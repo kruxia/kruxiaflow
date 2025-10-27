@@ -1,2 +1,2 @@
-# flowstream
-Kruxia FlowStream: Streaming Workflow Orchestration
+# StreamFlow
+Kruxia StreamFlow: Durable Streaming Workflow Orchestration
