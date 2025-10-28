@@ -105,7 +105,7 @@ All external infrastructure dependencies are wrapped in service interfaces:
 **Post-MVP Options**:
 - AuthenticationService → Auth0, Okta
 - ActivityQueue → AWS SQS, RabbitMQ, Redis (for >50k activities/sec or managed service)
-- EventSource → Logical Replication (only if <10ms latency needed, guaranteed delivery)
+- EventSource → Kafka/Redpanda/WarpStream (>100k events/sec), NATS JetStream (<1ms latency), Logical Replication
 - WorkflowStorage → S3-compatible storage, Filesystem
 
 **Never Use**:
