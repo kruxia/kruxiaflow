@@ -100,9 +100,11 @@ All external infrastructure dependencies are wrapped in service interfaces:
   - Workflow orchestration requires guaranteed delivery (missed events = hung workflows)
   - Only polling and logical replication provide delivery guarantees
 - **Auth uses custom JWT provider** (not external IdP like Auth0/Okta)
+- **ActivityQueue uses PostgreSQL** with FOR UPDATE SKIP LOCKED for safe concurrency
 
 **Post-MVP Options**:
 - AuthenticationService → Auth0, Okta
+- ActivityQueue → AWS SQS, RabbitMQ, Redis (for >50k activities/sec or managed service)
 - EventSource → Logical Replication (only if <10ms latency needed, guaranteed delivery)
 - WorkflowStorage → S3-compatible storage, Filesystem
 

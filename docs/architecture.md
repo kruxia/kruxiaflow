@@ -1310,7 +1310,160 @@ pub trait ActivityQueue: Send + Sync {
     async fn heartbeat(&self, activity_id: Uuid) -> Result<()>;
 }
 
-pub struct PostgresQueue { /* ... */ }
+pub struct PostgresQueue { /* ... */ }         // MVP: PostgreSQL-based queue
+pub struct SqsQueue { /* ... */ }              // Post-MVP: AWS SQS
+pub struct RabbitMqQueue { /* ... */ }         // Post-MVP: RabbitMQ
+pub struct RedisQueue { /* ... */ }            // Post-MVP: Redis-based queue
+```
+
+**MVP Implementation: PostgreSQL Queue**
+
+```rust
+pub struct PostgresQueue {
+    pool: PgPool,
+}
+
+#[async_trait]
+impl ActivityQueue for PostgresQueue {
+    async fn schedule(&self, workflow_id: Uuid, activities: Vec<Activity>) -> Result<()> {
+        // Idempotent insert - prevents duplicate scheduling
+        for activity in activities {
+            sqlx::query!(
+                "INSERT INTO activity_queue
+                 (workflow_id, activity_key, namespace, name, parameters, settings, scheduled_for)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 ON CONFLICT (workflow_id, activity_key) DO NOTHING",
+                workflow_id,
+                activity.key,
+                activity.namespace,
+                activity.name,
+                activity.parameters,
+                activity.settings,
+                activity.scheduled_for.unwrap_or_else(|| Utc::now())
+            )
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn claim_next(&self, namespace: &str, name: &str) -> Result<Option<QueuedActivity>> {
+        // FOR UPDATE SKIP LOCKED ensures safe concurrent claiming
+        let activity = sqlx::query_as!(
+            QueuedActivity,
+            "UPDATE activity_queue
+             SET status = 'running',
+                 claimed_at = NOW(),
+                 claimed_by = $3
+             WHERE id = (
+                 SELECT id FROM activity_queue
+                 WHERE status = 'pending'
+                   AND scheduled_for <= NOW()
+                   AND namespace = $1
+                   AND name = $2
+                 ORDER BY scheduled_for ASC
+                 LIMIT 1
+                 FOR UPDATE SKIP LOCKED
+             )
+             RETURNING *",
+            namespace,
+            name,
+            Uuid::new_v4()  // Worker instance ID
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(activity)
+    }
+
+    async fn complete(&self, activity_id: Uuid, result: ActivityResult) -> Result<()> {
+        // Remove from queue and publish completion event
+        sqlx::query!(
+            "DELETE FROM activity_queue WHERE id = $1",
+            activity_id
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn heartbeat(&self, activity_id: Uuid) -> Result<()> {
+        sqlx::query!(
+            "UPDATE activity_queue
+             SET last_heartbeat = NOW()
+             WHERE id = $1",
+            activity_id
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+}
+```
+
+**Post-MVP: Cloud-Hosted Task Queues**
+
+For high-scale deployments, can swap to managed queue services:
+
+```rust
+// AWS SQS implementation
+pub struct SqsQueue {
+    client: aws_sdk_sqs::Client,
+    queue_url: String,
+    pool: PgPool,  // Still track state in PostgreSQL
+}
+
+// RabbitMQ implementation
+pub struct RabbitMqQueue {
+    connection: lapin::Connection,
+    channel: lapin::Channel,
+    pool: PgPool,  // Still track state in PostgreSQL
+}
+```
+
+**Queue Backend Comparison**:
+
+| Provider     | MVP        | Scalability                  | Latency     | Operations                             |
+|--------------|------------|------------------------------|-------------|----------------------------------------|
+| **PostgreSQL** | ✅ Yes     | ~10,000 activities/sec       | <5ms        | Single database, transactional, simple |
+| **AWS SQS**    | ❌ Post-MVP | Virtually unlimited          | ~10–50ms    | Managed, pay-per-use                   |
+| **RabbitMQ**   | ❌ Post-MVP | ~50,000 activities/sec      | <1ms        | Self‑hosted, high throughput           |
+| **Redis**      | ❌ Post-MVP | ~100,000 activities/sec     | <1ms        | In‑memory, requires persistence config |
+
+Why PostgreSQL Queue for MVP:
+- Single operational surface: one database to deploy, backup, and secure.
+- Transactional guarantees: queue operations participate in the same ACID transactions as state and events.
+- Proven concurrency model: FOR UPDATE SKIP LOCKED enables safe, efficient worker claiming without extra coordination.
+- Predictable performance: indexed queries and proper vacuuming deliver low-latency scheduling (~10k/sec practical).
+- Minimal dependencies: no external managed services required—suitable for edge and air‑gapped deployments.
+- Smooth migration path: swap to SQS/RabbitMQ/Redis post‑MVP by implementing the ActivityQueue interface.
+- Cost and ops efficient: reduced operational overhead and lower TCO during MVP validation.
+
+✅ **Single database** - No additional infrastructure
+✅ **Transactional** - ACID guarantees with workflow state
+✅ **FOR UPDATE SKIP LOCKED** - Safe concurrent claiming
+✅ **Simple operations** - Standard SQL queries
+✅ **Sufficient throughput** - >10,000 activities/sec
+✅ **Cost-effective** - No additional service costs
+
+**When to Consider Cloud Queues (Post-MVP)**:
+
+- Need >50,000 activities/sec throughput
+- Want managed service with auto-scaling
+- Multi-region distribution requirements
+- Separate queue scaling from database scaling
+
+Configuration example:
+```bash
+# MVP (default)
+STREAMFLOW_QUEUE_PROVIDER=postgresql
+
+# Post-MVP: AWS SQS
+STREAMFLOW_QUEUE_PROVIDER=sqs
+STREAMFLOW_QUEUE_SQS_URL=https://sqs.us-east-1.amazonaws.com/123456/streamflow-activities
+STREAMFLOW_QUEUE_SQS_REGION=us-east-1
 ```
 
 ### Event Source Interface (Publish/Subscribe)
@@ -1625,7 +1778,7 @@ StreamFlow uses four pluggable service interfaces to wrap infrastructure depende
 | Interface                | Purpose                                       | MVP Implementation                                  | Post-MVP Options                 |
 |-------------------------|-----------------------------------------------|-----------------------------------------------------|----------------------------------|
 | **AuthenticationService** | JWT token issuance and validation            | PostgresAuthService (JWT + PostgreSQL)              | Auth0, Okta, additional IdPs     |
-| **ActivityQueue**        | Activity scheduling and worker polling        | PostgresQueue                                       | (PostgreSQL only)                |
+| **ActivityQueue**        | Activity scheduling and worker polling        | PostgresQueue                                       | AWS SQS, RabbitMQ, Redis         |
 | **EventSource**          | Workflow event publish/subscribe              | PostgresEventSource (Polling with adaptive backoff) | Logical Replication              |
 | **WorkflowStorage**      | Large file / artifact storage                 | PostgresStorage (Large Objects)                     | S3-compatible, Filesystem        |
 
