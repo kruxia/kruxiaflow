@@ -1467,23 +1467,23 @@ STREAMFLOW_EVENT_BACKOFF_MULTIPLIER=1.5   # Backoff growth rate
 
 PostgreSQL's LISTEN/NOTIFY is **not suitable for reliable event delivery** because:
 
-❌ **No delivery guarantees** - Notifications can be lost on connection drop
-❌ **Not transactional** - NOTIFY happens regardless of transaction commit/rollback
-❌ **Fire-and-forget** - No way to know if notification was received
-❌ **Connection-dependent** - Must maintain persistent connection per subscriber
-❌ **No backlog** - Late subscribers miss events that occurred while disconnected
+- ❌ **No delivery guarantees** - Notifications can be lost on connection drop
+- ❌ **Not transactional** - NOTIFY happens regardless of transaction commit/rollback
+- ❌ **Fire-and-forget** - No way to know if notification was received
+- ❌ **Connection-dependent** - Must maintain persistent connection per subscriber
+- ❌ **No backlog** - Late subscribers miss events that occurred while disconnected
 
 **Polling provides guaranteed delivery**:
 
-✅ **All events seen** - Query-based retrieval ensures no missed events
-✅ **Transactional** - Only see committed events in the table
-✅ **Recoverable** - Can resume from last seen event_id after restart
-✅ **Simple implementation** - No connection management complexity
-✅ **Efficient when busy** - 10ms polling keeps latency low under load
-✅ **Efficient when quiet** - Backs off to 5s when no activity
-✅ **Stateless** - Each poll is independent
-✅ **Debuggable** - Easy to understand and troubleshoot
-✅ **Database-agnostic** - Works with any PostgreSQL version/config
+- ✅ **All events seen** - Query-based retrieval ensures no missed events
+- ✅ **Transactional** - Only see committed events in the table
+- ✅ **Recoverable** - Can resume from last seen event_id after restart
+- ✅ **Simple implementation** - No connection management complexity
+- ✅ **Efficient when busy** - 10ms polling keeps latency low under load
+- ✅ **Efficient when quiet** - Backs off to 5s when no activity
+- ✅ **Stateless** - Each poll is independent
+- ✅ **Debuggable** - Easy to understand and troubleshoot
+- ✅ **Database-agnostic** - Works with any PostgreSQL version/config
 
 **Guaranteed Delivery is Critical**: Workflow orchestration cannot tolerate missed events. A single missed "activity completed" event would cause a workflow to hang indefinitely. Polling ensures this cannot happen.
 
