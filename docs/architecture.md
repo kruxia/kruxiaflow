@@ -58,7 +58,7 @@ flowchart TB
     Orch -.-> Interfaces
     Worker -.-> Interfaces
 
-    AuthSvc -->|MVP: Custom Auth| PG
+    AuthSvc -->|MVP: Postgres Auth| PG
     AuthSvc -.->|Post-MVP| Auth
     QueueSvc --> PG
     EventSvc --> PG
@@ -911,9 +911,9 @@ STREAMFLOW_AUTH_CLIENT_ID=worker_app
 STREAMFLOW_AUTH_CLIENT_SECRET=secret_xyz
 ```
 
-#### Custom Auth Provider Implementation (MVP)
+#### Postgres Auth Provider Implementation (MVP)
 
-For MVP, StreamFlow includes a built-in Custom Auth Provider that uses PostgreSQL as the backend, eliminating external identity provider dependencies.
+For MVP, StreamFlow includes a built-in Postgres Auth Provider that uses PostgreSQL as the backend, eliminating external identity provider dependencies.
 
 **Database Schema**:
 
@@ -1278,7 +1278,7 @@ pub struct Claims {
 }
 ```
 
-**Benefits of Custom Auth Provider (MVP)**:
+**Benefits of Postgres Auth Provider (MVP)**:
 
 - ✅ **True single-server deployment**: No external identity provider dependency
 - ✅ **PostgreSQL only**: All data in one database
