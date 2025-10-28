@@ -1425,21 +1425,14 @@ pub struct RabbitMqQueue {
 
 **Queue Backend Comparison**:
 
-| Provider     | MVP        | Scalability                  | Latency     | Operations                             |
-|--------------|------------|------------------------------|-------------|----------------------------------------|
-| **PostgreSQL** | ✅ Yes     | ~10,000 activities/sec       | <5ms        | Single database, transactional, simple |
-| **AWS SQS**    | ❌ Post-MVP | Virtually unlimited          | ~10–50ms    | Managed, pay-per-use                   |
-| **RabbitMQ**   | ❌ Post-MVP | ~50,000 activities/sec      | <1ms        | Self‑hosted, high throughput           |
-| **Redis**      | ❌ Post-MVP | ~100,000 activities/sec     | <1ms        | In‑memory, requires persistence config |
+| Provider | MVP | Scalability | Latency | Operations |
+|----------|-----|-------------|---------|------------|
+| **PostgreSQL** | ✅ Yes | ~10,000 activities/sec | <5ms | Single database, simple |
+| **AWS SQS** | ❌ Post-MVP | Unlimited | ~10-50ms | Managed, pay-per-use |
+| **RabbitMQ** | ❌ Post-MVP | ~50,000 activities/sec | <1ms | Self-hosted, high throughput |
+| **Redis** | ❌ Post-MVP | ~100,000 activities/sec | <1ms | In-memory, requires persistence setup |
 
-Why PostgreSQL Queue for MVP:
-- Single operational surface: one database to deploy, backup, and secure.
-- Transactional guarantees: queue operations participate in the same ACID transactions as state and events.
-- Proven concurrency model: FOR UPDATE SKIP LOCKED enables safe, efficient worker claiming without extra coordination.
-- Predictable performance: indexed queries and proper vacuuming deliver low-latency scheduling (~10k/sec practical).
-- Minimal dependencies: no external managed services required—suitable for edge and air‑gapped deployments.
-- Smooth migration path: swap to SQS/RabbitMQ/Redis post‑MVP by implementing the ActivityQueue interface.
-- Cost and ops efficient: reduced operational overhead and lower TCO during MVP validation.
+**Why PostgreSQL Queue for MVP**:
 
 ✅ **Single database** - No additional infrastructure
 ✅ **Transactional** - ACID guarantees with workflow state
@@ -1475,21 +1468,23 @@ pub trait EventSource: Send + Sync {
     async fn poll(&self, last_event_id: Option<Uuid>) -> Result<Vec<WorkflowEvent>>;
 }
 
-pub struct PostgresEventSource { /* ... */ }  // Polling-based
+pub struct PostgresPollingEventSource { /* ... */ }        // MVP: Polling-based
 pub struct PostgresLogicalReplicationSource { /* ... */ }  // Post-MVP: Logical replication
+pub struct KafkaEventSource { /* ... */ }                  // Post-MVP: Kafka, Redpanda, WarpStream
+pub struct NatsEventSource { /* ... */ }                   // Post-MVP: NATS JetStream
 ```
 
 **MVP Implementation: Polling-based Event Streaming**
 
 ```rust
-pub struct PostgresEventSource {
+pub struct PostgresPollingEventSource {
     pool: PgPool,
     poll_interval: Duration,
     backoff_strategy: BackoffStrategy,
 }
 
 #[async_trait]
-impl EventSource for PostgresEventSource {
+impl EventSource for PostgresPollingEventSource {
     async fn publish(&self, event: WorkflowEvent) -> Result<()> {
         sqlx::query!(
             "INSERT INTO workflow_events (id, workflow_id, event_type, activity_key, payload, timestamp)
@@ -1647,9 +1642,11 @@ PostgreSQL's LISTEN/NOTIFY is **not suitable for reliable event delivery** becau
 - **Database overhead**: Minimal - indexed query on `timestamp` column
 - **Scalability**: Multiple orchestrators poll independently without coordination
 
-**Post-MVP: Logical Replication** (if sub-millisecond latency needed):
+**Post-MVP: Alternative Event Streaming Options**
 
-PostgreSQL logical replication is the **only other option that guarantees delivery**:
+When scaling beyond MVP, several options provide guaranteed delivery with lower latency:
+
+**1. PostgreSQL Logical Replication**
 
 ```rust
 pub struct PostgresLogicalReplicationSource {
@@ -1660,15 +1657,88 @@ pub struct PostgresLogicalReplicationSource {
 }
 ```
 
-**Comparison of Delivery Guarantees**:
+Best for: Staying with PostgreSQL while achieving sub-10ms latency
 
-| Mechanism                          | Delivery Guarantee     | Latency | Complexity |
-|------------------------------------|------------------------|--------:|-----------:|
-| **Polling** (MVP)                  | ✅ Guaranteed          | ~10ms   | Low       |
-| **Logical Replication** (Post-MVP) | ✅ Guaranteed          | <1ms    | High      |
-| **LISTEN/NOTIFY**                  | ❌ Best-effort only    | <1ms    | Medium    |
+**2. Kafka-Protocol Services**
 
-For MVP, polling with adaptive backoff provides guaranteed delivery with acceptable latency and minimal complexity. Logical replication can be added post-MVP if sub-10ms latency becomes a requirement.
+```rust
+pub struct KafkaEventSource {
+    producer: rdkafka::producer::FutureProducer,
+    consumer: rdkafka::consumer::StreamConsumer,
+    topic: String,
+}
+
+// Compatible with:
+// - Apache Kafka
+// - Redpanda (Kafka-compatible, simpler ops)
+// - WarpStream (S3-backed, serverless Kafka)
+```
+
+Best for: High-throughput (>100k events/sec), multi-consumer patterns, long retention
+
+**3. NATS JetStream**
+
+```rust
+pub struct NatsEventSource {
+    client: async_nats::Client,
+    jetstream: async_nats::jetstream::Context,
+    stream: String,
+}
+```
+
+Best for: Low latency (<1ms), simple ops, smaller scale (<50k events/sec)
+
+**Event Streaming Backend Comparison**:
+
+| Provider                 | MVP           | Delivery Guarantee | Latency | Throughput   | Complexity | Operations                                |
+|--------------------------|---------------|--------------------|---------|--------------|------------|-------------------------------------------|
+| **PostgreSQL Polling**   | ✅ Yes        | ✅ Guaranteed      | ~10ms   | ~10k/sec     | Low        | Single database                            |
+| **Postgres Logical Repl**| ❌ Post‑MVP   | ✅ Guaranteed      | <1ms    | ~10k/sec     | High       | Replication slots, connection management   |
+| **Kafka / Redpanda**     | ❌ Post‑MVP   | ✅ Guaranteed      | ~5ms    | >100k/sec    | Medium     | Topic management, consumer groups          |
+| **WarpStream**           | ❌ Post‑MVP   | ✅ Guaranteed      | ~10ms   | >100k/sec    | Low        | Managed, S3‑backed                         |
+| **NATS JetStream**       | ❌ Post‑MVP   | ✅ Guaranteed      | <1ms    | ~50k/sec     | Low        | Simple, lightweight                        |
+| **LISTEN/NOTIFY**        | ❌ Never      | ❌ Best‑effort     | <1ms    | ~1k/sec      | Medium     | ❌ Events can be lost                      |
+
+**Why Kafka-Protocol Services for High Scale**:
+
+✅ **Proven at scale** - Battle-tested for millions of events/sec
+✅ **Multi-consumer** - Multiple orchestrator instances consume in parallel
+✅ **Consumer groups** - Automatic partition assignment and rebalancing
+✅ **Offset tracking** - Each consumer tracks its position independently
+✅ **Long retention** - Keep events for debugging/replay (hours to days)
+✅ **Ecosystem** - Rich tooling, monitoring, and operational experience
+
+**When to Consider Event Streaming Services (Post-MVP)**:
+
+- Need >50,000 events/sec throughput
+- Want <5ms event delivery latency
+- Require multi-region event distribution
+- Need multiple consumers (orchestrators + analytics + audit)
+- Want to separate event streaming scaling from database scaling
+
+**Configuration Examples**:
+
+```bash
+# MVP (default)
+STREAMFLOW_EVENT_SOURCE=postgresql-polling
+
+# Post-MVP: Kafka
+STREAMFLOW_EVENT_SOURCE=kafka
+STREAMFLOW_KAFKA_BROKERS=localhost:9092
+STREAMFLOW_KAFKA_TOPIC=streamflow-events
+
+# Post-MVP: Redpanda (Kafka-compatible, simpler)
+STREAMFLOW_EVENT_SOURCE=kafka
+STREAMFLOW_KAFKA_BROKERS=redpanda:9092
+STREAMFLOW_KAFKA_TOPIC=streamflow-events
+
+# Post-MVP: NATS JetStream
+STREAMFLOW_EVENT_SOURCE=nats
+STREAMFLOW_NATS_URL=nats://localhost:4222
+STREAMFLOW_NATS_STREAM=STREAMFLOW_EVENTS
+```
+
+For MVP, polling with adaptive backoff provides guaranteed delivery with acceptable latency and minimal complexity. Event streaming services can be added post-MVP when throughput or latency requirements exceed PostgreSQL's capabilities.
 
 ### Workflow Storage Interface
 
@@ -1779,7 +1849,7 @@ StreamFlow uses four pluggable service interfaces to wrap infrastructure depende
 |-------------------------|-----------------------------------------------|-----------------------------------------------------|----------------------------------|
 | **AuthenticationService** | JWT token issuance and validation            | PostgresAuthService (JWT + PostgreSQL)              | Auth0, Okta, additional IdPs     |
 | **ActivityQueue**        | Activity scheduling and worker polling        | PostgresQueue                                       | AWS SQS, RabbitMQ, Redis         |
-| **EventSource**          | Workflow event publish/subscribe              | PostgresEventSource (Polling with adaptive backoff) | Logical Replication              |
+| **EventSource**          | Workflow event publish/subscribe              | PostgresPollingEventSource (Polling with adaptive backoff) | Kafka, Redpanda, NATS, Logical Replication |
 | **WorkflowStorage**      | Large file / artifact storage                 | PostgresStorage (Large Objects)                     | S3-compatible, Filesystem        |
 
 **Design Benefits**:
@@ -1795,7 +1865,7 @@ For MVP, PostgreSQL serves all roles:
 pub struct StreamFlowServices {
     auth: Box<dyn AuthenticationService>,           // PostgresAuthService (PostgreSQL)
     queue: Box<dyn ActivityQueue>,                   // PostgresQueue
-    events: Box<dyn EventSource>,                    // PostgresEventSource
+    events: Box<dyn EventSource>,                    // PostgresPollingEventSource
     storage: Box<dyn WorkflowStorage>,               // PostgresStorage
 }
 ```
@@ -1813,7 +1883,7 @@ Post-MVP flexibility (enterprise scaling):
 pub struct StreamFlowServices {
     auth: Box<dyn AuthenticationService>,           // → Auth0Service or OktaService
     queue: Box<dyn ActivityQueue>,                   // PostgresQueue (unchanged)
-    events: Box<dyn EventSource>,                    // PostgresEventSource (unchanged)
+    events: Box<dyn EventSource>,                    // PostgresPollingEventSource (unchanged)
     storage: Box<dyn WorkflowStorage>,               // → S3Storage for large files
 }
 ```
