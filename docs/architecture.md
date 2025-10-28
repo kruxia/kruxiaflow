@@ -1,0 +1,2026 @@
+# StreamFlow Architecture
+
+**Version**: 0.2 MVP
+**Last Updated**: 2025-10-28
+**Status**: Implementation Planning
+
+---
+
+## Table of Contents
+
+1. [System Overview](#system-overview)
+2. [Core Components](#core-components)
+3. [Data Architecture](#data-architecture)
+4. [Execution Model](#execution-model)
+5. [Service Interfaces](#service-interfaces)
+6. [Deployment Architecture](#deployment-architecture)
+7. [Technology Stack](#technology-stack)
+8. [Performance Targets](#performance-targets)
+
+---
+
+## System Overview
+
+StreamFlow is a lightweight, high-performance workflow orchestration platform designed for edge-to-cloud deployment. The system is built as a single binary that includes three independently launchable services: API server, workflow orchestrator, and built-in activity worker.
+
+### Core Value Proposition
+
+- **Single Binary**: Complete orchestration stack in one 10-15MB executable
+- **PostgreSQL-First**: All persistence (queues, events, state) using PostgreSQL 15+
+- **High Performance**: Target >1,000 workflows/sec on commodity hardware
+- **Edge-Ready**: Runs with 50MB RAM footprint
+- **AI-Native**: Built-in cost tracking, streaming, and non-deterministic activity handling
+
+### System Boundaries
+
+```mermaid
+flowchart TB
+    subgraph Binary["StreamFlow Binary (Single 10MB Executable)"]
+        API[API Server<br/>HTTP/WS]
+        Orch[Orchestrator<br/>Event-Driven]
+        Worker[Built-in Worker]
+
+        subgraph Interfaces["Service Interfaces (Pluggable)"]
+            AuthSvc[AuthenticationService]
+            QueueSvc[ActivityQueue]
+            EventSvc[EventSource]
+            StorageSvc[WorkflowStorage]
+        end
+    end
+
+    subgraph Infra["Supporting Infrastructure"]
+        PG[(PostgreSQL<br/>Required<br/>MVP: All Services)]
+        Auth[Auth Provider<br/>Post-MVP<br/>Auth0/Okta]
+        Redis[(Redis<br/>Optional<br/>Caching)]
+    end
+
+    API -.-> Interfaces
+    Orch -.-> Interfaces
+    Worker -.-> Interfaces
+
+    AuthSvc -->|MVP: Custom Auth| PG
+    AuthSvc -.->|Post-MVP| Auth
+    QueueSvc --> PG
+    EventSvc --> PG
+    StorageSvc --> PG
+
+    API -.-> Redis
+    Worker -.-> Redis
+
+    classDef binary fill:#e1f5ff,stroke:#333,stroke-width:2px
+    classDef infra fill:#fff4e1,stroke:#333,stroke-width:2px
+    classDef interface fill:#f0f0f0,stroke:#666,stroke-dasharray: 5 5
+
+    class Binary binary
+    class Infra infra
+    class Interfaces interface
+```
+
+**Architecture Notes**:
+- **MVP**: PostgreSQL is the ONLY required dependency (handles Queue, Events, Storage, and Auth)
+- **Post-MVP**: Auth can be swapped to external provider (Auth0/Okta), Storage can use S3
+- Redis is optional for all deployments (result caching only)
+
+---
+
+## Core Components
+
+### 1. API Server (Axum)
+
+**Responsibilities**:
+- Accept HTTP requests to start workflows
+- Authenticate requests via JWT Bearer tokens
+- Publish workflow created/updated events
+- Expose workflow status queries
+- Provide WebSocket endpoints for streaming
+
+**Technology**: Async Rust with Axum framework
+
+**Endpoints**:
+
+*Authentication*:
+- `POST /api/v1/auth/token` - Obtain access token (client credentials or password grant)
+- `POST /api/v1/auth/refresh` - Refresh expired token
+
+*Workflow Management*:
+- `POST /api/v1/workflows` - Start new workflow
+- `GET /api/v1/workflows/{id}` - Query workflow status
+
+*Activity Worker Endpoints*:
+- `GET /api/v1/activities/poll` - Poll for pending activities (long-polling supported)
+- `POST /api/v1/activities/{id}/start` - Claim activity (optional explicit claim)
+- `POST /api/v1/activities/{id}/complete` - Report activity completion
+- `POST /api/v1/activities/{id}/fail` - Report activity failure
+- `POST /api/v1/activities/{id}/heartbeat` - Long-running activity heartbeat
+- `WS /api/v1/activities/{id}/stream` - Token streaming for AI activities
+
+*Artifact Management*:
+- `POST /api/v1/workflows/{workflow_id}/artifacts` - Upload artifact
+- `GET /api/v1/workflows/{workflow_id}/artifacts/{key}` - Download artifact
+- `HEAD /api/v1/workflows/{workflow_id}/artifacts/{key}` - Get artifact metadata
+- `DELETE /api/v1/workflows/{workflow_id}/artifacts/{key}` - Delete artifact
+- `GET /api/v1/workflows/{workflow_id}/artifacts` - List workflow artifacts
+
+**Authentication Flow**:
+
+The API provides public auth endpoints for token acquisition:
+
+1. **Client Credentials Flow** (for workers and services):
+   ```http
+   POST /api/v1/auth/token
+   Content-Type: application/json
+
+   {
+     "grant_type": "client_credentials",
+     "client_id": "worker_payments",
+     "client_secret": "secret_xyz"
+   }
+   ```
+
+2. **Password Grant Flow** (for human users/testing):
+   ```http
+   POST /api/v1/auth/token
+   Content-Type: application/json
+
+   {
+     "grant_type": "password",
+     "username": "admin@example.com",
+     "password": "..."
+   }
+   ```
+
+The API validates credentials via the configured Authentication service interface (Auth0, Okta, or custom) and returns a signed JWT access token.
+
+**Token Validation**:
+- All non-auth API requests require valid signed JWT Bearer token
+- Token must be included in Authorization header: `Authorization: Bearer {token}`
+- Token validation handled by Authentication service interface
+- Expired tokens return 401, requiring token refresh
+
+### 2. Workflow Orchestrator (Event-Driven)
+
+**Responsibilities**:
+- Subscribe to workflow state events (Created, Updated)
+- Evaluate workflow state to determine ready activities
+- Schedule activities to queue when dependencies satisfied
+- Publish workflow state events after each transition
+- Handle workflow completion detection
+
+**Execution Model**:
+```mermaid
+flowchart TD
+    Start([Event Published]) --> Consume[Orchestrator Consumes Event]
+    Consume --> Load[Load Workflow Definition]
+    Load --> Eval[Evaluate Current State]
+    Eval --> Find[Find Ready Activities]
+    Find --> Schedule[Schedule to Queue<br/>Idempotent]
+    Schedule --> Publish[Publish State Event]
+    Publish --> End([Complete])
+```
+
+**Performance Target**: <1ms evaluation latency
+
+**Concurrency**: Multiple orchestrator instances supported via event stream partitioning
+
+### 3. Activity Worker (Built-in)
+
+**Responsibilities**:
+- Authenticate with API to obtain access token
+- Poll activity queue for pending activities
+- Execute activity implementations
+- Report progress via heartbeats (long-running activities)
+- Post completion status to API
+- Handle retry logic and timeout detection
+
+**Worker Types**:
+- **Built-in worker**: Executes activities compiled into the binary
+- **External workers**: Custom implementations that connect to API via HTTP/WS
+
+**Authentication**: Both built-in and external workers use the same authentication flow:
+
+```mermaid
+sequenceDiagram
+    participant W as Worker
+    participant A as API Server
+    participant Auth as Auth Provider
+
+    Note over W,A: Step 1: Obtain Access Token
+    W->>A: POST /api/v1/auth/token<br/>{grant_type: "client_credentials",<br/>client_id, client_secret}
+    A->>Auth: Validate credentials
+    Auth-->>A: Valid
+    A-->>W: {access_token: "eyJhbGc...",<br/>token_type: "Bearer",<br/>expires_in: 3600}
+
+    Note over W,A: Step 2: Use Token for API Requests
+    W->>A: GET /activities/poll<br/>Authorization: Bearer eyJhbGc...
+    A->>A: Validate JWT
+    A-->>W: Activity details
+```
+
+Detailed flow:
+
+1. **Worker obtains access token** via API auth endpoint:
+   ```http
+   POST /api/v1/auth/token
+   Content-Type: application/json
+
+   {
+     "grant_type": "client_credentials",
+     "client_id": "worker_xyz",
+     "client_secret": "..."
+   }
+   ```
+
+2. **API validates credentials** and returns JWT:
+   ```json
+   {
+     "access_token": "eyJhbGc...",
+     "token_type": "Bearer",
+     "expires_in": 3600
+   }
+   ```
+
+3. **Worker uses token** for all subsequent API requests:
+   ```http
+   GET /api/v1/activities/poll?namespace=payments&name=authorize_card
+   Authorization: Bearer eyJhbGc...
+   ```
+
+**Polling Strategy** (via authenticated API endpoint):
+```http
+GET /api/v1/activities/poll?namespace={namespace}&name={name}
+Authorization: Bearer {token}
+```
+
+The API executes:
+```sql
+SELECT id, workflow_id, parameters, settings
+FROM activity_queue
+WHERE status = 'pending'
+  AND scheduled_for <= NOW()
+  AND namespace = $1
+  AND name = $2
+ORDER BY scheduled_for ASC
+LIMIT 1
+FOR UPDATE SKIP LOCKED;
+```
+
+**External Worker Implementation Example**:
+
+Any language can implement an external worker by following this pattern:
+
+```python
+# Python external worker example
+import requests
+import time
+
+class StreamFlowWorker:
+    def __init__(self, api_url, client_id, client_secret, namespace, name):
+        self.api_url = api_url
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.namespace = namespace
+        self.name = name
+        self.access_token = None
+        self.token_expires_at = 0
+
+    def authenticate(self):
+        """Obtain access token from API"""
+        response = requests.post(
+            f"{self.api_url}/auth/token",
+            json={
+                "grant_type": "client_credentials",
+                "client_id": self.client_id,
+                "client_secret": self.client_secret
+            }
+        )
+        data = response.json()
+        self.access_token = data["access_token"]
+        self.token_expires_at = time.time() + data["expires_in"]
+
+    def poll_activity(self):
+        """Poll for next pending activity"""
+        if time.time() >= self.token_expires_at:
+            self.authenticate()
+
+        response = requests.get(
+            f"{self.api_url}/activities/poll",
+            params={"namespace": self.namespace, "name": self.name},
+            headers={"Authorization": f"Bearer {self.access_token}"}
+        )
+        if response.status_code == 200:
+            return response.json()
+        return None
+
+    def complete_activity(self, activity_id, result):
+        """Report activity completion"""
+        requests.post(
+            f"{self.api_url}/activities/{activity_id}/complete",
+            json={"result": result},
+            headers={"Authorization": f"Bearer {self.access_token}"}
+        )
+
+    def run(self):
+        """Main worker loop"""
+        self.authenticate()
+        while True:
+            activity = self.poll_activity()
+            if activity:
+                # Execute activity logic
+                result = self.execute(activity["parameters"])
+                self.complete_activity(activity["id"], result)
+            else:
+                time.sleep(1)
+
+    def execute(self, parameters):
+        """Implement your activity logic here"""
+        raise NotImplementedError()
+```
+
+---
+
+## Data Architecture
+
+### PostgreSQL Schema
+
+StreamFlow uses PostgreSQL 15+ as the single source of truth for all state.
+
+#### Core Tables
+
+**1. Workflows**
+```sql
+CREATE TABLE workflows (
+    id UUID PRIMARY KEY,
+    workflow_type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    execution_step INTEGER NOT NULL,
+    custom_state JSONB,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);
+```
+
+**2. Activity Queue**
+```sql
+CREATE TABLE activity_queue (
+    id UUID PRIMARY KEY,
+    workflow_id UUID NOT NULL,
+    activity_key TEXT NOT NULL,
+    namespace TEXT NOT NULL,
+    name TEXT NOT NULL,
+    parameters JSONB NOT NULL,
+    settings JSONB,
+    status TEXT NOT NULL DEFAULT 'pending',
+    scheduled_for TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    claimed_by UUID,
+    claimed_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL,
+    UNIQUE(workflow_id, activity_key)
+);
+
+CREATE INDEX idx_queue_pending
+ON activity_queue(namespace, name, scheduled_for)
+WHERE status = 'pending' AND scheduled_for <= NOW();
+```
+
+**3. Workflow Events (Event Sourcing)**
+```sql
+CREATE TABLE workflow_events (
+    id UUID PRIMARY KEY,
+    workflow_id UUID NOT NULL,
+    event_type TEXT NOT NULL,
+    activity_key TEXT,
+    payload JSONB NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL
+) PARTITION BY RANGE (timestamp);
+
+CREATE INDEX idx_events_workflow_time
+ON workflow_events(workflow_id, timestamp DESC);
+```
+
+**4. Workflow Definitions**
+```sql
+CREATE TABLE workflow_definitions (
+    id UUID PRIMARY KEY,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    definition JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    UNIQUE(name, version)
+);
+```
+
+**5. Workflow Artifacts**
+```sql
+CREATE TABLE workflow_artifacts (
+    id UUID PRIMARY KEY,
+    workflow_id UUID NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+    artifact_key TEXT NOT NULL,
+    storage_path TEXT NOT NULL,
+    content_type TEXT,
+    size_bytes BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ,
+    UNIQUE(workflow_id, artifact_key)
+);
+
+CREATE INDEX idx_artifacts_workflow
+ON workflow_artifacts(workflow_id);
+
+CREATE INDEX idx_artifacts_expires
+ON workflow_artifacts(expires_at)
+WHERE expires_at IS NOT NULL;
+```
+
+#### Event Sourcing Pattern
+
+Every workflow state transition publishes an event containing the **complete workflow state**:
+
+```json
+{
+  "event_type": "WorkflowUpdated",
+  "workflow_id": "wf_123",
+  "activity_key": "authorize_card",
+  "activity_status": "completed",
+  "activity_outputs": {"authorization_id": "auth_456"},
+  "workflow_state": {
+    "activities": {
+      "validate_payment": {"status": "completed", "outputs": {...}},
+      "authorize_card": {"status": "completed", "outputs": {...}}
+    },
+    "execution_step": 2,
+    "custom_state": {...}
+  },
+  "timestamp": "2025-10-28T10:30:00Z"
+}
+```
+
+This enables:
+- Complete workflow state reconstruction from event stream
+- Stateless orchestrator (all state in events)
+- Audit trail for compliance
+- Time-travel debugging
+
+#### Artifact Storage Pattern
+
+Each workflow has its own artifact storage for handling large files and data that shouldn't be stored in the workflow state JSON:
+
+**Use Cases**:
+- Large CSV/JSON files in ETL pipelines
+- Generated reports and documents
+- ML model files
+- Images, videos, or binary data
+- Intermediate results too large for JSONB
+
+**Storage Strategy**:
+
+Artifacts are stored via the WorkflowStorage interface. The storage path format depends on the configured provider:
+
+```
+PostgreSQL Large Objects (MVP):
+  storage_path: "lo:16385"
+  Actual storage: PostgreSQL large object with OID 16385
+
+S3-compatible (Post-MVP):
+  storage_path: "s3:bucket/wf_123abc/input_data.csv"
+  Actual storage: S3 object at key wf_123abc/input_data.csv
+
+Filesystem (Post-MVP):
+  storage_path: "fs:/var/lib/streamflow/artifacts/wf_123abc/input_data.csv"
+  Actual storage: File on local filesystem
+```
+
+Example artifact organization per workflow:
+```
+Workflow ID: wf_123abc
+├── raw_data.csv
+├── transformed_data.csv
+└── final_report.pdf
+```
+
+**Artifact References in Workflow State**:
+
+Activities store artifact references (not the data itself) in their outputs:
+
+```json
+{
+  "activity_key": "transform_data",
+  "outputs": {
+    "artifact_ref": "transformed_data.csv",
+    "row_count": 10000,
+    "size_bytes": 1048576
+  }
+}
+```
+
+Downstream activities reference artifacts using special template syntax:
+
+```yaml
+- key: load_data
+  namespace: storage
+  parameters:
+    # Reference artifact by key, not inline data
+    input_file: "{{ARTIFACT.transform_data.artifact_ref}}"
+    destination: "s3://output/result.csv"
+```
+
+**Artifact Lifecycle**:
+
+1. **Creation**: Activity stores large data to artifact storage via API
+   ```http
+   POST /api/v1/workflows/{workflow_id}/artifacts
+   Content-Type: multipart/form-data
+   Authorization: Bearer {token}
+
+   artifact_key=transformed_data.csv
+   file=@/path/to/data.csv
+   ```
+
+2. **Reference**: Activity outputs include artifact reference
+   ```json
+   {
+     "artifact_ref": "transformed_data.csv",
+     "size_bytes": 1048576
+   }
+   ```
+
+3. **Access**: Downstream activities retrieve artifacts
+   ```http
+   GET /api/v1/workflows/{workflow_id}/artifacts/{artifact_key}
+   Authorization: Bearer {token}
+   ```
+
+4. **Cleanup**: Artifacts deleted when workflow completes or expires
+   - Configurable retention period per workflow
+   - Automatic cleanup via background job
+   - CASCADE delete when workflow is deleted
+
+**Storage Backend Configuration**:
+
+```bash
+# MVP: PostgreSQL Large Objects (default)
+STREAMFLOW_STORAGE_PROVIDER=postgresql
+
+# Post-MVP: S3-compatible storage
+STREAMFLOW_STORAGE_PROVIDER=s3
+STREAMFLOW_STORAGE_S3_BUCKET=streamflow-artifacts
+STREAMFLOW_STORAGE_S3_ENDPOINT=https://s3.amazonaws.com
+STREAMFLOW_STORAGE_S3_REGION=us-east-1
+
+# Post-MVP: Local filesystem
+STREAMFLOW_STORAGE_PROVIDER=filesystem
+STREAMFLOW_STORAGE_FILESYSTEM_PATH=/var/lib/streamflow/artifacts
+
+# Default retention (all providers)
+STREAMFLOW_ARTIFACT_RETENTION_DAYS=7
+```
+
+**Storage Backend Comparison**:
+
+| Provider        | MVP         | Use Case                           | Pros                                 | Cons                              |
+|-----------------|-------------|------------------------------------|--------------------------------------|-----------------------------------|
+| **PostgreSQL**  | ✅ Yes      | Default, single-database simplicity| No extra dependencies, transactional | Size limits (~2GB per object)     |
+| **S3**          | ❌ Post-MVP | Production scale, large files      | Unlimited size, durable, CDN-ready   | External dependency, cost         |
+| **Filesystem**  | ❌ Post-MVP | Edge deployments, air-gapped       | Simple, no network latency           | No replication, single node only  |
+
+**PostgreSQL Large Objects Details**:
+
+PostgreSQL provides a Large Objects API specifically for binary data:
+- Stores data outside regular tables (no row size limits)
+- Transactional (ACID guarantees)
+- Efficient streaming (read/write in chunks)
+- Up to 2GB per object (sufficient for most workflows)
+- Automatic cleanup via `lo_unlink()`
+
+Schema stores reference to large object:
+```sql
+CREATE TABLE workflow_artifacts (
+    id UUID PRIMARY KEY,
+    workflow_id UUID NOT NULL,
+    artifact_key TEXT NOT NULL,
+    storage_path TEXT NOT NULL,  -- Format: "lo:{oid}" for PostgreSQL
+    content_type TEXT,
+    size_bytes BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    expires_at TIMESTAMPTZ,
+    UNIQUE(workflow_id, artifact_key)
+);
+
+-- Example row:
+-- storage_path = "lo:16385"  (PostgreSQL Large Object OID)
+-- storage_path = "s3:bucket/wf_123/data.csv"  (S3 key, post-MVP)
+```
+
+**Complete ETL Example Using Artifacts**:
+
+```yaml
+workflow: data_pipeline
+version: "1.0"
+description: "ETL pipeline with large file handling via artifacts"
+
+activities:
+  # Step 1: Extract - Download large CSV from external source
+  - key: extract_data
+    namespace: data
+    name: download_file
+    parameters:
+      source_url: "{{ARG.source_url}}"
+      artifact_key: "raw_data.csv"
+    outputs:
+      - artifact_ref      # Reference to uploaded artifact
+      - size_bytes
+      - row_count
+    following:
+      - activity_key: transform_data
+
+  # Step 2: Transform - Process the data
+  - key: transform_data
+    namespace: data
+    name: transform_csv
+    parameters:
+      # Use artifact reference, not inline data
+      input_file: "{{ARTIFACT.extract_data.artifact_ref}}"
+      transformations: "{{ARG.transformations}}"
+      output_artifact_key: "transformed_data.csv"
+    outputs:
+      - artifact_ref
+      - row_count
+      - dropped_rows
+    following:
+      - activity_key: validate_data
+
+  # Step 3: Validate - Check data quality
+  - key: validate_data
+    namespace: data
+    name: validate_csv
+    parameters:
+      input_file: "{{ARTIFACT.transform_data.artifact_ref}}"
+      validation_rules: "{{ARG.validation_rules}}"
+    outputs:
+      - valid
+      - error_count
+      - errors        # Small array of errors, stored in state
+    following:
+      - activity_key: load_data
+        conditions:
+          - "{{validate_data.valid}} == true"
+
+  # Step 4: Load - Upload to destination
+  - key: load_data
+    namespace: data
+    name: upload_file
+    parameters:
+      input_file: "{{ARTIFACT.transform_data.artifact_ref}}"
+      destination: "{{ARG.destination_url}}"
+    outputs:
+      - uploaded_url
+      - upload_size_bytes
+```
+
+In this example:
+- Large CSV files are stored as artifacts (not in workflow state JSON)
+- Activities reference artifacts using `{{ARTIFACT.activity_key.artifact_ref}}`
+- Small metadata (row counts, status) stored in activity outputs
+- Artifacts automatically cleaned up after workflow completes
+
+### Query Optimization
+
+**Stored Procedures**: Most queries are implemented as stored procedures managed by sqlx:
+- Activity queue operations
+- Workflow state updates
+- Event publishing
+- State queries
+
+**Connection Pooling**: Sqlx provides compile-time query validation and connection pooling:
+```rust
+let pool = PgPoolOptions::new()
+    .min_connections(2)
+    .max_connections(20)
+    .connect(&database_url)
+    .await?;
+```
+
+**Aggressive Vacuuming**: Completed activities are removed from queue and aggressively vacuumed to maintain performance.
+
+---
+
+## Execution Model
+
+### Workflow Lifecycle
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as API Server
+    participant E as Event Stream
+    participant O as Orchestrator
+    participant Q as Activity Queue
+    participant W as Worker
+
+    C->>A: 1) POST /api/v1/workflows
+    A->>E: 2) Publish "Workflow Created" event
+    E->>O: 3) Orchestrator consumes event
+    O->>O: 4) Evaluate initial state
+    O->>Q: 5) Schedule ready activities to queue
+
+    W->>A: 6) POST /auth/token (authenticate)
+    A-->>W: JWT access token
+    W->>A: 7) GET /activities/poll (with Bearer token)
+    A->>Q: Claim activity (FOR UPDATE SKIP LOCKED)
+    Q-->>A: Activity details
+    A-->>W: Activity to execute
+
+    W->>W: 8) Execute activity
+    W->>A: 9) POST /activities/{id}/complete (with Bearer token)
+    A->>E: 10) Publish "Workflow Updated" event
+
+    E->>O: 11) Orchestrator re-evaluates
+    O->>Q: Schedule next activities
+
+    Note over C,W: 12) Repeat steps 7-11 until workflow complete
+```
+
+### Activity Scheduling (Idempotent)
+
+Activities are only scheduled when:
+1. All preceding activities have completed
+2. All conditions on those relationships are satisfied
+3. Activity not already queued or completed
+
+Idempotency ensured via:
+```sql
+INSERT INTO activity_queue (...)
+ON CONFLICT (workflow_id, activity_key) DO NOTHING;
+```
+
+### Directed Graph Structure
+
+Workflows are defined as **Directed Graphs** where:
+- **Nodes**: Activities to be executed
+- **Directed edges**: Relationships between activities defined by `preceding` and `following` declarations
+- **Conditions**: Optional predicates that must be satisfied for edges to activate
+
+The orchestrator evaluates this graph to determine when activities become ready for execution.
+
+### Sequential Execution
+
+Sequential execution is guaranteed because activities only enter the queue when their dependencies are satisfied. Workers cannot execute activities that aren't queued yet.
+
+```yaml
+# Example: Sequential workflow
+activities:
+  - key: step1
+    following:
+      - activity_key: step2
+  - key: step2
+    following:
+      - activity_key: step3
+  - key: step3
+```
+
+Execution timeline:
+- t=0: step1 scheduled (no dependencies)
+- t=1: step1 completes → step2 scheduled
+- t=2: step2 completes → step3 scheduled
+- t=3: step3 completes → workflow done
+
+### Parallel Execution
+
+Parallel execution happens naturally when multiple activities become ready simultaneously:
+
+```yaml
+# Example: Parallel workflow (fan-out and fan-in)
+activities:
+  - key: fetch_data
+    following:
+      - activity_key: analyze_security
+      - activity_key: analyze_performance
+      - activity_key: analyze_quality
+
+  - key: analyze_security
+    # No following/preceding = terminal or joins elsewhere
+
+  - key: analyze_performance
+    # No following/preceding = terminal or joins elsewhere
+
+  - key: analyze_quality
+    # No following/preceding = terminal or joins elsewhere
+
+  - key: aggregate_results
+    preceding:
+      - activity_key: analyze_security
+      - activity_key: analyze_performance
+      - activity_key: analyze_quality
+```
+
+Execution timeline:
+- t=0: fetch_data scheduled
+- t=1: fetch_data completes → all 3 analyze_* scheduled simultaneously
+- t=2-4: Workers execute analyze_* in parallel (any order)
+- t=5: Last analysis completes → aggregate_results scheduled
+
+### Long-Running Activities
+
+Activities post heartbeats to prevent timeout:
+```
+POST /api/v1/activities/{id}/heartbeat
+```
+
+Configuration per activity:
+```yaml
+settings:
+  timeout_config:
+    timeout_seconds: 300
+    enable_heartbeat: true
+    heartbeat_interval_seconds: 30
+```
+
+### Workflow State Reconstruction
+
+Since complete workflow state is included in each event, the orchestrator can reconstruct current state by reading the latest event for a workflow:
+
+```rust
+async fn get_workflow_state(workflow_id: Uuid) -> WorkflowState {
+    sqlx::query_as!(
+        WorkflowEvent,
+        "SELECT * FROM workflow_events
+         WHERE workflow_id = $1
+         ORDER BY timestamp DESC
+         LIMIT 1",
+        workflow_id
+    )
+    .fetch_one(&pool)
+    .await?
+    .into_state()
+}
+```
+
+---
+
+## Service Interfaces
+
+### Design Pattern: Wrapped Infrastructure
+
+All connections with external systems are wrapped in service interfaces. This allows supporting different infrastructure services by implementing the interface and configuring which implementation to use.
+
+### Authentication Service Interface
+
+```rust
+#[async_trait]
+pub trait AuthenticationService: Send + Sync {
+    // Token issuance (for public auth endpoints)
+    async fn authenticate_client(&self, client_id: &str, client_secret: &str) -> Result<TokenResponse>;
+    async fn authenticate_password(&self, username: &str, password: &str) -> Result<TokenResponse>;
+    async fn refresh_token(&self, refresh_token: &str) -> Result<TokenResponse>;
+
+    // Token validation (for protected endpoints)
+    async fn validate_token(&self, token: &str) -> Result<Claims>;
+    async fn get_signing_keys(&self) -> Result<Vec<JwtKey>>;
+}
+
+pub struct Auth0Service { /* ... */ }
+pub struct OktaService { /* ... */ }  
+pub struct PostgresAuthService { /* ... */ }
+
+pub struct TokenResponse {
+    pub access_token: String,
+    pub token_type: String,
+    pub expires_in: u64,
+    pub refresh_token: Option<String>,
+}
+```
+
+**Implementation Notes**:
+- **Auth0/Okta**: Proxy to external identity provider's token endpoints (Post-MVP)
+- **Custom (MVP)**: Direct JWT signing using configured private key, PostgreSQL for user storage
+- Built-in workers can use same authentication flow or bypass (direct internal access)
+
+Configuration:
+```bash
+# MVP: Custom auth provider (PostgreSQL backend)
+STREAMFLOW_AUTH_PROVIDER=custom
+STREAMFLOW_AUTH_JWT_SECRET=your-secret-key-here
+STREAMFLOW_AUTH_JWT_ISSUER=streamflow
+STREAMFLOW_AUTH_JWT_AUDIENCE=streamflow-api
+STREAMFLOW_AUTH_TOKEN_TTL=3600  # 1 hour
+
+# Post-MVP: External identity providers
+STREAMFLOW_AUTH_PROVIDER=auth0
+STREAMFLOW_AUTH_DOMAIN=example.auth0.com
+STREAMFLOW_AUTH_CLIENT_ID=worker_app
+STREAMFLOW_AUTH_CLIENT_SECRET=secret_xyz
+```
+
+#### Custom Auth Provider Implementation (MVP)
+
+For MVP, StreamFlow includes a built-in Custom Auth Provider that uses PostgreSQL as the backend, eliminating external identity provider dependencies.
+
+**Database Schema**:
+
+```sql
+-- Users table (for password grant flow and user management)
+CREATE TABLE auth_users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username TEXT UNIQUE NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,  -- bcrypt hash
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_auth_users_username ON auth_users(username);
+CREATE INDEX idx_auth_users_email ON auth_users(email);
+
+-- Service accounts/clients (for client_credentials flow)
+CREATE TABLE auth_clients (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    client_id TEXT UNIQUE NOT NULL,
+    client_secret_hash TEXT NOT NULL,  -- bcrypt hash
+    name TEXT NOT NULL,
+    description TEXT,
+    scopes TEXT[] NOT NULL DEFAULT '{}',
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_auth_clients_client_id ON auth_clients(client_id);
+
+-- Refresh tokens (for token refresh)
+CREATE TABLE auth_refresh_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    token_hash TEXT UNIQUE NOT NULL,
+    user_id UUID REFERENCES auth_users(id) ON DELETE CASCADE,
+    client_id UUID REFERENCES auth_clients(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    revoked_at TIMESTAMPTZ
+);
+
+CREATE INDEX idx_auth_refresh_tokens_user ON auth_refresh_tokens(user_id);
+CREATE INDEX idx_auth_refresh_tokens_expires ON auth_refresh_tokens(expires_at);
+```
+
+**PostgresAuthService Implementation**:
+
+```rust
+pub struct PostgresAuthService {
+    pool: PgPool,
+    jwt_secret: String,
+    jwt_issuer: String,
+    jwt_audience: String,
+    token_ttl: u64,
+}
+
+impl PostgresAuthService {
+    pub fn new(pool: PgPool, config: AuthConfig) -> Self {
+        Self {
+            pool,
+            jwt_secret: config.jwt_secret,
+            jwt_issuer: config.jwt_issuer,
+            jwt_audience: config.jwt_audience,
+            token_ttl: config.token_ttl,
+        }
+    }
+
+    fn sign_jwt(&self, claims: Claims) -> Result<String> {
+        use jsonwebtoken::{encode, Header, EncodingKey, Algorithm};
+
+        let header = Header::new(Algorithm::HS256);
+        let key = EncodingKey::from_secret(self.jwt_secret.as_bytes());
+
+        encode(&header, &claims, &key)
+            .map_err(|e| Error::JwtSigning(e.to_string()))
+    }
+
+    fn verify_jwt(&self, token: &str) -> Result<Claims> {
+        use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
+
+        let key = DecodingKey::from_secret(self.jwt_secret.as_bytes());
+        let mut validation = Validation::new(Algorithm::HS256);
+        validation.set_issuer(&[&self.jwt_issuer]);
+        validation.set_audience(&[&self.jwt_audience]);
+
+        decode::<Claims>(token, &key, &validation)
+            .map(|data| data.claims)
+            .map_err(|e| Error::JwtValidation(e.to_string()))
+    }
+}
+
+#[async_trait]
+impl AuthenticationService for PostgresAuthService {
+    async fn authenticate_client(
+        &self,
+        client_id: &str,
+        client_secret: &str,
+    ) -> Result<TokenResponse> {
+        // Lookup client in database
+        let client = sqlx::query_as!(
+            AuthClient,
+            "SELECT * FROM auth_clients WHERE client_id = $1 AND is_active = true",
+            client_id
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(Error::InvalidCredentials)?;
+
+        // Verify client secret (bcrypt)
+        use bcrypt::verify;
+        if !verify(client_secret, &client.client_secret_hash)? {
+            return Err(Error::InvalidCredentials);
+        }
+
+        // Generate JWT
+        let now = Utc::now();
+        let claims = Claims {
+            sub: client.id.to_string(),
+            iss: self.jwt_issuer.clone(),
+            aud: self.jwt_audience.clone(),
+            exp: (now + Duration::seconds(self.token_ttl as i64)).timestamp(),
+            iat: now.timestamp(),
+            client_id: Some(client.client_id.clone()),
+            scopes: client.scopes.clone(),
+            ..Default::default()
+        };
+
+        let access_token = self.sign_jwt(claims)?;
+
+        Ok(TokenResponse {
+            access_token,
+            token_type: "Bearer".to_string(),
+            expires_in: self.token_ttl,
+            refresh_token: None,  // Client credentials don't get refresh tokens
+        })
+    }
+
+    async fn authenticate_password(
+        &self,
+        username: &str,
+        password: &str,
+    ) -> Result<TokenResponse> {
+        // Lookup user in database
+        let user = sqlx::query_as!(
+            AuthUser,
+            "SELECT * FROM auth_users WHERE username = $1 AND is_active = true",
+            username
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(Error::InvalidCredentials)?;
+
+        // Verify password (bcrypt)
+        use bcrypt::verify;
+        if !verify(password, &user.password_hash)? {
+            return Err(Error::InvalidCredentials);
+        }
+
+        // Generate JWT
+        let now = Utc::now();
+        let claims = Claims {
+            sub: user.id.to_string(),
+            iss: self.jwt_issuer.clone(),
+            aud: self.jwt_audience.clone(),
+            exp: (now + Duration::seconds(self.token_ttl as i64)).timestamp(),
+            iat: now.timestamp(),
+            username: Some(user.username.clone()),
+            email: Some(user.email.clone()),
+            ..Default::default()
+        };
+
+        let access_token = self.sign_jwt(claims)?;
+
+        // Generate refresh token
+        let refresh_token = generate_secure_token();
+        let refresh_token_hash = bcrypt::hash(&refresh_token, bcrypt::DEFAULT_COST)?;
+
+        sqlx::query!(
+            "INSERT INTO auth_refresh_tokens (token_hash, user_id, expires_at)
+             VALUES ($1, $2, $3)",
+            refresh_token_hash,
+            user.id,
+            Utc::now() + Duration::days(30)
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(TokenResponse {
+            access_token,
+            token_type: "Bearer".to_string(),
+            expires_in: self.token_ttl,
+            refresh_token: Some(refresh_token),
+        })
+    }
+
+    async fn refresh_token(&self, refresh_token: &str) -> Result<TokenResponse> {
+        let refresh_token_hash = bcrypt::hash(refresh_token, bcrypt::DEFAULT_COST)?;
+
+        // Lookup and validate refresh token
+        let token_record = sqlx::query!(
+            "SELECT user_id, expires_at, revoked_at
+             FROM auth_refresh_tokens
+             WHERE token_hash = $1",
+            refresh_token_hash
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(Error::InvalidRefreshToken)?;
+
+        // Check if expired or revoked
+        if token_record.revoked_at.is_some() {
+            return Err(Error::RevokedToken);
+        }
+        if token_record.expires_at < Utc::now() {
+            return Err(Error::ExpiredToken);
+        }
+
+        // Get user
+        let user = sqlx::query_as!(
+            AuthUser,
+            "SELECT * FROM auth_users WHERE id = $1 AND is_active = true",
+            token_record.user_id
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        // Generate new access token
+        let now = Utc::now();
+        let claims = Claims {
+            sub: user.id.to_string(),
+            iss: self.jwt_issuer.clone(),
+            aud: self.jwt_audience.clone(),
+            exp: (now + Duration::seconds(self.token_ttl as i64)).timestamp(),
+            iat: now.timestamp(),
+            username: Some(user.username.clone()),
+            email: Some(user.email.clone()),
+            ..Default::default()
+        };
+
+        let access_token = self.sign_jwt(claims)?;
+
+        Ok(TokenResponse {
+            access_token,
+            token_type: "Bearer".to_string(),
+            expires_in: self.token_ttl,
+            refresh_token: Some(refresh_token.to_string()),  // Return same refresh token
+        })
+    }
+
+    async fn validate_token(&self, token: &str) -> Result<Claims> {
+        self.verify_jwt(token)
+    }
+
+    async fn get_signing_keys(&self) -> Result<Vec<JwtKey>> {
+        // For HS256, we don't expose the secret
+        // This would be used for RS256 with public keys
+        Ok(vec![])
+    }
+}
+```
+
+**Initial Setup / Bootstrap**:
+
+```rust
+// CLI command: streamflow admin create-client
+pub async fn create_client(pool: &PgPool, name: &str) -> Result<(String, String)> {
+    use bcrypt::hash;
+    use uuid::Uuid;
+
+    let client_id = format!("client_{}", Uuid::new_v4());
+    let client_secret = generate_secure_token();
+    let client_secret_hash = hash(&client_secret, bcrypt::DEFAULT_COST)?;
+
+    sqlx::query!(
+        "INSERT INTO auth_clients (client_id, client_secret_hash, name, scopes)
+         VALUES ($1, $2, $3, $4)",
+        client_id,
+        client_secret_hash,
+        name,
+        &["workflow:read", "workflow:write", "activity:execute"] as &[&str]
+    )
+    .execute(pool)
+    .await?;
+
+    println!("Client created successfully!");
+    println!("Client ID: {}", client_id);
+    println!("Client Secret: {}", client_secret);
+    println!("⚠️  Save these credentials - the secret cannot be retrieved again!");
+
+    Ok((client_id, client_secret))
+}
+
+// CLI command: streamflow admin create-user
+pub async fn create_user(
+    pool: &PgPool,
+    username: &str,
+    email: &str,
+    password: &str,
+) -> Result<Uuid> {
+    use bcrypt::hash;
+
+    let password_hash = hash(password, bcrypt::DEFAULT_COST)?;
+
+    let user = sqlx::query_as!(
+        AuthUser,
+        "INSERT INTO auth_users (username, email, password_hash)
+         VALUES ($1, $2, $3)
+         RETURNING *",
+        username,
+        email,
+        password_hash
+    )
+    .fetch_one(pool)
+    .await?;
+
+    println!("User created successfully!");
+    println!("User ID: {}", user.id);
+    println!("Username: {}", user.username);
+
+    Ok(user.id)
+}
+```
+
+**CLI Commands for Management**:
+
+```bash
+# Create initial admin client for built-in worker
+streamflow admin create-client "Built-in Worker"
+# Output: client_abc123 / secret_xyz789
+
+# Create user account for testing/admin
+streamflow admin create-user --username admin --email admin@example.com
+# Prompts for password
+
+# List clients
+streamflow admin list-clients
+
+# Revoke client
+streamflow admin revoke-client client_abc123
+
+# Reset user password
+streamflow admin reset-password --username admin
+```
+
+**JWT Claims Structure**:
+
+```rust
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Claims {
+    pub sub: String,           // Subject (user_id or client_id)
+    pub iss: String,           // Issuer (streamflow)
+    pub aud: String,           // Audience (streamflow-api)
+    pub exp: i64,              // Expiration time
+    pub iat: i64,              // Issued at
+    pub client_id: Option<String>,  // For client_credentials flow
+    pub username: Option<String>,   // For password flow
+    pub email: Option<String>,      // For password flow
+    pub scopes: Vec<String>,        // Permissions
+}
+```
+
+**Benefits of Custom Auth Provider (MVP)**:
+
+- ✅ **True single-server deployment**: No external identity provider dependency
+- ✅ **PostgreSQL only**: All data in one database
+- ✅ **Simple setup**: CLI commands to create clients and users
+- ✅ **Standard OAuth 2.0 flows**: client_credentials and password grant
+- ✅ **Secure**: bcrypt for password hashing, JWT for tokens
+- ✅ **No network latency**: Local validation, no external API calls
+- ✅ **Edge-ready**: Works in air-gapped environments
+
+**Migration Path to External IdP (Post-MVP)**:
+
+When scaling to enterprise, can switch to Auth0/Okta:
+```bash
+# Switch from custom to Auth0
+STREAMFLOW_AUTH_PROVIDER=auth0
+STREAMFLOW_AUTH_DOMAIN=company.auth0.com
+```
+
+The same AuthenticationService interface ensures no code changes required in core services.
+
+### Activity Queue Interface
+
+```rust
+#[async_trait]
+pub trait ActivityQueue: Send + Sync {
+    async fn schedule(&self, workflow_id: Uuid, activities: Vec<Activity>) -> Result<()>;
+    async fn claim_next(&self, namespace: &str, name: &str) -> Result<Option<QueuedActivity>>;
+    async fn complete(&self, activity_id: Uuid, result: ActivityResult) -> Result<()>;
+    async fn heartbeat(&self, activity_id: Uuid) -> Result<()>;
+}
+
+pub struct PostgresQueue { /* ... */ }
+```
+
+### Event Source Interface (Publish/Subscribe)
+
+```rust
+#[async_trait]
+pub trait EventSource: Send + Sync {
+    async fn publish(&self, event: WorkflowEvent) -> Result<()>;
+    async fn poll(&self, last_event_id: Option<Uuid>) -> Result<Vec<WorkflowEvent>>;
+}
+
+pub struct PostgresEventSource { /* ... */ }  // Polling-based
+pub struct PostgresLogicalReplicationSource { /* ... */ }  // Post-MVP: Logical replication
+```
+
+**MVP Implementation: Polling-based Event Streaming**
+
+```rust
+pub struct PostgresEventSource {
+    pool: PgPool,
+    poll_interval: Duration,
+    backoff_strategy: BackoffStrategy,
+}
+
+#[async_trait]
+impl EventSource for PostgresEventSource {
+    async fn publish(&self, event: WorkflowEvent) -> Result<()> {
+        sqlx::query!(
+            "INSERT INTO workflow_events (id, workflow_id, event_type, activity_key, payload, timestamp)
+             VALUES ($1, $2, $3, $4, $5, $6)",
+            event.id,
+            event.workflow_id,
+            event.event_type,
+            event.activity_key,
+            event.payload,
+            event.timestamp
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    async fn poll(&self, last_event_id: Option<Uuid>) -> Result<Vec<WorkflowEvent>> {
+        let events = if let Some(last_id) = last_event_id {
+            // Poll for events after the last seen event
+            sqlx::query_as!(
+                WorkflowEvent,
+                "SELECT * FROM workflow_events
+                 WHERE id > $1
+                 ORDER BY timestamp ASC, id ASC
+                 LIMIT 100",
+                last_id
+            )
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            // First poll - get recent events
+            sqlx::query_as!(
+                WorkflowEvent,
+                "SELECT * FROM workflow_events
+                 ORDER BY timestamp DESC, id DESC
+                 LIMIT 100"
+            )
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        Ok(events)
+    }
+}
+```
+
+**Orchestrator Event Loop with Adaptive Backoff**:
+
+```rust
+pub async fn run_orchestrator(
+    event_source: Arc<dyn EventSource>,
+    config: OrchestratorConfig,
+) -> Result<()> {
+    let mut last_event_id: Option<Uuid> = None;
+    let mut backoff = AdaptiveBackoff::new(
+        Duration::from_millis(10),   // Min: 10ms when busy
+        Duration::from_secs(5),      // Max: 5s when quiet
+        1.5,                         // Backoff multiplier
+    );
+
+    loop {
+        // Poll for new events
+        let events = event_source.poll(last_event_id).await?;
+
+        if events.is_empty() {
+            // No events - increase backoff
+            backoff.increase();
+            tokio::time::sleep(backoff.current()).await;
+            continue;
+        }
+
+        // Process events
+        for event in &events {
+            process_workflow_event(event, &config).await?;
+            last_event_id = Some(event.id);
+        }
+
+        // Got events - reset backoff to minimum
+        backoff.reset();
+    }
+}
+
+pub struct AdaptiveBackoff {
+    min: Duration,
+    max: Duration,
+    current: Duration,
+    multiplier: f64,
+}
+
+impl AdaptiveBackoff {
+    pub fn new(min: Duration, max: Duration, multiplier: f64) -> Self {
+        Self {
+            min,
+            max,
+            current: min,
+            multiplier,
+        }
+    }
+
+    pub fn current(&self) -> Duration {
+        self.current
+    }
+
+    pub fn increase(&mut self) {
+        let next = Duration::from_secs_f64(
+            self.current.as_secs_f64() * self.multiplier
+        );
+        self.current = next.min(self.max);
+    }
+
+    pub fn reset(&mut self) {
+        self.current = self.min;
+    }
+}
+```
+
+**Configuration**:
+
+```bash
+# Event polling configuration
+STREAMFLOW_EVENT_POLL_INTERVAL_MIN=10ms   # Minimum interval when busy
+STREAMFLOW_EVENT_POLL_INTERVAL_MAX=5s     # Maximum interval when quiet
+STREAMFLOW_EVENT_BACKOFF_MULTIPLIER=1.5   # Backoff growth rate
+```
+
+**Why Polling (Not LISTEN/NOTIFY)**:
+
+PostgreSQL's LISTEN/NOTIFY is **not suitable for reliable event delivery** because:
+
+❌ **No delivery guarantees** - Notifications can be lost on connection drop
+❌ **Not transactional** - NOTIFY happens regardless of transaction commit/rollback
+❌ **Fire-and-forget** - No way to know if notification was received
+❌ **Connection-dependent** - Must maintain persistent connection per subscriber
+❌ **No backlog** - Late subscribers miss events that occurred while disconnected
+
+**Polling provides guaranteed delivery**:
+
+✅ **All events seen** - Query-based retrieval ensures no missed events
+✅ **Transactional** - Only see committed events in the table
+✅ **Recoverable** - Can resume from last seen event_id after restart
+✅ **Simple implementation** - No connection management complexity
+✅ **Efficient when busy** - 10ms polling keeps latency low under load
+✅ **Efficient when quiet** - Backs off to 5s when no activity
+✅ **Stateless** - Each poll is independent
+✅ **Debuggable** - Easy to understand and troubleshoot
+✅ **Database-agnostic** - Works with any PostgreSQL version/config
+
+**Guaranteed Delivery is Critical**: Workflow orchestration cannot tolerate missed events. A single missed "activity completed" event would cause a workflow to hang indefinitely. Polling ensures this cannot happen.
+
+**Performance Characteristics**:
+
+- **High load**: ~10ms latency (polls every 10ms, finds events immediately)
+- **Low load**: ~2.5s average latency (polls every 5s when quiet)
+- **Database overhead**: Minimal - indexed query on `timestamp` column
+- **Scalability**: Multiple orchestrators poll independently without coordination
+
+**Post-MVP: Logical Replication** (if sub-millisecond latency needed):
+
+PostgreSQL logical replication is the **only other option that guarantees delivery**:
+
+```rust
+pub struct PostgresLogicalReplicationSource {
+    // Uses PostgreSQL logical replication slots
+    // Streams changes as they happen (push model)
+    // Guarantees delivery (replication slot tracks position)
+    // More complex but provides <1ms latency
+}
+```
+
+**Comparison of Delivery Guarantees**:
+
+| Mechanism                          | Delivery Guarantee     | Latency | Complexity |
+|------------------------------------|------------------------|--------:|-----------:|
+| **Polling** (MVP)                  | ✅ Guaranteed          | ~10ms   | Low       |
+| **Logical Replication** (Post-MVP) | ✅ Guaranteed          | <1ms    | High      |
+| **LISTEN/NOTIFY**                  | ❌ Best-effort only    | <1ms    | Medium    |
+
+For MVP, polling with adaptive backoff provides guaranteed delivery with acceptable latency and minimal complexity. Logical replication can be added post-MVP if sub-10ms latency becomes a requirement.
+
+### Workflow Storage Interface
+
+```rust
+#[async_trait]
+pub trait WorkflowStorage: Send + Sync {
+    async fn store_artifact(
+        &self,
+        workflow_id: Uuid,
+        artifact_key: &str,
+        data: impl AsyncRead + Send,
+        metadata: ArtifactMetadata,
+    ) -> Result<StoredArtifact>;
+
+    async fn retrieve_artifact(
+        &self,
+        workflow_id: Uuid,
+        artifact_key: &str,
+    ) -> Result<impl AsyncRead + Send>;
+
+    async fn get_artifact_metadata(
+        &self,
+        workflow_id: Uuid,
+        artifact_key: &str,
+    ) -> Result<ArtifactMetadata>;
+
+    async fn delete_artifact(
+        &self,
+        workflow_id: Uuid,
+        artifact_key: &str,
+    ) -> Result<()>;
+
+    async fn list_artifacts(
+        &self,
+        workflow_id: Uuid,
+    ) -> Result<Vec<StoredArtifact>>;
+
+    async fn cleanup_expired(&self) -> Result<usize>;
+}
+
+pub struct PostgresStorage { /* ... */ }      // MVP: PostgreSQL Large Objects
+pub struct S3Storage { /* ... */ }            // Post-MVP: S3-compatible storage
+pub struct FilesystemStorage { /* ... */ }    // Post-MVP: Local filesystem
+
+pub struct ArtifactMetadata {
+    pub content_type: Option<String>,
+    pub size_bytes: i64,
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
+pub struct StoredArtifact {
+    pub workflow_id: Uuid,
+    pub artifact_key: String,
+    pub metadata: ArtifactMetadata,
+    pub created_at: DateTime<Utc>,
+}
+```
+
+**Implementation Strategy**:
+
+**MVP - PostgreSQL Large Objects**:
+```rust
+// PostgreSQL Large Objects API for binary data storage
+pub struct PostgresStorage {
+    pool: PgPool,
+}
+
+impl PostgresStorage {
+    async fn store_artifact(&self, ...) -> Result<StoredArtifact> {
+        let mut tx = self.pool.begin().await?;
+
+        // Create large object
+        let oid = tx.execute("SELECT lo_create(0)").await?;
+
+        // Write data in chunks
+        let fd = tx.execute("SELECT lo_open($1, 131072)", oid).await?;
+        // ... write data via lo_write ...
+
+        // Store metadata in workflow_artifacts table
+        sqlx::query!(
+            "INSERT INTO workflow_artifacts
+             (workflow_id, artifact_key, storage_path, content_type, size_bytes, expires_at)
+             VALUES ($1, $2, $3, $4, $5, $6)",
+            workflow_id, artifact_key, format!("lo:{}", oid),
+            metadata.content_type, metadata.size_bytes, metadata.expires_at
+        ).execute(&mut *tx).await?;
+
+        tx.commit().await?;
+    }
+}
+```
+
+**Post-MVP - S3-compatible Storage**:
+```rust
+pub struct S3Storage {
+    client: aws_sdk_s3::Client,
+    bucket: String,
+    pool: PgPool,  // Still use PostgreSQL for metadata
+}
+```
+
+### Service Interface Summary
+
+StreamFlow uses four pluggable service interfaces to wrap infrastructure dependencies:
+
+
+| Interface                | Purpose                                       | MVP Implementation                                  | Post-MVP Options                 |
+|-------------------------|-----------------------------------------------|-----------------------------------------------------|----------------------------------|
+| **AuthenticationService** | JWT token issuance and validation            | PostgresAuthService (JWT + PostgreSQL)              | Auth0, Okta, additional IdPs     |
+| **ActivityQueue**        | Activity scheduling and worker polling        | PostgresQueue                                       | (PostgreSQL only)                |
+| **EventSource**          | Workflow event publish/subscribe              | PostgresEventSource (Polling with adaptive backoff) | Logical Replication              |
+| **WorkflowStorage**      | Large file / artifact storage                 | PostgresStorage (Large Objects)                     | S3-compatible, Filesystem        |
+
+**Design Benefits**:
+- Single database (PostgreSQL) for MVP simplicity
+- Clean abstraction boundaries for future flexibility
+- Easy to add new implementations without changing core logic
+- Configuration-driven selection via environment variables
+
+**PostgreSQL MVP Strategy**:
+
+For MVP, PostgreSQL serves all roles:
+```rust
+pub struct StreamFlowServices {
+    auth: Box<dyn AuthenticationService>,           // PostgresAuthService (PostgreSQL)
+    queue: Box<dyn ActivityQueue>,                   // PostgresQueue
+    events: Box<dyn EventSource>,                    // PostgresEventSource
+    storage: Box<dyn WorkflowStorage>,               // PostgresStorage
+}
+```
+
+This provides:
+- ✅ **Single database to deploy and manage** - PostgreSQL only
+- ✅ **Zero external dependencies** - No Auth0, Okta, or other services required
+- ✅ **Transactional consistency** across all operations
+- ✅ **No network latency** between services (all local)
+- ✅ **Minimal dependencies** for edge deployment (10MB binary + PostgreSQL)
+- ✅ **Air-gapped deployment ready** - Works without internet access
+
+Post-MVP flexibility (enterprise scaling):
+```rust
+pub struct StreamFlowServices {
+    auth: Box<dyn AuthenticationService>,           // → Auth0Service or OktaService
+    queue: Box<dyn ActivityQueue>,                   // PostgresQueue (unchanged)
+    events: Box<dyn EventSource>,                    // PostgresEventSource (unchanged)
+    storage: Box<dyn WorkflowStorage>,               // → S3Storage for large files
+}
+```
+
+**Simple configuration switch**:
+```bash
+# MVP (default)
+STREAMFLOW_AUTH_PROVIDER=custom
+
+# Enterprise (just change one env var)
+STREAMFLOW_AUTH_PROVIDER=auth0
+STREAMFLOW_AUTH_DOMAIN=company.auth0.com
+```
+
+### Service Configuration
+
+Services are configured entirely through environment variables and command-line parameters. **No .env files, TOML, or other config files.**
+
+Command-line takes precedence over environment:
+```bash
+# Environment
+export STREAMFLOW_AUTH_PROVIDER=auth0
+export STREAMFLOW_DATABASE_URL=postgres://localhost/streamflow
+export STREAMFLOW_STORAGE_PROVIDER=postgresql
+
+# Command-line override
+streamflow serve \
+  --auth-provider=okta \
+  --database-url=postgres://prod/streamflow \
+  --storage-provider=s3
+```
+
+---
+
+## Deployment Architecture
+
+### Single Binary, Multiple Services
+
+The main binary includes three services launchable from different subcommands:
+
+```bash
+# Launch API server only
+streamflow api --port=8080
+
+# Launch orchestrator only
+streamflow orchestrator
+
+# Launch built-in worker only
+streamflow worker
+
+# Launch all three together
+streamflow serve
+```
+
+When launched together with `streamflow serve`, services run on separate independent threads, each capable of running multiple instances:
+
+```rust
+#[tokio::main]
+async fn main() {
+    let config = load_config();
+
+    // Launch on separate threads
+    let api_handle = tokio::spawn(run_api_server(config.clone()));
+    let orchestrator_handle = tokio::spawn(run_orchestrator(config.clone()));
+    let worker_handle = tokio::spawn(run_worker(config.clone()));
+
+    // Each service can run N instances on separate OS threads
+    tokio::join!(api_handle, orchestrator_handle, worker_handle).await;
+}
+```
+
+### Multi-Instance Deployment
+
+Each service supports running multiple instances:
+
+**API Server**: Axum handles multiple instances transparently via Tokio async runtime
+```bash
+# Single binary, multiple API instances on different ports
+streamflow api --port=8080 --instances=4
+```
+
+**Orchestrator**: Multiple instances consume from partitioned event stream
+```bash
+# Multiple orchestrator instances for parallel processing
+streamflow orchestrator --instances=3
+```
+
+**Worker**: Multiple workers poll queue with `FOR UPDATE SKIP LOCKED` for safe concurrency
+```bash
+# Scale workers for parallel activity execution
+streamflow worker --instances=10
+```
+
+### Deployment Topologies
+
+**1. All-in-One (Development/Edge)**
+```bash
+streamflow serve
+```
+Single process, all services in one binary. Suitable for:
+- Development environments
+- Edge deployments (Raspberry Pi)
+- Low-traffic production (<100 workflows/sec)
+
+**2. Separated Services (Production)**
+```bash
+# Machine 1: API servers (scale horizontally)
+streamflow api --instances=4
+
+# Machine 2: Orchestrators (scale horizontally)
+streamflow orchestrator --instances=2
+
+# Machine 3: Workers (scale horizontally)
+streamflow worker --instances=10
+```
+
+**3. Kubernetes Deployment**
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: streamflow-api
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+      - name: streamflow
+        image: streamflow:latest
+        args: ["api", "--port=8080"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: streamflow-orchestrator
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+      - name: streamflow
+        image: streamflow:latest
+        args: ["orchestrator"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: streamflow-worker
+spec:
+  replicas: 5
+  template:
+    spec:
+      containers:
+      - name: streamflow
+        image: streamflow:latest
+        args: ["worker"]
+```
+
+### State Management
+
+**Mutable state is avoided as much as possible**. Services are designed to be stateless where feasible:
+
+**Stateless** (can scale freely):
+- API server: No state (all in PostgreSQL)
+- Orchestrator: Loads state from events, stateless between evaluations
+- Worker: Claims activity, executes, reports back
+
+**Cached state** (for performance):
+- App settings (loaded at startup)
+- JWT signing keys (cached with TTL)
+- Workflow definitions (LRU cache, optional)
+
+**Redis (Optional)**:
+- Result caching for deterministic activities
+- NOT required for core functionality
+- Graceful degradation when unavailable
+
+---
+
+## Technology Stack
+
+### Core Technologies
+
+**Language**: Rust (async, compiled binary)
+
+**Web Framework**: Axum (async HTTP/WebSocket server)
+
+**Database Driver**: sqlx
+- Compile-time query validation
+- Connection pooling
+- Migration management
+- Prepared statement support
+
+**Database**: PostgreSQL 15+
+- Activity queue
+- Event sourcing
+- Workflow state
+- Workflow definitions
+
+**Async Runtime**: Tokio
+- Async I/O for all services
+- Thread pool management
+- Multi-instance orchestrator/worker
+
+### Optional Dependencies
+
+**Redis**: Result caching for deterministic activities (post-MVP)
+
+**Auth0/Okta**: External identity provider for JWT validation
+
+### Build Configuration
+
+**Release optimizations** (optimize for size to meet business goals):
+```toml
+[profile.release]
+opt-level = 'z'     # Optimize for size
+lto = true          # Link-time optimization
+codegen-units = 1   # Better optimization
+strip = true        # Strip symbols
+```
+
+**Target binary size**: 10-15MB
+
+**Target memory footprint**: 50MB base + ~1KB per workflow
+
+### Migrations
+
+Database migrations managed by sqlx:
+```bash
+# Create migration
+sqlx migrate add create_activity_queue
+
+# Run migrations
+sqlx migrate run
+
+# Revert migration
+sqlx migrate revert
+```
+
+Migrations are embedded in the binary and run automatically on startup.
+
+---
+
+## Performance Targets
+
+### Throughput
+
+- **>1,000 workflows/sec**: Sustained throughput on commodity hardware
+- **>10,000 activities/sec**: Activity execution throughput
+- **<1ms orchestrator evaluation**: Time to determine next activities
+
+### Latency
+
+- **<10ms P99**: Workflow start latency (API call → first activity scheduled)
+- **<1ms P99**: Activity schedule latency (activity complete → next scheduled)
+- **<2ms average**: Workflow status query latency
+- **<1ms**: Orchestrator evaluation latency
+
+### Resource Efficiency
+
+- **<50MB RAM**: Base footprint (all services)
+- **<1KB RAM per workflow**: Active workflow memory
+- **<10MB binary**: Single executable size
+
+### Comparison to Competitors
+
+| Platform     | Workflows/sec | Start Latency | Architecture                      |
+|--------------|---------------|---------------|-----------------------------------|
+| **StreamFlow** | **>1,000**  | **<10ms**     | Single binary                     |
+| Temporal     | 35-100        | 50-200ms      | 4+ services, 2GB+ RAM             |
+| Conductor    | 35-100        | 50-150ms      | 4+ services, 1GB+ RAM             |
+| Airflow      | ~10-50        | 100-500ms     | 6+ services, 1GB+ RAM             |
+
+### Optimization Strategy
+
+**MVP**: Event-driven DAG evaluation
+- Event-driven orchestration eliminates polling overhead
+- Idempotent scheduling prevents duplicate work
+- PostgreSQL query optimization with prepared statements
+- ~1ms orchestration latency
+- Target >1,000 workflows/sec with query and index optimization
+
+---
+
+## Multi-Tenancy and Authorization
+
+**MVP**: Authentication implies authorization
+- Single tenant per deployment
+- JWT validation for authentication only
+- No row-level security or tenant isolation
+
+**Post-MVP**: Multi-tenancy support
+- Tenant ID in all tables
+- Row-level security policies
+- Tenant-scoped API queries
+- Per-tenant resource limits
+
+---
+
+## Workflow Definition Languages
+
+### YAML DSL (Primary)
+
+Declarative workflow definitions covering 70-80% of use cases. Activities are defined with their `preceding` and/or `following` relationships to form a directed graph:
+
+```yaml
+workflow: payment_processing
+version: "1.0"
+
+activities:
+  - key: validate_payment
+    namespace: payments
+    name: validate_card
+    parameters:
+      card_token: "{{ARG.card_token}}"
+    following:
+      - activity_key: authorize_card
+        conditions:
+          - "{{validate_payment.valid}} == true"
+
+  - key: authorize_card
+    namespace: payments
+    name: authorize
+    following:
+      - activity_key: capture_payment
+```
+
+### Programmatic (Python/JavaScript/Rust)
+
+For complex workflows requiring type safety and reusable components:
+```python
+from streamflow import Workflow, Activity
+
+workflow = Workflow("payment_processing")
+validate = Activity("validate_payment", namespace="payments")
+authorize = Activity("authorize_card", namespace="payments") \
+    .with_preceding(validate) \
+    .when(validate.outputs.valid == True)
+workflow.add_activities(validate, authorize)
+```
+
+**Key insight**: Programmatic definitions **compile to YAML at deployment time**, not runtime. This provides type safety and IDE support while maintaining the same <1ms runtime performance as hand-written YAML. The compiled YAML uses the same `preceding`/`following` structure to define the directed graph.
+
+---
+
+## Summary
+
+StreamFlow's architecture is designed for:
+
+1. **Operational Simplicity**: Single binary, PostgreSQL-first, minimal dependencies
+2. **High Performance**: Event-driven orchestration, compiled workflows, optimized queries
+3. **Edge-to-Cloud**: 50MB footprint to 1000+ workflows/sec
+4. **Flexibility**: Multiple deployment topologies, pluggable service interfaces
+5. **Developer Experience**: Multiple definition languages, all compiling to same efficient runtime
+
+The system achieves these goals through careful architectural choices:
+- Event sourcing for complete state reconstruction
+- Idempotent scheduling for safe concurrency
+- Service interfaces for infrastructure portability
+- Stateless services for horizontal scaling
+- Compile-time optimization (sqlx query validation, Rust performance)
+
+This architecture positions StreamFlow as the highest-performance, most operationally simple workflow orchestration platform for both traditional and AI-native workloads.
