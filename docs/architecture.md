@@ -2069,6 +2069,13 @@ spec:
 
 **Language**: Rust (async, compiled binary)
 
+**Project Structure**: Cargo workspace with multiple crates
+- `core` - Core orchestration engine (activity queue, event sourcing, workflow execution)
+- `api` - API server (HTTP/WebSocket endpoints, authentication, routing)
+- `activity` - Built-in activities and built-in activity worker
+- `dashboard` - Built-in dashboard UI (web interface for monitoring and management)
+- Additional crates added as needed for distinct functionality
+
 **Web Framework**: Axum (async HTTP/WebSocket server)
 
 **Database Driver**: sqlx
