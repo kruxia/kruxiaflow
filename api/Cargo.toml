@@ -1,0 +1,28 @@
+[package]
+name = "streamflow-api"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Workspace dependencies
+streamflow-core = { path = "../core" }
+tokio.workspace = true
+async-trait.workspace = true
+sqlx.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+jsonwebtoken.workspace = true
+bcrypt.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
