@@ -829,10 +829,10 @@ POST /api/v1/activities/{id}/heartbeat
 Configuration per activity:
 ```yaml
 settings:
-  timeout_config:
-    timeout_seconds: 300
+  timeout:
+    timeout: 300
     enable_heartbeat: true
-    heartbeat_interval_seconds: 30
+    heartbeat_interval: 30
 ```
 
 ### Workflow State Reconstruction

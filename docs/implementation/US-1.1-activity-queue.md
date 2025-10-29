@@ -78,7 +78,6 @@ CREATE TABLE activity_queue (
     max_retries INTEGER NOT NULL DEFAULT 3,
     claimed_by UUID,
     claimed_at TIMESTAMPTZ,
-    last_heartbeat TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
@@ -149,16 +148,16 @@ CREATE TYPE activity_status AS ENUM (
 // Pseudocode
 for activity in activities {
     // Extract timeout from settings or use default
-    let timeout_seconds = activity.settings
-        .and_then(|s| s.timeout_config)
-        .map(|tc| tc.timeout_seconds)
+    let timeout = activity.settings
+        .and_then(|s| s.timeout)
+        .map(|tc| tc.timeout)
         .unwrap_or(config.default_timeout.as_secs());
 
-    let timeout_duration = format!("{} seconds", timeout_seconds);
+    let timeout_duration = format!("{} seconds", timeout);
 
     // Extract max_retries from settings or use default
     let max_retries = activity.settings
-        .and_then(|s| s.retry_config)
+        .and_then(|s| s.retry)
         .map(|rc| rc.max_attempts)
         .unwrap_or(config.default_max_retries);
 
@@ -198,7 +197,6 @@ UPDATE activity_queue
 SET status = 'running',
     claimed_at = NOW(),
     claimed_by = $worker_id,
-    last_heartbeat = NOW(),
     retry_count = CASE
         WHEN status = 'running' THEN retry_count + 1  -- Reclaiming stale activity
         ELSE retry_count                               -- Fresh claim
@@ -261,7 +259,6 @@ DELETE FROM activity_queue WHERE id = $activity_id
 #### 1.4 `heartbeat()` - Long-Running Activity Heartbeat
 
 **Requirements**:
-- Update last_heartbeat timestamp
 - **Reset claimed_at to extend deadline** (timeout deadline = claimed_at + timeout_duration)
 - Verify activity still owned by calling worker
 - Return HTTP 409 Conflict if activity reclaimed by another worker
@@ -271,8 +268,7 @@ DELETE FROM activity_queue WHERE id = $activity_id
 ```rust
 // Pseudocode
 UPDATE activity_queue
-SET last_heartbeat = NOW(),
-    claimed_at = NOW()  -- Reset timeout baseline, effectively extending deadline
+SET claimed_at = NOW()  -- Reset timeout baseline, effectively extending deadline
 WHERE id = $activity_id
   AND claimed_by = $worker_id
   AND status = 'running'
@@ -326,10 +322,10 @@ pub struct Activity {
 
 // Activity settings (retry, timeout, budget)
 pub struct ActivitySettings {
-    pub retry_config: Option<RetryConfig>,
-    pub timeout_config: Option<TimeoutConfig>,
-    pub budget_config: Option<BudgetConfig>,
-    pub cache_config: Option<CacheConfig>,
+    pub retry: Option<RetryConfig>,
+    pub timeout: Option<TimeoutConfig>,
+    pub budget: Option<BudgetConfig>,
+    pub cache: Option<CacheConfig>,
     pub deterministic: bool,  // Default: true
 }
 

@@ -18,18 +18,18 @@ impl PostgresQueue {
         Self { pool, config }
     }
 
-    fn extract_timeout_seconds(&self, settings: &Option<ActivitySettings>) -> u64 {
+    fn extract_timeout(&self, settings: &Option<ActivitySettings>) -> u64 {
         settings
             .as_ref()
-            .and_then(|s| s.timeout_config.as_ref())
-            .map(|tc| tc.timeout_seconds)
+            .and_then(|s| s.timeout.as_ref())
+            .map(|tc| tc.timeout)
             .unwrap_or(self.config.default_timeout.as_secs())
     }
 
     fn extract_max_retries(&self, settings: &Option<ActivitySettings>) -> i32 {
         settings
             .as_ref()
-            .and_then(|s| s.retry_config.as_ref())
+            .and_then(|s| s.retry.as_ref())
             .map(|rc| rc.max_attempts as i32)
             .unwrap_or(self.config.default_max_retries as i32)
     }
@@ -54,7 +54,7 @@ impl ActivityQueue for PostgresQueue {
                 ));
             }
 
-            let timeout_seconds = self.extract_timeout_seconds(&activity.settings);
+            let timeout = self.extract_timeout(&activity.settings);
             let max_retries = self.extract_max_retries(&activity.settings);
             let scheduled_for = activity.scheduled_for.unwrap_or_else(Utc::now);
 
@@ -80,7 +80,7 @@ impl ActivityQueue for PostgresQueue {
                 activity.parameters,
                 settings_json,
                 scheduled_for,
-                timeout_seconds as f64,
+                timeout as f64,
                 max_retries
             )
             .execute(&self.pool)
@@ -113,7 +113,7 @@ impl ActivityQueue for PostgresQueue {
         // This query:
         // 1. Finds the next claimable activity (pending OR stale running)
         // 2. Updates it to running status
-        // 3. Sets claimed_by, claimed_at, last_heartbeat
+        // 3. Sets claimed_by, claimed_at
         // 4. Increments retry_count if reclaiming a stale activity
         // 5. Uses FOR UPDATE SKIP LOCKED for safe concurrency
         let activity = sqlx::query!(
@@ -122,7 +122,6 @@ impl ActivityQueue for PostgresQueue {
             SET status = 'running'::activity_status,
                 claimed_at = NOW(),
                 claimed_by = $3,
-                last_heartbeat = NOW(),
                 retry_count = CASE
                     WHEN status = 'running'::activity_status THEN retry_count + 1
                     ELSE retry_count
@@ -214,12 +213,11 @@ impl ActivityQueue for PostgresQueue {
     }
 
     async fn heartbeat(&self, activity_id: Uuid, worker_id: Uuid) -> Result<()> {
-        // Update heartbeat and reset claimed_at to extend timeout deadline
+        // Reset claimed_at to extend timeout deadline
         let result = sqlx::query!(
             r#"
             UPDATE activity_queue
-            SET last_heartbeat = NOW(),
-                claimed_at = NOW()
+            SET claimed_at = NOW()
             WHERE id = $1
               AND claimed_by = $2
               AND status = 'running'::activity_status
