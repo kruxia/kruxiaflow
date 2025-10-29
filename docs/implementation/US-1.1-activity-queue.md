@@ -659,7 +659,7 @@ activities:
 
 ### Database Migrations
 
-**File**: `migrations/YYYYMMDD_create_activity_queue.sql`
+**File**: `migrations/YYYYMMDDHHMMSS_activity_queue.sql`
 
 **Migration Steps**:
 1. Create activity_queue table
