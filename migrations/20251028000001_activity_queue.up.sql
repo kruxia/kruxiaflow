@@ -8,7 +8,7 @@ CREATE TYPE activity_status AS ENUM (
 
 -- Activity queue table with timeout duration and retry tracking
 CREATE TABLE activity_queue (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
     workflow_id UUID NOT NULL,
     activity_key TEXT NOT NULL,
     namespace TEXT NOT NULL,
@@ -22,7 +22,6 @@ CREATE TABLE activity_queue (
     max_retries INTEGER NOT NULL DEFAULT 3,
     claimed_by UUID,
     claimed_at TIMESTAMPTZ,
-    last_heartbeat TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 

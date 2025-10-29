@@ -17,13 +17,13 @@ pub struct Activity {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActivitySettings {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub retry_config: Option<RetryConfig>,
+    pub retry: Option<RetryConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub timeout_config: Option<TimeoutConfig>,
+    pub timeout: Option<TimeoutConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub budget_config: Option<BudgetConfig>,
+    pub budget: Option<BudgetConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cache_config: Option<CacheConfig>,
+    pub cache: Option<CacheConfig>,
     #[serde(default = "default_deterministic")]
     pub deterministic: bool,
 }
@@ -36,16 +36,14 @@ fn default_deterministic() -> bool {
 pub struct RetryConfig {
     pub max_attempts: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub backoff_seconds: Option<u64>,
+    pub backoff: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeoutConfig {
-    pub timeout_seconds: u64,
-    #[serde(default)]
-    pub enable_heartbeat: bool,
+    pub timeout: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub heartbeat_interval_seconds: Option<u64>,
+    pub heartbeat: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,9 +53,7 @@ pub struct BudgetConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CacheConfig {
-    pub enabled: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub ttl_seconds: Option<u64>,
+    pub ttl: u64,
 }
 
 /// Queued activity returned to worker

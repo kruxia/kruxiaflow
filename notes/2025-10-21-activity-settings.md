@@ -22,14 +22,14 @@ The StreamFlow codebase supports these settings for each activity step:
     - Adaptive: Fallback chains with different providers/models
   - Includes budget limits for retry costs
 
-3. timeout_config (Timeout Settings)
+3. timeout (Timeout Settings)
 
   - Default: 60 seconds with Fail strategy
   - Fields:
-    - timeout_seconds: Duration before timeout
+    - timeout: Duration before timeout
     - on_timeout: Strategy (Fail, Retry, or Fallback)
     - enable_heartbeat: For long-running activities (>60s)
-    - heartbeat_interval_seconds: How often to send heartbeats
+    - heartbeat_interval: How often to send heartbeats
     - warning_threshold: When to emit warning (default 0.8 = 80%)
 
 4. budget (Cost Limits)
@@ -45,8 +45,8 @@ settings:
   retry_policy:  # Basic retry (if not using retry_strategy)
     max_attempts: 3
     backoff: exponential  # or fixed, linear
-  timeout_config:  # Optional timeout settings
-    timeout_seconds: 10
+  timeout:  # Optional timeout settings
+    timeout: 10
     on_timeout: fail  # or retry, fallback
     enable_heartbeat: false  # Not needed for short activities
   budget:  # Optional budget limit
@@ -71,17 +71,17 @@ settings:
       initial_ms: 1000
       multiplier: 2.0
       max_ms: 10000
-  timeout_config:
-    timeout_seconds: 10
+  timeout:
+    timeout: 10
     on_timeout: retry
     max_attempts: 2
-    backoff_seconds: 5
+    backoff: 5
 ```
 
 Key Points:
 
 1. retry_policy and retry_strategy are mutually exclusive - use one or the other
-2. timeout_config is optional and only needed for activities that might timeout
+2. timeout is optional and only needed for activities that might timeout
 3. budget is optional and used for cost-constrained workflows
 4. scheduled_at is optional for delayed activity execution
 5. The settings block itself is optional - if omitted, defaults are used

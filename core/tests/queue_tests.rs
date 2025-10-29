@@ -5,7 +5,7 @@ use streamflow_core::queue::{
     Activity, ActivityQueue, ActivityResult, ActivitySettings, PostgresQueue, QueueConfig,
     QueueMonitor, RetryConfig, TimeoutConfig,
 };
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 use uuid::Uuid;
 
 /// Helper to create test database pool
@@ -158,17 +158,16 @@ async fn test_stale_activity_recovery() {
         name: "test_task".to_string(),
         parameters: json!({"key": "value"}),
         settings: Some(ActivitySettings {
-            timeout_config: Some(TimeoutConfig {
-                timeout_seconds: 1, // 1 second timeout
-                enable_heartbeat: false,
-                heartbeat_interval_seconds: None,
+            timeout: Some(TimeoutConfig {
+                timeout: 1, // 1 second timeout
+                heartbeat: None,
             }),
-            retry_config: Some(RetryConfig {
+            retry: Some(RetryConfig {
                 max_attempts: 3,
-                backoff_seconds: None,
+                backoff: None,
             }),
-            budget_config: None,
-            cache_config: None,
+            budget: None,
+            cache: None,
             deterministic: true,
         }),
         scheduled_for: None,
@@ -228,17 +227,16 @@ async fn test_heartbeat_conflict_detection() {
         name: "test_task".to_string(),
         parameters: json!({"key": "value"}),
         settings: Some(ActivitySettings {
-            timeout_config: Some(TimeoutConfig {
-                timeout_seconds: 1,
-                enable_heartbeat: true,
-                heartbeat_interval_seconds: Some(10),
+            timeout: Some(TimeoutConfig {
+                timeout: 1,
+                heartbeat: Some(10),
             }),
-            retry_config: Some(RetryConfig {
+            retry: Some(RetryConfig {
                 max_attempts: 3,
-                backoff_seconds: None,
+                backoff: None,
             }),
-            budget_config: None,
-            cache_config: None,
+            budget: None,
+            cache: None,
             deterministic: true,
         }),
         scheduled_for: None,
@@ -302,17 +300,16 @@ async fn test_max_retries_exhaustion() {
         name: "test_task".to_string(),
         parameters: json!({"key": "value"}),
         settings: Some(ActivitySettings {
-            timeout_config: Some(TimeoutConfig {
-                timeout_seconds: 0, // Very short timeout (uses default minimum)
-                enable_heartbeat: false,
-                heartbeat_interval_seconds: None,
+            timeout: Some(TimeoutConfig {
+                timeout: 0, // Very short timeout (uses default minimum)
+                heartbeat: None,
             }),
-            retry_config: Some(RetryConfig {
+            retry: Some(RetryConfig {
                 max_attempts: 2,
-                backoff_seconds: None,
+                backoff: None,
             }),
-            budget_config: None,
-            cache_config: None,
+            budget: None,
+            cache: None,
             deterministic: true,
         }),
         scheduled_for: None,
