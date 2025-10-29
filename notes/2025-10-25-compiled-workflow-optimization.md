@@ -94,11 +94,11 @@ workflow: payment_processing
 activities:
   - key: validate_payment       # index 0
   - key: authorize_card         # index 1
-    edges:
-      - preceding_key: validate_payment
+    preceding:
+      - activity_key: validate_payment
   - key: capture_payment        # index 2
-    edges:
-      - preceding_key: authorize_card
+    preceding:
+      - activity_key: authorize_card
 ```
 
 **Compiled Representation**:
@@ -427,11 +427,11 @@ workflow: data_pipeline
 activities:
   - key: fetch_data
   - key: validate_data
-    edges: [{preceding_key: fetch_data}]
+    preceding: [{activity_key: fetch_data}]
   - key: transform_data
-    edges: [{preceding_key: validate_data}]
+    preceding: [{activity_key: validate_data}]
   - key: load_data
-    edges: [{preceding_key: transform_data}]
+    preceding: [{activity_key: transform_data}]
 ```
 
 **Output (Compiled)**:

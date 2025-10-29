@@ -100,6 +100,6 @@ activities:
     # - 3 retry attempts with exponential backoff
     # - 60 second timeout with immediate failure
     # - No budget limits
-    edges:
-      - following_key: next_activity
+    following:
+      - activity_key: next_activity
 ```

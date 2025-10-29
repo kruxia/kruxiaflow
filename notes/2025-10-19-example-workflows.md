@@ -208,8 +208,8 @@ activities:
       - input_records
       - output_records
       - timestamp
-    edges:
-      - preceding_key: extract_data
+    preceding:
+      - activity_key: extract_data
         conditions:
           - preceding.succeeded: true
 
@@ -227,8 +227,8 @@ activities:
       - checks
       - valid_records
       - timestamp
-    edges:
-      - preceding_key: transform_data
+    preceding:
+      - activity_key: transform_data
         conditions:
           - preceding.succeeded: true
 
@@ -246,8 +246,8 @@ activities:
       - destination
       - records_loaded
       - timestamp
-    edges:
-      - preceding_key: validate_data
+    preceding:
+      - activity_key: validate_data
         conditions:
           - preceding.succeeded: true
 
@@ -268,8 +268,8 @@ activities:
       - total_pipeline_duration_ms
       - activities_completed
       - completion_time
-    edges:
-      - preceding_key: load_data
+    preceding:
+      - activity_key: load_data
         conditions:
           - preceding.succeeded: true
 
