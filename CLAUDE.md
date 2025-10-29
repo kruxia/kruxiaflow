@@ -155,3 +155,4 @@ All external infrastructure dependencies are wrapped in service interfaces:
 - When creating implementation plans (in docs/implementation), don't write a first draft of the code; instead, describe what has to be built in terms of the requirements and the architecture.
 - When implementing code, always refer to docs/architecture.md in addition to the specific requirements of the current implementation. Update any corresponding docs/implementation document with information about what has been implemented and the completion status of each part of the plan.
 - When implementing code, do not implement tests unless and until asked to.
+- When we decide to postpone an epic/feature/story to post-MVP, update docs/post-mvp.md to include it.
