@@ -561,9 +561,19 @@ activities:
 
 ## Testing Requirements
 
-### Unit Tests
+### Testing Phases Overview
+
+**Phase 1 (US-1.1)**: Queue implementation tests - **CAN IMPLEMENT NOW**
+**Phase 2 (After US-1.2)**: Orchestrator integration tests - **MUST DEFER**
+**Phase 3 (After US-1.3 + API)**: End-to-end system tests - **MUST DEFER**
+
+---
+
+### Phase 1: Unit Tests (✅ Implement During US-1.1)
 
 **File**: `core/src/queue/postgres_queue_test.rs`
+
+**Status**: All tests can be implemented immediately. Only require PostgresQueue, database, and activity models.
 
 **Test Cases**:
 
@@ -581,11 +591,13 @@ activities:
    - Schedule chain: A → B → C
    - Verify B not in queue until A completes
    - Verify C not in queue until B completes
+   - **Note**: Tests queue ordering, not orchestrator dependency resolution
 
 4. **Parallel Execution**:
    - Schedule fan-out: A → [B, C, D]
    - Verify all scheduled simultaneously
    - Verify can be claimed in parallel
+   - **Note**: Manually schedules activities, doesn't test orchestrator fan-out detection
 
 5. **Stale Activity Recovery**:
    - Claim activity
@@ -603,55 +615,167 @@ activities:
    - Activity times out and is reclaimed max_retries times
    - Verify claim_next() does not return it (retry_count >= max_retries)
    - Wait for cleanup thread
-   - Verify activity deleted and failure event published
+   - Verify activity deleted
+   - **Note**: Cannot test failure event publishing until EventSource implemented
 
 8. **Completion Idempotency**:
    - Complete activity twice
    - Verify no error on second call
    - Verify activity removed from queue
 
-### Integration Tests
+---
+
+### Phase 1: Partial Performance Tests (⚠️ Implement Partially During US-1.1)
+
+**File**: `core/benches/queue_benchmark.rs`
+
+**Status**: Can benchmark queue operations in isolation, but not full workflow throughput.
+
+**Benchmarks Available Now**:
+
+1. ✅ **Schedule Latency**: Target <1ms for single activity
+   - Direct PostgresQueue::schedule() calls
+   - Measure database insertion time
+
+2. ✅ **Claim Latency**: Target <2ms for polling operation
+   - Direct PostgresQueue::claim_next() calls
+   - Measure FOR UPDATE SKIP LOCKED query time
+
+3. ✅ **Concurrent Workers**: 100 workers, no degradation
+   - Multiple workers polling same queue
+   - Verify no lock contention
+
+**Benchmarks Deferred to Phase 3**:
+
+4. ❌ **End-to-End Throughput**: Target >10,000 activities/sec
+   - **Deferred**: Requires full orchestration stack (API → Orchestrator → Queue → Worker)
+   - **Dependencies**: US-1.2 (Orchestrator), US-1.3 (Worker), API Server
+   - **Why**: Must measure realistic workflow execution, not just queue operations
+
+---
+
+### Phase 2: Integration Tests (❌ DEFER Until After US-1.2)
 
 **File**: `core/tests/queue_integration_test.rs`
 
+**Status**: Cannot implement until Orchestrator and EventSource are available.
+
 **Test Scenarios**:
 
-1. **Full Sequential Workflow**:
+1. ❌ **Full Sequential Workflow**:
    - Create workflow with 5 sequential activities
    - Simulate worker execution
    - Verify exact ordering
    - Measure latency (<5ms per schedule)
+   - **Missing Dependencies**:
+     - Orchestrator (US-1.2) to evaluate dependencies and schedule activities
+     - EventSource to publish/consume workflow events
+     - Workflow definition loading and graph evaluation
 
-2. **Full Parallel Workflow**:
+2. ❌ **Full Parallel Workflow**:
    - Create workflow with 1 → [5 parallel] → 1 join
    - Simulate multiple workers
    - Verify all parallel execute simultaneously
    - Verify join waits for all
+   - **Missing Dependencies**:
+     - Orchestrator (US-1.2) to detect satisfied dependencies and schedule fan-out
+     - EventSource for activity completion events
+     - Dependency graph evaluation logic
 
-3. **Worker Failure Recovery**:
+3. ⚠️ **Worker Failure Recovery** (Partial):
    - Claim activity
    - Simulate worker crash (no complete)
    - Wait for timeout
    - Verify activity rescheduled
    - Complete on retry
+   - **Can Test Now**: Queue-level stale activity reclaim (covered in unit tests)
+   - **Must Defer**: Full workflow progression after worker failure
+   - **Missing Dependencies**:
+     - Orchestrator to schedule next activities after completion
+     - Worker implementation that posts completion to API
+     - EventSource for completion events
 
-4. **High Concurrency**:
+4. ⚠️ **High Concurrency** (Partial):
    - 100 workers polling simultaneously
    - 1000 activities in queue
    - Verify no duplicate claims
    - Verify no lost activities
    - Measure throughput (>10k activities/sec)
+   - **Can Test Now**: Queue concurrency behavior (no duplicates, no lost activities)
+   - **Must Defer**: End-to-end workflow throughput with orchestrator overhead
+   - **Missing Dependencies**:
+     - Orchestrator processing workflow events
+     - EventSource throughput characteristics
+     - API server for workflow submission
 
-### Performance Tests
+---
 
-**File**: `core/benches/queue_benchmark.rs`
+### Phase 3: End-to-End System Tests (❌ DEFER Until After US-1.3 + API)
 
-**Benchmarks**:
+**Status**: Requires complete orchestration stack.
 
-1. **Schedule Latency**: Target <1ms for single activity
-2. **Claim Latency**: Target <2ms for polling operation
-3. **Throughput**: Target >10,000 activities/sec
-4. **Concurrent Workers**: 100 workers, no degradation
+**Test Scenarios**:
+
+1. ❌ **API → Orchestrator → Queue → Worker Flow**:
+   - Submit workflow via HTTP API
+   - Orchestrator evaluates and schedules activities
+   - Workers poll, execute, and complete
+   - Verify workflow completes successfully
+   - **Missing Dependencies**: API Server, Worker, Orchestrator, EventSource
+
+2. ❌ **Worker Authentication Flow**:
+   - Worker obtains JWT token via /api/v1/auth/token
+   - Worker polls activities with Bearer token
+   - Verify token validation
+   - **Missing Dependencies**: API Server, AuthenticationService
+
+3. ❌ **Full System Performance Benchmarks**:
+   - >10,000 activities/sec sustained throughput
+   - <10ms P99 workflow start latency
+   - <1ms orchestrator evaluation latency
+   - **Missing Dependencies**: Complete stack with realistic load patterns
+
+---
+
+### Testing Phase Summary
+
+| Test Category           |Phase| Status     | Implement Now? | Missing Dependencies                  |
+|-------------------------|:---:|------------|:--------------:|---------------------------------------|
+| **Unit Tests**          | 1   | ✅ Ready   | **Yes**        | None — only needs PostgresQueue        |
+| **Queue Performance**   | 1   | ⚠️ Partial | **Partial**    | Full throughput requires Orchestrator  |
+| **Sequential Workflow** | 2   | ❌ Blocked | **No**         | Orchestrator (US-1.2), EventSource     |
+| **Parallel Workflow**   | 2   | ❌ Blocked | **No**         | Orchestrator (US-1.2), EventSource     |
+| **Failure Recovery**    | 2   | ⚠️ Partial | **Partial**    | Orchestrator, EventSource, Worker      |
+| **High Concurrency**    | 2   | ⚠️ Partial | **Partial**    | Orchestrator, EventSource, API         |
+| **End-to-End**          | 3   | ❌ Blocked | **No**         | API, Worker, Orchestrator, EventSource |
+
+---
+
+### US-1.1 Acceptance Criteria Validation
+
+**What Can Be Validated Now**:
+- ✅ Idempotent scheduling (duplicate calls harmless)
+- ✅ Safe concurrent claiming (FOR UPDATE SKIP LOCKED works)
+- ✅ Stale activity recovery (claim_next detects and reclaims timed-out activities)
+- ✅ Heartbeat conflict detection (409 Conflict when activity reclaimed)
+- ✅ Max retries enforcement (activities not claimed after exhausting retries)
+- ✅ Clean completion (activities removed from queue)
+- ✅ Schedule latency: <1ms P95
+- ✅ Claim latency: <2ms P95
+- ✅ Concurrent workers: 100+ without degradation
+
+**What Must Be Validated Later**:
+- ❌ Sequential workflows execute in exact order (requires Orchestrator - US-1.2)
+- ❌ Parallel activities execute simultaneously (requires Orchestrator - US-1.2)
+- ❌ Failed activity cleanup with event publishing (requires EventSource - US-1.2)
+- ❌ Throughput: >10,000 activities/sec sustained (requires full stack - Phase 3)
+- ❌ Worker crash recovery in workflow context (requires Orchestrator + Worker - US-1.3)
+
+**US-1.1 is considered complete when**:
+- All Phase 1 tests pass (unit tests + partial performance)
+- Queue behavior validated in isolation
+- Database schema and indexes performing as expected
+- Code ready for orchestrator integration in US-1.2
 
 ---
 
