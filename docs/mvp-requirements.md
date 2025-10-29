@@ -100,6 +100,137 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 
 ---
 
+## Epic 1B: API Server
+
+**Business Objective**: Provide HTTP/REST API for workflow submission, management, and monitoring to enable client applications and AI agents to interact with StreamFlow
+
+### User Stories
+
+**US-1B.1: Workflow Submission API**
+- **As** an AI startup engineer
+- **I want** to submit workflows via HTTP API
+- **So that** my applications can trigger workflows programmatically
+- **Acceptance Criteria**:
+  - `POST /api/v1/workflows` - Submit workflow with definition and input parameters
+  - Request body: `{workflow_type, input, workflow_definition}` (YAML as string or JSON)
+  - Response: `{workflow_id, status, created_at}` with 201 Created
+  - Async execution: API returns immediately, workflow runs in background
+  - Validation: Reject invalid workflow definitions with 400 Bad Request
+  - Idempotency: Optional `idempotency_key` header to prevent duplicate submissions
+- **Example**: `POST /api/v1/workflows` with payment workflow definition and `{amount: 100.00}`
+
+**US-1B.2: Workflow Status and Query API**
+- **As** a platform engineering lead
+- **I want** to query workflow status and results via API
+- **So that** I can monitor execution and retrieve outputs
+- **Acceptance Criteria**:
+  - `GET /api/v1/workflows/{workflow_id}` - Get workflow status and state
+  - Response includes: `{id, status, workflow_type, created_at, updated_at, state_data}`
+  - `GET /api/v1/workflows/{workflow_id}/activities` - List all activities with their states
+  - `GET /api/v1/workflows?status=running&limit=100` - List workflows with filters
+  - Filter parameters: `status`, `workflow_type`, `created_after`, `created_before`
+  - Pagination: `limit` and `offset` parameters
+
+**US-1B.3: Workflow Definition Management API**
+- **As** an AI startup engineer
+- **I want** to deploy and manage workflow definitions separately from execution
+- **So that** I can version and reuse workflow templates
+- **Acceptance Criteria**:
+  - `POST /api/v1/workflow-definitions` - Deploy workflow definition with name and version
+  - `GET /api/v1/workflow-definitions` - List all deployed definitions
+  - `GET /api/v1/workflow-definitions/{name}` - Get latest version of definition
+  - `GET /api/v1/workflow-definitions/{name}/versions/{version}` - Get specific version
+  - `POST /api/v1/workflows` with `{workflow_definition_name, workflow_definition_version, input}`
+  - Versioning: Semantic versioning (1.0.0, 1.1.0) or timestamps
+  - Validation on deployment: Syntax and semantic checks before storage
+
+**US-1B.4: Activity Results and Output Retrieval**
+- **As** an AI researcher
+- **I want** to retrieve activity outputs and workflow results via API
+- **So that** I can access computation results for downstream processing
+- **Acceptance Criteria**:
+  - `GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/output` - Get activity output
+  - `GET /api/v1/workflows/{workflow_id}/output` - Get final workflow output
+  - Response includes: `{activity_key, output, cost_usd, completed_at}`
+  - Large outputs: Return reference to artifact storage with signed URL
+  - 404 if activity not completed or doesn't exist
+  - Output format: JSON with activity outputs accessible by key
+
+**US-1B.5: Authentication and Authorization**
+- **As** a platform engineering lead
+- **I want** API authentication and authorization
+- **So that** only authorized clients can submit and query workflows
+- **Acceptance Criteria**:
+  - Bearer token authentication: `Authorization: Bearer <token>`
+  - JWT tokens issued by AuthenticationService (PostgresAuthService for MVP)
+  - `POST /api/v1/auth/token` - Issue token with credentials (username/password or API key)
+  - Token expiration: Configurable TTL (default 24 hours)
+  - Authorization checks: Verify token on all protected endpoints
+  - 401 Unauthorized for missing/invalid tokens
+  - Rate limiting per token: Configurable requests per minute
+
+**US-1B.6: WebSocket Streaming for Real-Time Updates**
+- **As** an AI startup engineer
+- **I want** real-time workflow execution updates via WebSocket
+- **So that** my UI can show live progress without polling
+- **Acceptance Criteria**:
+  - Subscribe to 1 or more workflows: `WS /api/v1/workflows/ws?workflow_id=id1,id2...`
+  - Stream events: `workflow_started`, `activity_scheduled`, `activity_completed`, `workflow_completed`
+  - Event payload: `{event_type, workflow_id, activity_key, timestamp, data}`
+  - Authentication: Bearer token in query parameter or initial message
+  - Backpressure handling: Client can pause/resume stream
+  - Automatic reconnection support with last event ID for replay
+
+**US-1B.7: Health Check and Service Discovery**
+- **As** a platform engineering lead
+- **I want** standard health and readiness endpoints
+- **So that** load balancers and orchestrators can manage API servers
+- **Acceptance Criteria**:
+  - `GET /health` - Liveness probe (returns 200 if server is running)
+  - `GET /health/ready` - Readiness probe (returns 200 if can handle requests)
+  - Readiness checks: Database connectivity, event source availability
+  - `GET /api/v1/info` - Service information (version, build, capabilities)
+  - Response format: `{version, build_date, api_version, features: []}`
+  - Metrics endpoint: `GET /metrics` (Prometheus format)
+
+**US-1B.8: Error Handling and API Contracts**
+- **As** an AI startup engineer
+- **I want** consistent error responses and API documentation
+- **So that** I can handle errors gracefully and integrate easily
+- **Acceptance Criteria**:
+  - Standard error format: `{error: {code, message, details}}`
+  - HTTP status codes: 400 (validation), 401 (auth), 404 (not found), 500 (server error)
+  - Validation errors include field-level details
+  - OpenAPI 3.0 specification published at `/api/v1/openapi.json`
+  - API documentation UI: Swagger/ReDoc at `/api/v1/docs`
+  - Request ID in response headers for tracing: `X-Request-ID`
+  - CORS support for browser-based clients
+
+**US-1B.9: Worker Activity APIs**
+- **As** an activity worker
+- **I want** HTTP APIs to poll for activities, send heartbeats, and report results
+- **So that** I can execute activities in distributed environments without direct database access
+- **Acceptance Criteria**:
+  - `POST /api/v1/workers/poll` - Poll for activities by activity type
+    - Request body: `{activity_types: ["namespace.name"], worker_id, max_activities: 10}`
+    - Response: `[{activity_id, workflow_id, activity_key, parameters, timeout}]`
+    - Uses ActivityQueue::poll() internally with FOR UPDATE SKIP LOCKED
+  - `POST /api/v1/activities/{activity_id}/heartbeat` - Send heartbeat to prevent timeout
+    - Request body: `{worker_id}`
+    - Response: `{acknowledged: true, next_heartbeat_seconds: 30}`
+  - `POST /api/v1/activities/{activity_id}/complete` - Report successful completion
+    - Request body: `{worker_id, output, cost_usd}`
+    - Response: `{acknowledged: true}`
+    - Publishes activity completion event to workflow orchestrator
+  - `POST /api/v1/activities/{activity_id}/fail` - Report activity failure
+    - Request body: `{worker_id, error: {code, message, retryable}}`
+    - Response: `{acknowledged: true, will_retry: boolean}`
+  - Worker authentication: Bearer token or worker API key
+  - Idempotency: Activities can only be completed/failed once (409 Conflict if already done)
+  - Timeout handling: Activities not heartbeat within timeout are released for retry
+
+---
+
 ## Epic 2: YAML Workflow Definition Language
 
 **Business Objective**: Enable 70-80% of workflows to be expressed declaratively for non-developers and rapid prototyping
@@ -925,6 +1056,14 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
    - ✅ Template expressions
    - ✅ Activity settings (retry, timeout)
 
+1B. **API Server** (Epic 1B):
+   - ✅ Workflow submission API (POST /api/v1/workflows)
+   - ✅ Workflow status and query API
+   - ✅ Workflow definition management
+   - ✅ Worker activity APIs (poll, heartbeat, complete, fail)
+   - ✅ Authentication and authorization (JWT)
+   - ✅ Health checks and metrics endpoints
+
 3. **Performance Validation** (Epic 3):
    - ✅ Benchmark proving >1,000 workflows/sec
    - ✅ Competitor comparisons published
@@ -973,43 +1112,43 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 
 ### Technical Metrics
 
-| Metric | Target | Validation Method |
-|--------|--------|-------------------|
-| **Workflow Throughput** | >1,000/sec sustained | Continuous benchmarking (Epic 3) |
-| **Latency P99** | <10ms workflow start | Production monitoring |
-| **Binary Size** | <15MB | Build artifacts |
-| **Memory Footprint** | <50MB base | Docker stats |
-| **Edge Deployment** | Works on RPi Zero | Hardware validation |
+| Metric                  | Target                 | Validation Method                    |
+|:------------------------|:----------------------:|:-------------------------------------|
+| **Workflow Throughput** | >1,000/sec sustained   | Continuous benchmarking (Epic 3)     |
+| **Latency P99**         | <10ms workflow start   | Production monitoring                 |
+| **Binary Size**         | <15MB                  | Build artifacts                       |
+| **Memory Footprint**    | <50MB base             | Docker stats                          |
+| **Edge Deployment**     | Works on RPi Zero      | Hardware validation                   |
 
 ### Adoption Metrics
 
-| Metric | 3 Months | 6 Months | 12 Months |
-|--------|----------|----------|-----------|
-| **GitHub Stars** | 1,000 | 3,000 | 10,000 |
-| **Production Deployments** | 10 | 50 | 200 |
-| **Community Contributors** | 10 | 30 | 100 |
-| **Paying Customers** | 5 | 25 | 100 |
-| **MRR** | $10K | $50K | $200K |
+| Metric                 | 3 Months | 6 Months | 12 Months |
+|:-----------------------|:-------:|:--------:|:---------:|
+| **GitHub Stars**       | 1,000   | 3,000    | 10,000    |
+| **Production Deployments** | 10  | 50       | 200       |
+| **Community Contributors**  | 10  | 30       | 100       |
+| **Paying Customers**       | 5   | 25       | 100       |
+| **MRR**                   | $10K | $50K   | $200K     |
 
 ### Market Position
 
-| Milestone | Target Timeline | Success Indicator |
-|-----------|----------------|-------------------|
-| **HackerNews Launch** | Month 0 | 200-500 upvotes, 100-300 stars |
-| **First Case Study** | Month 3 | Published cost savings or edge deployment |
-| **AWS Marketplace** | Month 6 | Listed with 5+ reviews |
-| **First Fortune 500 POC** | Month 9 | Signed agreement |
-| **SOC 2 Type I** | Month 12 | Audit complete |
-| **Conference Talk** | Month 6 | Accepted at KubeCon or AI conference |
+| Milestone                | Target Timeline | Success Indicator                                |
+|:------------------------ |:---------------:|:-------------------------------------------------|
+| **HackerNews Launch**    | Month 0         | 200–500 upvotes, 100–300 stars                    |
+| **First Case Study**     | Month 3         | Published cost savings or edge deployment        |
+| **AWS Marketplace**      | Month 6         | Listed with 5+ reviews                            |
+| **First Fortune 500 POC**| Month 9         | Signed agreement                                  |
+| **SOC 2 Type I**        | Month 12        | Audit complete                                    |
+| **Conference Talk**      | Month 6         | Accepted at KubeCon or major AI conference        |
 
 ### Competitive Position
 
-| Metric | Target | Evidence |
-|--------|--------|----------|
-| **Performance Advantage** | 10x Temporal | Published benchmarks (Epic 3) |
-| **Cost Savings** | 50-80% LLM costs | Customer testimonials |
-| **Deployment Time** | <5 minutes vs days | Comparison video |
-| **Edge Market Share** | #1 for edge AI | Customer count in segment |
+| Metric                 | Target       | Evidence                              |
+|:-----------------------|:------------:|:--------------------------------------|
+| **Performance Advantage** | 10x Temporal | Published benchmarks (Epic 3)         |
+| **Cost Savings**         | 50–80% LLM costs | Customer testimonials              |
+| **Deployment Time**      | <5 minutes vs days | Comparison video                  |
+| **Edge Market Share**    | #1 for edge AI | Customer count in segment            |
 
 ---
 
@@ -1111,10 +1250,13 @@ See detailed GTM plan in:
 - YAML DSL core
 - Performance baseline: 100+ workflows/sec
 
-**Phase 2: YAML DSL Complete + Early Benchmarking (Weeks 5-8)**
+**Phase 2: YAML DSL Complete + API Server + Early Benchmarking (Weeks 5-8)**
 - Advanced YAML features (loops, dynamic parallel)
 - Built-in activity library (core activities)
 - CLI tooling
+- **API Server (Epic 1B)**: HTTP/REST endpoints for workflow submission and management
+- Authentication/authorization with JWT
+- WebSocket streaming for real-time updates
 - **CRITICAL: Initial benchmarking suite (Epic 3)**
 - Establish performance baseline vs competitors
 - Identify optimization opportunities for Phase 4
@@ -1144,10 +1286,12 @@ See detailed GTM plan in:
 
 **Version History:**
 
-| Version | Date | Author | Changes |
-|---------|------|--------|---------|
-| 0.1 | 2025-10-26 | Claude Code | Initial PRD based on collected notes |
-| 0.2 | 2025-10-26 | Claude Code | Moved Epic 11 (Benchmarking) to Epic 3 for early performance validation |
+| Version | Date       | Author      | Changes                                                                 |
+|---------|------------|-------------|-------------------------------------------------------------------------|
+| 0.1     | 2025-10-26 | Claude Code | Initial PRD based on collected notes                                    |
+| 0.2     | 2025-10-26 | Claude Code | Moved Epic 11 (Benchmarking) to Epic 3 for early performance validation |
+| 0.3     | 2025-10-29 | Claude Code | Added Epic 1B (API Server) with 8 user stories for HTTP/REST API, authentication, and WebSocket streaming |
+| 0.4     | 2025-10-29 | Claude Code | Added US-1B.9 (Worker Activity APIs) for worker polling, heartbeat, and result reporting |
 
 **Approval:**
 

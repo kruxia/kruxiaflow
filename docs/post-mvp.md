@@ -30,7 +30,7 @@ Post-MVP expands to:
 ## Table of Contents
 
 1. [Epic 1: External Service Integrations](#epic-1-external-service-integrations)
-2. [Epic 2B: Performance Optimization](#epic-2-performance-optimization)
+2. [Epic 2: Performance Optimization](#epic-2-performance-optimization)
 3. [Epic 3: Multi-Tenancy & Authorization](#epic-3-multi-tenancy--authorization)
 4. [Epic 4: Developer Experience](#epic-4-developer-experience)
 5. [Epic 5: Enterprise Operations](#epic-5-enterprise-operations)
@@ -375,7 +375,7 @@ STREAMFLOW_CACHE_TTL_DEFAULT=3600  # 1 hour
 
 ---
 
-## Epic 2B: Performance Optimization
+## Epic 2: Performance Optimization
 
 **Goal**: Achieve >10,000 workflows/sec throughput and <1ms orchestration latency through architectural optimizations.
 
@@ -1730,8 +1730,8 @@ Post-MVP features are prioritized using:
 - Epic 1: Auth0/Okta integration (1.1)
 - Epic 1: Kafka event streaming (1.2)
 - Epic 1: S3 artifact storage (1.8)
-- Epic 2B: Compiled workflows (2.1)
-- Epic 2B: Workflow state caching (2.2)
+- Epic 2: Compiled workflows (2.1)
+- Epic 2: Workflow state caching (2.2)
 - Epic 4: Python SDK (4.1)
 - Epic 5: Metrics and monitoring (5.1)
 - Epic 5: High availability setup (5.4)
@@ -1768,8 +1768,8 @@ Post-MVP features are prioritized using:
 - Epic 1: NATS JetStream (1.3)
 - Epic 1: RabbitMQ queue (1.6)
 - Epic 1: Redis caching (1.10)
-- Epic 2B: Event table partitioning (2.3)
-- Epic 2B: Priority queues (2.5)
+- Epic 2: Event table partitioning (2.3)
+- Epic 2: Priority queues (2.5)
 - Epic 4: Web workflow designer (4.5)
 - Epic 4: Activity development kit (4.7)
 - Epic 6: Dynamic parallelism (6.3)
