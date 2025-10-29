@@ -739,15 +739,15 @@ activities:
 
 ### Testing Phase Summary
 
-| Test Category           |Phase| Status     | Implement Now? | Missing Dependencies                  |
-|-------------------------|:---:|------------|:--------------:|---------------------------------------|
-| **Unit Tests**          | 1   | ✅ Ready   | **Yes**        | None — only needs PostgresQueue        |
-| **Queue Performance**   | 1   | ⚠️ Partial | **Partial**    | Full throughput requires Orchestrator  |
-| **Sequential Workflow** | 2   | ❌ Blocked | **No**         | Orchestrator (US-1.2), EventSource     |
-| **Parallel Workflow**   | 2   | ❌ Blocked | **No**         | Orchestrator (US-1.2), EventSource     |
-| **Failure Recovery**    | 2   | ⚠️ Partial | **Partial**    | Orchestrator, EventSource, Worker      |
-| **High Concurrency**    | 2   | ⚠️ Partial | **Partial**    | Orchestrator, EventSource, API         |
-| **End-to-End**          | 3   | ❌ Blocked | **No**         | API, Worker, Orchestrator, EventSource |
+| Test Category           | Phase | Status     | Implement Now? | Missing Dependencies                  |
+|-------------------------|:-----:|------------|:--------------:|---------------------------------------|
+| **Unit Tests**          |  1    | ✅ Ready   | **Yes**        | None — only needs PostgresQueue        |
+| **Queue Performance**   |  1    | ⚠️ Partial | **Partial**    | Full throughput requires Orchestrator  |
+| **Sequential Workflow** |  2    | ❌ Blocked | **No**         | Orchestrator (US-1.2), EventSource     |
+| **Parallel Workflow**   |  2    | ❌ Blocked | **No**         | Orchestrator (US-1.2), EventSource     |
+| **Failure Recovery**    |  2    | ⚠️ Partial | **Partial**    | Orchestrator, EventSource, Worker      |
+| **High Concurrency**    |  2    | ⚠️ Partial | **Partial**    | Orchestrator, EventSource, API         |
+| **End-to-End**          |  3    | ❌ Blocked | **No**         | API, Worker, Orchestrator, EventSource |
 
 ---
 
