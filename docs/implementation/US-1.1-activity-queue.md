@@ -64,7 +64,7 @@ pub trait ActivityQueue: Send + Sync {
 
 ```sql
 CREATE TABLE activity_queue (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
     workflow_id UUID NOT NULL,
     activity_key TEXT NOT NULL,
     namespace TEXT NOT NULL,
@@ -777,7 +777,7 @@ impl Default for QueueConfig {
 
 ### External Dependencies
 
-- **PostgreSQL 15+**: Required for database
+- **PostgreSQL 18+**: Required for database
 - **sqlx**: Async PostgreSQL driver with compile-time query validation
 - **tokio**: Async runtime for background monitoring tasks
 - **serde_json**: JSONB serialization/deserialization

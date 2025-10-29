@@ -26,7 +26,7 @@ StreamFlow is a lightweight, high-performance workflow orchestration platform de
 ### Core Value Proposition
 
 - **Single Binary**: Complete orchestration stack in one 10-15MB executable
-- **PostgreSQL-First**: All persistence (queues, events, state) using PostgreSQL 15+
+- **PostgreSQL-First**: All persistence (queues, events, state) using PostgreSQL 18+
 - **High Performance**: Target >1,000 workflows/sec on commodity hardware
 - **Edge-Ready**: Runs with 50MB RAM footprint
 - **AI-Native**: Built-in cost tracking, streaming, and non-deterministic activity handling
@@ -342,7 +342,7 @@ class StreamFlowWorker:
 
 ### PostgreSQL Schema
 
-StreamFlow uses PostgreSQL 15+ as the single source of truth for all state.
+StreamFlow uses PostgreSQL 18+ as the single source of truth for all state.
 
 #### Core Tables
 
@@ -920,7 +920,7 @@ For MVP, StreamFlow includes a built-in Postgres Auth Provider that uses Postgre
 ```sql
 -- Users table (for password grant flow and user management)
 CREATE TABLE auth_users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
     username TEXT UNIQUE NOT NULL,
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,  -- bcrypt hash
@@ -934,7 +934,7 @@ CREATE INDEX idx_auth_users_email ON auth_users(email);
 
 -- Service accounts/clients (for client_credentials flow)
 CREATE TABLE auth_clients (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
     client_id TEXT UNIQUE NOT NULL,
     client_secret_hash TEXT NOT NULL,  -- bcrypt hash
     name TEXT NOT NULL,
@@ -949,7 +949,7 @@ CREATE INDEX idx_auth_clients_client_id ON auth_clients(client_id);
 
 -- Refresh tokens (for token refresh)
 CREATE TABLE auth_refresh_tokens (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
     token_hash TEXT UNIQUE NOT NULL,
     user_id UUID REFERENCES auth_users(id) ON DELETE CASCADE,
     client_id UUID REFERENCES auth_clients(id) ON DELETE CASCADE,
@@ -2084,7 +2084,7 @@ spec:
 - Migration management
 - Prepared statement support
 
-**Database**: PostgreSQL 15+
+**Database**: PostgreSQL 18+
 - Activity queue
 - Event sourcing
 - Workflow state
