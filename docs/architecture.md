@@ -208,6 +208,63 @@ flowchart TD
 - **Built-in worker**: Executes activities compiled into the binary
 - **External workers**: Custom implementations that connect to API via HTTP/WS
 
+**Architecture Decision: Built-in Worker Uses API Server**
+
+The built-in worker is implemented as an HTTP client to the API server rather than directly accessing service interfaces (ActivityQueue, EventSource, etc.). This design choice was made after evaluating two approaches:
+
+**Approach 1: Built-in Worker → API Server → Service Interfaces** (CHOSEN)
+- Built-in worker authenticates via JWT
+- Polls via `/api/v1/workers/poll` endpoint
+- Reports results via `/api/v1/activities/{id}/complete` endpoint
+- Identical code path to external workers
+
+**Approach 2: Built-in Worker → Service Interfaces Directly** (REJECTED)
+- Built-in worker calls `ActivityQueue::claim_next()` directly
+- Bypasses HTTP layer and authentication
+- Separate code path from external workers
+
+**Why Approach 1 (API Server) Was Chosen**:
+
+✅ **Benefits**:
+- **Code path consistency**: Built-in and external workers execute identical logic, eliminating risk of behavior divergence
+- **Testing leverage**: Built-in worker usage automatically validates API endpoints under real production load
+- **Single authentication model**: One auth flow to document, secure, audit, and maintain
+- **Future-proof**: Easy to separate built-in worker into standalone service later without breaking changes
+- **Dogfooding**: Forces API design to be robust enough for internal use, improving external worker experience
+- **No security bypass**: Built-in worker goes through same authentication/authorization as external workers
+
+❌ **Trade-offs**:
+- **HTTP overhead**: ~1-2ms serialization and localhost network latency per activity operation
+- **Startup dependencies**: API server must be running before built-in worker can start (managed by `streamflow serve` startup order)
+- **Extra HTTP client**: Worker needs reqwest/http client dependency (~200KB binary size increase)
+- **Token management**: Built-in worker must manage JWT refresh and retry logic
+
+**Performance Impact Analysis**:
+
+The 1-2ms HTTP overhead per activity is **negligible** because:
+- Typical activity execution time: seconds to minutes (HTTP overhead is <0.1% of total)
+- Current event polling latency: ~10ms (HTTP overhead is <20% of this, not on critical path)
+- MVP target >1,000 workflows/sec: easily achievable with this overhead
+- Most activities are I/O bound (LLM calls, database queries, HTTP requests), not CPU bound
+
+**Why Direct Service Access Was Rejected**:
+
+The rejected approach would have saved 1-2ms per activity but created significant risks:
+- ❌ **Code divergence risk**: Two worker implementations to maintain and keep in sync
+- ❌ **Testing burden**: Must test both internal path AND API path separately
+- ❌ **Inconsistent behavior**: Built-in worker could behave differently than external workers, confusing users
+- ❌ **Security bypass**: Built-in worker skips authentication layer, creating a backdoor
+- ❌ **Refactoring risk**: Tight coupling to service internals harder to change later
+
+**Post-MVP Optimization Path**:
+
+If HTTP overhead becomes a measurable bottleneck (unlikely given analysis above), optimization options include:
+1. **Internal fast path**: Add compile-time flag for built-in worker to use service interfaces directly while external workers continue using API
+2. **Unix domain sockets**: Replace TCP with UDS for localhost communication (saves ~0.5ms)
+3. **Batch operations**: Claim multiple activities in one API call
+
+Both paths would still go through service interfaces (preserving architectural boundaries), and external workers would continue using HTTP API (no breaking changes).
+
 **Authentication**: Both built-in and external workers use the same authentication flow:
 
 ```mermaid

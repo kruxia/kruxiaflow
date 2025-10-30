@@ -561,7 +561,7 @@ activities:
 
 **Phase 1 (US-1.1)**: Queue implementation tests - **CAN IMPLEMENT NOW**
 **Phase 2 (After US-1.2)**: Orchestrator integration tests - **MUST DEFER**
-**Phase 3 (After US-1.3 + API)**: End-to-end system tests - **MUST DEFER**
+**Phase 3 (After Epic 1B + Epic 1A)**: End-to-end system tests - **MUST DEFER**
 
 ---
 
@@ -645,7 +645,7 @@ activities:
 
 4. ❌ **End-to-End Throughput**: Target >10,000 activities/sec
    - **Deferred**: Requires full orchestration stack (API → Orchestrator → Queue → Worker)
-   - **Dependencies**: US-1.2 (Orchestrator), US-1.3 (Worker), API Server
+   - **Dependencies**: US-1.2 (Orchestrator), Epic 1B (Built-in Worker), Epic 1A (API Server)
    - **Why**: Must measure realistic workflow execution, not just queue operations
 
 ---
@@ -688,7 +688,8 @@ activities:
    - **Must Defer**: Full workflow progression after worker failure
    - **Missing Dependencies**:
      - Orchestrator to schedule next activities after completion
-     - Worker implementation that posts completion to API
+     - Epic 1B (Built-in Worker) that posts completion to API
+     - Epic 1A (API Server) for worker endpoints
      - EventSource for completion events
 
 4. ⚠️ **High Concurrency** (Partial):
@@ -706,9 +707,9 @@ activities:
 
 ---
 
-### Phase 3: End-to-End System Tests (❌ DEFER Until After US-1.3 + API)
+### Phase 3: End-to-End System Tests (❌ DEFER Until After Epic 1B + Epic 1A)
 
-**Status**: Requires complete orchestration stack.
+**Status**: Requires complete orchestration stack (Epic 1B: Built-in Worker, Epic 1A: API Server).
 
 **Test Scenarios**:
 
@@ -717,13 +718,13 @@ activities:
    - Orchestrator evaluates and schedules activities
    - Workers poll, execute, and complete
    - Verify workflow completes successfully
-   - **Missing Dependencies**: API Server, Worker, Orchestrator, EventSource
+   - **Missing Dependencies**: Epic 1A (API Server), Epic 1B (Built-in Worker), Orchestrator, EventSource
 
 2. ❌ **Worker Authentication Flow**:
    - Worker obtains JWT token via /api/v1/auth/token
    - Worker polls activities with Bearer token
    - Verify token validation
-   - **Missing Dependencies**: API Server, AuthenticationService
+   - **Missing Dependencies**: Epic 1A (API Server with AuthenticationService)
 
 3. ❌ **Full System Performance Benchmarks**:
    - >10,000 activities/sec sustained throughput
@@ -735,15 +736,15 @@ activities:
 
 ### Testing Phase Summary
 
-| Test Category           | Phase | Status     | Implement Now? | Missing Dependencies                  |
-|-------------------------|:-----:|------------|:--------------:|---------------------------------------|
-| **Unit Tests**          |  1    | ✅ Ready   | **Yes**        | None — only needs PostgresQueue        |
-| **Queue Performance**   |  1    | ⚠️ Partial | **Partial**    | Full throughput requires Orchestrator  |
-| **Sequential Workflow** |  2    | ❌ Blocked | **No**         | Orchestrator (US-1.2), EventSource     |
-| **Parallel Workflow**   |  2    | ❌ Blocked | **No**         | Orchestrator (US-1.2), EventSource     |
-| **Failure Recovery**    |  2    | ⚠️ Partial | **Partial**    | Orchestrator, EventSource, Worker      |
-| **High Concurrency**    |  2    | ⚠️ Partial | **Partial**    | Orchestrator, EventSource, API         |
-| **End-to-End**          |  3    | ❌ Blocked | **No**         | API, Worker, Orchestrator, EventSource |
+| Test Category           | Phase | Status     | Implement Now? | Missing Dependencies                           |
+|-------------------------|:-----:|------------|:--------------:|------------------------------------------------|
+| **Unit Tests**          |  1    | ✅ Ready   | **Yes**        | None — only needs PostgresQueue                 |
+| **Queue Performance**   |  1    | ⚠️ Partial | **Partial**    | Full throughput requires Orchestrator           |
+| **Sequential Workflow** |  2    | ❌ Blocked | **No**         | Orchestrator (US-1.2), EventSource              |
+| **Parallel Workflow**   |  2    | ❌ Blocked | **No**         | Orchestrator (US-1.2), EventSource              |
+| **Failure Recovery**    |  2    | ⚠️ Partial | **Partial**    | Orchestrator, EventSource, Epic 1B, Epic 1A     |
+| **High Concurrency**    |  2    | ⚠️ Partial | **Partial**    | Orchestrator, EventSource, Epic 1A              |
+| **End-to-End**          |  3    | ❌ Blocked | **No**         | Epic 1A, Epic 1B, Orchestrator, EventSource     |
 
 ---
 
@@ -765,7 +766,7 @@ activities:
 - ❌ Parallel activities execute simultaneously (requires Orchestrator - US-1.2)
 - ❌ Failed activity cleanup with event publishing (requires EventSource - US-1.2)
 - ❌ Throughput: >10,000 activities/sec sustained (requires full stack - Phase 3)
-- ❌ Worker crash recovery in workflow context (requires Orchestrator + Worker - US-1.3)
+- ❌ Worker crash recovery in workflow context (requires Orchestrator + Epic 1B + Epic 1A)
 
 **US-1.1 is considered complete when**:
 - All Phase 1 tests pass (unit tests + partial performance)
@@ -916,7 +917,7 @@ impl Default for QueueConfig {
 - Prepared statements for all queries
 - Connection pooling (2-20 connections)
 - VACUUM automation
-- Early benchmarking (Epic 3) to validate
+- Early benchmarking (Epic 2) to validate
 - Fallback: Batch operations for higher throughput
 
 ### Risk 2: Race Conditions in Concurrent Claiming
@@ -1015,14 +1016,15 @@ Track permanently failed activities in separate table for debugging.
 - [ ] Performance benchmarks pass (>10k activities/sec)
 - [ ] Documentation complete (user + developer)
 - [ ] Code review completed
-- [ ] Epic 3 benchmarking validates performance
+- [ ] Epic 2 benchmarking validates performance
 
 ---
 
 ## Related User Stories
 
 - **US-1.2**: Event-Driven Dynamic Scheduling (orchestrator consumes events, schedules activities)
-- **US-1.3**: Worker Polling with Concurrency Safety (workers use claim_next())
+- **Epic 1A**: API Server (provides HTTP endpoints for workflow and worker operations)
+- **Epic 1B (US-1.3)**: Worker Polling with Concurrency Safety (workers use API endpoints which call claim_next())
 - **US-2.5**: Activity Settings (timeout, retry config stored in queue)
 - **US-6.1**: Query Optimization (prepared statements, indexes)
 
