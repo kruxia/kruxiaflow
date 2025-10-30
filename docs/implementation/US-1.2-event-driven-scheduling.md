@@ -2,7 +2,7 @@
 
 **Epic**: 1 - Event-Driven Orchestration Architecture
 **User Story**: US-1.2
-**Status**: 📝 Planning
+**Status**: ✅ Complete
 **Priority**: P0 (Must Have for MVP)
 
 ---
@@ -314,7 +314,7 @@ tx.commit().await?;  // Lock released automatically
 CREATE TABLE workflow_events (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     workflow_id UUID NOT NULL,
-    event_type TEXT NOT NULL,
+    event_type workflow_event_type NOT NULL,
     activity_key TEXT,
     payload JSONB NOT NULL,
     timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),  -- Human-readable time, not used for ordering
@@ -356,7 +356,7 @@ ON workflow_events(event_type, id DESC);
 CREATE TABLE workflows (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     workflow_type TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'running',
+    status workflow_status NOT NULL DEFAULT 'running',
     state_data JSONB NOT NULL,  -- Materialized workflow state (see State Management Strategy)
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -1888,11 +1888,29 @@ impl Default for OrchestratorConfig {
 **File**: `migrations/YYYYMMDDHHMMSS_workflow_events.sql`
 
 ```sql
+-- Create enums first
+CREATE TYPE workflow_event_type AS ENUM (
+    'WorkflowCreated',
+    'WorkflowUpdated',
+    'ActivityScheduled',
+    'ActivityCompleted',
+    'ActivityFailed',
+    'WorkflowCompleted',
+    'WorkflowFailed'
+);
+
+CREATE TYPE workflow_status AS ENUM (
+    'running',
+    'completed',
+    'failed',
+    'paused'
+);
+
 -- Create workflow_events table
 CREATE TABLE workflow_events (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     workflow_id UUID NOT NULL,
-    event_type TEXT NOT NULL,
+    event_type workflow_event_type NOT NULL,
     activity_key TEXT,
     payload JSONB NOT NULL,
     timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -1901,8 +1919,7 @@ CREATE TABLE workflow_events (
     UNIQUE(workflow_id, event_type, activity_key)
 );
 
--- Indexes (UUIDv7 is monotonic, so id alone provides ordering)
-CREATE INDEX idx_events_poll ON workflow_events(id);
+-- Indexes for workflow history and event type filtering
 CREATE INDEX idx_events_workflow_id ON workflow_events(workflow_id, id DESC);
 CREATE INDEX idx_events_type ON workflow_events(event_type, id DESC);
 
@@ -1910,8 +1927,8 @@ CREATE INDEX idx_events_type ON workflow_events(event_type, id DESC);
 CREATE TABLE workflows (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     workflow_type TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'running',
-    state_data JSONB,
+    status workflow_status NOT NULL DEFAULT 'running',
+    state_data JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -1929,31 +1946,11 @@ CREATE TABLE workflow_definitions (
     UNIQUE(name, version)
 );
 
-CREATE INDEX idx_workflow_definitions_name ON workflow_definitions(name, version);
-
 -- Create event consumer positions table (durable checkpointing)
 CREATE TABLE workflow_event_consumers (
     consumer_id TEXT PRIMARY KEY,
     last_event_id UUID NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- Create enums
-CREATE TYPE workflow_event_type AS ENUM (
-    'WorkflowCreated',
-    'WorkflowUpdated',
-    'ActivityScheduled',
-    'ActivityCompleted',
-    'ActivityFailed',
-    'WorkflowCompleted',
-    'WorkflowFailed'
-);
-
-CREATE TYPE workflow_status AS ENUM (
-    'running',
-    'completed',
-    'failed',
-    'paused'
 );
 ```
 
