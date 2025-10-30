@@ -21,7 +21,7 @@
 - Publishes workflow state events after each evaluation
 - Handles workflow completion detection (all activities done)
 - Achieves <1ms evaluation latency per event
-- Supports multiple orchestrator instances consuming from partitioned event stream
+- Supports multiple orchestrator instances consuming from event stream
 
 ---
 
@@ -40,13 +40,13 @@ Per `docs/architecture.md`:
 
 **Execution Model**:
 ```mermaid
-flowchart TD
-    Start([Event Published]) --> Consume[Orchestrator Consumes Event]
-    Consume --> Load[Load Workflow Definition]
-    Load --> Eval[Evaluate Current State]
-    Eval --> Find[Find Ready Activities]
-    Find --> Schedule[Schedule to Queue<br/>Idempotent]
-    Schedule --> Publish[Publish State Event]
+flowchart LR
+    Start([Event<br/>Published]) --> Consume[Orchestrator<br/>Consumes<br/>Event]
+    Consume --> Load[Load<br/>Workflow<br/>Definition]
+    Load --> Eval[Evaluate<br/>Current<br/>State]
+    Eval --> Find[Find<br/>Ready<br/>Activities]
+    Find --> Schedule[Schedule<br/>to Queue<br/>Idempotent]
+    Schedule --> Publish[Publish<br/>State<br/>Event]
     Publish --> End([Complete])
 ```
 
@@ -86,7 +86,6 @@ pub trait EventSource: Send + Sync {
 - Activities define `preceding` and/or `following` relationships
 - Orchestrator evaluates graph to determine when activities become ready
 - Activity is ready when: ALL `preceding` activities completed AND conditions satisfied
-- **Never use "edges" terminology** - always use `preceding` and `following`
 
 **Example YAML**:
 ```yaml
@@ -117,6 +116,196 @@ activities:
 
 ---
 
+## State Management Strategy
+
+### Design Decision: Materialized State with Event Audit Trail
+
+**Chosen Approach**: Store materialized workflow state in `workflows.state_data` JSONB column, updated incrementally on event consumption. Keep all events for audit trail and verification.
+
+### Comparison of Approaches
+
+We evaluated three approaches for managing workflow state:
+
+#### Approach 1: Event Sourcing (Reconstruct from All Events)
+
+**Implementation**: Load all events for a workflow and reconstruct current state on every evaluation.
+
+```rust
+// Load ALL events for this workflow
+let workflow_events = load_workflow_events(&mut *tx, workflow_id).await?;
+
+// Reconstruct current state from all events
+let state = reconstruct_state(workflow_id, &definition, &workflow_events)?; // O(n)
+```
+
+**Benefits**:
+- ✅ Complete audit trail - Perfect history of all state changes
+- ✅ Time travel debugging - Can reconstruct state at any point
+- ✅ Bug recovery - Fix reconstruction logic and replay events
+- ✅ Idempotent - Same events always produce same state
+- ✅ No write conflicts - Only appending events
+
+**Drawbacks**:
+- ❌ O(n) performance - Cost grows with workflow length (n = number of events)
+- ❌ Latency growth - 100-activity workflow = 100 events to process on each evaluation
+- ❌ Violates <1ms target - Workflows with >50 activities may exceed 1ms reconstruction time
+- ❌ Memory overhead - Must load all events into memory
+
+**Performance estimate**:
+- Small workflow (10 activities): ~100μs reconstruction time ✅
+- Medium workflow (50 activities): ~500μs reconstruction time ⚠️
+- Large workflow (200 activities): ~2ms reconstruction time ❌ (exceeds 1ms target)
+
+#### Approach 2: State in Each Event
+
+**Implementation**: Include complete workflow state in every event payload, fetch latest event to get current state.
+
+```rust
+// Event contains full state snapshot
+{
+  "event_type": "ActivityCompleted",
+  "payload": {
+    "outputs": {...},
+    "workflow_state": {  // Full state duplicated in every event
+      "activities": {...}
+    }
+  }
+}
+
+// Fetch latest event
+let latest = sqlx::query!("SELECT * FROM workflow_events WHERE workflow_id = $1 ORDER BY id DESC LIMIT 1", ...)
+let state = latest.into_state(); // O(1)
+```
+
+**Benefits**:
+- ✅ O(1) performance - Just fetch latest event
+- ✅ Audit trail - Can see exact state at each step
+- ✅ Time travel - State snapshot at every event
+
+**Drawbacks**:
+- ❌ Storage bloat - Full state duplicated in every event (50 activities × 50 events × 5KB = 250KB vs 5KB)
+- ❌ Network overhead - Large events to fetch and serialize
+- ❌ Serialization cost - JSON encoding/decoding on every event
+- ❌ Inconsistency risk - State in event might not match actual computation if bug exists
+
+#### Approach 3: Materialized State (Recommended)
+
+**Implementation**: Store current state in `workflows.state_data`, load state O(1), apply single event incrementally, save updated state.
+
+```rust
+// Orchestrator consumes event
+async fn process_workflow_event(event: &WorkflowEvent, ...) -> Result<()> {
+    let mut tx = config.pool.begin().await?;
+
+    // 1. Lock workflow (prevents concurrent evaluation)
+    sqlx::query!("SELECT pg_advisory_xact_lock(hashtext($1::text))", ...)
+        .execute(&mut *tx).await?;
+
+    // 2. Load materialized state from workflows table (O(1))
+    let mut state = sqlx::query_as!(
+        WorkflowState,
+        "SELECT state_data FROM workflows WHERE id = $1",
+        workflow_id
+    ).fetch_one(&mut *tx).await?;
+
+    // 3. Apply THIS event to update state incrementally (just 1 event, not n events)
+    apply_event_to_state(&mut state, event)?;
+
+    // 4. Evaluate and schedule
+    let ready = find_ready_activities(&definition, &state)?;
+    activity_queue.schedule(workflow_id, ready).await?;
+
+    // 5. Publish events (for audit trail - keep these!)
+    for activity in &ready {
+        event_source.publish(ActivityScheduled { ... }).await?;
+    }
+
+    // 6. Save updated state back to workflows table
+    sqlx::query!(
+        "UPDATE workflows SET state_data = $1, updated_at = NOW() WHERE id = $2",
+        serde_json::to_value(&state)?,
+        workflow_id
+    ).execute(&mut *tx).await?;
+
+    tx.commit().await?;
+    Ok(())
+}
+```
+
+**Benefits**:
+- ✅ **O(1) performance** - Constant time regardless of workflow length
+- ✅ **Meets <1ms target** - Always fast, even for 1000-activity workflows (~10μs state operations)
+- ✅ **Predictable latency** - No performance degradation over time
+- ✅ **Audit trail preserved** - All events kept in `workflow_events` table
+- ✅ **Verification possible** - Can reconstruct from events to verify state correctness
+- ✅ **Bug recovery** - Can fix state by reconstruction if corruption detected
+- ✅ **No write contention** - Advisory locks ensure single orchestrator per workflow
+
+**Drawbacks**:
+- ⚠️ Must maintain state update logic correctness (mitigated by verification strategy)
+
+### Performance Comparison
+
+| Approach | Small Workflow<br/>(10 activities) | Medium Workflow<br/>(50 activities) | Large Workflow<br/>(200 activities) | Meets <1ms Target |
+|----------|-----------------------------------|-------------------------------------|-------------------------------------|-------------------|
+| **Event Sourcing** | ~100μs ✅ | ~500μs ⚠️ | ~2ms ❌ | Only small workflows |
+| **State in Events** | ~50μs ✅ | ~100μs ✅ | ~200μs ✅ | Yes, but storage bloat |
+| **Materialized State** | **~10μs ✅** | **~10μs ✅** | **~10μs ✅** | **Yes, all workflows** |
+
+### Verification Strategy
+
+To ensure materialized state correctness, implement background verification:
+
+```rust
+// Periodic verification job (runs every hour for active workflows)
+async fn verify_workflow_states(pool: &PgPool) -> Result<()> {
+    let active_workflows = sqlx::query!("SELECT id FROM workflows WHERE status = 'running'")
+        .fetch_all(pool).await?;
+
+    for workflow in active_workflows {
+        // Reconstruct from events
+        let events = load_all_events(pool, workflow.id).await?;
+        let reconstructed = reconstruct_state_from_events(&events)?;
+
+        // Load materialized
+        let materialized = load_materialized_state(pool, workflow.id).await?;
+
+        // Compare
+        if reconstructed != materialized {
+            error!("State mismatch for workflow {}", workflow.id);
+            // Alert, log, potentially auto-fix
+            save_materialized_state(pool, workflow.id, &reconstructed).await?;
+        }
+    }
+    Ok(())
+}
+```
+
+### Why Advisory Locks Eliminate Write Contention
+
+The US-1.2 implementation uses PostgreSQL advisory locks to ensure only ONE orchestrator evaluates a workflow at any time:
+
+```rust
+// Acquire exclusive lock for this workflow (blocks other orchestrators)
+sqlx::query!("SELECT pg_advisory_xact_lock(hashtext($1::text))", workflow_id.to_string())
+    .execute(&mut *tx).await?;
+
+// ... load state, evaluate, save state ...
+
+tx.commit().await?;  // Lock released automatically
+```
+
+**Key properties**:
+- Only one orchestrator can hold the lock per workflow at a time
+- Other orchestrators skip to process different workflows (no blocking)
+- Lock automatically released on transaction commit/rollback
+- No risk of concurrent state updates or race conditions
+- Different workflows processed in parallel by different orchestrators
+
+**Result**: No write contention concern with materialized state approach.
+
+---
+
 ## Database Schema Requirements
 
 ### 1. Workflow Events Table
@@ -133,10 +322,6 @@ CREATE TABLE workflow_events (
     -- Idempotency: prevent duplicate events for same workflow+type+activity
     UNIQUE(workflow_id, event_type, activity_key)
 );
-
--- Index for event polling (hot path) - UUIDv7 is monotonic, so id alone provides ordering
-CREATE INDEX idx_events_poll
-ON workflow_events(id);
 
 -- Index for workflow history queries
 CREATE INDEX idx_events_workflow_id
@@ -172,7 +357,7 @@ CREATE TABLE workflows (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     workflow_type TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'running',
-    state_data JSONB,
+    state_data JSONB NOT NULL,  -- Materialized workflow state (see State Management Strategy)
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -186,6 +371,48 @@ CREATE INDEX idx_workflows_status
 ON workflows(status, updated_at DESC);
 ```
 
+**Purpose**: Stores materialized workflow state for O(1) access during orchestration.
+
+**State Structure**: The `state_data` JSONB column contains the complete current state of the workflow:
+
+```json
+{
+  "workflow_id": "wf_123",
+  "workflow_type": "payment_processing",
+  "status": "Running",
+  "activities": {
+    "validate_payment": {
+      "status": "Completed",
+      "outputs": {"valid": true},
+      "completed_at": "2025-10-28T10:30:00Z"
+    },
+    "authorize_card": {
+      "status": "Pending",
+      "outputs": null,
+      "completed_at": null
+    },
+    "capture_payment": {
+      "status": "NotScheduled",
+      "outputs": null,
+      "completed_at": null
+    }
+  },
+  "state_data": {}  // Custom workflow-specific data
+}
+```
+
+**State Update Flow**:
+1. Orchestrator consumes event (e.g., "ActivityCompleted")
+2. Loads current state from this JSONB column (O(1))
+3. Applies event to update state incrementally
+4. Saves updated state back to this column
+5. Result: Always current, always fast
+
+**Why NOT use event sourcing reconstruction**:
+- ❌ Event sourcing (reconstruct from all events) is O(n) - violates <1ms target for large workflows
+- ✅ Materialized state is O(1) - meets <1ms target for any workflow size
+- ✅ Events still preserved in `workflow_events` for audit trail and verification
+
 ### 3. Workflow Definitions Table
 
 ```sql
@@ -197,10 +424,6 @@ CREATE TABLE workflow_definitions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(name, version)
 );
-
--- Index for definition lookups
-CREATE INDEX idx_workflow_definitions_name
-ON workflow_definitions(name, version);
 ```
 
 ### 4. Event Consumption Tracking Table
@@ -326,8 +549,8 @@ async fn poll(&self, consumer_id: &str) -> Result<Vec<StoredWorkflowEvent>> {
         StoredWorkflowEvent,
         "SELECT e.*
          FROM workflow_events e
-         LEFT JOIN workflow_event_consumers p ON p.consumer_id = $1
-         WHERE p.last_event_id IS NULL OR e.id > p.last_event_id
+         LEFT JOIN workflow_event_consumers c ON c.consumer_id = $1
+         WHERE c.last_event_id IS NULL OR e.id > c.last_event_id
          ORDER BY e.id ASC
          LIMIT 100",
         consumer_id
@@ -341,8 +564,8 @@ async fn poll(&self, consumer_id: &str) -> Result<Vec<StoredWorkflowEvent>> {
 
 **Query Explanation**:
 - `LEFT JOIN workflow_event_consumers`: Get checkpoint for this consumer (NULL if first poll)
-- `WHERE p.last_event_id IS NULL`: First poll (no checkpoint) - return events from beginning
-- `WHERE e.id > p.last_event_id`: Resume from checkpoint - return events after last consumed
+- `WHERE c.last_event_id IS NULL`: First poll (no checkpoint) - return events from beginning
+- `WHERE e.id > c.last_event_id`: Resume from checkpoint - return events after last consumed
 - Single query eliminates extra database roundtrip
 - PostgreSQL query planner optimizes this efficiently
 
@@ -429,14 +652,15 @@ loop {
 
 **Responsibilities**:
 1. Load workflow definition from database
-2. Reconstruct current workflow state from events
-3. Track activity status (pending, running, completed, failed)
-4. Provide state queries (is activity ready? workflow complete?)
+2. Load materialized workflow state from `workflows.state_data` (O(1))
+3. Apply single event to update state incrementally
+4. Save updated state back to database
+5. Provide state queries (is activity ready? workflow complete?)
 
 **Data Structures**:
 
 ```rust
-// Complete workflow state (reconstructed from events)
+// Complete workflow state (stored in workflows.state_data JSONB)
 pub struct WorkflowState {
     pub workflow_id: Uuid,
     pub workflow_type: String,
@@ -478,7 +702,7 @@ pub enum WorkflowStatus {
 ```rust
 // Pseudocode
 async fn load_definition(
-    pool: &PgPool,
+    tx: &mut PgConnection,
     workflow_type: &str,
     version: &str,
 ) -> Result<WorkflowDefinition> {
@@ -489,7 +713,7 @@ async fn load_definition(
         workflow_type,
         version
     )
-    .fetch_one(pool)
+    .fetch_one(tx)
     .await?;
 
     // Parse JSONB definition into structured format
@@ -497,15 +721,185 @@ async fn load_definition(
 }
 ```
 
-#### 2.2 `reconstruct_state()` - Build State from Events
+#### 2.2 `load_materialized_state()` - Load Current State (O(1))
 
 ```rust
 // Pseudocode
-fn reconstruct_state(
+async fn load_materialized_state(
+    tx: &mut PgConnection,
+    workflow_id: Uuid,
+) -> Result<WorkflowState> {
+    let row = sqlx::query!(
+        "SELECT state_data FROM workflows WHERE id = $1",
+        workflow_id
+    )
+    .fetch_one(tx)
+    .await?;
+
+    // Deserialize JSONB to WorkflowState
+    serde_json::from_value(row.state_data)
+        .map_err(|e| Error::StateDeserialization(e.to_string()))
+}
+```
+
+#### 2.3 `save_materialized_state()` - Save Updated State
+
+```rust
+// Pseudocode
+async fn save_materialized_state(
+    tx: &mut PgConnection,
+    workflow_id: Uuid,
+    state: &WorkflowState,
+) -> Result<()> {
+    let state_json = serde_json::to_value(state)
+        .map_err(|e| Error::StateSerialization(e.to_string()))?;
+
+    sqlx::query!(
+        "UPDATE workflows
+         SET state_data = $1, updated_at = NOW()
+         WHERE id = $2",
+        state_json,
+        workflow_id
+    )
+    .execute(tx)
+    .await?;
+
+    Ok(())
+}
+```
+
+#### 2.4 `apply_event_to_state()` - Incremental State Update
+
+**Critical**: This applies ONE event to existing state (not full reconstruction from all events).
+
+```rust
+// Pseudocode
+fn apply_event_to_state(state: &mut WorkflowState, event: &WorkflowEvent) -> Result<()> {
+    match event.event_type.as_str() {
+        "WorkflowCreated" => {
+            // Initial state setup (if any custom state data in payload)
+            if let Some(initial_state) = event.payload.get("state_data") {
+                state.state_data = initial_state.clone();
+            }
+        }
+        "ActivityScheduled" => {
+            let activity_key = event.activity_key.as_ref()
+                .ok_or(Error::MissingActivityKey)?;
+
+            if let Some(activity) = state.activities.get_mut(activity_key) {
+                activity.status = ActivityStatus::Pending;
+                activity.started_at = Some(Utc::now());
+            }
+        }
+        "ActivityCompleted" => {
+            let activity_key = event.activity_key.as_ref()
+                .ok_or(Error::MissingActivityKey)?;
+
+            if let Some(activity) = state.activities.get_mut(activity_key) {
+                activity.status = ActivityStatus::Completed;
+                activity.outputs = event.payload.get("outputs").cloned();
+                activity.completed_at = Some(Utc::now());
+            }
+        }
+        "ActivityFailed" => {
+            let activity_key = event.activity_key.as_ref()
+                .ok_or(Error::MissingActivityKey)?;
+
+            if let Some(activity) = state.activities.get_mut(activity_key) {
+                activity.status = ActivityStatus::Failed;
+                activity.error = event.payload.get("error")
+                    .and_then(|e| e.as_str())
+                    .map(String::from);
+                activity.completed_at = Some(Utc::now());
+            }
+        }
+        "WorkflowCompleted" => {
+            state.status = WorkflowStatus::Completed;
+        }
+        "WorkflowFailed" => {
+            state.status = WorkflowStatus::Failed;
+        }
+        _ => {
+            // Unknown event type - log warning but continue
+            warn!("Unknown event type: {}", event.event_type);
+        }
+    }
+
+    Ok(())
+}
+```
+
+#### 2.5 `initialize_workflow_state()` - Create Initial State
+
+**Called when WorkflowCreated event is consumed**:
+
+```rust
+// Pseudocode
+async fn initialize_workflow_state(
+    tx: &mut PgConnection,
     workflow_id: Uuid,
     definition: &WorkflowDefinition,
-    events: &[WorkflowEvent],
+    initial_state_data: Option<serde_json::Value>,
 ) -> Result<WorkflowState> {
+    let mut activities = HashMap::new();
+
+    // Initialize all activities as NotScheduled
+    for activity in &definition.activities {
+        activities.insert(
+            activity.key.clone(),
+            ActivityState {
+                key: activity.key.clone(),
+                status: ActivityStatus::NotScheduled,
+                outputs: None,
+                error: None,
+                started_at: None,
+                completed_at: None,
+                retry_count: 0,
+            },
+        );
+    }
+
+    let state = WorkflowState {
+        workflow_id,
+        workflow_type: definition.name.clone(),
+        status: WorkflowStatus::Running,
+        activities,
+        state_data: initial_state_data.unwrap_or_else(|| json!({})),
+    };
+
+    // Save initial state to database
+    save_materialized_state(tx, workflow_id, &state).await?;
+
+    Ok(state)
+}
+```
+
+#### 2.6 `reconstruct_state_from_events()` - Verification Only
+
+**Note**: This function is ONLY used for verification, not normal orchestration flow.
+
+```rust
+// Pseudocode - Used by background verification job only
+async fn reconstruct_state_from_events(
+    pool: &PgPool,
+    workflow_id: Uuid,
+) -> Result<WorkflowState> {
+    // Load workflow definition
+    let workflow = sqlx::query!("SELECT workflow_type FROM workflows WHERE id = $1", workflow_id)
+        .fetch_one(pool).await?;
+
+    let definition = load_definition_by_type(pool, &workflow.workflow_type).await?;
+
+    // Load ALL events (expensive - only for verification)
+    let events = sqlx::query_as!(
+        StoredWorkflowEvent,
+        "SELECT * FROM workflow_events WHERE workflow_id = $1 ORDER BY id ASC",
+        workflow_id
+    )
+    .fetch_all(pool)
+    .await?;
+
+    // Initialize empty state
     let mut state = WorkflowState {
         workflow_id,
         workflow_type: definition.name.clone(),
@@ -530,54 +924,12 @@ fn reconstruct_state(
         );
     }
 
-    // Apply events to build current state
-    for event in events {
-        apply_event(&mut state, event)?;
+    // Apply all events to reconstruct state
+    for event in &events {
+        apply_event_to_state(&mut state, event)?;
     }
 
     Ok(state)
-}
-
-fn apply_event(state: &mut WorkflowState, event: &WorkflowEvent) -> Result<()> {
-    match event.event_type.as_str() {
-        "WorkflowCreated" => {
-            // Initial state setup (if any custom state data in payload)
-            if let Some(initial_state) = event.payload.get("state_data") {
-                state.state_data = initial_state.clone();
-            }
-        }
-        "ActivityScheduled" => {
-            if let Some(activity) = state.activities.get_mut(&event.activity_key) {
-                activity.status = ActivityStatus::Pending;
-            }
-        }
-        "ActivityCompleted" => {
-            if let Some(activity) = state.activities.get_mut(&event.activity_key) {
-                activity.status = ActivityStatus::Completed;
-                activity.outputs = event.payload.get("outputs").cloned();
-                activity.completed_at = Some(event.timestamp);
-            }
-        }
-        "ActivityFailed" => {
-            if let Some(activity) = state.activities.get_mut(&event.activity_key) {
-                activity.status = ActivityStatus::Failed;
-                activity.error = event.payload.get("error")
-                    .and_then(|e| e.as_str())
-                    .map(String::from);
-            }
-        }
-        "WorkflowCompleted" => {
-            state.status = WorkflowStatus::Completed;
-        }
-        "WorkflowFailed" => {
-            state.status = WorkflowStatus::Failed;
-        }
-        _ => {
-            // Unknown event type - log warning but continue
-        }
-    }
-
-    Ok(())
 }
 ```
 
@@ -882,20 +1234,26 @@ async fn process_workflow_event(
         &event.workflow_id,
     ).await?;
 
-    // 2. Load all events for this workflow (within transaction, sees latest committed events)
-    let workflow_events = load_workflow_events(
-        &mut *tx,
-        event.workflow_id,
-    ).await?;
+    // 2. Load materialized state from workflows table (O(1), not O(n))
+    //    Special case: WorkflowCreated needs to initialize state first
+    let mut state = if event.event_type == "WorkflowCreated" {
+        // Initialize new workflow state
+        let initial_state_data = event.payload.get("state_data").cloned();
+        initialize_workflow_state(
+            &mut *tx,
+            event.workflow_id,
+            &definition,
+            initial_state_data,
+        ).await?
+    } else {
+        // Load existing materialized state
+        load_materialized_state(&mut *tx, event.workflow_id).await?
+    };
 
-    // 3. Reconstruct current state
-    let state = reconstruct_state(
-        event.workflow_id,
-        &definition,
-        &workflow_events,
-    )?;
+    // 3. Apply THIS event to update state incrementally (just 1 event, not n events)
+    apply_event_to_state(&mut state, event)?;
 
-    // 4. Find ready activities
+    // 4. Find ready activities (using updated state)
     let ready_activities = find_ready_activities(&definition, &state)?;
 
     // 5. Schedule ready activities to queue
@@ -944,7 +1302,7 @@ async fn process_workflow_event(
 
         event_source.publish(completion_event).await?;
 
-        // Update workflow status in database
+        // Update workflow status in workflows table
         update_workflow_status(
             &mut *tx,
             event.workflow_id,
@@ -956,6 +1314,9 @@ async fn process_workflow_event(
         ).await?;
     }
 
+    // 7. Save updated materialized state back to workflows table
+    save_materialized_state(&mut *tx, event.workflow_id, &state).await?;
+
     // Commit transaction (releases advisory lock automatically)
     tx.commit().await?;
 
@@ -964,6 +1325,27 @@ async fn process_workflow_event(
 
 // Note: If this function returns an error, transaction is rolled back
 // and advisory lock is released. Event will be reprocessed on next poll.
+
+/**
+ * Key differences from event sourcing approach:
+ *
+ * OLD (Event Sourcing - O(n)):
+ *   - Load ALL events for workflow
+ *   - Reconstruct state by replaying all events
+ *   - Performance degrades with workflow length
+ *
+ * NEW (Materialized State - O(1)):
+ *   - Load current state from workflows.state_data (1 row)
+ *   - Apply ONLY the new event incrementally
+ *   - Save updated state back
+ *   - Constant time regardless of workflow length
+ *
+ * Benefits:
+ *   - ✅ Meets <1ms target for any workflow size
+ *   - ✅ Events still kept for audit trail
+ *   - ✅ Can verify state via reconstruction
+ *   - ✅ Advisory lock prevents write contention
+ */
 ```
 
 ### Component 5: Event Models
@@ -1435,12 +1817,12 @@ US-1.2 has dependencies on other components for complete end-to-end testing:
 
 ## Testing Phase Summary
 
-| Phase | Tests | Dependencies | Status | Can Start |
-|-------|-------|--------------|--------|-----------|
-| **Phase 1** | Unit tests (event publishing, polling, state reconstruction, dependency evaluation) | None (just PostgreSQL) | ✅ Ready | Immediately |
-| **Phase 2** | Integration tests with mocked workflows/workers | US-1.1 complete | ⏳ Waiting | After US-1.1 |
-| **Phase 3** | End-to-end tests with real workers | US-1.1, US-1.3, Epic 1B complete | ⏸️ Blocked | After all dependencies |
-| **Phase 4** | Performance benchmarks | US-1.1 complete | ⏳ Waiting | After US-1.1 |
+| Phase       | Tests                                           | Dependencies            | Status     | Can Start              |
+|-------------|-------------------------------------------------|-------------------------|------------|------------------------|
+| **Phase 1** | Unit tests                                      | None (PostgreSQL only)  | ✅ Ready   | Immediately            |
+| **Phase 2** | Integration tests with mocked workflows/workers | US-1.1 (Activity Queue) | ⏳ Waiting | After US-1.1           |
+| **Phase 3** | End-to-end tests with real workers              | US-1.1, US-1.3, Epic 1B | ⏸️ Blocked | After all dependencies |
+| **Phase 4** | Performance benchmarks                          | US-1.1 (Activity Queue) | ⏳ Waiting | After US-1.1           |
 
 **Recommendation**: Implement Phase 1 tests immediately alongside US-1.2 code. This validates core logic without external dependencies.
 

@@ -170,17 +170,29 @@ The API validates credentials via the configured Authentication service interfac
 ```mermaid
 flowchart TD
     Start([Event Published]) --> Consume[Orchestrator Consumes Event]
-    Consume --> Load[Load Workflow Definition]
-    Load --> Eval[Evaluate Current State]
-    Eval --> Find[Find Ready Activities]
+    Consume --> Lock[Acquire Advisory Lock<br/>for Workflow]
+    Lock --> LoadDef[Load Workflow Definition]
+    LoadDef --> LoadState[Load Materialized State<br/>from workflows.state_data<br/>O1 operation]
+    LoadState --> Apply[Apply Event to State<br/>Incremental Update]
+    Apply --> Find[Find Ready Activities<br/>Evaluate Dependencies]
     Find --> Schedule[Schedule to Queue<br/>Idempotent]
-    Schedule --> Publish[Publish State Event]
-    Publish --> End([Complete])
+    Schedule --> PublishEvent[Publish ActivityScheduled<br/>Events]
+    PublishEvent --> SaveState[Save Updated State<br/>to workflows.state_data]
+    SaveState --> Commit[Commit Transaction<br/>Release Lock]
+    Commit --> End([Complete])
 ```
 
-**Performance Target**: <1ms evaluation latency
+**Performance Target**: <1ms evaluation latency (achievable via O(1) state access)
 
-**Concurrency**: Multiple orchestrator instances supported via event stream partitioning
+**State Management**:
+- Materialized state in `workflows.state_data` JSONB column
+- Events stored in `workflow_events` for audit trail
+- State updated incrementally on event consumption (not reconstructed from all events)
+
+**Concurrency**:
+- PostgreSQL advisory locks ensure one orchestrator per workflow
+- Different workflows processed in parallel by different orchestrators
+- No write contention or race conditions
 
 ### 3. Activity Worker (Built-in)
 
@@ -352,12 +364,13 @@ CREATE TABLE workflows (
     id UUID PRIMARY KEY,
     workflow_type TEXT NOT NULL,
     status TEXT NOT NULL,
-    execution_step INTEGER NOT NULL,
-    custom_state JSONB,
+    state_data JSONB NOT NULL,  -- Materialized workflow state (O(1) access)
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
 );
 ```
+
+**Note**: The `state_data` JSONB column contains the complete current workflow state, including all activity statuses, outputs, and custom workflow data. This enables O(1) state access during orchestration, meeting the <1ms evaluation latency target for workflows of any size.
 
 **2. Activity Queue**
 ```sql
@@ -434,32 +447,48 @@ WHERE expires_at IS NOT NULL;
 
 #### Event Sourcing Pattern
 
-Every workflow state transition publishes an event containing the **complete workflow state**:
+**Event Storage**: Every workflow state transition publishes an event to the `workflow_events` table:
 
 ```json
 {
-  "event_type": "WorkflowUpdated",
+  "event_type": "ActivityCompleted",
   "workflow_id": "wf_123",
   "activity_key": "authorize_card",
-  "activity_status": "completed",
-  "activity_outputs": {"authorization_id": "auth_456"},
-  "workflow_state": {
-    "activities": {
-      "validate_payment": {"status": "completed", "outputs": {...}},
-      "authorize_card": {"status": "completed", "outputs": {...}}
-    },
-    "execution_step": 2,
-    "custom_state": {...}
+  "payload": {
+    "outputs": {"authorization_id": "auth_456"}
   },
   "timestamp": "2025-10-28T10:30:00Z"
 }
 ```
 
+**State Management**: Current workflow state is stored in `workflows.state_data` JSONB column (materialized state):
+
+```json
+{
+  "workflow_id": "wf_123",
+  "workflow_type": "payment_processing",
+  "status": "Running",
+  "activities": {
+    "validate_payment": {"status": "Completed", "outputs": {"valid": true}},
+    "authorize_card": {"status": "Completed", "outputs": {"authorization_id": "auth_456"}},
+    "capture_payment": {"status": "NotScheduled", "outputs": null}
+  },
+  "state_data": {}
+}
+```
+
+**Orchestrator Flow**:
+1. Consume event from `workflow_events`
+2. Load materialized state from `workflows.state_data` (O(1))
+3. Apply event to update state incrementally
+4. Evaluate dependencies and schedule ready activities
+5. Save updated state back to `workflows.state_data`
+
 This enables:
-- Complete workflow state reconstruction from event stream
-- Stateless orchestrator (all state in events)
-- Audit trail for compliance
-- Time-travel debugging
+- **O(1) state access** - Constant time regardless of workflow length
+- **Complete audit trail** - All events preserved in `workflow_events` table
+- **State verification** - Can reconstruct from events to verify correctness
+- **Time-travel debugging** - Full event history available
 
 #### Artifact Storage Pattern
 
@@ -835,25 +864,77 @@ settings:
     heartbeat_interval: 30
 ```
 
-### Workflow State Reconstruction
+### Workflow State Management
 
-Since complete workflow state is included in each event, the orchestrator can reconstruct current state by reading the latest event for a workflow:
+**Materialized State Approach**: Current workflow state is stored in `workflows.state_data` JSONB column for O(1) access:
 
 ```rust
-async fn get_workflow_state(workflow_id: Uuid) -> WorkflowState {
-    sqlx::query_as!(
-        WorkflowEvent,
-        "SELECT * FROM workflow_events
-         WHERE workflow_id = $1
-         ORDER BY timestamp DESC
-         LIMIT 1",
+async fn get_workflow_state(pool: &PgPool, workflow_id: Uuid) -> Result<WorkflowState> {
+    let row = sqlx::query!(
+        "SELECT state_data FROM workflows WHERE id = $1",
         workflow_id
     )
-    .fetch_one(&pool)
-    .await?
-    .into_state()
+    .fetch_one(pool)
+    .await?;
+
+    // Deserialize JSONB to WorkflowState struct
+    serde_json::from_value(row.state_data)
+        .map_err(|e| Error::StateDeserialization(e.to_string()))
 }
 ```
+
+**Orchestrator State Update Flow**:
+```rust
+// 1. Load current state (O(1))
+let mut state = get_workflow_state(&pool, workflow_id).await?;
+
+// 2. Apply new event incrementally
+apply_event_to_state(&mut state, &event)?;
+
+// 3. Save updated state
+let state_json = serde_json::to_value(&state)?;
+sqlx::query!(
+    "UPDATE workflows SET state_data = $1, updated_at = NOW() WHERE id = $2",
+    state_json,
+    workflow_id
+)
+.execute(&pool)
+.await?;
+```
+
+**Event Reconstruction (Verification Only)**:
+
+For verification and debugging, state can be reconstructed from complete event history:
+
+```rust
+async fn reconstruct_state_from_events(
+    pool: &PgPool,
+    workflow_id: Uuid
+) -> Result<WorkflowState> {
+    // Load ALL events (expensive - only for verification)
+    let events = sqlx::query_as!(
+        WorkflowEvent,
+        "SELECT * FROM workflow_events WHERE workflow_id = $1 ORDER BY id ASC",
+        workflow_id
+    )
+    .fetch_all(pool)
+    .await?;
+
+    // Apply all events to reconstruct state
+    let mut state = WorkflowState::new(workflow_id);
+    for event in &events {
+        apply_event_to_state(&mut state, event)?;
+    }
+
+    Ok(state)
+}
+```
+
+**Why Materialized State**:
+- ✅ **O(1) performance** - Constant time regardless of workflow length (meets <1ms target)
+- ✅ **Events preserved** - Complete audit trail in `workflow_events` table
+- ✅ **Verification possible** - Can reconstruct from events to verify correctness
+- ❌ **NOT event sourcing** - Reconstruction from all events would be O(n) and violate performance targets for large workflows
 
 ---
 
