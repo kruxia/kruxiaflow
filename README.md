@@ -1,28 +1,48 @@
 # StreamFlow - Lightweight Workflow Orchestration
 
-StreamFlow is a high-performance workflow orchestration platform designed for edge-to-cloud deployment. Built as a single binary with PostgreSQL as the only required dependency.
+StreamFlow is a high-performance workflow orchestration engine designed for edge-to-cloud deployment. Built as a **single Rust binary** with PostgreSQL as the only required dependency.
+
+## Why StreamFlow?
+
+- **🚀 10x Performance**: Event-driven architecture targets >1,000 workflows/sec (vs Temporal's 35-100/sec)
+- **📦 Minimal Footprint**: <15MB binary, <50MB RAM (vs Temporal's multi-GB deployment)
+- **⚡ Edge-Ready**: Runs on Raspberry Pi Zero for edge AI and IoT workflows
+- **🔧 PostgreSQL-Only**: No Kafka, Cassandra, or Elasticsearch required for MVP
+- **🎯 AI-Native**: Built-in LLM cost tracking, budget enforcement, and result caching
+- **🔌 Pluggable Architecture**: Swap PostgreSQL for Kafka, Redis, S3, etc. post-MVP
 
 ## Status
 
-**Current Version**: 0.2.0 MVP
-**Implementation Status**: US-1.1 Activity Queue - ✅ Complete
+**Current Version**: 0.2.0 MVP (In Development)
+**Implementation Phase**: Epic 1 - Core Orchestration
 
 ### Completed Features
 
-- ✅ **Activity Queue** (US-1.1)
-  - PostgreSQL-based queue with FOR UPDATE SKIP LOCKED for safe concurrency
-  - Idempotent scheduling via UNIQUE constraints
-  - Stale activity detection and automatic retry
-  - Heartbeat support for long-running activities
-  - Background cleanup for failed activities
-  - Comprehensive test suite (9 tests, all passing)
+- ✅ **Epic 1: Event-Driven Orchestration Architecture**
+  - ✅ **US-1.1: Activity Queue** - PostgreSQL-based queue with safe concurrency
+    - FOR UPDATE SKIP LOCKED for concurrent worker polling
+    - Idempotent scheduling via UNIQUE constraints
+    - Stale activity detection and automatic retry
+    - Heartbeat support for long-running activities
+    - Background cleanup for failed activities
+  - ✅ **US-1.2: Event-Driven Dynamic Scheduling** - Reactive orchestrator
+    - Event-driven workflow evaluation
+    - PostgreSQL event sourcing with polling
+    - Materialized workflow state for fast queries
+    - Dependency graph evaluation
+    - Activity scheduling on state changes
+
+### In Progress
+
+- 🔨 **Epic 1A: API Server** - HTTP/REST endpoints for workflow and worker operations
+- 🔨 **Epic 1B: Built-in Worker** - Worker implementation using API endpoints
 
 ## Quick Start
 
 ### Prerequisites
 
 - Rust 1.90.0+
-- Docker (for PostgreSQL)
+- Docker (for PostgreSQL 18+)
 - sqlx-cli: `cargo install sqlx-cli --no-default-features --features postgres`
 
 ### Setup
@@ -76,20 +96,53 @@ streamflow/
 
 ## Architecture
 
-StreamFlow uses a service-oriented architecture with pluggable interfaces:
+StreamFlow uses an event-driven, service-oriented architecture with pluggable interfaces:
 
+### Core Components (✅ Implemented)
 - **ActivityQueue**: Schedules and manages activity execution
-- **EventSource**: Publishes and consumes workflow events (TODO)
-- **WorkflowStorage**: Handles large artifacts and files (TODO)
-- **AuthenticationService**: JWT-based authentication (TODO)
+  - PostgreSQL-based with FOR UPDATE SKIP LOCKED for safe concurrency
+  - Idempotent scheduling and automatic retry
+- **EventSource**: Publishes and consumes workflow events
+  - PostgreSQL polling with adaptive backoff (10ms-5s)
+  - Guaranteed event delivery (no LISTEN/NOTIFY to avoid message loss)
+- **Orchestrator**: Reactive workflow evaluation engine
+  - Event-driven scheduling (no polling loops)
+  - Materialized workflow state for <1ms evaluation
+  - Dependency graph resolution
 
-### MVP Implementation
+### In Progress Components
+- **API Server**: HTTP/REST endpoints for workflow and worker operations
+- **WorkflowStorage**: Handles large artifacts and files
+- **AuthenticationService**: JWT-based authentication
+- **Built-in Worker**: Activity execution using API endpoints
 
-- **Database**: PostgreSQL 18+ (all services)
+### MVP Implementation Strategy
+
+**All services use PostgreSQL** for MVP simplicity:
+- **Database**: PostgreSQL 18+
 - **Queue**: PostgreSQL with optimized indexes
-- **Event Stream**: PostgreSQL polling with adaptive backoff (TODO)
-- **Storage**: PostgreSQL Large Objects (TODO)
-- **Auth**: Custom JWT provider with PostgreSQL backend (TODO)
+- **Event Stream**: PostgreSQL polling (guaranteed delivery)
+- **Storage**: PostgreSQL Large Objects (planned)
+- **Auth**: Custom JWT provider with PostgreSQL backend (planned)
+
+**Architectural Decision: Built-in Worker Uses API Server**
+
+The built-in worker authenticates via JWT and uses the same HTTP API endpoints as external workers. This ensures:
+- Code path consistency (no behavior divergence)
+- Automatic API testing through built-in worker usage
+- Future flexibility (easy to separate into standalone service)
+
+See [Architecture Documentation](docs/architecture.md) for detailed design rationale and tradeoff analysis.
+
+### Post-MVP: External Service Integrations
+
+After MVP validation, service interfaces can be swapped for:
+- **EventSource**: Kafka/Redpanda (>100k events/sec), NATS JetStream (<1ms latency)
+- **ActivityQueue**: AWS SQS, RabbitMQ, Redis (for managed services)
+- **WorkflowStorage**: S3-compatible storage
+- **Auth**: Auth0, Okta (for SSO integration)
+
+See [Post-MVP Roadmap](docs/post-mvp.md) for details.
 
 ## Development
 
@@ -144,18 +197,55 @@ STREAMFLOW_QUEUE_DEFAULT_MAX_RETRIES=3
 
 ## Documentation
 
-- [Architecture](docs/architecture.md) - System design and component overview
-- [Implementation Plans](docs/implementation/) - User story implementation details
+### Core Documentation
+- **[MVP Requirements](docs/mvp-requirements.md)** - Complete product requirements document
+  - Epic definitions and user stories
+  - Implementation roadmap and phases
+  - Performance targets and success criteria
+  - Architecture decisions and tradeoffs
+- **[Architecture](docs/architecture.md)** - System design and component overview
+  - Event-driven orchestration design
+  - Service interface patterns
+  - Database schema and optimization strategies
+  - Built-in worker architectural decisions
+- **[Implementation Plans](docs/implementation/)** - Detailed user story implementations
+  - [US-1.1: Activity Queue](docs/implementation/US-1.1-activity-queue.md)
+  - [US-1.2: Event-Driven Scheduling](docs/implementation/US-1.2-event-driven-scheduling.md)
+
+### Additional Documentation
+- **[Post-MVP Roadmap](docs/post-mvp.md)** - Features deferred beyond MVP
 
 ## Roadmap
 
-### Current Sprint
+### Epic 1: Core Orchestration ✅ Complete
 - ✅ US-1.1: Activity Queue with Ordering Guarantees
+- ✅ US-1.2: Event-Driven Dynamic Scheduling
 
-### Next Up
-- US-1.2: Event-Driven Dynamic Scheduling (Orchestrator)
-- US-1.3: Worker Polling with Concurrency Safety
-- API Server with authentication
+### Epic 1A: API Server 🔨 In Progress
+- HTTP/REST endpoints for workflow submission and management
+- Worker activity APIs (poll, heartbeat, complete, fail)
+- JWT authentication and authorization
+- WebSocket streaming for real-time updates
+
+### Epic 1B: Built-in Worker 🔨 In Progress
+- Worker implementation using API endpoints
+- JWT authentication and token management
+- Activity execution and result reporting
+- Same code path as external workers (consistency)
+
+### Epic 2: Performance Benchmarking 📋 Planned
+- Automated performance test suite
+- Competitor comparison benchmarks (vs Temporal, Airflow, Conductor)
+- PostgreSQL profiling and optimization
+- Target: >1,000 workflows/sec validation
+
+### Epic 3: YAML Workflow Definition Language 📋 Planned
+- Declarative sequential, parallel, and conditional workflows
+- Template expressions and activity settings
+- YAML validation and tooling
+
+### Beyond MVP
+See [Post-MVP Roadmap](docs/post-mvp.md) for external service integrations, multi-tenancy, advanced features, and enterprise operations.
 
 ## Performance Targets
 
