@@ -233,6 +233,13 @@ STREAMFLOW_QUEUE_DEFAULT_MAX_RETRIES=3
 - Activity execution and result reporting
 - Same code path as external workers (consistency)
 
+### Epic 1C: StreamFlow Binary and CLI 📋 Planned
+- Main binary with subcommands (serve, orchestrator, api, worker, migrate)
+- All-in-one mode (`streamflow serve`) for single-node deployment
+- Individual service launchers for distributed deployment
+- Configuration management (CLI flags > env vars > defaults)
+- Database migration CLI and graceful shutdown
+
 ### Epic 2: Performance Benchmarking 📋 Planned
 - Automated performance test suite
 - Competitor comparison benchmarks (vs Temporal, Airflow, Conductor)
