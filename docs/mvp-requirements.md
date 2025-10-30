@@ -1,7 +1,7 @@
 # StreamFlow v0.2 Product Requirements Document
 
-**Version**: 0.2
-**Date**: October 26, 2025
+**Version**: 0.6
+**Date**: October 30, 2025
 **Status**: Planning
 **Target Release**: Q1 2026
 
@@ -63,7 +63,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 
 ### User Stories
 
-**US-1.1: Activity Queue with Ordering Guarantees**
+**US-1.1: Activity Queue with Ordering Guarantees** ✅ Complete
 - **As** an AI startup engineer
 - **I want** workflows to execute activities in the correct sequence without manual coordination
 - **So that** my multi-step AI pipelines produce consistent results
@@ -75,7 +75,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - PostgreSQL UNIQUE constraint prevents duplicate scheduling
 - **Technical Notes**: See architecture section 1.1-1.6 in v02-sonnet.md
 
-**US-1.2: Event-Driven Dynamic Scheduling**
+**US-1.2: Event-Driven Dynamic Scheduling** ✅ Complete
 - **As** a platform engineering lead
 - **I want** the orchestrator to reactively schedule activities only when ready
 - **So that** we achieve <10ms P99 workflow start latency
@@ -87,26 +87,15 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Support for 1,000+ workflows/sec sustained throughput
 - **Performance Target**: >1,000 workflows/sec, <10ms P99 start latency
 
-**US-1.3: Worker Polling with Concurrency Safety**
-- **As** a platform engineering lead
-- **I want** multiple workers to safely poll the activity queue without conflicts
-- **So that** we can scale horizontally without coordination overhead
-- **Acceptance Criteria**:
-  - Workers poll by activity type (namespace.name)
-  - PostgreSQL FOR UPDATE SKIP LOCKED prevents conflicts
-  - Workers claim activities atomically
-  - Failed workers release activities for retry
-  - No external coordination required (Redis, Zookeeper)
-
 ---
 
-## Epic 1B: API Server
+## Epic 1A: API Server
 
 **Business Objective**: Provide HTTP/REST API for workflow submission, management, and monitoring to enable client applications and AI agents to interact with StreamFlow
 
 ### User Stories
 
-**US-1B.1: Workflow Submission API**
+**US-1A.1: Workflow Submission API**
 - **As** an AI startup engineer
 - **I want** to submit workflows via HTTP API
 - **So that** my applications can trigger workflows programmatically
@@ -119,7 +108,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Idempotency: Optional `idempotency_key` header to prevent duplicate submissions
 - **Example**: `POST /api/v1/workflows` with payment workflow definition and `{amount: 100.00}`
 
-**US-1B.2: Workflow Status and Query API**
+**US-1A.2: Workflow Status and Query API**
 - **As** a platform engineering lead
 - **I want** to query workflow status and results via API
 - **So that** I can monitor execution and retrieve outputs
@@ -131,7 +120,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Filter parameters: `status`, `workflow_type`, `created_after`, `created_before`
   - Pagination: `limit` and `offset` parameters
 
-**US-1B.3: Workflow Definition Management API**
+**US-1A.3: Workflow Definition Management API**
 - **As** an AI startup engineer
 - **I want** to deploy and manage workflow definitions separately from execution
 - **So that** I can version and reuse workflow templates
@@ -144,7 +133,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Versioning: Semantic versioning (1.0.0, 1.1.0) or timestamps
   - Validation on deployment: Syntax and semantic checks before storage
 
-**US-1B.4: Activity Results and Output Retrieval**
+**US-1A.4: Activity Results and Output Retrieval**
 - **As** an AI researcher
 - **I want** to retrieve activity outputs and workflow results via API
 - **So that** I can access computation results for downstream processing
@@ -156,7 +145,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - 404 if activity not completed or doesn't exist
   - Output format: JSON with activity outputs accessible by key
 
-**US-1B.5: Authentication and Authorization**
+**US-1A.5: Authentication and Authorization**
 - **As** a platform engineering lead
 - **I want** API authentication and authorization
 - **So that** only authorized clients can submit and query workflows
@@ -169,7 +158,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - 401 Unauthorized for missing/invalid tokens
   - Rate limiting per token: Configurable requests per minute
 
-**US-1B.6: WebSocket Streaming for Real-Time Updates**
+**US-1A.6: WebSocket Streaming for Real-Time Updates**
 - **As** an AI startup engineer
 - **I want** real-time workflow execution updates via WebSocket
 - **So that** my UI can show live progress without polling
@@ -181,7 +170,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Backpressure handling: Client can pause/resume stream
   - Automatic reconnection support with last event ID for replay
 
-**US-1B.7: Health Check and Service Discovery**
+**US-1A.7: Health Check and Service Discovery**
 - **As** a platform engineering lead
 - **I want** standard health and readiness endpoints
 - **So that** load balancers and orchestrators can manage API servers
@@ -193,7 +182,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Response format: `{version, build_date, api_version, features: []}`
   - Metrics endpoint: `GET /metrics` (Prometheus format)
 
-**US-1B.8: Error Handling and API Contracts**
+**US-1A.8: Error Handling and API Contracts**
 - **As** an AI startup engineer
 - **I want** consistent error responses and API documentation
 - **So that** I can handle errors gracefully and integrate easily
@@ -206,7 +195,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Request ID in response headers for tracing: `X-Request-ID`
   - CORS support for browser-based clients
 
-**US-1B.9: Worker Activity APIs**
+**US-1A.9: Worker Activity APIs**
 - **As** an activity worker
 - **I want** HTTP APIs to poll for activities, send heartbeats, and report results
 - **So that** I can execute activities in distributed environments without direct database access
@@ -231,92 +220,63 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 
 ---
 
-## Epic 2: YAML Workflow Definition Language
+## Epic 1B: Built-in Worker
 
-**Business Objective**: Enable 70-80% of workflows to be expressed declaratively for non-developers and rapid prototyping
+**Business Objective**: Provide a built-in activity worker that uses the API server, ensuring consistent behavior between built-in and external workers while validating API functionality under real load
 
 ### User Stories
 
-**US-2.1: Declarative Sequential Workflows**
-- **As** an AI startup engineer
-- **I want** to define workflows in simple YAML without programming
-- **So that** I can rapidly prototype and iterate on AI pipelines
-- **Acceptance Criteria**:
-  - Activities defined with key, namespace, name, parameters
-  - Sequential execution via `following_key` edges
-  - Template expressions for parameter passing: `{{validate_payment.card_token}}`
-  - Support for workflow input: `{{ARG.amount}}`
-  - Outputs declared per activity
-- **Example**: Payment processing workflow (validation → authorization → capture)
-
-**US-2.2: Conditional Branching**
-- **As** an AI researcher
-- **I want** workflows to branch based on activity outputs
-- **So that** I can implement decision logic (success/failure paths)
-- **Acceptance Criteria**:
-  - Conditional edges with boolean expressions
-  - Comparison operators: `==`, `!=`, `<`, `>`, `<=`, `>=`
-  - Logical operators: `AND`, `OR`, `NOT`
-  - Multiple edges from single activity with conditions
-  - Example: Route to different paths based on `{{validate.valid}} == true`
-
-**US-2.3: Parallel Execution (Fan-Out/Fan-In)**
-- **As** a data engineer
-- **I want** to execute multiple activities in parallel and aggregate results
-- **So that** I can maximize throughput for independent operations
-- **Acceptance Criteria**:
-  - Multiple `following_key` edges for fan-out
-  - Multiple `preceding_key` edges for fan-in (join point)
-  - Join waits for ALL preceding activities to complete
-  - Access to all parallel results: `{{analyze_security.results}}`
-  - Static parallel: Fixed number of activities
-  - Dynamic parallel: Runtime-determined count via `parallel_count`
-
-**US-2.4: Iterative Workflows (Loops)**
-- **As** an AI startup engineer
-- **I want** workflows to loop until a condition is met
-- **So that** I can implement agentic research patterns (evaluate → search more if needed)
-- **Acceptance Criteria**:
-  - Edge from later activity back to earlier activity (loop)
-  - Conditional loop exit: `{{evaluate.sufficient}} == true`
-  - Iteration counter: `{{workflow.iteration}}`
-  - Maximum iteration limits to prevent infinite loops
-  - Budget-aware loops: `{{workflow.remaining_budget}} > 1.0`
-
-**US-2.5: Activity Settings (Retry, Timeout, Budget)**
+**US-1.3: Worker Polling with Concurrency Safety**
 - **As** a platform engineering lead
-- **I want** declarative control over activity behavior
-- **So that** I don't need custom code for common patterns
+- **I want** multiple workers (built-in and external) to safely poll the activity queue without conflicts
+- **So that** we can scale horizontally without coordination overhead
 - **Acceptance Criteria**:
-  - Timeout configuration per activity
-  - Retry policy: max_attempts, backoff strategy (exponential)
-  - Budget limits per activity: `budget.limit: 2.00` (USD)
-  - Budget action on exceeded: `abort` or `continue`
-  - Result caching: `cache: true`, `cache_ttl: 3600`
-  - Non-deterministic flag: `deterministic: false` for LLM calls
+  - Workers poll by activity type (namespace.name) via API endpoints
+  - PostgreSQL FOR UPDATE SKIP LOCKED prevents conflicts (enforced by API)
+  - Workers claim activities atomically
+  - Failed workers release activities for retry
+  - No external coordination required (Redis, Zookeeper)
+  - Built-in worker uses same API endpoints as external workers
+- **Technical Notes**:
+  - Built-in worker authenticates via JWT (same as external workers)
+  - Uses `/api/v1/workers/poll` endpoint for claiming activities
+  - Uses `/api/v1/activities/{id}/complete` and `/api/v1/activities/{id}/fail` for reporting results
+  - See architecture.md section on Built-in Worker design tradeoffs
 
-**US-2.6: YAML Validation and Tooling**
-- **As** a data engineer migrating from Airflow
-- **I want** CLI tools to validate and test workflows before deployment
-- **So that** I catch errors early and iterate quickly
-- **Acceptance Criteria**:
-  - `streamflow validate workflow.yaml` checks syntax and semantics
-  - `streamflow test workflow.yaml --input test.json` runs locally
-  - `streamflow visualize workflow.yaml --format png` generates DAG diagram
-  - Validation checks: all edges valid, no cycles, activity types registered
-  - Inline error messages with line numbers
+**Architecture Decision: Built-in Worker Uses API Server**
+
+The built-in worker is implemented as an HTTP client to the API server rather than directly accessing service interfaces. This design choice prioritizes:
+
+**Benefits**:
+- **Code path consistency**: Built-in and external workers execute identical logic, eliminating behavior divergence
+- **Testing leverage**: Built-in worker automatically validates API endpoints under real load
+- **Single authentication model**: One auth flow to document, secure, and maintain
+- **Future-proof**: Easy to separate built-in worker into standalone service later
+- **Dogfooding**: Forces API design to be good enough for internal use
+
+**Trade-offs**:
+- **HTTP overhead**: ~1-2ms serialization and localhost network latency per operation
+- **Startup dependencies**: API server must be running before worker can start
+- **Extra HTTP client**: Worker needs reqwest/http client dependency
+
+**Performance Impact**: The 1-2ms HTTP overhead per activity is negligible compared to:
+- Typical activity execution time (seconds to minutes)
+- Current ~10ms event polling latency
+- MVP target >1,000 workflows/sec (easily achievable with this overhead)
+
+**Post-MVP Optimization**: If HTTP overhead becomes a bottleneck, an internal fast path can be added while maintaining the same API contract for external workers.
 
 ---
 
-## Epic 3: Performance Benchmarking and Validation
+## Epic 2: Performance Benchmarking and Validation
 
 **Business Objective**: Establish early performance baseline and prove 10x advantage over competitors
 
-**Strategic Rationale**: Benchmarking immediately after Epic 2 ensures we validate core architecture performance before investing in additional features. Early detection of bottlenecks prevents building on a weak foundation.
+**Strategic Rationale**: Benchmarking immediately after Epic 1 (core orchestration) validates the fundamental architectural claims before investing in additional features. Early detection of bottlenecks prevents building on a weak foundation. Epic 2 uses **programmatic workflow definitions** (Rust structs, JSON, or hardcoded test workflows), eliminating dependency on YAML parsing. This provides a pure baseline for orchestration performance and informs Epic 3 (YAML) design decisions.
 
 ### User Stories
 
-**US-3.1: Automated Performance Test Suite**
+**US-2.1: Automated Performance Test Suite**
 - **As** a platform engineering lead
 - **I want** continuous performance benchmarking from day one
 - **So that** we detect regressions early and stay on performance track
@@ -326,9 +286,10 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - CI integration: Run on every commit
   - Performance regression detection: Fail if >10% slower
   - Historical trend tracking
-  - **Early Baseline**: Establish performance floor after Epic 1-2 implementation
+  - **Programmatic workflows**: Use Rust WorkflowDefinition structs, not YAML
+  - **Early Baseline**: Establish performance floor after Epic 1 implementation
 
-**US-3.2: Competitor Comparison Benchmarks**
+**US-2.2: Competitor Comparison Benchmarks**
 - **As** a platform engineering lead
 - **I want** reproducible benchmarks vs Temporal, Airflow, Conductor
 - **So that** I can prove 10x performance to leadership and validate our architecture early
@@ -339,9 +300,9 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Published methodology: Open-source on GitHub
   - Results: HTML report with charts
   - Target proof: StreamFlow >1,000 wf/sec vs Temporal/Conductor 35-100 wf/sec
-  - **Critical**: Run after Epic 2 to validate event-driven architecture
+  - **Critical**: Run after Epic 1 to validate event-driven architecture
 
-**US-3.3: PostgreSQL Performance Profiling**
+**US-2.3: PostgreSQL Performance Profiling**
 - **As** a platform engineering lead
 - **I want** detailed profiling of PostgreSQL query performance
 - **So that** we identify optimization opportunities before scaling complexity
@@ -353,7 +314,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Lock contention detection
   - Recommendations for Epic 6 (PostgreSQL Optimization)
 
-**US-3.4: Stress Testing and Capacity Planning**
+**US-2.4: Stress Testing and Capacity Planning**
 - **As** a platform engineering lead
 - **I want** early stress test results showing breaking points
 - **So that** I understand system limits before adding more features
@@ -365,7 +326,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Load test tool provided
   - Document baseline capacity for future comparison
 
-**US-3.5: Performance Dashboard and Monitoring**
+**US-2.5: Performance Dashboard and Monitoring**
 - **As** a platform engineering lead
 - **I want** real-time performance visibility during development
 - **So that** we catch performance issues immediately during feature development
@@ -376,6 +337,85 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Queue depth visualization
   - Database performance metrics (queries/sec, connection pool)
   - Alerting on performance degradation
+
+---
+
+## Epic 3: YAML Workflow Definition Language
+
+**Business Objective**: Enable 70-80% of workflows to be expressed declaratively for non-developers and rapid prototyping
+
+**Strategic Rationale**: With Epic 2 benchmarks establishing performance baseline, Epic 3 adds YAML DSL with confidence that parsing overhead won't compromise throughput targets. Performance data from Epic 2 informs YAML feature decisions.
+
+### User Stories
+
+**US-3.1: Declarative Sequential Workflows**
+- **As** an AI startup engineer
+- **I want** to define workflows in simple YAML without programming
+- **So that** I can rapidly prototype and iterate on AI pipelines
+- **Acceptance Criteria**:
+  - Activities defined with key, namespace, name, parameters
+  - Sequential execution via `following_key` edges
+  - Template expressions for parameter passing: `{{validate_payment.card_token}}`
+  - Support for workflow input: `{{ARG.amount}}`
+  - Outputs declared per activity
+- **Example**: Payment processing workflow (validation → authorization → capture)
+
+**US-3.2: Conditional Branching**
+- **As** an AI researcher
+- **I want** workflows to branch based on activity outputs
+- **So that** I can implement decision logic (success/failure paths)
+- **Acceptance Criteria**:
+  - Conditional edges with boolean expressions
+  - Comparison operators: `==`, `!=`, `<`, `>`, `<=`, `>=`
+  - Logical operators: `AND`, `OR`, `NOT`
+  - Multiple edges from single activity with conditions
+  - Example: Route to different paths based on `{{validate.valid}} == true`
+
+**US-3.3: Parallel Execution (Fan-Out/Fan-In)**
+- **As** a data engineer
+- **I want** to execute multiple activities in parallel and aggregate results
+- **So that** I can maximize throughput for independent operations
+- **Acceptance Criteria**:
+  - Multiple `following_key` edges for fan-out
+  - Multiple `preceding_key` edges for fan-in (join point)
+  - Join waits for ALL preceding activities to complete
+  - Access to all parallel results: `{{analyze_security.results}}`
+  - Static parallel: Fixed number of activities
+  - Dynamic parallel: Runtime-determined count via `parallel_count`
+
+**US-3.4: Iterative Workflows (Loops)**
+- **As** an AI startup engineer
+- **I want** workflows to loop until a condition is met
+- **So that** I can implement agentic research patterns (evaluate → search more if needed)
+- **Acceptance Criteria**:
+  - Edge from later activity back to earlier activity (loop)
+  - Conditional loop exit: `{{evaluate.sufficient}} == true`
+  - Iteration counter: `{{workflow.iteration}}`
+  - Maximum iteration limits to prevent infinite loops
+  - Budget-aware loops: `{{workflow.remaining_budget}} > 1.0`
+
+**US-3.5: Activity Settings (Retry, Timeout, Budget)**
+- **As** a platform engineering lead
+- **I want** declarative control over activity behavior
+- **So that** I don't need custom code for common patterns
+- **Acceptance Criteria**:
+  - Timeout configuration per activity
+  - Retry policy: max_attempts, backoff strategy (exponential)
+  - Budget limits per activity: `budget.limit: 2.00` (USD)
+  - Budget action on exceeded: `abort` or `continue`
+  - Result caching: `cache: true`, `cache_ttl: 3600`
+  - Non-deterministic flag: `deterministic: false` for LLM calls
+
+**US-3.6: YAML Validation and Tooling**
+- **As** a data engineer migrating from Airflow
+- **I want** CLI tools to validate and test workflows before deployment
+- **So that** I catch errors early and iterate quickly
+- **Acceptance Criteria**:
+  - `streamflow validate workflow.yaml` checks syntax and semantics
+  - `streamflow test workflow.yaml --input test.json` runs locally
+  - `streamflow visualize workflow.yaml --format png` generates DAG diagram
+  - Validation checks: all edges valid, no cycles, activity types registered
+  - Inline error messages with line numbers
 
 ---
 
@@ -561,7 +601,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 
 **Business Objective**: Prove >1,000 workflows/sec on PostgreSQL, overcoming documented 35-100/sec bottleneck of competitors
 
-**Note**: This epic builds on insights from Epic 3 (Performance Benchmarking) to implement targeted optimizations.
+**Note**: This epic builds on insights from Epic 2 (Performance Benchmarking) to implement targeted optimizations.
 
 ### User Stories
 
@@ -576,7 +616,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Activity scheduling: Batch inserts for multiple activities
   - Index strategy: Covering indexes for common queries
   - **Target**: <1ms per workflow evaluation
-  - Apply learnings from Epic 3 profiling
+  - Apply learnings from Epic 2 profiling
 
 **US-6.2: Connection Pooling and Batching**
 - **As** a platform engineering lead
@@ -603,7 +643,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 **US-6.4: Advanced Indexing Strategy**
 - **As** a platform engineering lead
 - **I want** optimal indexes for all query patterns
-- **So that** we achieve target throughput from Epic 3 benchmarks
+- **So that** we achieve target throughput from Epic 2 benchmarks
 - **Acceptance Criteria**:
   - Covering indexes for hot queries (no table lookups)
   - Partial indexes for filtered queries (WHERE status = 'pending')
@@ -1047,16 +1087,11 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 **MUST HAVE for launch:**
 
 1. **Core Engine** (Epic 1):
-   - ✅ Event-driven orchestrator with activity queue
+   - ✅ Event-driven orchestrator with activity queue (US-1.1, US-1.2)
    - ✅ Sequential and parallel execution
    - ✅ PostgreSQL backend with optimizations
 
-2. **Workflow Definition** (Epic 2):
-   - ✅ YAML DSL with conditional branching
-   - ✅ Template expressions
-   - ✅ Activity settings (retry, timeout)
-
-1B. **API Server** (Epic 1B):
+1A. **API Server** (Epic 1A):
    - ✅ Workflow submission API (POST /api/v1/workflows)
    - ✅ Workflow status and query API
    - ✅ Workflow definition management
@@ -1064,10 +1099,22 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
    - ✅ Authentication and authorization (JWT)
    - ✅ Health checks and metrics endpoints
 
-3. **Performance Validation** (Epic 3):
+1B. **Built-in Worker** (Epic 1B):
+   - ✅ Worker polling with concurrency safety (US-1.3)
+   - ✅ Built-in worker uses API server (same code path as external workers)
+   - ✅ JWT authentication and token management
+   - ✅ Activity execution and result reporting
+
+2. **Performance Validation** (Epic 2):
    - ✅ Benchmark proving >1,000 workflows/sec
    - ✅ Competitor comparisons published
    - ✅ Performance baseline established
+   - ✅ Programmatic workflow definitions for benchmarking
+
+3. **Workflow Definition** (Epic 3):
+   - ✅ YAML DSL with conditional branching
+   - ✅ Template expressions
+   - ✅ Activity settings (retry, timeout)
 
 4. **Built-In Activities** (Epic 5):
    - ✅ Object storage and artifact management (S3, GCS, Azure Blob, MinIO)
@@ -1077,7 +1124,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
    - ✅ Database operations (PostgreSQL)
 
 5. **PostgreSQL Optimization** (Epic 6):
-   - ✅ Query optimization based on Epic 3 insights
+   - ✅ Query optimization based on Epic 2 insights
    - ✅ Connection pooling and batching
    - ✅ Achieve >1,000 workflows/sec target
 
@@ -1114,7 +1161,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 
 | Metric                  | Target                 | Validation Method                    |
 |:------------------------|:----------------------:|:-------------------------------------|
-| **Workflow Throughput** | >1,000/sec sustained   | Continuous benchmarking (Epic 3)     |
+| **Workflow Throughput** | >1,000/sec sustained   | Continuous benchmarking (Epic 2)     |
 | **Latency P99**         | <10ms workflow start   | Production monitoring                 |
 | **Binary Size**         | <15MB                  | Build artifacts                       |
 | **Memory Footprint**    | <50MB base             | Docker stats                          |
@@ -1145,7 +1192,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 
 | Metric                 | Target       | Evidence                              |
 |:-----------------------|:------------:|:--------------------------------------|
-| **Performance Advantage** | 10x Temporal | Published benchmarks (Epic 3)         |
+| **Performance Advantage** | 10x Temporal | Published benchmarks (Epic 2)         |
 | **Cost Savings**         | 50–80% LLM costs | Customer testimonials              |
 | **Deployment Time**      | <5 minutes vs days | Comparison video                  |
 | **Edge Market Share**    | #1 for edge AI | Customer count in segment            |
@@ -1160,8 +1207,8 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 - **Probability**: Medium
 - **Impact**: HIGH (core value prop)
 - **Mitigation**:
-  - **Early validation via Epic 3** - Benchmark immediately after Epic 2
-  - Incremental optimization in Epic 6 based on Epic 3 profiling
+  - **Early validation via Epic 2** - Benchmark immediately after Epic 1B
+  - Incremental optimization in Epic 6 based on Epic 2 profiling
   - Fallback: Lower target to 500/sec (still 5x better)
   - Alternative: Optional Redis hot path
 
@@ -1250,21 +1297,26 @@ See detailed GTM plan in:
 - YAML DSL core
 - Performance baseline: 100+ workflows/sec
 
-**Phase 2: YAML DSL Complete + API Server + Early Benchmarking (Weeks 5-8)**
-- Advanced YAML features (loops, dynamic parallel)
-- Built-in activity library (core activities)
-- CLI tooling
-- **API Server (Epic 1B)**: HTTP/REST endpoints for workflow submission and management
+**Phase 2: API Server + Built-in Worker + Benchmarking (Weeks 5-8)**
+- **API Server (Epic 1A)**: HTTP/REST endpoints for workflow submission and management
 - Authentication/authorization with JWT
 - WebSocket streaming for real-time updates
-- **CRITICAL: Initial benchmarking suite (Epic 3)**
-- Establish performance baseline vs competitors
+- **Built-in Worker (Epic 1B)**: Worker polling using API server endpoints
+- Worker authentication via JWT
+- Activity execution and result reporting
+- **CRITICAL: Benchmarking suite (Epic 2)**
+- Programmatic workflow definitions for benchmarks (Rust structs, JSON)
+- Establish performance baseline vs competitors (>1,000 wf/sec target)
+- PostgreSQL profiling and optimization recommendations
 - Identify optimization opportunities for Phase 4
 
-**Phase 3: Programmatic Definition (Weeks 9-12)**
-- Python builder API
-- JavaScript builder API
-- Compilation pipeline
+**Phase 3: YAML DSL + Programmatic Definition (Weeks 9-12)**
+- **YAML DSL (Epic 3)**: Declarative workflow definitions
+- Sequential, parallel, conditional, and loop workflows
+- Activity settings (retry, timeout, budget)
+- YAML validation and tooling
+- **Programmatic APIs (Epic 4)**: Python and JavaScript builder APIs
+- Compilation pipeline (code → YAML)
 - 5+ examples per language
 
 **Phase 4: PostgreSQL Optimization (Weeks 13-16)**
@@ -1290,8 +1342,10 @@ See detailed GTM plan in:
 |---------|------------|-------------|-------------------------------------------------------------------------|
 | 0.1     | 2025-10-26 | Claude Code | Initial PRD based on collected notes                                    |
 | 0.2     | 2025-10-26 | Claude Code | Moved Epic 11 (Benchmarking) to Epic 3 for early performance validation |
-| 0.3     | 2025-10-29 | Claude Code | Added Epic 1B (API Server) with 8 user stories for HTTP/REST API, authentication, and WebSocket streaming |
-| 0.4     | 2025-10-29 | Claude Code | Added US-1B.9 (Worker Activity APIs) for worker polling, heartbeat, and result reporting |
+| 0.3     | 2025-10-29 | Claude Code | Added Epic 1A (API Server) with 8 user stories for HTTP/REST API, authentication, and WebSocket streaming |
+| 0.4     | 2025-10-29 | Claude Code | Added US-1A.9 (Worker Activity APIs) for worker polling, heartbeat, and result reporting |
+| 0.5     | 2025-10-30 | Claude Code | Created Epic 1B (Built-in Worker), moved US-1.3 from Epic 1 to Epic 1B. Built-in worker uses API server for consistency with external workers. Added architecture decision and tradeoff analysis. |
+| 0.6     | 2025-10-30 | Claude Code | Swapped Epic 2 (YAML) and Epic 3 (Benchmarking). Benchmarking now Epic 2 (after Epic 1B), YAML now Epic 3. Benchmarking uses programmatic workflows (no YAML dependency), validates core architecture earlier, and informs YAML design. Updated all references, roadmap phases, and release criteria. |
 
 **Approval:**
 

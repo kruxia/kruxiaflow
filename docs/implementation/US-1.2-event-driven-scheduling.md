@@ -1631,8 +1631,8 @@ US-1.2 has dependencies on other components for complete end-to-end testing:
 - ✅ **PostgreSQL database** - Available (can test immediately)
 - ✅ **Activity Queue (US-1.1)** - Required for `schedule()` calls
 - ❌ **Workflow Definition Storage** - Need to store/load workflow definitions
-- ❌ **Workers (US-1.3)** - Need to publish `ActivityCompleted` events for full workflows
-- ❌ **API Server (Epic 1B)** - Need to publish `WorkflowCreated` events
+- ❌ **Built-in Worker (Epic 1B)** - Need to publish `ActivityCompleted` events for full workflows
+- ❌ **API Server (Epic 1A)** - Need to publish `WorkflowCreated` events
 
 **Testing Strategy**: Phased approach similar to US-1.1
 
@@ -1744,19 +1744,19 @@ US-1.2 has dependencies on other components for complete end-to-end testing:
 
 ---
 
-### Phase 3: End-to-End Tests (After US-1.3 and Epic 1B complete)
+### Phase 3: End-to-End Tests (After Epic 1B and Epic 1A complete)
 
 **File**: `core/tests/e2e_orchestrator_test.rs`
 
-**Dependencies**: US-1.1 (Queue), US-1.3 (Workers), Epic 1B (API Server), Workflow Definition Storage
+**Dependencies**: US-1.1 (Queue), Epic 1B (Built-in Worker), Epic 1A (API Server), Workflow Definition Storage
 
 **Real components**: All (no mocks)
 
 1. **Full Sequential Workflow**:
-   - Submit workflow via API (Epic 1B)
+   - Submit workflow via API (Epic 1A)
    - Orchestrator schedules first activity
-   - Worker claims and executes (US-1.3)
-   - Worker publishes ActivityCompleted
+   - Worker claims and executes (Epic 1B)
+   - Worker publishes ActivityCompleted via API
    - Orchestrator schedules next activity
    - Repeat until WorkflowCompleted
    - Verify end-to-end latency
@@ -1778,7 +1778,7 @@ US-1.2 has dependencies on other components for complete end-to-end testing:
    - Measure end-to-end throughput
    - Verify >1000 workflows/sec
 
-**Status**: ⏸️ **Blocked until US-1.3 and Epic 1B are complete**
+**Status**: ⏸️ **Blocked until Epic 1B (Built-in Worker) and Epic 1A (API Server) are complete**
 
 ---
 
@@ -1817,12 +1817,12 @@ US-1.2 has dependencies on other components for complete end-to-end testing:
 
 ## Testing Phase Summary
 
-| Phase       | Tests                                           | Dependencies            | Status     | Can Start              |
-|-------------|-------------------------------------------------|-------------------------|------------|------------------------|
-| **Phase 1** | Unit tests                                      | None (PostgreSQL only)  | ✅ Ready   | Immediately            |
-| **Phase 2** | Integration tests with mocked workflows/workers | US-1.1 (Activity Queue) | ⏳ Waiting | After US-1.1           |
-| **Phase 3** | End-to-end tests with real workers              | US-1.1, US-1.3, Epic 1B | ⏸️ Blocked | After all dependencies |
-| **Phase 4** | Performance benchmarks                          | US-1.1 (Activity Queue) | ⏳ Waiting | After US-1.1           |
+| Phase       | Tests                                           | Dependencies                  | Status     | Can Start              |
+|-------------|-------------------------------------------------|-------------------------------|------------|------------------------|
+| **Phase 1** | Unit tests                                      | None (PostgreSQL only)        | ✅ Ready   | Immediately            |
+| **Phase 2** | Integration tests with mocked workflows/workers | US-1.1 (Activity Queue)       | ⏳ Waiting | After US-1.1           |
+| **Phase 3** | End-to-end tests with real workers              | US-1.1, Epic 1B, Epic 1A      | ⏸️ Blocked | After all dependencies |
+| **Phase 4** | Performance benchmarks                          | US-1.1 (Activity Queue)       | ⏳ Waiting | After US-1.1           |
 
 **Recommendation**: Implement Phase 1 tests immediately alongside US-1.2 code. This validates core logic without external dependencies.
 
@@ -2189,8 +2189,8 @@ Full expression language support:
 ## Related User Stories
 
 - **US-1.1**: Activity Queue (orchestrator schedules to queue)
-- **US-1.3**: Worker Polling (workers consume from queue)
-- **Epic 1B**: API Server (workflow submission endpoint)
+- **Epic 1A**: API Server (workflow submission endpoint, worker activity endpoints)
+- **Epic 1B (US-1.3)**: Worker Polling (built-in worker polls via API endpoints)
 - **US-2.1**: Workflow Definition Language (YAML parsing)
 - **US-6.1**: Query Optimization (event polling performance)
 
