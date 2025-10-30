@@ -1577,6 +1577,108 @@ activities:
 
 ---
 
+### Story 6.9: Delayed Activity Scheduling
+
+**Priority**: P2 (Medium - Rate limiting and time-based workflows)
+
+**As** a workflow developer
+**I want** to schedule activities to execute at a specific future time
+**So that** I can implement rate limiting, time-based workflows, and custom backoff strategies
+
+**Current Status**: The ActivityQueue infrastructure fully supports delayed scheduling via the `scheduled_for` field, but the orchestrator currently always passes `None`, scheduling all activities for immediate execution.
+
+**Scope**:
+- Add `scheduled_for` field to `ActivityDefinition` (optional timestamp or duration)
+- Support absolute times (ISO 8601 timestamp)
+- Support relative delays (duration from now: "5m", "1h", "1d")
+- Support delays based on previous activity outputs (dynamic scheduling)
+- Orchestrator passes `scheduled_for` to queue instead of `None`
+- Workers respect `scheduled_for` (already implemented in queue)
+- Metrics on scheduled vs immediate activities
+
+**Example - Fixed Delay**:
+```yaml
+activities:
+  - key: fetch_data
+    namespace: api
+    name: get_user_data
+    scheduled_for: "2025-10-30T12:00:00Z"  # Absolute time
+
+  - key: retry_after_delay
+    namespace: api
+    name: retry_request
+    scheduled_for: "+5m"  # 5 minutes from now
+```
+
+**Example - Rate Limiting**:
+```yaml
+activities:
+  - key: call_api_1
+    namespace: external
+    name: api_call
+    scheduled_for: "+0s"  # Immediate
+
+  - key: call_api_2
+    namespace: external
+    name: api_call
+    scheduled_for: "+1s"  # 1 second delay (rate limit)
+    preceding:
+      - activity_key: call_api_1
+
+  - key: call_api_3
+    namespace: external
+    name: api_call
+    scheduled_for: "+1s"  # Another 1 second delay
+    preceding:
+      - activity_key: call_api_2
+```
+
+**Example - Dynamic Delay from Output**:
+```yaml
+activities:
+  - key: check_status
+    namespace: polling
+    name: get_status
+    outputs:
+      - retry_after  # Returns delay in seconds
+
+  - key: retry_check
+    namespace: polling
+    name: get_status
+    scheduled_for: "{{check_status.retry_after}}s"  # Dynamic delay
+    preceding:
+      - activity_key: check_status
+```
+
+**Architecture Reference**:
+- Queue infrastructure: `core/src/queue/models.rs:13` (`scheduled_for` field)
+- Queue implementation: `core/src/queue/postgres_queue.rs:59` (defaults to now)
+- Orchestrator: `core/src/orchestrator/orchestrator.rs:128` (currently passes None)
+
+**Implementation Tasks**:
+1. Add `scheduled_for` field to `ActivityDefinition` model
+2. Parse timestamp/duration strings in orchestrator
+3. Pass computed timestamp to queue instead of None
+4. Add validation (scheduled_for not in past)
+5. Update documentation and examples
+
+**Benefits**:
+- Rate limiting (avoid overwhelming external APIs)
+- Time-based workflows (schedule activities for specific times)
+- Custom backoff strategies at workflow definition level
+- Polling patterns (check status every N seconds)
+- Cost optimization (delay non-urgent activities to off-peak hours)
+- Compliance (delay sensitive operations until business hours)
+
+**Use Cases**:
+- API rate limiting (max 1 call per second)
+- Batch processing (delay until off-peak hours)
+- Polling workflows (check status every 30 seconds)
+- Time-sensitive operations (execute at specific time)
+- Custom retry strategies (exponential backoff at workflow level)
+
+---
+
 ## Epic 7: Scalability Enhancements
 
 **Goal**: Scale StreamFlow to handle millions of workflows per day with minimal infrastructure.

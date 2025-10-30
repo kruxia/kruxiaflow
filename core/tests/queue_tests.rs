@@ -1,4 +1,5 @@
 use serde_json::json;
+use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use streamflow_core::queue::{
@@ -39,6 +40,7 @@ async fn cleanup_queue(pool: &PgPool, workflow_id: Uuid) {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_idempotent_scheduling() {
     let pool = setup_test_pool().await;
     let config = QueueConfig::default();
@@ -81,6 +83,7 @@ async fn test_idempotent_scheduling() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_concurrent_claiming() {
     let pool = setup_test_pool().await;
     let config = QueueConfig::default();
@@ -141,8 +144,16 @@ async fn test_concurrent_claiming() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_stale_activity_recovery() {
     let pool = setup_test_pool().await;
+
+    // Clean all test data before starting
+    sqlx::query!("TRUNCATE activity_queue CASCADE")
+        .execute(&pool)
+        .await
+        .expect("Failed to clean test data");
+
     let mut config = QueueConfig::default();
     config.default_timeout = Duration::from_secs(1); // Very short timeout for testing
 
@@ -210,6 +221,7 @@ async fn test_stale_activity_recovery() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_heartbeat_conflict_detection() {
     let pool = setup_test_pool().await;
     let mut config = QueueConfig::default();
@@ -285,6 +297,7 @@ async fn test_heartbeat_conflict_detection() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_max_retries_exhaustion() {
     let pool = setup_test_pool().await;
     let mut config = QueueConfig::default();
@@ -396,6 +409,7 @@ async fn test_max_retries_exhaustion() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_completion_idempotency() {
     let pool = setup_test_pool().await;
     let config = QueueConfig::default();
@@ -460,6 +474,7 @@ async fn test_completion_idempotency() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_sequential_ordering() {
     let pool = setup_test_pool().await;
     let config = QueueConfig::default();
@@ -533,6 +548,7 @@ async fn test_sequential_ordering() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_parallel_execution() {
     let pool = setup_test_pool().await;
     let config = QueueConfig::default();
