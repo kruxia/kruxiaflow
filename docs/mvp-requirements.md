@@ -95,20 +95,71 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 
 ### User Stories
 
-**US-1A.1: Workflow Submission API**
+**US-1A.1: Health Check and Service Discovery**
+- **As** a platform engineering lead
+- **I want** standard health and readiness endpoints
+- **So that** load balancers and orchestrators can manage API servers
+- **Acceptance Criteria**:
+  - `GET /health` - Liveness probe (returns 200 if server is running)
+  - `GET /health/ready` - Readiness probe (returns 200 if can handle requests)
+    - Readiness checks: Database connectivity, event source availability
+  - `GET /api/v1/info` - Service information (version, build, capabilities)
+    - Response format: `{version, build_date, api_version, features: []}`
+
+**US-1A.2: Error Handling and API Contracts**
 - **As** an AI startup engineer
+- **I want** consistent error responses and API documentation
+- **So that** I can handle errors gracefully and integrate easily
+- **Acceptance Criteria**:
+  - Standard error format: `{error: {code, message, details}}`
+  - HTTP status codes: 401 (auth), 404 (not found), 409 (conflict), 422 (validation), 500 (server error)
+  - Validation errors include field-level details
+  - OpenAPI 3.0 specification published at `/api/v1/openapi.json`
+  - API documentation UI: Swagger at `/api/v1/docs`
+  - Request ID in response headers for tracing: `X-Request-ID`
+  - CORS support for browser-based clients
+
+**US-1A.3: Authentication and Authorization**
+- **As** a platform engineering lead
+- **I want** API authentication and authorization
+- **So that** only authorized clients can submit and query workflows
+- **Acceptance Criteria**:
+  - Bearer token authentication: `Authorization: Bearer <token>`
+  - RSA256 Signed JWT tokens issued by AuthenticationService (PostgresAuthService for MVP)
+  - `POST /api/v1/auth/token` - Issue token with credentials (username/password or API key)
+  - Token expiration: Configurable TTL (default 24 hours)
+  - Authorization checks: Validate RSA256 signed token on all protected endpoints
+  - 401 Unauthorized for missing/invalid tokens with helpful error message
+  - Rate limiting per token: Configurable requests per minute
+
+**US-1A.4: Workflow Definition Management API**
+- **As** an AI startup engineer
+- **I want** to deploy and manage workflow definitions separately from execution
+- **So that** I can version and reuse workflow templates
+- **Acceptance Criteria**:
+  - `POST /api/v1/workflow_definitions` - Deploy workflow definition with name and version
+  - `GET /api/v1/workflow_definitions` - List all deployed definitions (later: Search)
+  - `GET /api/v1/workflow_definitions/{name}` - Get latest version of definition
+  - `GET /api/v1/workflow_definitions/{name}?version={version}` - Get specific version
+  - Versioning: Semantic versioning (1.0.0, 1.1.0) or timestamp (YYYYMMDD.HHMMSS)
+  - Validation on deployment: Syntax and semantic checks before storage
+
+**US-1A.5: Workflow Submission API**
+- **As** an AI startup engineer.
 - **I want** to submit workflows via HTTP API
 - **So that** my applications can trigger workflows programmatically
 - **Acceptance Criteria**:
   - `POST /api/v1/workflows` - Submit workflow with definition and input parameters
-  - Request body: `{workflow_type, input, workflow_definition}` (YAML as string or JSON)
+  - Request body: `{definition_name, version, input, unique_key}`
+    (JSON, optional version, optional unique_key)
   - Response: `{workflow_id, status, created_at}` with 201 Created
   - Async execution: API returns immediately, workflow runs in background
-  - Validation: Reject invalid workflow definitions with 400 Bad Request
-  - Idempotency: Optional `idempotency_key` header to prevent duplicate submissions
-- **Example**: `POST /api/v1/workflows` with payment workflow definition and `{amount: 100.00}`
+  - Workflow definition not found: 404 Not Found
+  - Validation: Reject invalid body or invalid input for the given workflow definition with 422 Unprocessable Entity
+  - Idempotency: Optional `unique_key` body parameter to prevent duplicate submissions: 409 Conflict
+- **Example**: `POST /api/v1/workflows` with `{"definition_name": "payment", "input": {"amount": 100.00}}`
 
-**US-1A.2: Workflow Status and Query API**
+**US-1A.6: Workflow Status and Query API**
 - **As** a platform engineering lead
 - **I want** to query workflow status and results via API
 - **So that** I can monitor execution and retrieve outputs
@@ -117,85 +168,10 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Response includes: `{id, status, workflow_type, created_at, updated_at, state_data}`
   - `GET /api/v1/workflows/{workflow_id}/activities` - List all activities with their states
   - `GET /api/v1/workflows?status=running&limit=100` - List workflows with filters
+  - Pagination: `limit` (default 100) and `offset` (default 0) parameters
   - Filter parameters: `status`, `workflow_type`, `created_after`, `created_before`
-  - Pagination: `limit` and `offset` parameters
 
-**US-1A.3: Workflow Definition Management API**
-- **As** an AI startup engineer
-- **I want** to deploy and manage workflow definitions separately from execution
-- **So that** I can version and reuse workflow templates
-- **Acceptance Criteria**:
-  - `POST /api/v1/workflow-definitions` - Deploy workflow definition with name and version
-  - `GET /api/v1/workflow-definitions` - List all deployed definitions
-  - `GET /api/v1/workflow-definitions/{name}` - Get latest version of definition
-  - `GET /api/v1/workflow-definitions/{name}/versions/{version}` - Get specific version
-  - `POST /api/v1/workflows` with `{workflow_definition_name, workflow_definition_version, input}`
-  - Versioning: Semantic versioning (1.0.0, 1.1.0) or timestamps
-  - Validation on deployment: Syntax and semantic checks before storage
-
-**US-1A.4: Activity Results and Output Retrieval**
-- **As** an AI researcher
-- **I want** to retrieve activity outputs and workflow results via API
-- **So that** I can access computation results for downstream processing
-- **Acceptance Criteria**:
-  - `GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/output` - Get activity output
-  - `GET /api/v1/workflows/{workflow_id}/output` - Get final workflow output
-  - Response includes: `{activity_key, output, cost_usd, completed_at}`
-  - Large outputs: Return reference to artifact storage with signed URL
-  - 404 if activity not completed or doesn't exist
-  - Output format: JSON with activity outputs accessible by key
-
-**US-1A.5: Authentication and Authorization**
-- **As** a platform engineering lead
-- **I want** API authentication and authorization
-- **So that** only authorized clients can submit and query workflows
-- **Acceptance Criteria**:
-  - Bearer token authentication: `Authorization: Bearer <token>`
-  - JWT tokens issued by AuthenticationService (PostgresAuthService for MVP)
-  - `POST /api/v1/auth/token` - Issue token with credentials (username/password or API key)
-  - Token expiration: Configurable TTL (default 24 hours)
-  - Authorization checks: Verify token on all protected endpoints
-  - 401 Unauthorized for missing/invalid tokens
-  - Rate limiting per token: Configurable requests per minute
-
-**US-1A.6: WebSocket Streaming for Real-Time Updates**
-- **As** an AI startup engineer
-- **I want** real-time workflow execution updates via WebSocket
-- **So that** my UI can show live progress without polling
-- **Acceptance Criteria**:
-  - Subscribe to 1 or more workflows: `WS /api/v1/workflows/ws?workflow_id=id1,id2...`
-  - Stream events: `workflow_started`, `activity_scheduled`, `activity_completed`, `workflow_completed`
-  - Event payload: `{event_type, workflow_id, activity_key, timestamp, data}`
-  - Authentication: Bearer token in query parameter or initial message
-  - Backpressure handling: Client can pause/resume stream
-  - Automatic reconnection support with last event ID for replay
-
-**US-1A.7: Health Check and Service Discovery**
-- **As** a platform engineering lead
-- **I want** standard health and readiness endpoints
-- **So that** load balancers and orchestrators can manage API servers
-- **Acceptance Criteria**:
-  - `GET /health` - Liveness probe (returns 200 if server is running)
-  - `GET /health/ready` - Readiness probe (returns 200 if can handle requests)
-  - Readiness checks: Database connectivity, event source availability
-  - `GET /api/v1/info` - Service information (version, build, capabilities)
-  - Response format: `{version, build_date, api_version, features: []}`
-  - Metrics endpoint: `GET /metrics` (Prometheus format)
-
-**US-1A.8: Error Handling and API Contracts**
-- **As** an AI startup engineer
-- **I want** consistent error responses and API documentation
-- **So that** I can handle errors gracefully and integrate easily
-- **Acceptance Criteria**:
-  - Standard error format: `{error: {code, message, details}}`
-  - HTTP status codes: 400 (validation), 401 (auth), 404 (not found), 500 (server error)
-  - Validation errors include field-level details
-  - OpenAPI 3.0 specification published at `/api/v1/openapi.json`
-  - API documentation UI: Swagger/ReDoc at `/api/v1/docs`
-  - Request ID in response headers for tracing: `X-Request-ID`
-  - CORS support for browser-based clients
-
-**US-1A.9: Worker Activity APIs**
+**US-1A.7: Worker Activity APIs**
 - **As** an activity worker
 - **I want** HTTP APIs to poll for activities, send heartbeats, and report results
 - **So that** I can execute activities in distributed environments without direct database access
@@ -214,9 +190,37 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - `POST /api/v1/activities/{activity_id}/fail` - Report activity failure
     - Request body: `{worker_id, error: {code, message, retryable}}`
     - Response: `{acknowledged: true, will_retry: boolean}`
-  - Worker authentication: Bearer token or worker API key
-  - Idempotency: Activities can only be completed/failed once (409 Conflict if already done)
+  - Worker authentication: Bearer token
   - Timeout handling: Activities not heartbeat within timeout are released for retry
+  - Idempotency: Activities can only be completed/failed once (409 Conflict if already
+    done or timed out / reassigned)
+
+**US-1A.8: Activity Results and Output Retrieval**
+- **As** an AI researcher
+- **I want** to retrieve activity outputs and workflow results via API
+- **So that** I can access computation results for downstream processing
+- **Acceptance Criteria**:
+  - `GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/output` - Get activity output
+    - Response includes: `{activity_key, output, cost_usd, completed_at}`
+    - Large outputs: Return reference to artifact storage with signed URL
+    - 404 if activity not completed or doesn't exist
+  - `GET /api/v1/workflows/{workflow_id}/output` - Get final workflow output
+    - Output format: JSON with activity outputs accessible by key
+
+**US-1A.9: WebSocket Streaming for Real-Time Updates**
+- **As** an AI startup engineer
+- **I want** real-time workflow execution updates via WebSocket
+- **So that** my UI can show live progress without polling
+- **Acceptance Criteria**:
+  - Subscribe to all workflows: `WS /api/v1/ws/workflow_events`
+  - Subscribe to 1 or more workflows: `WS /api/v1/ws/workflow_events?workflow_id=id1,id2...`
+  - Subscribe to specific events: `WS /api/v1/ws/workflow_events?event_type=WorkflowCreated,...`
+  - Stream events (PascalCase): `WorkflowCreated`, `ActivityScheduled`,
+    `ActivityCompleted`, `WorkflowCompleted`, `ActivityFailed`, `WorkflowFailed`
+  - Event payload: `{event_type, workflow_id, activity_key, timestamp, payload}`
+  - Authentication: Bearer token in query parameter or initial message
+  - Automatic reconnection support with last event ID for replay (`?event_id=...`)
+- **Serialization Format**: All event types use **PascalCase** (matches PostgreSQL enum and Rust enum variants)
 
 ---
 
@@ -1343,7 +1347,7 @@ See detailed GTM plan in:
 | 0.1     | 2025-10-26 | Claude Code | Initial PRD based on collected notes                                    |
 | 0.2     | 2025-10-26 | Claude Code | Moved Epic 11 (Benchmarking) to Epic 3 for early performance validation |
 | 0.3     | 2025-10-29 | Claude Code | Added Epic 1A (API Server) with 8 user stories for HTTP/REST API, authentication, and WebSocket streaming |
-| 0.4     | 2025-10-29 | Claude Code | Added US-1A.9 (Worker Activity APIs) for worker polling, heartbeat, and result reporting |
+| 0.4     | 2025-10-29 | Claude Code | Added US-1A.7 (Worker Activity APIs) for worker polling, heartbeat, and result reporting |
 | 0.5     | 2025-10-30 | Claude Code | Created Epic 1B (Built-in Worker), moved US-1.3 from Epic 1 to Epic 1B. Built-in worker uses API server for consistency with external workers. Added architecture decision and tradeoff analysis. |
 | 0.6     | 2025-10-30 | Claude Code | Swapped Epic 2 (YAML) and Epic 3 (Benchmarking). Benchmarking now Epic 2 (after Epic 1B), YAML now Epic 3. Benchmarking uses programmatic workflows (no YAML dependency), validates core architecture earlier, and informs YAML design. Updated all references, roadmap phases, and release criteria. |
 
