@@ -26,3 +26,6 @@ bcrypt.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+serial_test.workspace = true
+axum-test = "15.0"
+futures = "0.3"

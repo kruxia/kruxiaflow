@@ -19,18 +19,10 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 ### Completed Features
 
 - ✅ **Epic 1: Event-Driven Orchestration Architecture**
-  - ✅ **US-1.1: Activity Queue** - PostgreSQL-based queue with safe concurrency
-    - FOR UPDATE SKIP LOCKED for concurrent worker polling
-    - Idempotent scheduling via UNIQUE constraints
-    - Stale activity detection and automatic retry
-    - Heartbeat support for long-running activities
-    - Background cleanup for failed activities
-  - ✅ **US-1.2: Event-Driven Dynamic Scheduling** - Reactive orchestrator
-    - Event-driven workflow evaluation
-    - PostgreSQL event sourcing with polling
-    - Materialized workflow state for fast queries
-    - Dependency graph evaluation
-    - Activity scheduling on state changes
+  - ✅ **[US-1.1: Activity Queue](docs/implementation/US-1.1-activity-queue.md)** - PostgreSQL-based queue with safe concurrency
+  - ✅ **[US-1.2: Event-Driven Dynamic Scheduling](docs/implementation/US-1.2-event-driven-scheduling.md)** - Reactive orchestrator
+- ✅ **Epic 1A: API Server** (Partial)
+  - ✅ **[US-1A.1: Health Check and Service Discovery](docs/implementation/US-1A.1-health-checks.md)** - Liveness/readiness probes with parallel health checks
 
 ### In Progress
 
@@ -87,7 +79,7 @@ cargo build --release
 ```
 streamflow/
 ├── core/           # Core orchestration engine (activity queue, event sourcing)
-├── api/            # API server (HTTP/WebSocket endpoints) - TODO
+├── api/            # API server (HTTP/WebSocket endpoints) - In Progress
 ├── activity/       # Built-in activities and worker - TODO
 ├── dashboard/      # Web UI for monitoring - TODO
 ├── migrations/     # Database migrations
@@ -211,6 +203,7 @@ STREAMFLOW_QUEUE_DEFAULT_MAX_RETRIES=3
 - **[Implementation Plans](docs/implementation/)** - Detailed user story implementations
   - [US-1.1: Activity Queue](docs/implementation/US-1.1-activity-queue.md)
   - [US-1.2: Event-Driven Scheduling](docs/implementation/US-1.2-event-driven-scheduling.md)
+  - [US-1A.1: Health Check and Service Discovery](docs/implementation/US-1A.1-health-checks.md)
 
 ### Additional Documentation
 - **[Post-MVP Roadmap](docs/post-mvp.md)** - Features deferred beyond MVP
@@ -218,14 +211,15 @@ STREAMFLOW_QUEUE_DEFAULT_MAX_RETRIES=3
 ## Roadmap
 
 ### Epic 1: Core Orchestration ✅ Complete
-- ✅ US-1.1: Activity Queue with Ordering Guarantees
-- ✅ US-1.2: Event-Driven Dynamic Scheduling
+- ✅ Activity Queue with Ordering Guarantees
+- ✅ Event-Driven Dynamic Scheduling
 
 ### Epic 1A: API Server 🔨 In Progress
-- HTTP/REST endpoints for workflow submission and management
-- Worker activity APIs (poll, heartbeat, complete, fail)
-- JWT authentication and authorization
-- WebSocket streaming for real-time updates
+- ✅ Health Check and Service Discovery
+- 📋 HTTP/REST endpoints for workflow submission and management
+- 📋 Worker activity APIs (poll, heartbeat, complete, fail)
+- 📋 JWT authentication and authorization
+- 📋 WebSocket streaming for real-time updates
 
 ### Epic 1B: Built-in Worker 🔨 In Progress
 - Worker implementation using API endpoints
