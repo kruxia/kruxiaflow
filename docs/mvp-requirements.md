@@ -1,6 +1,6 @@
 # StreamFlow v0.2 Product Requirements Document
 
-**Version**: 0.6
+**Version**: 0.8
 **Date**: October 30, 2025
 **Status**: Planning
 **Target Release**: Q1 2026
@@ -269,6 +269,143 @@ The built-in worker is implemented as an HTTP client to the API server rather th
 - MVP target >1,000 workflows/sec (easily achievable with this overhead)
 
 **Post-MVP Optimization**: If HTTP overhead becomes a bottleneck, an internal fast path can be added while maintaining the same API contract for external workers.
+
+---
+
+## Epic 1C: StreamFlow Binary and CLI
+
+**Business Objective**: Provide a unified binary and CLI interface to launch and manage StreamFlow services, enabling single-binary deployment and flexible service orchestration
+
+### User Stories
+
+**US-1C.1: Main Binary and CLI Framework**
+- **As** a platform engineering lead
+- **I want** a single binary with subcommands to launch different services
+- **So that** I can deploy StreamFlow with minimal dependencies
+- **Acceptance Criteria**:
+  - Main crate `streamflow` that depends on `core`, `api`, and `worker` crates
+  - CLI framework (clap) with subcommands for different services
+  - Subcommands: `serve`, `orchestrator`, `api`, `worker`, `version`, `migrate`
+  - Global flags: `--config`, `--log-level`, `--log-format`, `--database-url`
+  - Help text and examples for each subcommand
+  - Binary size: <15MB release build
+  - Version information: `streamflow --version` shows semantic version and build info
+
+**US-1C.2: Service Launcher - All-in-One Mode**
+- **As** a developer
+- **I want** to launch all services together with one command
+- **So that** I can quickly start StreamFlow for development or single-node deployment
+- **Acceptance Criteria**:
+  - `streamflow serve` launches orchestrator + API server + built-in worker(s)
+  - Configuration: `--port` (API port, default 8080), `--workers` (worker count, default 1)
+  - Service startup order: Database connectivity check → Orchestrator → API server → Workers
+  - Health checks: Wait for each service to be ready before starting next
+  - Graceful shutdown: SIGTERM/SIGINT stops all services cleanly (drain workers, close connections)
+  - Logging: Structured JSON or human-readable format (configurable)
+  - All services share same database connection pool
+
+**US-1C.3: Service Launcher - Individual Services**
+- **As** a platform engineering lead
+- **I want** to launch services independently for distributed deployment
+- **So that** I can scale orchestrator, API, and workers separately
+- **Acceptance Criteria**:
+  - `streamflow orchestrator` - Launch orchestrator only
+    - Flags: `--consumer-id` (for event consumer checkpointing)
+  - `streamflow api` - Launch API server only
+    - Flags: `--port` (default 8080), `--bind` (default 0.0.0.0)
+  - `streamflow worker` - Launch worker only
+    - Flags: `--activity-types` (namespace.name list), `--api-url`, `--worker-id`
+  - Each service can run on different hosts/containers
+  - Environment variable configuration: `STREAMFLOW_DATABASE_URL`, `STREAMFLOW_API_URL`, etc.
+
+**US-1C.4: Configuration Management**
+- **As** a platform engineering lead
+- **I want** flexible configuration via environment variables and CLI flags
+- **So that** I can deploy StreamFlow in different environments without code changes
+- **Acceptance Criteria**:
+  - Configuration precedence: CLI flags > Environment variables > Defaults
+  - Environment variables: `STREAMFLOW_DATABASE_URL`, `STREAMFLOW_API_PORT`, `STREAMFLOW_LOG_LEVEL`, etc.
+  - Configuration validation on startup (fail fast with clear error messages)
+  - Configuration file support: Optional YAML/TOML config file via `--config` flag (post-MVP)
+  - Sensitive values: Support for environment variables (no secrets in CLI arguments)
+  - Configuration logging: Print effective configuration on startup (redact secrets)
+
+**US-1C.5: Database Migration Management**
+- **As** a platform engineering lead
+- **I want** to manage database migrations via CLI
+- **So that** I can control schema updates independently of service startup
+- **Acceptance Criteria**:
+  - `streamflow migrate` - Run pending migrations (uses sqlx migrate)
+  - `streamflow migrate --status` - Show migration status
+  - `streamflow migrate --revert` - Revert last migration (with confirmation)
+  - Migration directory: Embedded in binary or external path via `--migrations-dir`
+  - Migration history: Track applied migrations in database
+  - Idempotent: Safe to run multiple times
+  - Automatic migration on `streamflow serve` (optional via `--auto-migrate` flag)
+
+**US-1C.6: Health Checks and Service Monitoring**
+- **As** a platform engineering lead
+- **I want** CLI commands to check service health and status
+- **So that** I can monitor StreamFlow in production
+- **Acceptance Criteria**:
+  - `streamflow health` - Check if all services are healthy
+    - Checks: Database connectivity, API server reachability, orchestrator running
+    - Exit code: 0 (healthy), 1 (unhealthy)
+  - `streamflow status` - Show detailed service status
+    - Output: Service names, health status, uptime, version
+  - Health check timeout: Configurable (default 5s)
+  - Output formats: Human-readable text or JSON (via `--format json`)
+
+**US-1C.7: Graceful Shutdown and Signal Handling**
+- **As** a platform engineering lead
+- **I want** services to shut down gracefully on SIGTERM/SIGINT
+- **So that** workflows and activities complete without data loss
+- **Acceptance Criteria**:
+  - SIGTERM/SIGINT handling: Initiate graceful shutdown
+  - Shutdown sequence:
+    1. Stop accepting new workflows (API returns 503)
+    2. Wait for in-flight activities to complete (configurable timeout, default 30s)
+    3. Close database connections
+    4. Exit with code 0
+  - SIGKILL handling: Force immediate shutdown (no cleanup)
+  - Shutdown timeout: Configurable via `--shutdown-timeout` (default 30s)
+  - Worker drain: Workers finish current activities before exiting
+  - Logging: Log shutdown progress and any errors
+
+### Implementation Notes
+
+**Crate Structure**:
+```
+streamflow/
+├── core/           # Core orchestration logic (queue, orchestrator, events)
+├── api/            # API server (Axum HTTP server)
+├── worker/         # Built-in worker implementation
+└── main/           # Main binary and CLI (depends on all above)
+    ├── src/
+    │   ├── main.rs           # CLI entry point
+    │   ├── commands/         # Subcommand implementations
+    │   │   ├── serve.rs
+    │   │   ├── orchestrator.rs
+    │   │   ├── api.rs
+    │   │   ├── worker.rs
+    │   │   ├── migrate.rs
+    │   │   └── health.rs
+    │   ├── config.rs         # Configuration management
+    │   └── signals.rs        # Signal handling
+    └── Cargo.toml
+```
+
+**Dependencies**:
+- `clap` - CLI parsing with derive macros
+- `tokio` - Async runtime for all services
+- `tracing`/`tracing-subscriber` - Structured logging
+- `serde` - Configuration deserialization
+- `sqlx` - Database migrations
+
+**Service Coordination**:
+- All services share same database connection pool (configured in main)
+- Services communicate via database (orchestrator → queue, API → queue)
+- Built-in worker communicates with API via HTTP (as designed in Epic 1B)
 
 ---
 
@@ -1109,6 +1246,14 @@ The built-in worker is implemented as an HTTP client to the API server rather th
    - ✅ JWT authentication and token management
    - ✅ Activity execution and result reporting
 
+1C. **StreamFlow Binary and CLI** (Epic 1C):
+   - ✅ Main binary with subcommands (serve, orchestrator, api, worker, migrate)
+   - ✅ All-in-one mode (`streamflow serve`) for single-node deployment
+   - ✅ Individual service launchers for distributed deployment
+   - ✅ Configuration management (CLI flags > env vars > defaults)
+   - ✅ Database migration CLI
+   - ✅ Graceful shutdown and signal handling
+
 2. **Performance Validation** (Epic 2):
    - ✅ Benchmark proving >1,000 workflows/sec
    - ✅ Competitor comparisons published
@@ -1301,18 +1446,22 @@ See detailed GTM plan in:
 - YAML DSL core
 - Performance baseline: 100+ workflows/sec
 
-**Phase 2: API Server + Built-in Worker + Benchmarking (Weeks 5-8)**
+**Phase 2: API Server + Built-in Worker + CLI + Benchmarking (Weeks 5-8)**
 - **API Server (Epic 1A)**: HTTP/REST endpoints for workflow submission and management
-- Authentication/authorization with JWT
-- WebSocket streaming for real-time updates
+  - Authentication/authorization with JWT
+  - WebSocket streaming for real-time updates
 - **Built-in Worker (Epic 1B)**: Worker polling using API server endpoints
-- Worker authentication via JWT
-- Activity execution and result reporting
+  - Worker authentication via JWT
+  - Activity execution and result reporting
+- **StreamFlow Binary and CLI (Epic 1C)**: Single binary deployment
+  - Main binary with subcommands (serve, orchestrator, api, worker, migrate)
+  - All-in-one mode and individual service launchers
+  - Configuration management and graceful shutdown
 - **CRITICAL: Benchmarking suite (Epic 2)**
-- Programmatic workflow definitions for benchmarks (Rust structs, JSON)
-- Establish performance baseline vs competitors (>1,000 wf/sec target)
-- PostgreSQL profiling and optimization recommendations
-- Identify optimization opportunities for Phase 4
+  - Programmatic workflow definitions for benchmarks (Rust structs, JSON)
+  - Establish performance baseline vs competitors (>1,000 wf/sec target)
+  - PostgreSQL profiling and optimization recommendations
+  - Identify optimization opportunities for Phase 4
 
 **Phase 3: YAML DSL + Programmatic Definition (Weeks 9-12)**
 - **YAML DSL (Epic 3)**: Declarative workflow definitions
@@ -1350,6 +1499,8 @@ See detailed GTM plan in:
 | 0.4     | 2025-10-29 | Claude Code | Added US-1A.7 (Worker Activity APIs) for worker polling, heartbeat, and result reporting |
 | 0.5     | 2025-10-30 | Claude Code | Created Epic 1B (Built-in Worker), moved US-1.3 from Epic 1 to Epic 1B. Built-in worker uses API server for consistency with external workers. Added architecture decision and tradeoff analysis. |
 | 0.6     | 2025-10-30 | Claude Code | Swapped Epic 2 (YAML) and Epic 3 (Benchmarking). Benchmarking now Epic 2 (after Epic 1B), YAML now Epic 3. Benchmarking uses programmatic workflows (no YAML dependency), validates core architecture earlier, and informs YAML design. Updated all references, roadmap phases, and release criteria. |
+| 0.7     | 2025-10-30 | Sean Harrison | Revised and Re-ordered Epic 1A (API). Fixed event serialization format to PascalCase (WorkflowCreated, ActivityCompleted, etc.) matching PostgreSQL enum and Rust types. |
+| 0.8     | 2025-10-30 | Claude Code | Added Epic 1C (StreamFlow Binary and CLI) with 7 user stories covering main binary, service launchers (serve, orchestrator, api, worker), configuration management, database migrations, health checks, and graceful shutdown. Updated release criteria and roadmap. |
 
 **Approval:**
 
