@@ -95,7 +95,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 
 ### User Stories
 
-**US-1A.1: Health Check and Service Discovery**
+**US-1A.1: Health Check and Service Discovery** ✅ Complete (Phase 1)
 - **As** a platform engineering lead
 - **I want** standard health and readiness endpoints
 - **So that** load balancers and orchestrators can manage API servers
@@ -104,7 +104,27 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - `GET /health/ready` - Readiness probe (returns 200 if can handle requests)
     - Readiness checks: Database connectivity, event source availability
   - `GET /api/v1/info` - Service information (version, build, capabilities)
-    - Response format: `{version, build_date, api_version, features: []}`
+    - Response format: `{version, build_timestamp, build_git_hash, api_version, features: []}`
+- **Implementation**: See `docs/implementation/US-1A.1-health-checks.md`
+
+**US-1A.1.5: API Server CLI Launcher**
+- **As** a developer
+- **I want** to launch the API server via `streamflow api` command
+- **So that** I can develop and test the API endpoints independently
+- **Acceptance Criteria**:
+  - Main binary crate `streamflow` with CLI framework (clap)
+  - `streamflow api` command launches HTTP server on specified port
+  - Configuration via CLI flags: `--port`, `--bind`, `--database-url`
+  - Configuration via environment variables: `STREAMFLOW_DATABASE_URL`, `STREAMFLOW_API_PORT`, `STREAMFLOW_API_BIND`
+  - Configuration precedence: CLI flags > Environment variables > Defaults
+  - Default configuration: Port 8080, bind to 0.0.0.0
+  - Database connection pool initialization with validation
+  - Graceful shutdown on SIGTERM/SIGINT
+  - Logging: Structured logging with configurable level (via `--log-level` or `STREAMFLOW_LOG_LEVEL`)
+  - Startup logging: Log configuration and successful startup
+  - Health endpoints accessible after startup
+- **Scope**: Minimal implementation from Epic 1C focused only on API server launcher
+- **Implementation**: See `docs/implementation/US-1A.1.5-api-server-launcher.md`
 
 **US-1A.2: Error Handling and API Contracts**
 - **As** an AI startup engineer
