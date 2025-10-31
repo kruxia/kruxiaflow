@@ -42,10 +42,10 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 **Quick Start** (automated):
 ```bash
 # Set up development database
-./scripts/setup-dev-db.sh
+./tools/setup-dev-db.sh
 
 # Run tests
-./scripts/test.sh
+./tools/test.sh
 
 # Build
 cargo build --release
@@ -71,7 +71,7 @@ cargo build --release
 
 4. **Run tests**:
    ```bash
-   ./scripts/test.sh
+   ./tools/test.sh
    ```
 
 ## Project Structure
@@ -159,7 +159,7 @@ cargo sqlx prepare --workspace
 Tests require a running PostgreSQL instance. The recommended way to run tests is using the test script, which creates a clean test database:
 
 ```bash
-./scripts/test.sh
+./tools/test.sh
 ```
 
 This script will:

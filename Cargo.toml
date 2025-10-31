@@ -4,6 +4,7 @@ members = [
     "api",
     "activity",
     "dashboard",
+    "streamflow",
 ]
 resolver = "2"
 
