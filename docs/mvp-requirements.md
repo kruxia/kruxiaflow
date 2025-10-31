@@ -95,7 +95,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 
 ### User Stories
 
-**US-1A.1: Health Check and Service Discovery** ✅ Complete (Phase 1)
+**US-1A.1: Health Check and Service Discovery** ✅ Complete
 - **As** a platform engineering lead
 - **I want** standard health and readiness endpoints
 - **So that** load balancers and orchestrators can manage API servers
@@ -107,7 +107,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
     - Response format: `{version, build_timestamp, build_git_hash, api_version, features: []}`
 - **Implementation**: See `docs/implementation/US-1A.1-health-checks.md`
 
-**US-1A.1.5: API Server CLI Launcher**
+**US-1A.1.5: API Server CLI Launcher** ✅ Complete
 - **As** a developer
 - **I want** to launch the API server via `streamflow api` command
 - **So that** I can develop and test the API endpoints independently

@@ -23,6 +23,7 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
   - ✅ **[US-1.2: Event-Driven Dynamic Scheduling](docs/implementation/US-1.2-event-driven-scheduling.md)** - Reactive orchestrator
 - ✅ **Epic 1A: API Server** (Partial)
   - ✅ **[US-1A.1: Health Check and Service Discovery](docs/implementation/US-1A.1-health-checks.md)** - Liveness/readiness probes with parallel health checks
+  - ✅ **[US-1A.1.5: API Server CLI Launcher](docs/implementation/US-1A.1.5-api-server-launcher.md)** - `streamflow api` command with configuration management
 
 ### In Progress
 
@@ -49,6 +50,10 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 
 # Build
 cargo build --release
+
+# Run API server
+export STREAMFLOW_DATABASE_URL='postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow'
+./target/release/streamflow api
 ```
 
 **Manual Setup**:
@@ -74,12 +79,21 @@ cargo build --release
    ./tools/test.sh
    ```
 
+5. **Run API server**:
+   ```bash
+   export STREAMFLOW_DATABASE_URL='postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow'
+   ./target/release/streamflow api
+   # Or with custom port:
+   ./target/release/streamflow api --port 9090 --bind 127.0.0.1
+   ```
+
 ## Project Structure
 
 ```
 streamflow/
+├── streamflow/     # Main binary and CLI (streamflow api, future: serve, orchestrator, worker)
 ├── core/           # Core orchestration engine (activity queue, event sourcing)
-├── api/            # API server (HTTP/WebSocket endpoints) - In Progress
+├── api/            # API server library (HTTP/WebSocket endpoints) - In Progress
 ├── activity/       # Built-in activities and worker - TODO
 ├── dashboard/      # Web UI for monitoring - TODO
 ├── migrations/     # Database migrations
@@ -176,12 +190,49 @@ cargo test --all -- --test-threads=1
 
 **Note**: Use `--test-threads=1` to avoid race conditions between tests.
 
+### Running the API Server
+
+```bash
+# Using environment variables
+export STREAMFLOW_DATABASE_URL='postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow'
+./target/release/streamflow api
+
+# Using CLI flags
+./target/release/streamflow api \
+  --database-url postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow \
+  --port 8080 \
+  --bind 0.0.0.0 \
+  --log-level info \
+  --log-format text
+
+# View help
+./target/release/streamflow --help
+./target/release/streamflow api --help
+```
+
+Health endpoints will be available at:
+- http://localhost:8080/health - Liveness probe
+- http://localhost:8080/health/ready - Readiness probe
+- http://localhost:8080/api/v1/info - Service info
+
 ### Environment Variables
 
 Copy `.env.example` to `.env` and adjust as needed:
 
 ```bash
+# Database
 DATABASE_URL=postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow
+STREAMFLOW_DATABASE_URL=postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow
+
+# API Server
+STREAMFLOW_API_PORT=8080
+STREAMFLOW_API_BIND=0.0.0.0
+
+# Logging
+STREAMFLOW_LOG_LEVEL=info
+STREAMFLOW_LOG_FORMAT=text
+
+# Queue Configuration
 STREAMFLOW_QUEUE_POLL_INTERVAL=100ms
 STREAMFLOW_QUEUE_DEFAULT_TIMEOUT=60s
 STREAMFLOW_QUEUE_DEFAULT_MAX_RETRIES=3
@@ -204,6 +255,7 @@ STREAMFLOW_QUEUE_DEFAULT_MAX_RETRIES=3
   - [US-1.1: Activity Queue](docs/implementation/US-1.1-activity-queue.md)
   - [US-1.2: Event-Driven Scheduling](docs/implementation/US-1.2-event-driven-scheduling.md)
   - [US-1A.1: Health Check and Service Discovery](docs/implementation/US-1A.1-health-checks.md)
+  - [US-1A.1.5: API Server CLI Launcher](docs/implementation/US-1A.1.5-api-server-launcher.md)
 
 ### Additional Documentation
 - **[Post-MVP Roadmap](docs/post-mvp.md)** - Features deferred beyond MVP
@@ -216,6 +268,7 @@ STREAMFLOW_QUEUE_DEFAULT_MAX_RETRIES=3
 
 ### Epic 1A: API Server 🔨 In Progress
 - ✅ Health Check and Service Discovery
+- ✅ API Server CLI Launcher (`streamflow api` command)
 - 📋 HTTP/REST endpoints for workflow submission and management
 - 📋 Worker activity APIs (poll, heartbeat, complete, fail)
 - 📋 JWT authentication and authorization
