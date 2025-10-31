@@ -24,6 +24,7 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 - ✅ **Epic 1A: API Server** (Partial)
   - ✅ **[US-1A.1: Health Check and Service Discovery](docs/implementation/US-1A.1-health-checks.md)** - Liveness/readiness probes with parallel health checks
   - ✅ **[US-1A.1.5: API Server CLI Launcher](docs/implementation/US-1A.1.5-api-server-launcher.md)** - `streamflow api` command with configuration management
+  - ✅ **[US-1A.2: Error Handling and API Contracts](docs/implementation/US-1A.2-error-handling.md)** - Standard error responses, OpenAPI/ReDoc docs, CORS, request tracing
 
 ### In Progress
 
@@ -181,6 +182,25 @@ This script will:
 2. Drop and recreate the `streamflow_test` database
 3. Run migrations
 4. Execute all tests with proper isolation
+
+**Test Coverage:**
+```bash
+# Run tests with coverage
+./tools/test.sh --coverage
+
+# Generate HTML coverage report
+./tools/test.sh --coverage-html
+
+# Test specific crate
+./tools/test.sh -p streamflow-api --coverage
+```
+
+**More options:**
+```bash
+./tools/test.sh --help  # See all options
+```
+
+See [docs/testing.md](docs/testing.md) for comprehensive testing guide.
 
 **Manual testing:**
 ```bash
