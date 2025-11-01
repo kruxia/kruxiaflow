@@ -139,10 +139,10 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Request ID in response headers for tracing: `X-Request-ID`
   - CORS support for browser-based clients
 
-**US-1A.3: Authentication and Authorization**
+**US-1A.3: Authentication**
 - **As** a platform engineering lead
-- **I want** API authentication and authorization
-- **So that** only authorized clients can submit and query workflows
+- **I want** API authentication
+- **So that** only authenticated clients can submit and query workflows
 - **Acceptance Criteria**:
   - Bearer token authentication: `Authorization: Bearer <token>`
   - RSA256 Signed JWT tokens issued by AuthenticationService (PostgresAuthService for MVP)
