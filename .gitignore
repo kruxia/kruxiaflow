@@ -30,3 +30,9 @@ target
 .DS_Store
 test.log
 typescript
+
+# Coverage reports
+coverage/
+*.profraw
+*.profdata
+target/llvm-cov/

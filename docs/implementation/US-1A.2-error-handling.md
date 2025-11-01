@@ -2,7 +2,7 @@
 
 **Epic**: 1A - API Server
 **User Story**: US-1A.2
-**Status**: ⏳ Planning
+**Status**: ✅ Completed
 **Priority**: P0 (Must Have for MVP)
 
 ---
@@ -348,7 +348,7 @@ pub const REQUEST_ID_HEADER: &str = "X-Request-ID";
 /// Middleware that adds a unique request ID to each request
 ///
 /// The request ID is:
-/// - Generated as a UUID v4
+/// - Generated as a UUID v7
 /// - Added to the response headers as `X-Request-ID`
 /// - Injected into the tracing context for log correlation
 ///
@@ -361,7 +361,7 @@ pub async fn request_id_middleware(mut request: Request, next: Next) -> Response
         .get(REQUEST_ID_HEADER)
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string())
-        .unwrap_or_else(|| Uuid::new_v4().to_string());
+        .unwrap_or_else(|| Uuid::now_v7().to_string());
 
     // Add request ID to tracing context
     let span = tracing::info_span!("request", request_id = %request_id);
@@ -393,7 +393,7 @@ impl RequestId {
 ```
 
 **Key Features**:
-- Generates UUID v4 for unique request identification
+- Generates UUID v7 for unique request identification
 - Respects client-provided request IDs (for distributed tracing)
 - Injects request ID into tracing spans for log correlation
 - Stores request ID in request extensions for handler access
@@ -516,8 +516,7 @@ use utoipa::{OpenApi, ToSchema};
         )
     ),
     servers(
-        (url = "http://localhost:8080", description = "Local development server"),
-        (url = "http://localhost:8081", description = "Alternative local port")
+        (url = "http://localhost:8080", description = "Local development server")
     ),
     paths(
         crate::handlers::health::liveness_handler,
@@ -1077,7 +1076,7 @@ mod tests {
    #[tokio::test]
    async fn test_request_id_preserved_from_client() {
        let app = test_app().await;
-       let client_request_id = Uuid::new_v4().to_string();
+       let client_request_id = Uuid::now_v7().to_string();
 
        let response = app
            .get("/health")
@@ -1302,7 +1301,7 @@ Validation errors include field-level details:
 - ✅ OpenAPI spec validates against OpenAPI 3.0 schema
 - ✅ Documentation renders correctly in ReDoc
 - ✅ OpenAPI spec generated at compile time (no drift from implementation)
-- ✅ Request IDs are unique (UUID v4)
+- ✅ Request IDs are unique (UUID v7)
 - ✅ CORS configuration allows browser-based clients
 - ✅ Internal errors logged without exposing sensitive details
 
@@ -1454,14 +1453,14 @@ Validation errors include field-level details:
 
 ## Implementation Notes
 
-**Status**: Ready for implementation after US-1A.1.5 is complete.
+**Status**: ✅ Completed (2025-10-31)
 
-**Estimated Effort**: 9 hours total
-- Error handling: 2 hours
-- Request ID middleware: 1 hour
-- CORS middleware: 1 hour
-- OpenAPI specification: 2 hours
-- Documentation UI: 1 hour
+**Actual Implementation Time**: ~6 hours
+- Error handling: 1 hour
+- Request ID middleware: 0.5 hours
+- CORS middleware: 0.5 hours
+- OpenAPI specification with utoipa: 1.5 hours
+- ReDoc documentation UI: 0.5 hours
 - Integration and testing: 2 hours
 
 **Implementation Order**:
@@ -1469,10 +1468,43 @@ Validation errors include field-level details:
 2. Request ID middleware (tracing support)
 3. CORS middleware (browser support)
 4. OpenAPI specification (documentation)
-5. Documentation UI (developer experience)
+5. ReDoc documentation UI (developer experience)
 6. Integration and testing (verification)
+
+**Implemented Components**:
+- ✅ `api/src/error.rs` - Standard error types (AppError, ApiErrorResponse, ErrorCode, ValidationErrors)
+- ✅ `api/src/middleware/request_id.rs` - Request ID middleware with UUID v7 generation
+- ✅ `api/src/middleware/cors.rs` - CORS middleware with security-compliant configuration
+- ✅ `api/src/openapi.rs` - OpenAPI 3.1.0 specification using utoipa
+- ✅ `api/src/health/responses.rs` - Response types with ToSchema derives
+- ✅ `api/src/routes.rs` - Updated with middleware layers, ReDoc UI, and 404 fallback
+- ✅ `api/tests/error_handling_test.rs` - Comprehensive integration tests (15 tests)
+- ✅ Unit tests in error.rs (6 tests)
+
+**Key Implementation Decisions**:
+1. **CORS Configuration**: Removed `allow_credentials(true)` when using `allow_origin(Any)` to comply with browser security restrictions. This is correct for MVP; production should use specific origins with credentials enabled.
+2. **utoipa for OpenAPI**: Used compile-time OpenAPI generation via utoipa instead of runtime spec building. This ensures zero documentation drift.
+3. **ReDoc over Swagger UI**: Chose ReDoc for cleaner, more professional documentation UI. Developers can import OpenAPI spec into Postman for interactive testing.
+4. **404 Fallback Handler**: Added `fallback_404()` to ensure all 404 errors return standard error format.
+5. **ErrorCode Enum**: Used serde's `rename_all = "SCREAMING_SNAKE_CASE"` for automatic case conversion without manual string constants.
+
+**Test Results**:
+- ✅ All 84 tests passing (9 api unit + 14 health integration + 15 error handling integration + 46 core tests)
+- ✅ Zero clippy warnings
+- ✅ Zero compiler warnings
+- ✅ Database health check tests moved from source files to integration tests (test_check_database_health_success, test_check_event_source_health_success, test_check_activity_queue_health_success)
+
+**Test Coverage Infrastructure**:
+- ✅ Enhanced `tools/test.sh` with cargo-llvm-cov support
+- ✅ Coverage options: `--coverage`, `--coverage-html`, `--coverage-ci`
+- ✅ HTML coverage reports with automatic browser opening
+- ✅ lcov format for CI/CD integration
+- ✅ Created comprehensive `docs/testing.md` documentation
+- ✅ Added `tools/README.md` for tool documentation
 
 **Post-Implementation**:
 - All subsequent API endpoints (US-1A.3+) will use standardized error handling
-- OpenAPI spec will be updated as new endpoints are added
-- Documentation UI provides immediate feedback during development
+- OpenAPI spec will be updated as new endpoints are added via utoipa annotations
+- Documentation UI provides immediate feedback during development at `/api/v1/docs`
+- OpenAPI spec available at `/api/v1/openapi.json` for Postman/client generation
+- Test coverage tracking available via `./tools/test.sh --coverage-html`
