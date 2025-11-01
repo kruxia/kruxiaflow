@@ -18,7 +18,7 @@
 - Main binary crate `streamflow` with CLI framework (clap)
 - `streamflow api` command launches HTTP server on specified port
 - Configuration via CLI flags: `--port`, `--bind`, `--database-url`
-- Configuration via environment variables: `STREAMFLOW_DATABASE_URL`, `STREAMFLOW_API_PORT`, `STREAMFLOW_API_BIND`
+- Configuration via environment variables: `DATABASE_URL`, `STREAMFLOW_API_PORT`, `STREAMFLOW_API_BIND`
 - Configuration precedence: CLI flags > Environment variables > Defaults
 - Default configuration: Port 8080, bind to 0.0.0.0
 - Database connection pool initialization with validation
@@ -172,7 +172,7 @@ struct Cli {
     /// Database connection URL
     #[arg(
         long,
-        env = "STREAMFLOW_DATABASE_URL",
+        env = "DATABASE_URL",
         global = true,
         help = "PostgreSQL connection URL (postgres://user:pass@host:port/db)"
     )]
@@ -273,8 +273,8 @@ impl ApiConfig {
     ) -> Result<Self> {
         // Database URL: Required
         let database_url = database_url_cli
-            .or_else(|| std::env::var("STREAMFLOW_DATABASE_URL").ok())
-            .context("Database URL is required (--database-url or STREAMFLOW_DATABASE_URL)")?;
+            .or_else(|| std::env::var("DATABASE_URL").ok())
+            .context("Database URL is required (--database-url or DATABASE_URL)")?;
 
         // Port: CLI > Env > Default (8080)
         let port = port_cli
@@ -707,7 +707,7 @@ resolver = "2"
 
 ```bash
 # Required
-STREAMFLOW_DATABASE_URL=postgres://user:pass@host:port/database
+DATABASE_URL=postgres://user:pass@host:port/database
 
 # Optional (with defaults)
 STREAMFLOW_API_PORT=8080
@@ -724,7 +724,7 @@ streamflow api [OPTIONS]
 OPTIONS:
   -p, --port <PORT>              Port to bind API server to [env: STREAMFLOW_API_PORT] [default: 8080]
   -b, --bind <BIND>              Address to bind to [env: STREAMFLOW_API_BIND] [default: 0.0.0.0]
-      --database-url <URL>       PostgreSQL connection URL [env: STREAMFLOW_DATABASE_URL]
+      --database-url <URL>       PostgreSQL connection URL [env: DATABASE_URL]
       --log-level <LEVEL>        Log level (trace, debug, info, warn, error) [env: STREAMFLOW_LOG_LEVEL] [default: info]
       --log-format <FORMAT>      Log format (text, json) [env: STREAMFLOW_LOG_FORMAT] [default: text]
   -h, --help                     Print help
@@ -774,7 +774,7 @@ spec:
         image: streamflow:latest
         command: ["streamflow", "api"]
         env:
-        - name: STREAMFLOW_DATABASE_URL
+        - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
               name: streamflow-secrets

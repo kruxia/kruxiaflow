@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use utoipa::ToSchema;
 
 /// Liveness probe response
@@ -7,7 +6,23 @@ use utoipa::ToSchema;
 pub struct LivenessResponse {
     /// Server liveness status (always "ok" if endpoint responds)
     #[schema(example = "ok")]
-    pub status: String,
+    pub status: &'static str,
+}
+
+/// Individual health check status
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct HealthCheckStatus {
+    /// Database health status
+    #[schema(example = "ok")]
+    pub database: &'static str,
+
+    /// Event source health status
+    #[schema(example = "ok")]
+    pub event_source: &'static str,
+
+    /// Activity queue health status
+    #[schema(example = "ok")]
+    pub queue: &'static str,
 }
 
 /// Readiness probe response
@@ -15,10 +30,10 @@ pub struct LivenessResponse {
 pub struct ReadinessResponse {
     /// Overall readiness status
     #[schema(example = "ready")]
-    pub status: String,
+    pub status: &'static str,
 
     /// Individual health check results
-    pub checks: HashMap<String, String>,
+    pub checks: HealthCheckStatus,
 }
 
 /// Service information response

@@ -22,10 +22,6 @@ pub async fn request_id_middleware(mut request: Request, next: Next) -> Response
         .map(|s| s.to_string())
         .unwrap_or_else(|| Uuid::now_v7().to_string());
 
-    // Add request ID to tracing context
-    let span = tracing::info_span!("request", request_id = %request_id);
-    let _guard = span.enter();
-
     // Store request ID in extensions for access by handlers
     request
         .extensions_mut()

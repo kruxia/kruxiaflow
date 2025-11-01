@@ -73,11 +73,11 @@ Post-MVP expands to:
 **Configuration Example**:
 ```bash
 # Switch from MVP custom auth to Auth0
-STREAMFLOW_AUTH_PROVIDER=auth0
-STREAMFLOW_AUTH_DOMAIN=company.auth0.com
-STREAMFLOW_AUTH_AUDIENCE=streamflow-api
-STREAMFLOW_AUTH_CLIENT_ID=streamflow_server
-STREAMFLOW_AUTH_CLIENT_SECRET=...
+STREAMFLOW_OAUTH_PROVIDER=auth0
+STREAMFLOW_OAUTH_DOMAIN=company.auth0.com
+STREAMFLOW_OAUTH_AUDIENCE=streamflow-api
+STREAMFLOW_OAUTH_CLIENT_ID=streamflow_server
+STREAMFLOW_OAUTH_CLIENT_SECRET=...
 ```
 
 ---

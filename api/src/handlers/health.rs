@@ -1,10 +1,9 @@
 use crate::health::{
-    LivenessResponse, ReadinessResponse, ServiceInfo, check_activity_queue_health,
-    check_database_health, check_event_source_health,
+    HealthCheckStatus, LivenessResponse, ReadinessResponse, ServiceInfo,
+    check_activity_queue_health, check_database_health, check_event_source_health,
 };
 use crate::state::AppState;
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
-use std::collections::HashMap;
 
 /// Liveness probe handler
 ///
@@ -29,9 +28,7 @@ pub async fn liveness_handler() -> impl IntoResponse {
     // If this handler runs, server is alive
     (
         StatusCode::OK,
-        Json(LivenessResponse {
-            status: "ok".to_string(),
-        }),
+        Json(LivenessResponse { status: "ok" }),
     )
 }
 
@@ -76,44 +73,34 @@ pub async fn readiness_handler(State(app_state): State<AppState>) -> impl IntoRe
         check_activity_queue_health(&app_state.db_pool)
     );
 
-    let mut checks = HashMap::new();
-    let mut all_healthy = true;
-
-    // Process database check result
-    match db_result {
-        Ok(_) => {
-            checks.insert("database".to_string(), "ok".to_string());
-        }
+    // Use static strings to avoid allocations
+    let database_status = match db_result {
+        Ok(_) => "ok",
         Err(e) => {
-            checks.insert("database".to_string(), "unhealthy".to_string());
-            all_healthy = false;
             tracing::warn!("Database health check failed: {}", e);
+            "unhealthy"
         }
-    }
+    };
 
-    // Process event source check result
-    match event_source_result {
-        Ok(_) => {
-            checks.insert("event_source".to_string(), "ok".to_string());
-        }
+    let event_source_status = match event_source_result {
+        Ok(_) => "ok",
         Err(e) => {
-            checks.insert("event_source".to_string(), "unhealthy".to_string());
-            all_healthy = false;
             tracing::warn!("Event source health check failed: {}", e);
+            "unhealthy"
         }
-    }
+    };
 
-    // Process activity queue check result
-    match queue_result {
-        Ok(_) => {
-            checks.insert("queue".to_string(), "ok".to_string());
-        }
+    let queue_status = match queue_result {
+        Ok(_) => "ok",
         Err(e) => {
-            checks.insert("queue".to_string(), "unhealthy".to_string());
-            all_healthy = false;
             tracing::warn!("Activity queue health check failed: {}", e);
+            "unhealthy"
         }
-    }
+    };
+
+    let all_healthy = database_status == "ok"
+        && event_source_status == "ok"
+        && queue_status == "ok";
 
     let status_code = if all_healthy {
         StatusCode::OK
@@ -124,12 +111,12 @@ pub async fn readiness_handler(State(app_state): State<AppState>) -> impl IntoRe
     (
         status_code,
         Json(ReadinessResponse {
-            status: if all_healthy {
-                "ready".to_string()
-            } else {
-                "not_ready".to_string()
+            status: if all_healthy { "ready" } else { "not_ready" },
+            checks: HealthCheckStatus {
+                database: database_status,
+                event_source: event_source_status,
+                queue: queue_status,
             },
-            checks,
         }),
     )
 }

@@ -1844,7 +1844,7 @@ STREAMFLOW_ORCHESTRATOR_WORKERS=1         # Number of orchestrator instances
 STREAMFLOW_ORCHESTRATOR_TIMEOUT=30s       # Evaluation timeout
 
 # Database configuration
-STREAMFLOW_DATABASE_URL=postgres://localhost/streamflow
+DATABASE_URL=postgres://localhost/streamflow
 STREAMFLOW_DATABASE_MAX_CONNECTIONS=20
 
 # Logging
