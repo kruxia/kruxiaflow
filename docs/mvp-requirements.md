@@ -115,7 +115,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Main binary crate `streamflow` with CLI framework (clap)
   - `streamflow api` command launches HTTP server on specified port
   - Configuration via CLI flags: `--port`, `--bind`, `--database-url`
-  - Configuration via environment variables: `STREAMFLOW_DATABASE_URL`, `STREAMFLOW_API_PORT`, `STREAMFLOW_API_BIND`
+  - Configuration via environment variables: `DATABASE_URL`, `STREAMFLOW_API_PORT`, `STREAMFLOW_API_BIND`
   - Configuration precedence: CLI flags > Environment variables > Defaults
   - Default configuration: Port 8080, bind to 0.0.0.0
   - Database connection pool initialization with validation
@@ -336,7 +336,7 @@ The built-in worker is implemented as an HTTP client to the API server rather th
   - `streamflow worker` - Launch worker only
     - Flags: `--activity-types` (namespace.name list), `--api-url`, `--worker-id`
   - Each service can run on different hosts/containers
-  - Environment variable configuration: `STREAMFLOW_DATABASE_URL`, `STREAMFLOW_API_URL`, etc.
+  - Environment variable configuration: `DATABASE_URL`, `STREAMFLOW_API_URL`, etc.
 
 **US-1C.4: Configuration Management**
 - **As** a platform engineering lead
@@ -344,7 +344,7 @@ The built-in worker is implemented as an HTTP client to the API server rather th
 - **So that** I can deploy StreamFlow in different environments without code changes
 - **Acceptance Criteria**:
   - Configuration precedence: CLI flags > Environment variables > Defaults
-  - Environment variables: `STREAMFLOW_DATABASE_URL`, `STREAMFLOW_API_PORT`, `STREAMFLOW_LOG_LEVEL`, etc.
+  - Environment variables: `DATABASE_URL`, `STREAMFLOW_API_PORT`, `STREAMFLOW_LOG_LEVEL`, etc.
   - Configuration validation on startup (fail fast with clear error messages)
   - Configuration file support: Optional YAML/TOML config file via `--config` flag (post-MVP)
   - Sensitive values: Support for environment variables (no secrets in CLI arguments)

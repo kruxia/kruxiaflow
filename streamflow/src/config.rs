@@ -22,8 +22,8 @@ impl ApiConfig {
     ) -> Result<Self> {
         // Database URL: Required
         let database_url = database_url_cli
-            .or_else(|| std::env::var("STREAMFLOW_DATABASE_URL").ok())
-            .context("Database URL is required (--database-url or STREAMFLOW_DATABASE_URL)")?;
+            .or_else(|| std::env::var("DATABASE_URL").ok())
+            .context("Database URL is required (--database-url or DATABASE_URL)")?;
 
         // Port: CLI > Env > Default (8080)
         let port = port_cli
@@ -112,7 +112,7 @@ mod tests {
     fn test_defaults() {
         // Set database URL via environment for test
         unsafe {
-            std::env::set_var("STREAMFLOW_DATABASE_URL", "postgres://localhost/test");
+            std::env::set_var("DATABASE_URL", "postgres://localhost/test");
         }
 
         let config = ApiConfig::new(None, None, None).unwrap();
@@ -122,7 +122,7 @@ mod tests {
 
         // Clean up
         unsafe {
-            std::env::remove_var("STREAMFLOW_DATABASE_URL");
+            std::env::remove_var("DATABASE_URL");
         }
     }
 
@@ -130,7 +130,7 @@ mod tests {
     #[serial]
     fn test_cli_overrides_env() {
         unsafe {
-            std::env::set_var("STREAMFLOW_DATABASE_URL", "postgres://localhost/env_db");
+            std::env::set_var("DATABASE_URL", "postgres://localhost/env_db");
             std::env::set_var("STREAMFLOW_API_PORT", "9090");
             std::env::set_var("STREAMFLOW_API_BIND", "127.0.0.1");
         }
@@ -148,7 +148,7 @@ mod tests {
 
         // Clean up
         unsafe {
-            std::env::remove_var("STREAMFLOW_DATABASE_URL");
+            std::env::remove_var("DATABASE_URL");
             std::env::remove_var("STREAMFLOW_API_PORT");
             std::env::remove_var("STREAMFLOW_API_BIND");
         }
@@ -158,7 +158,7 @@ mod tests {
     #[serial]
     fn test_env_overrides_defaults() {
         unsafe {
-            std::env::set_var("STREAMFLOW_DATABASE_URL", "postgres://localhost/test");
+            std::env::set_var("DATABASE_URL", "postgres://localhost/test");
             std::env::set_var("STREAMFLOW_API_PORT", "9000");
             std::env::set_var("STREAMFLOW_API_BIND", "localhost");
         }
@@ -170,7 +170,7 @@ mod tests {
 
         // Clean up
         unsafe {
-            std::env::remove_var("STREAMFLOW_DATABASE_URL");
+            std::env::remove_var("DATABASE_URL");
             std::env::remove_var("STREAMFLOW_API_PORT");
             std::env::remove_var("STREAMFLOW_API_BIND");
         }
@@ -180,7 +180,7 @@ mod tests {
     #[serial]
     fn test_invalid_port() {
         unsafe {
-            std::env::set_var("STREAMFLOW_DATABASE_URL", "postgres://localhost/test");
+            std::env::set_var("DATABASE_URL", "postgres://localhost/test");
         }
 
         let result = ApiConfig::new(None, Some(0), None);
@@ -188,7 +188,7 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("Port must be"));
 
         unsafe {
-            std::env::remove_var("STREAMFLOW_DATABASE_URL");
+            std::env::remove_var("DATABASE_URL");
         }
     }
 
@@ -196,7 +196,7 @@ mod tests {
     #[serial]
     fn test_database_url_required() {
         unsafe {
-            std::env::remove_var("STREAMFLOW_DATABASE_URL");
+            std::env::remove_var("DATABASE_URL");
         }
 
         let result = ApiConfig::new(None, None, None);

@@ -1036,28 +1036,28 @@ pub struct TokenResponse {
 Configuration:
 ```bash
 # MVP: Custom auth provider (PostgreSQL backend)
-STREAMFLOW_AUTH_PROVIDER=custom
-STREAMFLOW_AUTH_JWT_SECRET=your-secret-key-here
-STREAMFLOW_AUTH_JWT_ISSUER=streamflow
-STREAMFLOW_AUTH_JWT_AUDIENCE=streamflow-api
-STREAMFLOW_AUTH_TOKEN_TTL=3600  # 1 hour
+STREAMFLOW_OAUTH_PROVIDER=custom
+STREAMFLOW_OAUTH_JWT_SECRET=your-secret-key-here
+STREAMFLOW_OAUTH_JWT_ISSUER=streamflow
+STREAMFLOW_OAUTH_JWT_AUDIENCE=streamflow-api
+STREAMFLOW_OAUTH_TOKEN_TTL=3600  # 1 hour
 
 # Post-MVP: External identity providers
-STREAMFLOW_AUTH_PROVIDER=auth0
-STREAMFLOW_AUTH_DOMAIN=example.auth0.com
-STREAMFLOW_AUTH_CLIENT_ID=worker_app
-STREAMFLOW_AUTH_CLIENT_SECRET=secret_xyz
+STREAMFLOW_OAUTH_PROVIDER=auth0
+STREAMFLOW_OAUTH_DOMAIN=example.auth0.com
+STREAMFLOW_OAUTH_CLIENT_ID=worker_app
+STREAMFLOW_OAUTH_CLIENT_SECRET=secret_xyz
 ```
 
-#### Postgres Auth Provider Implementation (MVP)
+#### Postgres OAuth Provider Implementation (MVP)
 
-For MVP, StreamFlow includes a built-in Postgres Auth Provider that uses PostgreSQL as the backend, eliminating external identity provider dependencies.
+For MVP, StreamFlow includes a built-in Postgres OAuth Provider that uses PostgreSQL as the backend, eliminating external identity provider dependencies.
 
 **Database Schema**:
 
 ```sql
 -- Users table (for password grant flow and user management)
-CREATE TABLE auth_users (
+CREATE TABLE oauth_users (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     username TEXT UNIQUE NOT NULL,
     email TEXT UNIQUE NOT NULL,
@@ -1067,11 +1067,11 @@ CREATE TABLE auth_users (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_auth_users_username ON auth_users(username);
-CREATE INDEX idx_auth_users_email ON auth_users(email);
+CREATE INDEX idx_auth_users_username ON oauth_users(username);
+CREATE INDEX idx_auth_users_email ON oauth_users(email);
 
 -- Service accounts/clients (for client_credentials flow)
-CREATE TABLE auth_clients (
+CREATE TABLE oauth_clients (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     client_id TEXT UNIQUE NOT NULL,
     client_secret_hash TEXT NOT NULL,  -- bcrypt hash
@@ -1083,21 +1083,21 @@ CREATE TABLE auth_clients (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_auth_clients_client_id ON auth_clients(client_id);
+CREATE INDEX idx_auth_clients_client_id ON oauth_clients(client_id);
 
 -- Refresh tokens (for token refresh)
-CREATE TABLE auth_refresh_tokens (
+CREATE TABLE oauth_refresh_tokens (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     token_hash TEXT UNIQUE NOT NULL,
-    user_id UUID REFERENCES auth_users(id) ON DELETE CASCADE,
-    client_id UUID REFERENCES auth_clients(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES oauth_users(id) ON DELETE CASCADE,
+    client_id UUID REFERENCES oauth_clients(id) ON DELETE CASCADE,
     expires_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     revoked_at TIMESTAMPTZ
 );
 
-CREATE INDEX idx_auth_refresh_tokens_user ON auth_refresh_tokens(user_id);
-CREATE INDEX idx_auth_refresh_tokens_expires ON auth_refresh_tokens(expires_at);
+CREATE INDEX idx_auth_refresh_tokens_user ON oauth_refresh_tokens(user_id);
+CREATE INDEX idx_auth_refresh_tokens_expires ON oauth_refresh_tokens(expires_at);
 ```
 
 **PostgresAuthService Implementation**:
@@ -1155,8 +1155,8 @@ impl AuthenticationService for PostgresAuthService {
     ) -> Result<TokenResponse> {
         // Lookup client in database
         let client = sqlx::query_as!(
-            AuthClient,
-            "SELECT * FROM auth_clients WHERE client_id = $1 AND is_active = true",
+            OAuthClient,
+            "SELECT * FROM oauth_clients WHERE client_id = $1 AND is_active = true",
             client_id
         )
         .fetch_optional(&self.pool)
@@ -1199,8 +1199,8 @@ impl AuthenticationService for PostgresAuthService {
     ) -> Result<TokenResponse> {
         // Lookup user in database
         let user = sqlx::query_as!(
-            AuthUser,
-            "SELECT * FROM auth_users WHERE username = $1 AND is_active = true",
+            OAuthUser,
+            "SELECT * FROM oauth_users WHERE username = $1 AND is_active = true",
             username
         )
         .fetch_optional(&self.pool)
@@ -1233,7 +1233,7 @@ impl AuthenticationService for PostgresAuthService {
         let refresh_token_hash = bcrypt::hash(&refresh_token, bcrypt::DEFAULT_COST)?;
 
         sqlx::query!(
-            "INSERT INTO auth_refresh_tokens (token_hash, user_id, expires_at)
+            "INSERT INTO oauth_refresh_tokens (token_hash, user_id, expires_at)
              VALUES ($1, $2, $3)",
             refresh_token_hash,
             user.id,
@@ -1256,7 +1256,7 @@ impl AuthenticationService for PostgresAuthService {
         // Lookup and validate refresh token
         let token_record = sqlx::query!(
             "SELECT user_id, expires_at, revoked_at
-             FROM auth_refresh_tokens
+             FROM oauth_refresh_tokens
              WHERE token_hash = $1",
             refresh_token_hash
         )
@@ -1274,8 +1274,8 @@ impl AuthenticationService for PostgresAuthService {
 
         // Get user
         let user = sqlx::query_as!(
-            AuthUser,
-            "SELECT * FROM auth_users WHERE id = $1 AND is_active = true",
+            OAuthUser,
+            "SELECT * FROM oauth_users WHERE id = $1 AND is_active = true",
             token_record.user_id
         )
         .fetch_one(&self.pool)
@@ -1329,7 +1329,7 @@ pub async fn create_client(pool: &PgPool, name: &str) -> Result<(String, String)
     let client_secret_hash = hash(&client_secret, bcrypt::DEFAULT_COST)?;
 
     sqlx::query!(
-        "INSERT INTO auth_clients (client_id, client_secret_hash, name, scopes)
+        "INSERT INTO oauth_clients (client_id, client_secret_hash, name, scopes)
          VALUES ($1, $2, $3, $4)",
         client_id,
         client_secret_hash,
@@ -1359,8 +1359,8 @@ pub async fn create_user(
     let password_hash = hash(password, bcrypt::DEFAULT_COST)?;
 
     let user = sqlx::query_as!(
-        AuthUser,
-        "INSERT INTO auth_users (username, email, password_hash)
+        OAuthUser,
+        "INSERT INTO oauth_users (username, email, password_hash)
          VALUES ($1, $2, $3)
          RETURNING *",
         username,
@@ -1416,7 +1416,7 @@ pub struct Claims {
 }
 ```
 
-**Benefits of Postgres Auth Provider (MVP)**:
+**Benefits of Postgres OAuth Provider (MVP)**:
 
 - ✅ **True single-server deployment**: No external identity provider dependency
 - ✅ **PostgreSQL only**: All data in one database
@@ -1431,8 +1431,8 @@ pub struct Claims {
 When scaling to enterprise, can switch to Auth0/Okta:
 ```bash
 # Switch from custom to Auth0
-STREAMFLOW_AUTH_PROVIDER=auth0
-STREAMFLOW_AUTH_DOMAIN=company.auth0.com
+STREAMFLOW_OAUTH_PROVIDER=auth0
+STREAMFLOW_OAUTH_DOMAIN=company.auth0.com
 ```
 
 The same AuthenticationService interface ensures no code changes required in core services.
@@ -2029,11 +2029,11 @@ pub struct StreamFlowServices {
 **Simple configuration switch**:
 ```bash
 # MVP (default)
-STREAMFLOW_AUTH_PROVIDER=custom
+STREAMFLOW_OAUTH_PROVIDER=custom
 
 # Enterprise (just change one env var)
-STREAMFLOW_AUTH_PROVIDER=auth0
-STREAMFLOW_AUTH_DOMAIN=company.auth0.com
+STREAMFLOW_OAUTH_PROVIDER=auth0
+STREAMFLOW_OAUTH_DOMAIN=company.auth0.com
 ```
 
 ### Service Configuration
@@ -2043,8 +2043,8 @@ Services are configured entirely through environment variables and command-line 
 Command-line takes precedence over environment:
 ```bash
 # Environment
-export STREAMFLOW_AUTH_PROVIDER=auth0
-export STREAMFLOW_DATABASE_URL=postgres://localhost/streamflow
+export STREAMFLOW_OAUTH_PROVIDER=auth0
+export DATABASE_URL=postgres://localhost/streamflow
 export STREAMFLOW_STORAGE_PROVIDER=postgresql
 
 # Command-line override

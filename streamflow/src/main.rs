@@ -18,7 +18,7 @@ struct Cli {
     /// Database connection URL
     #[arg(
         long,
-        env = "STREAMFLOW_DATABASE_URL",
+        env = "DATABASE_URL",
         global = true,
         help = "PostgreSQL connection URL (postgres://user:pass@host:port/db)"
     )]

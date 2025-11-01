@@ -53,7 +53,7 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 cargo build --release
 
 # Run API server
-export STREAMFLOW_DATABASE_URL='postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow'
+export DATABASE_URL='postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow'
 ./target/release/streamflow api
 ```
 
@@ -82,7 +82,7 @@ export STREAMFLOW_DATABASE_URL='postgres://streamflow:streamflow_dev@127.0.0.1:5
 
 5. **Run API server**:
    ```bash
-   export STREAMFLOW_DATABASE_URL='postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow'
+   export DATABASE_URL='postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow'
    ./target/release/streamflow api
    # Or with custom port:
    ./target/release/streamflow api --port 9090 --bind 127.0.0.1
@@ -214,7 +214,7 @@ cargo test --all -- --test-threads=1
 
 ```bash
 # Using environment variables
-export STREAMFLOW_DATABASE_URL='postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow'
+export DATABASE_URL='postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow'
 ./target/release/streamflow api
 
 # Using CLI flags
@@ -242,7 +242,7 @@ Copy `.env.example` to `.env` and adjust as needed:
 ```bash
 # Database
 DATABASE_URL=postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow
-STREAMFLOW_DATABASE_URL=postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow
+DATABASE_URL=postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow
 
 # API Server
 STREAMFLOW_API_PORT=8080

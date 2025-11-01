@@ -17,7 +17,7 @@
 
 - Bearer token authentication: `Authorization: Bearer <token>`
 - RSA256 Signed JWT tokens issued by AuthenticationService (PostgresAuthService for MVP)
-- `POST /api/v1/auth/token` - Issue token with credentials (username/password or API key)
+- `POST /api/v1/oauth/token` - Issue token with credentials (OAuth 2.0 compliant endpoint)
 - Token expiration: Configurable TTL (default 24 hours)
 - Authorization checks: Validate RSA256 signed token on all protected endpoints
 - 401 Unauthorized for missing/invalid tokens with helpful error message
@@ -62,7 +62,7 @@ Per `docs/architecture.md` (Service Interfaces - AuthenticationService):
 - AuthenticationService interface provides token issuance and validation
 - PostgresAuthService (MVP) uses custom JWT signing with PostgreSQL user/client storage
 - API server caches JWT signing keys at startup to minimize per-request overhead
-- Tokens issued via `/api/v1/auth/token` endpoint (client_credentials or password grant)
+- Tokens issued via `/api/v1/oauth/token` endpoint (client_credentials or password grant)
 - Token validation via `validate_token()` method on all protected endpoints
 
 Per `docs/mvp-requirements.md` (Epic 1A, US-1A.3):
@@ -81,10 +81,11 @@ This means:
 - ✅ Target: <1ms validation overhead
 
 **Claims for Future Features** (not extracted in MVP):
-The JWT will include standard claims (sub, iss, aud, exp, iat) plus custom claims (client_id, username, email, scopes). While MVP doesn't extract or use these claims for authorization, the structure is ready for future:
+The JWT will include only standard claims (sub, iss, aud, exp, iat) for MVP. The `sub` (subject) claim uniquely identifies the authenticated entity (user_id or client_id). While MVP doesn't use claims for authorization, additional claims can be added in future for:
 - Multi-tenancy (tenant_id claim)
 - Role-based authorization (scopes/roles claims)
-- User context (username, email claims)
+- User context (email, name claims)
+- Fine-grained permissions (custom claims)
 
 ---
 
@@ -111,7 +112,7 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use core_auth::{AuthenticationService, Claims};
+use oauth::{AuthenticationService, Claims};
 use std::sync::Arc;
 
 /// Extract Bearer token from Authorization header
@@ -172,34 +173,22 @@ pub async fn auth_middleware(
 /// Validated JWT claims extracted from request
 ///
 /// This type is inserted into request extensions by the auth middleware
-/// and can be extracted by handlers that need user context.
+/// and can be extracted by handlers that need the authenticated subject.
+///
+/// For MVP, this simply wraps the standard Claims structure. Post-MVP,
+/// handlers can use this to access authorization data (scopes, tenant_id, etc.)
 #[derive(Debug, Clone)]
 pub struct ValidatedClaims(pub Claims);
 
 impl ValidatedClaims {
-    /// Get the subject (user_id or client_id)
+    /// Get the subject (user_id or client_id) - the authenticated entity
     pub fn subject(&self) -> &str {
         &self.0.sub
     }
 
-    /// Get client_id (for client_credentials flow)
-    pub fn client_id(&self) -> Option<&str> {
-        self.0.client_id.as_deref()
-    }
-
-    /// Get username (for password flow)
-    pub fn username(&self) -> Option<&str> {
-        self.0.username.as_deref()
-    }
-
-    /// Get email (for password flow)
-    pub fn email(&self) -> Option<&str> {
-        self.0.email.as_deref()
-    }
-
-    /// Get scopes
-    pub fn scopes(&self) -> &[String] {
-        &self.0.scopes
+    /// Get the full claims for future authorization use
+    pub fn claims(&self) -> &Claims {
+        &self.0
     }
 }
 ```
@@ -219,13 +208,13 @@ impl ValidatedClaims {
 
 **Responsibilities**:
 1. Initialize AuthenticationService during server startup
-2. Cache JWT signing keys in memory
+2. Cache JWT signing keys in memory (issuer, valid audience(s) are in config settings)
 3. Provide service to middleware and handlers
 
 **Implementation**:
 
 ```rust
-use core_auth::{AuthenticationService, PostgresAuthService, AuthConfig};
+use oauth::{AuthenticationService, PostgresAuthService, AuthConfig};
 use sqlx::PgPool;
 use std::sync::Arc;
 
@@ -262,10 +251,10 @@ impl AppState {
 
 ### Component 3: Token Issuance Endpoint
 
-**Location**: `api/src/handlers/auth.rs`
+**Location**: `api/src/handlers/oauth.rs`
 
 **Responsibilities**:
-1. Handle `POST /api/v1/auth/token` requests
+1. Handle `POST /api/v1/oauth/token` requests (OAuth 2.0 compliant)
 2. Support both client_credentials and password grant flows
 3. Issue JWT tokens with configurable TTL
 4. Return token response with expiration info
@@ -273,44 +262,116 @@ impl AppState {
 **Implementation**:
 
 ```rust
-use crate::error::{AppError, ApiResult};
+use crate::error::{AppError, ApiResult, ValidationErrors};
 use crate::state::AppState;
-use axum::{extract::State, Json};
-use core_auth::{TokenRequest, TokenResponse};
+use axum::{extract::State, Form, Json};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-/// Token request body
+/// OAuth 2.0 grant types
 ///
-/// Supports two OAuth 2.0 grant types:
-/// - client_credentials: For service accounts / workers
-/// - password: For human users (testing/admin)
-#[derive(Debug, Deserialize, ToSchema)]
-#[serde(tag = "grant_type")]
-pub enum TokenRequestBody {
-    /// Client credentials grant (for workers and services)
-    #[serde(rename = "client_credentials")]
-    ClientCredentials {
-        client_id: String,
-        client_secret: String,
-    },
+/// Per RFC 6749, grant_type determines which authentication flow to use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum GrantType {
+    /// Client credentials grant (RFC 6749 Section 4.4)
+    /// For service accounts and workers
+    ClientCredentials,
 
-    /// Password grant (for human users)
-    #[serde(rename = "password")]
-    Password {
-        username: String,
-        password: String,
-    },
+    /// Resource owner password credentials grant (RFC 6749 Section 4.3)
+    /// For human users (testing/admin)
+    Password,
+
+    /// Refresh token grant (RFC 6749 Section 6)
+    /// For refreshing expired access tokens
+    RefreshToken,
 }
 
-/// Token response
+/// OAuth 2.0 token request
+///
+/// Compliant with RFC 6749 (OAuth 2.0 specification).
+/// Accepts both application/x-www-form-urlencoded (per spec)
+/// and application/json (for convenience).
+///
+/// All fields are flat in the request body. The grant_type field
+/// determines which other fields are required.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct TokenRequest {
+    /// OAuth 2.0 grant type - determines which fields are required
+    pub grant_type: GrantType,
+
+    /// Client identifier (required for client_credentials grant)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_id: Option<String>,
+
+    /// Client secret (required for client_credentials grant)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+
+    /// Username (required for password grant)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+
+    /// Password (required for password grant)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+
+    /// Refresh token (required for refresh_token grant)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+
+    /// Requested scope (optional, for future use)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+}
+
+impl TokenRequest {
+    /// Validate that required fields are present for the grant type
+    fn validate(&self) -> Result<(), ValidationErrors> {
+        let mut errors = ValidationErrors::new();
+
+        match self.grant_type {
+            GrantType::ClientCredentials => {
+                if self.client_id.is_none() {
+                    errors.add("client_id", "Required for client_credentials grant");
+                }
+                if self.client_secret.is_none() {
+                    errors.add("client_secret", "Required for client_credentials grant");
+                }
+            }
+            GrantType::Password => {
+                if self.username.is_none() {
+                    errors.add("username", "Required for password grant");
+                }
+                if self.password.is_none() {
+                    errors.add("password", "Required for password grant");
+                }
+            }
+            GrantType::RefreshToken => {
+                if self.refresh_token.is_none() {
+                    errors.add("refresh_token", "Required for refresh_token grant");
+                }
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+}
+
+/// OAuth 2.0 token response
+///
+/// Compliant with RFC 6749 Section 5.1.
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
-pub struct TokenResponseBody {
+pub struct TokenResponse {
     /// JWT access token
     #[schema(example = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...")]
     pub access_token: String,
 
-    /// Token type (always "Bearer")
+    /// Token type (always "Bearer" for JWT)
     #[schema(example = "Bearer")]
     pub token_type: String,
 
@@ -321,71 +382,121 @@ pub struct TokenResponseBody {
     /// Refresh token (only for password grant)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,
+
+    /// Granted scope (optional, for future use)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
 }
 
-/// Issue authentication token
+/// Issue authentication token (JSON request body)
 ///
-/// Endpoint: POST /api/v1/auth/token
+/// Endpoint: POST /api/v1/oauth/token
+/// Content-Type: application/json
 ///
-/// Supports two OAuth 2.0 grant types:
+/// OAuth 2.0 compliant token endpoint per RFC 6749.
+///
+/// Supports OAuth 2.0 grant types:
 /// - client_credentials: For workers and service accounts
 /// - password: For human users (testing/admin)
+/// - refresh_token: For refreshing expired access tokens
 ///
 /// Returns JWT access token with configurable TTL.
 #[utoipa::path(
     post,
-    path = "/api/v1/auth/token",
-    tag = "Authentication",
-    request_body = TokenRequestBody,
+    path = "/api/v1/oauth/token",
+    tag = "OAuth 2.0",
+    request_body = TokenRequest,
     responses(
-        (status = 200, description = "Token issued successfully", body = TokenResponseBody),
-        (status = 401, description = "Invalid credentials", body = ApiErrorResponse)
+        (status = 200, description = "Token issued successfully", body = TokenResponse),
+        (status = 401, description = "Invalid credentials", body = ApiErrorResponse),
+        (status = 422, description = "Validation error", body = ApiErrorResponse)
     )
 )]
 pub async fn token_handler(
     State(state): State<AppState>,
-    Json(request): Json<TokenRequestBody>,
-) -> ApiResult<Json<TokenResponseBody>> {
-    let token_response = match request {
-        TokenRequestBody::ClientCredentials {
-            client_id,
-            client_secret,
-        } => {
+    Json(request): Json<TokenRequest>,
+) -> ApiResult<Json<TokenResponse>> {
+    // Validate required fields for grant type
+    request.validate().map_err(AppError::ValidationError)?;
+
+    // Process based on grant type
+    let auth_response = match request.grant_type {
+        GrantType::ClientCredentials => {
+            let client_id = request.client_id.as_ref().unwrap();
+            let client_secret = request.client_secret.as_ref().unwrap();
+
             state
                 .auth_service
-                .authenticate_client(&client_id, &client_secret)
+                .authenticate_client(client_id, client_secret)
                 .await
                 .map_err(|e| {
                     tracing::warn!("Client authentication failed: {:?}", e);
                     AppError::Unauthorized("Invalid client credentials".to_string())
                 })?
         }
-        TokenRequestBody::Password { username, password } => {
+        GrantType::Password => {
+            let username = request.username.as_ref().unwrap();
+            let password = request.password.as_ref().unwrap();
+
             state
                 .auth_service
-                .authenticate_password(&username, &password)
+                .authenticate_password(username, password)
                 .await
                 .map_err(|e| {
                     tracing::warn!("Password authentication failed: {:?}", e);
                     AppError::Unauthorized("Invalid username or password".to_string())
                 })?
         }
+        GrantType::RefreshToken => {
+            let refresh_token = request.refresh_token.as_ref().unwrap();
+
+            state
+                .auth_service
+                .refresh_token(refresh_token)
+                .await
+                .map_err(|e| {
+                    tracing::warn!("Token refresh failed: {:?}", e);
+                    AppError::Unauthorized("Invalid or expired refresh token".to_string())
+                })?
+        }
     };
 
-    Ok(Json(TokenResponseBody {
-        access_token: token_response.access_token,
-        token_type: token_response.token_type,
-        expires_in: token_response.expires_in,
-        refresh_token: token_response.refresh_token,
+    Ok(Json(TokenResponse {
+        access_token: auth_response.access_token,
+        token_type: auth_response.token_type,
+        expires_in: auth_response.expires_in,
+        refresh_token: auth_response.refresh_token,
+        scope: None, // MVP doesn't use scopes
     }))
+}
+
+/// Issue authentication token (form-encoded request body)
+///
+/// Endpoint: POST /api/v1/oauth/token
+/// Content-Type: application/x-www-form-urlencoded
+///
+/// This endpoint provides the same functionality as token_handler but accepts
+/// form-encoded data per OAuth 2.0 specification (RFC 6749).
+///
+/// Axum automatically routes based on Content-Type header, so this uses the
+/// same route path but with Form extractor instead of Json.
+pub async fn token_form_handler(
+    State(state): State<AppState>,
+    Form(request): Form<TokenRequest>,
+) -> ApiResult<Json<TokenResponse>> {
+    // Reuse the same logic as JSON handler
+    token_handler(State(state), Json(request)).await
 }
 ```
 
 **Key Features**:
-- Supports both client_credentials and password grant flows
-- Tagged union for type-safe request parsing
+- **OAuth 2.0 compliant** - follows RFC 6749 specification
+- **Both content types** - accepts `application/json` and `application/x-www-form-urlencoded`
+- **Three grant types** - client_credentials, password, refresh_token
+- **Field validation** - validates required fields per grant type
+- **Type-safe parsing** - strongly-typed GrantType enum
 - Logs authentication failures without exposing sensitive details
-- Returns helpful error messages
+- Returns helpful error messages with field-level validation
 - OpenAPI documentation via utoipa
 
 ---
@@ -419,14 +530,18 @@ use utoipa_redoc::{Redoc, Servable};
 /// Routes:
 /// - GET /health - Liveness probe
 /// - GET /health/ready - Readiness probe
-/// - POST /api/v1/auth/token - Token issuance
+/// - POST /api/v1/oauth/token - OAuth 2.0 token issuance (both JSON and form-encoded)
 ///
 /// These routes are accessible without authentication.
+///
+/// Note: The token endpoint accepts both application/json and
+/// application/x-www-form-urlencoded per OAuth 2.0 spec. Axum
+/// automatically routes based on Content-Type header.
 pub fn public_routes() -> Router<AppState> {
     Router::new()
         .route("/health", get(handlers::health::liveness_handler))
         .route("/health/ready", get(handlers::health::readiness_handler))
-        .route("/api/v1/auth/token", post(handlers::auth::token_handler))
+        .route("/api/v1/oauth/token", post(handlers::oauth::token_handler))
 }
 
 /// Protected API routes (require authentication)
@@ -506,11 +621,11 @@ This order ensures:
 
 ---
 
-### Component 5: Core Authentication Service (core-auth crate)
+### Component 5: OAuth 2.0 Authentication Service (oauth crate)
 
-**Location**: `core-auth/src/lib.rs` and `core-auth/src/postgres.rs`
+**Location**: `oauth/src/lib.rs` and `oauth/src/postgres.rs`
 
-**Note**: This component is in the `core-auth` crate, not the `api` crate.
+**Note**: This component is in the `oauth` crate, not the `api` crate. The crate is named `oauth` for clarity and alignment with OAuth 2.0 standards.
 
 **Responsibilities**:
 1. Define AuthenticationService trait
@@ -521,7 +636,7 @@ This order ensures:
 **Implementation**:
 
 ```rust
-// core-auth/src/lib.rs
+// oauth/src/lib.rs
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -557,15 +672,23 @@ pub enum AuthError {
 pub type AuthResult<T> = Result<T, AuthError>;
 
 /// JWT claims structure
+///
+/// For MVP, we use only standard JWT claims. The `sub` (subject) claim
+/// uniquely identifies the authenticated entity (user_id or client_id).
+///
+/// Additional claims can be added post-MVP for authorization:
+/// - scopes: Vec<String> for permissions
+/// - tenant_id: String for multi-tenancy
+/// - roles: Vec<String> for RBAC
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
-    /// Subject (user_id or client_id)
+    /// Subject (user_id or client_id) - uniquely identifies authenticated entity
     pub sub: String,
 
-    /// Issuer
+    /// Issuer (who issued this token)
     pub iss: String,
 
-    /// Audience
+    /// Audience (who this token is intended for)
     pub aud: String,
 
     /// Expiration time (Unix timestamp)
@@ -573,18 +696,6 @@ pub struct Claims {
 
     /// Issued at (Unix timestamp)
     pub iat: i64,
-
-    /// Client ID (for client_credentials flow)
-    pub client_id: Option<String>,
-
-    /// Username (for password flow)
-    pub username: Option<String>,
-
-    /// Email (for password flow)
-    pub email: Option<String>,
-
-    /// Scopes / permissions
-    pub scopes: Vec<String>,
 }
 
 /// Token response
@@ -662,7 +773,7 @@ impl Default for AuthConfig {
 ```
 
 ```rust
-// core-auth/src/postgres.rs
+// oauth/src/postgres.rs
 use crate::{AuthenticationService, AuthConfig, AuthError, AuthResult, Claims, TokenResponse, JwtKey};
 use async_trait::async_trait;
 use bcrypt::{hash, verify, DEFAULT_COST};
@@ -741,7 +852,7 @@ impl AuthenticationService for PostgresAuthService {
         let client = sqlx::query!(
             r#"
             SELECT id, client_id, client_secret_hash, name, scopes, is_active
-            FROM auth_clients
+            FROM oauth_clients
             WHERE client_id = $1 AND is_active = true
             "#,
             client_id
@@ -757,18 +868,15 @@ impl AuthenticationService for PostgresAuthService {
             return Err(AuthError::InvalidCredentials);
         }
 
-        // Generate JWT
+        // Generate JWT with standard claims only
+        // The `sub` (subject) uniquely identifies the client
         let now = Utc::now();
         let claims = Claims {
-            sub: client.id.to_string(),
+            sub: client.id.to_string(), // Uniquely identifies this client
             iss: self.config.jwt_issuer.clone(),
             aud: self.config.jwt_audience.clone(),
             exp: (now + Duration::seconds(self.config.token_ttl as i64)).timestamp(),
             iat: now.timestamp(),
-            client_id: Some(client.client_id.clone()),
-            username: None,
-            email: None,
-            scopes: client.scopes.clone(),
         };
 
         let access_token = self.sign_jwt(claims)?;
@@ -790,7 +898,7 @@ impl AuthenticationService for PostgresAuthService {
         let user = sqlx::query!(
             r#"
             SELECT id, username, email, password_hash, is_active
-            FROM auth_users
+            FROM oauth_users
             WHERE username = $1 AND is_active = true
             "#,
             username
@@ -806,18 +914,15 @@ impl AuthenticationService for PostgresAuthService {
             return Err(AuthError::InvalidCredentials);
         }
 
-        // Generate JWT
+        // Generate JWT with standard claims only
+        // The `sub` (subject) uniquely identifies the user
         let now = Utc::now();
         let claims = Claims {
-            sub: user.id.to_string(),
+            sub: user.id.to_string(), // Uniquely identifies this user
             iss: self.config.jwt_issuer.clone(),
             aud: self.config.jwt_audience.clone(),
             exp: (now + Duration::seconds(self.config.token_ttl as i64)).timestamp(),
             iat: now.timestamp(),
-            client_id: None,
-            username: Some(user.username.clone()),
-            email: Some(user.email.clone()),
-            scopes: vec![], // Users don't have scopes in MVP
         };
 
         let access_token = self.sign_jwt(claims)?;
@@ -829,7 +934,7 @@ impl AuthenticationService for PostgresAuthService {
 
         sqlx::query!(
             r#"
-            INSERT INTO auth_refresh_tokens (token_hash, user_id, expires_at)
+            INSERT INTO oauth_refresh_tokens (token_hash, user_id, expires_at)
             VALUES ($1, $2, $3)
             "#,
             refresh_token_hash,
@@ -855,7 +960,7 @@ impl AuthenticationService for PostgresAuthService {
         let token_record = sqlx::query!(
             r#"
             SELECT user_id, expires_at, revoked_at
-            FROM auth_refresh_tokens
+            FROM oauth_refresh_tokens
             WHERE token_hash = $1
             "#,
             refresh_token_hash
@@ -876,7 +981,7 @@ impl AuthenticationService for PostgresAuthService {
         let user = sqlx::query!(
             r#"
             SELECT id, username, email, is_active
-            FROM auth_users
+            FROM oauth_users
             WHERE id = $1 AND is_active = true
             "#,
             token_record.user_id
@@ -884,18 +989,14 @@ impl AuthenticationService for PostgresAuthService {
         .fetch_one(&self.pool)
         .await?;
 
-        // Generate new access token
+        // Generate new access token with standard claims only
         let now = Utc::now();
         let claims = Claims {
-            sub: user.id.to_string(),
+            sub: user.id.to_string(), // Uniquely identifies this user
             iss: self.config.jwt_issuer.clone(),
             aud: self.config.jwt_audience.clone(),
             exp: (now + Duration::seconds(self.config.token_ttl as i64)).timestamp(),
             iat: now.timestamp(),
-            client_id: None,
-            username: Some(user.username.clone()),
-            email: Some(user.email.clone()),
-            scopes: vec![],
         };
 
         let access_token = self.sign_jwt(claims)?;
@@ -937,11 +1038,11 @@ impl AuthenticationService for PostgresAuthService {
 **Note**: Schema already defined in `docs/architecture.md`. This section documents it for completeness.
 
 **Tables Required**:
-- `auth_users` - Human users (for password grant)
-- `auth_clients` - Service accounts (for client_credentials grant)
-- `auth_refresh_tokens` - Refresh tokens (for password grant)
+- `oauth_users` - Human users (for password grant)
+- `oauth_clients` - Service accounts (for client_credentials grant)
+- `oauth_refresh_tokens` - Refresh tokens (for password grant)
 
-See `docs/architecture.md` section "Postgres Auth Provider Implementation (MVP)" for complete schema.
+See `docs/architecture.md` section "Postgres OAuth Provider Implementation (MVP)" for complete schema.
 
 ---
 
@@ -958,7 +1059,7 @@ See `docs/architecture.md` section "Postgres Auth Provider Implementation (MVP)"
 
 ```rust
 // Add to api/src/openapi.rs
-use crate::handlers::auth::{TokenRequestBody, TokenResponseBody};
+use crate::handlers::oauth::{TokenRequest, TokenResponse, GrantType};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -976,8 +1077,8 @@ use crate::handlers::auth::{TokenRequestBody, TokenResponseBody};
         crate::handlers::health::readiness_handler,
         crate::handlers::health::service_info_handler,
 
-        // Authentication endpoints
-        crate::handlers::auth::token_handler,
+        // OAuth 2.0 endpoints
+        crate::handlers::oauth::token_handler,
     ),
     components(
         schemas(
@@ -986,9 +1087,10 @@ use crate::handlers::auth::{TokenRequestBody, TokenResponseBody};
             ReadinessResponse,
             ServiceInfo,
 
-            // Authentication schemas
-            TokenRequestBody,
-            TokenResponseBody,
+            // OAuth 2.0 schemas
+            TokenRequest,
+            TokenResponse,
+            GrantType,
 
             // Error response schemas
             ApiErrorResponse,
@@ -999,7 +1101,7 @@ use crate::handlers::auth::{TokenRequestBody, TokenResponseBody};
     tags(
         (name = "Health", description = "Health check and service information endpoints"),
         (name = "Service", description = "Service metadata and capabilities"),
-        (name = "Authentication", description = "Token issuance and authentication"),
+        (name = "OAuth 2.0", description = "OAuth 2.0 compliant token issuance (RFC 6749)"),
     ),
     modifiers(&SecurityAddon)
 )]
@@ -1032,7 +1134,7 @@ impl utoipa::Modify for SecurityAddon {
 
 ### Unit Tests
 
-**File**: `core-auth/src/postgres_test.rs`
+**File**: `oauth/src/postgres_test.rs`
 
 **Test Scenarios**:
 
@@ -1054,16 +1156,13 @@ mod tests {
         let pool = PgPool::connect(&std::env::var("DATABASE_URL").unwrap()).await.unwrap();
         let service = PostgresAuthService::new(pool, config);
 
+        // Create claims with standard fields only
         let claims = Claims {
-            sub: "test_user".to_string(),
+            sub: "550e8400-e29b-41d4-a716-446655440000".to_string(), // User or client ID
             iss: "test".to_string(),
             aud: "test".to_string(),
             exp: (Utc::now() + Duration::hours(1)).timestamp(),
             iat: Utc::now().timestamp(),
-            client_id: None,
-            username: Some("testuser".to_string()),
-            email: Some("test@example.com".to_string()),
-            scopes: vec![],
         };
 
         // Sign JWT
@@ -1072,7 +1171,8 @@ mod tests {
         // Verify JWT
         let verified_claims = service.verify_jwt(&token).unwrap();
         assert_eq!(verified_claims.sub, claims.sub);
-        assert_eq!(verified_claims.username, claims.username);
+        assert_eq!(verified_claims.iss, claims.iss);
+        assert_eq!(verified_claims.aud, claims.aud);
     }
 
     #[tokio::test]
@@ -1088,15 +1188,11 @@ mod tests {
         let service = PostgresAuthService::new(pool, config);
 
         let claims = Claims {
-            sub: "test_user".to_string(),
+            sub: "550e8400-e29b-41d4-a716-446655440000".to_string(),
             iss: "test".to_string(),
             aud: "test".to_string(),
             exp: (Utc::now() - Duration::hours(1)).timestamp(), // Expired
             iat: Utc::now().timestamp(),
-            client_id: None,
-            username: Some("testuser".to_string()),
-            email: Some("test@example.com".to_string()),
-            scopes: vec![],
         };
 
         let token = service.sign_jwt(claims).unwrap();
@@ -1125,7 +1221,7 @@ async fn test_token_issuance_client_credentials() {
 
     // Request token
     let response = app
-        .post("/api/v1/auth/token")
+        .post("/api/v1/oauth/token")
         .json(&json!({
             "grant_type": "client_credentials",
             "client_id": client_id,
@@ -1135,11 +1231,36 @@ async fn test_token_issuance_client_credentials() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body: TokenResponseBody = response.json().await;
+    let body: TokenResponse = response.json().await;
     assert_eq!(body.token_type, "Bearer");
     assert!(!body.access_token.is_empty());
     assert_eq!(body.expires_in, 86400); // 24 hours
     assert!(body.refresh_token.is_none()); // No refresh for client creds
+}
+
+#[tokio::test]
+async fn test_token_issuance_form_encoded() {
+    let app = test_app().await;
+
+    // Create test client in database
+    let client_id = create_test_client(&app.db_pool, "test_client").await;
+    let client_secret = "test_secret";
+
+    // Request token using form-encoded body (per OAuth 2.0 spec)
+    let response = app
+        .post("/api/v1/oauth/token")
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .body(format!(
+            "grant_type=client_credentials&client_id={}&client_secret={}",
+            client_id, client_secret
+        ))
+        .await;
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body: TokenResponse = response.json().await;
+    assert_eq!(body.token_type, "Bearer");
+    assert!(!body.access_token.is_empty());
 }
 
 #[tokio::test]
@@ -1153,7 +1274,7 @@ async fn test_token_issuance_password() {
 
     // Request token
     let response = app
-        .post("/api/v1/auth/token")
+        .post("/api/v1/oauth/token")
         .json(&json!({
             "grant_type": "password",
             "username": username,
@@ -1163,7 +1284,7 @@ async fn test_token_issuance_password() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body: TokenResponseBody = response.json().await;
+    let body: TokenResponse = response.json().await;
     assert_eq!(body.token_type, "Bearer");
     assert!(!body.access_token.is_empty());
     assert!(body.refresh_token.is_some()); // Refresh token for password flow
@@ -1174,7 +1295,7 @@ async fn test_invalid_credentials_rejected() {
     let app = test_app().await;
 
     let response = app
-        .post("/api/v1/auth/token")
+        .post("/api/v1/oauth/token")
         .json(&json!({
             "grant_type": "client_credentials",
             "client_id": "invalid",
@@ -1187,6 +1308,49 @@ async fn test_invalid_credentials_rejected() {
     let body: ApiErrorResponse = response.json().await;
     assert_eq!(body.error.code, ErrorCode::Unauthorized);
     assert!(body.error.message.contains("Invalid"));
+}
+
+#[tokio::test]
+async fn test_missing_required_fields() {
+    let app = test_app().await;
+
+    // Missing client_secret for client_credentials grant
+    let response = app
+        .post("/api/v1/oauth/token")
+        .json(&json!({
+            "grant_type": "client_credentials",
+            "client_id": "test_client"
+            // Missing client_secret
+        }))
+        .await;
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let body: ApiErrorResponse = response.json().await;
+    assert_eq!(body.error.code, ErrorCode::ValidationError);
+
+    // Check field-level error details
+    let details = body.error.details.unwrap();
+    assert!(details["field_errors"]["client_secret"].as_array().is_some());
+}
+
+#[tokio::test]
+async fn test_password_grant_missing_username() {
+    let app = test_app().await;
+
+    let response = app
+        .post("/api/v1/oauth/token")
+        .json(&json!({
+            "grant_type": "password",
+            "password": "testpass"
+            // Missing username
+        }))
+        .await;
+
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let body: ApiErrorResponse = response.json().await;
+    assert_eq!(body.error.code, ErrorCode::ValidationError);
 }
 
 #[tokio::test]
@@ -1281,7 +1445,7 @@ async fn test_malformed_authorization_header() {
 
 ### New Dependencies
 
-Add to `core-auth/Cargo.toml`:
+Add to `oauth/Cargo.toml`:
 
 ```toml
 [dependencies]
@@ -1321,8 +1485,8 @@ Add to `api/Cargo.toml`:
 [dependencies]
 # Existing dependencies...
 
-# Core auth service
-core-auth = { path = "../core-auth" }
+# OAuth 2.0 authentication service
+oauth = { path = "../oauth" }
 ```
 
 **Why these dependencies:**
@@ -1340,17 +1504,17 @@ core-auth = { path = "../core-auth" }
 ```bash
 # RSA private key for JWT signing (PEM format)
 # Generate with: openssl genrsa -out private.pem 2048
-STREAMFLOW_AUTH_RSA_PRIVATE_KEY_PEM="-----BEGIN RSA PRIVATE KEY-----
+STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="-----BEGIN RSA PRIVATE KEY-----
 ...
 -----END RSA PRIVATE KEY-----"
 
 # JWT configuration
-STREAMFLOW_AUTH_JWT_ISSUER=streamflow
-STREAMFLOW_AUTH_JWT_AUDIENCE=streamflow-api
-STREAMFLOW_AUTH_TOKEN_TTL=86400  # 24 hours
+STREAMFLOW_OAUTH_JWT_ISSUER=streamflow
+STREAMFLOW_OAUTH_JWT_AUDIENCE=streamflow-api
+STREAMFLOW_OAUTH_TOKEN_TTL=86400  # 24 hours
 
 # Database URL (already configured)
-STREAMFLOW_DATABASE_URL=postgres://localhost/streamflow
+DATABASE_URL=postgres://localhost/streamflow
 ```
 
 ### CLI Configuration (for future)
@@ -1374,13 +1538,21 @@ Update `docs/api-reference.md`:
 
 All API endpoints (except health checks and token issuance) require authentication via JWT Bearer token.
 
+StreamFlow implements OAuth 2.0 (RFC 6749) compliant authentication.
+
 ### Obtaining a Token
 
-**Endpoint**: `POST /api/v1/auth/token`
+**Endpoint**: `POST /api/v1/oauth/token`
 
-**Client Credentials Flow** (for workers and services):
+**OAuth 2.0 Compliance**: This endpoint accepts both:
+- `application/json` (modern convenience)
+- `application/x-www-form-urlencoded` (per OAuth 2.0 specification)
+
+#### Client Credentials Flow
+
+**JSON format** (for workers and services):
 \`\`\`bash
-curl -X POST http://localhost:8080/api/v1/auth/token \
+curl -X POST http://localhost:8080/api/v1/oauth/token \
   -H "Content-Type: application/json" \
   -d '{
     "grant_type": "client_credentials",
@@ -1389,9 +1561,18 @@ curl -X POST http://localhost:8080/api/v1/auth/token \
   }'
 \`\`\`
 
-**Password Flow** (for human users):
+**Form-encoded format** (OAuth 2.0 standard):
 \`\`\`bash
-curl -X POST http://localhost:8080/api/v1/auth/token \
+curl -X POST http://localhost:8080/api/v1/oauth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials&client_id=worker_payments&client_secret=your_secret_here"
+\`\`\`
+
+#### Password Flow
+
+**JSON format** (for human users):
+\`\`\`bash
+curl -X POST http://localhost:8080/api/v1/oauth/token \
   -H "Content-Type: application/json" \
   -d '{
     "grant_type": "password",
@@ -1400,7 +1581,28 @@ curl -X POST http://localhost:8080/api/v1/auth/token \
   }'
 \`\`\`
 
-**Response**:
+**Form-encoded format**:
+\`\`\`bash
+curl -X POST http://localhost:8080/api/v1/oauth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=password&username=admin&password=your_password_here"
+\`\`\`
+
+#### Refresh Token Flow
+
+**JSON format**:
+\`\`\`bash
+curl -X POST http://localhost:8080/api/v1/oauth/token \
+  -H "Content-Type: application/json" \
+  -d '{
+    "grant_type": "refresh_token",
+    "refresh_token": "your_refresh_token_here"
+  }'
+\`\`\`
+
+#### Token Response
+
+**Response** (all grant types):
 \`\`\`json
 {
   "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...",
@@ -1442,7 +1644,10 @@ Request a new token using the refresh token (password flow) or re-authenticate (
 ### Functional Requirements
 
 - ✅ `POST /api/v1/auth/token` issues JWT tokens for valid credentials
-- ✅ Supports both client_credentials and password grant flows
+- ✅ **OAuth 2.0 compliant** - follows RFC 6749 specification
+- ✅ **Both content types** - accepts `application/json` and `application/x-www-form-urlencoded`
+- ✅ **Three grant types** - client_credentials, password, refresh_token
+- ✅ **Field validation** - validates required fields per grant type with helpful error messages
 - ✅ JWT tokens signed with RSA256 (not HS256)
 - ✅ Token expiration configurable via TTL (default 24 hours)
 - ✅ Auth middleware validates tokens on protected endpoints
@@ -1464,8 +1669,8 @@ Request a new token using the refresh token (password flow) or re-authenticate (
 
 ## Implementation Phases
 
-### Phase 1: Core Authentication Service (P0)
-- Implement `core-auth` crate structure
+### Phase 1: OAuth 2.0 Authentication Service (P0)
+- Implement `oauth` crate structure
 - Implement AuthenticationService trait
 - Implement PostgresAuthService with RSA256 signing
 - Cache signing keys in memory
@@ -1473,7 +1678,7 @@ Request a new token using the refresh token (password flow) or re-authenticate (
 - **Estimated Time**: 4 hours
 
 ### Phase 2: Token Issuance Endpoint (P0)
-- Implement `POST /api/v1/auth/token` handler
+- Implement `POST /api/v1/oauth/token` handler (OAuth 2.0 compliant)
 - Support client_credentials grant flow
 - Support password grant flow
 - Add OpenAPI documentation
@@ -1628,15 +1833,19 @@ openssl rsa -in private.pem -pubout -out public.pem
 **Status**: Planning
 
 **Key Design Decisions**:
-1. **RSA256 over HS256**: Per requirements, using RSA256 for non-repudiation and key rotation
-2. **Middleware Pattern**: Auth applied as middleware layer, not per-handler
-3. **Cached Keys**: Signing keys loaded at startup and cached in Arc for fast validation
-4. **Claims Available**: Claims stored in request extensions but not used for authorization in MVP
-5. **Separate Public/Protected Routes**: Clear separation allows selective middleware application
+1. **OAuth 2.0 Compliance**: Token request/response format follows RFC 6749 specification
+2. **Both Content Types**: Accepts `application/json` (convenience) and `application/x-www-form-urlencoded` (spec)
+3. **RSA256 over HS256**: Per requirements, using RSA256 for non-repudiation and key rotation
+4. **Standard JWT Claims Only**: MVP uses only standard claims (sub, iss, aud, exp, iat) - no redundant custom claims
+5. **Middleware Pattern**: Auth applied as middleware layer, not per-handler
+6. **Cached Keys**: Signing keys loaded at startup and cached in Arc for fast validation
+7. **Field Validation**: Validates required fields based on grant_type with helpful error messages
+8. **Claims Available**: Claims stored in request extensions but not used for authorization in MVP
+9. **Separate Public/Protected Routes**: Clear separation allows selective middleware application
 
 **Implementation Order**:
-1. Core authentication service (foundation)
-2. Token issuance endpoint (can test immediately)
+1. OAuth 2.0 authentication service - `oauth` crate (foundation)
+2. Token issuance endpoint - `POST /api/v1/oauth/token` (can test immediately)
 3. Authentication middleware (protects routes)
 4. Route protection configuration (integration)
 5. Database setup and CLI tools (operational)
