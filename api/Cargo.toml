@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+description.workspace = true
 
 [dependencies]
 # Workspace dependencies
@@ -23,6 +24,10 @@ tower.workspace = true
 tower-http.workspace = true
 jsonwebtoken.workspace = true
 bcrypt.workspace = true
+
+# OpenAPI generation and documentation
+utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
+utoipa-redoc = { version = "5", features = ["axum"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

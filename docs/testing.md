@@ -175,17 +175,16 @@ async fn test_feature_end_to_end() {
 StreamFlow aims for high test coverage to ensure production reliability:
 
 ### Target Coverage by Component
-
-| Component | Target | Current | Notes |
-|-----------|--------|---------|-------|
-| **Core (Orchestrator)** | 90%+ | TBD | Critical path - workflow execution |
-| **Core (Queue)** | 90%+ | TBD | Critical path - task distribution |
-| **Core (Event Source)** | 85%+ | TBD | Core infrastructure |
-| **API (Handlers)** | 85%+ | ~95% | User-facing endpoints |
-| **API (Error Handling)** | 95%+ | 100% | Error paths must be tested |
-| **Activity (Worker)** | 85%+ | TBD | Activity execution |
-| **Dashboard** | 70%+ | TBD | UI/frontend code |
-| **Overall** | 80%+ | TBD | Project-wide target |
+| Component                |  Target | Current | Notes                              |
+|:------------------------ |:------:|-------:|:-----------------------------------|
+| **Core (Orchestrator)**  | 90%+   | TBD    | Critical path — workflow execution  |
+| **Core (Queue)**         | 90%+   | TBD    | Critical path — task distribution   |
+| **Core (Event Source)**  | 85%+   | TBD    | Core infrastructure                 |
+| **API (Handlers)**       | 85%+   | ~95%   | User-facing endpoints               |
+| **API (Error Handling)** | 95%+   | 100%   | Error paths must be tested          |
+| **Activity (Worker)**    | 85%+   | TBD    | Activity execution                  |
+| **Dashboard**            | 70%+   | TBD    | UI/frontend code                    |
+| **Overall**              | 80%+   | TBD    | Project-wide target                 |
 
 ### Exclusions
 

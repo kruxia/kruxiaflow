@@ -1,9 +1,9 @@
 use crate::health::{
-    check_activity_queue_health, check_database_health, check_event_source_health,
+    LivenessResponse, ReadinessResponse, ServiceInfo, check_activity_queue_health,
+    check_database_health, check_event_source_health,
 };
 use crate::state::AppState;
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
-use serde_json::json;
 use std::collections::HashMap;
 
 /// Liveness probe handler
@@ -17,9 +17,22 @@ use std::collections::HashMap;
 ///
 /// # Performance
 /// Target: <1ms P99 latency
+#[utoipa::path(
+    get,
+    path = "/health",
+    tag = "Health",
+    responses(
+        (status = 200, description = "Server is alive", body = LivenessResponse)
+    )
+)]
 pub async fn liveness_handler() -> impl IntoResponse {
     // If this handler runs, server is alive
-    (StatusCode::OK, Json(json!({"status": "ok"})))
+    (
+        StatusCode::OK,
+        Json(LivenessResponse {
+            status: "ok".to_string(),
+        }),
+    )
 }
 
 /// Readiness probe handler
@@ -46,6 +59,15 @@ pub async fn liveness_handler() -> impl IntoResponse {
 /// # Performance
 /// Target: <100ms P99 latency
 /// Uses parallel execution to minimize total latency
+#[utoipa::path(
+    get,
+    path = "/health/ready",
+    tag = "Health",
+    responses(
+        (status = 200, description = "Server is ready", body = ReadinessResponse),
+        (status = 503, description = "Server is not ready", body = ReadinessResponse)
+    )
+)]
 pub async fn readiness_handler(State(app_state): State<AppState>) -> impl IntoResponse {
     // Run all health checks in parallel for optimal performance
     let (db_result, event_source_result, queue_result) = tokio::join!(
@@ -60,10 +82,10 @@ pub async fn readiness_handler(State(app_state): State<AppState>) -> impl IntoRe
     // Process database check result
     match db_result {
         Ok(_) => {
-            checks.insert("database", "ok");
+            checks.insert("database".to_string(), "ok".to_string());
         }
         Err(e) => {
-            checks.insert("database", "unhealthy");
+            checks.insert("database".to_string(), "unhealthy".to_string());
             all_healthy = false;
             tracing::warn!("Database health check failed: {}", e);
         }
@@ -72,10 +94,10 @@ pub async fn readiness_handler(State(app_state): State<AppState>) -> impl IntoRe
     // Process event source check result
     match event_source_result {
         Ok(_) => {
-            checks.insert("event_source", "ok");
+            checks.insert("event_source".to_string(), "ok".to_string());
         }
         Err(e) => {
-            checks.insert("event_source", "unhealthy");
+            checks.insert("event_source".to_string(), "unhealthy".to_string());
             all_healthy = false;
             tracing::warn!("Event source health check failed: {}", e);
         }
@@ -84,10 +106,10 @@ pub async fn readiness_handler(State(app_state): State<AppState>) -> impl IntoRe
     // Process activity queue check result
     match queue_result {
         Ok(_) => {
-            checks.insert("queue", "ok");
+            checks.insert("queue".to_string(), "ok".to_string());
         }
         Err(e) => {
-            checks.insert("queue", "unhealthy");
+            checks.insert("queue".to_string(), "unhealthy".to_string());
             all_healthy = false;
             tracing::warn!("Activity queue health check failed: {}", e);
         }
@@ -101,10 +123,14 @@ pub async fn readiness_handler(State(app_state): State<AppState>) -> impl IntoRe
 
     (
         status_code,
-        Json(json!({
-            "status": if all_healthy { "ready" } else { "not_ready" },
-            "checks": checks
-        })),
+        Json(ReadinessResponse {
+            status: if all_healthy {
+                "ready".to_string()
+            } else {
+                "not_ready".to_string()
+            },
+            checks,
+        }),
     )
 }
 
@@ -128,16 +154,24 @@ pub async fn readiness_handler(State(app_state): State<AppState>) -> impl IntoRe
 ///
 /// # Performance
 /// Target: <1ms P99 latency
+#[utoipa::path(
+    get,
+    path = "/api/v1/info",
+    tag = "Service",
+    responses(
+        (status = 200, description = "Service information", body = ServiceInfo)
+    )
+)]
 pub async fn service_info_handler(State(app_state): State<AppState>) -> impl IntoResponse {
     (
         StatusCode::OK,
-        Json(json!({
-            "version": app_state.version,
-            "build_timestamp": app_state.build.timestamp,
-            "build_git_hash": app_state.build.git_hash,
-            "api_version": "v1",
-            "features": app_state.features
-        })),
+        Json(ServiceInfo {
+            version: app_state.version.clone(),
+            build_timestamp: app_state.build.timestamp.clone(),
+            build_git_hash: Some(app_state.build.git_hash.clone()),
+            api_version: "v1".to_string(),
+            features: app_state.features.clone(),
+        }),
     )
 }
 

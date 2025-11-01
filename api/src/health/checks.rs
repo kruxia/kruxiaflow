@@ -81,42 +81,9 @@ pub async fn check_activity_queue_health(pool: &PgPool) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use sqlx::postgres::PgPoolOptions;
-
-    // Integration tests would go here
-    // For unit tests, we'd need to mock the database pool
-    // These tests require a running PostgreSQL instance
-
-    #[tokio::test]
-    #[ignore] // Requires database
-    async fn test_check_database_health_success() {
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://localhost/streamflow_test".to_string());
-
-        let pool = PgPoolOptions::new()
-            .max_connections(1)
-            .connect(&database_url)
-            .await
-            .expect("Failed to connect to database");
-
-        let result = check_database_health(&pool).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    #[ignore] // Requires database
-    async fn test_check_event_source_health_success() {
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://localhost/streamflow_test".to_string());
-
-        let pool = PgPoolOptions::new()
-            .max_connections(1)
-            .connect(&database_url)
-            .await
-            .expect("Failed to connect to database");
-
-        let result = check_event_source_health(&pool).await;
-        assert!(result.is_ok());
-    }
+    // Unit tests would go here
+    // For proper unit tests, we'd need to mock the database pool
+    //
+    // Integration tests for these functions are in:
+    // tests/health_integration_tests.rs
 }

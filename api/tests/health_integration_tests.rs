@@ -249,3 +249,47 @@ async fn test_kubernetes_simulation() {
         assert_eq!(response.status_code(), StatusCode::OK);
     }
 }
+
+// Tests for individual health check functions
+// These test the health check functions directly, not through HTTP endpoints
+
+#[tokio::test]
+#[serial]
+async fn test_check_database_health_success() {
+    let pool = setup_test_pool().await;
+
+    // Test that database health check passes with a working database
+    let result = streamflow_api::health::check_database_health(&pool).await;
+    assert!(
+        result.is_ok(),
+        "Database health check should succeed with working database"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn test_check_event_source_health_success() {
+    let pool = setup_test_pool().await;
+
+    // Test that event source health check passes
+    // Event source is PostgreSQL-based, so this tests the event_source_commands table
+    let result = streamflow_api::health::check_event_source_health(&pool).await;
+    assert!(
+        result.is_ok(),
+        "Event source health check should succeed with working database"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn test_check_activity_queue_health_success() {
+    let pool = setup_test_pool().await;
+
+    // Test that activity queue health check passes
+    // Activity queue is PostgreSQL-based, so this tests the activity_tasks table
+    let result = streamflow_api::health::check_activity_queue_health(&pool).await;
+    assert!(
+        result.is_ok(),
+        "Activity queue health check should succeed with working database"
+    );
+}

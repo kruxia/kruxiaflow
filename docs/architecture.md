@@ -1324,7 +1324,7 @@ pub async fn create_client(pool: &PgPool, name: &str) -> Result<(String, String)
     use bcrypt::hash;
     use uuid::Uuid;
 
-    let client_id = format!("client_{}", Uuid::new_v4());
+    let client_id = format!("client_{}", Uuid::now_v7());
     let client_secret = generate_secure_token();
     let client_secret_hash = hash(&client_secret, bcrypt::DEFAULT_COST)?;
 
@@ -1506,7 +1506,7 @@ impl ActivityQueue for PostgresQueue {
              RETURNING *",
             namespace,
             name,
-            Uuid::new_v4()  // Worker instance ID
+            Uuid::now_v7()  // Worker instance ID
         )
         .fetch_optional(&self.pool)
         .await?;
