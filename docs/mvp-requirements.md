@@ -157,12 +157,12 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 - **I want** to deploy and manage workflow definitions separately from execution
 - **So that** I can version and reuse workflow templates
 - **Acceptance Criteria**:
-  - `POST /api/v1/workflow_definitions` - Deploy workflow definition with name and version
+  - `POST /api/v1/workflow_definitions` - Deploy workflow definition with name
   - `GET /api/v1/workflow_definitions` - List all deployed definitions (later: Search)
   - `GET /api/v1/workflow_definitions/{name}` - Get latest version of definition
   - `GET /api/v1/workflow_definitions/{name}?version={version}` - Get specific version
-  - Versioning: Semantic versioning (1.0.0, 1.1.0) or timestamp (YYYYMMDD.HHMMSS)
   - Validation on deployment: Syntax and semantic checks before storage
+  - Versioning: Auto-generated timestamp version (YYYYMMDDHHMMSS)
 
 **US-1A.5: Workflow Submission API**
 - **As** an AI startup engineer.
