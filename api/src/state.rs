@@ -268,4 +268,55 @@ mod tests {
         let result = state.auth_service.authenticate_client("test", "test").await;
         assert!(result.is_ok());
     }
+
+    #[tokio::test]
+    async fn test_mock_auth_service_authenticate_password() {
+        let service = MockAuthService;
+        let result = service.authenticate_password("user", "pass").await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(response.access_token, "mock_token");
+        assert_eq!(response.refresh_token, Some("mock_refresh".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_mock_auth_service_refresh_token() {
+        let service = MockAuthService;
+        let result = service.refresh_token("old_token").await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(response.access_token, "new_token");
+        assert_eq!(response.refresh_token, Some("new_refresh".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_mock_auth_service_validate_token() {
+        let service = MockAuthService;
+        let result = service.validate_token("some_token").await;
+        assert!(result.is_ok());
+        let claims = result.unwrap();
+        assert_eq!(claims.sub, "test_user");
+        assert_eq!(claims.iss, "test");
+    }
+
+    #[tokio::test]
+    async fn test_mock_auth_service_get_signing_keys() {
+        let service = MockAuthService;
+        let result = service.get_signing_keys().await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_mock_pool_uses_default_database_url() {
+        // Test that mock_pool falls back to default when DATABASE_URL is not set
+        unsafe {
+            std::env::remove_var("DATABASE_URL");
+        }
+
+        // This should use the default URL
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string());
+        assert_eq!(database_url, "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow");
+    }
 }

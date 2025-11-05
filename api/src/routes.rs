@@ -99,9 +99,143 @@ pub fn app_router(state: AppState) -> Router {
 
 #[cfg(test)]
 mod tests {
-    // Unit tests would go here
-    // For proper unit tests, we'd need to mock dependencies
-    //
+    use super::*;
+    use axum_test::TestServer;
+    use serial_test::serial;
+    use sqlx::PgPool;
+    use std::sync::Arc;
+    use streamflow_oauth::{AuthConfig, PostgresAuthService};
+
+    /// Helper to create test database pool
+    async fn setup_test_pool() -> PgPool {
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        });
+
+        PgPool::connect(&database_url)
+            .await
+            .expect("Failed to connect to test database")
+    }
+
+    /// Generate test RSA private key
+    fn test_rsa_private_key() -> String {
+        include_str!("../../oauth/tests/private.pem").to_string()
+    }
+
+    /// Generate test RSA public key
+    fn test_rsa_public_key() -> String {
+        include_str!("../../oauth/tests/public.pem").to_string()
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_public_routes_creation() {
+        // Test that public_routes() creates a router successfully
+        let router = public_routes();
+        // Just verifying it compiles and creates a Router<AppState>
+        assert!(std::mem::size_of_val(&router) > 0);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_protected_routes_creation() {
+        // Test that protected_routes() creates a router successfully
+        let router = protected_routes();
+        // Just verifying it compiles and creates a Router<AppState>
+        assert!(std::mem::size_of_val(&router) > 0);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_app_router_creation() {
+        // Test that app_router() creates a router with state
+        let pool = setup_test_pool().await;
+
+        let auth_config = AuthConfig {
+            rsa_private_key_pem: test_rsa_private_key(),
+            rsa_public_key_pem: Some(test_rsa_public_key()),
+            jwt_issuer: "test".to_string(),
+            jwt_audience: "test".to_string(),
+            token_ttl: 3600,
+        };
+
+        let auth_service = PostgresAuthService::new(pool.clone(), auth_config)
+            .expect("Failed to create test auth service");
+
+        let state = AppState::new(pool, Arc::new(auth_service));
+        let router = app_router(state);
+
+        // Just verifying it compiles and creates a Router
+        assert!(std::mem::size_of_val(&router) > 0);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_fallback_404_handler() {
+        // Test that fallback_404 returns NotFound error
+        let response = fallback_404().await;
+        let body_bytes = axum::body::to_bytes(response.into_response().into_body(), usize::MAX)
+            .await
+            .expect("Failed to read response body");
+
+        let body_str = String::from_utf8(body_bytes.to_vec()).expect("Invalid UTF-8");
+        assert!(body_str.contains("not found") || body_str.contains("Not Found"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_404_for_unknown_route() {
+        // Test that unknown routes return 404
+        let pool = setup_test_pool().await;
+
+        let auth_config = AuthConfig {
+            rsa_private_key_pem: test_rsa_private_key(),
+            rsa_public_key_pem: Some(test_rsa_public_key()),
+            jwt_issuer: "test".to_string(),
+            jwt_audience: "test".to_string(),
+            token_ttl: 3600,
+        };
+
+        let auth_service = PostgresAuthService::new(pool.clone(), auth_config)
+            .expect("Failed to create test auth service");
+
+        let state = AppState::new(pool, Arc::new(auth_service));
+        let app = app_router(state);
+        let server = TestServer::new(app).expect("Failed to create test server");
+
+        let response = server.get("/nonexistent-route").await;
+        assert_eq!(response.status_code(), axum::http::StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_openapi_json_endpoint() {
+        // Test that /api/v1/openapi.json returns OpenAPI spec
+        let pool = setup_test_pool().await;
+
+        let auth_config = AuthConfig {
+            rsa_private_key_pem: test_rsa_private_key(),
+            rsa_public_key_pem: Some(test_rsa_public_key()),
+            jwt_issuer: "test".to_string(),
+            jwt_audience: "test".to_string(),
+            token_ttl: 3600,
+        };
+
+        let auth_service = PostgresAuthService::new(pool.clone(), auth_config)
+            .expect("Failed to create test auth service");
+
+        let state = AppState::new(pool, Arc::new(auth_service));
+        let app = app_router(state);
+        let server = TestServer::new(app).expect("Failed to create test server");
+
+        let response = server.get("/api/v1/openapi.json").await;
+        assert_eq!(response.status_code(), axum::http::StatusCode::OK);
+
+        let body: serde_json::Value = response.json();
+        assert!(body.get("openapi").is_some());
+        assert!(body.get("info").is_some());
+    }
+
     // Integration tests for routes are in:
     // tests/health_integration_tests.rs
     // tests/error_handling_test.rs
