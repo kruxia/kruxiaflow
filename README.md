@@ -25,6 +25,7 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
   - ✅ **[US-1A.1: Health Check and Service Discovery](docs/implementation/US-1A.1-health-checks.md)** - Liveness/readiness probes with parallel health checks
   - ✅ **[US-1A.1.5: API Server CLI Launcher](docs/implementation/US-1A.1.5-api-server-launcher.md)** - `streamflow api` command with configuration management
   - ✅ **[US-1A.2: Error Handling and API Contracts](docs/implementation/US-1A.2-error-handling.md)** - Standard error responses, OpenAPI/ReDoc docs, CORS, request tracing
+  - ✅ **[US-1A.3: Authentication](docs/implementation/US-1A.3-authentication.md)** - OAuth 2.0 JWT authentication with RSA256 signing, refresh token rotation
 
 ### In Progress
 
@@ -117,10 +118,15 @@ StreamFlow uses an event-driven, service-oriented architecture with pluggable in
   - Materialized workflow state for <1ms evaluation
   - Dependency graph resolution
 
-### In Progress Components
+### Completed Components (✅)
+- **ActivityQueue**: PostgreSQL-based queue with safe concurrency
+- **EventSource**: PostgreSQL polling with guaranteed delivery
+- **Orchestrator**: Event-driven workflow evaluation
+- **AuthenticationService**: OAuth 2.0 JWT authentication with RSA256
+
+### In Progress Components (🔨)
 - **API Server**: HTTP/REST endpoints for workflow and worker operations
 - **WorkflowStorage**: Handles large artifacts and files
-- **AuthenticationService**: JWT-based authentication
 - **Built-in Worker**: Activity execution using API endpoints
 
 ### MVP Implementation Strategy
@@ -130,7 +136,7 @@ StreamFlow uses an event-driven, service-oriented architecture with pluggable in
 - **Queue**: PostgreSQL with optimized indexes
 - **Event Stream**: PostgreSQL polling (guaranteed delivery)
 - **Storage**: PostgreSQL Large Objects (planned)
-- **Auth**: Custom JWT provider with PostgreSQL backend (planned)
+- **Auth**: Custom JWT provider with PostgreSQL backend ✅
 
 **Architectural Decision: Built-in Worker Uses API Server**
 
@@ -242,11 +248,17 @@ Copy `.env.example` to `.env` and adjust as needed:
 ```bash
 # Database
 DATABASE_URL=postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow
-DATABASE_URL=postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow
 
 # API Server
 STREAMFLOW_API_PORT=8080
 STREAMFLOW_API_BIND=0.0.0.0
+
+# OAuth 2.0 Authentication (Required)
+STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="$(cat private.pem)"
+STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM="$(cat public.pem)"  # Optional
+STREAMFLOW_OAUTH_JWT_ISSUER=streamflow
+STREAMFLOW_OAUTH_JWT_AUDIENCE=streamflow-api
+STREAMFLOW_OAUTH_TOKEN_TTL=86400  # 24 hours
 
 # Logging
 STREAMFLOW_LOG_LEVEL=info
@@ -256,6 +268,12 @@ STREAMFLOW_LOG_FORMAT=text
 STREAMFLOW_QUEUE_POLL_INTERVAL=100ms
 STREAMFLOW_QUEUE_DEFAULT_TIMEOUT=60s
 STREAMFLOW_QUEUE_DEFAULT_MAX_RETRIES=3
+```
+
+**Generate RSA keys for authentication:**
+```bash
+openssl genrsa -out private.pem 2048
+openssl rsa -in private.pem -pubout -out public.pem
 ```
 
 ## Documentation
@@ -276,6 +294,8 @@ STREAMFLOW_QUEUE_DEFAULT_MAX_RETRIES=3
   - [US-1.2: Event-Driven Scheduling](docs/implementation/US-1.2-event-driven-scheduling.md)
   - [US-1A.1: Health Check and Service Discovery](docs/implementation/US-1A.1-health-checks.md)
   - [US-1A.1.5: API Server CLI Launcher](docs/implementation/US-1A.1.5-api-server-launcher.md)
+  - [US-1A.2: Error Handling and API Contracts](docs/implementation/US-1A.2-error-handling.md)
+  - [US-1A.3: Authentication](docs/implementation/US-1A.3-authentication.md)
 
 ### Additional Documentation
 - **[Post-MVP Roadmap](docs/post-mvp.md)** - Features deferred beyond MVP
@@ -289,9 +309,10 @@ STREAMFLOW_QUEUE_DEFAULT_MAX_RETRIES=3
 ### Epic 1A: API Server 🔨 In Progress
 - ✅ Health Check and Service Discovery
 - ✅ API Server CLI Launcher (`streamflow api` command)
+- ✅ Error Handling and API Contracts (OpenAPI/ReDoc docs)
+- ✅ JWT authentication and authorization (OAuth 2.0 with RSA256)
 - 📋 HTTP/REST endpoints for workflow submission and management
 - 📋 Worker activity APIs (poll, heartbeat, complete, fail)
-- 📋 JWT authentication and authorization
 - 📋 WebSocket streaming for real-time updates
 
 ### Epic 1B: Built-in Worker 🔨 In Progress
