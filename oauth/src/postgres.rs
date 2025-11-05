@@ -23,7 +23,9 @@ use uuid::Uuid;
 /// - We check expiration and revocation server-side
 /// - Tokens transmitted over HTTPS only
 /// - SHA-256 enables O(1) indexed lookup vs O(n) bcrypt verification
-fn hash_refresh_token(token: &str) -> String {
+///
+/// Public for testing purposes.
+pub fn hash_refresh_token(token: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(token.as_bytes());
     format!("{:x}", hasher.finalize())

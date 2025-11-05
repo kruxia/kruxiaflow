@@ -1024,7 +1024,7 @@ Track permanently failed activities in separate table for debugging.
 
 - **US-1.2**: Event-Driven Dynamic Scheduling (orchestrator consumes events, schedules activities)
 - **Epic 1A**: API Server (provides HTTP endpoints for workflow and worker operations)
-- **Epic 1B (US-1.3)**: Worker Polling with Concurrency Safety (workers use API endpoints which call claim_next())
+- **Epic 1B (US-1B.1)**: Worker Polling with Concurrency Safety (workers use API endpoints which call claim_next())
 - **US-2.5**: Activity Settings (timeout, retry config stored in queue)
 - **US-6.1**: Query Optimization (prepared statements, indexes)
 

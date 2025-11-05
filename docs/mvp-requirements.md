@@ -250,7 +250,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 
 ### User Stories
 
-**US-1.3: Worker Polling with Concurrency Safety**
+**US-1B.1: Worker Polling with Concurrency Safety**
 - **As** a platform engineering lead
 - **I want** multiple workers (built-in and external) to safely poll the activity queue without conflicts
 - **So that** we can scale horizontally without coordination overhead
@@ -1261,7 +1261,7 @@ streamflow/
    - ✅ Health checks and metrics endpoints
 
 1B. **Built-in Worker** (Epic 1B):
-   - ✅ Worker polling with concurrency safety (US-1.3)
+   - ✅ Worker polling with concurrency safety (US-1B.1)
    - ✅ Built-in worker uses API server (same code path as external workers)
    - ✅ JWT authentication and token management
    - ✅ Activity execution and result reporting
@@ -1517,7 +1517,7 @@ See detailed GTM plan in:
 | 0.2     | 2025-10-26 | Claude Code | Moved Epic 11 (Benchmarking) to Epic 3 for early performance validation |
 | 0.3     | 2025-10-29 | Claude Code | Added Epic 1A (API Server) with 8 user stories for HTTP/REST API, authentication, and WebSocket streaming |
 | 0.4     | 2025-10-29 | Claude Code | Added US-1A.7 (Worker Activity APIs) for worker polling, heartbeat, and result reporting |
-| 0.5     | 2025-10-30 | Claude Code | Created Epic 1B (Built-in Worker), moved US-1.3 from Epic 1 to Epic 1B. Built-in worker uses API server for consistency with external workers. Added architecture decision and tradeoff analysis. |
+| 0.5     | 2025-10-30 | Claude Code | Created Epic 1B (Built-in Worker), moved US-1B.1 from Epic 1 to Epic 1B. Built-in worker uses API server for consistency with external workers. Added architecture decision and tradeoff analysis. |
 | 0.6     | 2025-10-30 | Claude Code | Swapped Epic 2 (YAML) and Epic 3 (Benchmarking). Benchmarking now Epic 2 (after Epic 1B), YAML now Epic 3. Benchmarking uses programmatic workflows (no YAML dependency), validates core architecture earlier, and informs YAML design. Updated all references, roadmap phases, and release criteria. |
 | 0.7     | 2025-10-30 | Sean Harrison | Revised and Re-ordered Epic 1A (API). Fixed event serialization format to PascalCase (WorkflowCreated, ActivityCompleted, etc.) matching PostgreSQL enum and Rust types. |
 | 0.8     | 2025-10-30 | Claude Code | Added Epic 1C (StreamFlow Binary and CLI) with 7 user stories covering main binary, service launchers (serve, orchestrator, api, worker), configuration management, database migrations, health checks, and graceful shutdown. Updated release criteria and roadmap. |

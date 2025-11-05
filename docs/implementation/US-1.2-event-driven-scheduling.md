@@ -2190,7 +2190,7 @@ Full expression language support:
 
 - **US-1.1**: Activity Queue (orchestrator schedules to queue)
 - **Epic 1A**: API Server (workflow submission endpoint, worker activity endpoints)
-- **Epic 1B (US-1.3)**: Worker Polling (built-in worker polls via API endpoints)
+- **Epic 1B (US-1B.1)**: Worker Polling (built-in worker polls via API endpoints)
 - **US-2.1**: Workflow Definition Language (YAML parsing)
 - **US-6.1**: Query Optimization (event polling performance)
 
