@@ -38,7 +38,7 @@ This user story establishes the workflow definition management system that enabl
 - Foundation for workflow execution (US-1A.5 depends on this)
 - Enables GitOps workflows (definitions in version control → deployed via API)
 - Allows rollback to previous versions if issues discovered
-- Supports A/B testing (deploy v1.0.0 and v1.1.0, route traffic appropriately)
+- Supports A/B testing (deploy two versions, route traffic appropriately)
 - Essential for multi-tenant deployments (each tenant can have their own definitions)
 
 **Why Auto-Generated Timestamps**:

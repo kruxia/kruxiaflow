@@ -128,9 +128,11 @@ impl AuthenticationService for PostgresAuthService {
 
         // Generate JWT with standard claims only
         // The `sub` (subject) uniquely identifies the client
+        // The `jti` (JWT ID) ensures each token is unique
         let now = Utc::now();
         let claims = Claims {
             sub: client.id.to_string(), // Uniquely identifies this client
+            jti: Uuid::now_v7().to_string(), // Unique token ID
             iss: self.config.jwt_issuer.clone(),
             aud: self.config.jwt_audience.clone(),
             exp: (now + Duration::seconds(self.config.token_ttl as i64)).timestamp(),
@@ -174,9 +176,11 @@ impl AuthenticationService for PostgresAuthService {
 
         // Generate JWT with standard claims only
         // The `sub` (subject) uniquely identifies the user
+        // The `jti` (JWT ID) ensures each token is unique
         let now = Utc::now();
         let claims = Claims {
             sub: user.id.to_string(), // Uniquely identifies this user
+            jti: Uuid::now_v7().to_string(), // Unique token ID
             iss: self.config.jwt_issuer.clone(),
             aud: self.config.jwt_audience.clone(),
             exp: (now + Duration::seconds(self.config.token_ttl as i64)).timestamp(),
@@ -247,9 +251,11 @@ impl AuthenticationService for PostgresAuthService {
         .await?;
 
         // Generate new access token with standard claims only
+        // The `jti` (JWT ID) ensures each token is unique
         let now = Utc::now();
         let claims = Claims {
             sub: user.id.to_string(), // Uniquely identifies this user
+            jti: Uuid::now_v7().to_string(), // Unique token ID
             iss: self.config.jwt_issuer.clone(),
             aud: self.config.jwt_audience.clone(),
             exp: (now + Duration::seconds(self.config.token_ttl as i64)).timestamp(),

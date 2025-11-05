@@ -6,6 +6,7 @@
 use chrono::{Duration, Utc};
 use sqlx::PgPool;
 use streamflow_oauth::{AuthConfig, AuthError, Claims, PostgresAuthService};
+use uuid::Uuid;
 
 /// Load test private key (PKCS#8 format)
 fn test_private_key() -> String {
@@ -45,6 +46,7 @@ async fn test_sign_and_verify_jwt() {
     let now = Utc::now();
     let claims = Claims {
         sub: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+        jti: Uuid::now_v7().to_string(),
         iss: "test".to_string(),
         aud: "test".to_string(),
         exp: (now + Duration::hours(1)).timestamp(),
@@ -69,6 +71,7 @@ async fn test_expired_token_rejected() {
     let now = Utc::now();
     let claims = Claims {
         sub: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+        jti: Uuid::now_v7().to_string(),
         iss: "test".to_string(),
         aud: "test".to_string(),
         exp: (now - Duration::hours(1)).timestamp(), // Expired 1 hour ago
@@ -94,6 +97,7 @@ async fn test_invalid_issuer_rejected() {
     let now = Utc::now();
     let claims = Claims {
         sub: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+        jti: Uuid::now_v7().to_string(),
         iss: "wrong-issuer".to_string(), // Wrong issuer
         aud: "test".to_string(),
         exp: (now + Duration::hours(1)).timestamp(),
@@ -119,6 +123,7 @@ async fn test_invalid_audience_rejected() {
     let now = Utc::now();
     let claims = Claims {
         sub: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+        jti: Uuid::now_v7().to_string(),
         iss: "test".to_string(),
         aud: "wrong-audience".to_string(), // Wrong audience
         exp: (now + Duration::hours(1)).timestamp(),
@@ -144,6 +149,7 @@ async fn test_token_with_future_iat_accepted() {
     let now = Utc::now();
     let claims = Claims {
         sub: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+        jti: Uuid::now_v7().to_string(),
         iss: "test".to_string(),
         aud: "test".to_string(),
         exp: (now + Duration::hours(2)).timestamp(),
@@ -179,6 +185,7 @@ async fn test_token_with_tampered_signature_rejected() {
     let now = Utc::now();
     let claims = Claims {
         sub: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+        jti: Uuid::now_v7().to_string(),
         iss: "test".to_string(),
         aud: "test".to_string(),
         exp: (now + Duration::hours(1)).timestamp(),
@@ -209,6 +216,7 @@ async fn test_token_ttl_respected() {
     let now = Utc::now();
     let claims = Claims {
         sub: "550e8400-e29b-41d4-a716-446655440000".to_string(),
+        jti: Uuid::now_v7().to_string(),
         iss: "test".to_string(),
         aud: "test".to_string(),
         exp: (now + Duration::seconds(3600)).timestamp(),
@@ -230,4 +238,269 @@ async fn test_token_ttl_respected() {
         expected_exp,
         actual_exp
     );
+}
+
+// ============================================================================
+// Tests for oauth/src/lib.rs types and structures
+// ============================================================================
+
+#[test]
+fn test_auth_config_default() {
+    let config = streamflow_oauth::AuthConfig::default();
+
+    assert_eq!(config.rsa_private_key_pem, "");
+    assert_eq!(config.rsa_public_key_pem, None);
+    assert_eq!(config.jwt_issuer, "streamflow");
+    assert_eq!(config.jwt_audience, "streamflow-api");
+    assert_eq!(config.token_ttl, 86400);
+}
+
+#[test]
+fn test_auth_config_custom() {
+    let config = streamflow_oauth::AuthConfig {
+        rsa_private_key_pem: "test-key".to_string(),
+        rsa_public_key_pem: Some("test-pub".to_string()),
+        jwt_issuer: "custom-issuer".to_string(),
+        jwt_audience: "custom-audience".to_string(),
+        token_ttl: 7200,
+    };
+
+    assert_eq!(config.rsa_private_key_pem, "test-key");
+    assert_eq!(config.rsa_public_key_pem, Some("test-pub".to_string()));
+    assert_eq!(config.jwt_issuer, "custom-issuer");
+    assert_eq!(config.jwt_audience, "custom-audience");
+    assert_eq!(config.token_ttl, 7200);
+}
+
+#[test]
+fn test_claims_serialization() {
+    use streamflow_oauth::Claims;
+
+    let claims = Claims {
+        sub: "user-123".to_string(),
+        jti: "jti-123".to_string(),
+        iss: "streamflow".to_string(),
+        aud: "streamflow-api".to_string(),
+        exp: 1234567890,
+        iat: 1234567800,
+    };
+
+    let json = serde_json::to_string(&claims).unwrap();
+    assert!(json.contains("\"sub\":\"user-123\""));
+    assert!(json.contains("\"jti\":\"jti-123\""));
+    assert!(json.contains("\"iss\":\"streamflow\""));
+    assert!(json.contains("\"aud\":\"streamflow-api\""));
+    assert!(json.contains("\"exp\":1234567890"));
+    assert!(json.contains("\"iat\":1234567800"));
+}
+
+#[test]
+fn test_claims_deserialization() {
+    use streamflow_oauth::Claims;
+
+    let json = r#"{
+        "sub": "user-123",
+        "jti": "jti-123",
+        "iss": "streamflow",
+        "aud": "streamflow-api",
+        "exp": 1234567890,
+        "iat": 1234567800
+    }"#;
+
+    let claims: Claims = serde_json::from_str(json).unwrap();
+    assert_eq!(claims.sub, "user-123");
+    assert_eq!(claims.jti, "jti-123");
+    assert_eq!(claims.iss, "streamflow");
+    assert_eq!(claims.aud, "streamflow-api");
+    assert_eq!(claims.exp, 1234567890);
+    assert_eq!(claims.iat, 1234567800);
+}
+
+#[test]
+fn test_auth_response_serialization() {
+    use streamflow_oauth::AuthResponse;
+
+    let response = AuthResponse {
+        access_token: "token-123".to_string(),
+        token_type: "Bearer".to_string(),
+        expires_in: 3600,
+        refresh_token: Some("refresh-123".to_string()),
+    };
+
+    let json = serde_json::to_string(&response).unwrap();
+    assert!(json.contains("\"access_token\":\"token-123\""));
+    assert!(json.contains("\"token_type\":\"Bearer\""));
+    assert!(json.contains("\"expires_in\":3600"));
+    assert!(json.contains("\"refresh_token\":\"refresh-123\""));
+}
+
+#[test]
+fn test_auth_response_deserialization() {
+    use streamflow_oauth::AuthResponse;
+
+    let json = r#"{
+        "access_token": "token-123",
+        "token_type": "Bearer",
+        "expires_in": 3600,
+        "refresh_token": "refresh-123"
+    }"#;
+
+    let response: AuthResponse = serde_json::from_str(json).unwrap();
+    assert_eq!(response.access_token, "token-123");
+    assert_eq!(response.token_type, "Bearer");
+    assert_eq!(response.expires_in, 3600);
+    assert_eq!(response.refresh_token, Some("refresh-123".to_string()));
+}
+
+#[test]
+fn test_auth_response_without_refresh_token() {
+    use streamflow_oauth::AuthResponse;
+
+    let response = AuthResponse {
+        access_token: "token-123".to_string(),
+        token_type: "Bearer".to_string(),
+        expires_in: 3600,
+        refresh_token: None,
+    };
+
+    let json = serde_json::to_string(&response).unwrap();
+    assert!(json.contains("\"access_token\":\"token-123\""));
+    assert!(!json.contains("refresh_token"));
+}
+
+#[test]
+fn test_jwt_key_serialization() {
+    use streamflow_oauth::JwtKey;
+
+    let key = JwtKey {
+        kid: "key-1".to_string(),
+        kty: "RSA".to_string(),
+        alg: "RS256".to_string(),
+        n: "modulus".to_string(),
+        e: "exponent".to_string(),
+    };
+
+    let json = serde_json::to_string(&key).unwrap();
+    assert!(json.contains("\"kid\":\"key-1\""));
+    assert!(json.contains("\"kty\":\"RSA\""));
+    assert!(json.contains("\"alg\":\"RS256\""));
+    assert!(json.contains("\"n\":\"modulus\""));
+    assert!(json.contains("\"e\":\"exponent\""));
+}
+
+#[test]
+fn test_auth_error_display() {
+    use streamflow_oauth::AuthError;
+
+    let err = AuthError::InvalidCredentials;
+    assert_eq!(err.to_string(), "Invalid credentials");
+
+    let err = AuthError::InvalidToken("bad signature".to_string());
+    assert_eq!(err.to_string(), "Invalid token: bad signature");
+
+    let err = AuthError::ExpiredToken;
+    assert_eq!(err.to_string(), "Expired token");
+
+    let err = AuthError::RevokedToken;
+    assert_eq!(err.to_string(), "Revoked token");
+
+    let err = AuthError::JwtError("encoding failed".to_string());
+    assert_eq!(err.to_string(), "JWT error: encoding failed");
+
+    let err = AuthError::InternalError("unexpected".to_string());
+    assert_eq!(err.to_string(), "Internal error: unexpected");
+}
+
+#[test]
+fn test_auth_error_from_sqlx_error() {
+    use streamflow_oauth::AuthError;
+
+    // Simulate a database connection error
+    let sqlx_err = sqlx::Error::PoolTimedOut;
+    let auth_err: AuthError = sqlx_err.into();
+
+    match auth_err {
+        AuthError::DatabaseError(_) => {} // Expected
+        _ => panic!("Expected DatabaseError variant"),
+    }
+}
+
+#[test]
+fn test_claims_clone() {
+    use streamflow_oauth::Claims;
+
+    let claims1 = Claims {
+        sub: "user-123".to_string(),
+        jti: "jti-123".to_string(),
+        iss: "streamflow".to_string(),
+        aud: "streamflow-api".to_string(),
+        exp: 1234567890,
+        iat: 1234567800,
+    };
+
+    let claims2 = claims1.clone();
+    assert_eq!(claims1.sub, claims2.sub);
+    assert_eq!(claims1.jti, claims2.jti);
+    assert_eq!(claims1.iss, claims2.iss);
+    assert_eq!(claims1.aud, claims2.aud);
+    assert_eq!(claims1.exp, claims2.exp);
+    assert_eq!(claims1.iat, claims2.iat);
+}
+
+#[test]
+fn test_auth_response_clone() {
+    use streamflow_oauth::AuthResponse;
+
+    let response1 = AuthResponse {
+        access_token: "token-123".to_string(),
+        token_type: "Bearer".to_string(),
+        expires_in: 3600,
+        refresh_token: Some("refresh-123".to_string()),
+    };
+
+    let response2 = response1.clone();
+    assert_eq!(response1.access_token, response2.access_token);
+    assert_eq!(response1.token_type, response2.token_type);
+    assert_eq!(response1.expires_in, response2.expires_in);
+    assert_eq!(response1.refresh_token, response2.refresh_token);
+}
+
+#[test]
+fn test_jwt_key_clone() {
+    use streamflow_oauth::JwtKey;
+
+    let key1 = JwtKey {
+        kid: "key-1".to_string(),
+        kty: "RSA".to_string(),
+        alg: "RS256".to_string(),
+        n: "modulus".to_string(),
+        e: "exponent".to_string(),
+    };
+
+    let key2 = key1.clone();
+    assert_eq!(key1.kid, key2.kid);
+    assert_eq!(key1.kty, key2.kty);
+    assert_eq!(key1.alg, key2.alg);
+    assert_eq!(key1.n, key2.n);
+    assert_eq!(key1.e, key2.e);
+}
+
+#[test]
+fn test_auth_config_clone() {
+    use streamflow_oauth::AuthConfig;
+
+    let config1 = AuthConfig {
+        rsa_private_key_pem: "test-key".to_string(),
+        rsa_public_key_pem: Some("test-pub".to_string()),
+        jwt_issuer: "custom-issuer".to_string(),
+        jwt_audience: "custom-audience".to_string(),
+        token_ttl: 7200,
+    };
+
+    let config2 = config1.clone();
+    assert_eq!(config1.rsa_private_key_pem, config2.rsa_private_key_pem);
+    assert_eq!(config1.rsa_public_key_pem, config2.rsa_public_key_pem);
+    assert_eq!(config1.jwt_issuer, config2.jwt_issuer);
+    assert_eq!(config1.jwt_audience, config2.jwt_audience);
+    assert_eq!(config1.token_ttl, config2.token_ttl);
 }

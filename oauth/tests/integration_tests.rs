@@ -82,8 +82,10 @@ async fn create_test_user(pool: &PgPool, username: &str, email: &str, password: 
 
     let row = sqlx::query!(
         r#"
-        INSERT INTO oauth_users (username, email, password_hash)
-        VALUES ($1, $2, $3)
+        INSERT INTO oauth_users (username, email, password_hash, is_active)
+        VALUES ($1, $2, $3, true)
+        ON CONFLICT (email) DO UPDATE
+        SET username = EXCLUDED.username, password_hash = EXCLUDED.password_hash, is_active = true
         RETURNING id
         "#,
         username,
@@ -250,7 +252,7 @@ async fn test_password_flow_success() {
     // Authenticate with password
     let result = service.authenticate_password(username, password).await;
 
-    assert!(result.is_ok(), "Password authentication should succeed");
+    assert!(result.is_ok(), "Password authentication should succeed: {:?}", result.err());
 
     let response = result.unwrap();
     assert_eq!(response.token_type, "Bearer");

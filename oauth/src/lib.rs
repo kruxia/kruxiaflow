@@ -43,6 +43,9 @@ pub type AuthResult<T> = Result<T, AuthError>;
 /// For MVP, we use only standard JWT claims. The `sub` (subject) claim
 /// uniquely identifies the authenticated entity (user_id or client_id).
 ///
+/// The `jti` (JWT ID) ensures each token is unique, even when issued
+/// at the same timestamp for the same subject.
+///
 /// Additional claims can be added post-MVP for authorization:
 /// - scopes: Vec<String> for permissions
 /// - tenant_id: String for multi-tenancy
@@ -51,6 +54,9 @@ pub type AuthResult<T> = Result<T, AuthError>;
 pub struct Claims {
     /// Subject (user_id or client_id) - uniquely identifies authenticated entity
     pub sub: String,
+
+    /// JWT ID - unique identifier for this token
+    pub jti: String,
 
     /// Issuer (who issued this token)
     pub iss: String,
@@ -71,6 +77,7 @@ pub struct AuthResponse {
     pub access_token: String,
     pub token_type: String,
     pub expires_in: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,
 }
 
