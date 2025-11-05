@@ -8,7 +8,9 @@ use bcrypt::hash;
 use chrono::{Duration, Utc};
 use serial_test::serial;
 use sqlx::PgPool;
-use streamflow_oauth::{AuthConfig, AuthError, AuthenticationService, PostgresAuthService};
+use streamflow_oauth::{
+    hash_refresh_token, AuthConfig, AuthError, AuthenticationService, PostgresAuthService,
+};
 use uuid::Uuid;
 
 /// Load test private key
@@ -367,6 +369,9 @@ async fn test_refresh_token_success() {
 
     let refresh_token = initial_response.refresh_token.unwrap();
 
+    // Wait 1 second so the new JWT has a different iat (issued at) timestamp
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
     // Use refresh token to get new access token
     let result = service.refresh_token(&refresh_token).await;
 
@@ -381,9 +386,23 @@ async fn test_refresh_token_success() {
         "New access token should be different"
     );
 
-    // Validate the new token
+    // Verify refresh token rotation - new refresh token should be different
+    let new_refresh_token = response.refresh_token.as_ref().unwrap();
+    assert_ne!(
+        new_refresh_token, &refresh_token,
+        "New refresh token should be different (rotation)"
+    );
+
+    // Validate the new access token
     let claims = service.validate_token(&response.access_token).await;
     assert!(claims.is_ok(), "New token should be valid");
+
+    // Verify old refresh token is now revoked
+    let old_token_result = service.refresh_token(&refresh_token).await;
+    assert!(
+        matches!(old_token_result, Err(AuthError::RevokedToken)),
+        "Old refresh token should be revoked after rotation"
+    );
 
     cleanup_test_data(&pool, None, Some(username)).await;
 }
@@ -420,7 +439,7 @@ async fn test_refresh_token_expired() {
 
     // Create an expired refresh token
     let refresh_token = Uuid::now_v7().to_string();
-    let refresh_token_hash = hash(&refresh_token, bcrypt::DEFAULT_COST).unwrap();
+    let refresh_token_hash = hash_refresh_token(&refresh_token); // Use SHA-256, not bcrypt
 
     sqlx::query!(
         r#"
