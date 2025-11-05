@@ -1,4 +1,5 @@
 use crate::error::{ApiError, ApiErrorResponse, ErrorCode};
+use crate::handlers::oauth::{GrantType, TokenRequest, TokenResponse};
 use crate::health::{LivenessResponse, ReadinessResponse, ServiceInfo};
 use utoipa::OpenApi;
 
@@ -23,9 +24,13 @@ use utoipa::OpenApi;
         (url = "http://localhost:8080", description = "Local development server")
     ),
     paths(
+        // Health check endpoints
         crate::handlers::health::liveness_handler,
         crate::handlers::health::readiness_handler,
         crate::handlers::health::service_info_handler,
+
+        // OAuth 2.0 endpoints
+        crate::handlers::oauth::token_handler,
     ),
     components(
         schemas(
@@ -33,6 +38,11 @@ use utoipa::OpenApi;
             LivenessResponse,
             ReadinessResponse,
             ServiceInfo,
+
+            // OAuth 2.0 schemas
+            TokenRequest,
+            TokenResponse,
+            GrantType,
 
             // Error response schemas
             ApiErrorResponse,
@@ -43,6 +53,7 @@ use utoipa::OpenApi;
     tags(
         (name = "Health", description = "Health check and service information endpoints"),
         (name = "Service", description = "Service metadata and capabilities"),
+        (name = "OAuth 2.0", description = "OAuth 2.0 compliant token issuance (RFC 6749)"),
     ),
     modifiers(&SecurityAddon)
 )]

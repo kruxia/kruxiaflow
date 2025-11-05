@@ -2,6 +2,7 @@
 members = [
     "core",
     "api",
+    "oauth",
     "activity",
     "dashboard",
     "streamflow",
@@ -39,6 +40,7 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 # Authentication
 jsonwebtoken = "9.3"
 bcrypt = "0.15"
+sha2 = "0.10"
 
 # Error handling
 anyhow = "1.0"

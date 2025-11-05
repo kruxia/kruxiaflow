@@ -2,7 +2,9 @@ use axum::http::{HeaderName, Method, StatusCode};
 use axum_test::TestServer;
 use serial_test::serial;
 use sqlx::PgPool;
+use std::sync::Arc;
 use streamflow_api::{ApiErrorResponse, AppState, AppStateBuild, app_router};
+use streamflow_oauth::{AuthConfig, PostgresAuthService};
 use uuid::Uuid;
 
 /// Helper to create test database pool
@@ -24,12 +26,36 @@ async fn setup_test_pool() -> PgPool {
     pool
 }
 
+/// Generate test RSA private key
+fn test_rsa_private_key() -> String {
+    // Test RSA private key (2048-bit) - for testing only!
+    include_str!("../../oauth/tests/private.pem").to_string()
+}
+
+/// Generate test RSA public key
+fn test_rsa_public_key() -> String {
+    include_str!("../../oauth/tests/public.pem").to_string()
+}
+
 /// Helper to create test AppState
 async fn setup_test_state() -> AppState {
     let pool = setup_test_pool().await;
 
+    // Create auth service for testing
+    let auth_config = AuthConfig {
+        rsa_private_key_pem: test_rsa_private_key(),
+        rsa_public_key_pem: Some(test_rsa_public_key()),
+        jwt_issuer: "test".to_string(),
+        jwt_audience: "test".to_string(),
+        token_ttl: 3600,
+    };
+
+    let auth_service = PostgresAuthService::new(pool.clone(), auth_config)
+        .expect("Failed to create test auth service");
+
     AppState::with_metadata(
         pool,
+        Arc::new(auth_service),
         "0.2.0-test".to_string(),
         AppStateBuild {
             timestamp: "2025-10-30T00:00:00Z".to_string(),

@@ -1446,7 +1446,7 @@ Validation errors include field-level details:
 - Axum Error Handling: https://docs.rs/axum/latest/axum/error_handling/
 - OpenAPI 3.0 Spec: https://swagger.io/specification/
 - Tower HTTP CORS: https://docs.rs/tower-http/latest/tower_http/cors/
-- Swagger UI: https://swagger.io/tools/swagger-ui/
+- Swagger UI: https://swagger.io/scr/swagger-ui/
 - ReDoc: https://redocly.com/redoc/
 
 ---
@@ -1495,16 +1495,16 @@ Validation errors include field-level details:
 - ✅ Database health check tests moved from source files to integration tests (test_check_database_health_success, test_check_event_source_health_success, test_check_activity_queue_health_success)
 
 **Test Coverage Infrastructure**:
-- ✅ Enhanced `tools/test.sh` with cargo-llvm-cov support
+- ✅ Enhanced `scr/test.sh` with cargo-llvm-cov support
 - ✅ Coverage options: `--coverage`, `--coverage-html`, `--coverage-ci`
 - ✅ HTML coverage reports with automatic browser opening
 - ✅ lcov format for CI/CD integration
 - ✅ Created comprehensive `docs/testing.md` documentation
-- ✅ Added `tools/README.md` for tool documentation
+- ✅ Added `scr/README.md` for tool documentation
 
 **Post-Implementation**:
 - All subsequent API endpoints (US-1A.3+) will use standardized error handling
 - OpenAPI spec will be updated as new endpoints are added via utoipa annotations
 - Documentation UI provides immediate feedback during development at `/api/v1/docs`
 - OpenAPI spec available at `/api/v1/openapi.json` for Postman/client generation
-- Test coverage tracking available via `./tools/test.sh --coverage-html`
+- Test coverage tracking available via `./scr/test.sh --coverage-html`
