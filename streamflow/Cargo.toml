@@ -27,6 +27,7 @@ thiserror = { workspace = true }
 # Internal dependencies
 streamflow-api = { path = "../api" }
 streamflow-core = { path = "../core" }
+streamflow-oauth = { path = "../oauth" }
 
 # Database
 sqlx = { workspace = true }

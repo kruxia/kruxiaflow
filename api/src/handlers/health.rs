@@ -26,10 +26,7 @@ use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
 )]
 pub async fn liveness_handler() -> impl IntoResponse {
     // If this handler runs, server is alive
-    (
-        StatusCode::OK,
-        Json(LivenessResponse { status: "ok" }),
-    )
+    (StatusCode::OK, Json(LivenessResponse { status: "ok" }))
 }
 
 /// Readiness probe handler
@@ -98,9 +95,8 @@ pub async fn readiness_handler(State(app_state): State<AppState>) -> impl IntoRe
         }
     };
 
-    let all_healthy = database_status == "ok"
-        && event_source_status == "ok"
-        && queue_status == "ok";
+    let all_healthy =
+        database_status == "ok" && event_source_status == "ok" && queue_status == "ok";
 
     let status_code = if all_healthy {
         StatusCode::OK

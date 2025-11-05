@@ -44,10 +44,10 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 **Quick Start** (automated):
 ```bash
 # Set up development database
-./tools/setup-dev-db.sh
+./scr/setup-dev-db.sh
 
 # Run tests
-./tools/test.sh
+./scr/test.sh
 
 # Build
 cargo build --release
@@ -77,7 +77,7 @@ export DATABASE_URL='postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamf
 
 4. **Run tests**:
    ```bash
-   ./tools/test.sh
+   ./scr/test.sh
    ```
 
 5. **Run API server**:
@@ -174,7 +174,7 @@ cargo sqlx prepare --workspace
 Tests require a running PostgreSQL instance. The recommended way to run tests is using the test script, which creates a clean test database:
 
 ```bash
-./tools/test.sh
+./scr/test.sh
 ```
 
 This script will:
@@ -186,18 +186,18 @@ This script will:
 **Test Coverage:**
 ```bash
 # Run tests with coverage
-./tools/test.sh --coverage
+./scr/test.sh --coverage
 
 # Generate HTML coverage report
-./tools/test.sh --coverage-html
+./scr/test.sh --coverage-html
 
 # Test specific crate
-./tools/test.sh -p streamflow-api --coverage
+./scr/test.sh -p streamflow-api --coverage
 ```
 
 **More options:**
 ```bash
-./tools/test.sh --help  # See all options
+./scr/test.sh --help  # See all options
 ```
 
 See [docs/testing.md](docs/testing.md) for comprehensive testing guide.

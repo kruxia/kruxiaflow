@@ -3,7 +3,9 @@ use crate::signals;
 use anyhow::{Context, Result};
 use clap::Args;
 use sqlx::postgres::PgPoolOptions;
+use std::sync::Arc;
 use std::time::Duration;
+use streamflow_oauth::{AuthConfig, PostgresAuthService};
 
 #[derive(Args)]
 pub struct ApiCommand {
@@ -52,8 +54,39 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
 
     tracing::info!("Database connectivity verified");
 
+    // Load RSA keys for JWT signing/verification from environment
+    let rsa_private_key_pem = std::env::var("STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM").context(
+        "STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM environment variable is required. \
+             Generate keys with: openssl genrsa -out private.pem 2048 && \
+             openssl rsa -in private.pem -pubout -out public.pem",
+    )?;
+
+    let rsa_public_key_pem = std::env::var("STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM").ok();
+
+    tracing::info!("RSA keys loaded for JWT signing/verification");
+
+    // Configure authentication service
+    let auth_config = AuthConfig {
+        rsa_private_key_pem,
+        rsa_public_key_pem,
+        jwt_issuer: std::env::var("STREAMFLOW_OAUTH_JWT_ISSUER")
+            .unwrap_or_else(|_| "streamflow".to_string()),
+        jwt_audience: std::env::var("STREAMFLOW_OAUTH_JWT_AUDIENCE")
+            .unwrap_or_else(|_| "streamflow-api".to_string()),
+        token_ttl: std::env::var("STREAMFLOW_OAUTH_TOKEN_TTL")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(86400), // 24 hours
+    };
+
+    // Initialize authentication service
+    let auth_service = PostgresAuthService::new(db_pool.clone(), auth_config)
+        .context("Failed to initialize authentication service")?;
+
+    tracing::info!("Authentication service initialized");
+
     // Create application state
-    let app_state = streamflow_api::AppState::new(db_pool);
+    let app_state = streamflow_api::AppState::new(db_pool, Arc::new(auth_service));
 
     // Create Axum router
     let app = streamflow_api::app_router(app_state);

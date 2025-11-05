@@ -3,7 +3,7 @@
 # StreamFlow Test Runner
 #
 # Usage:
-#   ./tools/test.sh [OPTIONS]
+#   ./scr/test.sh [OPTIONS]
 #
 # Options:
 #   --help, -h              Show this help message
@@ -20,12 +20,12 @@
 #   --skip-db-setup         Skip database setup (assumes DB is ready)
 #
 # Examples:
-#   ./tools/test.sh                           # Run all tests
-#   ./tools/test.sh --coverage                # Run with coverage
-#   ./tools/test.sh --coverage-html           # Generate HTML report
-#   ./tools/test.sh -p streamflow-api         # Test only API crate
-#   ./tools/test.sh --unit                    # Unit tests only
-#   ./tools/test.sh --skip-db-setup           # Skip DB setup
+#   ./scr/test.sh                           # Run all tests
+#   ./scr/test.sh --coverage                # Run with coverage
+#   ./scr/test.sh --coverage-html           # Generate HTML report
+#   ./scr/test.sh -p streamflow-api         # Test only API crate
+#   ./scr/test.sh --unit                    # Unit tests only
+#   ./scr/test.sh --skip-db-setup           # Skip DB setup
 
 set -e
 

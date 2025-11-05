@@ -43,7 +43,62 @@ Post-MVP expands to:
 
 **Goal**: Enable StreamFlow to integrate with external managed services for improved scalability, reliability, and operational simplicity in production environments.
 
-### Story 1.1: External Identity Provider Integration
+### Story 1.1: Refresh Token Rotation with Grace Period
+
+**Priority**: P1 (High - Security enhancement for MVP auth)
+
+**As** a platform engineer
+**I want** refresh token rotation with grace period handling
+**So that** we can detect token theft while handling legitimate network failures
+
+**Current Status**: MVP implements **strict rotation** (immediate revocation) per RFC 6749. This is secure but doesn't handle network failures gracefully.
+
+**Scope**:
+- Add `replaced_by` column to `oauth_refresh_tokens` table
+- Implement grace period for token rotation (30 seconds default)
+- Track token replacement chains (old → new)
+- Detect reuse of replaced tokens:
+  - Within grace period → Allow (network retry)
+  - Outside grace period → Revoke both tokens (detected breach)
+- Automatic cleanup of stale replaced tokens
+- Metrics on token rotation and breach detection
+- Configuration for grace period duration
+
+**Architecture Reference**: `oauth/src/postgres.rs:210` (refresh_token method)
+
+**Migration**:
+```sql
+ALTER TABLE oauth_refresh_tokens ADD COLUMN replaced_by UUID REFERENCES oauth_refresh_tokens(id);
+CREATE INDEX idx_oauth_refresh_tokens_replaced ON oauth_refresh_tokens(replaced_by) WHERE replaced_by IS NOT NULL;
+```
+
+**Security Model**:
+```
+Token Lifecycle:
+1. Token A issued at T0
+2. Token A used at T1 → Replaced by Token B
+3. Token A marked with replaced_by = Token B (not revoked yet)
+4. If Token A used again:
+   - T1 + 30s (within grace) → Return Token B (network retry)
+   - T1 + 60s (outside grace) → Revoke both A and B (breach detected)
+```
+
+**Benefits**:
+- **Security**: Detect token theft (reuse of replaced token)
+- **Reliability**: Handle network failures gracefully
+- **Industry standard**: Same approach as Auth0, Okta, Google
+- **Observability**: Metrics on breaches and retries
+
+**Trade-offs**:
+- Increased complexity (token relationship tracking)
+- Schema change required
+- Grace period is a security vs reliability balance
+
+**Post-MVP Enhancement**: This moves MVP from strict rotation to rotation with grace period, matching production OAuth providers.
+
+---
+
+### Story 1.2: External Identity Provider Integration
 
 **Priority**: P1 (High - Common enterprise requirement)
 
@@ -82,7 +137,7 @@ STREAMFLOW_OAUTH_CLIENT_SECRET=...
 
 ---
 
-### Story 1.2: Kafka/Redpanda Event Streaming
+### Story 1.3: Kafka/Redpanda Event Streaming
 
 **Priority**: P1 (High - Key scalability path)
 
@@ -125,7 +180,7 @@ STREAMFLOW_KAFKA_CONSUMER_GROUP=streamflow-orchestrators
 
 ---
 
-### Story 1.3: NATS JetStream Event Streaming
+### Story 1.4: NATS JetStream Event Streaming
 
 **Priority**: P2 (Medium - Alternative for lower scale, simpler ops)
 
@@ -156,7 +211,7 @@ STREAMFLOW_KAFKA_CONSUMER_GROUP=streamflow-orchestrators
 
 ---
 
-### Story 1.4: PostgreSQL Logical Replication Event Streaming
+### Story 1.5: PostgreSQL Logical Replication Event Streaming
 
 **Priority**: P2 (Medium - Stay with PostgreSQL while improving latency)
 
@@ -191,7 +246,7 @@ STREAMFLOW_KAFKA_CONSUMER_GROUP=streamflow-orchestrators
 
 ---
 
-### Story 1.5: AWS SQS Activity Queue
+### Story 1.6: AWS SQS Activity Queue
 
 **Priority**: P2 (Medium - Cloud-native queue for AWS deployments)
 
@@ -224,7 +279,7 @@ STREAMFLOW_KAFKA_CONSUMER_GROUP=streamflow-orchestrators
 
 ---
 
-### Story 1.6: RabbitMQ Activity Queue
+### Story 1.7: RabbitMQ Activity Queue
 
 **Priority**: P2 (Medium - High-throughput queue)
 
@@ -249,7 +304,7 @@ STREAMFLOW_KAFKA_CONSUMER_GROUP=streamflow-orchestrators
 
 ---
 
-### Story 1.7: Redis Activity Queue
+### Story 1.8: Redis Activity Queue
 
 **Priority**: P3 (Lower - Niche use case)
 
@@ -276,7 +331,7 @@ STREAMFLOW_KAFKA_CONSUMER_GROUP=streamflow-orchestrators
 
 ---
 
-### Story 1.8: S3-Compatible Storage for Artifacts
+### Story 1.9: S3-Compatible Storage for Artifacts
 
 **Priority**: P1 (High - Common for large files)
 
@@ -312,7 +367,7 @@ STREAMFLOW_STORAGE_S3_REGION=us-east-1
 
 ---
 
-### Story 1.9: Filesystem Storage for Artifacts
+### Story 1.10: Filesystem Storage for Artifacts
 
 **Priority**: P2 (Medium - Edge deployments)
 
@@ -341,7 +396,7 @@ STREAMFLOW_STORAGE_S3_REGION=us-east-1
 
 ---
 
-### Story 1.10: Redis Result Caching
+### Story 1.11: Redis Result Caching
 
 **Priority**: P2 (Medium - Performance optimization)
 
