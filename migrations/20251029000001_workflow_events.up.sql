@@ -10,6 +10,7 @@ CREATE TYPE workflow_event_type AS ENUM (
 );
 
 CREATE TYPE workflow_status AS ENUM (
+    'created',
     'running',
     'completed',
     'failed',
@@ -54,17 +55,20 @@ USING brin(created_at);
 -- Create workflows table
 CREATE TABLE workflows (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
-    workflow_type TEXT NOT NULL,
+    definition_name TEXT NOT NULL,
     workflow_definition_id UUID NOT NULL REFERENCES workflow_definitions(id),
-    status workflow_status NOT NULL DEFAULT 'running',
+    input JSONB NOT NULL,
+    unique_key TEXT UNIQUE,
+    status workflow_status NOT NULL DEFAULT 'created',
+    activities JSONB NOT NULL,
     state_data JSONB NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- Index for workflow queries
-CREATE INDEX idx_workflows_type_status
-ON workflows(workflow_type, status, created_at DESC);
+CREATE INDEX idx_workflows_definition_status
+ON workflows(definition_name, status, created_at DESC);
 
 -- Index for status queries
 CREATE INDEX idx_workflows_status

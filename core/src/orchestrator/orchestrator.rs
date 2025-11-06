@@ -172,20 +172,12 @@ pub async fn process_workflow_event(
 
         event_source.publish(completion_event).await?;
 
-        // Update workflow status in workflows table
+        // Update workflow status in memory (will be persisted by save_materialized_state)
         let new_status = if is_workflow_failed(&state) {
             WorkflowStatus::Failed
         } else {
             WorkflowStatus::Completed
         };
-
-        sqlx::query!(
-            r#"UPDATE workflows SET status = $1, updated_at = NOW() WHERE id = $2"#,
-            new_status as WorkflowStatus,
-            event.workflow_id
-        )
-        .execute(&mut *tx)
-        .await?;
 
         state.status = new_status;
     }

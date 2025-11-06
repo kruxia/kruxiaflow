@@ -11,7 +11,7 @@ fn test_apply_workflow_created_event() {
     let workflow_id = Uuid::now_v7();
     let mut state = WorkflowState {
         workflow_id,
-        workflow_type: "test_workflow".to_string(),
+        definition_name: "test_workflow".to_string(),
         status: WorkflowStatus::Running,
         activities: Default::default(),
         state_data: json!({}),
@@ -36,7 +36,7 @@ fn test_apply_activity_scheduled_event() {
     let workflow_id = Uuid::now_v7();
     let mut state = WorkflowState {
         workflow_id,
-        workflow_type: "test_workflow".to_string(),
+        definition_name: "test_workflow".to_string(),
         status: WorkflowStatus::Running,
         activities: vec![(
             "activity1".to_string(),
@@ -76,7 +76,7 @@ fn test_apply_activity_completed_event() {
     let workflow_id = Uuid::now_v7();
     let mut state = WorkflowState {
         workflow_id,
-        workflow_type: "test_workflow".to_string(),
+        definition_name: "test_workflow".to_string(),
         status: WorkflowStatus::Running,
         activities: vec![(
             "activity1".to_string(),
@@ -117,7 +117,7 @@ fn test_apply_activity_failed_event() {
     let workflow_id = Uuid::now_v7();
     let mut state = WorkflowState {
         workflow_id,
-        workflow_type: "test_workflow".to_string(),
+        definition_name: "test_workflow".to_string(),
         status: WorkflowStatus::Running,
         activities: vec![(
             "activity1".to_string(),
@@ -158,7 +158,7 @@ fn test_apply_workflow_completed_event() {
     let workflow_id = Uuid::now_v7();
     let mut state = WorkflowState {
         workflow_id,
-        workflow_type: "test_workflow".to_string(),
+        definition_name: "test_workflow".to_string(),
         status: WorkflowStatus::Running,
         activities: Default::default(),
         state_data: json!({}),
@@ -183,7 +183,7 @@ fn test_apply_workflow_failed_event() {
     let workflow_id = Uuid::now_v7();
     let mut state = WorkflowState {
         workflow_id,
-        workflow_type: "test_workflow".to_string(),
+        definition_name: "test_workflow".to_string(),
         status: WorkflowStatus::Running,
         activities: Default::default(),
         state_data: json!({}),
@@ -208,7 +208,7 @@ fn test_apply_multiple_events_sequential() {
     let workflow_id = Uuid::now_v7();
     let mut state = WorkflowState {
         workflow_id,
-        workflow_type: "test_workflow".to_string(),
+        definition_name: "test_workflow".to_string(),
         status: WorkflowStatus::Running,
         activities: vec![
             (
@@ -297,7 +297,7 @@ fn test_apply_workflow_updated_event() {
     let workflow_id = Uuid::now_v7();
     let mut state = WorkflowState {
         workflow_id,
-        workflow_type: "test_workflow".to_string(),
+        definition_name: "test_workflow".to_string(),
         status: WorkflowStatus::Running,
         activities: Default::default(),
         state_data: json!({}),
@@ -324,7 +324,7 @@ fn test_apply_activity_scheduled_event_nonexistent_activity() {
     let workflow_id = Uuid::now_v7();
     let mut state = WorkflowState {
         workflow_id,
-        workflow_type: "test_workflow".to_string(),
+        definition_name: "test_workflow".to_string(),
         status: WorkflowStatus::Running,
         activities: Default::default(), // Empty activities map
         state_data: json!({}),
@@ -352,7 +352,7 @@ fn test_apply_activity_completed_event_nonexistent_activity() {
     let workflow_id = Uuid::now_v7();
     let mut state = WorkflowState {
         workflow_id,
-        workflow_type: "test_workflow".to_string(),
+        definition_name: "test_workflow".to_string(),
         status: WorkflowStatus::Running,
         activities: Default::default(), // Empty activities map
         state_data: json!({}),
@@ -380,7 +380,7 @@ fn test_apply_activity_failed_event_nonexistent_activity() {
     let workflow_id = Uuid::now_v7();
     let mut state = WorkflowState {
         workflow_id,
-        workflow_type: "test_workflow".to_string(),
+        definition_name: "test_workflow".to_string(),
         status: WorkflowStatus::Running,
         activities: Default::default(), // Empty activities map
         state_data: json!({}),

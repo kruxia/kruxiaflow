@@ -85,6 +85,7 @@ impl std::fmt::Display for WorkflowEventType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "workflow_status", rename_all = "lowercase")]
 pub enum WorkflowStatus {
+    Created,
     Running,
     Completed,
     Failed,
@@ -94,6 +95,7 @@ pub enum WorkflowStatus {
 impl std::fmt::Display for WorkflowStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            WorkflowStatus::Created => write!(f, "created"),
             WorkflowStatus::Running => write!(f, "running"),
             WorkflowStatus::Completed => write!(f, "completed"),
             WorkflowStatus::Failed => write!(f, "failed"),

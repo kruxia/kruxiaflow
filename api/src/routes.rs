@@ -41,7 +41,7 @@ pub fn public_routes() -> Router<AppState> {
 /// - POST /api/v1/workflow_definitions - Deploy workflow definition
 /// - GET /api/v1/workflow_definitions - List workflow definitions
 /// - GET /api/v1/workflow_definitions/{name} - Get workflow definition
-/// - (Future) POST /api/v1/workflows - Submit workflow
+/// - POST /api/v1/workflows - Submit workflow
 /// - (Future) GET /api/v1/workflows/{id} - Query workflow
 ///
 /// All routes in this group require valid JWT Bearer token.
@@ -57,6 +57,8 @@ pub fn protected_routes() -> Router<AppState> {
             "/api/v1/workflow_definitions/:name",
             get(handlers::get_workflow_definition),
         )
+        // Workflow Submission
+        .route("/api/v1/workflows", post(handlers::submit_workflow))
     // Future routes will be added here
 }
 

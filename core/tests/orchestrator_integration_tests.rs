@@ -60,14 +60,14 @@ async fn insert_workflow_definition(pool: &PgPool, definition: &WorkflowDefiniti
 async fn insert_workflow(
     pool: &PgPool,
     workflow_id: Uuid,
-    workflow_type: &str,
+    definition_name: &str,
     workflow_definition_id: Uuid,
 ) {
     sqlx::query!(
-        r#"INSERT INTO workflows (id, workflow_type, workflow_definition_id, status, state_data)
-           VALUES ($1, $2, $3, 'running', '{}'::jsonb)"#,
+        r#"INSERT INTO workflows (id, definition_name, workflow_definition_id, input, status, activities, state_data)
+           VALUES ($1, $2, $3, '{}'::jsonb, 'running', '{}'::jsonb, '{}'::jsonb)"#,
         workflow_id,
-        workflow_type,
+        definition_name,
         workflow_definition_id
     )
     .execute(pool)

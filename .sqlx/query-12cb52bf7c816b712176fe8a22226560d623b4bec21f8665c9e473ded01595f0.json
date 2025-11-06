@@ -1,15 +1,18 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE workflows SET status = $1, updated_at = NOW() WHERE id = $2",
+  "query": "UPDATE workflows\n           SET activities = $1, state_data = $2, status = $3, updated_at = NOW()\n           WHERE id = $4",
   "describe": {
     "columns": [],
     "parameters": {
       "Left": [
+        "Jsonb",
+        "Jsonb",
         {
           "Custom": {
             "name": "workflow_status",
             "kind": {
               "Enum": [
+                "created",
                 "running",
                 "completed",
                 "failed",
@@ -23,5 +26,5 @@
     },
     "nullable": []
   },
-  "hash": "329b3ae1a247a3c459cb5a88b5ed89d733712d228da51ca272578cf1617fee1d"
+  "hash": "12cb52bf7c816b712176fe8a22226560d623b4bec21f8665c9e473ded01595f0"
 }
