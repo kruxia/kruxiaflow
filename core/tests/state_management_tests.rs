@@ -290,3 +290,114 @@ fn test_apply_multiple_events_sequential() {
     assert_eq!(activity2.status, WorkflowActivityStatus::Completed);
     assert_eq!(activity2.outputs, Some(json!({"value": 100})));
 }
+
+#[test]
+fn test_apply_workflow_updated_event() {
+    // Test WorkflowUpdated event type (which is a no-op in current implementation)
+    let workflow_id = Uuid::now_v7();
+    let mut state = WorkflowState {
+        workflow_id,
+        workflow_type: "test_workflow".to_string(),
+        status: WorkflowStatus::Running,
+        activities: Default::default(),
+        state_data: json!({}),
+    };
+
+    let event = WorkflowEvent {
+        id: Uuid::now_v7(),
+        workflow_id,
+        event_type: WorkflowEventType::WorkflowUpdated,
+        activity_key: None,
+        payload: json!({}),
+        timestamp: Utc::now(),
+    };
+
+    apply_event_to_state(&mut state, &event).expect("Failed to apply event");
+
+    // WorkflowUpdated doesn't modify state, so state should remain unchanged
+    assert_eq!(state.status, WorkflowStatus::Running);
+}
+
+#[test]
+fn test_apply_activity_scheduled_event_nonexistent_activity() {
+    // Test that events for non-existent activities are handled gracefully
+    let workflow_id = Uuid::now_v7();
+    let mut state = WorkflowState {
+        workflow_id,
+        workflow_type: "test_workflow".to_string(),
+        status: WorkflowStatus::Running,
+        activities: Default::default(), // Empty activities map
+        state_data: json!({}),
+    };
+
+    let event = WorkflowEvent {
+        id: Uuid::now_v7(),
+        workflow_id,
+        event_type: WorkflowEventType::ActivityScheduled,
+        activity_key: Some("nonexistent_activity".to_string()),
+        payload: json!({}),
+        timestamp: Utc::now(),
+    };
+
+    // Should not panic or error - just silently ignore
+    apply_event_to_state(&mut state, &event).expect("Failed to apply event");
+
+    // State should remain unchanged
+    assert_eq!(state.activities.len(), 0);
+}
+
+#[test]
+fn test_apply_activity_completed_event_nonexistent_activity() {
+    // Test that completion events for non-existent activities are handled gracefully
+    let workflow_id = Uuid::now_v7();
+    let mut state = WorkflowState {
+        workflow_id,
+        workflow_type: "test_workflow".to_string(),
+        status: WorkflowStatus::Running,
+        activities: Default::default(), // Empty activities map
+        state_data: json!({}),
+    };
+
+    let event = WorkflowEvent {
+        id: Uuid::now_v7(),
+        workflow_id,
+        event_type: WorkflowEventType::ActivityCompleted,
+        activity_key: Some("nonexistent_activity".to_string()),
+        payload: json!({"outputs": {"result": "success"}}),
+        timestamp: Utc::now(),
+    };
+
+    // Should not panic or error - just silently ignore
+    apply_event_to_state(&mut state, &event).expect("Failed to apply event");
+
+    // State should remain unchanged
+    assert_eq!(state.activities.len(), 0);
+}
+
+#[test]
+fn test_apply_activity_failed_event_nonexistent_activity() {
+    // Test that failure events for non-existent activities are handled gracefully
+    let workflow_id = Uuid::now_v7();
+    let mut state = WorkflowState {
+        workflow_id,
+        workflow_type: "test_workflow".to_string(),
+        status: WorkflowStatus::Running,
+        activities: Default::default(), // Empty activities map
+        state_data: json!({}),
+    };
+
+    let event = WorkflowEvent {
+        id: Uuid::now_v7(),
+        workflow_id,
+        event_type: WorkflowEventType::ActivityFailed,
+        activity_key: Some("nonexistent_activity".to_string()),
+        payload: json!({"error": "Connection timeout"}),
+        timestamp: Utc::now(),
+    };
+
+    // Should not panic or error - just silently ignore
+    apply_event_to_state(&mut state, &event).expect("Failed to apply event");
+
+    // State should remain unchanged
+    assert_eq!(state.activities.len(), 0);
+}

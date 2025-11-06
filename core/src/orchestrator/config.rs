@@ -2,6 +2,7 @@ use sqlx::PgPool;
 use std::time::Duration;
 
 /// Orchestrator configuration
+#[derive(Clone)]
 pub struct OrchestratorConfig {
     pub pool: PgPool,
     pub poll_interval_min: Duration,

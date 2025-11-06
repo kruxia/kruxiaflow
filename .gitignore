@@ -36,3 +36,4 @@ coverage/
 *.profraw
 *.profdata
 target/llvm-cov/
+*.lcov

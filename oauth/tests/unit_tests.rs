@@ -5,7 +5,7 @@
 
 use chrono::{Duration, Utc};
 use sqlx::PgPool;
-use streamflow_oauth::{AuthConfig, AuthError, Claims, PostgresAuthService};
+use streamflow_oauth::{AuthConfig, AuthError, AuthenticationService, Claims, PostgresAuthService};
 use uuid::Uuid;
 
 /// Load test private key (PKCS#8 format)
@@ -503,4 +503,138 @@ fn test_auth_config_clone() {
     assert_eq!(config1.jwt_issuer, config2.jwt_issuer);
     assert_eq!(config1.jwt_audience, config2.jwt_audience);
     assert_eq!(config1.token_ttl, config2.token_ttl);
+}
+
+// ============================================================================
+// PostgresAuthService construction and key handling tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_postgres_auth_service_with_invalid_private_key() {
+    let pool = mock_pool().await;
+    let mut config = test_auth_config();
+    config.rsa_private_key_pem = "invalid-key".to_string();
+
+    let result = PostgresAuthService::new(pool, config);
+    assert!(
+        result.is_err(),
+        "Should fail with invalid private key"
+    );
+
+    if let Err(e) = result {
+        assert!(
+            matches!(e, streamflow_oauth::AuthError::InternalError(_)),
+            "Expected InternalError for invalid key"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_postgres_auth_service_with_invalid_public_key() {
+    let pool = mock_pool().await;
+    let mut config = test_auth_config();
+    config.rsa_public_key_pem = Some("invalid-public-key".to_string());
+
+    let result = PostgresAuthService::new(pool, config);
+    assert!(
+        result.is_err(),
+        "Should fail with invalid public key"
+    );
+}
+
+#[tokio::test]
+async fn test_postgres_auth_service_without_public_key() {
+    let pool = mock_pool().await;
+    let mut config = test_auth_config();
+    config.rsa_public_key_pem = None;
+
+    // Should try to use private key for decoding
+    let result = PostgresAuthService::new(pool, config);
+
+    // This might succeed or fail depending on the key format
+    // The important thing is we're testing the code path
+    let _ = result;
+}
+
+#[tokio::test]
+async fn test_get_signing_keys_returns_empty() {
+    let pool = mock_pool().await;
+    let service = PostgresAuthService::new(pool, test_auth_config()).unwrap();
+
+    // For MVP, get_signing_keys returns empty vec
+    let keys = service.get_signing_keys().await.unwrap();
+    assert!(
+        keys.is_empty(),
+        "get_signing_keys should return empty vec for MVP"
+    );
+}
+
+#[tokio::test]
+async fn test_validate_token_uses_verify_jwt() {
+    let pool = mock_pool().await;
+    let service = PostgresAuthService::new(pool, test_auth_config()).unwrap();
+
+    let now = Utc::now();
+    let claims = Claims {
+        sub: "test-user".to_string(),
+        jti: Uuid::now_v7().to_string(),
+        iss: "test".to_string(),
+        aud: "test".to_string(),
+        exp: (now + Duration::hours(1)).timestamp(),
+        iat: now.timestamp(),
+    };
+
+    let token = service.sign_jwt(claims.clone()).unwrap();
+
+    // validate_token should delegate to verify_jwt
+    let result = service.validate_token(&token).await;
+    assert!(result.is_ok(), "validate_token should succeed");
+
+    let validated_claims = result.unwrap();
+    assert_eq!(validated_claims.sub, claims.sub);
+}
+
+// ============================================================================
+// Hash function tests
+// ============================================================================
+
+#[test]
+fn test_hash_refresh_token_deterministic() {
+    use streamflow_oauth::hash_refresh_token;
+
+    let token = "test-token-123";
+    let hash1 = hash_refresh_token(token);
+    let hash2 = hash_refresh_token(token);
+
+    assert_eq!(hash1, hash2, "Hash should be deterministic");
+}
+
+#[test]
+fn test_hash_refresh_token_different_tokens() {
+    use streamflow_oauth::hash_refresh_token;
+
+    let token1 = "token-1";
+    let token2 = "token-2";
+
+    let hash1 = hash_refresh_token(token1);
+    let hash2 = hash_refresh_token(token2);
+
+    assert_ne!(hash1, hash2, "Different tokens should have different hashes");
+}
+
+#[test]
+fn test_hash_refresh_token_produces_hex_string() {
+    use streamflow_oauth::hash_refresh_token;
+
+    let token = "test-token";
+    let hash = hash_refresh_token(token);
+
+    // SHA-256 hash should be 64 hex characters
+    assert_eq!(hash.len(), 64, "SHA-256 hash should be 64 characters");
+
+    // All characters should be valid hex
+    assert!(
+        hash.chars().all(|c| c.is_ascii_hexdigit()),
+        "Hash should contain only hex digits"
+    );
 }

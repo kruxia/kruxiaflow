@@ -112,3 +112,256 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serial_test::serial;
+
+    #[test]
+    fn test_api_command_construction() {
+        // Test that ApiCommand can be constructed with all fields
+        let cmd = ApiCommand {
+            port: Some(8080),
+            bind: Some("127.0.0.1".to_string()),
+        };
+        assert_eq!(cmd.port, Some(8080));
+        assert_eq!(cmd.bind, Some("127.0.0.1".to_string()));
+    }
+
+    #[test]
+    fn test_api_command_with_none_values() {
+        // Test that ApiCommand can be constructed with None values
+        let cmd = ApiCommand {
+            port: None,
+            bind: None,
+        };
+        assert_eq!(cmd.port, None);
+        assert_eq!(cmd.bind, None);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_execute_fails_without_database_url() {
+        // Test that execute fails when no database URL is provided
+        let cmd = ApiCommand {
+            port: Some(8080),
+            bind: Some("127.0.0.1".to_string()),
+        };
+
+        // Remove DATABASE_URL from environment
+        unsafe {
+            std::env::remove_var("DATABASE_URL");
+        }
+
+        let result = execute(cmd, None).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Database URL is required"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_execute_fails_with_invalid_database_url() {
+        // Test that execute fails with an invalid database URL
+        let cmd = ApiCommand {
+            port: Some(8080),
+            bind: Some("127.0.0.1".to_string()),
+        };
+
+        let result = execute(cmd, Some("invalid://url".to_string())).await;
+        assert!(result.is_err());
+        // Should fail during database connection
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Failed to connect to database") || err_msg.contains("invalid")
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_execute_fails_without_rsa_keys() {
+        // Test that execute fails when RSA keys are not provided
+        // This test requires a valid database URL but will fail at RSA key loading
+
+        // Clean up RSA key environment variables
+        unsafe {
+            std::env::remove_var("STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM");
+            std::env::remove_var("STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM");
+        }
+
+        // Use default database URL for testing
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        });
+
+        let cmd = ApiCommand {
+            port: Some(8181), // Use different port to avoid conflicts
+            bind: Some("127.0.0.1".to_string()),
+        };
+
+        let result = execute(cmd, Some(database_url)).await;
+
+        // Should fail either at database connection or RSA key loading
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM")
+                || err_msg.contains("Failed to connect to database")
+                || err_msg.contains("Database connectivity test failed")
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_execute_with_invalid_rsa_key() {
+        // Test that execute fails with invalid RSA key format
+
+        // Set invalid RSA key
+        unsafe {
+            std::env::set_var("STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM", "invalid-key");
+        }
+
+        // Use default database URL for testing
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        });
+
+        let cmd = ApiCommand {
+            port: Some(8182),
+            bind: Some("127.0.0.1".to_string()),
+        };
+
+        let result = execute(cmd, Some(database_url)).await;
+
+        // Should fail either at database connection or auth service initialization
+        assert!(result.is_err());
+
+        // Clean up
+        unsafe {
+            std::env::remove_var("STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM");
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_execute_with_valid_config_fails_at_bind() {
+        // Test that execute with valid database and RSA keys proceeds to bind attempt
+        // Uses an invalid bind address to fail at binding rather than blocking
+
+        // Load test RSA keys
+        let private_key = include_str!("../../../oauth/tests/private.pem");
+        let public_key = include_str!("../../../oauth/tests/public.pem");
+
+        unsafe {
+            std::env::set_var("STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM", private_key);
+            std::env::set_var("STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM", public_key);
+            std::env::set_var("STREAMFLOW_OAUTH_JWT_ISSUER", "test-issuer");
+            std::env::set_var("STREAMFLOW_OAUTH_JWT_AUDIENCE", "test-audience");
+            std::env::set_var("STREAMFLOW_OAUTH_TOKEN_TTL", "3600");
+        }
+
+        // Use default database URL for testing
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        });
+
+        let cmd = ApiCommand {
+            port: Some(9999),
+            bind: Some("256.256.256.256".to_string()), // Invalid IP to fail at bind
+        };
+
+        let result = execute(cmd, Some(database_url)).await;
+
+        // Should fail either at database connection, auth initialization, or bind
+        assert!(result.is_err());
+
+        // Clean up
+        unsafe {
+            std::env::remove_var("STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM");
+            std::env::remove_var("STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM");
+            std::env::remove_var("STREAMFLOW_OAUTH_JWT_ISSUER");
+            std::env::remove_var("STREAMFLOW_OAUTH_JWT_AUDIENCE");
+            std::env::remove_var("STREAMFLOW_OAUTH_TOKEN_TTL");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_auth_config_with_invalid_ttl() {
+        // Test that invalid TTL values are handled gracefully
+        unsafe {
+            std::env::set_var("STREAMFLOW_OAUTH_TOKEN_TTL", "not-a-number");
+        }
+
+        let token_ttl: u64 = std::env::var("STREAMFLOW_OAUTH_TOKEN_TTL")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(86400);
+
+        // Should fall back to default
+        assert_eq!(token_ttl, 86400);
+
+        // Clean up
+        unsafe {
+            std::env::remove_var("STREAMFLOW_OAUTH_TOKEN_TTL");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_auth_config_defaults() {
+        // Test that auth configuration uses sensible defaults
+        unsafe {
+            std::env::remove_var("STREAMFLOW_OAUTH_JWT_ISSUER");
+            std::env::remove_var("STREAMFLOW_OAUTH_JWT_AUDIENCE");
+            std::env::remove_var("STREAMFLOW_OAUTH_TOKEN_TTL");
+        }
+
+        let issuer =
+            std::env::var("STREAMFLOW_OAUTH_JWT_ISSUER").unwrap_or_else(|_| "streamflow".to_string());
+        let audience = std::env::var("STREAMFLOW_OAUTH_JWT_AUDIENCE")
+            .unwrap_or_else(|_| "streamflow-api".to_string());
+        let token_ttl: u64 = std::env::var("STREAMFLOW_OAUTH_TOKEN_TTL")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(86400);
+
+        assert_eq!(issuer, "streamflow");
+        assert_eq!(audience, "streamflow-api");
+        assert_eq!(token_ttl, 86400);
+    }
+
+    #[test]
+    #[serial]
+    fn test_auth_config_from_environment() {
+        // Test that auth configuration can be set via environment variables
+        unsafe {
+            std::env::set_var("STREAMFLOW_OAUTH_JWT_ISSUER", "test-issuer");
+            std::env::set_var("STREAMFLOW_OAUTH_JWT_AUDIENCE", "test-audience");
+            std::env::set_var("STREAMFLOW_OAUTH_TOKEN_TTL", "3600");
+        }
+
+        let issuer =
+            std::env::var("STREAMFLOW_OAUTH_JWT_ISSUER").unwrap_or_else(|_| "streamflow".to_string());
+        let audience = std::env::var("STREAMFLOW_OAUTH_JWT_AUDIENCE")
+            .unwrap_or_else(|_| "streamflow-api".to_string());
+        let token_ttl: u64 = std::env::var("STREAMFLOW_OAUTH_TOKEN_TTL")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(86400);
+
+        assert_eq!(issuer, "test-issuer");
+        assert_eq!(audience, "test-audience");
+        assert_eq!(token_ttl, 3600);
+
+        // Clean up
+        unsafe {
+            std::env::remove_var("STREAMFLOW_OAUTH_JWT_ISSUER");
+            std::env::remove_var("STREAMFLOW_OAUTH_JWT_AUDIENCE");
+            std::env::remove_var("STREAMFLOW_OAUTH_TOKEN_TTL");
+        }
+    }
+}

@@ -1134,7 +1134,7 @@ impl AppState {
 
 ### Component 6: Database Migration
 
-**Location**: `migrations/YYYYMMDD_workflow_definitions.sql`
+**Location**: `migrations/YYYYMMDDHHMMSS_workflow_definitions.sql`
 
 **Note**: Schema already defined in architecture.md, this migration creates the table.
 
