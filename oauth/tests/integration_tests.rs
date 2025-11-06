@@ -9,7 +9,7 @@ use chrono::{Duration, Utc};
 use serial_test::serial;
 use sqlx::PgPool;
 use streamflow_oauth::{
-    hash_refresh_token, AuthConfig, AuthError, AuthenticationService, PostgresAuthService,
+    AuthConfig, AuthError, AuthenticationService, PostgresAuthService, hash_refresh_token,
 };
 use uuid::Uuid;
 
@@ -252,7 +252,11 @@ async fn test_password_flow_success() {
     // Authenticate with password
     let result = service.authenticate_password(username, password).await;
 
-    assert!(result.is_ok(), "Password authentication should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Password authentication should succeed: {:?}",
+        result.err()
+    );
 
     let response = result.unwrap();
     assert_eq!(response.token_type, "Bearer");

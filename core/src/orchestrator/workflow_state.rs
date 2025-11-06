@@ -45,7 +45,7 @@ pub async fn load_workflow_definition(
     workflow_id: Uuid,
 ) -> Result<WorkflowDefinition> {
     let row = sqlx::query!(
-        r#"SELECT wd.id, wd.name, wd.version, wd.activities
+        r#"SELECT wd.id, wd.name, wd.activities, wd.created_at
            FROM workflows w
            JOIN workflow_definitions wd ON wd.id = w.workflow_definition_id
            WHERE w.id = $1"#,
@@ -55,13 +55,14 @@ pub async fn load_workflow_definition(
     .await
     .map_err(|_| OrchestratorError::WorkflowDefinitionNotFound(workflow_id.to_string()))?;
 
+    // Parse activities JSONB array
     let activities = serde_json::from_value(row.activities)
         .map_err(|e| OrchestratorError::StateDeserialization(e.to_string()))?;
 
     Ok(WorkflowDefinition {
         id: row.id,
         name: row.name,
-        version: row.version,
+        version: crate::workflow::definition::format_version(&row.created_at),
         activities,
     })
 }

@@ -174,9 +174,7 @@ fn test_activity_settings_with_all_options() {
             timeout: 30000,
             heartbeat: Some(5000),
         }),
-        budget: Some(BudgetConfig {
-            max_cost_usd: 10.0,
-        }),
+        budget: Some(BudgetConfig { max_cost_usd: 10.0 }),
         cache: Some(CacheConfig { ttl: 3600 }),
         deterministic: false,
     };
@@ -330,9 +328,7 @@ fn test_budget_config_deserialization() {
 
 #[test]
 fn test_budget_config_clone() {
-    let config1 = BudgetConfig {
-        max_cost_usd: 15.0,
-    };
+    let config1 = BudgetConfig { max_cost_usd: 15.0 };
 
     let config2 = config1.clone();
     assert_eq!(config1.max_cost_usd, config2.max_cost_usd);

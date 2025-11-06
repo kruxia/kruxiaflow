@@ -98,16 +98,20 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::PgPool;
-    use streamflow_oauth::{AuthenticationService, AuthResult, AuthResponse, Claims, JwtKey};
     use async_trait::async_trait;
+    use sqlx::PgPool;
+    use streamflow_oauth::{AuthResponse, AuthResult, AuthenticationService, Claims, JwtKey};
 
     // Mock authentication service for testing
     struct MockAuthService;
 
     #[async_trait]
     impl AuthenticationService for MockAuthService {
-        async fn authenticate_client(&self, _client_id: &str, _client_secret: &str) -> AuthResult<AuthResponse> {
+        async fn authenticate_client(
+            &self,
+            _client_id: &str,
+            _client_secret: &str,
+        ) -> AuthResult<AuthResponse> {
             Ok(AuthResponse {
                 access_token: "mock_token".to_string(),
                 token_type: "Bearer".to_string(),
@@ -116,7 +120,11 @@ mod tests {
             })
         }
 
-        async fn authenticate_password(&self, _username: &str, _password: &str) -> AuthResult<AuthResponse> {
+        async fn authenticate_password(
+            &self,
+            _username: &str,
+            _password: &str,
+        ) -> AuthResult<AuthResponse> {
             Ok(AuthResponse {
                 access_token: "mock_token".to_string(),
                 token_type: "Bearer".to_string(),
@@ -151,9 +159,12 @@ mod tests {
     }
 
     async fn mock_pool() -> PgPool {
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string());
-        PgPool::connect(&database_url).await.expect("Failed to connect to test database")
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        });
+        PgPool::connect(&database_url)
+            .await
+            .expect("Failed to connect to test database")
     }
 
     #[tokio::test]
@@ -246,13 +257,7 @@ mod tests {
             git_hash: "test".to_string(),
         };
 
-        let state = AppState::with_metadata(
-            pool,
-            auth_service,
-            "1.0.0".to_string(),
-            build,
-            vec![],
-        );
+        let state = AppState::with_metadata(pool, auth_service, "1.0.0".to_string(), build, vec![]);
 
         assert_eq!(state.features.len(), 0);
     }
@@ -315,8 +320,12 @@ mod tests {
         }
 
         // This should use the default URL
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string());
-        assert_eq!(database_url, "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow");
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        });
+        assert_eq!(
+            database_url,
+            "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow"
+        );
     }
 }

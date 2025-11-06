@@ -78,7 +78,10 @@ fn test_backoff_with_different_multipliers() {
     assert_eq!(backoff.current(), Duration::from_millis(15));
     backoff.increase();
     // 15 * 1.5 = 22.5ms
-    assert!(backoff.current() >= Duration::from_millis(22) && backoff.current() <= Duration::from_millis(23));
+    assert!(
+        backoff.current() >= Duration::from_millis(22)
+            && backoff.current() <= Duration::from_millis(23)
+    );
 
     // Test with multiplier 3.0
     let mut backoff = AdaptiveBackoff::new(min, max, 3.0);

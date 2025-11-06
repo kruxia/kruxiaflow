@@ -516,10 +516,7 @@ async fn test_postgres_auth_service_with_invalid_private_key() {
     config.rsa_private_key_pem = "invalid-key".to_string();
 
     let result = PostgresAuthService::new(pool, config);
-    assert!(
-        result.is_err(),
-        "Should fail with invalid private key"
-    );
+    assert!(result.is_err(), "Should fail with invalid private key");
 
     if let Err(e) = result {
         assert!(
@@ -536,10 +533,7 @@ async fn test_postgres_auth_service_with_invalid_public_key() {
     config.rsa_public_key_pem = Some("invalid-public-key".to_string());
 
     let result = PostgresAuthService::new(pool, config);
-    assert!(
-        result.is_err(),
-        "Should fail with invalid public key"
-    );
+    assert!(result.is_err(), "Should fail with invalid public key");
 }
 
 #[tokio::test]
@@ -619,7 +613,10 @@ fn test_hash_refresh_token_different_tokens() {
     let hash1 = hash_refresh_token(token1);
     let hash2 = hash_refresh_token(token2);
 
-    assert_ne!(hash1, hash2, "Different tokens should have different hashes");
+    assert_ne!(
+        hash1, hash2,
+        "Different tokens should have different hashes"
+    );
 }
 
 #[test]

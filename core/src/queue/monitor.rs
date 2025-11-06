@@ -171,10 +171,13 @@ mod tests {
 
     /// Helper to cleanup test data
     async fn cleanup_queue(pool: &PgPool, workflow_id: Uuid) {
-        sqlx::query!("DELETE FROM activity_queue WHERE workflow_id = $1", workflow_id)
-            .execute(pool)
-            .await
-            .expect("Failed to cleanup test data");
+        sqlx::query!(
+            "DELETE FROM activity_queue WHERE workflow_id = $1",
+            workflow_id
+        )
+        .execute(pool)
+        .await
+        .expect("Failed to cleanup test data");
     }
 
     #[tokio::test]
@@ -206,7 +209,10 @@ mod tests {
         let monitor = QueueMonitor::new(pool.clone(), config);
 
         // Run cleanup
-        monitor.cleanup_failed_activities().await.expect("Cleanup should succeed");
+        monitor
+            .cleanup_failed_activities()
+            .await
+            .expect("Cleanup should succeed");
 
         // Verify failed activities were deleted
         let count = sqlx::query_scalar!(
@@ -250,7 +256,10 @@ mod tests {
         let monitor = QueueMonitor::new(pool.clone(), config);
 
         // Run cleanup
-        monitor.cleanup_failed_activities().await.expect("Cleanup should succeed");
+        monitor
+            .cleanup_failed_activities()
+            .await
+            .expect("Cleanup should succeed");
 
         // Verify activity still exists
         let count = sqlx::query_scalar!(
@@ -274,7 +283,10 @@ mod tests {
         let monitor = QueueMonitor::new(pool.clone(), config);
 
         // Run vacuum
-        monitor.vacuum_queue_table().await.expect("Vacuum should succeed");
+        monitor
+            .vacuum_queue_table()
+            .await
+            .expect("Vacuum should succeed");
     }
 
     #[tokio::test]

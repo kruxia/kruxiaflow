@@ -6,8 +6,8 @@
 use axum::http::StatusCode;
 use axum_test::TestServer;
 use bcrypt::hash;
-use serial_test::serial;
 use serde_json::json;
+use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use streamflow_api::{AppState, AppStateBuild, app_router};
@@ -165,7 +165,9 @@ async fn test_token_endpoint_rejects_unsupported_content_type() {
     assert_eq!(response.status_code(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
 
     let body = response.text();
-    assert!(body.contains("Content-Type must be application/json or application/x-www-form-urlencoded"));
+    assert!(
+        body.contains("Content-Type must be application/json or application/x-www-form-urlencoded")
+    );
 }
 
 #[tokio::test]

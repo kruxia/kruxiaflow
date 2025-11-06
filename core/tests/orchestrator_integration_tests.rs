@@ -38,15 +38,16 @@ async fn clean_test_data(pool: &PgPool) {
 }
 
 async fn insert_workflow_definition(pool: &PgPool, definition: &WorkflowDefinition) -> Uuid {
+    // Store only the activities array (not the full definition)
+    // Version is derived from created_at, no need to store separately
     let activities_json =
         serde_json::to_value(&definition.activities).expect("Failed to serialize activities");
 
     let row = sqlx::query!(
-        r#"INSERT INTO workflow_definitions (name, version, activities)
-           VALUES ($1, $2, $3)
+        r#"INSERT INTO workflow_definitions (name, activities)
+           VALUES ($1, $2)
            RETURNING id"#,
         definition.name,
-        definition.version,
         activities_json
     )
     .fetch_one(pool)
@@ -948,9 +949,11 @@ async fn test_workflow_completion_with_multiple_activities() {
         .unwrap();
 
     let completion_events = event_source.poll("test_orch").await.unwrap();
-    assert!(completion_events
-        .iter()
-        .any(|e| e.event_type == WorkflowEventType::WorkflowCompleted));
+    assert!(
+        completion_events
+            .iter()
+            .any(|e| e.event_type == WorkflowEventType::WorkflowCompleted)
+    );
 }
 
 #[tokio::test]

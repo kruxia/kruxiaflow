@@ -17,13 +17,34 @@ fn test_uuid() -> Uuid {
 
 #[test]
 fn test_workflow_event_type_display() {
-    assert_eq!(WorkflowEventType::WorkflowCreated.to_string(), "WorkflowCreated");
-    assert_eq!(WorkflowEventType::WorkflowUpdated.to_string(), "WorkflowUpdated");
-    assert_eq!(WorkflowEventType::ActivityScheduled.to_string(), "ActivityScheduled");
-    assert_eq!(WorkflowEventType::ActivityCompleted.to_string(), "ActivityCompleted");
-    assert_eq!(WorkflowEventType::ActivityFailed.to_string(), "ActivityFailed");
-    assert_eq!(WorkflowEventType::WorkflowCompleted.to_string(), "WorkflowCompleted");
-    assert_eq!(WorkflowEventType::WorkflowFailed.to_string(), "WorkflowFailed");
+    assert_eq!(
+        WorkflowEventType::WorkflowCreated.to_string(),
+        "WorkflowCreated"
+    );
+    assert_eq!(
+        WorkflowEventType::WorkflowUpdated.to_string(),
+        "WorkflowUpdated"
+    );
+    assert_eq!(
+        WorkflowEventType::ActivityScheduled.to_string(),
+        "ActivityScheduled"
+    );
+    assert_eq!(
+        WorkflowEventType::ActivityCompleted.to_string(),
+        "ActivityCompleted"
+    );
+    assert_eq!(
+        WorkflowEventType::ActivityFailed.to_string(),
+        "ActivityFailed"
+    );
+    assert_eq!(
+        WorkflowEventType::WorkflowCompleted.to_string(),
+        "WorkflowCompleted"
+    );
+    assert_eq!(
+        WorkflowEventType::WorkflowFailed.to_string(),
+        "WorkflowFailed"
+    );
 }
 
 #[test]

@@ -18,6 +18,9 @@ anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
+# Additional dependencies
+regex = "1"
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 mockall.workspace = true

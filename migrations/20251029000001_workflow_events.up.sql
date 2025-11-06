@@ -41,11 +41,15 @@ ON workflow_events(event_type, id DESC);
 CREATE TABLE workflow_definitions (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     name TEXT NOT NULL,
-    version TEXT NOT NULL,
     activities JSONB NOT NULL,  -- Store only activities array, not full definition
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE(name, version)
+    UNIQUE(name, created_at)  -- created_at IS the version (microsecond precision prevents collisions)
 );
+
+-- BRIN index for created_at (optimal for append-only workload with timestamp correlation)
+-- Used by get_latest() queries that ORDER BY created_at DESC
+CREATE INDEX IF NOT EXISTS idx_workflow_definitions_created_at ON workflow_definitions
+USING brin(created_at);
 
 -- Create workflows table
 CREATE TABLE workflows (

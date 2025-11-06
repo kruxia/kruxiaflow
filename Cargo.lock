@@ -2134,6 +2134,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "mockall",
+ "regex",
  "serde",
  "serde_json",
  "serial_test",

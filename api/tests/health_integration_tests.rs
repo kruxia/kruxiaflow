@@ -328,7 +328,8 @@ async fn test_check_activity_queue_health_success() {
 #[serial]
 async fn test_database_health_with_invalid_connection() {
     // Create a pool with an invalid connection string
-    let invalid_pool_result = PgPool::connect("postgres://invalid:invalid@localhost:1/invalid").await;
+    let invalid_pool_result =
+        PgPool::connect("postgres://invalid:invalid@localhost:1/invalid").await;
 
     // If we can't even create the pool, that's expected
     if let Ok(invalid_pool) = invalid_pool_result {
@@ -345,7 +346,8 @@ async fn test_database_health_with_invalid_connection() {
 async fn test_event_source_health_maps_errors_correctly() {
     // Test that event source health check properly maps database errors
     // Create a pool with an invalid connection
-    let invalid_pool_result = PgPool::connect("postgres://invalid:invalid@localhost:1/invalid").await;
+    let invalid_pool_result =
+        PgPool::connect("postgres://invalid:invalid@localhost:1/invalid").await;
 
     if let Ok(invalid_pool) = invalid_pool_result {
         let result = streamflow_api::health::check_event_source_health(&invalid_pool).await;
@@ -370,7 +372,8 @@ async fn test_event_source_health_maps_errors_correctly() {
 #[serial]
 async fn test_activity_queue_health_with_invalid_connection() {
     // Test activity queue health check with invalid connection
-    let invalid_pool_result = PgPool::connect("postgres://invalid:invalid@localhost:1/invalid").await;
+    let invalid_pool_result =
+        PgPool::connect("postgres://invalid:invalid@localhost:1/invalid").await;
 
     if let Ok(invalid_pool) = invalid_pool_result {
         let result = streamflow_api::health::check_activity_queue_health(&invalid_pool).await;
@@ -428,19 +431,16 @@ async fn test_multiple_concurrent_health_checks() {
     let handles: Vec<_> = (0..10)
         .map(|_| {
             let pool_clone = pool.clone();
-            tokio::spawn(async move {
-                streamflow_api::health::check_database_health(&pool_clone).await
-            })
+            tokio::spawn(
+                async move { streamflow_api::health::check_database_health(&pool_clone).await },
+            )
         })
         .collect();
 
     // All should succeed
     for handle in handles {
         let result = handle.await.unwrap();
-        assert!(
-            result.is_ok(),
-            "Concurrent health check should succeed"
-        );
+        assert!(result.is_ok(), "Concurrent health check should succeed");
     }
 }
 
@@ -477,7 +477,10 @@ async fn test_all_health_checks_return_consistent_results() {
         let queue_result = streamflow_api::health::check_activity_queue_health(&pool).await;
 
         assert!(db_result.is_ok(), "Database health should be consistent");
-        assert!(event_result.is_ok(), "Event source health should be consistent");
+        assert!(
+            event_result.is_ok(),
+            "Event source health should be consistent"
+        );
         assert!(queue_result.is_ok(), "Queue health should be consistent");
     }
 }

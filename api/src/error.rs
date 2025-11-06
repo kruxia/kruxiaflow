@@ -159,6 +159,30 @@ impl Default for ValidationErrors {
     }
 }
 
+impl ValidationErrors {
+    /// Convert workflow validation errors to API validation errors
+    pub fn from_workflow_validation(ve: streamflow_core::workflow::ValidationError) -> Self {
+        use streamflow_core::workflow::ValidationError as WfValidationError;
+
+        match ve {
+            WfValidationError::SingleError(msg) => {
+                let mut errors = Self::new();
+                errors.add("definition", msg);
+                errors
+            }
+            WfValidationError::MultipleErrors(errs) => {
+                let mut errors = Self::new();
+                for (field, messages) in errs.errors() {
+                    for message in messages {
+                        errors.add(field, message);
+                    }
+                }
+                errors
+            }
+        }
+    }
+}
+
 impl AppError {
     /// Get HTTP status code for this error
     pub fn status_code(&self) -> StatusCode {

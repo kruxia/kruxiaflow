@@ -1,14 +1,17 @@
 // core/tests/orchestrator_config_tests.rs
 //! Unit tests for OrchestratorConfig
 
+use sqlx::PgPool;
 use std::time::Duration;
 use streamflow_core::orchestrator::config::OrchestratorConfig;
-use sqlx::PgPool;
 
 async fn mock_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string());
-    PgPool::connect(&database_url).await.expect("Failed to connect to test database")
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+    });
+    PgPool::connect(&database_url)
+        .await
+        .expect("Failed to connect to test database")
 }
 
 #[tokio::test]
@@ -35,8 +38,7 @@ async fn test_orchestrator_config_with_poll_interval() {
 #[tokio::test]
 async fn test_orchestrator_config_with_backoff_multiplier() {
     let pool = mock_pool().await;
-    let config = OrchestratorConfig::new(pool)
-        .with_backoff_multiplier(2.0);
+    let config = OrchestratorConfig::new(pool).with_backoff_multiplier(2.0);
 
     assert_eq!(config.poll_interval_min, Duration::from_millis(10)); // Should remain default
     assert_eq!(config.poll_interval_max, Duration::from_secs(5)); // Should remain default
@@ -76,8 +78,7 @@ async fn test_orchestrator_config_with_very_large_max_interval() {
 #[tokio::test]
 async fn test_orchestrator_config_with_fractional_multiplier() {
     let pool = mock_pool().await;
-    let config = OrchestratorConfig::new(pool)
-        .with_backoff_multiplier(1.5);
+    let config = OrchestratorConfig::new(pool).with_backoff_multiplier(1.5);
 
     assert_eq!(config.backoff_multiplier, 1.5);
 }
@@ -85,8 +86,7 @@ async fn test_orchestrator_config_with_fractional_multiplier() {
 #[tokio::test]
 async fn test_orchestrator_config_with_multiplier_one() {
     let pool = mock_pool().await;
-    let config = OrchestratorConfig::new(pool)
-        .with_backoff_multiplier(1.0);
+    let config = OrchestratorConfig::new(pool).with_backoff_multiplier(1.0);
 
     assert_eq!(config.backoff_multiplier, 1.0);
 }
