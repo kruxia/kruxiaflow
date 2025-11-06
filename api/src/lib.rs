@@ -1,4 +1,6 @@
+pub mod dto;
 pub mod error;
+pub mod extractors;
 pub mod handlers;
 pub mod health;
 pub mod middleware;

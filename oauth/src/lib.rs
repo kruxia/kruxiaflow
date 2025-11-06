@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 mod postgres;
-pub use postgres::{hash_refresh_token, PostgresAuthService};
+pub use postgres::{PostgresAuthService, hash_refresh_token};
 
 /// Authentication service error
 #[derive(Debug, Error)]

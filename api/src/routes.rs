@@ -38,6 +38,9 @@ pub fn public_routes() -> Router<AppState> {
 /// Protected API routes (require authentication)
 ///
 /// Routes:
+/// - POST /api/v1/workflow_definitions - Deploy workflow definition
+/// - GET /api/v1/workflow_definitions - List workflow definitions
+/// - GET /api/v1/workflow_definitions/{name} - Get workflow definition
 /// - (Future) POST /api/v1/workflows - Submit workflow
 /// - (Future) GET /api/v1/workflows/{id} - Query workflow
 ///
@@ -45,6 +48,15 @@ pub fn public_routes() -> Router<AppState> {
 /// Authentication middleware is applied in app_router() after with_state().
 pub fn protected_routes() -> Router<AppState> {
     Router::new()
+        // Workflow Definition Management
+        .route(
+            "/api/v1/workflow_definitions",
+            post(handlers::deploy_workflow_definition).get(handlers::list_workflow_definitions),
+        )
+        .route(
+            "/api/v1/workflow_definitions/:name",
+            get(handlers::get_workflow_definition),
+        )
     // Future routes will be added here
 }
 

@@ -100,7 +100,11 @@ fn test_invalid_command() {
 
     assert!(!output.status.success());
     // Clap should provide an error message about invalid subcommand
-    assert!(stderr.contains("invalid") || stderr.contains("unrecognized") || stderr.contains("unexpected"));
+    assert!(
+        stderr.contains("invalid")
+            || stderr.contains("unrecognized")
+            || stderr.contains("unexpected")
+    );
 }
 
 #[test]

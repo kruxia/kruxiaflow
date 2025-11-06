@@ -131,7 +131,7 @@ impl AuthenticationService for PostgresAuthService {
         // The `jti` (JWT ID) ensures each token is unique
         let now = Utc::now();
         let claims = Claims {
-            sub: client.id.to_string(), // Uniquely identifies this client
+            sub: client.id.to_string(),      // Uniquely identifies this client
             jti: Uuid::now_v7().to_string(), // Unique token ID
             iss: self.config.jwt_issuer.clone(),
             aud: self.config.jwt_audience.clone(),
@@ -179,7 +179,7 @@ impl AuthenticationService for PostgresAuthService {
         // The `jti` (JWT ID) ensures each token is unique
         let now = Utc::now();
         let claims = Claims {
-            sub: user.id.to_string(), // Uniquely identifies this user
+            sub: user.id.to_string(),        // Uniquely identifies this user
             jti: Uuid::now_v7().to_string(), // Unique token ID
             iss: self.config.jwt_issuer.clone(),
             aud: self.config.jwt_audience.clone(),
@@ -254,7 +254,7 @@ impl AuthenticationService for PostgresAuthService {
         // The `jti` (JWT ID) ensures each token is unique
         let now = Utc::now();
         let claims = Claims {
-            sub: user.id.to_string(), // Uniquely identifies this user
+            sub: user.id.to_string(),        // Uniquely identifies this user
             jti: Uuid::now_v7().to_string(), // Unique token ID
             iss: self.config.jwt_issuer.clone(),
             aud: self.config.jwt_audience.clone(),

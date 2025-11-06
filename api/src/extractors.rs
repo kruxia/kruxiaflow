@@ -1,0 +1,30 @@
+/// Axum extractors for StreamFlow API
+///
+/// This module provides custom extractors that integrate StreamFlow core types
+/// with Axum's handler system.
+use crate::state::AppState;
+use axum::{async_trait, extract::FromRequestParts, http::request::Parts};
+use streamflow_core::workflow::WorkflowDefinitionRepository;
+
+/// Axum extractor for WorkflowDefinitionRepository
+///
+/// Allows WorkflowDefinitionRepository to be extracted directly in handler signatures.
+/// Automatically creates repository from AppState's db_pool.
+///
+/// # Example
+/// ```rust,ignore
+/// async fn handler(repo: WorkflowDefinitionRepository) -> impl IntoResponse {
+///     // Use repo directly
+/// }
+/// ```
+#[async_trait]
+impl FromRequestParts<AppState> for WorkflowDefinitionRepository {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        _parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        Ok(WorkflowDefinitionRepository::new(state.db_pool.clone()))
+    }
+}

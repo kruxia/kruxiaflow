@@ -55,49 +55,65 @@ fn test_queue_config_from_env_with_no_env_vars() {
 #[test]
 #[serial]
 fn test_queue_config_from_env_with_poll_interval_ms() {
-    unsafe { std::env::set_var("STREAMFLOW_QUEUE_POLL_INTERVAL", "250ms"); }
+    unsafe {
+        std::env::set_var("STREAMFLOW_QUEUE_POLL_INTERVAL", "250ms");
+    }
 
     let config = QueueConfig::from_env();
 
     assert_eq!(config.poll_interval, Duration::from_millis(250));
 
-    unsafe { std::env::remove_var("STREAMFLOW_QUEUE_POLL_INTERVAL"); }
+    unsafe {
+        std::env::remove_var("STREAMFLOW_QUEUE_POLL_INTERVAL");
+    }
 }
 
 #[test]
 #[serial]
 fn test_queue_config_from_env_with_poll_interval_seconds() {
-    unsafe { std::env::set_var("STREAMFLOW_QUEUE_POLL_INTERVAL", "2s"); }
+    unsafe {
+        std::env::set_var("STREAMFLOW_QUEUE_POLL_INTERVAL", "2s");
+    }
 
     let config = QueueConfig::from_env();
 
     assert_eq!(config.poll_interval, Duration::from_secs(2));
 
-    unsafe { std::env::remove_var("STREAMFLOW_QUEUE_POLL_INTERVAL"); }
+    unsafe {
+        std::env::remove_var("STREAMFLOW_QUEUE_POLL_INTERVAL");
+    }
 }
 
 #[test]
 #[serial]
 fn test_queue_config_from_env_with_poll_interval_minutes() {
-    unsafe { std::env::set_var("STREAMFLOW_QUEUE_POLL_INTERVAL", "5m"); }
+    unsafe {
+        std::env::set_var("STREAMFLOW_QUEUE_POLL_INTERVAL", "5m");
+    }
 
     let config = QueueConfig::from_env();
 
     assert_eq!(config.poll_interval, Duration::from_secs(300));
 
-    unsafe { std::env::remove_var("STREAMFLOW_QUEUE_POLL_INTERVAL"); }
+    unsafe {
+        std::env::remove_var("STREAMFLOW_QUEUE_POLL_INTERVAL");
+    }
 }
 
 #[test]
 #[serial]
 fn test_queue_config_from_env_with_batch_size() {
-    unsafe { std::env::set_var("STREAMFLOW_QUEUE_BATCH_SIZE", "500"); }
+    unsafe {
+        std::env::set_var("STREAMFLOW_QUEUE_BATCH_SIZE", "500");
+    }
 
     let config = QueueConfig::from_env();
 
     assert_eq!(config.batch_size, 500);
 
-    unsafe { std::env::remove_var("STREAMFLOW_QUEUE_BATCH_SIZE"); }
+    unsafe {
+        std::env::remove_var("STREAMFLOW_QUEUE_BATCH_SIZE");
+    }
 }
 
 #[test]

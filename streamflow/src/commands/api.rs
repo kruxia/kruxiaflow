@@ -156,10 +156,12 @@ mod tests {
 
         let result = execute(cmd, None).await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Database URL is required"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Database URL is required")
+        );
     }
 
     #[tokio::test]
@@ -175,9 +177,7 @@ mod tests {
         assert!(result.is_err());
         // Should fail during database connection
         let err_msg = result.unwrap_err().to_string();
-        assert!(
-            err_msg.contains("Failed to connect to database") || err_msg.contains("invalid")
-        );
+        assert!(err_msg.contains("Failed to connect to database") || err_msg.contains("invalid"));
     }
 
     #[tokio::test]
@@ -320,8 +320,8 @@ mod tests {
             std::env::remove_var("STREAMFLOW_OAUTH_TOKEN_TTL");
         }
 
-        let issuer =
-            std::env::var("STREAMFLOW_OAUTH_JWT_ISSUER").unwrap_or_else(|_| "streamflow".to_string());
+        let issuer = std::env::var("STREAMFLOW_OAUTH_JWT_ISSUER")
+            .unwrap_or_else(|_| "streamflow".to_string());
         let audience = std::env::var("STREAMFLOW_OAUTH_JWT_AUDIENCE")
             .unwrap_or_else(|_| "streamflow-api".to_string());
         let token_ttl: u64 = std::env::var("STREAMFLOW_OAUTH_TOKEN_TTL")
@@ -344,8 +344,8 @@ mod tests {
             std::env::set_var("STREAMFLOW_OAUTH_TOKEN_TTL", "3600");
         }
 
-        let issuer =
-            std::env::var("STREAMFLOW_OAUTH_JWT_ISSUER").unwrap_or_else(|_| "streamflow".to_string());
+        let issuer = std::env::var("STREAMFLOW_OAUTH_JWT_ISSUER")
+            .unwrap_or_else(|_| "streamflow".to_string());
         let audience = std::env::var("STREAMFLOW_OAUTH_JWT_AUDIENCE")
             .unwrap_or_else(|_| "streamflow-api".to_string());
         let token_ttl: u64 = std::env::var("STREAMFLOW_OAUTH_TOKEN_TTL")

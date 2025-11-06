@@ -3,14 +3,14 @@
 //!
 //! Tests JWT Bearer token validation in HTTP middleware.
 
-use axum::http::{StatusCode, HeaderName, HeaderValue};
-#[allow(unused_imports)]
-use std::str::FromStr;
+use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum_test::TestServer;
 use bcrypt::hash;
-use serial_test::serial;
 use serde_json::json;
+use serial_test::serial;
 use sqlx::PgPool;
+#[allow(unused_imports)]
+use std::str::FromStr;
 use std::sync::Arc;
 use streamflow_api::{AppState, AppStateBuild, app_router};
 use streamflow_oauth::{AuthConfig, PostgresAuthService};
@@ -85,7 +85,7 @@ async fn setup_test_state() -> AppState {
 
 /// Helper to create test server with protected test endpoint
 async fn setup_test_server() -> TestServer {
-    use axum::{routing::get, Router, middleware as axum_middleware, extract::Extension};
+    use axum::{Router, extract::Extension, middleware as axum_middleware, routing::get};
     use streamflow_api::middleware::auth::ValidatedClaims;
 
     let state = setup_test_state().await;
@@ -107,11 +107,8 @@ async fn setup_test_server() -> TestServer {
         .layer(axum_middleware::from_fn(move |req, next| {
             let state = auth_state.clone();
             async move {
-                streamflow_api::middleware::auth_middleware(
-                    axum::extract::State(state),
-                    req,
-                    next,
-                ).await
+                streamflow_api::middleware::auth_middleware(axum::extract::State(state), req, next)
+                    .await
             }
         }));
 
@@ -167,13 +164,16 @@ async fn test_auth_middleware_accepts_valid_bearer_token() {
 async fn test_auth_middleware_rejects_missing_authorization_header() {
     let server = setup_test_server().await;
 
-    let response = server
-        .get("/api/v1/protected")
-        .await;
+    let response = server.get("/api/v1/protected").await;
 
     assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
     let body: serde_json::Value = response.json();
-    assert!(body["error"]["message"].as_str().unwrap().contains("Missing or invalid Authorization header"));
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Missing or invalid Authorization header")
+    );
 }
 
 #[tokio::test]
@@ -185,7 +185,10 @@ async fn test_extract_bearer_token_case_insensitive() {
     // Test lowercase "bearer"
     let response = server
         .get("/api/v1/protected")
-        .add_header(HeaderName::from_static("authorization"), HeaderValue::from_str(&format!("bearer {}", token)).unwrap())
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("bearer {}", token)).unwrap(),
+        )
         .await;
 
     assert_eq!(response.status_code(), StatusCode::OK);
@@ -193,7 +196,10 @@ async fn test_extract_bearer_token_case_insensitive() {
     // Test uppercase "BEARER"
     let response = server
         .get("/api/v1/protected")
-        .add_header(HeaderName::from_static("authorization"), HeaderValue::from_str(&format!("BEARER {}", token)).unwrap())
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("BEARER {}", token)).unwrap(),
+        )
         .await;
 
     assert_eq!(response.status_code(), StatusCode::OK);
@@ -201,7 +207,10 @@ async fn test_extract_bearer_token_case_insensitive() {
     // Test mixed case "BeArEr"
     let response = server
         .get("/api/v1/protected")
-        .add_header(HeaderName::from_static("authorization"), HeaderValue::from_str(&format!("BeArEr {}", token)).unwrap())
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("BeArEr {}", token)).unwrap(),
+        )
         .await;
 
     assert_eq!(response.status_code(), StatusCode::OK);
@@ -216,7 +225,10 @@ async fn test_extract_bearer_token_with_extra_whitespace() {
     // Token with extra space after "Bearer" becomes part of the token, which will be invalid
     let response = server
         .get("/api/v1/protected")
-        .add_header(HeaderName::from_static("authorization"), HeaderValue::from_str(&format!("Bearer  {}", token)).unwrap())
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("Bearer  {}", token)).unwrap(),
+        )
         .await;
 
     // Extra whitespace makes the token invalid
@@ -234,12 +246,20 @@ async fn test_auth_middleware_rejects_invalid_token_format() {
 
     let response = server
         .get("/api/v1/protected")
-        .add_header(HeaderName::from_static("authorization"), HeaderValue::from_static("Bearer invalid-token"))
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_static("Bearer invalid-token"),
+        )
         .await;
 
     assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
     let body: serde_json::Value = response.json();
-    assert!(body["error"]["message"].as_str().unwrap().contains("Invalid token"));
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid token")
+    );
 }
 
 #[tokio::test]
@@ -250,12 +270,20 @@ async fn test_auth_middleware_rejects_malformed_bearer_format() {
     // Missing "Bearer " prefix
     let response = server
         .get("/api/v1/protected")
-        .add_header(HeaderName::from_static("authorization"), HeaderValue::from_static("just-a-token"))
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_static("just-a-token"),
+        )
         .await;
 
     assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
     let body: serde_json::Value = response.json();
-    assert!(body["error"]["message"].as_str().unwrap().contains("Missing or invalid Authorization header"));
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Missing or invalid Authorization header")
+    );
 }
 
 #[tokio::test]
@@ -265,7 +293,10 @@ async fn test_auth_middleware_rejects_empty_bearer_token() {
 
     let response = server
         .get("/api/v1/protected")
-        .add_header(HeaderName::from_static("authorization"), HeaderValue::from_static("Bearer "))
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_static("Bearer "),
+        )
         .await;
 
     assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
@@ -282,12 +313,20 @@ async fn test_auth_middleware_rejects_bearer_without_space() {
 
     let response = server
         .get("/api/v1/protected")
-        .add_header(HeaderName::from_static("authorization"), HeaderValue::from_static("BearerTOKEN"))
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_static("BearerTOKEN"),
+        )
         .await;
 
     assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
     let body: serde_json::Value = response.json();
-    assert!(body["error"]["message"].as_str().unwrap().contains("Missing or invalid Authorization header"));
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Missing or invalid Authorization header")
+    );
 }
 
 // ============================================================================
@@ -300,8 +339,8 @@ async fn test_auth_middleware_rejects_expired_token() {
     let server = setup_test_server().await;
 
     // Create claims with past expiration
+    use chrono::{Duration, Utc};
     use streamflow_oauth::Claims;
-    use chrono::{Utc, Duration};
 
     let now = Utc::now();
     let expired_claims = Claims {
@@ -327,12 +366,20 @@ async fn test_auth_middleware_rejects_expired_token() {
 
     let response = server
         .get("/api/v1/protected")
-        .add_header(HeaderName::from_static("authorization"), HeaderValue::from_str(&format!("Bearer {}", expired_token)).unwrap())
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("Bearer {}", expired_token)).unwrap(),
+        )
         .await;
 
     assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
     let body: serde_json::Value = response.json();
-    assert!(body["error"]["message"].as_str().unwrap().contains("Invalid token"));
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid token")
+    );
 }
 
 // ============================================================================
@@ -355,8 +402,8 @@ async fn test_auth_middleware_rejects_wrong_issuer() {
 
     let auth_service = PostgresAuthService::new(pool, wrong_issuer_config).unwrap();
 
+    use chrono::{Duration, Utc};
     use streamflow_oauth::Claims;
-    use chrono::{Utc, Duration};
 
     let now = Utc::now();
     let claims = Claims {
@@ -374,12 +421,20 @@ async fn test_auth_middleware_rejects_wrong_issuer() {
 
     let response = server
         .get("/api/v1/protected")
-        .add_header(HeaderName::from_static("authorization"), HeaderValue::from_str(&format!("Bearer {}", token)).unwrap())
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+        )
         .await;
 
     assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
     let body: serde_json::Value = response.json();
-    assert!(body["error"]["message"].as_str().unwrap().contains("Invalid token"));
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid token")
+    );
 }
 
 #[tokio::test]
@@ -397,8 +452,8 @@ async fn test_auth_middleware_rejects_wrong_audience() {
 
     let auth_service = PostgresAuthService::new(pool, wrong_audience_config).unwrap();
 
+    use chrono::{Duration, Utc};
     use streamflow_oauth::Claims;
-    use chrono::{Utc, Duration};
 
     let now = Utc::now();
     let claims = Claims {
@@ -416,12 +471,20 @@ async fn test_auth_middleware_rejects_wrong_audience() {
 
     let response = server
         .get("/api/v1/protected")
-        .add_header(HeaderName::from_static("authorization"), HeaderValue::from_str(&format!("Bearer {}", token)).unwrap())
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+        )
         .await;
 
     assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
     let body: serde_json::Value = response.json();
-    assert!(body["error"]["message"].as_str().unwrap().contains("Invalid token"));
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("Invalid token")
+    );
 }
 
 // ============================================================================
@@ -431,9 +494,9 @@ async fn test_auth_middleware_rejects_wrong_audience() {
 #[tokio::test]
 #[serial]
 async fn test_validated_claims_subject_extraction() {
-    use streamflow_oauth::Claims;
-    use streamflow_api::middleware::auth::ValidatedClaims;
     use chrono::Utc;
+    use streamflow_api::middleware::auth::ValidatedClaims;
+    use streamflow_oauth::Claims;
 
     let claims = Claims {
         sub: "user-123".to_string(),
@@ -452,9 +515,9 @@ async fn test_validated_claims_subject_extraction() {
 #[tokio::test]
 #[serial]
 async fn test_validated_claims_full_claims_access() {
-    use streamflow_oauth::Claims;
-    use streamflow_api::middleware::auth::ValidatedClaims;
     use chrono::Utc;
+    use streamflow_api::middleware::auth::ValidatedClaims;
+    use streamflow_oauth::Claims;
 
     let claims = Claims {
         sub: "user-123".to_string(),
@@ -485,7 +548,10 @@ async fn test_auth_middleware_handles_multiple_authorization_headers() {
     // HTTP spec allows multiple headers, but we should use the first one
     let response = server
         .get("/api/v1/protected")
-        .add_header(HeaderName::from_static("authorization"), HeaderValue::from_str(&format!("Bearer {}", token)).unwrap())
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+        )
         .await;
 
     assert_eq!(response.status_code(), StatusCode::OK);
@@ -497,9 +563,7 @@ async fn test_auth_middleware_handles_non_ascii_in_header() {
     let server = setup_test_server().await;
 
     // Non-ASCII characters in Authorization header should be rejected gracefully
-    let response = server
-        .get("/api/v1/protected")
-        .await;
+    let response = server.get("/api/v1/protected").await;
 
     // Without auth header, should return 401
     assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
@@ -520,7 +584,10 @@ async fn test_auth_middleware_validation_latency() {
     for _ in 0..100 {
         let response = server
             .get("/api/v1/protected")
-            .add_header(HeaderName::from_static("authorization"), HeaderValue::from_str(&format!("Bearer {}", token)).unwrap())
+            .add_header(
+                HeaderName::from_static("authorization"),
+                HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+            )
             .await;
 
         assert_eq!(response.status_code(), StatusCode::OK);
@@ -550,7 +617,10 @@ async fn test_extract_bearer_token_with_only_bearer() {
     // Just "Bearer" without a token
     let response = server
         .get("/api/v1/protected")
-        .add_header(HeaderName::from_static("authorization"), HeaderValue::from_static("Bearer"))
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_static("Bearer"),
+        )
         .await;
 
     assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
@@ -587,7 +657,10 @@ async fn test_auth_middleware_logs_validation_failure() {
     // Invalid token should trigger a warning log
     let response = server
         .get("/api/v1/protected")
-        .add_header(HeaderName::from_static("authorization"), HeaderValue::from_static("Bearer invalid-jwt-token"))
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_static("Bearer invalid-jwt-token"),
+        )
         .await;
 
     assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
@@ -597,9 +670,9 @@ async fn test_auth_middleware_logs_validation_failure() {
 #[tokio::test]
 #[serial]
 async fn test_validated_claims_clone() {
-    use streamflow_oauth::Claims;
-    use streamflow_api::middleware::auth::ValidatedClaims;
     use chrono::Utc;
+    use streamflow_api::middleware::auth::ValidatedClaims;
+    use streamflow_oauth::Claims;
 
     let claims = Claims {
         sub: "user-123".to_string(),
@@ -620,9 +693,9 @@ async fn test_validated_claims_clone() {
 #[tokio::test]
 #[serial]
 async fn test_auth_middleware_with_token_signed_by_different_key() {
-    use jsonwebtoken::{encode, EncodingKey, Header};
+    use chrono::{Duration, Utc};
+    use jsonwebtoken::{EncodingKey, Header, encode};
     use streamflow_oauth::Claims;
-    use chrono::{Utc, Duration};
 
     // Use a complete different RSA private key for testing
     let different_private_key = r#"-----BEGIN PRIVATE KEY-----
@@ -649,13 +722,21 @@ vnv7KLhLAgMBAAECggEBAK5nD8vXl6D0s5N8OlNJxK7Y8TJ8LHxWbKqxhU8gSVCL
     // Note: This may fail at encoding if the key format is invalid, which is acceptable for this test
     match EncodingKey::from_rsa_pem(different_private_key.as_bytes()) {
         Ok(encoding_key) => {
-            let token = encode(&Header::new(jsonwebtoken::Algorithm::RS256), &claims, &encoding_key).unwrap();
+            let token = encode(
+                &Header::new(jsonwebtoken::Algorithm::RS256),
+                &claims,
+                &encoding_key,
+            )
+            .unwrap();
 
             let server = setup_test_server().await;
 
             let response = server
                 .get("/api/v1/protected")
-                .add_header(HeaderName::from_static("authorization"), HeaderValue::from_str(&format!("Bearer {}", token)).unwrap())
+                .add_header(
+                    HeaderName::from_static("authorization"),
+                    HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+                )
                 .await;
 
             assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);

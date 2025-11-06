@@ -204,7 +204,11 @@ async fn test_cors_with_different_origins() {
         .layer(layer);
 
     // Test with different origins
-    let origins = vec!["http://example.com", "https://example.org", "http://localhost:3000"];
+    let origins = vec![
+        "http://example.com",
+        "https://example.org",
+        "http://localhost:3000",
+    ];
 
     for origin in origins {
         let response = app
