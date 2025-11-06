@@ -181,7 +181,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 - **Example**: `POST /api/v1/workflows` with `{"definition_name": "payment", "input": {"amount": 100.00}}`
 - **Implementation Plan**: See `docs/implementation/US-1A.5-workflow-submission.md`
 
-**US-1A.6: Workflow Status and Query API**
+**US-1A.6: Workflow Status and Query API** 🎯 **Pre-Epic 2 (Required for Benchmarking)**
 - **As** a platform engineering lead
 - **I want** to query workflow status and results via API
 - **So that** I can monitor execution and retrieve outputs
@@ -192,8 +192,9 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - `GET /api/v1/workflows?status=running&limit=100` - List workflows with filters
   - Pagination: `limit` (default 100) and `offset` (default 0) parameters
   - Filter parameters: `status`, `workflow_type`, `created_after`, `created_before`
+- **Implementation**: See `docs/implementation/US-1A.6-workflow-status-query.md`
 
-**US-1A.7: Worker Activity APIs**
+**US-1A.7: Worker Activity APIs** 🎯 **Pre-Epic 2 (Required for Built-in Worker)**
 - **As** an activity worker
 - **I want** HTTP APIs to poll for activities, send heartbeats, and report results
 - **So that** I can execute activities in distributed environments without direct database access
@@ -217,7 +218,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Idempotency: Activities can only be completed/failed once (409 Conflict if already
     done or timed out / reassigned)
 
-**US-1A.8: Activity Results and Output Retrieval**
+**US-1A.8: Activity Results and Output Retrieval** 📋 **Post-Epic 2 (Deferred)**
 - **As** an AI researcher
 - **I want** to retrieve activity outputs and workflow results via API
 - **So that** I can access computation results for downstream processing
@@ -228,8 +229,9 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
     - 404 if activity not completed or doesn't exist
   - `GET /api/v1/workflows/{workflow_id}/output` - Get final workflow output
     - Output format: JSON with activity outputs accessible by key
+- **Deferral Rationale**: US-1A.6 status query includes outputs in `state_data`. Dedicated output retrieval endpoints can be added after Epic 2 performance validation.
 
-**US-1A.9: WebSocket Streaming for Real-Time Updates**
+**US-1A.9: WebSocket Streaming for Real-Time Updates** 📋 **Post-Epic 2 (Deferred)**
 - **As** an AI startup engineer
 - **I want** real-time workflow execution updates via WebSocket
 - **So that** my UI can show live progress without polling
@@ -243,6 +245,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Authentication: Bearer token in query parameter or initial message
   - Automatic reconnection support with last event ID for replay (`?event_id=...`)
 - **Serialization Format**: All event types use **PascalCase** (matches PostgreSQL enum and Rust enum variants)
+- **Deferral Rationale**: Polling via US-1A.6 is sufficient for Epic 2 benchmarking. WebSocket streaming can be added after performance validation.
 
 ---
 
@@ -300,7 +303,7 @@ The built-in worker is implemented as an HTTP client to the API server rather th
 
 ### User Stories
 
-**US-1C.1: Main Binary and CLI Framework**
+**US-1C.1: Main Binary and CLI Framework** 🎯 **Pre-Epic 2 (Required for Unified Deployment)**
 - **As** a platform engineering lead
 - **I want** a single binary with subcommands to launch different services
 - **So that** I can deploy StreamFlow with minimal dependencies
@@ -313,7 +316,7 @@ The built-in worker is implemented as an HTTP client to the API server rather th
   - Binary size: <15MB release build
   - Version information: `streamflow --version` shows semantic version and build info
 
-**US-1C.2: Service Launcher - All-in-One Mode**
+**US-1C.2: Service Launcher - All-in-One Mode** 🎯 **Pre-Epic 2 (Required for Benchmarking)**
 - **As** a developer
 - **I want** to launch all services together with one command
 - **So that** I can quickly start StreamFlow for development or single-node deployment
@@ -326,7 +329,7 @@ The built-in worker is implemented as an HTTP client to the API server rather th
   - Logging: Structured JSON or human-readable format (configurable)
   - All services share same database connection pool
 
-**US-1C.3: Service Launcher - Individual Services**
+**US-1C.3: Service Launcher - Individual Services** 📋 **Post-Epic 2 (Deferred)**
 - **As** a platform engineering lead
 - **I want** to launch services independently for distributed deployment
 - **So that** I can scale orchestrator, API, and workers separately
@@ -339,8 +342,9 @@ The built-in worker is implemented as an HTTP client to the API server rather th
     - Flags: `--activity-types` (namespace.name list), `--api-url`, `--worker-id`
   - Each service can run on different hosts/containers
   - Environment variable configuration: `DATABASE_URL`, `STREAMFLOW_API_URL`, etc.
+- **Deferral Rationale**: All-in-one mode (US-1C.2) is sufficient for Epic 2 benchmarking. Distributed deployment can be validated after performance baseline is established.
 
-**US-1C.4: Configuration Management**
+**US-1C.4: Configuration Management** 📋 **Post-Epic 2 (Deferred)**
 - **As** a platform engineering lead
 - **I want** flexible configuration via environment variables and CLI flags
 - **So that** I can deploy StreamFlow in different environments without code changes
@@ -351,8 +355,9 @@ The built-in worker is implemented as an HTTP client to the API server rather th
   - Configuration file support: Optional YAML/TOML config file via `--config` flag (post-MVP)
   - Sensitive values: Support for environment variables (no secrets in CLI arguments)
   - Configuration logging: Print effective configuration on startup (redact secrets)
+- **Deferral Rationale**: Basic configuration via environment variables and CLI flags already exists. Enhanced configuration management can be added after Epic 2 based on operational insights.
 
-**US-1C.5: Database Migration Management**
+**US-1C.5: Database Migration Management** 📋 **Post-Epic 2 (Deferred)**
 - **As** a platform engineering lead
 - **I want** to manage database migrations via CLI
 - **So that** I can control schema updates independently of service startup
@@ -364,8 +369,9 @@ The built-in worker is implemented as an HTTP client to the API server rather th
   - Migration history: Track applied migrations in database
   - Idempotent: Safe to run multiple times
   - Automatic migration on `streamflow serve` (optional via `--auto-migrate` flag)
+- **Deferral Rationale**: Can use `sqlx migrate` directly for Epic 2. CLI wrapper provides convenience but is not essential for benchmarking.
 
-**US-1C.6: Health Checks and Service Monitoring**
+**US-1C.6: Health Checks and Service Monitoring** 📋 **Post-Epic 2 (Deferred)**
 - **As** a platform engineering lead
 - **I want** CLI commands to check service health and status
 - **So that** I can monitor StreamFlow in production
@@ -377,8 +383,9 @@ The built-in worker is implemented as an HTTP client to the API server rather th
     - Output: Service names, health status, uptime, version
   - Health check timeout: Configurable (default 5s)
   - Output formats: Human-readable text or JSON (via `--format json`)
+- **Deferral Rationale**: Basic health endpoints from US-1A.1 are sufficient for Epic 2. Enhanced CLI monitoring tools can be informed by Epic 2 metrics requirements.
 
-**US-1C.7: Graceful Shutdown and Signal Handling**
+**US-1C.7: Graceful Shutdown and Signal Handling** 🎯 **Pre-Epic 2 (Required for Test Reliability)**
 - **As** a platform engineering lead
 - **I want** services to shut down gracefully on SIGTERM/SIGINT
 - **So that** workflows and activities complete without data loss
@@ -1255,12 +1262,18 @@ streamflow/
    - ✅ PostgreSQL backend with optimizations
 
 1A. **API Server** (Epic 1A):
-   - ✅ Workflow submission API (POST /api/v1/workflows)
-   - ✅ Workflow status and query API
-   - ✅ Workflow definition management
-   - ✅ Worker activity APIs (poll, heartbeat, complete, fail)
-   - ✅ Authentication and authorization (JWT)
-   - ✅ Health checks and metrics endpoints
+   - ✅ **Pre-Epic 2 (Complete)**:
+     - Workflow submission API (POST /api/v1/workflows) - US-1A.5
+     - Workflow definition management - US-1A.4
+     - Authentication and authorization (JWT) - US-1A.3
+     - Health checks and service discovery - US-1A.1
+     - Error handling and API contracts - US-1A.2
+   - 🎯 **Pre-Epic 2 (In Progress)**:
+     - Workflow status and query API - US-1A.6
+     - Worker activity APIs (poll, heartbeat, complete, fail) - US-1A.7
+   - 📋 **Post-Epic 2 (Deferred)**:
+     - Activity results and output retrieval - US-1A.8
+     - WebSocket streaming for real-time updates - US-1A.9
 
 1B. **Built-in Worker** (Epic 1B):
    - ✅ Worker polling with concurrency safety (US-1B.1)
@@ -1269,12 +1282,15 @@ streamflow/
    - ✅ Activity execution and result reporting
 
 1C. **StreamFlow Binary and CLI** (Epic 1C):
-   - ✅ Main binary with subcommands (serve, orchestrator, api, worker, migrate)
-   - ✅ All-in-one mode (`streamflow serve`) for single-node deployment
-   - ✅ Individual service launchers for distributed deployment
-   - ✅ Configuration management (CLI flags > env vars > defaults)
-   - ✅ Database migration CLI
-   - ✅ Graceful shutdown and signal handling
+   - 🎯 **Pre-Epic 2 (In Progress)**:
+     - Main binary and CLI framework - US-1C.1
+     - All-in-one mode (`streamflow serve`) - US-1C.2
+     - Graceful shutdown and signal handling - US-1C.7
+   - 📋 **Post-Epic 2 (Deferred)**:
+     - Individual service launchers - US-1C.3
+     - Configuration management - US-1C.4
+     - Database migration CLI - US-1C.5
+     - Health checks and service monitoring - US-1C.6
 
 2. **Performance Validation** (Epic 2):
    - ✅ Benchmark proving >1,000 workflows/sec
@@ -1460,52 +1476,138 @@ See detailed GTM plan in:
 - Launch roadmap: notes/2025-10-11-streamflow-gtm-strategy.md (section 4)
 - Budget-conscious tactics: notes/2025-10-11-streamflow-gtm-strategy.md (section 8)
 
-### D. Implementation Roadmap (Updated with Early Benchmarking)
+### D. Implementation Roadmap (Revised with Pre-Epic 2 Requirements)
 
-**Phase 1: Foundation (Weeks 1-4)**
-- Event-driven orchestrator
-- Activity queue with ordering guarantees
-- YAML DSL core
-- Performance baseline: 100+ workflows/sec
+#### Implementation Dependencies
 
-**Phase 2: API Server + Built-in Worker + CLI + Benchmarking (Weeks 5-8)**
-- **API Server (Epic 1A)**: HTTP/REST endpoints for workflow submission and management
-  - Authentication/authorization with JWT
-  - WebSocket streaming for real-time updates
-- **Built-in Worker (Epic 1B)**: Worker polling using API server endpoints
-  - Worker authentication via JWT
-  - Activity execution and result reporting
-- **StreamFlow Binary and CLI (Epic 1C)**: Single binary deployment
-  - Main binary with subcommands (serve, orchestrator, api, worker, migrate)
-  - All-in-one mode and individual service launchers
-  - Configuration management and graceful shutdown
-- **CRITICAL: Benchmarking suite (Epic 2)**
+```mermaid
+flowchart TB
+    subgraph "Pre-Epic 2 (5-6 days)"
+        1C1[US-1C.1<br/>Main Binary/CLI<br/>6h]
+        1A6[US-1A.6<br/>Status Query API<br/>11h]
+        1A7[US-1A.7<br/>Worker APIs<br/>12h]
+        1C2[US-1C.2<br/>All-in-One Mode<br/>8h]
+        1C7[US-1C.7<br/>Graceful Shutdown<br/>4h]
+    end
+
+    subgraph "Epic 2 (1-2 weeks)"
+        E2[Performance<br/>Benchmarking]
+    end
+
+    subgraph "Post-Epic 2 (5 days)"
+        1A8[US-1A.8<br/>Output Retrieval<br/>8h]
+        1A9[US-1A.9<br/>WebSocket<br/>15h]
+        1C3[US-1C.3<br/>Individual Launchers<br/>5h]
+        1C4[US-1C.4<br/>Config Mgmt<br/>4h]
+        1C5[US-1C.5<br/>Migration CLI<br/>3h]
+        1C6[US-1C.6<br/>Monitoring<br/>5h]
+    end
+
+    1C1 --> 1C2
+    1C1 --> 1A6
+    1C1 --> 1A7
+    1C2 --> 1C7
+    1A6 --> E2
+    1A7 --> E2
+    1C2 --> E2
+    1C7 --> E2
+
+    E2 --> 1A8
+    E2 --> 1A9
+    E2 --> 1C3
+    E2 --> 1C4
+    E2 --> 1C5
+    E2 --> 1C6
+```
+
+**Phase 1: Foundation (Weeks 1-4)** ✅ **Complete**
+- ✅ Event-driven orchestrator with activity queue (Epic 1)
+- ✅ Sequential and parallel execution with ordering guarantees
+- ✅ PostgreSQL backend (events, queue, storage, auth)
+- ✅ Performance baseline: 100+ workflows/sec
+
+**Phase 2A: API Server (Weeks 5-6)** ✅ **Complete**
+- ✅ Workflow definition management (US-1A.4)
+- ✅ Workflow submission API (US-1A.5)
+- ✅ Authentication/authorization with JWT (US-1A.3)
+- ✅ Health checks and service discovery (US-1A.1)
+- ✅ Error handling and API contracts (US-1A.2)
+
+**Phase 2B: Built-in Worker (Week 7)** ✅ **Complete**
+- ✅ Built-in Worker implementation (Epic 1B)
+- ✅ Worker authentication via JWT
+- ✅ Activity execution and result reporting via API
+
+**Phase 2C: Pre-Epic 2 Requirements (Weeks 8-9)** 🎯 **Current Focus**
+- 🎯 **US-1A.6**: Workflow Status and Query API (~11 hours)
+  - GET /api/v1/workflows/{id}
+  - GET /api/v1/workflows/{id}/activities
+  - GET /api/v1/workflows with filters and pagination
+- 🎯 **US-1A.7**: Worker Activity APIs (~12 hours)
+  - POST /api/v1/workers/poll
+  - POST /api/v1/activities/{id}/heartbeat
+  - POST /api/v1/activities/{id}/complete
+  - POST /api/v1/activities/{id}/fail
+- 🎯 **US-1C.1**: Main Binary and CLI Framework (~6 hours)
+  - Single binary with clap CLI
+  - Subcommands for all services
+- 🎯 **US-1C.2**: All-in-One Service Launcher (~8 hours)
+  - `streamflow serve` launches all services
+  - Shared connection pool
+- 🎯 **US-1C.7**: Graceful Shutdown (~4 hours)
+  - SIGTERM/SIGINT handling
+  - Worker drain and connection cleanup
+
+**Total Phase 2C: ~41 hours (5-6 days)**
+
+**Phase 3: Performance Benchmarking (Weeks 10-11)** 📋 **Next**
+- **Epic 2**: Establish performance baseline and competitive advantage
   - Programmatic workflow definitions for benchmarks (Rust structs, JSON)
-  - Establish performance baseline vs competitors (>1,000 wf/sec target)
-  - PostgreSQL profiling and optimization recommendations
-  - Identify optimization opportunities for Phase 4
+  - Automated performance test suite (US-2.1)
+  - Competitor comparison benchmarks (US-2.2)
+  - PostgreSQL performance profiling (US-2.3)
+  - Stress testing and capacity planning (US-2.4)
+  - Performance dashboard and monitoring (US-2.5)
+  - **Target**: Prove >1,000 workflows/sec vs competitors' 35-100/sec
 
-**Phase 3: YAML DSL + Programmatic Definition (Weeks 9-12)**
-- **YAML DSL (Epic 3)**: Declarative workflow definitions
-- Sequential, parallel, conditional, and loop workflows
-- Activity settings (retry, timeout, budget)
-- YAML validation and tooling
-- **Programmatic APIs (Epic 4)**: Python and JavaScript builder APIs
-- Compilation pipeline (code → YAML)
-- 5+ examples per language
+**Phase 4: Complete Epic 1A/1C (Week 12)** 📋 **Post-Epic 2**
+- 📋 **US-1A.8**: Activity Results and Output Retrieval (~8 hours)
+- 📋 **US-1A.9**: WebSocket Streaming for Real-Time Updates (~15 hours)
+- 📋 **US-1C.3**: Individual Service Launchers (~5 hours)
+- 📋 **US-1C.4**: Configuration Management (~4 hours)
+- 📋 **US-1C.5**: Database Migration Management (~3 hours)
+- 📋 **US-1C.6**: Health Checks and Service Monitoring (~5 hours)
 
-**Phase 4: PostgreSQL Optimization (Weeks 13-16)**
-- Query optimization based on Phase 2 benchmark insights
-- Connection pooling and batching
-- Advanced indexing strategy
-- Target validation: >1,000 workflows/sec
-- Final competitive benchmark comparisons
+**Total Phase 4: ~40 hours (5 days)**
 
-**Phase 5: Developer Experience (Weeks 17-20)**
-- VS Code extension
-- Migration tools
-- Complete documentation
-- Production deployment guides
+**Phase 5: YAML DSL + Programmatic Definition (Weeks 13-16)**
+- **Epic 3**: YAML workflow definition language
+  - Sequential, parallel, conditional, and loop workflows
+  - Activity settings (retry, timeout, budget)
+  - YAML validation and tooling
+- **Epic 4**: Python and JavaScript builder APIs
+  - Compilation pipeline (code → YAML)
+  - 5+ examples per language
+
+**Phase 6: PostgreSQL Optimization (Weeks 17-20)**
+- **Epic 6**: Query optimization based on Epic 2 benchmark insights
+  - Connection pooling and batching
+  - Advanced indexing strategy
+  - Partitioning for time-series data
+  - Target validation: >1,000 workflows/sec sustained
+  - Final competitive benchmark comparisons
+
+**Phase 7: Developer Experience (Weeks 21-24)**
+- **Epic 9**: VS Code extension, migration tools, complete documentation
+  - CLI tools for workflow lifecycle
+  - Migration tools (Temporal, Airflow)
+  - Production deployment guides
+
+**Key Benefits of Revised Sequencing**:
+- ✅ Performance validation 4-5 days earlier
+- ✅ Epic 2 insights inform Epic 1A/1C completion decisions
+- ✅ Reduced risk: Validate architecture before investing in advanced features
+- ✅ Total MVP timeline unchanged, just reordered for better outcomes
 
 ---
 
@@ -1523,6 +1625,7 @@ See detailed GTM plan in:
 | 0.6     | 2025-10-30 | Claude Code | Swapped Epic 2 (YAML) and Epic 3 (Benchmarking). Benchmarking now Epic 2 (after Epic 1B), YAML now Epic 3. Benchmarking uses programmatic workflows (no YAML dependency), validates core architecture earlier, and informs YAML design. Updated all references, roadmap phases, and release criteria. |
 | 0.7     | 2025-10-30 | Sean Harrison | Revised and Re-ordered Epic 1A (API). Fixed event serialization format to PascalCase (WorkflowCreated, ActivityCompleted, etc.) matching PostgreSQL enum and Rust types. |
 | 0.8     | 2025-10-30 | Claude Code | Added Epic 1C (StreamFlow Binary and CLI) with 7 user stories covering main binary, service launchers (serve, orchestrator, api, worker), configuration management, database migrations, health checks, and graceful shutdown. Updated release criteria and roadmap. |
+| 0.9     | 2025-11-06 | Claude Code | Revised epic sequencing: Split Epic 1A and 1C into Pre-Epic 2 (US-1A.6,7 and US-1C.1,2,7) and Post-Epic 2 (US-1A.8,9 and US-1C.3,4,5,6). Pre-Epic 2 stories provide minimal viable system for benchmarking. Post-Epic 2 stories will be informed by performance insights. Updated implementation roadmap to show phased approach. All deferred stories remain in MVP scope, just resequenced for better risk management and earlier performance validation. |
 
 **Approval:**
 
