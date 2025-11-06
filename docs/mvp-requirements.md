@@ -152,19 +152,20 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - 401 Unauthorized for missing/invalid tokens with helpful error message
   - Rate limiting per token: Configurable requests per minute
 
-**US-1A.4: Workflow Definition Management API**
+**US-1A.4: Workflow Definition Management API** ✅ Complete
 - **As** an AI startup engineer
 - **I want** to deploy and manage workflow definitions separately from execution
 - **So that** I can version and reuse workflow templates
 - **Acceptance Criteria**:
   - `POST /api/v1/workflow_definitions` - Deploy workflow definition with name
-  - `GET /api/v1/workflow_definitions` - List all deployed definitions (later: Search)
+  - `GET /api/v1/workflow_definitions` - List all deployed definitions
   - `GET /api/v1/workflow_definitions/{name}` - Get latest version of definition
   - `GET /api/v1/workflow_definitions/{name}?version={version}` - Get specific version
   - Validation on deployment: Syntax and semantic checks before storage
-  - Versioning: Auto-generated timestamp version (YYYYMMDDHHMMSS)
+  - Versioning: Auto-generated timestamp version (YYYYmmdd.HHMMSS.uuuuuu)
+- **Implementation**: See `docs/implementation/US-1A.4-workflow-definition-management.md`
 
-**US-1A.5: Workflow Submission API**
+**US-1A.5: Workflow Submission API** 📋 Ready for Implementation
 - **As** an AI startup engineer.
 - **I want** to submit workflows via HTTP API
 - **So that** my applications can trigger workflows programmatically
@@ -173,11 +174,12 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Request body: `{definition_name, version, input, unique_key}`
     (JSON, optional version, optional unique_key)
   - Response: `{workflow_id, status, created_at}` with 201 Created
-  - Async execution: API returns immediately, workflow runs in background
   - Workflow definition not found: 404 Not Found
   - Validation: Reject invalid body or invalid input for the given workflow definition with 422 Unprocessable Entity
   - Idempotency: Optional `unique_key` body parameter to prevent duplicate submissions: 409 Conflict
+  - Async execution: API creates workflow and workflow event then returns immediately, workflow runs in background
 - **Example**: `POST /api/v1/workflows` with `{"definition_name": "payment", "input": {"amount": 100.00}}`
+- **Implementation Plan**: See `docs/implementation/US-1A.5-workflow-submission.md`
 
 **US-1A.6: Workflow Status and Query API**
 - **As** a platform engineering lead

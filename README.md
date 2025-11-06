@@ -26,10 +26,12 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
   - ✅ **[US-1A.1.5: API Server CLI Launcher](docs/implementation/US-1A.1.5-api-server-launcher.md)** - `streamflow api` command with configuration management
   - ✅ **[US-1A.2: Error Handling and API Contracts](docs/implementation/US-1A.2-error-handling.md)** - Standard error responses, OpenAPI/ReDoc docs, CORS, request tracing
   - ✅ **[US-1A.3: Authentication](docs/implementation/US-1A.3-authentication.md)** - OAuth 2.0 JWT authentication with RSA256 signing, refresh token rotation
+  - ✅ **[US-1A.4: Workflow Definition Management](docs/implementation/US-1A.4-workflow-definition-management.md)** - Deploy, version, and manage workflow definitions with timestamp-based versioning
 
 ### In Progress
 
-- 🔨 **Epic 1A: API Server** - HTTP/REST endpoints for workflow and worker operations
+- 🔨 **Epic 1A: API Server** - Workflow submission and worker operations APIs
+  - 📋 **[US-1A.5: Workflow Submission API](docs/implementation/US-1A.5-workflow-submission.md)** - Implementation plan ready, aligned with US-1A.4 patterns
 - 🔨 **Epic 1B: Built-in Worker** - Worker implementation using API endpoints
 
 ## Quick Start
@@ -296,6 +298,8 @@ openssl rsa -in private.pem -pubout -out public.pem
   - [US-1A.1.5: API Server CLI Launcher](docs/implementation/US-1A.1.5-api-server-launcher.md)
   - [US-1A.2: Error Handling and API Contracts](docs/implementation/US-1A.2-error-handling.md)
   - [US-1A.3: Authentication](docs/implementation/US-1A.3-authentication.md)
+  - [US-1A.4: Workflow Definition Management](docs/implementation/US-1A.4-workflow-definition-management.md)
+  - [US-1A.5: Workflow Submission API](docs/implementation/US-1A.5-workflow-submission.md) (Implementation Plan)
 
 ### Additional Documentation
 - **[Post-MVP Roadmap](docs/post-mvp.md)** - Features deferred beyond MVP
@@ -311,7 +315,9 @@ openssl rsa -in private.pem -pubout -out public.pem
 - ✅ API Server CLI Launcher (`streamflow api` command)
 - ✅ Error Handling and API Contracts (OpenAPI/ReDoc docs)
 - ✅ JWT authentication and authorization (OAuth 2.0 with RSA256)
-- 📋 HTTP/REST endpoints for workflow submission and management
+- ✅ Workflow Definition Management (deploy, version, query)
+- 📋 Workflow Submission API (implementation plan ready)
+- 📋 Workflow Status and Query API
 - 📋 Worker activity APIs (poll, heartbeat, complete, fail)
 - 📋 WebSocket streaming for real-time updates
 
