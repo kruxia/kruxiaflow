@@ -20,7 +20,7 @@
 - `GET /api/v1/workflow_definitions` - List all deployed definitions (later: Search)
 - `GET /api/v1/workflow_definitions/{name}` - Get latest version of definition
 - `GET /api/v1/workflow_definitions/{name}?version={version}` - Get specific version
-- Versioning: Timestamp-based (auto-generated at deployment: `YYYYMMDDHHmmss`)
+- Versioning: Timestamp-based using `created_at` (formatted as `YYYYmmdd.HHMMSS.uuuuuu` in API)
 - Validation on deployment: Syntax and semantic checks before storage
 
 ---
@@ -42,11 +42,13 @@ This user story establishes the workflow definition management system that enabl
 - Supports A/B testing (deploy two versions, route traffic appropriately)
 - Essential for multi-tenant deployments (each tenant can have their own definitions)
 
-**Why Auto-Generated Timestamps**:
-- ✅ **Simplicity** - Users don't need to manage version numbers
-- ✅ **No conflicts** - Timestamp uniqueness prevents duplicate version errors
-- ✅ **Natural ordering** - Sortable by version gives chronological order
-- ✅ **Audit trail** - Version timestamp shows exact deployment time
+**Why created_at as Version**:
+- ✅ **Single source of truth** - No duplication, database timestamp is authoritative
+- ✅ **Microsecond precision** - Virtually impossible to collide (vs second precision)
+- ✅ **Simpler code** - No version generation logic, database handles it
+- ✅ **Better UX** - Compact format (YYYYmmdd.HHMMSS.uuuuuu) is scannable and sortable
+- ✅ **Natural ordering** - Timestamp ordering gives chronological order
+- ✅ **Audit trail** - Exact deployment time to microsecond precision
 
 **Why Validation is Essential**:
 - ✅ **Fail fast** - Catch errors at deployment time, not execution time
@@ -65,7 +67,7 @@ Per `docs/architecture.md` (Data Architecture - Workflow Definitions):
 - Definitions stored as JSONB for efficient querying and validation
 
 Per `docs/mvp-requirements.md` (Epic 1A, US-1A.4):
-- Versioning is timestamp-based and auto-generated at deployment (format: `YYYYMMDDHHmmss`)
+- Versioning uses `created_at` timestamp (formatted as `YYYYmmdd.HHMMSS.uuuuuu` in API responses)
 - Validation includes syntax checking (valid YAML) and semantic checking (valid activity references)
 - List endpoint returns all definitions (search/filtering is post-MVP)
 
@@ -74,19 +76,27 @@ Per `docs/mvp-requirements.md` (Epic 1A, US-1A.4):
 CREATE TABLE workflow_definitions (
     id UUID PRIMARY KEY,
     name TEXT NOT NULL,
-    version TEXT NOT NULL,
     activities JSONB NOT NULL,  -- Stores only the activities array, not the full WorkflowDefinition
     created_at TIMESTAMPTZ NOT NULL,
-    UNIQUE(name, version)
+    UNIQUE(name, created_at)  -- created_at IS the version (microsecond precision prevents collisions)
 );
 ```
+
+**Version Format**:
+- **Storage**: `created_at` timestamp (TIMESTAMPTZ with microsecond precision)
+- **API Format**: `YYYYmmdd.HHMMSS.uuuuuu` (e.g., "20250105.143022.123456")
+- **Benefits**:
+  - Compact and human-scannable
+  - Lexicographically sortable
+  - Microsecond precision prevents collisions
+  - No URL encoding issues
+  - Single source of truth (created_at)
 
 **Workflow Definition Structure**:
 Per architecture.md, workflows are defined as directed graphs using `preceding` and `following` relationships:
 
 ```yaml
 name: payment_processing
-description: "Process payment with validation and authorization"
 
 activities:
   - key: validate_payment
@@ -121,9 +131,8 @@ activities:
 ### Storage Design Decision
 
 **What gets stored where**:
-- **Database columns** (`name`, `version`, `created_at`): Stored as separate columns for efficient querying and indexing
+- **Database columns** (`name`, `created_at`): Stored as separate columns for efficient querying and indexing
 - **JSONB column** (`activities`): Stores only the activities array, not the full WorkflowDefinition
-- **Not stored**: `description` and `settings` fields are not persisted (can be added post-MVP if needed)
 
 **Rationale**:
 - Avoids redundancy: `name` and `version` are already in table columns, no need to duplicate in JSONB
@@ -150,33 +159,18 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 /// Workflow definition (user-provided, without version)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct WorkflowDefinition {
     /// Workflow name (unique per version)
     pub name: String,
 
-    /// Human-readable description
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-
     /// Activities in the workflow
     pub activities: Vec<ActivityDefinition>,
-
-    /// Workflow-level settings (timeouts, retries, etc.)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub settings: Option<WorkflowSettings>,
 }
 
-impl WorkflowDefinition {
-    /// Generate timestamp-based version
-    ///
-    /// Format: YYYYMMDDHHmmss (e.g., "20250105143022")
-    /// Uses UTC time for consistency across timezones.
-    pub fn generate_version() -> String {
-        use chrono::Utc;
-        Utc::now().format("%Y%m%d%H%M%S").to_string()
-    }
-}
+// Note: Version is NOT part of WorkflowDefinition.
+// It is auto-generated from created_at timestamp when stored in the database.
+// See format_version() and parse_version() functions for version formatting.
 
 /// Activity definition within a workflow
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -544,7 +538,9 @@ pub enum ValidationError {
 **Implementation**:
 
 ```rust
-use crate::workflow::definition::{WorkflowDefinition, ValidationError};
+use crate::workflow::definition::{
+    format_version, parse_version, ActivityDefinition, ValidationError, WorkflowDefinition,
+};
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -555,7 +551,7 @@ pub struct StoredWorkflowDefinition {
     pub id: Uuid,
     pub name: String,
     pub version: String,
-    pub definition: WorkflowDefinition,
+    pub activities: Vec<ActivityDefinition>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -579,11 +575,11 @@ impl WorkflowDefinitionRepository {
         definition: WorkflowDefinition,
     ) -> Result<StoredWorkflowDefinition, RepositoryError> {
         // Validate definition before storing
-        definition.validate()
+        definition
+            .validate()
             .map_err(RepositoryError::ValidationError)?;
 
         let id = Uuid::now_v7();
-        let version = WorkflowDefinition::generate_version();
         let name = definition.name.clone();
 
         // Store only the activities array (not the full definition)
@@ -591,24 +587,23 @@ impl WorkflowDefinitionRepository {
 
         let row = sqlx::query!(
             r#"
-            INSERT INTO workflow_definitions (id, name, version, activities, created_at)
-            VALUES ($1, $2, $3, $4, NOW())
-            RETURNING id, name, version, activities, created_at
+            INSERT INTO workflow_definitions (id, name, activities, created_at)
+            VALUES ($1, $2, $3, NOW())
+            RETURNING id, name, activities, created_at
             "#,
             id,
             name,
-            version,
             activities_json
         )
         .fetch_one(&self.pool)
         .await
         .map_err(|e| {
-            // Check for unique constraint violation (extremely rare with timestamp versions)
+            // Check for unique constraint violation (virtually impossible with microsecond precision)
             if let Some(db_err) = e.as_database_error() {
                 if db_err.is_unique_violation() {
                     return RepositoryError::DuplicateVersion {
                         name: name.clone(),
-                        version: version.clone(),
+                        version: format_version(&Utc::now()),
                     };
                 }
             }
@@ -618,13 +613,8 @@ impl WorkflowDefinitionRepository {
         Ok(StoredWorkflowDefinition {
             id: row.id,
             name: row.name,
-            version: row.version,
-            definition: WorkflowDefinition {
-                name: row.name.clone(),
-                description: definition.description,
-                activities: serde_json::from_value(row.activities)?,
-                settings: definition.settings,
-            },
+            version: format_version(&row.created_at),
+            activities: serde_json::from_value(row.activities)?,
             created_at: row.created_at,
         })
     }
@@ -838,9 +828,6 @@ pub struct DeployWorkflowDefinitionResponse {
 
     /// When the definition was deployed
     pub created_at: chrono::DateTime<chrono::Utc>,
-
-    /// Message
-    pub message: String,
 }
 
 /// List workflow definitions response
@@ -862,10 +849,6 @@ pub struct WorkflowDefinitionSummary {
     /// Workflow version
     pub version: String,
 
-    /// Description
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-
     /// Number of activities
     pub activity_count: usize,
 
@@ -882,8 +865,8 @@ pub struct GetWorkflowDefinitionResponse {
     /// Workflow version
     pub version: String,
 
-    /// Full workflow definition
-    pub definition: WorkflowDefinition,
+    /// Activities in this workflow
+    pub activities: Vec<ActivityDefinition>,
 
     /// When deployed
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -902,7 +885,7 @@ pub struct GetWorkflowDefinitionQuery {
 /// Endpoint: POST /api/v1/workflow_definitions
 ///
 /// Validates and stores a workflow definition. The version is automatically
-/// generated as a timestamp (format: YYYYMMDDHHmmss) at deployment time.
+/// generated from the `created_at` timestamp (format: YYYYmmdd.HHMMSS.uuuuuu) at deployment time.
 ///
 /// Validation includes:
 /// - Syntax validation (valid YAML structure)
@@ -970,10 +953,6 @@ pub async fn deploy_workflow_definition(
             name: stored.name.clone(),
             version: stored.version.clone(),
             created_at: stored.created_at,
-            message: format!(
-                "Workflow definition '{}' version '{}' deployed successfully",
-                stored.name, stored.version
-            ),
         }),
     ))
 }
@@ -1010,8 +989,7 @@ pub async fn list_workflow_definitions(
         .map(|d| WorkflowDefinitionSummary {
             name: d.name,
             version: d.version,
-            description: d.definition.description,
-            activity_count: d.definition.activities.len(),
+            activity_count: d.activities.len(),
             created_at: d.created_at,
         })
         .collect();
@@ -1086,7 +1064,7 @@ pub async fn get_workflow_definition(
     Ok(Json(GetWorkflowDefinitionResponse {
         name: stored.name,
         version: stored.version,
-        definition: stored.definition,
+        activities: stored.activities,
         created_at: stored.created_at,
     }))
 }
@@ -1401,18 +1379,6 @@ mod tests {
         assert!(err.to_string().contains("cycle"));
     }
 
-    #[test]
-    fn test_generate_version() {
-        let version1 = WorkflowDefinition::generate_version();
-        let version2 = WorkflowDefinition::generate_version();
-
-        // Check format: YYYYMMDDHHmmss (14 digits)
-        assert_eq!(version1.len(), 14);
-        assert!(version1.chars().all(|c| c.is_ascii_digit()));
-
-        // Versions should be equal or sequential if generated close together
-        assert!(version1 <= version2);
-    }
 }
 ```
 
@@ -1604,7 +1570,7 @@ async fn test_get_workflow_definition_by_version() {
     let body: GetWorkflowDefinitionResponse = response.json().await;
     assert_eq!(body.name, "test_workflow");
     assert_eq!(body.version, version);
-    assert_eq!(body.definition.activities.len(), 1);
+    assert_eq!(body.activities.len(), 1);
 }
 
 #[tokio::test]
@@ -1776,12 +1742,11 @@ Workflow definitions are deployed separately from workflow execution. This allow
 {
   "name": "payment_processing",
   "version": "20250105143022",
-  "created_at": "2025-11-05T10:30:00Z",
-  "message": "Workflow definition 'payment_processing' version '20250105143022' deployed successfully"
+  "created_at": "2025-11-05T10:30:00Z"
 }
 \`\`\`
 
-**Note**: Version is auto-generated as a timestamp (format: `YYYYMMDDHHmmss`).
+**Note**: Version is auto-generated from the `created_at` timestamp (format: `YYYYmmdd.HHMMSS.uuuuuu`).
 
 **Error Responses**:
 - `409 Conflict` - Workflow definition with same name and version already exists (extremely rare)
@@ -1840,10 +1805,11 @@ Workflow definitions are deployed separately from workflow execution. This allow
 StreamFlow uses automatic timestamp-based versioning:
 
 **Timestamp Versioning**:
-- Format: `YYYYMMDDHHmmss` (e.g., `20250105143022`)
-- Auto-generated at deployment time (UTC)
-- Sortable by deployment time
-- 14 digits: year (4), month (2), day (2), hour (2), minute (2), second (2)
+- Format: `YYYYmmdd.HHMMSS.uuuuuu` (e.g., `20250105.143022.123456`)
+- Auto-generated from `created_at` timestamp at deployment time (UTC)
+- Sortable by deployment time (lexicographically)
+- Components: year (4), month (2), day (2), hour (2), minute (2), second (2), microseconds (6)
+- Microsecond precision prevents collisions
 - No user input required - eliminates version conflicts
 ```
 
@@ -1854,7 +1820,7 @@ StreamFlow uses automatic timestamp-based versioning:
 ### Functional Requirements
 
 - ✅ `POST /api/v1/workflow_definitions` deploys workflow definition with validation
-- ✅ Version auto-generated as timestamp (format: `YYYYMMDDHHmmss`)
+- ✅ Version auto-generated from `created_at` timestamp (format: `YYYYmmdd.HHMMSS.uuuuuu`)
 - ✅ Unique constraint enforced on (name, version)
 - ✅ 409 Conflict returned for duplicate deployments (extremely rare)
 - ✅ Validation includes syntax and semantic checks
@@ -2028,14 +1994,17 @@ StreamFlow uses automatic timestamp-based versioning:
 
 **Key Design Decisions**:
 1. **Directed Graph Structure**: Activities use `preceding`/`following` relationships (never "edges")
-2. **JSONB Storage**: Stores only the activities array (not full WorkflowDefinition) to avoid redundancy since name/version are in separate columns
-3. **Auto-Generated Versions**: Timestamp-based versions (YYYYMMDDHHmmss) eliminate user coordination and conflicts
+2. **JSONB Storage**: Stores only the activities array (not full WorkflowDefinition) to avoid redundancy since name is in a separate column
+3. **created_at as Version**: Database timestamp is the version (no separate column)
+   - Formatted as `YYYYmmdd.HHMMSS.uuuuuu` in API for human-scannability
+   - Microsecond precision prevents collisions
+   - Single source of truth, no duplication
 4. **Fail Fast**: Validation happens at deployment, not execution
-5. **Latest Version Logic**: Based on `created_at` timestamp (most recent deployment)
+5. **Latest Version Logic**: Based on `created_at DESC` (most recent deployment)
 6. **Repository Pattern**: Clean separation of storage from business logic
 7. **Cycle Detection**: DFS-based algorithm for reliable cycle detection
 8. **Field-Level Errors**: Validation errors include specific field paths for debugging
-9. **Minimal Storage**: Only activities are stored in JSONB; description and settings not persisted (can be added post-MVP)
+9. **Minimal Storage**: Only activities are stored in JSONB
 
 **Implementation Order**:
 1. Data model and validation (foundation)
@@ -2083,12 +2052,15 @@ StreamFlow uses automatic timestamp-based versioning:
 
 ### Test Results
 
-- **All tests passing**: 310+ tests across workspace
-- **Test coverage**: 87.57% (target was 90%)
-  - Core workflow module: 90% coverage
-  - Repository: 90% coverage
-  - Handlers: Need integration tests (deferred to US-1A.5)
-- **Zero cargo warnings**
+- **All tests passing**: 330+ tests across workspace
+- **Integration tests**: 15 comprehensive API integration tests added (api/tests/workflow_definition_tests.rs)
+  - Deployment tests (valid, invalid, cycles, duplicate keys, multiple versions)
+  - Retrieval tests (by version, latest, list, not found)
+  - Authentication tests (all endpoints require auth)
+  - Complex workflow test (payment processing example)
+- **Unit tests**: 18 tests for workflow definition validation and repository
+- **Test coverage**: Enhanced with full API endpoint coverage
+- **Zero compilation warnings** (except one benign unused import warning)
 
 ### API Endpoints
 
@@ -2110,8 +2082,7 @@ Response: 201 Created
 {
   "name": "payment_processing",
   "version": "20251105143022",
-  "created_at": "2025-11-05T14:30:22Z",
-  "message": "Workflow definition 'payment_processing' version '20251105143022' deployed successfully"
+  "created_at": "2025-11-05T14:30:22Z"
 }
 ```
 
@@ -2149,6 +2120,13 @@ Response: 200 OK
 
 ### Notes
 
-- Handler integration tests deferred to US-1A.5 (will test end-to-end workflow submission + definition retrieval)
-- Test coverage of 87.57% exceeds most components; handlers will be tested in workflow execution story
-- All acceptance criteria met and validated
+- **Testing Complete**: All 15 integration tests passing, covering all API endpoints and validation scenarios
+- **Implementation Complete**: All acceptance criteria met and validated
+  - ✅ POST /api/v1/workflow_definitions deploys and validates definitions
+  - ✅ GET /api/v1/workflow_definitions lists all definitions
+  - ✅ GET /api/v1/workflow_definitions/{name} retrieves specific versions or latest
+  - ✅ Timestamp-based versioning (YYYYmmdd.HHMMSS.uuuuuu format)
+  - ✅ Comprehensive validation (cycles, invalid references, duplicates, empty workflows)
+  - ✅ Authentication required on all endpoints
+  - ✅ Detailed field-level error messages for validation failures
+- Ready for US-1A.5 (Workflow Submission API) which will use these definitions for workflow execution
