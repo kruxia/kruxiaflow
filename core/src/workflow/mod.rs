@@ -9,8 +9,8 @@ pub use definition::{
 };
 
 pub use query_service::{
-    WorkflowFilters, WorkflowQueryError, WorkflowQueryResult, WorkflowQueryService,
-    WorkflowRecord, WorkflowSummaryRecord,
+    WorkflowFilters, WorkflowQueryError, WorkflowQueryResult, WorkflowQueryService, WorkflowRecord,
+    WorkflowSummaryRecord,
 };
 
 pub use repository::{RepositoryError, StoredWorkflowDefinition, WorkflowDefinitionRepository};

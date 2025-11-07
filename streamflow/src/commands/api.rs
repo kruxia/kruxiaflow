@@ -5,6 +5,8 @@ use clap::Args;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 use std::time::Duration;
+use streamflow_core::events::PostgresEventSource;
+use streamflow_core::queue::{PostgresQueue, QueueConfig};
 use streamflow_oauth::{AuthConfig, PostgresAuthService};
 
 #[derive(Args)]
@@ -85,8 +87,21 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
 
     tracing::info!("Authentication service initialized");
 
-    // Create application state
-    let app_state = streamflow_api::AppState::new(db_pool, Arc::new(auth_service));
+    // Initialize activity queue (PostgreSQL implementation for MVP)
+    let activity_queue = Arc::new(PostgresQueue::new(db_pool.clone(), QueueConfig::default()));
+    tracing::info!("Activity queue initialized (PostgreSQL)");
+
+    // Initialize event source (PostgreSQL polling implementation for MVP)
+    let event_source = Arc::new(PostgresEventSource::new(db_pool.clone()));
+    tracing::info!("Event source initialized (PostgreSQL polling)");
+
+    // Create application state with configured infrastructure services
+    let app_state = streamflow_api::AppState::new(
+        db_pool,
+        Arc::new(auth_service),
+        activity_queue,
+        event_source,
+    );
 
     // Create Axum router
     let app = streamflow_api::app_router(app_state);

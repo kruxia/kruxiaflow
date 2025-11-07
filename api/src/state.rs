@@ -1,5 +1,7 @@
 use sqlx::PgPool;
 use std::sync::Arc;
+use streamflow_core::events::EventSource;
+use streamflow_core::queue::ActivityQueue;
 use streamflow_oauth::AuthenticationService;
 
 /// Build metadata captured at compile time
@@ -14,15 +16,28 @@ pub struct AppStateBuild {
 
 /// Application state shared across all request handlers
 ///
-/// Contains database connection pool, authentication service, and service metadata.
-/// Cloning is cheap as it uses Arc internally for shared resources.
+/// Contains database connection pool, infrastructure services with swappable
+/// implementations, and service metadata. Cloning is cheap as it uses Arc
+/// internally for shared resources.
+///
+/// Infrastructure services use trait objects to allow swapping implementations
+/// via configuration (e.g., PostgreSQL → Kafka for events, PostgreSQL → SQS for queue).
 #[derive(Clone)]
 pub struct AppState {
     /// PostgreSQL connection pool
     pub db_pool: PgPool,
 
     /// Authentication service (JWT token validation and issuance)
+    /// Swappable: PostgresAuthService → Auth0, Okta (post-MVP)
     pub auth_service: Arc<dyn AuthenticationService>,
+
+    /// Activity queue for scheduling and claiming activities
+    /// Swappable: PostgresQueue → SQS, RabbitMQ, Redis (post-MVP)
+    pub activity_queue: Arc<dyn ActivityQueue>,
+
+    /// Event source for publishing and consuming workflow events
+    /// Swappable: PostgresEventSource → Kafka, NATS, Logical Replication (post-MVP)
+    pub event_source: Arc<dyn EventSource>,
 
     /// Service version from Cargo.toml
     pub version: String,
@@ -40,16 +55,25 @@ impl AppState {
     /// # Arguments
     /// * `db_pool` - PostgreSQL connection pool
     /// * `auth_service` - Authentication service for JWT validation
+    /// * `activity_queue` - Activity queue implementation (e.g., PostgresQueue, SqsQueue)
+    /// * `event_source` - Event source implementation (e.g., PostgresEventSource, KafkaEventSource)
     ///
     /// # Build Metadata
     /// - `version`: Captured from CARGO_PKG_VERSION at compile time
     /// - `build.timestamp`: Captured via build.rs at compile time (BUILD_TIMESTAMP env var)
     /// - `build.git_hash`: Captured via build.rs at compile time (BUILD_GIT_HASH env var)
     /// - `features`: Hardcoded feature list for MVP
-    pub fn new(db_pool: PgPool, auth_service: Arc<dyn AuthenticationService>) -> Self {
+    pub fn new(
+        db_pool: PgPool,
+        auth_service: Arc<dyn AuthenticationService>,
+        activity_queue: Arc<dyn ActivityQueue>,
+        event_source: Arc<dyn EventSource>,
+    ) -> Self {
         Self {
             db_pool,
             auth_service,
+            activity_queue,
+            event_source,
             version: env!("CARGO_PKG_VERSION").to_string(),
             build: AppStateBuild {
                 timestamp: option_env!("BUILD_TIMESTAMP")
@@ -73,6 +97,8 @@ impl AppState {
     /// # Arguments
     /// * `db_pool` - PostgreSQL connection pool
     /// * `auth_service` - Authentication service for JWT validation
+    /// * `activity_queue` - Activity queue implementation
+    /// * `event_source` - Event source implementation
     /// * `version` - Service version string
     /// * `build` - Build metadata (timestamp and git hash)
     /// * `features` - List of enabled features
@@ -81,6 +107,8 @@ impl AppState {
     pub fn with_metadata(
         db_pool: PgPool,
         auth_service: Arc<dyn AuthenticationService>,
+        activity_queue: Arc<dyn ActivityQueue>,
+        event_source: Arc<dyn EventSource>,
         version: String,
         build: AppStateBuild,
         features: Vec<String>,
@@ -88,6 +116,8 @@ impl AppState {
         Self {
             db_pool,
             auth_service,
+            activity_queue,
+            event_source,
             version,
             build,
             features,
@@ -100,10 +130,85 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use sqlx::PgPool;
+    use streamflow_core::events::{EventError, NewWorkflowEvent, WorkflowEvent};
+    use streamflow_core::queue::{Activity, ActivityResult, QueuedActivity};
     use streamflow_oauth::{AuthResponse, AuthResult, AuthenticationService, Claims, JwtKey};
+    use uuid::Uuid;
 
     // Mock authentication service for testing
     struct MockAuthService;
+
+    // Mock activity queue for testing
+    struct MockActivityQueue;
+
+    #[async_trait]
+    impl ActivityQueue for MockActivityQueue {
+        async fn schedule(
+            &self,
+            _workflow_id: Uuid,
+            _activities: Vec<Activity>,
+        ) -> streamflow_core::queue::Result<()> {
+            Ok(())
+        }
+
+        async fn claim_next(
+            &self,
+            _worker_id: &str,
+            _namespace: &str,
+            _name: &str,
+        ) -> streamflow_core::queue::Result<Option<QueuedActivity>> {
+            Ok(None)
+        }
+
+        async fn complete(
+            &self,
+            _activity_id: Uuid,
+            _worker_id: &str,
+            _result: ActivityResult,
+        ) -> streamflow_core::queue::Result<()> {
+            Ok(())
+        }
+
+        async fn fail(
+            &self,
+            _activity_id: Uuid,
+            _worker_id: &str,
+            _retryable: bool,
+            _result: ActivityResult,
+        ) -> streamflow_core::queue::Result<bool> {
+            Ok(false)
+        }
+
+        async fn heartbeat(
+            &self,
+            _activity_id: Uuid,
+            _worker_id: &str,
+        ) -> streamflow_core::queue::Result<()> {
+            Ok(())
+        }
+    }
+
+    // Mock event source for testing
+    struct MockEventSource;
+
+    #[async_trait]
+    impl EventSource for MockEventSource {
+        async fn publish(&self, _event: NewWorkflowEvent) -> Result<(), EventError> {
+            Ok(())
+        }
+
+        async fn poll(&self, _consumer_id: &str) -> Result<Vec<WorkflowEvent>, EventError> {
+            Ok(vec![])
+        }
+
+        async fn update_position(
+            &self,
+            _consumer_id: &str,
+            _last_event_id: Uuid,
+        ) -> Result<(), EventError> {
+            Ok(())
+        }
+    }
 
     #[async_trait]
     impl AuthenticationService for MockAuthService {
@@ -171,8 +276,10 @@ mod tests {
     async fn test_app_state_new_creates_with_defaults() {
         let pool = mock_pool().await;
         let auth_service = Arc::new(MockAuthService);
+        let activity_queue = Arc::new(MockActivityQueue);
+        let event_source = Arc::new(MockEventSource);
 
-        let state = AppState::new(pool, auth_service);
+        let state = AppState::new(pool, auth_service, activity_queue, event_source);
 
         assert_eq!(state.version, env!("CARGO_PKG_VERSION"));
         assert_eq!(state.features.len(), 4);
@@ -186,6 +293,8 @@ mod tests {
     async fn test_app_state_with_metadata_uses_custom_values() {
         let pool = mock_pool().await;
         let auth_service = Arc::new(MockAuthService);
+        let activity_queue = Arc::new(MockActivityQueue);
+        let event_source = Arc::new(MockEventSource);
 
         let build = AppStateBuild {
             timestamp: "2025-01-01T00:00:00Z".to_string(),
@@ -197,6 +306,8 @@ mod tests {
         let state = AppState::with_metadata(
             pool,
             auth_service,
+            activity_queue,
+            event_source,
             "1.2.3".to_string(),
             build.clone(),
             features.clone(),
@@ -212,8 +323,10 @@ mod tests {
     async fn test_app_state_clone() {
         let pool = mock_pool().await;
         let auth_service = Arc::new(MockAuthService);
+        let activity_queue = Arc::new(MockActivityQueue);
+        let event_source = Arc::new(MockEventSource);
 
-        let state1 = AppState::new(pool, auth_service);
+        let state1 = AppState::new(pool, auth_service, activity_queue, event_source);
         let state2 = state1.clone();
 
         assert_eq!(state1.version, state2.version);
@@ -239,8 +352,10 @@ mod tests {
     async fn test_app_state_new_captures_build_metadata() {
         let pool = mock_pool().await;
         let auth_service = Arc::new(MockAuthService);
+        let activity_queue = Arc::new(MockActivityQueue);
+        let event_source = Arc::new(MockEventSource);
 
-        let state = AppState::new(pool, auth_service);
+        let state = AppState::new(pool, auth_service, activity_queue, event_source);
 
         // Build metadata should be set (either from env vars or "unknown")
         assert!(!state.build.timestamp.is_empty());
@@ -251,13 +366,23 @@ mod tests {
     async fn test_app_state_with_empty_features() {
         let pool = mock_pool().await;
         let auth_service = Arc::new(MockAuthService);
+        let activity_queue = Arc::new(MockActivityQueue);
+        let event_source = Arc::new(MockEventSource);
 
         let build = AppStateBuild {
             timestamp: "test".to_string(),
             git_hash: "test".to_string(),
         };
 
-        let state = AppState::with_metadata(pool, auth_service, "1.0.0".to_string(), build, vec![]);
+        let state = AppState::with_metadata(
+            pool,
+            auth_service,
+            activity_queue,
+            event_source,
+            "1.0.0".to_string(),
+            build,
+            vec![],
+        );
 
         assert_eq!(state.features.len(), 0);
     }
@@ -266,8 +391,10 @@ mod tests {
     async fn test_app_state_auth_service_accessible() {
         let pool = mock_pool().await;
         let auth_service = Arc::new(MockAuthService);
+        let activity_queue = Arc::new(MockActivityQueue);
+        let event_source = Arc::new(MockEventSource);
 
-        let state = AppState::new(pool, auth_service);
+        let state = AppState::new(pool, auth_service, activity_queue, event_source);
 
         // Verify we can access the auth service
         let result = state.auth_service.authenticate_client("test", "test").await;

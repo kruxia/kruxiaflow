@@ -11,6 +11,8 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use streamflow_api::handlers::workflows::SubmitWorkflowResponse;
 use streamflow_api::{AppState, AppStateBuild, app_router};
+use streamflow_core::events::PostgresEventSource;
+use streamflow_core::queue::{PostgresQueue, QueueConfig};
 use streamflow_oauth::{AuthConfig, PostgresAuthService};
 
 /// Helper to create test database pool
@@ -68,9 +70,14 @@ async fn setup_test_state() -> AppState {
     .await
     .expect("Failed to create test client");
 
+    let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
+
     AppState::with_metadata(
         pool,
         Arc::new(auth_service),
+        queue,
+        event_source,
         "0.2.0-test".to_string(),
         AppStateBuild {
             timestamp: "2025-10-30T00:00:00Z".to_string(),

@@ -108,9 +108,9 @@ async fn test_concurrent_claiming() {
         .expect("Failed to schedule activities");
 
     // Simulate 3 workers claiming concurrently
-    let worker1_id = Uuid::now_v7();
-    let worker2_id = Uuid::now_v7();
-    let worker3_id = Uuid::now_v7();
+    let worker1_id = "worker_test_01";
+    let worker2_id = "worker_test_02";
+    let worker3_id = "worker_test_03";
 
     let queue1 = PostgresQueue::new(pool.clone(), config.clone());
     let queue2 = PostgresQueue::new(pool.clone(), config.clone());
@@ -159,8 +159,8 @@ async fn test_stale_activity_recovery() {
 
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
-    let worker1_id = Uuid::now_v7();
-    let worker2_id = Uuid::now_v7();
+    let worker1_id = "worker_test_01";
+    let worker2_id = "worker_test_02";
 
     // Schedule activity with short timeout
     let activity = Activity {
@@ -229,8 +229,8 @@ async fn test_heartbeat_conflict_detection() {
 
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
-    let worker1_id = Uuid::now_v7();
-    let worker2_id = Uuid::now_v7();
+    let worker1_id = "worker_test_01";
+    let worker2_id = "worker_test_02";
 
     // Schedule activity
     let activity = Activity {
@@ -336,9 +336,9 @@ async fn test_max_retries_exhaustion() {
     // Claim and timeout: initial claim + max_retries attempts
     // With max_retries=2, we should be able to claim 3 times total (initial + 2 retries)
     for i in 0..3 {
-        let worker_id = Uuid::now_v7();
+        let worker_id = format!("worker_test_{:02}", i);
         let claimed = queue
-            .claim_next(worker_id, "test", "test_task")
+            .claim_next(&worker_id, "test", "test_task")
             .await
             .expect("Failed to claim activity")
             .expect("Should have claimed activity");
@@ -356,7 +356,7 @@ async fn test_max_retries_exhaustion() {
     }
 
     // Try to claim again - should not return activity (retry_count >= max_retries)
-    let worker_id = Uuid::now_v7();
+    let worker_id = "worker_test_final";
     let no_claim = queue
         .claim_next(worker_id, "test", "test_task")
         .await
@@ -415,7 +415,7 @@ async fn test_completion_idempotency() {
     let config = QueueConfig::default();
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
-    let worker_id = Uuid::now_v7();
+    let worker_id = "worker_test_01";
 
     // Schedule activity
     let activity = Activity {
@@ -449,15 +449,18 @@ async fn test_completion_idempotency() {
 
     // Complete activity first time
     queue
-        .complete(claimed.id, result.clone())
+        .complete(claimed.id, worker_id, result.clone())
         .await
         .expect("First completion should succeed");
 
-    // Complete activity second time (should be idempotent)
-    queue
-        .complete(claimed.id, result)
-        .await
-        .expect("Second completion should succeed (idempotent)");
+    // Complete activity second time (should fail - activity already completed)
+    let second_result = queue.complete(claimed.id, worker_id, result).await;
+
+    assert!(second_result.is_err(), "Second completion should fail");
+    assert!(matches!(
+        second_result.unwrap_err(),
+        streamflow_core::queue::QueueError::ActivityNotFound(_)
+    ));
 
     // Verify activity removed from queue
     let count = sqlx::query_scalar!(
@@ -480,7 +483,7 @@ async fn test_sequential_ordering() {
     let config = QueueConfig::default();
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
-    let worker_id = Uuid::now_v7();
+    let worker_id = "worker_test_01";
 
     // Schedule first activity
     let activity1 = Activity {
@@ -509,6 +512,7 @@ async fn test_sequential_ordering() {
     queue
         .complete(
             claimed1.id,
+            worker_id,
             ActivityResult {
                 success: true,
                 outputs: None,
@@ -584,9 +588,9 @@ async fn test_parallel_execution() {
     assert_eq!(count, Some(3), "All 3 activities should be in queue");
 
     // Claim all 3 in parallel with different workers
-    let worker1_id = Uuid::now_v7();
-    let worker2_id = Uuid::now_v7();
-    let worker3_id = Uuid::now_v7();
+    let worker1_id = "worker_test_01";
+    let worker2_id = "worker_test_02";
+    let worker3_id = "worker_test_03";
 
     let queue1 = PostgresQueue::new(pool.clone(), QueueConfig::default());
     let queue2 = PostgresQueue::new(pool.clone(), QueueConfig::default());

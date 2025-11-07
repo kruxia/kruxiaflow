@@ -1,9 +1,14 @@
+pub mod activity;
 pub mod events;
 pub mod orchestrator;
 pub mod queue;
 pub mod workflow;
 
 // Re-export specific items to avoid ambiguity
+pub use activity::{
+    ActivityWorkerError, ActivityWorkerResult, ActivityWorkerService, PendingActivityRecord,
+};
+
 pub use events::{
     ActivityDefinition as EventActivityDefinition, DependencyEdge, EventSource, NewWorkflowEvent,
     PostgresEventSource, WorkflowDefinition as EventWorkflowDefinition, WorkflowEvent,

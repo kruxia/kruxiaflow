@@ -1,8 +1,8 @@
 //! Tests for DTO conversion functions
 
+use std::collections::HashMap;
 use streamflow_api::dto;
 use streamflow_core::workflow;
-use std::collections::HashMap;
 
 #[test]
 fn test_workflow_definition_from_core_to_dto() {
@@ -14,16 +14,15 @@ fn test_workflow_definition_from_core_to_dto() {
                 key: "step1".to_string(),
                 namespace: "test".to_string(),
                 name: Some("action".to_string()),
-                parameters: Some(HashMap::from([
-                    ("key1".to_string(), serde_json::json!("value1")),
-                ])),
+                parameters: Some(HashMap::from([(
+                    "key1".to_string(),
+                    serde_json::json!("value1"),
+                )])),
                 preceding: None,
-                following: Some(vec![
-                    workflow::ActivityRelationship {
-                        activity_key: "step2".to_string(),
-                        conditions: Some(vec!["condition1".to_string()]),
-                    }
-                ]),
+                following: Some(vec![workflow::ActivityRelationship {
+                    activity_key: "step2".to_string(),
+                    conditions: Some(vec!["condition1".to_string()]),
+                }]),
                 settings: Some(workflow::ActivitySettings {
                     timeout: Some(300),
                     retry: Some(workflow::RetrySettings {
@@ -37,12 +36,10 @@ fn test_workflow_definition_from_core_to_dto() {
                 namespace: "test".to_string(),
                 name: None,
                 parameters: None,
-                preceding: Some(vec![
-                    workflow::ActivityRelationship {
-                        activity_key: "step1".to_string(),
-                        conditions: None,
-                    }
-                ]),
+                preceding: Some(vec![workflow::ActivityRelationship {
+                    activity_key: "step1".to_string(),
+                    conditions: None,
+                }]),
                 following: None,
                 settings: None,
             },
@@ -68,7 +65,10 @@ fn test_workflow_definition_from_core_to_dto() {
     let following = activity1.following.as_ref().unwrap();
     assert_eq!(following.len(), 1);
     assert_eq!(following[0].activity_key, "step2");
-    assert_eq!(following[0].conditions, Some(vec!["condition1".to_string()]));
+    assert_eq!(
+        following[0].conditions,
+        Some(vec!["condition1".to_string()])
+    );
 
     // Check settings conversion
     let settings = activity1.settings.as_ref().unwrap();
@@ -94,30 +94,27 @@ fn test_workflow_definition_from_dto_to_core() {
     // Create a DTO WorkflowDefinition
     let dto_def = dto::WorkflowDefinition {
         name: "test_workflow".to_string(),
-        activities: vec![
-            dto::ActivityDefinition {
-                key: "step1".to_string(),
-                namespace: "test".to_string(),
-                name: Some("action".to_string()),
-                parameters: Some(HashMap::from([
-                    ("key1".to_string(), serde_json::json!("value1")),
-                ])),
-                preceding: None,
-                following: Some(vec![
-                    dto::ActivityRelationship {
-                        activity_key: "step2".to_string(),
-                        conditions: None,
-                    }
-                ]),
-                settings: Some(dto::ActivitySettings {
-                    timeout: Some(300),
-                    retry: Some(dto::RetrySettings {
-                        max_attempts: 5,
-                        backoff: dto::BackoffStrategy::Fixed,
-                    }),
+        activities: vec![dto::ActivityDefinition {
+            key: "step1".to_string(),
+            namespace: "test".to_string(),
+            name: Some("action".to_string()),
+            parameters: Some(HashMap::from([(
+                "key1".to_string(),
+                serde_json::json!("value1"),
+            )])),
+            preceding: None,
+            following: Some(vec![dto::ActivityRelationship {
+                activity_key: "step2".to_string(),
+                conditions: None,
+            }]),
+            settings: Some(dto::ActivitySettings {
+                timeout: Some(300),
+                retry: Some(dto::RetrySettings {
+                    max_attempts: 5,
+                    backoff: dto::BackoffStrategy::Fixed,
                 }),
-            },
-        ],
+            }),
+        }],
     };
 
     // Convert to core
@@ -209,7 +206,10 @@ fn test_retry_settings_conversions() {
 
     let dto_retry: dto::RetrySettings = core_retry.clone().into();
     assert_eq!(dto_retry.max_attempts, 3);
-    assert!(matches!(dto_retry.backoff, dto::BackoffStrategy::Exponential));
+    assert!(matches!(
+        dto_retry.backoff,
+        dto::BackoffStrategy::Exponential
+    ));
 
     // Test core to DTO - Fixed
     let core_retry2 = workflow::RetrySettings {
@@ -229,7 +229,10 @@ fn test_retry_settings_conversions() {
 
     let core_retry3: workflow::RetrySettings = dto_retry3.clone().into();
     assert_eq!(core_retry3.max_attempts, 8);
-    assert!(matches!(core_retry3.backoff, workflow::BackoffStrategy::Exponential));
+    assert!(matches!(
+        core_retry3.backoff,
+        workflow::BackoffStrategy::Exponential
+    ));
 
     // Test DTO to core - Fixed
     let dto_retry4 = dto::RetrySettings {
@@ -239,7 +242,10 @@ fn test_retry_settings_conversions() {
 
     let core_retry4: workflow::RetrySettings = dto_retry4.clone().into();
     assert_eq!(core_retry4.max_attempts, 12);
-    assert!(matches!(core_retry4.backoff, workflow::BackoffStrategy::Fixed));
+    assert!(matches!(
+        core_retry4.backoff,
+        workflow::BackoffStrategy::Fixed
+    ));
 }
 
 #[test]
@@ -256,7 +262,10 @@ fn test_backoff_strategy_conversions() {
     // Test DTO to core
     let dto_exponential2 = dto::BackoffStrategy::Exponential;
     let core_exponential2: workflow::BackoffStrategy = dto_exponential2.into();
-    assert!(matches!(core_exponential2, workflow::BackoffStrategy::Exponential));
+    assert!(matches!(
+        core_exponential2,
+        workflow::BackoffStrategy::Exponential
+    ));
 
     let dto_fixed2 = dto::BackoffStrategy::Fixed;
     let core_fixed2: workflow::BackoffStrategy = dto_fixed2.into();
@@ -334,21 +343,18 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                 key: "middle1".to_string(),
                 namespace: "processing".to_string(),
                 name: Some("process".to_string()),
-                parameters: Some(HashMap::from([
-                    ("type".to_string(), serde_json::json!("fast")),
-                ])),
-                preceding: Some(vec![
-                    workflow::ActivityRelationship {
-                        activity_key: "start".to_string(),
-                        conditions: None,
-                    }
-                ]),
-                following: Some(vec![
-                    workflow::ActivityRelationship {
-                        activity_key: "end".to_string(),
-                        conditions: None,
-                    }
-                ]),
+                parameters: Some(HashMap::from([(
+                    "type".to_string(),
+                    serde_json::json!("fast"),
+                )])),
+                preceding: Some(vec![workflow::ActivityRelationship {
+                    activity_key: "start".to_string(),
+                    conditions: None,
+                }]),
+                following: Some(vec![workflow::ActivityRelationship {
+                    activity_key: "end".to_string(),
+                    conditions: None,
+                }]),
                 settings: Some(workflow::ActivitySettings {
                     timeout: Some(100),
                     retry: None,
@@ -358,21 +364,18 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                 key: "middle2".to_string(),
                 namespace: "processing".to_string(),
                 name: Some("process".to_string()),
-                parameters: Some(HashMap::from([
-                    ("type".to_string(), serde_json::json!("slow")),
-                ])),
-                preceding: Some(vec![
-                    workflow::ActivityRelationship {
-                        activity_key: "start".to_string(),
-                        conditions: Some(vec!["branch".to_string()]),
-                    }
-                ]),
-                following: Some(vec![
-                    workflow::ActivityRelationship {
-                        activity_key: "end".to_string(),
-                        conditions: None,
-                    }
-                ]),
+                parameters: Some(HashMap::from([(
+                    "type".to_string(),
+                    serde_json::json!("slow"),
+                )])),
+                preceding: Some(vec![workflow::ActivityRelationship {
+                    activity_key: "start".to_string(),
+                    conditions: Some(vec!["branch".to_string()]),
+                }]),
+                following: Some(vec![workflow::ActivityRelationship {
+                    activity_key: "end".to_string(),
+                    conditions: None,
+                }]),
                 settings: Some(workflow::ActivitySettings {
                     timeout: Some(500),
                     retry: Some(workflow::RetrySettings {
@@ -410,7 +413,11 @@ fn test_workflow_with_multiple_activities_and_relationships() {
     assert_eq!(core_def_back.name, core_def.name);
     assert_eq!(core_def_back.activities.len(), core_def.activities.len());
 
-    for (original, round_trip) in core_def.activities.iter().zip(core_def_back.activities.iter()) {
+    for (original, round_trip) in core_def
+        .activities
+        .iter()
+        .zip(core_def_back.activities.iter())
+    {
         assert_eq!(original.key, round_trip.key);
         assert_eq!(original.namespace, round_trip.namespace);
         assert_eq!(original.name, round_trip.name);

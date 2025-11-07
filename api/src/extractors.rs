@@ -4,6 +4,7 @@
 /// with Axum's handler system.
 use crate::state::AppState;
 use axum::{async_trait, extract::FromRequestParts, http::request::Parts};
+use streamflow_core::activity::ActivityWorkerService;
 use streamflow_core::workflow::{
     WorkflowDefinitionRepository, WorkflowQueryService, WorkflowService,
 };
@@ -74,5 +75,35 @@ impl FromRequestParts<AppState> for WorkflowQueryService {
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
         Ok(WorkflowQueryService::new(state.db_pool.clone()))
+    }
+}
+
+/// Axum extractor for ActivityWorkerService
+///
+/// Allows ActivityWorkerService to be extracted directly in handler signatures.
+/// Uses the ActivityQueue implementation configured in AppState (e.g., PostgresQueue, SqsQueue).
+///
+/// This follows the dependency inversion principle: the queue implementation is
+/// determined at startup based on configuration, not hard-coded in the extractor.
+///
+/// # Example
+/// ```rust,ignore
+/// async fn handler(service: ActivityWorkerService) -> impl IntoResponse {
+///     // Use service directly
+/// }
+/// ```
+#[async_trait]
+impl FromRequestParts<AppState> for ActivityWorkerService {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        _parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        // Use the configured queue from AppState (swappable via configuration)
+        Ok(ActivityWorkerService::new(
+            state.activity_queue.clone(),
+            state.db_pool.clone(),
+        ))
     }
 }

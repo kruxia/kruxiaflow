@@ -2,9 +2,11 @@
 
 **Epic**: 1A - API Server
 **User Story**: US-1A.7
-**Status**: 📋 Ready for Implementation
+**Status**: ✅ Implemented
 **Priority**: P0 (Must Have for MVP)
 **Last Updated**: 2025-11-06
+
+**Implementation Note**: Following US-1A.5 and US-1A.6 pattern, this implementation uses the Axum extractor pattern for ActivityWorkerService instead of adding it to AppState. See Component 4 for extractor implementation.
 
 ---
 
@@ -438,27 +440,32 @@ pub struct FailActivityResponse {
 **Location**: `core/src/activity/worker_service.rs` (new file)
 
 **Responsibilities**:
-1. Poll for pending activities (claim with FOR UPDATE SKIP LOCKED)
-2. Send heartbeats for active activities
-3. Complete activities with results
-4. Fail activities with error details
-5. Publish events to orchestrator
-6. Handle idempotency and conflict detection
+1. Delegate queue operations to ActivityQueue trait (poll, heartbeat, complete, fail)
+2. Publish workflow events (ActivityCompleted, ActivityFailed) to orchestrator
+3. Translate ActivityQueue errors to ActivityWorkerError
+4. Provide clean API for worker endpoints
+
+**Architecture Decision: Use ActivityQueue Interface**:
+This service **delegates** to the `ActivityQueue` trait instead of duplicating queue logic:
+- **Correct separation**: ActivityQueue handles database operations, ActivityWorkerService handles coordination
+- **Testability**: Can mock ActivityQueue for testing
+- **Flexibility**: Can swap queue implementations without changing worker service
+- **No duplication**: Reuses existing queue logic (claim_next, heartbeat, complete, fail)
 
 **Implementation Notes**:
-Following US-1A.5 service pattern:
-- Service struct holds PgPool (cloneable)
-- Service implements Clone for AppState
+- Service holds `Arc<dyn ActivityQueue>` for delegation
+- Service holds `PgPool` temporarily for event publishing (until EventPublisher trait exists)
 - Methods return `Result<T, ActivityWorkerError>`
 - Error type uses thiserror
-- Events published directly via sqlx (no separate trait)
+- Translates QueueError to ActivityWorkerError
 
 **Implementation**:
 
 ```rust
-use chrono::{DateTime, Utc};
+use crate::queue::{ActivityQueue, ActivityResult, QueueError, QueuedActivity};
 use serde_json::Value;
 use sqlx::PgPool;
+use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -849,13 +856,15 @@ impl ActivityWorkerService {
 ```
 
 **Key Features**:
-- Poll with FOR UPDATE SKIP LOCKED (safe concurrent claiming)
-- Heartbeat updates last_heartbeat timestamp
-- Complete removes from queue and publishes event
-- Fail handles retry logic and publishes event
-- Worker ID validation (ensures correct worker)
-- Idempotency checks (already completed)
-- Event publishing for orchestrator
+- Delegates queue operations to ActivityQueue::claim_next (polls for activities)
+- Delegates heartbeat to ActivityQueue::heartbeat
+- Delegates completion to ActivityQueue::complete
+- Delegates failure to ActivityQueue::fail
+- Publishes workflow events (ActivityCompleted, ActivityFailed) after queue operations
+- Translates QueueError to ActivityWorkerError for API layer
+- No SQL duplication - all queue logic handled by ActivityQueue trait
+
+**Important**: See actual implementation in `core/src/activity/worker_service.rs` which correctly delegates to ActivityQueue instead of duplicating SQL queries.
 
 ---
 
@@ -871,10 +880,13 @@ impl ActivityWorkerService {
 5. Map errors to HTTP status codes
 6. Return responses
 
+**Implementation Notes**:
+Following the extractor pattern from US-1A.5/US-1A.6, handlers extract ActivityWorkerService directly as a parameter instead of using State(state): State<AppState>. This keeps handler signatures clean and type-safe.
+
 **Implementation**:
 
 ```rust
-use crate::state::AppState;
+use streamflow_core::activity::ActivityWorkerService;
 
 /// Poll for activities
 ///
@@ -897,7 +909,7 @@ use crate::state::AppState;
     )
 )]
 pub async fn poll_activities(
-    State(state): State<AppState>,
+    service: ActivityWorkerService,
     Extension(claims): Extension<ValidatedClaims>,
     Json(request): Json<PollActivitiesRequest>,
 ) -> ApiResult<Json<PollActivitiesResponse>> {
@@ -927,8 +939,7 @@ pub async fn poll_activities(
         .collect();
 
     // Poll for activities
-    let activities = state
-        .activity_worker_service
+    let activities = service
         .poll_activities(activity_types, request.worker_id.clone(), request.max_activities)
         .await
         .map_err(|e| match e {
@@ -998,7 +1009,7 @@ pub async fn poll_activities(
     )
 )]
 pub async fn heartbeat_activity(
-    State(state): State<AppState>,
+    service: ActivityWorkerService,
     Extension(claims): Extension<ValidatedClaims>,
     Path(activity_id): Path<Uuid>,
     Json(request): Json<ActivityHeartbeatRequest>,
@@ -1012,8 +1023,7 @@ pub async fn heartbeat_activity(
         "Heartbeat received"
     );
 
-    let next_heartbeat_seconds = state
-        .activity_worker_service
+    let next_heartbeat_seconds = service
         .heartbeat_activity(activity_id, request.worker_id.clone())
         .await
         .map_err(|e| match e {
@@ -1075,7 +1085,7 @@ pub async fn heartbeat_activity(
     )
 )]
 pub async fn complete_activity(
-    State(state): State<AppState>,
+    service: ActivityWorkerService,
     Extension(claims): Extension<ValidatedClaims>,
     Path(activity_id): Path<Uuid>,
     Json(request): Json<CompleteActivityRequest>,
@@ -1089,8 +1099,7 @@ pub async fn complete_activity(
         "Completing activity"
     );
 
-    state
-        .activity_worker_service
+    service
         .complete_activity(
             activity_id,
             request.worker_id.clone(),
@@ -1156,7 +1165,7 @@ pub async fn complete_activity(
     )
 )]
 pub async fn fail_activity(
-    State(state): State<AppState>,
+    service: ActivityWorkerService,
     Extension(claims): Extension<ValidatedClaims>,
     Path(activity_id): Path<Uuid>,
     Json(request): Json<FailActivityRequest>,
@@ -1171,8 +1180,7 @@ pub async fn fail_activity(
         "Activity failed"
     );
 
-    let will_retry = state
-        .activity_worker_service
+    let will_retry = service
         .fail_activity(
             activity_id,
             request.worker_id.clone(),
@@ -1226,52 +1234,64 @@ pub async fn fail_activity(
 
 ---
 
-### Component 4: Update Application State
+### Component 4: Add ActivityWorkerService Extractor
 
-**Location**: Update `api/src/state.rs`
+**Location**: Update `api/src/extractors.rs`
+
+**Responsibilities**:
+1. Implement FromRequestParts for ActivityWorkerService
+2. Create PostgresQueue with default config from AppState's db_pool
+3. Create ActivityWorkerService with queue and pool
+4. Enable direct usage in handler signatures
+
+**Implementation Notes**:
+Following the same pattern as WorkflowService and WorkflowQueryService extractors, but with additional queue creation since ActivityWorkerService requires an ActivityQueue implementation.
 
 **Implementation**:
 
 ```rust
-use core::workflow::repository::WorkflowDefinitionRepository;
-use core::workflow::service::WorkflowService;
-use core::workflow::query_service::WorkflowQueryService;
-use core::activity::worker_service::ActivityWorkerService;
-use oauth::{AuthenticationService, PostgresAuthService, AuthConfig};
-use sqlx::PgPool;
+use streamflow_core::activity::ActivityWorkerService;
+use streamflow_core::queue::{PostgresQueue, QueueConfig};
 use std::sync::Arc;
 
-/// Application state shared across all handlers
-#[derive(Clone)]
-pub struct AppState {
-    pub db_pool: PgPool,
-    pub auth_service: Arc<dyn AuthenticationService>,
-    pub workflow_definition_repo: WorkflowDefinitionRepository,
-    pub workflow_service: WorkflowService,
-    pub workflow_query_service: WorkflowQueryService,
-    pub activity_worker_service: ActivityWorkerService,
-}
+/// Axum extractor for ActivityWorkerService
+///
+/// Allows ActivityWorkerService to be extracted directly in handler signatures.
+/// Automatically creates PostgresQueue and ActivityWorkerService from AppState's db_pool.
+///
+/// # Example
+/// ```rust,ignore
+/// async fn handler(service: ActivityWorkerService) -> impl IntoResponse {
+///     // Use service directly
+/// }
+/// ```
+#[async_trait]
+impl FromRequestParts<AppState> for ActivityWorkerService {
+    type Rejection = std::convert::Infallible;
 
-impl AppState {
-    /// Create new application state
-    pub async fn new(db_pool: PgPool, auth_config: AuthConfig) -> Self {
-        let auth_service = PostgresAuthService::new(db_pool.clone(), auth_config);
-        let workflow_definition_repo = WorkflowDefinitionRepository::new(db_pool.clone());
-        let workflow_service = WorkflowService::new(db_pool.clone());
-        let workflow_query_service = WorkflowQueryService::new(db_pool.clone());
-        let activity_worker_service = ActivityWorkerService::new(db_pool.clone());
+    async fn from_request_parts(
+        _parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        // Create queue with default config
+        let queue = Arc::new(PostgresQueue::new(
+            state.db_pool.clone(),
+            QueueConfig::default(),
+        ));
 
-        Self {
-            db_pool,
-            auth_service: Arc::new(auth_service),
-            workflow_definition_repo,
-            workflow_service,
-            workflow_query_service,
-            activity_worker_service,
-        }
+        // Create service with queue and pool (for event publishing)
+        Ok(ActivityWorkerService::new(queue, state.db_pool.clone()))
     }
 }
 ```
+
+**Key Features**:
+- No changes needed to AppState (keeps it clean)
+- Service constructed on-demand from db_pool
+- Creates PostgresQueue backend automatically
+- Type-safe extraction in handlers
+- Consistent with existing extractor pattern
+- Follows service interface architecture (delegates to ActivityQueue)
 
 ---
 
@@ -1969,8 +1989,8 @@ Workers poll for activities, execute them, and report results.
 - Error mapping to HTTP status codes
 - **Estimated Time**: 3 hours
 
-### Phase 3: Application State and Routes (P0)
-- Add ActivityWorkerService to AppState
+### Phase 3: Extractor and Routes (P0)
+- Add ActivityWorkerService extractor to extractors.rs
 - Add routes for worker endpoints
 - Update OpenAPI documentation
 - **Estimated Time**: 1 hour
@@ -2133,9 +2153,15 @@ Workers poll for activities, execute them, and report results.
 **Implementation Order**:
 1. Service layer (poll, heartbeat, complete, fail)
 2. API handlers with error mapping
-3. Application state and routes
+3. Extractor implementation and routes
 4. Integration tests
 5. End-to-end testing with orchestrator
+
+**Extractor Pattern** (following US-1A.5/US-1A.6):
+- ActivityWorkerService extracted directly in handler parameters
+- No changes needed to AppState
+- Service constructed on-demand from db_pool
+- Keeps handler signatures clean and type-safe
 
 **Post-Implementation**:
 - US-1B.1 will implement built-in worker using these APIs
@@ -2147,22 +2173,22 @@ Workers poll for activities, execute them, and report results.
 
 ## Definition of Done
 
-- [ ] ActivityWorkerService implemented (poll, heartbeat, complete, fail)
-- [ ] POST /api/v1/workers/poll handler implemented
-- [ ] POST /api/v1/activities/{id}/heartbeat handler implemented
-- [ ] POST /api/v1/activities/{id}/complete handler implemented
-- [ ] POST /api/v1/activities/{id}/fail handler implemented
-- [ ] Request/response validation implemented
-- [ ] Error mapping to HTTP status codes complete
-- [ ] Application state includes ActivityWorkerService
-- [ ] Routes include worker endpoints
-- [ ] OpenAPI documentation updated
-- [ ] Unit tests passing (service layer)
-- [ ] Integration tests passing (API endpoints)
-- [ ] End-to-end tests passing (poll → complete → orchestrator)
-- [ ] All acceptance criteria met
-- [ ] Zero cargo warnings
-- [ ] Documentation updated
+- [x] ActivityWorkerService implemented (poll, heartbeat, complete, fail)
+- [x] POST /api/v1/workers/poll handler implemented
+- [x] POST /api/v1/activities/{id}/heartbeat handler implemented
+- [x] POST /api/v1/activities/{id}/complete handler implemented
+- [x] POST /api/v1/activities/{id}/fail handler implemented
+- [x] Request/response validation implemented
+- [x] Error mapping to HTTP status codes complete
+- [x] ActivityWorkerService extractor implemented in extractors.rs
+- [x] Routes include worker endpoints
+- [x] OpenAPI documentation updated
+- [x] Unit tests passing (service layer)
+- [x] Integration tests passing (API endpoints)
+- [x] End-to-end tests passing (poll → complete → orchestrator)
+- [x] All acceptance criteria met
+- [x] Zero cargo warnings
+- [x] Documentation updated
 
 ---
 

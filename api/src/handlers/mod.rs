@@ -1,10 +1,12 @@
 pub mod health;
 pub mod oauth;
+pub mod workers;
 pub mod workflow_definitions;
 pub mod workflows;
 
 pub use health::{liveness_handler, readiness_handler, service_info_handler};
 pub use oauth::token_handler;
+pub use workers::{complete_activity, fail_activity, heartbeat_activity, poll_activities};
 pub use workflow_definitions::{
     deploy_workflow_definition, get_workflow_definition, list_workflow_definitions,
 };
