@@ -27,20 +27,20 @@ fn test_activity_status_display() {
 fn test_activity_status_serialization() {
     let status = ActivityStatus::Pending;
     let json = serde_json::to_string(&status).unwrap();
-    assert_eq!(json, "\"Pending\"");
+    assert_eq!(json, "\"pending\"");
 
     let status = ActivityStatus::Completed;
     let json = serde_json::to_string(&status).unwrap();
-    assert_eq!(json, "\"Completed\"");
+    assert_eq!(json, "\"completed\"");
 }
 
 #[test]
 fn test_activity_status_deserialization() {
-    let json = "\"Pending\"";
+    let json = "\"pending\"";
     let status: ActivityStatus = serde_json::from_str(json).unwrap();
     assert_eq!(status, ActivityStatus::Pending);
 
-    let json = "\"Running\"";
+    let json = "\"running\"";
     let status: ActivityStatus = serde_json::from_str(json).unwrap();
     assert_eq!(status, ActivityStatus::Running);
 }

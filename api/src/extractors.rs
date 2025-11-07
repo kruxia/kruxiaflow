@@ -4,7 +4,9 @@
 /// with Axum's handler system.
 use crate::state::AppState;
 use axum::{async_trait, extract::FromRequestParts, http::request::Parts};
-use streamflow_core::workflow::{WorkflowDefinitionRepository, WorkflowService};
+use streamflow_core::workflow::{
+    WorkflowDefinitionRepository, WorkflowQueryService, WorkflowService,
+};
 
 /// Axum extractor for WorkflowDefinitionRepository
 ///
@@ -49,5 +51,28 @@ impl FromRequestParts<AppState> for WorkflowService {
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
         Ok(WorkflowService::new(state.db_pool.clone()))
+    }
+}
+
+/// Axum extractor for WorkflowQueryService
+///
+/// Allows WorkflowQueryService to be extracted directly in handler signatures.
+/// Automatically creates service from AppState's db_pool.
+///
+/// # Example
+/// ```rust,ignore
+/// async fn handler(service: WorkflowQueryService) -> impl IntoResponse {
+///     // Use service directly
+/// }
+/// ```
+#[async_trait]
+impl FromRequestParts<AppState> for WorkflowQueryService {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        _parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        Ok(WorkflowQueryService::new(state.db_pool.clone()))
     }
 }

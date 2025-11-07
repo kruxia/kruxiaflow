@@ -105,20 +105,20 @@ fn test_workflow_status_display() {
 fn test_workflow_status_serialization() {
     let status = WorkflowStatus::Running;
     let json = serde_json::to_string(&status).unwrap();
-    assert_eq!(json, "\"Running\"");
+    assert_eq!(json, "\"running\"");
 
     let status = WorkflowStatus::Completed;
     let json = serde_json::to_string(&status).unwrap();
-    assert_eq!(json, "\"Completed\"");
+    assert_eq!(json, "\"completed\"");
 }
 
 #[test]
 fn test_workflow_status_deserialization() {
-    let json = "\"Running\"";
+    let json = "\"running\"";
     let status: WorkflowStatus = serde_json::from_str(json).unwrap();
     assert_eq!(status, WorkflowStatus::Running);
 
-    let json = "\"Completed\"";
+    let json = "\"completed\"";
     let status: WorkflowStatus = serde_json::from_str(json).unwrap();
     assert_eq!(status, WorkflowStatus::Completed);
 }

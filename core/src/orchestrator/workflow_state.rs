@@ -31,6 +31,7 @@ pub struct ActivityState {
 
 /// Activity status in workflow (different from queue status)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum WorkflowActivityStatus {
     NotScheduled, // Not yet in queue
     Pending,      // In queue, waiting for worker

@@ -84,6 +84,7 @@ impl std::fmt::Display for WorkflowEventType {
 /// Workflow status enum
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "workflow_status", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum WorkflowStatus {
     Created,
     Running,
