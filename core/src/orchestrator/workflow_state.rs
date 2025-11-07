@@ -7,11 +7,11 @@ use sqlx::PgConnection;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-/// Complete workflow state (stored in workflows.state_data JSONB)
+/// Complete workflow state (stored in workflows table)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WorkflowState {
     pub workflow_id: Uuid,
-    pub workflow_type: String,
+    pub definition_name: String,
     pub status: WorkflowStatus,
     pub activities: HashMap<String, ActivityState>,
     pub state_data: serde_json::Value,
@@ -68,35 +68,51 @@ pub async fn load_workflow_definition(
 }
 
 /// Load materialized state from workflows table (O(1))
+/// Reconstructs WorkflowState from table columns (1:1 mapping with struct)
 pub async fn load_materialized_state(
     tx: &mut PgConnection,
     workflow_id: Uuid,
 ) -> Result<WorkflowState> {
     let row = sqlx::query!(
-        r#"SELECT state_data FROM workflows WHERE id = $1"#,
+        r#"SELECT id, definition_name, status AS "status: WorkflowStatus", activities, state_data
+           FROM workflows WHERE id = $1"#,
         workflow_id
     )
     .fetch_one(&mut *tx)
     .await?;
 
-    serde_json::from_value(row.state_data)
-        .map_err(|e| OrchestratorError::StateDeserialization(e.to_string()))
+    // Deserialize activities from its own column
+    let activities: HashMap<String, ActivityState> = serde_json::from_value(row.activities)
+        .map_err(|e| OrchestratorError::StateDeserialization(e.to_string()))?;
+
+    // Reconstruct WorkflowState from columns (1:1 mapping)
+    Ok(WorkflowState {
+        workflow_id: row.id,
+        definition_name: row.definition_name,
+        status: row.status,
+        activities,
+        state_data: row.state_data,
+    })
 }
 
 /// Save updated state to workflows table
+/// Stores activities and state_data in separate JSONB columns (1:1 with WorkflowState struct)
 pub async fn save_materialized_state(
     tx: &mut PgConnection,
     workflow_id: Uuid,
     state: &WorkflowState,
 ) -> Result<()> {
-    let state_json = serde_json::to_value(state)
+    // Serialize activities and state_data separately to their respective columns
+    let activities_json = serde_json::to_value(&state.activities)
         .map_err(|e| OrchestratorError::StateSerialization(e.to_string()))?;
 
     sqlx::query!(
         r#"UPDATE workflows
-           SET state_data = $1, updated_at = NOW()
-           WHERE id = $2"#,
-        state_json,
+           SET activities = $1, state_data = $2, status = $3, updated_at = NOW()
+           WHERE id = $4"#,
+        activities_json,
+        state.state_data,
+        state.status as WorkflowStatus,
         workflow_id
     )
     .execute(&mut *tx)
@@ -132,13 +148,13 @@ pub async fn initialize_workflow_state(
 
     let state = WorkflowState {
         workflow_id,
-        workflow_type: definition.name.clone(),
+        definition_name: definition.name.clone(),
         status: WorkflowStatus::Running,
-        activities,
+        activities: activities.clone(),
         state_data: initial_state_data.unwrap_or_else(|| json!({})),
     };
 
-    // Save initial state to database
+    // Save initial state to database (only activities + state_data to JSONB, status to column)
     save_materialized_state(tx, workflow_id, &state).await?;
 
     Ok(state)

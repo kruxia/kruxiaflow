@@ -1,0 +1,91 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO workflows (\n                id, definition_name, workflow_definition_id,\n                input, unique_key, status, activities, state_data,\n                created_at, updated_at\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())\n            RETURNING id, definition_name, workflow_definition_id,\n                      input, unique_key, status AS \"status: WorkflowStatus\", created_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "definition_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "workflow_definition_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "input",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "unique_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "status: WorkflowStatus",
+        "type_info": {
+          "Custom": {
+            "name": "workflow_status",
+            "kind": {
+              "Enum": [
+                "created",
+                "running",
+                "completed",
+                "failed",
+                "paused"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Jsonb",
+        "Text",
+        {
+          "Custom": {
+            "name": "workflow_status",
+            "kind": {
+              "Enum": [
+                "created",
+                "running",
+                "completed",
+                "failed",
+                "paused"
+              ]
+            }
+          }
+        },
+        "Jsonb",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "3011e64d9c12516feae9766d6ca2fb6c480008611c063ded264c87343a9289d6"
+}

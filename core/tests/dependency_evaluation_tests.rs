@@ -32,7 +32,7 @@ fn create_test_state_with_activities(
 
     WorkflowState {
         workflow_id,
-        workflow_type: "test_workflow".to_string(),
+        definition_name: "test_workflow".to_string(),
         status: WorkflowStatus::Running,
         activities: activities_map,
         state_data: json!({}),

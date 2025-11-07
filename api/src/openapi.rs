@@ -1,5 +1,10 @@
 use crate::error::{ApiError, ApiErrorResponse, ErrorCode};
 use crate::handlers::oauth::{GrantType, TokenRequest, TokenResponse};
+use crate::handlers::workflow_definitions::{
+    DeployWorkflowDefinitionRequest, DeployWorkflowDefinitionResponse,
+    GetWorkflowDefinitionResponse, ListWorkflowDefinitionsResponse, WorkflowDefinitionSummary,
+};
+use crate::handlers::workflows::{SubmitWorkflowRequest, SubmitWorkflowResponse};
 use crate::health::{LivenessResponse, ReadinessResponse, ServiceInfo};
 use utoipa::OpenApi;
 
@@ -31,6 +36,14 @@ use utoipa::OpenApi;
 
         // OAuth 2.0 endpoints
         crate::handlers::oauth::token_handler,
+
+        // Workflow Definition Management
+        crate::handlers::workflow_definitions::deploy_workflow_definition,
+        crate::handlers::workflow_definitions::list_workflow_definitions,
+        crate::handlers::workflow_definitions::get_workflow_definition,
+
+        // Workflow Submission
+        crate::handlers::workflows::submit_workflow,
     ),
     components(
         schemas(
@@ -44,6 +57,17 @@ use utoipa::OpenApi;
             TokenResponse,
             GrantType,
 
+            // Workflow Definition Management schemas
+            DeployWorkflowDefinitionRequest,
+            DeployWorkflowDefinitionResponse,
+            GetWorkflowDefinitionResponse,
+            ListWorkflowDefinitionsResponse,
+            WorkflowDefinitionSummary,
+
+            // Workflow Submission schemas
+            SubmitWorkflowRequest,
+            SubmitWorkflowResponse,
+
             // Error response schemas
             ApiErrorResponse,
             ApiError,
@@ -54,6 +78,8 @@ use utoipa::OpenApi;
         (name = "Health", description = "Health check and service information endpoints"),
         (name = "Service", description = "Service metadata and capabilities"),
         (name = "OAuth 2.0", description = "OAuth 2.0 compliant token issuance (RFC 6749)"),
+        (name = "Workflow Definitions", description = "Workflow definition deployment and management"),
+        (name = "Workflows", description = "Workflow submission and execution"),
     ),
     modifiers(&SecurityAddon)
 )]

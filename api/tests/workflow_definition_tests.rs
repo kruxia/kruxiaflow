@@ -5,6 +5,7 @@
 
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum_test::TestServer;
+use bcrypt::hash;
 use serde_json::json;
 use serial_test::serial;
 use sqlx::PgPool;

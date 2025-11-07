@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, definition_name, status AS \"status: WorkflowStatus\", activities, state_data\n           FROM workflows WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "definition_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "status: WorkflowStatus",
+        "type_info": {
+          "Custom": {
+            "name": "workflow_status",
+            "kind": {
+              "Enum": [
+                "created",
+                "running",
+                "completed",
+                "failed",
+                "paused"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "activities",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "state_data",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9e16ee7a8fb68739c6e8cb3d1142b74263ad72eb5c022d29c22c8e356e5e4be3"
+}
