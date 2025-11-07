@@ -12,7 +12,9 @@ use std::sync::Arc;
 use streamflow_api::handlers::workflows::{
     GetWorkflowResponse, ListWorkflowsResponse, SubmitWorkflowResponse,
 };
-use streamflow_api::{app_router, AppState, AppStateBuild};
+use streamflow_api::{AppState, AppStateBuild, app_router};
+use streamflow_core::events::PostgresEventSource;
+use streamflow_core::queue::{PostgresQueue, QueueConfig};
 use streamflow_oauth::{AuthConfig, PostgresAuthService};
 
 /// Helper to create test database pool
@@ -70,9 +72,14 @@ async fn setup_test_state() -> AppState {
     .await
     .expect("Failed to create test client");
 
+    let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
+
     AppState::with_metadata(
         pool,
         Arc::new(auth_service),
+        queue,
+        event_source,
         "0.2.0-test".to_string(),
         AppStateBuild {
             timestamp: "2025-10-30T00:00:00Z".to_string(),
@@ -128,7 +135,11 @@ async fn deploy_test_workflow(server: &TestServer, token: &str, name: &str) -> S
 
     if response.status_code() != StatusCode::CREATED {
         let error_text = response.text();
-        eprintln!("Workflow definition deployment failed with status {}: {}", response.status_code(), error_text);
+        eprintln!(
+            "Workflow definition deployment failed with status {}: {}",
+            response.status_code(),
+            error_text
+        );
         panic!(
             "Expected status CREATED (201), got {}",
             response.status_code()
@@ -140,11 +151,7 @@ async fn deploy_test_workflow(server: &TestServer, token: &str, name: &str) -> S
 }
 
 /// Helper to submit a workflow
-async fn submit_workflow(
-    server: &TestServer,
-    token: &str,
-    def_name: &str,
-) -> uuid::Uuid {
+async fn submit_workflow(server: &TestServer, token: &str, def_name: &str) -> uuid::Uuid {
     let response = server
         .post("/api/v1/workflows")
         .add_header(
@@ -159,7 +166,11 @@ async fn submit_workflow(
 
     if response.status_code() != StatusCode::CREATED {
         let error_text = response.text();
-        eprintln!("Workflow submission failed with status {}: {}", response.status_code(), error_text);
+        eprintln!(
+            "Workflow submission failed with status {}: {}",
+            response.status_code(),
+            error_text
+        );
         panic!(
             "Expected status CREATED (201), got {}",
             response.status_code()
@@ -222,10 +233,12 @@ async fn test_get_workflow_not_found() {
     assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
 
     let body: serde_json::Value = response.json();
-    assert!(body["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("not found"));
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not found")
+    );
 }
 
 #[tokio::test]

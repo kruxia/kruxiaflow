@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO workflow_events (id, workflow_id, event_type, activity_key, payload, timestamp)\n            VALUES ($1, $2, 'ActivityFailed', $3, $4, NOW())\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5af537696146c8cc8a5d98c65fd62a43776541ea8237d7236024ca4a35574aa8"
+}

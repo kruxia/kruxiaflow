@@ -1,7 +1,7 @@
 # StreamFlow v0.2 Product Requirements Document
 
-**Version**: 0.8
-**Date**: October 30, 2025
+**Version**: 0.8.1
+**Date**: November 6, 2025
 **Status**: In Development (Epic 1 Complete, Epic 1A Partial)
 **Target Release**: Q1 2026
 
@@ -217,6 +217,27 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Timeout handling: Activities not heartbeat within timeout are released for retry
   - Idempotency: Activities can only be completed/failed once (409 Conflict if already
     done or timed out / reassigned)
+
+**US-1A.7.5: Convert Monetary Values to Decimal Type** 🎯 **Pre-Production (Required for Financial Accuracy)**
+- **As** a platform engineering lead
+- **I want** all monetary values (cost_usd) to use decimal types instead of floating-point
+- **So that** we have exact precision for financial data and avoid rounding errors
+- **Acceptance Criteria**:
+  - Add `rust_decimal` dependency to Cargo.toml
+  - Enable `rust_decimal` feature in sqlx
+  - Change all `cost_usd` fields from `f64` to `Decimal` in:
+    - API request/response types (`CompleteActivityRequest`, etc.)
+    - Service layer methods (`ActivityWorkerService::complete_activity`)
+    - Database schema (`workflow_events.payload` JSON fields)
+  - Create database migration to change cost columns to `NUMERIC(15, 6)` type
+  - Update validation logic to work with Decimal (negative checks, range checks)
+  - Update OpenAPI schema to show cost_usd as string type (correct for JSON)
+  - JSON serialization: cost_usd serializes as string (e.g., "0.015000")
+  - All tests updated to use Decimal
+  - Zero cargo warnings
+- **Rationale**: Floating-point arithmetic (`f64`) has precision issues that are unacceptable for financial data. Using `f64` for costs will lead to rounding errors in billing calculations. Decimal types provide exact arithmetic required for monetary values.
+- **Scope**: Affects only cost tracking fields (currently only in worker activity APIs). Localized change to a few files before production deployment.
+- **Performance**: Negligible impact - cost tracking is not in hot path, and Decimal arithmetic overhead is acceptable for financial accuracy.
 
 **US-1A.8: Activity Results and Output Retrieval** 📋 **Post-Epic 2 (Deferred)**
 - **As** an AI researcher

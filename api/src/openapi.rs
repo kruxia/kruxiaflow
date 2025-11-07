@@ -1,5 +1,10 @@
 use crate::error::{ApiError, ApiErrorResponse, ErrorCode};
 use crate::handlers::oauth::{GrantType, TokenRequest, TokenResponse};
+use crate::handlers::workers::{
+    ActivityError, ActivityHeartbeatRequest, ActivityHeartbeatResponse, CompleteActivityRequest,
+    CompleteActivityResponse, FailActivityRequest, FailActivityResponse, PendingActivity,
+    PollActivitiesRequest, PollActivitiesResponse,
+};
 use crate::handlers::workflow_definitions::{
     DeployWorkflowDefinitionRequest, DeployWorkflowDefinitionResponse,
     GetWorkflowDefinitionResponse, ListWorkflowDefinitionsResponse, WorkflowDefinitionSummary,
@@ -49,6 +54,12 @@ use utoipa::OpenApi;
         crate::handlers::workflows::submit_workflow,
         crate::handlers::workflows::get_workflow,
         crate::handlers::workflows::list_workflows,
+
+        // Worker Activity APIs
+        crate::handlers::workers::poll_activities,
+        crate::handlers::workers::heartbeat_activity,
+        crate::handlers::workers::complete_activity,
+        crate::handlers::workers::fail_activity,
     ),
     components(
         schemas(
@@ -77,6 +88,18 @@ use utoipa::OpenApi;
             ListWorkflowsResponse,
             WorkflowSummary,
 
+            // Worker Activity schemas
+            PollActivitiesRequest,
+            PollActivitiesResponse,
+            PendingActivity,
+            ActivityHeartbeatRequest,
+            ActivityHeartbeatResponse,
+            CompleteActivityRequest,
+            CompleteActivityResponse,
+            FailActivityRequest,
+            FailActivityResponse,
+            ActivityError,
+
             // Error response schemas
             ApiErrorResponse,
             ApiError,
@@ -89,6 +112,7 @@ use utoipa::OpenApi;
         (name = "OAuth 2.0", description = "OAuth 2.0 compliant token issuance (RFC 6749)"),
         (name = "Workflow Definitions", description = "Workflow definition deployment and management"),
         (name = "Workflows", description = "Workflow submission, query, and management"),
+        (name = "Workers", description = "Worker activity polling and execution"),
     ),
     modifiers(&SecurityAddon)
 )]

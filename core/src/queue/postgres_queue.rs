@@ -1,6 +1,6 @@
 use crate::queue::{
-    Activity, ActivityQueue, ActivityResult, ActivitySettings, QueueConfig, QueueError,
-    QueuedActivity, Result,
+    Activity, ActivityQueue, ActivityResult, ActivitySettings, ActivityStatus, QueueConfig,
+    QueueError, QueuedActivity, Result,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -106,7 +106,7 @@ impl ActivityQueue for PostgresQueue {
 
     async fn claim_next(
         &self,
-        worker_id: Uuid,
+        worker_id: &str,
         namespace: &str,
         name: &str,
     ) -> Result<Option<QueuedActivity>> {
@@ -196,23 +196,80 @@ impl ActivityQueue for PostgresQueue {
         }
     }
 
-    async fn complete(&self, activity_id: Uuid, _result: ActivityResult) -> Result<()> {
-        // Remove activity from queue (DELETE)
-        // Activity completion is tracked in workflow_events by orchestrator
-        let result = sqlx::query!("DELETE FROM activity_queue WHERE id = $1", activity_id)
-            .execute(&self.pool)
-            .await?;
+    async fn complete(
+        &self,
+        activity_id: Uuid,
+        worker_id: &str,
+        _result: ActivityResult,
+    ) -> Result<()> {
+        // Verify the activity is claimed by this worker before completing
+        let result = sqlx::query!(
+            r#"
+            DELETE FROM activity_queue
+            WHERE id = $1 AND claimed_by = $2 AND status = 'running'::activity_status
+            "#,
+            activity_id,
+            worker_id
+        )
+        .execute(&self.pool)
+        .await?;
 
         if result.rows_affected() > 0 {
-            debug!(activity_id = %activity_id, "Activity completed and removed from queue");
+            debug!(
+                activity_id = %activity_id,
+                worker_id = %worker_id,
+                "Activity completed and removed from queue"
+            );
+            Ok(())
         } else {
-            debug!(activity_id = %activity_id, "Activity already completed (idempotent)");
-        }
+            // Check if activity exists to provide better error
+            let exists = sqlx::query!(
+                r#"
+                SELECT id, claimed_by, status AS "status: ActivityStatus"
+                FROM activity_queue
+                WHERE id = $1
+                "#,
+                activity_id
+            )
+            .fetch_optional(&self.pool)
+            .await?;
 
-        Ok(())
+            match exists {
+                Some(activity) => {
+                    if activity.claimed_by.as_deref() != Some(worker_id) {
+                        error!(
+                            activity_id = %activity_id,
+                            expected_worker = ?activity.claimed_by,
+                            actual_worker = %worker_id,
+                            "Activity claimed by different worker"
+                        );
+                        Err(QueueError::ActivityReclaimed)
+                    } else {
+                        // Activity exists but status is wrong (already completed)
+                        warn!(
+                            activity_id = %activity_id,
+                            status = ?activity.status,
+                            "Activity not in running state"
+                        );
+                        Err(QueueError::InvalidStatus {
+                            expected: "running".to_string(),
+                            actual: format!("{:?}", activity.status),
+                        })
+                    }
+                }
+                None => {
+                    // Activity already completed (idempotent case)
+                    debug!(
+                        activity_id = %activity_id,
+                        "Activity already completed (not found)"
+                    );
+                    Err(QueueError::ActivityNotFound(activity_id))
+                }
+            }
+        }
     }
 
-    async fn heartbeat(&self, activity_id: Uuid, worker_id: Uuid) -> Result<()> {
+    async fn heartbeat(&self, activity_id: Uuid, worker_id: &str) -> Result<()> {
         // Reset claimed_at to extend timeout deadline
         let result = sqlx::query!(
             r#"
@@ -256,5 +313,97 @@ impl ActivityQueue for PostgresQueue {
                 }
             }
         }
+    }
+
+    async fn fail(
+        &self,
+        activity_id: Uuid,
+        worker_id: &str,
+        retryable: bool,
+        result: ActivityResult,
+    ) -> Result<bool> {
+        // Get activity details to determine if we should retry
+        let activity = sqlx::query!(
+            r#"
+            SELECT id, workflow_id, activity_key, status AS "status: ActivityStatus",
+                   claimed_by, retry_count, max_retries, settings
+            FROM activity_queue
+            WHERE id = $1
+            FOR UPDATE
+            "#,
+            activity_id
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(QueueError::ActivityNotFound(activity_id))?;
+
+        // Verify the activity is claimed by this worker
+        if activity.claimed_by.as_deref() != Some(worker_id) {
+            error!(
+                activity_id = %activity_id,
+                expected_worker = ?activity.claimed_by,
+                actual_worker = %worker_id,
+                "Activity claimed by different worker"
+            );
+            return Err(QueueError::ActivityReclaimed);
+        }
+
+        // Verify the activity is still running
+        if activity.status != ActivityStatus::Running {
+            warn!(
+                activity_id = %activity_id,
+                status = ?activity.status,
+                "Activity not in running state"
+            );
+            return Err(QueueError::InvalidStatus {
+                expected: "running".to_string(),
+                actual: format!("{:?}", activity.status),
+            });
+        }
+
+        // Determine if we should retry based on retryable flag and retry count
+        let will_retry = retryable && (activity.retry_count < activity.max_retries);
+
+        if will_retry {
+            // Requeue for retry (immediate, but behind other pending work)
+            // TODO(post-MVP): Implement exponential backoff based on retry_count and activity settings
+            sqlx::query!(
+                r#"
+                UPDATE activity_queue
+                SET status = 'pending'::activity_status,
+                    claimed_by = NULL,
+                    claimed_at = NULL,
+                    scheduled_for = NOW(),
+                    retry_count = retry_count + 1
+                WHERE id = $1
+                "#,
+                activity_id
+            )
+            .execute(&self.pool)
+            .await?;
+
+            debug!(
+                activity_id = %activity_id,
+                workflow_id = %activity.workflow_id,
+                retry_count = activity.retry_count + 1,
+                max_retries = activity.max_retries,
+                "Activity requeued for retry"
+            );
+        } else {
+            // Permanent failure - remove from queue
+            sqlx::query!("DELETE FROM activity_queue WHERE id = $1", activity_id)
+                .execute(&self.pool)
+                .await?;
+
+            warn!(
+                activity_id = %activity_id,
+                workflow_id = %activity.workflow_id,
+                activity_key = %activity.activity_key,
+                error = ?result.error,
+                "Activity permanently failed"
+            );
+        }
+
+        Ok(will_retry)
     }
 }

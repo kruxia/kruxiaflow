@@ -44,6 +44,10 @@ pub fn public_routes() -> Router<AppState> {
 /// - POST /api/v1/workflows - Submit workflow
 /// - GET /api/v1/workflows - List workflows with filters
 /// - GET /api/v1/workflows/{id} - Get workflow by ID
+/// - POST /api/v1/workers/poll - Poll for activities
+/// - POST /api/v1/activities/{activity_id}/heartbeat - Send heartbeat
+/// - POST /api/v1/activities/{activity_id}/complete - Complete activity
+/// - POST /api/v1/activities/{activity_id}/fail - Fail activity
 ///
 /// All routes in this group require valid JWT Bearer token.
 /// Authentication middleware is applied in app_router() after with_state().
@@ -66,6 +70,20 @@ pub fn protected_routes() -> Router<AppState> {
         .route(
             "/api/v1/workflows/:workflow_id",
             get(handlers::get_workflow),
+        )
+        // Worker Activity APIs
+        .route("/api/v1/workers/poll", post(handlers::poll_activities))
+        .route(
+            "/api/v1/activities/:activity_id/heartbeat",
+            post(handlers::heartbeat_activity),
+        )
+        .route(
+            "/api/v1/activities/:activity_id/complete",
+            post(handlers::complete_activity),
+        )
+        .route(
+            "/api/v1/activities/:activity_id/fail",
+            post(handlers::fail_activity),
         )
 }
 
@@ -125,6 +143,8 @@ mod tests {
     use serial_test::serial;
     use sqlx::PgPool;
     use std::sync::Arc;
+    use streamflow_core::events::PostgresEventSource;
+    use streamflow_core::queue::{PostgresQueue, QueueConfig};
     use streamflow_oauth::{AuthConfig, PostgresAuthService};
 
     /// Helper to create test database pool
@@ -183,7 +203,10 @@ mod tests {
         let auth_service = PostgresAuthService::new(pool.clone(), auth_config)
             .expect("Failed to create test auth service");
 
-        let state = AppState::new(pool, Arc::new(auth_service));
+        let activity_queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+        let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
+
+        let state = AppState::new(pool, Arc::new(auth_service), activity_queue, event_source);
         let router = app_router(state);
 
         // Just verifying it compiles and creates a Router
@@ -220,7 +243,10 @@ mod tests {
         let auth_service = PostgresAuthService::new(pool.clone(), auth_config)
             .expect("Failed to create test auth service");
 
-        let state = AppState::new(pool, Arc::new(auth_service));
+        let activity_queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+        let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
+
+        let state = AppState::new(pool, Arc::new(auth_service), activity_queue, event_source);
         let app = app_router(state);
         let server = TestServer::new(app).expect("Failed to create test server");
 
@@ -245,7 +271,10 @@ mod tests {
         let auth_service = PostgresAuthService::new(pool.clone(), auth_config)
             .expect("Failed to create test auth service");
 
-        let state = AppState::new(pool, Arc::new(auth_service));
+        let activity_queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+        let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
+
+        let state = AppState::new(pool, Arc::new(auth_service), activity_queue, event_source);
         let app = app_router(state);
         let server = TestServer::new(app).expect("Failed to create test server");
 

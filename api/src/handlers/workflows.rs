@@ -1,6 +1,10 @@
 use crate::error::{ApiResult, AppError, ValidationErrors};
 use crate::middleware::auth::ValidatedClaims;
-use axum::{Extension, Json, extract::{Path, Query}, http::StatusCode};
+use axum::{
+    Extension, Json,
+    extract::{Path, Query},
+    http::StatusCode,
+};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use streamflow_core::workflow::{
@@ -347,7 +351,10 @@ impl ListWorkflowsQuery {
         // Validate time range
         if let (Some(after), Some(before)) = (self.created_after, self.created_before) {
             if after >= before {
-                errors.add("created_after", "created_after must be before created_before");
+                errors.add(
+                    "created_after",
+                    "created_after must be before created_before",
+                );
             }
         }
 
@@ -583,11 +590,7 @@ pub async fn list_workflows(
 
     let count = workflows.len() as i64;
 
-    tracing::debug!(
-        count = count,
-        total = total,
-        "Workflows retrieved"
-    );
+    tracing::debug!(count = count, total = total, "Workflows retrieved");
 
     Ok(Json(ListWorkflowsResponse {
         workflows: workflows

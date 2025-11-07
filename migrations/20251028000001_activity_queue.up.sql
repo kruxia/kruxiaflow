@@ -20,7 +20,7 @@ CREATE TABLE activity_queue (
     timeout_duration INTERVAL NOT NULL,
     retry_count INTEGER NOT NULL DEFAULT 0,
     max_retries INTEGER NOT NULL DEFAULT 3,
-    claimed_by UUID,
+    claimed_by TEXT,
     claimed_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
