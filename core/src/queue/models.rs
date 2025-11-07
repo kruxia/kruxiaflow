@@ -94,6 +94,7 @@ pub struct TokenUsage {
 /// Activity status enum (matches database enum)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "activity_status", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
 pub enum ActivityStatus {
     Pending,
     Running,

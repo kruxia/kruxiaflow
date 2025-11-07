@@ -1,9 +1,15 @@
 use crate::error::{ApiResult, AppError, ValidationErrors};
 use crate::middleware::auth::ValidatedClaims;
-use axum::{Extension, Json, http::StatusCode};
+use axum::{Extension, Json, extract::{Path, Query}, http::StatusCode};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use streamflow_core::workflow::{WorkflowService, WorkflowServiceError};
-use utoipa::ToSchema;
+use streamflow_core::workflow::{
+    WorkflowFilters, WorkflowQueryError, WorkflowQueryService, WorkflowService,
+    WorkflowServiceError,
+};
+use streamflow_core::{WorkflowActivityStatus, WorkflowStatus};
+use utoipa::{IntoParams, ToSchema};
+use uuid::Uuid;
 
 /// Submit workflow request
 ///
@@ -219,4 +225,384 @@ pub async fn submit_workflow(
             created_at: workflow.created_at,
         }),
     ))
+}
+
+// ============================================================================
+// Workflow Query API
+// ============================================================================
+
+/// Get workflow by ID response
+///
+/// Returns the current state of a workflow, including status,
+/// activity states, and custom state data.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct GetWorkflowResponse {
+    /// Unique workflow ID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub id: Uuid,
+
+    /// Workflow status
+    #[schema(example = "running")]
+    pub status: String,
+
+    /// Workflow type (definition name)
+    #[schema(example = "payment_processing")]
+    pub definition_name: String,
+
+    /// When the workflow was created
+    #[schema(example = "2025-11-06T10:00:00Z")]
+    pub created_at: DateTime<Utc>,
+
+    /// When the workflow was last updated
+    #[schema(example = "2025-11-06T10:00:05Z")]
+    pub updated_at: DateTime<Utc>,
+
+    /// Activity states
+    pub activities: Vec<ActivityState>,
+
+    /// Custom workflow state data (from workflows.state_data column)
+    #[schema(example = json!({
+        "custom_field": "value"
+    }))]
+    pub state_data: serde_json::Value,
+}
+
+/// Activity state in a workflow
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ActivityState {
+    /// Activity key (unique within workflow)
+    #[schema(example = "validate_payment")]
+    pub activity_key: String,
+
+    /// Activity status: not_scheduled, pending, running, completed, or failed
+    #[schema(value_type = String, example = "completed")]
+    pub status: WorkflowActivityStatus,
+
+    /// Activity outputs (null if not completed)
+    #[schema(example = json!({"valid": true}))]
+    pub outputs: Option<serde_json::Value>,
+
+    /// When the activity started (null if not started)
+    #[schema(example = "2025-11-06T10:00:00Z")]
+    pub started_at: Option<DateTime<Utc>>,
+
+    /// When the activity completed (null if not completed)
+    #[schema(example = "2025-11-06T10:00:01Z")]
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+/// List workflows query parameters
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct ListWorkflowsQuery {
+    /// Filter by workflow status
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[param(example = "running")]
+    pub status: Option<String>,
+
+    /// Filter by workflow type (definition name)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[param(example = "payment_processing")]
+    pub definition_name: Option<String>,
+
+    /// Filter workflows created after this time
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[param(example = "2025-11-06T00:00:00Z")]
+    pub created_after: Option<DateTime<Utc>>,
+
+    /// Filter workflows created before this time
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[param(example = "2025-11-06T23:59:59Z")]
+    pub created_before: Option<DateTime<Utc>>,
+
+    /// Maximum number of results (default 100, max 1000)
+    #[serde(default = "default_limit")]
+    #[param(example = 100)]
+    pub limit: i64,
+
+    /// Offset for pagination (default 0)
+    #[serde(default)]
+    #[param(example = 0)]
+    pub offset: i64,
+}
+
+fn default_limit() -> i64 {
+    100
+}
+
+impl ListWorkflowsQuery {
+    /// Validate query parameters
+    fn validate(&self) -> Result<(), ValidationErrors> {
+        let mut errors = ValidationErrors::new();
+
+        if self.limit < 1 {
+            errors.add("limit", "Limit must be at least 1");
+        }
+        if self.limit > 1000 {
+            errors.add("limit", "Limit must be at most 1000");
+        }
+        if self.offset < 0 {
+            errors.add("offset", "Offset must be non-negative");
+        }
+
+        // Validate time range
+        if let (Some(after), Some(before)) = (self.created_after, self.created_before) {
+            if after >= before {
+                errors.add("created_after", "created_after must be before created_before");
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+}
+
+/// List workflows response
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ListWorkflowsResponse {
+    /// List of workflows matching filter criteria
+    pub workflows: Vec<WorkflowSummary>,
+
+    /// Total count of matching workflows (for pagination)
+    pub total: i64,
+
+    /// Number of results returned
+    pub count: i64,
+
+    /// Query limit
+    pub limit: i64,
+
+    /// Query offset
+    pub offset: i64,
+}
+
+/// Workflow summary (for list view)
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct WorkflowSummary {
+    /// Unique workflow ID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub id: Uuid,
+
+    /// Workflow status: created, running, completed, failed, or paused
+    #[schema(value_type = String, example = "running")]
+    pub status: WorkflowStatus,
+
+    /// Workflow type (definition name)
+    #[schema(example = "payment_processing")]
+    pub definition_name: String,
+
+    /// When the workflow was created
+    #[schema(example = "2025-11-06T10:00:00Z")]
+    pub created_at: DateTime<Utc>,
+
+    /// When the workflow was last updated
+    #[schema(example = "2025-11-06T10:00:05Z")]
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Get workflow by ID
+///
+/// Endpoint: GET /api/v1/workflows/{workflow_id}
+///
+/// Returns the current state of a workflow, including status, activity states,
+/// and custom state data.
+#[utoipa::path(
+    get,
+    path = "/api/v1/workflows/{workflow_id}",
+    tag = "Workflows",
+    params(
+        ("workflow_id" = Uuid, Path, description = "Workflow ID")
+    ),
+    responses(
+        (status = 200, description = "Workflow found", body = GetWorkflowResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 404, description = "Workflow not found")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+pub async fn get_workflow(
+    service: WorkflowQueryService,
+    Extension(claims): Extension<ValidatedClaims>,
+    Path(workflow_id): Path<Uuid>,
+) -> ApiResult<Json<GetWorkflowResponse>> {
+    tracing::info!(
+        workflow_id = %workflow_id,
+        user = %claims.subject(),
+        "Getting workflow"
+    );
+
+    let workflow = service
+        .get_workflow(workflow_id)
+        .await
+        .map_err(|e| match e {
+            WorkflowQueryError::WorkflowNotFound(id) => {
+                tracing::warn!("Workflow not found: {}", id);
+                AppError::NotFound(format!("Workflow '{}' not found", id))
+            }
+            WorkflowQueryError::DatabaseError(e) => {
+                tracing::error!("Database error getting workflow: {:?}", e);
+                AppError::DatabaseError(e)
+            }
+            WorkflowQueryError::DeserializationError(e) => {
+                tracing::error!("Deserialization error: {:?}", e);
+                AppError::InternalError(anyhow::anyhow!(e))
+            }
+        })?;
+
+    // Parse activities from the workflow's activities JSONB column
+    let activities = parse_activities(&workflow.activities).map_err(|e| {
+        tracing::error!("Failed to parse activities: {:?}", e);
+        AppError::InternalError(anyhow::anyhow!("Failed to parse activities: {}", e))
+    })?;
+
+    tracing::debug!(
+        workflow_id = %workflow.id,
+        status = %workflow.status,
+        activity_count = activities.len(),
+        "Workflow retrieved"
+    );
+
+    Ok(Json(GetWorkflowResponse {
+        id: workflow.id,
+        status: workflow.status,
+        definition_name: workflow.definition_name,
+        created_at: workflow.created_at,
+        updated_at: workflow.updated_at,
+        activities,
+        state_data: workflow.state_data,
+    }))
+}
+
+/// Parse activities from JSONB value into structured ActivityState objects
+fn parse_activities(activities_json: &serde_json::Value) -> Result<Vec<ActivityState>, String> {
+    let activities_map = activities_json
+        .as_object()
+        .ok_or_else(|| "activities is not an object".to_string())?;
+
+    let mut activities = Vec::new();
+    for (activity_key, activity_state) in activities_map {
+        let status = activity_state
+            .get("status")
+            .ok_or_else(|| format!("Activity '{}' missing status field", activity_key))?;
+
+        let status: WorkflowActivityStatus = serde_json::from_value(status.clone())
+            .map_err(|e| format!("Invalid status for activity '{}': {}", activity_key, e))?;
+
+        let outputs = activity_state.get("outputs").cloned();
+
+        let started_at = activity_state
+            .get("started_at")
+            .and_then(|v| v.as_str())
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+
+        let completed_at = activity_state
+            .get("completed_at")
+            .and_then(|v| v.as_str())
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc));
+
+        activities.push(ActivityState {
+            activity_key: activity_key.clone(),
+            status,
+            outputs,
+            started_at,
+            completed_at,
+        });
+    }
+
+    Ok(activities)
+}
+
+/// List workflows
+///
+/// Endpoint: GET /api/v1/workflows
+///
+/// Returns a paginated list of workflows matching filter criteria.
+#[utoipa::path(
+    get,
+    path = "/api/v1/workflows",
+    tag = "Workflows",
+    params(
+        ListWorkflowsQuery
+    ),
+    responses(
+        (status = 200, description = "Workflows list", body = ListWorkflowsResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 422, description = "Validation error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+pub async fn list_workflows(
+    service: WorkflowQueryService,
+    Extension(claims): Extension<ValidatedClaims>,
+    Query(query): Query<ListWorkflowsQuery>,
+) -> ApiResult<Json<ListWorkflowsResponse>> {
+    // Validate query parameters
+    query.validate().map_err(AppError::ValidationError)?;
+
+    tracing::info!(
+        status = ?query.status,
+        definition_name = ?query.definition_name,
+        limit = query.limit,
+        offset = query.offset,
+        user = %claims.subject(),
+        "Listing workflows"
+    );
+
+    let filters = WorkflowFilters {
+        status: query.status.clone(),
+        definition_name: query.definition_name.clone(),
+        created_after: query.created_after,
+        created_before: query.created_before,
+    };
+
+    let (workflows, total) = service
+        .list_workflows(filters, query.limit, query.offset)
+        .await
+        .map_err(|e| match e {
+            WorkflowQueryError::DatabaseError(e) => {
+                tracing::error!("Database error listing workflows: {:?}", e);
+                AppError::DatabaseError(e)
+            }
+            WorkflowQueryError::DeserializationError(e) => {
+                tracing::error!("Deserialization error: {:?}", e);
+                AppError::InternalError(anyhow::anyhow!(e))
+            }
+            WorkflowQueryError::WorkflowNotFound(_) => {
+                // This shouldn't happen in list_workflows
+                AppError::InternalError(anyhow::anyhow!("Unexpected error"))
+            }
+        })?;
+
+    let count = workflows.len() as i64;
+
+    tracing::debug!(
+        count = count,
+        total = total,
+        "Workflows retrieved"
+    );
+
+    Ok(Json(ListWorkflowsResponse {
+        workflows: workflows
+            .into_iter()
+            .map(|w| WorkflowSummary {
+                id: w.id,
+                status: w.status,
+                definition_name: w.definition_name,
+                created_at: w.created_at,
+                updated_at: w.updated_at,
+            })
+            .collect(),
+        total,
+        count,
+        limit: query.limit,
+        offset: query.offset,
+    }))
 }

@@ -8,4 +8,4 @@ pub use oauth::token_handler;
 pub use workflow_definitions::{
     deploy_workflow_definition, get_workflow_definition, list_workflow_definitions,
 };
-pub use workflows::submit_workflow;
+pub use workflows::{get_workflow, list_workflows, submit_workflow};

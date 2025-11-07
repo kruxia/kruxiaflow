@@ -4,7 +4,10 @@ use crate::handlers::workflow_definitions::{
     DeployWorkflowDefinitionRequest, DeployWorkflowDefinitionResponse,
     GetWorkflowDefinitionResponse, ListWorkflowDefinitionsResponse, WorkflowDefinitionSummary,
 };
-use crate::handlers::workflows::{SubmitWorkflowRequest, SubmitWorkflowResponse};
+use crate::handlers::workflows::{
+    ActivityState, GetWorkflowResponse, ListWorkflowsResponse, SubmitWorkflowRequest,
+    SubmitWorkflowResponse, WorkflowSummary,
+};
 use crate::health::{LivenessResponse, ReadinessResponse, ServiceInfo};
 use utoipa::OpenApi;
 
@@ -42,8 +45,10 @@ use utoipa::OpenApi;
         crate::handlers::workflow_definitions::list_workflow_definitions,
         crate::handlers::workflow_definitions::get_workflow_definition,
 
-        // Workflow Submission
+        // Workflow Submission and Query
         crate::handlers::workflows::submit_workflow,
+        crate::handlers::workflows::get_workflow,
+        crate::handlers::workflows::list_workflows,
     ),
     components(
         schemas(
@@ -64,9 +69,13 @@ use utoipa::OpenApi;
             ListWorkflowDefinitionsResponse,
             WorkflowDefinitionSummary,
 
-            // Workflow Submission schemas
+            // Workflow Submission and Query schemas
             SubmitWorkflowRequest,
             SubmitWorkflowResponse,
+            GetWorkflowResponse,
+            ActivityState,
+            ListWorkflowsResponse,
+            WorkflowSummary,
 
             // Error response schemas
             ApiErrorResponse,
@@ -79,7 +88,7 @@ use utoipa::OpenApi;
         (name = "Service", description = "Service metadata and capabilities"),
         (name = "OAuth 2.0", description = "OAuth 2.0 compliant token issuance (RFC 6749)"),
         (name = "Workflow Definitions", description = "Workflow definition deployment and management"),
-        (name = "Workflows", description = "Workflow submission and execution"),
+        (name = "Workflows", description = "Workflow submission, query, and management"),
     ),
     modifiers(&SecurityAddon)
 )]
