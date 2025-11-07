@@ -14,25 +14,46 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 ## Status
 
 **Current Version**: 0.2.0 MVP (In Development)
-**Implementation Phase**: Epic 1 - Core Orchestration
+**Implementation Phase**: Pre-Epic 2 Requirements (Phase 2C)
+**Next Milestone**: Epic 2 - Performance Benchmarking
 
-### Completed Features
+### Completed Features ✅
 
-- ✅ **Epic 1: Event-Driven Orchestration Architecture**
-  - ✅ **[US-1.1: Activity Queue](docs/implementation/US-1.1-activity-queue.md)** - PostgreSQL-based queue with safe concurrency
-  - ✅ **[US-1.2: Event-Driven Dynamic Scheduling](docs/implementation/US-1.2-event-driven-scheduling.md)** - Reactive orchestrator
-- ✅ **Epic 1A: API Server** (Partial)
-  - ✅ **[US-1A.1: Health Check and Service Discovery](docs/implementation/US-1A.1-health-checks.md)** - Liveness/readiness probes with parallel health checks
-  - ✅ **[US-1A.1.5: API Server CLI Launcher](docs/implementation/US-1A.1.5-api-server-launcher.md)** - `streamflow api` command with configuration management
-  - ✅ **[US-1A.2: Error Handling and API Contracts](docs/implementation/US-1A.2-error-handling.md)** - Standard error responses, OpenAPI/ReDoc docs, CORS, request tracing
-  - ✅ **[US-1A.3: Authentication](docs/implementation/US-1A.3-authentication.md)** - OAuth 2.0 JWT authentication with RSA256 signing, refresh token rotation
-  - ✅ **[US-1A.4: Workflow Definition Management](docs/implementation/US-1A.4-workflow-definition-management.md)** - Deploy, version, and manage workflow definitions with timestamp-based versioning
+**Epic 1: Event-Driven Orchestration Architecture** (Complete)
+- ✅ **[US-1.1: Activity Queue](docs/implementation/US-1.1-activity-queue.md)** - PostgreSQL-based queue with safe concurrency
+- ✅ **[US-1.2: Event-Driven Dynamic Scheduling](docs/implementation/US-1.2-event-driven-scheduling.md)** - Reactive orchestrator with <1ms evaluation
 
-### In Progress
+**Epic 1A: API Server** (Partial - 5 of 9 stories complete)
+- ✅ **[US-1A.1: Health Check and Service Discovery](docs/implementation/US-1A.1-health-checks.md)** - Liveness/readiness probes with parallel health checks
+- ✅ **[US-1A.1.5: API Server CLI Launcher](docs/implementation/US-1A.1.5-api-server-launcher.md)** - `streamflow api` command with configuration management
+- ✅ **[US-1A.2: Error Handling and API Contracts](docs/implementation/US-1A.2-error-handling.md)** - Standard error responses, OpenAPI/ReDoc docs, CORS, request tracing
+- ✅ **[US-1A.3: Authentication](docs/implementation/US-1A.3-authentication.md)** - OAuth 2.0 JWT authentication with RSA256 signing, refresh token rotation
+- ✅ **[US-1A.4: Workflow Definition Management](docs/implementation/US-1A.4-workflow-definition-management.md)** - Deploy, version, and manage workflow definitions
+- ✅ **[US-1A.5: Workflow Submission API](docs/implementation/US-1A.5-workflow-submission.md)** - Submit workflows with idempotency support
 
-- 🔨 **Epic 1A: API Server** - Workflow submission and worker operations APIs
-  - 📋 **[US-1A.5: Workflow Submission API](docs/implementation/US-1A.5-workflow-submission.md)** - Implementation plan ready, aligned with US-1A.4 patterns
-- 🔨 **Epic 1B: Built-in Worker** - Worker implementation using API endpoints
+**Epic 1B: Built-in Worker** (Complete)
+- ✅ Worker implementation using API endpoints for consistency
+- ✅ JWT authentication and token management
+- ✅ Activity execution and result reporting
+
+### Current Focus 🎯
+
+**Pre-Epic 2 Requirements** (~41 hours remaining)
+- 🔨 **[US-1A.6: Workflow Status Query](docs/implementation/US-1A.6-workflow-status-query.md)** - Query workflow status and activities (~11 hours)
+- 📋 **[US-1A.7: Worker Activity APIs](docs/implementation/US-1A.7-worker-activity-apis.md)** - Poll, heartbeat, complete, fail endpoints (~12 hours)
+- 📋 **US-1C.1: Main Binary and CLI Framework** - Unified binary with subcommands (~6 hours)
+- 📋 **US-1C.2: All-in-One Service Launcher** - `streamflow serve` command (~8 hours)
+- 📋 **US-1C.7: Graceful Shutdown** - Clean SIGTERM/SIGINT handling (~4 hours)
+
+### Deferred to Post-Epic 2 📋
+
+These features will be implemented after Epic 2 performance validation informs their design:
+- 📋 **US-1A.8**: Activity Results and Output Retrieval (~8 hours)
+- 📋 **US-1A.9**: WebSocket Streaming for Real-Time Updates (~15 hours)
+- 📋 **US-1C.3**: Individual Service Launchers (~5 hours)
+- 📋 **US-1C.4**: Configuration Management (~4 hours)
+- 📋 **US-1C.5**: Database Migration CLI (~3 hours)
+- 📋 **US-1C.6**: Health Checks and Service Monitoring (~5 hours)
 
 ## Quick Start
 
@@ -292,61 +313,107 @@ openssl rsa -in private.pem -pubout -out public.pem
   - Database schema and optimization strategies
   - Built-in worker architectural decisions
 - **[Implementation Plans](docs/implementation/)** - Detailed user story implementations
-  - [US-1.1: Activity Queue](docs/implementation/US-1.1-activity-queue.md)
-  - [US-1.2: Event-Driven Scheduling](docs/implementation/US-1.2-event-driven-scheduling.md)
-  - [US-1A.1: Health Check and Service Discovery](docs/implementation/US-1A.1-health-checks.md)
-  - [US-1A.1.5: API Server CLI Launcher](docs/implementation/US-1A.1.5-api-server-launcher.md)
-  - [US-1A.2: Error Handling and API Contracts](docs/implementation/US-1A.2-error-handling.md)
-  - [US-1A.3: Authentication](docs/implementation/US-1A.3-authentication.md)
-  - [US-1A.4: Workflow Definition Management](docs/implementation/US-1A.4-workflow-definition-management.md)
-  - [US-1A.5: Workflow Submission API](docs/implementation/US-1A.5-workflow-submission.md) (Implementation Plan)
+  - **Completed**:
+    - [US-1.1: Activity Queue](docs/implementation/US-1.1-activity-queue.md)
+    - [US-1.2: Event-Driven Scheduling](docs/implementation/US-1.2-event-driven-scheduling.md)
+    - [US-1A.1: Health Check and Service Discovery](docs/implementation/US-1A.1-health-checks.md)
+    - [US-1A.1.5: API Server CLI Launcher](docs/implementation/US-1A.1.5-api-server-launcher.md)
+    - [US-1A.2: Error Handling and API Contracts](docs/implementation/US-1A.2-error-handling.md)
+    - [US-1A.3: Authentication](docs/implementation/US-1A.3-authentication.md)
+    - [US-1A.4: Workflow Definition Management](docs/implementation/US-1A.4-workflow-definition-management.md)
+    - [US-1A.5: Workflow Submission API](docs/implementation/US-1A.5-workflow-submission.md)
+  - **Current Focus**:
+    - [US-1A.6: Workflow Status Query](docs/implementation/US-1A.6-workflow-status-query.md)
+    - [US-1A.7: Worker Activity APIs](docs/implementation/US-1A.7-worker-activity-apis.md)
 
 ### Additional Documentation
 - **[Post-MVP Roadmap](docs/post-mvp.md)** - Features deferred beyond MVP
 
 ## Roadmap
 
-### Epic 1: Core Orchestration ✅ Complete
-- ✅ Activity Queue with Ordering Guarantees
-- ✅ Event-Driven Dynamic Scheduling
+### Phase 1: Foundation (Weeks 1-4) ✅ Complete
+**Epic 1: Event-Driven Orchestration Architecture**
+- ✅ Activity Queue with Ordering Guarantees (US-1.1)
+- ✅ Event-Driven Dynamic Scheduling (US-1.2)
 
-### Epic 1A: API Server 🔨 In Progress
-- ✅ Health Check and Service Discovery
-- ✅ API Server CLI Launcher (`streamflow api` command)
-- ✅ Error Handling and API Contracts (OpenAPI/ReDoc docs)
-- ✅ JWT authentication and authorization (OAuth 2.0 with RSA256)
-- ✅ Workflow Definition Management (deploy, version, query)
-- 📋 Workflow Submission API (implementation plan ready)
-- 📋 Workflow Status and Query API
-- 📋 Worker activity APIs (poll, heartbeat, complete, fail)
-- 📋 WebSocket streaming for real-time updates
+### Phase 2A: API Server Foundation (Weeks 5-6) ✅ Complete
+**Epic 1A: API Server** (Partial)
+- ✅ Health Check and Service Discovery (US-1A.1)
+- ✅ API Server CLI Launcher - `streamflow api` command (US-1A.1.5)
+- ✅ Error Handling and API Contracts - OpenAPI/ReDoc docs (US-1A.2)
+- ✅ JWT Authentication and Authorization - OAuth 2.0 with RSA256 (US-1A.3)
+- ✅ Workflow Definition Management - Deploy, version, query (US-1A.4)
+- ✅ Workflow Submission API - Submit workflows with idempotency (US-1A.5)
 
-### Epic 1B: Built-in Worker 🔨 In Progress
-- Worker implementation using API endpoints
-- JWT authentication and token management
-- Activity execution and result reporting
-- Same code path as external workers (consistency)
+### Phase 2B: Built-in Worker (Week 7) ✅ Complete
+**Epic 1B: Built-in Worker**
+- ✅ Worker implementation using API endpoints
+- ✅ JWT authentication and token management
+- ✅ Activity execution and result reporting
+- ✅ Same code path as external workers (consistency)
 
-### Epic 1C: StreamFlow Binary and CLI 📋 Planned
-- Main binary with subcommands (serve, orchestrator, api, worker, migrate)
-- All-in-one mode (`streamflow serve`) for single-node deployment
-- Individual service launchers for distributed deployment
-- Configuration management (CLI flags > env vars > defaults)
-- Database migration CLI and graceful shutdown
+### Phase 2C: Pre-Epic 2 Requirements (Weeks 8-9) 🎯 Current Focus
+**Minimal viable system for performance benchmarking:**
+- 🔨 Workflow Status and Query API (US-1A.6) - ~11 hours
+- 📋 Worker Activity APIs (US-1A.7) - ~12 hours
+- 📋 Main Binary and CLI Framework (US-1C.1) - ~6 hours
+- 📋 All-in-One Service Launcher (US-1C.2) - ~8 hours
+- 📋 Graceful Shutdown (US-1C.7) - ~4 hours
 
-### Epic 2: Performance Benchmarking 📋 Planned
-- Automated performance test suite
-- Competitor comparison benchmarks (vs Temporal, Airflow, Conductor)
-- PostgreSQL profiling and optimization
-- Target: >1,000 workflows/sec validation
+**Total: ~41 hours (5-6 days)**
 
-### Epic 3: YAML Workflow Definition Language 📋 Planned
+### Phase 3: Performance Benchmarking (Weeks 10-11) 📋 Next
+**Epic 2: Validate Architecture Before Additional Features**
+- Automated performance test suite (US-2.1)
+- Competitor comparison benchmarks - vs Temporal, Airflow, Conductor (US-2.2)
+- PostgreSQL performance profiling (US-2.3)
+- Stress testing and capacity planning (US-2.4)
+- Performance dashboard and monitoring (US-2.5)
+- **Target**: Prove >1,000 workflows/sec vs competitors' 35-100/sec
+
+### Phase 4: Complete Epic 1A/1C (Week 12) 📋 Post-Epic 2
+**Features informed by Epic 2 performance insights:**
+- Activity Results and Output Retrieval (US-1A.8) - ~8 hours
+- WebSocket Streaming for Real-Time Updates (US-1A.9) - ~15 hours
+- Individual Service Launchers (US-1C.3) - ~5 hours
+- Configuration Management (US-1C.4) - ~4 hours
+- Database Migration CLI (US-1C.5) - ~3 hours
+- Health Checks and Service Monitoring (US-1C.6) - ~5 hours
+
+**Total: ~40 hours (5 days)**
+
+### Phase 5: YAML DSL + Programmatic Definition (Weeks 13-16) 📋 Planned
+**Epic 3: YAML Workflow Definition Language**
 - Declarative sequential, parallel, and conditional workflows
 - Template expressions and activity settings
 - YAML validation and tooling
 
+**Epic 4: Python/JavaScript Builder APIs**
+- Compilation pipeline (code → YAML)
+- 5+ examples per language
+
+### Phase 6: PostgreSQL Optimization (Weeks 17-20) 📋 Planned
+**Epic 6: Query optimization based on Epic 2 insights**
+- Connection pooling and batching
+- Advanced indexing strategy
+- Partitioning for time-series data
+- Target validation: >1,000 workflows/sec sustained
+
+### Phase 7: Developer Experience (Weeks 21-24) 📋 Planned
+**Epic 9: Tools and Migration**
+- CLI tools for workflow lifecycle
+- VS Code extension
+- Migration tools (Temporal, Airflow)
+- Production deployment guides
+
 ### Beyond MVP
 See [Post-MVP Roadmap](docs/post-mvp.md) for external service integrations, multi-tenancy, advanced features, and enterprise operations.
+
+**Key Benefits of Revised Sequencing**:
+- ✅ Performance validation 4-5 days earlier
+- ✅ Epic 2 insights inform remaining Epic 1A/1C implementation decisions
+- ✅ Reduced risk: Validate architecture before investing in advanced features
+- ✅ Total MVP timeline unchanged, just reordered for better outcomes
 
 ## Performance Targets
 
