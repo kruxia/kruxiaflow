@@ -1,9 +1,9 @@
 # US-1C.1: Main Binary and CLI Framework
 
 **Epic**: 1C - StreamFlow Binary and CLI
-**Status**: Partial - Core Framework Complete, Remaining Commands Needed
-**Estimated Remaining Effort**: ~6 hours
-**Dependencies**: None (foundation already in place via US-1A.1.5)
+**Status**: 📋 Ready for Implementation (~6 hours remaining)
+**Foundation**: ✅ Complete (via US-1A.1.5)
+**Current Binary Size**: 4.5MB (well under 15MB target ✅)
 
 ---
 
@@ -20,20 +20,20 @@
 - [x] Main crate `streamflow` that depends on `core`, `api`, and `worker` crates
 - [x] CLI framework (clap) with subcommands for different services
 - [ ] Subcommands: `serve`, `orchestrator`, `api`, `worker`, `version`, `migrate`
-  - [x] `api` - Launch API server only (implemented in US-1A.1.5)
-  - [ ] `serve` - Launch all services together (US-1C.2)
+  - [x] `api` - Launch API server only (✅ US-1A.1.5)
+  - [ ] `version` - Show version information (this story - ~2 hours)
+  - [ ] `serve` - Launch all services together (US-1C.2 - next)
   - [ ] `orchestrator` - Launch orchestrator only (US-1C.3 - Post-Epic 2)
   - [ ] `worker` - Launch worker only (US-1C.3 - Post-Epic 2)
-  - [ ] `version` - Show version information
   - [ ] `migrate` - Database migration management (US-1C.5 - Post-Epic 2)
 - [x] Global flags: `--database-url`, `--log-level`, `--log-format`
-- [ ] Help text and examples for each subcommand
-- [ ] Binary size: <15MB release build
-- [ ] Version information: `streamflow --version` shows semantic version and build info
+- [ ] Help text and examples for each subcommand (~2 hours)
+- [ ] Binary size: <15MB release build (~1 hour validation)
+- [ ] Version information: `streamflow --version` shows semantic version and build info (~1 hour)
 
 ---
 
-## Current Implementation Status
+## Implementation Status
 
 ### ✅ Completed (via US-1A.1.5)
 
@@ -64,362 +64,152 @@ The foundation of the CLI framework is already in place:
    - Health endpoints
    - Comprehensive test coverage
 
-### 📋 Remaining Work for Pre-Epic 2
+### 📋 Remaining Work for US-1C.1 (~6 hours)
 
-For US-1C.1 specifically, we need to add:
+Four tasks to complete this user story:
 
-1. **`version` subcommand** (~2 hours)
-   - Display semantic version from Cargo.toml
-   - Show build timestamp
-   - Show git commit hash (if available)
-   - Show build platform/architecture
-   - Machine-readable output option (`--format json`)
+1. **Build Script for Metadata** (~1 hour)
+   - Create `streamflow/build.rs` using `api/build.rs` pattern
+   - Use same `BUILD_*` environment variables
+   - Capture timestamp, git commit, branch
 
-2. **Enhanced help text** (~2 hours)
-   - Update main CLI help with better descriptions
-   - Add examples to subcommand help
-   - Document environment variables in help
-   - Add "See also" cross-references between commands
+2. **Version Subcommand** (~2 hours)
+   - Implement `streamflow version` command
+   - Support text and JSON output formats
+   - Display version, build info, platform details
 
-3. **Binary size validation** (~1 hour)
-   - Measure release build size
-   - Verify <15MB target
-   - Document size optimization settings
-   - Add CI check for binary size regression
+3. **Enhanced Help Text** (~2 hours)
+   - Add examples to main CLI help
+   - Document environment variables
+   - Comprehensive help for all commands
 
-4. **Build metadata** (~1 hour)
-   - Add build timestamp to version output
-   - Add git commit hash using build.rs
-   - Add build platform information
+4. **Binary Size Validation** (~1 hour)
+   - Create validation script
+   - Verify <15MB target (currently 4.5MB)
+   - Document optimization settings
 
-**Total Pre-Epic 2 Work: ~6 hours**
-
-### 📋 Deferred to Later Phases
-
-The following subcommands will be implemented in later user stories:
+### 📋 Deferred to Later Stories
 
 - **`serve`** - US-1C.2 (Pre-Epic 2, ~8 hours)
-  - All-in-one mode launching orchestrator + API + workers
-  - Will be the next story to implement after US-1C.1
-
 - **`orchestrator`** - US-1C.3 (Post-Epic 2, ~2 hours)
-  - Launch orchestrator service independently
-  - Deferred until distributed deployment validation
-
 - **`worker`** - US-1C.3 (Post-Epic 2, ~2 hours)
-  - Launch worker service independently
-  - Deferred until distributed deployment validation
-
 - **`migrate`** - US-1C.5 (Post-Epic 2, ~3 hours)
-  - Database migration management
-  - Can use `sqlx migrate` directly until then
 
 ---
 
 ## Implementation Plan
 
-### Task 1: Add Version Subcommand (~2 hours)
+### Task 1: Build Script for Metadata Capture (~1 hour)
 
-**File**: `streamflow/src/commands/version.rs`
+**File**: `streamflow/build.rs` (new)
 
-Create new version command that displays:
-- Semantic version from Cargo.toml
-- Build timestamp (from build.rs)
-- Git commit hash (from build.rs)
-- Rust version used for build
-- Platform/architecture
-- Support for JSON output format
-
-**Example output (text format)**:
-```
-StreamFlow 0.2.0
-Build timestamp: 2025-11-06T10:30:00Z
-Git commit: 8a6b8d2
-Rust version: 1.90.0
-Platform: x86_64-unknown-linux-gnu
-```
-
-**Example output (json format)**:
-```json
-{
-  "version": "0.2.0",
-  "build_timestamp": "2025-11-06T10:30:00Z",
-  "git_commit": "8a6b8d2",
-  "git_commit_full": "8a6b8d2abcd1234...",
-  "rust_version": "1.90.0",
-  "platform": "x86_64-unknown-linux-gnu"
-}
-```
-
-**Implementation steps**:
-1. Create `streamflow/src/commands/version.rs`
-2. Add `Version` variant to `Commands` enum in `main.rs`
-3. Create build.rs to capture build metadata
-4. Implement version display logic with text/json formats
-5. Add tests for version output formatting
-
-### Task 2: Create Build Script for Metadata (~1 hour)
-
-**File**: `streamflow/build.rs`
-
-Use Rust's build script mechanism to capture:
-- Build timestamp (using `chrono::Utc::now()`)
-- Git commit hash (using `std::process::Command` to run `git rev-parse`)
-- Git branch (using `git rev-parse --abbrev-ref HEAD`)
-- Generate constants that can be used in version command
-
-**Environment variables to set**:
-- `STREAMFLOW_BUILD_TIMESTAMP`
-- `STREAMFLOW_GIT_COMMIT_HASH`
-- `STREAMFLOW_GIT_COMMIT_FULL`
-- `STREAMFLOW_GIT_BRANCH`
-
-### Task 3: Enhance Help Text and Documentation (~2 hours)
-
-**Files to update**:
-- `streamflow/src/main.rs` - Main CLI help
-- `streamflow/src/commands/api.rs` - API command help
-- Future commands as they're added
-
-**Enhancements**:
-1. Add comprehensive descriptions to each command
-2. Add examples section to help text
-3. Document environment variables
-4. Add "See also" references
-5. Improve flag descriptions with examples
-
-**Example enhanced help**:
-```
-StreamFlow 0.2.0
-High-performance workflow orchestration platform
-
-USAGE:
-    streamflow [OPTIONS] <COMMAND>
-
-COMMANDS:
-    api       Launch API server
-    version   Show version information
-    help      Print this message or the help of the given subcommand(s)
-
-OPTIONS:
-    --database-url <URL>         PostgreSQL connection URL [env: DATABASE_URL]
-    --log-level <LEVEL>          Log level: trace, debug, info, warn, error [env: STREAMFLOW_LOG_LEVEL] [default: info]
-    --log-format <FORMAT>        Log format: text, json [env: STREAMFLOW_LOG_FORMAT] [default: text]
-    -h, --help                   Print help information
-    -V, --version                Print version information
-
-EXAMPLES:
-    # Launch API server with custom port
-    streamflow api --port 9090
-
-    # Show detailed version information
-    streamflow version --format json
-
-    # View API server help
-    streamflow api --help
-
-ENVIRONMENT VARIABLES:
-    DATABASE_URL               PostgreSQL connection string (required for most commands)
-    STREAMFLOW_LOG_LEVEL       Logging verbosity (default: info)
-    STREAMFLOW_LOG_FORMAT      Log output format (default: text)
-    STREAMFLOW_API_PORT        API server port (default: 8080)
-    STREAMFLOW_API_BIND        API server bind address (default: 0.0.0.0)
-
-See 'streamflow <command> --help' for more information on a specific command.
-```
-
-### Task 4: Binary Size Validation (~1 hour)
-
-**Goals**:
-- Measure current release build size
-- Verify <15MB target is met
-- Document optimization settings
-- Add CI check for size regression
+**Objective**: Capture build-time metadata (git commit, timestamp, branch) using the same pattern as `api/build.rs`.
 
 **Implementation**:
-1. Add size measurement to CI/CD pipeline
-2. Document current binary size in README
-3. Add build profile documentation
-4. Create script to measure and report binary size
-
-**Current optimization settings** (already in `Cargo.toml`):
-```toml
-[profile.release]
-opt-level = 'z'     # Optimize for size
-lto = true          # Link-time optimization
-codegen-units = 1   # Better optimization
-strip = true        # Strip symbols
-```
-
-**Validation script** (`scr/check-binary-size.sh`):
-```bash
-#!/bin/bash
-cargo build --release
-SIZE=$(stat -f%z target/release/streamflow 2>/dev/null || stat -c%s target/release/streamflow)
-SIZE_MB=$((SIZE / 1024 / 1024))
-echo "Binary size: ${SIZE_MB}MB"
-if [ $SIZE_MB -gt 15 ]; then
-    echo "ERROR: Binary size exceeds 15MB target"
-    exit 1
-fi
-```
-
----
-
-## Module Structure
-
-Current structure after US-1A.1.5:
-
-```
-streamflow/
-├── Cargo.toml
-├── build.rs                    # NEW: Build metadata capture
-└── src/
-    ├── main.rs                 # MODIFY: Add Version command
-    ├── config.rs               # Existing: ApiConfig
-    ├── logging.rs              # Existing: Log setup
-    ├── signals.rs              # Existing: Signal handling
-    └── commands/
-        ├── mod.rs              # MODIFY: Export version module
-        ├── api.rs              # Existing: API server command
-        └── version.rs          # NEW: Version command
-```
-
-Future structure after US-1C.2 and US-1C.3:
-
-```
-streamflow/
-└── src/
-    └── commands/
-        ├── mod.rs
-        ├── api.rs          # Existing
-        ├── version.rs      # This story
-        ├── serve.rs        # US-1C.2 (Pre-Epic 2)
-        ├── orchestrator.rs # US-1C.3 (Post-Epic 2)
-        ├── worker.rs       # US-1C.3 (Post-Epic 2)
-        └── migrate.rs      # US-1C.5 (Post-Epic 2)
-```
-
----
-
-## Testing Strategy
-
-### Unit Tests
-
-1. **Version command tests** (`streamflow/src/commands/version.rs`):
-   - Test version output format (text)
-   - Test version output format (json)
-   - Test JSON parsing and validation
-   - Test missing git information (CI environments)
-
-2. **Help text tests**:
-   - Verify help messages contain expected sections
-   - Test command discovery
-   - Validate environment variable documentation
-
-### Integration Tests
-
-1. **Binary invocation tests**:
-   ```bash
-   # Test version output
-   ./target/release/streamflow --version
-   ./target/release/streamflow version
-   ./target/release/streamflow version --format json
-
-   # Test help output
-   ./target/release/streamflow --help
-   ./target/release/streamflow help
-   ./target/release/streamflow api --help
-   ```
-
-2. **Build size validation**:
-   - Automated check in CI for binary size <15MB
-   - Track size over time to detect bloat
-
-### Manual Testing
-
-Test CLI user experience:
-```bash
-# Version information
-cargo build --release
-./target/release/streamflow --version
-./target/release/streamflow version
-./target/release/streamflow version --format json
-
-# Help text
-./target/release/streamflow --help
-./target/release/streamflow help
-./target/release/streamflow api --help
-
-# Global flags
-./target/release/streamflow --log-level debug api
-./target/release/streamflow --log-format json api
-```
-
----
-
-## Dependencies
-
-**Crate dependencies** (already in place):
-- `clap = { version = "4", features = ["derive", "env"] }` ✅
-- `tokio = { workspace = true }` ✅
-- `tracing` and `tracing-subscriber` ✅
-- `anyhow` and `thiserror` ✅
-- `streamflow-api`, `streamflow-core`, `streamflow-oauth` ✅
-
-**Build dependencies** (new):
-- `chrono` (workspace) - for build timestamp
-
-**No new runtime dependencies needed.**
-
----
-
-## Build Metadata Implementation
-
-### build.rs
 
 ```rust
 use std::process::Command;
-use chrono::Utc;
 
 fn main() {
-    // Capture build timestamp
-    println!("cargo:rustc-env=STREAMFLOW_BUILD_TIMESTAMP={}", Utc::now().to_rfc3339());
+    // Capture build timestamp in ISO 8601 format
+    // Use UTC time for consistency across different build environments
+    let output = Command::new("date")
+        .arg("-u")
+        .arg("+%Y-%m-%dT%H:%M:%SZ")
+        .output();
 
-    // Capture git commit hash (short)
-    if let Ok(output) = Command::new("git").args(["rev-parse", "--short", "HEAD"]).output() {
+    if let Ok(output) = output {
         if output.status.success() {
-            let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            println!("cargo:rustc-env=STREAMFLOW_GIT_COMMIT_HASH={}", hash);
+            let build_date = String::from_utf8_lossy(&output.stdout);
+            println!("cargo:rustc-env=BUILD_TIMESTAMP={}", build_date.trim());
+        } else {
+            // Fallback if date command fails
+            println!("cargo:rustc-env=BUILD_TIMESTAMP=unknown");
         }
+    } else {
+        // Fallback if date command is not available
+        println!("cargo:rustc-env=BUILD_TIMESTAMP=unknown");
     }
 
-    // Capture git commit hash (full)
-    if let Ok(output) = Command::new("git").args(["rev-parse", "HEAD"]).output() {
+    // Capture git commit short hash
+    let git_output = Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output();
+
+    if let Ok(output) = git_output {
         if output.status.success() {
-            let hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            println!("cargo:rustc-env=STREAMFLOW_GIT_COMMIT_FULL={}", hash);
+            let git_hash = String::from_utf8_lossy(&output.stdout);
+            println!("cargo:rustc-env=BUILD_GIT_HASH={}", git_hash.trim());
+        } else {
+            println!("cargo:rustc-env=BUILD_GIT_HASH=unknown");
         }
+    } else {
+        println!("cargo:rustc-env=BUILD_GIT_HASH=unknown");
+    }
+
+    // Capture git commit full hash
+    let git_full_output = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .output();
+
+    if let Ok(output) = git_full_output {
+        if output.status.success() {
+            let git_hash = String::from_utf8_lossy(&output.stdout);
+            println!("cargo:rustc-env=BUILD_GIT_HASH_FULL={}", git_hash.trim());
+        } else {
+            println!("cargo:rustc-env=BUILD_GIT_HASH_FULL=unknown");
+        }
+    } else {
+        println!("cargo:rustc-env=BUILD_GIT_HASH_FULL=unknown");
     }
 
     // Capture git branch
-    if let Ok(output) = Command::new("git").args(["rev-parse", "--abbrev-ref", "HEAD"]).output() {
+    let git_branch_output = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output();
+
+    if let Ok(output) = git_branch_output {
         if output.status.success() {
-            let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            println!("cargo:rustc-env=STREAMFLOW_GIT_BRANCH={}", branch);
+            let git_branch = String::from_utf8_lossy(&output.stdout);
+            println!("cargo:rustc-env=BUILD_GIT_BRANCH={}", git_branch.trim());
+        } else {
+            println!("cargo:rustc-env=BUILD_GIT_BRANCH=unknown");
         }
+    } else {
+        println!("cargo:rustc-env=BUILD_GIT_BRANCH=unknown");
     }
 
-    // Rerun if .git/HEAD changes (detects new commits)
+    // Rerun build script if git HEAD changes
     println!("cargo:rerun-if-changed=../.git/HEAD");
 }
 ```
 
+**Environment Variables Set**:
+- `BUILD_TIMESTAMP` - ISO 8601 timestamp (matches `api/build.rs`)
+- `BUILD_GIT_HASH` - Short git commit hash
+- `BUILD_GIT_HASH_FULL` - Full git commit hash
+- `BUILD_GIT_BRANCH` - Git branch name
+
+**Dependencies**: None (uses standard library only, matches `api/build.rs` pattern)
+
+**Testing**:
+```bash
+# Build and verify environment variables are set
+cargo build --release
+
+# Test in CI environment (gracefully handles missing git)
+# The script will output "unknown" for missing values
+```
+
 ---
 
-## Version Command Implementation
+### Task 2: Version Subcommand (~2 hours)
 
-### commands/version.rs
+**File**: `streamflow/src/commands/version.rs` (new)
+
+**Objective**: Implement version command with text and JSON output formats.
+
+**Implementation**:
 
 ```rust
 use anyhow::Result;
@@ -448,20 +238,19 @@ impl VersionInfo {
     fn new() -> Self {
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
-            build_timestamp: option_env!("STREAMFLOW_BUILD_TIMESTAMP")
+            build_timestamp: option_env!("BUILD_TIMESTAMP")
                 .unwrap_or("unknown")
                 .to_string(),
-            git_commit: option_env!("STREAMFLOW_GIT_COMMIT_HASH")
+            git_commit: option_env!("BUILD_GIT_HASH")
                 .unwrap_or("unknown")
                 .to_string(),
-            git_commit_full: option_env!("STREAMFLOW_GIT_COMMIT_FULL")
+            git_commit_full: option_env!("BUILD_GIT_HASH_FULL")
                 .unwrap_or("unknown")
                 .to_string(),
-            git_branch: option_env!("STREAMFLOW_GIT_BRANCH")
+            git_branch: option_env!("BUILD_GIT_BRANCH")
                 .unwrap_or("unknown")
                 .to_string(),
-            rust_version: env!("CARGO_PKG_RUST_VERSION")
-                .to_string(),
+            rust_version: env!("CARGO_PKG_RUST_VERSION").to_string(),
             platform: format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS),
         }
     }
@@ -527,96 +316,42 @@ mod tests {
 }
 ```
 
----
+**Changes to streamflow/Cargo.toml**:
+```toml
+[dependencies]
+# Add serde for JSON serialization (may already be in workspace)
+serde = { workspace = true }
+serde_json = { workspace = true }
+```
 
-## Updated main.rs
-
+**Changes to streamflow/src/commands/mod.rs**:
 ```rust
-use anyhow::Result;
-use clap::{Parser, Subcommand};
+pub mod api;
+pub mod version;  // NEW
+```
 
-mod commands;
-mod config;
-mod logging;
-mod signals;
+**Changes to streamflow/src/main.rs**:
 
-/// StreamFlow - High-performance workflow orchestration
-#[derive(Parser)]
-#[command(
-    name = "streamflow",
-    version,
-    about = "StreamFlow workflow orchestration platform",
-    long_about = "StreamFlow is a lightweight, high-performance workflow orchestration \
-                  platform designed for edge-to-cloud deployment. Built as a single binary \
-                  with PostgreSQL as the only required dependency.\n\n\
-                  Examples:\n  \
-                    streamflow api --port 8080\n  \
-                    streamflow version --format json\n  \
-                    streamflow --help"
-)]
-struct Cli {
-    /// Database connection URL
-    #[arg(
-        long,
-        env = "DATABASE_URL",
-        global = true,
-        help = "PostgreSQL connection URL (postgres://user:pass@host:port/db)"
-    )]
-    database_url: Option<String>,
-
-    /// Log level
-    #[arg(
-        long,
-        env = "STREAMFLOW_LOG_LEVEL",
-        default_value = "info",
-        global = true,
-        help = "Log level (trace, debug, info, warn, error)"
-    )]
-    log_level: String,
-
-    /// Log format
-    #[arg(
-        long,
-        env = "STREAMFLOW_LOG_FORMAT",
-        default_value = "text",
-        global = true,
-        help = "Log format (text, json)"
-    )]
-    log_format: String,
-
-    #[command(subcommand)]
-    command: Commands,
-}
-
+1. Update Commands enum:
+```rust
 #[derive(Subcommand)]
 enum Commands {
     /// Launch API server
-    #[command(about = "Launch the API server on the specified port")]
     Api(commands::api::ApiCommand),
 
     /// Show version information
     #[command(about = "Display version and build information")]
-    Version(commands::version::VersionCommand),
-
-    // Future commands (US-1C.2, US-1C.3, US-1C.5):
-    // /// Launch all services (orchestrator + API + workers)
-    // Serve(commands::serve::ServeCommand),
-
-    // /// Launch orchestrator only
-    // Orchestrator(commands::orchestrator::OrchestratorCommand),
-
-    // /// Launch worker only
-    // Worker(commands::worker::WorkerCommand),
-
-    // /// Manage database migrations
-    // Migrate(commands::migrate::MigrateCommand),
+    Version(commands::version::VersionCommand),  // NEW
 }
+```
 
+2. Update main() to skip logging for version command:
+```rust
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Initialize logging (not needed for version command)
+    // Initialize logging (skip for version command)
     if !matches!(cli.command, Commands::Version(_)) {
         logging::init(&cli.log_level, &cli.log_format)?;
     }
@@ -629,36 +364,482 @@ async fn main() -> Result<()> {
 }
 ```
 
+**Example Output (Text)**:
+```
+StreamFlow 0.2.0
+Build timestamp: 2025-11-07T10:30:00Z
+Git commit: 406bc2d
+Git branch: epic-1A-api
+Rust version: 1.90.0
+Platform: x86_64-darwin
+```
+
+**Example Output (JSON)**:
+```json
+{
+  "version": "0.2.0",
+  "build_timestamp": "2025-11-07T10:30:00Z",
+  "git_commit": "406bc2d",
+  "git_commit_full": "406bc2d1234...",
+  "git_branch": "epic-1A-api",
+  "rust_version": "1.90.0",
+  "platform": "x86_64-darwin"
+}
+```
+
+**Testing**:
+```bash
+cargo build --release
+
+# Test text format (default)
+./target/release/streamflow version
+
+# Test JSON format
+./target/release/streamflow version --format json
+
+# Test short version flag
+./target/release/streamflow --version
+```
+
+---
+
+### Task 3: Enhanced Help Text (~2 hours)
+
+**Files to Update**:
+- `streamflow/src/main.rs` - Main CLI help
+- `streamflow/src/commands/api.rs` - API command help
+- `streamflow/src/commands/version.rs` - Version command help
+
+**Update main.rs Cli struct**:
+
+```rust
+/// StreamFlow - High-performance workflow orchestration
+#[derive(Parser)]
+#[command(
+    name = "streamflow",
+    version,
+    about = "StreamFlow workflow orchestration platform",
+    long_about = "StreamFlow is a lightweight, high-performance workflow orchestration \
+platform designed for edge-to-cloud deployment. Built as a single binary \
+with PostgreSQL as the only required dependency.\n\n\
+EXAMPLES:\n  \
+  streamflow api --port 8080\n  \
+  streamflow version --format json\n  \
+  streamflow --help\n\n\
+ENVIRONMENT VARIABLES:\n  \
+  DATABASE_URL               PostgreSQL connection string (required for most commands)\n  \
+  STREAMFLOW_LOG_LEVEL       Logging verbosity (default: info)\n  \
+  STREAMFLOW_LOG_FORMAT      Log output format (default: text)\n  \
+  STREAMFLOW_API_PORT        API server port (default: 8080)\n  \
+  STREAMFLOW_API_BIND        API server bind address (default: 0.0.0.0)"
+)]
+struct Cli {
+    /// Database connection URL
+    #[arg(
+        long,
+        env = "DATABASE_URL",
+        global = true,
+        help = "PostgreSQL connection URL (postgres://user:pass@host:port/db)",
+        long_help = "PostgreSQL connection URL\n\n\
+Example: postgres://user:pass@localhost:5432/streamflow\n\
+Required for all commands except 'version'"
+    )]
+    database_url: Option<String>,
+
+    /// Log level
+    #[arg(
+        long,
+        env = "STREAMFLOW_LOG_LEVEL",
+        default_value = "info",
+        global = true,
+        help = "Log level (trace, debug, info, warn, error)",
+        long_help = "Log level for structured logging\n\n\
+Options: trace, debug, info, warn, error\n\
+Default: info\n\
+Example: --log-level debug"
+    )]
+    log_level: String,
+
+    /// Log format
+    #[arg(
+        long,
+        env = "STREAMFLOW_LOG_FORMAT",
+        default_value = "text",
+        global = true,
+        help = "Log format (text, json)",
+        long_help = "Log output format\n\n\
+Options: text (human-readable), json (machine-readable)\n\
+Default: text\n\
+Example: --log-format json for production logging"
+    )]
+    log_format: String,
+
+    #[command(subcommand)]
+    command: Commands,
+}
+```
+
+**Update Commands enum**:
+
+```rust
+#[derive(Subcommand)]
+enum Commands {
+    /// Launch API server
+    #[command(
+        about = "Launch the API server on the specified port",
+        long_about = "Launch the HTTP API server\n\n\
+The API server provides RESTful endpoints for workflow management, \
+authentication, and monitoring.\n\n\
+EXAMPLES:\n  \
+  streamflow api\n  \
+  streamflow api --port 9090 --bind 127.0.0.1\n  \
+  DATABASE_URL=postgres://localhost/db streamflow api\n\n\
+ENDPOINTS:\n  \
+  GET  /health              - Liveness probe\n  \
+  GET  /health/ready        - Readiness probe\n  \
+  GET  /api/v1/info         - Service information\n  \
+  POST /api/v1/auth/token   - Authentication\n  \
+  See /api/v1/openapi.json for full API documentation"
+    )]
+    Api(commands::api::ApiCommand),
+
+    /// Show version information
+    #[command(
+        about = "Display version and build information",
+        long_about = "Display version and build information\n\n\
+Shows StreamFlow version, build timestamp, git commit, and platform details.\n\n\
+EXAMPLES:\n  \
+  streamflow version\n  \
+  streamflow version --format json"
+    )]
+    Version(commands::version::VersionCommand),
+}
+```
+
+**Update commands/api.rs ApiCommand**:
+
+```rust
+#[derive(Args)]
+pub struct ApiCommand {
+    /// Port to bind to
+    #[arg(
+        short,
+        long,
+        env = "STREAMFLOW_API_PORT",
+        help = "Port to bind API server to",
+        long_help = "Port to bind API server to\n\n\
+Default: 8080\n\
+Example: --port 9090"
+    )]
+    port: Option<u16>,
+
+    /// Address to bind to
+    #[arg(
+        short,
+        long,
+        env = "STREAMFLOW_API_BIND",
+        help = "Address to bind API server to (e.g., 0.0.0.0, 127.0.0.1)",
+        long_help = "Address to bind API server to\n\n\
+Options:\n  \
+  0.0.0.0    - All network interfaces (default)\n  \
+  127.0.0.1  - Localhost only (development)\n\
+Example: --bind 127.0.0.1"
+    )]
+    bind: Option<String>,
+}
+```
+
+**Testing**:
+```bash
+# Test main help
+./target/release/streamflow --help
+
+# Test api command help
+./target/release/streamflow api --help
+
+# Test version command help
+./target/release/streamflow version --help
+
+# Verify examples and environment variables are documented
+```
+
+---
+
+### Task 4: Binary Size Validation (~1 hour)
+
+**File**: `scripts/check-binary-size.sh` (new)
+
+**Implementation**:
+
+```bash
+#!/bin/bash
+# Check StreamFlow binary size against 15MB target
+
+set -e
+
+BINARY_PATH="${1:-target/release/streamflow}"
+TARGET_SIZE_MB=15
+
+if [ ! -f "$BINARY_PATH" ]; then
+    echo "ERROR: Binary not found at $BINARY_PATH"
+    echo "Run: cargo build --release"
+    exit 1
+fi
+
+# Get file size (works on both macOS and Linux)
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    SIZE_BYTES=$(stat -f%z "$BINARY_PATH")
+else
+    SIZE_BYTES=$(stat -c%s "$BINARY_PATH")
+fi
+
+SIZE_MB=$((SIZE_BYTES / 1024 / 1024))
+SIZE_KB=$((SIZE_BYTES / 1024))
+
+echo "Binary: $BINARY_PATH"
+echo "Size: ${SIZE_MB}MB (${SIZE_KB}KB)"
+echo "Target: <${TARGET_SIZE_MB}MB"
+
+if [ $SIZE_MB -ge $TARGET_SIZE_MB ]; then
+    echo "❌ FAIL: Binary size (${SIZE_MB}MB) exceeds ${TARGET_SIZE_MB}MB target"
+    exit 1
+else
+    echo "✅ PASS: Binary size is within target"
+    exit 0
+fi
+```
+
+**Make Executable**:
+```bash
+chmod +x scripts/check-binary-size.sh
+```
+
+**Current Optimization Settings** (already in root `Cargo.toml`):
+```toml
+[profile.release]
+opt-level = 'z'     # Optimize for size
+lto = true          # Link-time optimization
+codegen-units = 1   # Better optimization
+strip = true        # Strip symbols
+```
+
+**Testing**:
+```bash
+# Build release binary
+cargo build --release
+
+# Run size check
+./scripts/check-binary-size.sh
+
+# Expected output:
+# Binary: target/release/streamflow
+# Size: 4MB (4608KB)
+# Target: <15MB
+# ✅ PASS: Binary size is within target
+```
+
+---
+
+## Module Structure
+
+**Current (after US-1A.1.5)**:
+```
+streamflow/
+├── Cargo.toml
+└── src/
+    ├── main.rs
+    ├── config.rs
+    ├── logging.rs
+    ├── signals.rs
+    └── commands/
+        ├── mod.rs
+        └── api.rs
+```
+
+**After This Story (US-1C.1)**:
+```
+streamflow/
+├── Cargo.toml
+├── build.rs                    # NEW: Build metadata
+└── src/
+    ├── main.rs                 # MODIFIED: Version command
+    ├── config.rs
+    ├── logging.rs
+    ├── signals.rs
+    └── commands/
+        ├── mod.rs              # MODIFIED: Export version
+        ├── api.rs              # MODIFIED: Enhanced help
+        └── version.rs          # NEW: Version command
+```
+
+**Future (US-1C.2, US-1C.3)**:
+```
+streamflow/
+└── src/
+    └── commands/
+        ├── mod.rs
+        ├── api.rs          # Existing
+        ├── version.rs      # This story
+        ├── serve.rs        # US-1C.2
+        ├── orchestrator.rs # US-1C.3
+        ├── worker.rs       # US-1C.3
+        └── migrate.rs      # US-1C.5
+```
+
+---
+
+## Testing Strategy
+
+### Unit Tests
+
+**Version Command** (`streamflow/src/commands/version.rs`):
+- Test version info creation
+- Test JSON serialization
+- Test text output format
+- Test JSON output format
+
+**Run Tests**:
+```bash
+# Test version command
+cargo test -p streamflow version
+
+# All streamflow tests
+cargo test -p streamflow
+```
+
+### Integration Tests
+
+**Binary Invocation**:
+```bash
+# Build release binary
+cargo build --release
+
+# Test version commands
+./target/release/streamflow --version
+./target/release/streamflow version
+./target/release/streamflow version --format json
+
+# Test help commands
+./target/release/streamflow --help
+./target/release/streamflow api --help
+./target/release/streamflow version --help
+
+# Test binary size
+./scripts/check-binary-size.sh
+```
+
+### Manual Verification
+
+1. **Version Output (Text)**:
+   ```bash
+   ./target/release/streamflow version
+   ```
+   Expected:
+   ```
+   StreamFlow 0.2.0
+   Build timestamp: 2025-11-07T...
+   Git commit: 406bc2d
+   Git branch: epic-1A-api
+   Rust version: 1.90.0
+   Platform: x86_64-darwin
+   ```
+
+2. **Version Output (JSON)**:
+   ```bash
+   ./target/release/streamflow version --format json
+   ```
+   Expected: Valid JSON with all fields
+
+3. **Help Quality**:
+   - Examples are clear and accurate
+   - Environment variables documented
+   - Long help more detailed than short help
+
+4. **Binary Size**:
+   - Verify <15MB (currently 4.5MB ✅)
+
+---
+
+## Dependencies
+
+**No new external dependencies needed**:
+- `clap` - ✅ Already in streamflow/Cargo.toml
+- `serde` / `serde_json` - ✅ Already in workspace
+- `build.rs` uses standard library only
+
 ---
 
 ## Success Criteria
 
 ### Functional Requirements
 
-- [x] CLI framework with subcommands works (via US-1A.1.5)
-- [ ] `streamflow version` displays version information in text format
+- [x] CLI framework with subcommands (via US-1A.1.5)
+- [ ] `streamflow version` displays version in text format
 - [ ] `streamflow version --format json` outputs valid JSON
 - [ ] `streamflow --version` shows short version string
 - [x] `streamflow api` launches API server (via US-1A.1.5)
 - [ ] Help text includes examples and environment variables
-- [ ] Binary size is <15MB in release mode
+- [ ] Binary size <15MB in release mode
 
 ### Non-Functional Requirements
 
-- **User Experience**: Clear, helpful command-line interface
-- **Documentation**: Comprehensive help text at all levels
-- **Size**: Binary stays within 15MB target
-- **Performance**: CLI startup time <100ms
+- **User Experience**: Clear, helpful CLI interface
+- **Documentation**: Comprehensive help at all levels
+- **Size**: Binary within 15MB target
+- **Performance**: CLI startup <100ms
 
 ---
 
-## Post-Epic 2 Command Additions
+## Implementation Checklist
 
-The following commands will be added after Epic 2 performance validation:
+### Task 1: Build Metadata (~1 hour)
+- [ ] Create `streamflow/build.rs` (based on `api/build.rs`)
+- [ ] Use `BUILD_*` environment variables (not `STREAMFLOW_*`)
+- [ ] Test build script captures git metadata
+- [ ] Verify graceful handling of missing git
+- [ ] Test rebuild triggers on git changes
 
-### `orchestrator` command (US-1C.3)
+### Task 2: Version Command (~2 hours)
+- [ ] Create `streamflow/src/commands/version.rs`
+- [ ] Add `serde`/`serde_json` to dependencies
+- [ ] Implement `VersionCommand` with text/json
+- [ ] Add unit tests
+- [ ] Update `commands/mod.rs`
+- [ ] Update `main.rs` Commands enum
+- [ ] Skip logging for version command
+- [ ] Test text and JSON output
 
-Launch orchestrator independently for distributed deployment:
+### Task 3: Enhanced Help (~2 hours)
+- [ ] Update `main.rs` Cli with `long_about`
+- [ ] Add examples to main help
+- [ ] Add environment variable docs
+- [ ] Update Commands enum with detailed help
+- [ ] Update `ApiCommand` with `long_help`
+- [ ] Update `VersionCommand` with `long_help`
+- [ ] Test all help outputs
+
+### Task 4: Binary Size (~1 hour)
+- [ ] Create `scripts/check-binary-size.sh`
+- [ ] Make script executable
+- [ ] Test with release binary
+- [ ] Document in README
+- [ ] Verify 4.5MB < 15MB target ✅
+
+### Final Verification
+- [ ] All tests pass: `cargo test`
+- [ ] No warnings: `cargo build --release`
+- [ ] Binary size verified
+- [ ] Help comprehensive
+- [ ] Version works correctly
+- [ ] Mark US-1C.1 complete
+
+---
+
+## Post-Epic 2 Commands
+
+These will be added in future stories:
+
+### `orchestrator` (US-1C.3)
 ```rust
 #[derive(Args)]
 pub struct OrchestratorCommand {
@@ -667,9 +848,7 @@ pub struct OrchestratorCommand {
 }
 ```
 
-### `worker` command (US-1C.3)
-
-Launch worker independently:
+### `worker` (US-1C.3)
 ```rust
 #[derive(Args)]
 pub struct WorkerCommand {
@@ -684,9 +863,7 @@ pub struct WorkerCommand {
 }
 ```
 
-### `migrate` command (US-1C.5)
-
-Database migration management:
+### `migrate` (US-1C.5)
 ```rust
 #[derive(Args)]
 pub struct MigrateCommand {
@@ -696,11 +873,8 @@ pub struct MigrateCommand {
 
 #[derive(Subcommand)]
 enum MigrateAction {
-    /// Run pending migrations
     Run,
-    /// Show migration status
     Status,
-    /// Revert last migration
     Revert,
 }
 ```
@@ -709,53 +883,32 @@ enum MigrateAction {
 
 ## References
 
-- **US-1A.1.5**: API Server CLI Launcher (foundation for this story)
-- **US-1C.2**: All-in-One Service Launcher (`serve` command)
-- **US-1C.3**: Individual Service Launchers (`orchestrator`, `worker` commands)
-- **US-1C.5**: Database Migration Management (`migrate` command)
-- **docs/architecture.md**: Overall system architecture
-- **docs/mvp-requirements.md**: Epic 1C user stories and sequencing
-
----
-
-## Implementation Checklist
-
-### Pre-Epic 2 (This Story - ~6 hours)
-
-- [ ] Create `build.rs` for build metadata capture
-- [ ] Implement `commands/version.rs` with text/json output
-- [ ] Add `Version` command to main.rs Commands enum
-- [ ] Enhance help text in main.rs with examples
-- [ ] Update API command help with better descriptions
-- [ ] Add comprehensive tests for version command
-- [ ] Create binary size validation script
-- [ ] Verify binary size <15MB target
-- [ ] Update README with version command documentation
-- [ ] Update CLAUDE.md if needed
-
-### Post-Epic 2 (Future Stories)
-
-- [ ] Implement `serve` command (US-1C.2)
-- [ ] Implement `orchestrator` command (US-1C.3)
-- [ ] Implement `worker` command (US-1C.3)
-- [ ] Implement `migrate` command (US-1C.5)
+- **US-1A.1.5**: API Server CLI Launcher (foundation)
+- **US-1C.2**: All-in-One Service Launcher (next story)
+- **US-1C.3**: Individual Service Launchers (Post-Epic 2)
+- **US-1C.5**: Database Migration Management (Post-Epic 2)
+- **api/build.rs**: Pattern for build metadata capture
+- **docs/architecture.md**: System architecture
+- **docs/mvp-requirements.md**: Epic 1C requirements
 
 ---
 
 ## Notes
 
 **Design Decisions**:
-1. **Build metadata via build.rs**: Standard Rust approach, metadata available at compile time
-2. **Separate version command**: More flexible than just `--version` flag, allows JSON output
-3. **Graceful degradation**: Version command works even without git information (CI environments)
-4. **Size optimization**: Already using `opt-level='z'` and LTO for minimal binary size
+1. **BUILD_* variables**: Match `api/build.rs` pattern for consistency
+2. **Separate version command**: More flexible than just `--version` flag
+3. **Graceful degradation**: Works without git (CI environments)
+4. **Size optimization**: Already using optimal settings
 
 **Known Limitations**:
-- Git metadata not available in some CI environments (handled gracefully with "unknown")
-- Binary size measurement varies by platform (both BSD and GNU stat supported)
+- Git metadata unavailable in some CI environments (handled gracefully)
+- Binary size measurement varies by platform (script handles both)
 
-**Future Enhancements** (Post-MVP):
-- Add plugin/extension version information
-- Show active configuration snapshot
-- Add system information (memory, CPU)
-- Check for updates mechanism
+**Timeline**: ~6 hours total
+1. Build script: 1 hour
+2. Version command: 2 hours
+3. Enhanced help: 2 hours
+4. Size validation: 1 hour
+
+**Next**: US-1C.2 (All-in-One Service Launcher)
