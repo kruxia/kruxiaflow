@@ -326,12 +326,9 @@ pub async fn poll_activities(
             request.max_activities,
         )
         .await
-        .map_err(|e| match e {
-            ActivityWorkerError::DatabaseError(e) => {
-                tracing::error!("Database error polling activities: {:?}", e);
-                AppError::DatabaseError(e)
-            }
-            _ => AppError::InternalError(anyhow::anyhow!(e)),
+        .map_err(|e| {
+            tracing::error!("Error polling activities: {:?}", e);
+            AppError::InternalError(anyhow::anyhow!(e))
         })?;
 
     let count = activities.len();
@@ -423,10 +420,6 @@ pub async fn heartbeat_activity(
                 tracing::warn!("Wrong worker for activity {}", activity_id);
                 AppError::Conflict("Activity claimed by different worker".to_string())
             }
-            ActivityWorkerError::DatabaseError(e) => {
-                tracing::error!("Database error sending heartbeat: {:?}", e);
-                AppError::DatabaseError(e)
-            }
             _ => AppError::InternalError(anyhow::anyhow!(e)),
         })?;
 
@@ -496,10 +489,6 @@ pub async fn complete_activity(
                 tracing::warn!("Wrong worker for activity {}", activity_id);
                 AppError::Conflict("Activity claimed by different worker".to_string())
             }
-            ActivityWorkerError::DatabaseError(e) => {
-                tracing::error!("Database error completing activity: {:?}", e);
-                AppError::DatabaseError(e)
-            }
             _ => AppError::InternalError(anyhow::anyhow!(e)),
         })?;
 
@@ -567,10 +556,6 @@ pub async fn fail_activity(
             ActivityWorkerError::WrongWorker => {
                 tracing::warn!("Wrong worker for activity {}", activity_id);
                 AppError::Conflict("Activity claimed by different worker".to_string())
-            }
-            ActivityWorkerError::DatabaseError(e) => {
-                tracing::error!("Database error failing activity: {:?}", e);
-                AppError::DatabaseError(e)
             }
             _ => AppError::InternalError(anyhow::anyhow!(e)),
         })?;

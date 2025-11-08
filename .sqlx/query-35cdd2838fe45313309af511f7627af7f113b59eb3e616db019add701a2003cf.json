@@ -1,20 +1,15 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, workflow_id, activity_key\n            FROM activity_queue\n            WHERE id = $1\n            ",
+  "query": "\n            SELECT workflow_id, activity_key\n            FROM activity_queue\n            WHERE id = $1\n            ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id",
-        "type_info": "Uuid"
-      },
-      {
-        "ordinal": 1,
         "name": "workflow_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 2,
+        "ordinal": 1,
         "name": "activity_key",
         "type_info": "Text"
       }
@@ -26,9 +21,8 @@
     },
     "nullable": [
       false,
-      false,
       false
     ]
   },
-  "hash": "378ecf9fca8b99178b43cd82ec85d485d64dc1fa7aac6a0d5ecc5a2cd49d222f"
+  "hash": "35cdd2838fe45313309af511f7627af7f113b59eb3e616db019add701a2003cf"
 }

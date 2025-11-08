@@ -13,6 +13,13 @@ pub use postgres_queue::PostgresQueue;
 use async_trait::async_trait;
 use uuid::Uuid;
 
+/// Activity details for event publishing
+#[derive(Debug, Clone)]
+pub struct ActivitySummary {
+    pub workflow_id: Uuid,
+    pub activity_key: String,
+}
+
 /// Activity Queue interface for scheduling and claiming activities
 #[async_trait]
 pub trait ActivityQueue: Send + Sync {
@@ -26,6 +33,9 @@ pub trait ActivityQueue: Send + Sync {
         namespace: &str,
         name: &str,
     ) -> Result<Option<QueuedActivity>>;
+
+    /// Get activity details (workflow_id, activity_key) for event publishing
+    async fn get_activity_summary(&self, activity_id: Uuid) -> Result<ActivitySummary>;
 
     /// Complete an activity and remove it from queue
     async fn complete(

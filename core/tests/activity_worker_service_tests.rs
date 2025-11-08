@@ -3,6 +3,7 @@ use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use streamflow_core::activity::ActivityWorkerService;
+use streamflow_core::events::{EventSource, PostgresEventSource};
 use streamflow_core::queue::{Activity, ActivityQueue, PostgresQueue, QueueConfig};
 use uuid::Uuid;
 
@@ -74,7 +75,8 @@ async fn test_poll_activities_success() {
     let pool = setup_test_pool().await;
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
-    let service = ActivityWorkerService::new(queue, pool.clone());
+    let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
+    let service = ActivityWorkerService::new(queue, event_source);
     let workflow_id = Uuid::now_v7();
 
     // Schedule test activities
@@ -105,7 +107,8 @@ async fn test_poll_activities_empty() {
     let pool = setup_test_pool().await;
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
-    let service = ActivityWorkerService::new(queue, pool.clone());
+    let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
+    let service = ActivityWorkerService::new(queue, event_source);
 
     // Poll for non-existent activity type
     let activity_types = vec![("nonexistent".to_string(), "type".to_string())];
@@ -125,10 +128,12 @@ async fn test_poll_activities_concurrent_workers() {
     let pool = setup_test_pool().await;
     let queue1 = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
-    let service1 = ActivityWorkerService::new(queue1, pool.clone());
+    let event_source1 = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
+    let service1 = ActivityWorkerService::new(queue1, event_source1);
     let queue2 = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
-    let service2 = ActivityWorkerService::new(queue2, pool.clone());
+    let event_source2 = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
+    let service2 = ActivityWorkerService::new(queue2, event_source2);
     let workflow_id = Uuid::now_v7();
 
     // Schedule 10 activities
@@ -175,7 +180,8 @@ async fn test_poll_activities_max_limit() {
     let pool = setup_test_pool().await;
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
-    let service = ActivityWorkerService::new(queue, pool.clone());
+    let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
+    let service = ActivityWorkerService::new(queue, event_source);
     let workflow_id = Uuid::now_v7();
 
     // Schedule 10 activities
@@ -210,7 +216,8 @@ async fn test_heartbeat_activity_success() {
     let pool = setup_test_pool().await;
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
-    let service = ActivityWorkerService::new(queue, pool.clone());
+    let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
+    let service = ActivityWorkerService::new(queue, event_source);
     let workflow_id = Uuid::now_v7();
 
     // Schedule and claim an activity
@@ -241,7 +248,8 @@ async fn test_heartbeat_wrong_worker() {
     let pool = setup_test_pool().await;
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
-    let service = ActivityWorkerService::new(queue, pool.clone());
+    let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
+    let service = ActivityWorkerService::new(queue, event_source);
     let workflow_id = Uuid::now_v7();
 
     // Schedule and claim with worker_01
@@ -275,7 +283,8 @@ async fn test_heartbeat_activity_not_found() {
     let pool = setup_test_pool().await;
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
-    let service = ActivityWorkerService::new(queue, pool.clone());
+    let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
+    let service = ActivityWorkerService::new(queue, event_source);
 
     let result = service
         .heartbeat_activity(Uuid::now_v7(), "worker_01".to_string())
@@ -294,7 +303,8 @@ async fn test_complete_activity_success() {
     let pool = setup_test_pool().await;
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
-    let service = ActivityWorkerService::new(queue, pool.clone());
+    let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
+    let service = ActivityWorkerService::new(queue, event_source);
     let workflow_id = Uuid::now_v7();
 
     // Schedule and claim an activity
@@ -360,7 +370,8 @@ async fn test_complete_activity_idempotency() {
     let pool = setup_test_pool().await;
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
-    let service = ActivityWorkerService::new(queue, pool.clone());
+    let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
+    let service = ActivityWorkerService::new(queue, event_source);
     let workflow_id = Uuid::now_v7();
 
     // Schedule and claim an activity
@@ -401,7 +412,8 @@ async fn test_complete_activity_wrong_worker() {
     let pool = setup_test_pool().await;
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
-    let service = ActivityWorkerService::new(queue, pool.clone());
+    let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
+    let service = ActivityWorkerService::new(queue, event_source);
     let workflow_id = Uuid::now_v7();
 
     // Schedule and claim with worker_01
@@ -436,7 +448,8 @@ async fn test_fail_activity_success() {
     let pool = setup_test_pool().await;
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
-    let service = ActivityWorkerService::new(queue, pool.clone());
+    let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
+    let service = ActivityWorkerService::new(queue, event_source);
     let workflow_id = Uuid::now_v7();
 
     // Schedule and claim an activity
@@ -504,7 +517,8 @@ async fn test_fail_activity_wrong_worker() {
     let pool = setup_test_pool().await;
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
-    let service = ActivityWorkerService::new(queue, pool.clone());
+    let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
+    let service = ActivityWorkerService::new(queue, event_source);
     let workflow_id = Uuid::now_v7();
 
     // Schedule and claim with worker_01
@@ -544,7 +558,8 @@ async fn test_fail_activity_not_found() {
     let pool = setup_test_pool().await;
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
-    let service = ActivityWorkerService::new(queue, pool.clone());
+    let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
+    let service = ActivityWorkerService::new(queue, event_source);
 
     let result = service
         .fail_activity(

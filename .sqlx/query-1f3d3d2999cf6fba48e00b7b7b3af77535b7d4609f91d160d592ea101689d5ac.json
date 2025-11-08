@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM activity_queue\n            WHERE id = $1 AND claimed_by = $2 AND status = 'running'::activity_status\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1f3d3d2999cf6fba48e00b7b7b3af77535b7d4609f91d160d592ea101689d5ac"
+}
