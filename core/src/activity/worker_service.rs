@@ -1,6 +1,6 @@
+use crate::events::{EventSource, NewWorkflowEvent, WorkflowEventType};
 use crate::queue::{ActivityQueue, ActivityResult, QueueError, QueuedActivity};
 use serde_json::Value;
-use sqlx::PgPool;
 use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
@@ -20,8 +20,8 @@ pub enum ActivityWorkerError {
     #[error("Queue error: {0}")]
     QueueError(#[from] QueueError),
 
-    #[error("Database error: {0}")]
-    DatabaseError(#[from] sqlx::Error),
+    #[error("Event source error: {0}")]
+    EventError(#[from] crate::events::EventError),
 
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
@@ -57,22 +57,24 @@ impl From<QueuedActivity> for PendingActivityRecord {
 
 /// Activity worker service
 ///
-/// Coordinates between ActivityQueue (for queue operations) and event publishing
+/// Coordinates between ActivityQueue (for queue operations) and EventSource
 /// (for orchestrator notifications). This service delegates queue operations to
-/// the ActivityQueue trait and handles the service-layer concern of publishing
-/// workflow events.
+/// the ActivityQueue trait and event publishing to the EventSource trait.
 ///
-/// This follows the service interface pattern - ActivityQueue handles database
-/// operations while this service provides higher-level coordination.
+/// This follows the service interface pattern - all infrastructure dependencies
+/// are abstracted behind interfaces.
 #[derive(Clone)]
 pub struct ActivityWorkerService {
     queue: Arc<dyn ActivityQueue>,
-    pool: PgPool, // For event publishing until EventPublisher trait exists
+    event_source: Arc<dyn EventSource>,
 }
 
 impl ActivityWorkerService {
-    pub fn new(queue: Arc<dyn ActivityQueue>, pool: PgPool) -> Self {
-        Self { queue, pool }
+    pub fn new(queue: Arc<dyn ActivityQueue>, event_source: Arc<dyn EventSource>) -> Self {
+        Self {
+            queue,
+            event_source,
+        }
     }
 
     /// Poll for pending activities
@@ -144,7 +146,7 @@ impl ActivityWorkerService {
 
     /// Complete an activity successfully
     ///
-    /// Delegates to ActivityQueue::complete and publishes ActivityCompleted event.
+    /// Delegates to ActivityQueue::complete and publishes ActivityCompleted event via EventSource.
     pub async fn complete_activity(
         &self,
         activity_id: Uuid,
@@ -152,22 +154,19 @@ impl ActivityWorkerService {
         output: Value,
         cost_usd: Option<f64>,
     ) -> ActivityWorkerResult<()> {
-        let mut tx = self.pool.begin().await?;
+        // Get activity details before completion (needed for event publishing)
+        // This is read-only and doesn't modify state
+        let activity = self
+            .queue
+            .get_activity_summary(activity_id)
+            .await
+            .map_err(|e| match e {
+                QueueError::ActivityNotFound(id) => ActivityWorkerError::ActivityNotFound(id),
+                other => ActivityWorkerError::QueueError(other),
+            })?;
 
-        // Get activity details before completion (for event publishing)
-        let activity = sqlx::query!(
-            r#"
-            SELECT id, workflow_id, activity_key
-            FROM activity_queue
-            WHERE id = $1
-            "#,
-            activity_id
-        )
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(ActivityWorkerError::ActivityNotFound(activity_id))?;
-
-        // Delegate to ActivityQueue
+        // Delegate to ActivityQueue to complete the activity
+        // This handles worker verification and queue removal atomically
         let result = ActivityResult {
             success: true,
             outputs: Some(output.clone()),
@@ -186,28 +185,21 @@ impl ActivityWorkerService {
                 other => ActivityWorkerError::QueueError(other),
             })?;
 
-        // Service-layer responsibility: Publish ActivityCompleted event
-        let event_id = Uuid::now_v7();
+        // Service-layer responsibility: Publish ActivityCompleted event via EventSource
         let event_payload = serde_json::json!({
             "activity_key": activity.activity_key,
             "output": output,
             "cost_usd": cost_usd
         });
 
-        sqlx::query!(
-            r#"
-            INSERT INTO workflow_events (id, workflow_id, event_type, activity_key, payload, timestamp)
-            VALUES ($1, $2, 'ActivityCompleted', $3, $4, NOW())
-            "#,
-            event_id,
-            activity.workflow_id,
-            activity.activity_key,
-            event_payload
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        tx.commit().await?;
+        self.event_source
+            .publish(NewWorkflowEvent {
+                workflow_id: activity.workflow_id,
+                event_type: WorkflowEventType::ActivityCompleted,
+                activity_key: Some(activity.activity_key.clone()),
+                payload: event_payload,
+            })
+            .await?;
 
         tracing::info!(
             activity_id = %activity_id,
@@ -222,7 +214,7 @@ impl ActivityWorkerService {
 
     /// Fail an activity
     ///
-    /// Delegates to ActivityQueue::fail and publishes ActivityFailed event.
+    /// Delegates to ActivityQueue::fail and publishes ActivityFailed event via EventSource.
     pub async fn fail_activity(
         &self,
         activity_id: Uuid,
@@ -231,22 +223,19 @@ impl ActivityWorkerService {
         error_message: String,
         retryable: bool,
     ) -> ActivityWorkerResult<bool> {
-        let mut tx = self.pool.begin().await?;
+        // Get activity details before failure (needed for event publishing)
+        // This is read-only and doesn't modify state
+        let activity = self
+            .queue
+            .get_activity_summary(activity_id)
+            .await
+            .map_err(|e| match e {
+                QueueError::ActivityNotFound(id) => ActivityWorkerError::ActivityNotFound(id),
+                other => ActivityWorkerError::QueueError(other),
+            })?;
 
-        // Get activity details before failure (for event publishing)
-        let activity = sqlx::query!(
-            r#"
-            SELECT id, workflow_id, activity_key
-            FROM activity_queue
-            WHERE id = $1
-            "#,
-            activity_id
-        )
-        .fetch_optional(&mut *tx)
-        .await?
-        .ok_or(ActivityWorkerError::ActivityNotFound(activity_id))?;
-
-        // Delegate to ActivityQueue
+        // Delegate to ActivityQueue to fail the activity
+        // This handles worker verification, retry logic, and queue management atomically
         let result = ActivityResult {
             success: false,
             outputs: None,
@@ -266,8 +255,7 @@ impl ActivityWorkerService {
                 other => ActivityWorkerError::QueueError(other),
             })?;
 
-        // Service-layer responsibility: Publish ActivityFailed event
-        let event_id = Uuid::now_v7();
+        // Service-layer responsibility: Publish ActivityFailed event via EventSource
         let event_payload = serde_json::json!({
             "activity_key": activity.activity_key,
             "error_code": error_code,
@@ -276,20 +264,14 @@ impl ActivityWorkerService {
             "will_retry": will_retry
         });
 
-        sqlx::query!(
-            r#"
-            INSERT INTO workflow_events (id, workflow_id, event_type, activity_key, payload, timestamp)
-            VALUES ($1, $2, 'ActivityFailed', $3, $4, NOW())
-            "#,
-            event_id,
-            activity.workflow_id,
-            activity.activity_key,
-            event_payload
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        tx.commit().await?;
+        self.event_source
+            .publish(NewWorkflowEvent {
+                workflow_id: activity.workflow_id,
+                event_type: WorkflowEventType::ActivityFailed,
+                activity_key: Some(activity.activity_key.clone()),
+                payload: event_payload,
+            })
+            .await?;
 
         tracing::info!(
             activity_id = %activity_id,

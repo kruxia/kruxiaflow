@@ -160,6 +160,16 @@ mod tests {
             Ok(None)
         }
 
+        async fn get_activity_summary(
+            &self,
+            _activity_id: Uuid,
+        ) -> streamflow_core::queue::Result<streamflow_core::queue::ActivitySummary> {
+            Ok(streamflow_core::queue::ActivitySummary {
+                workflow_id: Uuid::now_v7(),
+                activity_key: "mock_activity".to_string(),
+            })
+        }
+
         async fn complete(
             &self,
             _activity_id: Uuid,

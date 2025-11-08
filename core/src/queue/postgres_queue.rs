@@ -1,6 +1,6 @@
 use crate::queue::{
-    Activity, ActivityQueue, ActivityResult, ActivitySettings, ActivityStatus, QueueConfig,
-    QueueError, QueuedActivity, Result,
+    Activity, ActivityQueue, ActivityResult, ActivitySettings, ActivityStatus, ActivitySummary,
+    QueueConfig, QueueError, QueuedActivity, Result,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -194,6 +194,25 @@ impl ActivityQueue for PostgresQueue {
                 Ok(None)
             }
         }
+    }
+
+    async fn get_activity_summary(&self, activity_id: Uuid) -> Result<ActivitySummary> {
+        let details = sqlx::query!(
+            r#"
+            SELECT workflow_id, activity_key
+            FROM activity_queue
+            WHERE id = $1
+            "#,
+            activity_id
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(QueueError::ActivityNotFound(activity_id))?;
+
+        Ok(ActivitySummary {
+            workflow_id: details.workflow_id,
+            activity_key: details.activity_key,
+        })
     }
 
     async fn complete(
