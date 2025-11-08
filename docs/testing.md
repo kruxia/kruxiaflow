@@ -12,52 +12,52 @@ This guide covers testing practices, test coverage tracking, and testing workflo
 
 ## Running Tests
 
-StreamFlow uses a unified test script at `scr/test.sh` for all testing needs.
+StreamFlow uses a unified test script at `scripts/test.sh` for all testing needs.
 
 ### Basic Usage
 
 ```bash
 # Run all tests
-./scr/test.sh
+./scripts/test.sh
 
 # Run with verbose output
-./scr/test.sh --verbose
+./scripts/test.sh --verbose
 
 # Run tests for a specific crate
-./scr/test.sh -p streamflow-api
+./scripts/test.sh -p streamflow-api
 
 # Show all options
-./scr/test.sh --help
+./scripts/test.sh --help
 ```
 
 ### Test Types
 
 ```bash
 # Unit tests only (--lib)
-./scr/test.sh --unit
+./scripts/test.sh --unit
 
 # Integration tests only (--tests)
-./scr/test.sh --integration
+./scripts/test.sh --integration
 
 # Documentation tests only (--doc)
-./scr/test.sh --doc
+./scripts/test.sh --doc
 ```
 
 ### Debugging Tests
 
 ```bash
 # Show test output (don't capture)
-./scr/test.sh --nocapture
+./scripts/test.sh --nocapture
 
 # Verbose + nocapture
-./scr/test.sh --verbose --nocapture
+./scripts/test.sh --verbose --nocapture
 ```
 
 ### Skipping Database Setup
 
 ```bash
 # Skip DB setup if database is already configured
-./scr/test.sh --skip-db-setup
+./scripts/test.sh --skip-db-setup
 ```
 
 ## Test Coverage
@@ -68,7 +68,7 @@ StreamFlow uses `cargo-llvm-cov` for accurate, cross-platform test coverage trac
 
 ```bash
 # Install cargo-llvm-cov
-./scr/test.sh --install-coverage
+./scripts/test.sh --install-coverage
 
 # Or manually
 cargo install cargo-llvm-cov
@@ -78,13 +78,13 @@ cargo install cargo-llvm-cov
 
 ```bash
 # Run tests with coverage summary in terminal
-./scr/test.sh --coverage
+./scripts/test.sh --coverage
 
 # Generate HTML coverage report and open in browser
-./scr/test.sh --coverage-html
+./scripts/test.sh --coverage-html
 
 # Generate lcov format for CI/CD (e.g., Codecov)
-./scr/test.sh --coverage-ci
+./scripts/test.sh --coverage-ci
 ```
 
 ### Coverage Reports
@@ -103,10 +103,10 @@ coverage/lcov.info
 
 ```bash
 # Coverage for a specific crate
-./scr/test.sh --coverage -p streamflow-api
+./scripts/test.sh --coverage -p streamflow-api
 
 # HTML report for API crate only
-./scr/test.sh --coverage-html -p streamflow-api
+./scripts/test.sh --coverage-html -p streamflow-api
 ```
 
 ## Test Organization
@@ -128,7 +128,7 @@ streamflow/
 │       └── error_handling_test.rs
 ├── activity/
 │   └── ...
-└── scr/
+└── scripts/
     └── test.sh                # Unified test runner
 ```
 
@@ -198,7 +198,7 @@ The following are excluded from coverage requirements:
 
 ```bash
 # Generate HTML report for detailed analysis
-./scr/test.sh --coverage-html
+./scripts/test.sh --coverage-html
 
 # Check specific module coverage
 # (View in HTML report)
@@ -270,7 +270,7 @@ jobs:
           DATABASE_URL: postgres://streamflow:streamflow_dev@localhost:5433/streamflow_test
       
       - name: Run tests with coverage
-        run: ./scr/test.sh --coverage-ci --skip-db-setup
+        run: ./scripts/test.sh --coverage-ci --skip-db-setup
         env:
           DATABASE_URL: postgres://streamflow:streamflow_dev@localhost:5433/streamflow_test
       
@@ -285,7 +285,7 @@ jobs:
 
 ```bash
 # Before committing
-./scr/test.sh --coverage
+./scripts/test.sh --coverage
 
 # Ensure no regressions
 # - All tests pass
@@ -346,7 +346,7 @@ async fn test_async_function() {
 
 ```bash
 # Install it
-./scr/test.sh --install-coverage
+./scripts/test.sh --install-coverage
 
 # Or manually
 cargo install cargo-llvm-cov
@@ -358,7 +358,7 @@ This is rare but can happen. Try:
 ```bash
 # Clean and rebuild
 cargo clean
-./scr/test.sh --coverage
+./scripts/test.sh --coverage
 ```
 
 ### Database Connection Issues
@@ -369,7 +369,7 @@ Ensure PostgreSQL is running:
 docker-compose up -d postgres
 
 # Run tests
-./scr/test.sh
+./scripts/test.sh
 ```
 
 The test script handles DATABASE_URL automatically.
@@ -378,13 +378,13 @@ The test script handles DATABASE_URL automatically.
 
 ```bash
 # Run specific crate only
-./scr/test.sh -p streamflow-api
+./scripts/test.sh -p streamflow-api
 
 # Run unit tests only (faster)
-./scr/test.sh --unit
+./scripts/test.sh --unit
 
 # Skip database setup if DB is already ready
-./scr/test.sh --skip-db-setup
+./scripts/test.sh --skip-db-setup
 ```
 
 ## Resources

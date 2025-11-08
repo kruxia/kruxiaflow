@@ -23,27 +23,35 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 - ✅ **[US-1.1: Activity Queue](docs/implementation/US-1.1-activity-queue.md)** - PostgreSQL-based queue with safe concurrency
 - ✅ **[US-1.2: Event-Driven Dynamic Scheduling](docs/implementation/US-1.2-event-driven-scheduling.md)** - Reactive orchestrator with <1ms evaluation
 
-**Epic 1A: API Server** (Partial - 5 of 9 stories complete)
+**Epic 1A: API Server** (Complete - 7 of 9 stories, 2 deferred to Post-Epic 2)
 - ✅ **[US-1A.1: Health Check and Service Discovery](docs/implementation/US-1A.1-health-checks.md)** - Liveness/readiness probes with parallel health checks
 - ✅ **[US-1A.1.5: API Server CLI Launcher](docs/implementation/US-1A.1.5-api-server-launcher.md)** - `streamflow api` command with configuration management
 - ✅ **[US-1A.2: Error Handling and API Contracts](docs/implementation/US-1A.2-error-handling.md)** - Standard error responses, OpenAPI/ReDoc docs, CORS, request tracing
 - ✅ **[US-1A.3: Authentication](docs/implementation/US-1A.3-authentication.md)** - OAuth 2.0 JWT authentication with RSA256 signing, refresh token rotation
 - ✅ **[US-1A.4: Workflow Definition Management](docs/implementation/US-1A.4-workflow-definition-management.md)** - Deploy, version, and manage workflow definitions
 - ✅ **[US-1A.5: Workflow Submission API](docs/implementation/US-1A.5-workflow-submission.md)** - Submit workflows with idempotency support
+- ✅ **[US-1A.6: Workflow Status Query](docs/implementation/US-1A.6-workflow-status-query.md)** - Query workflow status and activities
+- ✅ **[US-1A.7: Worker Activity APIs](docs/implementation/US-1A.7-worker-activity-apis.md)** - Poll, heartbeat, complete, fail endpoints
 
 **Epic 1B: Built-in Worker** (Complete)
-- ✅ Worker implementation using API endpoints for consistency
+- ✅ **[US-1B.1: Worker Polling with Concurrency Safety](docs/implementation/US-1B.1-built-in-worker.md)** - Worker implementation using API endpoints
 - ✅ JWT authentication and token management
 - ✅ Activity execution and result reporting
+- ✅ Concurrent worker polling with FOR UPDATE SKIP LOCKED safety
 
 ### Current Focus 🎯
 
-**Pre-Epic 2 Requirements** (~41 hours remaining)
-- 🔨 **[US-1A.6: Workflow Status Query](docs/implementation/US-1A.6-workflow-status-query.md)** - Query workflow status and activities (~11 hours)
-- 📋 **[US-1A.7: Worker Activity APIs](docs/implementation/US-1A.7-worker-activity-apis.md)** - Poll, heartbeat, complete, fail endpoints (~12 hours)
-- 📋 **US-1C.1: Main Binary and CLI Framework** - Unified binary with subcommands (~6 hours)
-- 📋 **US-1C.2: All-in-One Service Launcher** - `streamflow serve` command (~8 hours)
+**Pre-Epic 2 Requirements** (~12 hours remaining)
+- 📋 **[US-1C.2: All-in-One Service Launcher](docs/implementation/US-1C.2-all-in-one-launcher.md)** - `streamflow serve` command (~8 hours)
 - 📋 **US-1C.7: Graceful Shutdown** - Clean SIGTERM/SIGINT handling (~4 hours)
+
+### Recent Completions ✅
+
+**Week of Nov 4-8, 2025**
+- ✅ **US-1A.6**: Workflow Status Query - GET /api/v1/workflows endpoints
+- ✅ **US-1A.7**: Worker Activity APIs - Poll, heartbeat, complete, fail endpoints with JWT auth
+- ✅ **US-1B.1**: Built-in Worker - Complete worker implementation with HTTP client
+- ✅ **US-1C.1**: Main Binary and CLI Framework - Version command, enhanced help, 4.5MB binary
 
 ### Deferred to Post-Epic 2 📋
 
@@ -68,10 +76,10 @@ These features will be implemented after Epic 2 performance validation informs t
 **Quick Start** (automated):
 ```bash
 # Set up development database
-./scr/setup-dev-db.sh
+./scripts/setup-dev-db.sh
 
 # Run tests
-./scr/test.sh
+./scripts/test.sh
 
 # Build
 cargo build --release
@@ -101,7 +109,7 @@ export DATABASE_URL='postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamf
 
 4. **Run tests**:
    ```bash
-   ./scr/test.sh
+   ./scripts/test.sh
    ```
 
 5. **Run API server**:
@@ -146,11 +154,13 @@ StreamFlow uses an event-driven, service-oriented architecture with pluggable in
 - **EventSource**: PostgreSQL polling with guaranteed delivery
 - **Orchestrator**: Event-driven workflow evaluation
 - **AuthenticationService**: OAuth 2.0 JWT authentication with RSA256
+- **API Server**: Complete HTTP/REST API for workflow and worker operations
+- **Built-in Worker**: Activity execution with HTTP client using API endpoints
+- **Main Binary**: Unified CLI with `api` and `version` commands (4.5MB)
 
 ### In Progress Components (🔨)
-- **API Server**: HTTP/REST endpoints for workflow and worker operations
-- **WorkflowStorage**: Handles large artifacts and files
-- **Built-in Worker**: Activity execution using API endpoints
+- **All-in-One Launcher**: `streamflow serve` to launch all services together
+- **WorkflowStorage**: Handles large artifacts and files (planned for Epic 5)
 
 ### MVP Implementation Strategy
 
@@ -203,7 +213,7 @@ cargo sqlx prepare --workspace
 Tests require a running PostgreSQL instance. The recommended way to run tests is using the test script, which creates a clean test database:
 
 ```bash
-./scr/test.sh
+./scripts/test.sh
 ```
 
 This script will:
@@ -215,18 +225,18 @@ This script will:
 **Test Coverage:**
 ```bash
 # Run tests with coverage
-./scr/test.sh --coverage
+./scripts/test.sh --coverage
 
 # Generate HTML coverage report
-./scr/test.sh --coverage-html
+./scripts/test.sh --coverage-html
 
 # Test specific crate
-./scr/test.sh -p streamflow-api --coverage
+./scripts/test.sh -p streamflow-api --coverage
 ```
 
 **More options:**
 ```bash
-./scr/test.sh --help  # See all options
+./scripts/test.sh --help  # See all options
 ```
 
 See [docs/testing.md](docs/testing.md) for comprehensive testing guide.
@@ -313,18 +323,22 @@ openssl rsa -in private.pem -pubout -out public.pem
   - Database schema and optimization strategies
   - Built-in worker architectural decisions
 - **[Implementation Plans](docs/implementation/)** - Detailed user story implementations
-  - **Completed**:
+  - **Epic 1: Event-Driven Orchestration** ✅
     - [US-1.1: Activity Queue](docs/implementation/US-1.1-activity-queue.md)
     - [US-1.2: Event-Driven Scheduling](docs/implementation/US-1.2-event-driven-scheduling.md)
+  - **Epic 1A: API Server** ✅ (7 of 9 complete)
     - [US-1A.1: Health Check and Service Discovery](docs/implementation/US-1A.1-health-checks.md)
     - [US-1A.1.5: API Server CLI Launcher](docs/implementation/US-1A.1.5-api-server-launcher.md)
     - [US-1A.2: Error Handling and API Contracts](docs/implementation/US-1A.2-error-handling.md)
     - [US-1A.3: Authentication](docs/implementation/US-1A.3-authentication.md)
     - [US-1A.4: Workflow Definition Management](docs/implementation/US-1A.4-workflow-definition-management.md)
     - [US-1A.5: Workflow Submission API](docs/implementation/US-1A.5-workflow-submission.md)
-  - **Current Focus**:
     - [US-1A.6: Workflow Status Query](docs/implementation/US-1A.6-workflow-status-query.md)
     - [US-1A.7: Worker Activity APIs](docs/implementation/US-1A.7-worker-activity-apis.md)
+  - **Epic 1B: Built-in Worker** ✅
+    - [US-1B.1: Worker Polling with Concurrency Safety](docs/implementation/US-1B.1-built-in-worker.md)
+  - **Epic 1C: Main Binary and CLI** (Partial - 1 of 6 complete)
+    - [US-1C.1: Main Binary and CLI Framework](docs/implementation/US-1C.1-main-binary-cli.md)
 
 ### Additional Documentation
 - **[Post-MVP Roadmap](docs/post-mvp.md)** - Features deferred beyond MVP
@@ -352,15 +366,15 @@ openssl rsa -in private.pem -pubout -out public.pem
 - ✅ Activity execution and result reporting
 - ✅ Same code path as external workers (consistency)
 
-### Phase 2C: Pre-Epic 2 Requirements (Weeks 8-9) 🎯 Current Focus
+### Phase 2C: Pre-Epic 2 Requirements (Weeks 8-9) 🎯 90% Complete
 **Minimal viable system for performance benchmarking:**
-- 🔨 Workflow Status and Query API (US-1A.6) - ~11 hours
-- 📋 Worker Activity APIs (US-1A.7) - ~12 hours
-- 📋 Main Binary and CLI Framework (US-1C.1) - ~6 hours
+- ✅ Workflow Status and Query API (US-1A.6) - 11 hours
+- ✅ Worker Activity APIs (US-1A.7) - 12 hours
+- ✅ Main Binary and CLI Framework (US-1C.1) - 6 hours
 - 📋 All-in-One Service Launcher (US-1C.2) - ~8 hours
 - 📋 Graceful Shutdown (US-1C.7) - ~4 hours
 
-**Total: ~41 hours (5-6 days)**
+**Completed: ~29 hours | Remaining: ~12 hours (1-2 days)**
 
 ### Phase 3: Performance Benchmarking (Weeks 10-11) 📋 Next
 **Epic 2: Validate Architecture Before Additional Features**
