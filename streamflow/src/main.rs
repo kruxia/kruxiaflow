@@ -12,7 +12,19 @@ mod signals;
     name = "streamflow",
     version,
     about = "StreamFlow workflow orchestration platform",
-    long_about = None
+    long_about = "StreamFlow is a lightweight, high-performance workflow orchestration \
+platform designed for edge-to-cloud deployment. Built as a single binary \
+with PostgreSQL as the only required dependency.\n\n\
+EXAMPLES:\n  \
+  streamflow api --port 8080\n  \
+  streamflow version --format json\n  \
+  streamflow --help\n\n\
+ENVIRONMENT VARIABLES:\n  \
+  DATABASE_URL               PostgreSQL connection string (required for most commands)\n  \
+  STREAMFLOW_LOG_LEVEL       Logging verbosity (default: info)\n  \
+  STREAMFLOW_LOG_FORMAT      Log output format (default: text)\n  \
+  STREAMFLOW_API_PORT        API server port (default: 8080)\n  \
+  STREAMFLOW_API_BIND        API server bind address (default: 0.0.0.0)"
 )]
 struct Cli {
     /// Database connection URL
@@ -20,7 +32,10 @@ struct Cli {
         long,
         env = "DATABASE_URL",
         global = true,
-        help = "PostgreSQL connection URL (postgres://user:pass@host:port/db)"
+        help = "PostgreSQL connection URL (postgres://user:pass@host:port/db)",
+        long_help = "PostgreSQL connection URL\n\n\
+Example: postgres://user:pass@localhost:5432/streamflow\n\
+Required for all commands except 'version'"
     )]
     database_url: Option<String>,
 
@@ -30,7 +45,11 @@ struct Cli {
         env = "STREAMFLOW_LOG_LEVEL",
         default_value = "info",
         global = true,
-        help = "Log level (trace, debug, info, warn, error)"
+        help = "Log level (trace, debug, info, warn, error)",
+        long_help = "Log level for structured logging\n\n\
+Options: trace, debug, info, warn, error\n\
+Default: info\n\
+Example: --log-level debug"
     )]
     log_level: String,
 
@@ -40,7 +59,11 @@ struct Cli {
         env = "STREAMFLOW_LOG_FORMAT",
         default_value = "text",
         global = true,
-        help = "Log format (text, json)"
+        help = "Log format (text, json)",
+        long_help = "Log output format\n\n\
+Options: text (human-readable), json (machine-readable)\n\
+Default: text\n\
+Example: --log-format json for production logging"
     )]
     log_format: String,
 
@@ -51,7 +74,34 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Launch API server
+    #[command(
+        about = "Launch the API server on the specified port",
+        long_about = "Launch the HTTP API server\n\n\
+The API server provides RESTful endpoints for workflow management, \
+authentication, and monitoring.\n\n\
+EXAMPLES:\n  \
+  streamflow api\n  \
+  streamflow api --port 9090 --bind 127.0.0.1\n  \
+  DATABASE_URL=postgres://localhost/db streamflow api\n\n\
+ENDPOINTS:\n  \
+  GET  /health              - Liveness probe\n  \
+  GET  /health/ready        - Readiness probe\n  \
+  GET  /api/v1/info         - Service information\n  \
+  POST /api/v1/auth/token   - Authentication\n  \
+  See /api/v1/openapi.json for full API documentation"
+    )]
     Api(commands::api::ApiCommand),
+
+    /// Show version information
+    #[command(
+        about = "Display version and build information",
+        long_about = "Display version and build information\n\n\
+Shows StreamFlow version, build timestamp, git commit, and platform details.\n\n\
+EXAMPLES:\n  \
+  streamflow version\n  \
+  streamflow version --format json"
+    )]
+    Version(commands::version::VersionCommand),
     // Future commands (Epic 1C):
     // Serve(commands::serve::ServeCommand),
     // Orchestrator(commands::orchestrator::OrchestratorCommand),
@@ -63,11 +113,14 @@ enum Commands {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Initialize logging
-    logging::init(&cli.log_level, &cli.log_format)?;
+    // Initialize logging (skip for version command)
+    if !matches!(cli.command, Commands::Version(_)) {
+        logging::init(&cli.log_level, &cli.log_format)?;
+    }
 
     // Route to command handler
     match cli.command {
         Commands::Api(cmd) => commands::api::execute(cmd, cli.database_url).await,
+        Commands::Version(cmd) => commands::version::execute(cmd),
     }
 }

@@ -16,7 +16,10 @@ pub struct ApiCommand {
         short,
         long,
         env = "STREAMFLOW_API_PORT",
-        help = "Port to bind API server to"
+        help = "Port to bind API server to",
+        long_help = "Port to bind API server to\n\n\
+Default: 8080\n\
+Example: --port 9090"
     )]
     port: Option<u16>,
 
@@ -25,7 +28,12 @@ pub struct ApiCommand {
         short,
         long,
         env = "STREAMFLOW_API_BIND",
-        help = "Address to bind API server to (e.g., 0.0.0.0, 127.0.0.1)"
+        help = "Address to bind API server to (e.g., 0.0.0.0, 127.0.0.1)",
+        long_help = "Address to bind API server to\n\n\
+Options:\n  \
+  0.0.0.0    - All network interfaces (default)\n  \
+  127.0.0.1  - Localhost only (development)\n\
+Example: --bind 127.0.0.1"
     )]
     bind: Option<String>,
 }
