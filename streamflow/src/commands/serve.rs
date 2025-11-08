@@ -115,6 +115,20 @@ Range: 5-300 seconds\n\
 Example: --shutdown-timeout 60"
     )]
     pub shutdown_timeout: u64,
+
+    /// Maximum activities per worker poll
+    #[arg(
+        long,
+        env = "STREAMFLOW_MAX_ACTIVITIES_PER_POLL",
+        default_value = "10",
+        help = "Maximum number of activities each worker claims per poll",
+        long_help = "Maximum number of activities each worker claims per poll\n\n\
+Default: 10\n\
+Range: 1-100\n\
+Note: Lower values (1-5) improve work distribution across workers\n\
+Example: --max-activities-per-poll 1"
+    )]
+    pub max_activities_per_poll: usize,
 }
 
 impl ServeCommand {
@@ -122,6 +136,10 @@ impl ServeCommand {
     pub fn validate(&self) -> Result<()> {
         if self.workers == 0 || self.workers > 100 {
             anyhow::bail!("Worker count must be between 1 and 100");
+        }
+
+        if self.max_activities_per_poll == 0 || self.max_activities_per_poll > 100 {
+            anyhow::bail!("Max activities per poll must be between 1 and 100");
         }
 
         if self.client_secret.is_none() {
@@ -234,6 +252,7 @@ async fn spawn_api_server(
 /// Spawn worker tasks
 async fn spawn_workers(
     worker_count: usize,
+    max_activities_per_poll: usize,
     api_url: String,
     client_id: String,
     client_secret: String,
@@ -256,7 +275,7 @@ async fn spawn_workers(
         api_url: api_url.clone(),
         worker_id: format!("internal_worker_{}", Uuid::now_v7()),
         activity_types: registry.activity_types(),
-        max_activities_per_poll: 10,
+        max_activities_per_poll,
         poll_interval: Duration::from_millis(100),
         concurrency: worker_count,
         activity_timeout: Duration::from_secs(300),
@@ -295,7 +314,9 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
     // 1. Test database connection
     tracing::info!("Testing database connection...");
     let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(20)
+        .max_connections(100) // Increased from 20 to support high concurrency
+        .min_connections(10) // Set minimum to reduce connection overhead
+        .acquire_timeout(std::time::Duration::from_secs(5))
         .connect(&database_url)
         .await
         .map_err(|e| {
@@ -358,6 +379,7 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
     // 5. Spawn workers (workers will be gracefully stopped via manager)
     let worker_handles = spawn_workers(
         cmd.workers,
+        cmd.max_activities_per_poll,
         api_url.clone(),
         cmd.client_id.clone(),
         cmd.client_secret.unwrap(),
@@ -445,6 +467,7 @@ mod tests {
             ),
             oauth_public_key: None,
             shutdown_timeout: 30,
+            max_activities_per_poll: 10,
         };
 
         assert!(cmd.validate().is_ok());
@@ -462,6 +485,7 @@ mod tests {
             oauth_private_key: Some("key".to_string()),
             oauth_public_key: None,
             shutdown_timeout: 30,
+            max_activities_per_poll: 10,
         };
 
         assert!(cmd.validate().is_err());
@@ -475,6 +499,7 @@ mod tests {
             workers: 1,
             orchestrator_id: "orchestrator_default".to_string(),
             client_id: "streamflow_internal_worker".to_string(),
+            max_activities_per_poll: 10,
             client_secret: None,
             oauth_private_key: Some("key".to_string()),
             oauth_public_key: None,

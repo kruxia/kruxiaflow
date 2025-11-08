@@ -2463,6 +2463,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "streamflow-benchmark"
+version = "0.2.0"
+dependencies = [
+ "bcrypt",
+ "chrono",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sqlx",
+ "streamflow-core",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "streamflow-core"
 version = "0.2.0"
 dependencies = [

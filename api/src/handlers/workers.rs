@@ -333,11 +333,13 @@ pub async fn poll_activities(
 
     let count = activities.len();
 
-    tracing::info!(
-        worker_id = %request.worker_id,
-        claimed_count = count,
-        "Activities claimed"
-    );
+    if count > 0 {
+        tracing::info!(
+            worker_id = %request.worker_id,
+            claimed_count = count,
+            "Activities claimed"
+        );
+    }
 
     Ok(Json(PollActivitiesResponse {
         activities: activities

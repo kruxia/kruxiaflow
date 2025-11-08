@@ -151,7 +151,7 @@ if [ "$SKIP_DB_SETUP" = false ]; then
     DB_USER="streamflow"
     DB_PASSWORD="streamflow_dev"
     DB_HOST="127.0.0.1"
-    DB_PORT="5433"
+    DB_PORT="5432"
     DB_NAME="streamflow_test"
 
     # Drop and recreate test database

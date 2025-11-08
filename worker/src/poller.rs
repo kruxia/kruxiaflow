@@ -253,6 +253,7 @@ mod tests {
     }
 
     /// Test activity that fails
+    #[allow(dead_code)]
     struct FailingActivity;
 
     #[async_trait]
@@ -271,6 +272,7 @@ mod tests {
     }
 
     /// Test activity that times out
+    #[allow(dead_code)]
     struct SlowActivity;
 
     #[async_trait]

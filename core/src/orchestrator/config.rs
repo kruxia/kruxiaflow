@@ -15,8 +15,8 @@ impl OrchestratorConfig {
         Self {
             pool,
             poll_interval_min: Duration::from_millis(10),
-            poll_interval_max: Duration::from_secs(5),
-            backoff_multiplier: 1.62,
+            poll_interval_max: Duration::from_millis(500), // Optimized for low latency
+            backoff_multiplier: 1.3, // Optimized for faster convergence
         }
     }
 

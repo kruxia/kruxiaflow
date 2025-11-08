@@ -2311,6 +2311,38 @@ Migrations are embedded in the binary and run automatically on startup.
 - ~1ms orchestration latency
 - Target >1,000 workflows/sec with query and index optimization
 
+### Performance Benchmarking
+
+StreamFlow includes comprehensive performance testing infrastructure to ensure we meet throughput and latency targets.
+
+**Benchmark Types**:
+
+1. **HTTP API Load Tests** (Primary):
+   - End-to-end workflow throughput and latency measurements
+   - Tests via production HTTP API (comparable to Temporal, Conductor)
+   - 4 test scenarios: Sequential, Parallel, High-Concurrency, Sustained Load
+   - Metrics: Throughput (wf/sec), End-to-End Latency (P50/P95/P99), Success Rate
+
+2. **Micro-benchmarks** (Future - US-2.X):
+   - Workflow evaluation time
+   - Activity scheduling latency
+   - Event publishing overhead
+   - State query performance
+
+**CI Integration**:
+- Automated benchmarks run on every commit to main and PRs
+- Regression detection: >10% performance degradation fails CI
+- Historical trend tracking via GitHub artifacts
+- Automated PR comments with performance comparison
+
+**Test Scenarios**:
+- Sequential workflow (5 activities, 1000 workflows): ≥100 wf/sec target
+- Parallel workflow (10 parallel activities, 500 workflows): ≥50 wf/sec target
+- High concurrency (3 activities, 5000 workflows, 100 concurrent): ≥200 wf/sec target
+- Sustained throughput (60 seconds continuous load): ≥100 wf/sec target
+
+See [Performance Testing Guide](performance-testing.md) for details on running and interpreting benchmarks.
+
 ---
 
 ## Multi-Tenancy and Authorization
