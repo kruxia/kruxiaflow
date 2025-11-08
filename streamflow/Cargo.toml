@@ -32,9 +32,13 @@ serde_json = { workspace = true }
 streamflow-api = { path = "../api" }
 streamflow-core = { path = "../core" }
 streamflow-oauth = { path = "../oauth" }
+streamflow-worker = { path = "../worker" }
 
 # Database
 sqlx = { workspace = true }
+
+# UUIDs
+uuid = { workspace = true }
 
 # Web framework
 axum = { workspace = true }
