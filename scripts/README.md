@@ -18,25 +18,25 @@ Unified test runner with coverage support.
 
 **Usage:**
 ```bash
-./scr/test.sh [OPTIONS]
+./scripts/test.sh [OPTIONS]
 ```
 
 **Common Commands:**
 ```bash
 # Run all tests
-./scr/test.sh
+./scripts/test.sh
 
 # Run with coverage report
-./scr/test.sh --coverage-html
+./scripts/test.sh --coverage-html
 
 # Test specific crate
-./scr/test.sh -p streamflow-api
+./scripts/test.sh -p streamflow-api
 
 # Unit tests only
-./scr/test.sh --unit
+./scripts/test.sh --unit
 
 # See all options
-./scr/test.sh --help
+./scripts/test.sh --help
 ```
 
 **Coverage Options:**
@@ -62,7 +62,7 @@ Sets up the development PostgreSQL database.
 
 **Usage:**
 ```bash
-./scr/setup-dev-db.sh
+./scripts/setup-dev-db.sh
 ```
 
 This script:
@@ -77,7 +77,7 @@ This script:
 - Rust toolchain (stable)
 - Docker and docker-compose (for PostgreSQL)
 - sqlx-cli (for migrations)
-- cargo-llvm-cov (for coverage - install with `./scr/test.sh --install-coverage`)
+- cargo-llvm-cov (for coverage - install with `./scripts/test.sh --install-coverage`)
 
 ### Installation
 
@@ -89,7 +89,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 cargo install sqlx-cli --no-default-features --features postgres
 
 # Install coverage tool
-./scr/test.sh --install-coverage
+./scripts/test.sh --install-coverage
 ```
 
 ## Coverage Reports
@@ -106,7 +106,7 @@ These paths are in `.gitignore` and will not be committed.
 For continuous integration, use:
 
 ```bash
-./scr/test.sh --coverage-ci --skip-db-setup
+./scripts/test.sh --coverage-ci --skip-db-setup
 ```
 
 This generates an lcov report that can be uploaded to services like Codecov or Coveralls.
@@ -115,7 +115,7 @@ Example GitHub Actions workflow snippet:
 
 ```yaml
 - name: Run tests with coverage
-  run: ./scr/test.sh --coverage-ci --skip-db-setup
+  run: ./scripts/test.sh --coverage-ci --skip-db-setup
   env:
     DATABASE_URL: postgres://streamflow:streamflow_dev@localhost:5433/streamflow_test
 
@@ -131,33 +131,33 @@ Example GitHub Actions workflow snippet:
 
 ```bash
 # Run tests locally
-./scr/test.sh
+./scripts/test.sh
 
 # Check coverage
-./scr/test.sh --coverage
+./scripts/test.sh --coverage
 ```
 
 ### When Adding New Code
 
 ```bash
 # Test specific crate you're working on
-./scr/test.sh -p streamflow-api
+./scripts/test.sh -p streamflow-api
 
 # Check coverage for that crate
-./scr/test.sh --coverage-html -p streamflow-api
+./scripts/test.sh --coverage-html -p streamflow-api
 ```
 
 ### Debugging Failed Tests
 
 ```bash
 # Run with verbose output
-./scr/test.sh --verbose
+./scripts/test.sh --verbose
 
 # Show test output
-./scr/test.sh --nocapture
+./scripts/test.sh --nocapture
 
 # Both together
-./scr/test.sh --verbose --nocapture
+./scripts/test.sh --verbose --nocapture
 ```
 
 ## See Also
