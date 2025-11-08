@@ -1,7 +1,7 @@
 # US-1C.1: Main Binary and CLI Framework
 
 **Epic**: 1C - StreamFlow Binary and CLI
-**Status**: 📋 Ready for Implementation (~6 hours remaining)
+**Status**: ✅ **COMPLETE**
 **Foundation**: ✅ Complete (via US-1A.1.5)
 **Current Binary Size**: 4.5MB (well under 15MB target ✅)
 
@@ -19,17 +19,17 @@
 
 - [x] Main crate `streamflow` that depends on `core`, `api`, and `worker` crates
 - [x] CLI framework (clap) with subcommands for different services
-- [ ] Subcommands: `serve`, `orchestrator`, `api`, `worker`, `version`, `migrate`
+- [x] Subcommands implemented for US-1C.1:
   - [x] `api` - Launch API server only (✅ US-1A.1.5)
-  - [ ] `version` - Show version information (this story - ~2 hours)
+  - [x] `version` - Show version information (✅ US-1C.1)
   - [ ] `serve` - Launch all services together (US-1C.2 - next)
   - [ ] `orchestrator` - Launch orchestrator only (US-1C.3 - Post-Epic 2)
   - [ ] `worker` - Launch worker only (US-1C.3 - Post-Epic 2)
   - [ ] `migrate` - Database migration management (US-1C.5 - Post-Epic 2)
 - [x] Global flags: `--database-url`, `--log-level`, `--log-format`
-- [ ] Help text and examples for each subcommand (~2 hours)
-- [ ] Binary size: <15MB release build (~1 hour validation)
-- [ ] Version information: `streamflow --version` shows semantic version and build info (~1 hour)
+- [x] Help text and examples for each subcommand
+- [x] Binary size: <15MB release build (actual: 4MB ✅)
+- [x] Version information: `streamflow version` shows semantic version and build info
 
 ---
 
@@ -64,29 +64,29 @@ The foundation of the CLI framework is already in place:
    - Health endpoints
    - Comprehensive test coverage
 
-### 📋 Remaining Work for US-1C.1 (~6 hours)
+### ✅ Completed Work for US-1C.1
 
-Four tasks to complete this user story:
+All four tasks completed:
 
-1. **Build Script for Metadata** (~1 hour)
-   - Create `streamflow/build.rs` using `api/build.rs` pattern
-   - Use same `BUILD_*` environment variables
-   - Capture timestamp, git commit, branch
+1. **Build Script for Metadata** ✅
+   - Created `streamflow/build.rs` using `api/build.rs` pattern
+   - Uses `BUILD_*` environment variables
+   - Captures timestamp, git commit, branch
 
-2. **Version Subcommand** (~2 hours)
-   - Implement `streamflow version` command
-   - Support text and JSON output formats
-   - Display version, build info, platform details
+2. **Version Subcommand** ✅
+   - Implemented `streamflow version` command
+   - Supports text and JSON output formats
+   - Displays version, build info, platform details
 
-3. **Enhanced Help Text** (~2 hours)
-   - Add examples to main CLI help
-   - Document environment variables
+3. **Enhanced Help Text** ✅
+   - Added examples to main CLI help
+   - Documented environment variables
    - Comprehensive help for all commands
 
-4. **Binary Size Validation** (~1 hour)
-   - Create validation script
-   - Verify <15MB target (currently 4.5MB)
-   - Document optimization settings
+4. **Binary Size Validation** ✅
+   - Created `scripts/check-binary-size.sh`
+   - Verified <15MB target (actual: 4MB)
+   - Documented optimization settings
 
 ### 📋 Deferred to Later Stories
 
@@ -774,12 +774,12 @@ cargo build --release
 ### Functional Requirements
 
 - [x] CLI framework with subcommands (via US-1A.1.5)
-- [ ] `streamflow version` displays version in text format
-- [ ] `streamflow version --format json` outputs valid JSON
-- [ ] `streamflow --version` shows short version string
+- [x] `streamflow version` displays version in text format
+- [x] `streamflow version --format json` outputs valid JSON
+- [x] `streamflow --version` shows short version string
 - [x] `streamflow api` launches API server (via US-1A.1.5)
-- [ ] Help text includes examples and environment variables
-- [ ] Binary size <15MB in release mode
+- [x] Help text includes examples and environment variables
+- [x] Binary size <15MB in release mode (actual: 4MB)
 
 ### Non-Functional Requirements
 
@@ -792,46 +792,46 @@ cargo build --release
 
 ## Implementation Checklist
 
-### Task 1: Build Metadata (~1 hour)
-- [ ] Create `streamflow/build.rs` (based on `api/build.rs`)
-- [ ] Use `BUILD_*` environment variables (not `STREAMFLOW_*`)
-- [ ] Test build script captures git metadata
-- [ ] Verify graceful handling of missing git
-- [ ] Test rebuild triggers on git changes
+### Task 1: Build Metadata ✅
+- [x] Create `streamflow/build.rs` (based on `api/build.rs`)
+- [x] Use `BUILD_*` environment variables (not `STREAMFLOW_*`)
+- [x] Test build script captures git metadata
+- [x] Verify graceful handling of missing git
+- [x] Test rebuild triggers on git changes
 
-### Task 2: Version Command (~2 hours)
-- [ ] Create `streamflow/src/commands/version.rs`
-- [ ] Add `serde`/`serde_json` to dependencies
-- [ ] Implement `VersionCommand` with text/json
-- [ ] Add unit tests
-- [ ] Update `commands/mod.rs`
-- [ ] Update `main.rs` Commands enum
-- [ ] Skip logging for version command
-- [ ] Test text and JSON output
+### Task 2: Version Command ✅
+- [x] Create `streamflow/src/commands/version.rs`
+- [x] Add `serde`/`serde_json` to dependencies
+- [x] Implement `VersionCommand` with text/json
+- [x] Add unit tests
+- [x] Update `commands/mod.rs`
+- [x] Update `main.rs` Commands enum
+- [x] Skip logging for version command
+- [x] Test text and JSON output
 
-### Task 3: Enhanced Help (~2 hours)
-- [ ] Update `main.rs` Cli with `long_about`
-- [ ] Add examples to main help
-- [ ] Add environment variable docs
-- [ ] Update Commands enum with detailed help
-- [ ] Update `ApiCommand` with `long_help`
-- [ ] Update `VersionCommand` with `long_help`
-- [ ] Test all help outputs
+### Task 3: Enhanced Help ✅
+- [x] Update `main.rs` Cli with `long_about`
+- [x] Add examples to main help
+- [x] Add environment variable docs
+- [x] Update Commands enum with detailed help
+- [x] Update `ApiCommand` with `long_help`
+- [x] Update `VersionCommand` with `long_help`
+- [x] Test all help outputs
 
-### Task 4: Binary Size (~1 hour)
-- [ ] Create `scripts/check-binary-size.sh`
-- [ ] Make script executable
-- [ ] Test with release binary
-- [ ] Document in README
-- [ ] Verify 4.5MB < 15MB target ✅
+### Task 4: Binary Size ✅
+- [x] Create `scripts/check-binary-size.sh`
+- [x] Make script executable
+- [x] Test with release binary
+- [x] Document in README
+- [x] Verify 4MB < 15MB target ✅
 
-### Final Verification
-- [ ] All tests pass: `cargo test`
-- [ ] No warnings: `cargo build --release`
-- [ ] Binary size verified
-- [ ] Help comprehensive
-- [ ] Version works correctly
-- [ ] Mark US-1C.1 complete
+### Final Verification ✅
+- [x] All tests pass: `cargo test` (286 tests passed)
+- [x] No warnings: `cargo build --release`
+- [x] Binary size verified (4MB)
+- [x] Help comprehensive
+- [x] Version works correctly
+- [x] Mark US-1C.1 complete
 
 ---
 
