@@ -463,7 +463,7 @@ streamflow/
 
 **Business Objective**: Establish early performance baseline and prove 10x advantage over competitors
 
-**Strategic Rationale**: Benchmarking immediately after Epic 1 (core orchestration) validates the fundamental architectural claims before investing in additional features. Early detection of bottlenecks prevents building on a weak foundation. Epic 2 uses **programmatic workflow definitions** (Rust structs, JSON, or hardcoded test workflows), eliminating dependency on YAML parsing. This provides a pure baseline for orchestration performance and informs Epic 3 (YAML) design decisions.
+**Strategic Rationale**: Benchmarking immediately after Epic 1 (core orchestration) validates the fundamental architectural claims before investing in additional features. Early detection of bottlenecks prevents building on a weak foundation. This provides a pure baseline for orchestration performance and informs Epic 3 (YAML) design decisions.
 
 ### User Stories
 
@@ -474,7 +474,7 @@ streamflow/
 - **Acceptance Criteria**:
   - Benchmark scenarios: Sequential workflow, parallel workflow, high-concurrency
   - Metrics: Workflow throughput (wf/sec), start latency (P50/P95/P99), activity latency
-  - CI integration: Run on every commit
+  - CI integration: Run on every commit to main
   - Performance regression detection: Fail if >10% slower
   - Historical trend tracking
   - **Programmatic workflows**: Use Rust WorkflowDefinition structs, not YAML
@@ -486,7 +486,7 @@ streamflow/
 - **So that** I can prove 10x performance to leadership and validate our architecture early
 - **Acceptance Criteria**:
   - Same workflow implemented on each platform
-  - Same hardware: AWS EC2 instance specifications
+  - Same hardware (number of CPU cores, AWS EC2 instance specifications) for each platform
   - Docker Compose setup for reproducibility
   - Published methodology: Open-source on GitHub
   - Results: HTML report with charts
@@ -512,22 +512,28 @@ streamflow/
 - **Acceptance Criteria**:
   - Stress test: Ramp to 10,000 concurrent workflows
   - Identify bottlenecks: Database, CPU, memory, network
-  - Capacity recommendations: "1 orchestrator + 10 workers handles 5,000 workflows/min"
+  - Capacity recommendations: "N orchestrator + M workers handles P,000 workflows/min"
   - Failure modes: Graceful degradation, not crashes
   - Load test tool provided
   - Document baseline capacity for future comparison
 
-**US-2.5: Performance Dashboard and Monitoring**
+**US-2.5: Grafana Performance Dashboard**
 - **As** a platform engineering lead
-- **I want** real-time performance visibility during development
+- **I want** real-time performance metrics via Grafana
 - **So that** we catch performance issues immediately during feature development
 - **Acceptance Criteria**:
-  - Grafana dashboard with key metrics
-  - Real-time workflow throughput monitoring
-  - Latency percentile charts (P50, P95, P99)
-  - Queue depth visualization
-  - Database performance metrics (queries/sec, connection pool)
-  - Alerting on performance degradation
+  - Prometheus metrics endpoint (`/metrics`) exposing StreamFlow metrics
+  - Grafana dashboard template with key performance metrics:
+    - Real-time workflow throughput (workflows/sec)
+    - Workflow start latency percentiles (P50, P95, P99)
+    - Activity queue depth over time
+    - Database performance (queries/sec, connection pool utilization)
+    - Active workflows count
+  - PostgreSQL datasource configuration for querying workflow data directly
+  - Grafana alerting rules for performance degradation (>10% throughput drop, latency spike)
+  - Dashboard export (JSON) included in repository
+- **Scope**: Focused on Grafana-native capabilities only
+- **Deferred to Epic 10**: Custom web UI for workflow inspection, execution history, activity traces
 
 ---
 
@@ -1068,15 +1074,16 @@ streamflow/
 
 **US-10.1: Built-In Observability Dashboard**
 - **As** a platform engineering lead
-- **I want** a web UI showing workflow execution history
-- **So that** I monitor production without external tools
+- **I want** a web UI showing workflow execution history and detailed inspection
+- **So that** I can monitor production and debug workflows without external tools
 - **Acceptance Criteria**:
   - Web UI: Workflow list, execution history, activity traces
-  - Real-time updates via WebSocket
+  - Real-time updates via WebSocket (from US-1A.9)
   - Filter by status, workflow type, date range
   - Drill-down: Workflow → Activity → Logs
-  - Execution timeline visualization
-  - Performance metrics: P50, P95, P99 latency
+  - Execution timeline visualization (Gantt-style activity timeline)
+  - Performance metrics: P50, P95, P99 latency (aggregated views)
+- **Note**: Complements Grafana (US-2.5) which provides time-series metrics. This dashboard focuses on workflow-level inspection and debugging.
 
 **US-10.2: PostgreSQL-Backed Traces (SQL Queryable)**
 - **As** a platform engineering lead
@@ -1652,6 +1659,7 @@ flowchart TB
 | 0.8     | 2025-10-30 | Claude Code | Added Epic 1C (StreamFlow Binary and CLI) with 7 user stories covering main binary, service launchers (serve, orchestrator, api, worker), configuration management, database migrations, health checks, and graceful shutdown. Updated release criteria and roadmap. |
 | 0.9     | 2025-11-06 | Claude Code | Revised epic sequencing: Split Epic 1A and 1C into Pre-Epic 2 (US-1A.6,7 and US-1C.1,2,7) and Post-Epic 2 (US-1A.8,9 and US-1C.3,4,5,6). Pre-Epic 2 stories provide minimal viable system for benchmarking. Post-Epic 2 stories will be informed by performance insights. Updated implementation roadmap to show phased approach. All deferred stories remain in MVP scope, just resequenced for better risk management and earlier performance validation. |
 | 0.9.0   | 2025-11-08 | Claude Code | Implementation progress update: Completed US-1A.6 (Workflow Status Query), US-1A.7 (Worker Activity APIs), US-1B.1 (Built-in Worker), and US-1C.1 (Main Binary and CLI Framework). Epic 1B now complete. Phase 2C is 90% complete with only US-1C.2 and US-1C.7 remaining (~12 hours). Binary size: 4.5MB (well under 15MB target). Ready for Epic 2 benchmarking after US-1C.2/1C.7 completion. |
+| 0.9.1   | 2025-11-08 | Claude Code | Refined US-2.5 (Performance Dashboard) to focus exclusively on Grafana capabilities: Prometheus metrics endpoint, Grafana dashboard template, PostgreSQL datasource, and alerting rules. Deferred custom web UI for workflow inspection to Epic 10 (US-10.1). Updated US-10.1 to clarify it complements Grafana with workflow-level debugging and inspection capabilities. |
 
 **Approval:**
 
