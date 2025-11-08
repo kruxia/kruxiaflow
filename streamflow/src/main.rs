@@ -92,6 +92,22 @@ ENDPOINTS:\n  \
     )]
     Api(commands::api::ApiCommand),
 
+    /// Launch all services together
+    #[command(
+        about = "Launch orchestrator, API server, and workers together",
+        long_about = "Launch all StreamFlow services in a single process\n\n\
+This is the recommended mode for development, testing, and single-node production.\n\n\
+EXAMPLES:\n  \
+  streamflow serve\n  \
+  streamflow serve --port 8080 --workers 4\n  \
+  streamflow serve --bind 127.0.0.1 --workers 2\n\n\
+SERVICES STARTED:\n  \
+  - Orchestrator: Evaluates workflows and schedules activities\n  \
+  - API Server: HTTP/REST endpoints\n  \
+  - Workers: Built-in activity execution (configurable count)"
+    )]
+    Serve(commands::serve::ServeCommand),
+
     /// Show version information
     #[command(
         about = "Display version and build information",
@@ -103,7 +119,6 @@ EXAMPLES:\n  \
     )]
     Version(commands::version::VersionCommand),
     // Future commands (Epic 1C):
-    // Serve(commands::serve::ServeCommand),
     // Orchestrator(commands::orchestrator::OrchestratorCommand),
     // Worker(commands::worker::WorkerCommand),
     // Migrate(commands::migrate::MigrateCommand),
@@ -118,9 +133,26 @@ async fn main() -> Result<()> {
         logging::init(&cli.log_level, &cli.log_format)?;
     }
 
+    // Validate database_url for commands that need it
+    let database_url = match &cli.command {
+        Commands::Version(_) => None,
+        _ => {
+            let url = cli.database_url.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Database URL is required\n\n\
+                    Set via:\n  \
+                      --database-url postgres://user:pass@host:port/db\n  \
+                      export DATABASE_URL=postgres://user:pass@host:port/db"
+                )
+            })?;
+            Some(url)
+        }
+    };
+
     // Route to command handler
     match cli.command {
-        Commands::Api(cmd) => commands::api::execute(cmd, cli.database_url).await,
+        Commands::Api(cmd) => commands::api::execute(cmd, database_url.clone()).await,
+        Commands::Serve(cmd) => commands::serve::execute(cmd, database_url.unwrap()).await,
         Commands::Version(cmd) => commands::version::execute(cmd),
     }
 }

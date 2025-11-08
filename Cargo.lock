@@ -2407,11 +2407,13 @@ dependencies = [
  "streamflow-api",
  "streamflow-core",
  "streamflow-oauth",
+ "streamflow-worker",
  "thiserror 2.0.17",
  "tokio",
  "tokio-stream",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
