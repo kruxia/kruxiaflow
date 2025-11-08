@@ -1,10 +1,12 @@
-# US-2.1: Automated Performance Test Suite - Implementation Plan
+# US-2.1: Integration Load Tests (HTTP API) - Implementation Plan
 
 **Epic**: 2 - Performance Benchmarking and Validation
 **User Story**: US-2.1
 **Status**: Ready for Implementation
-**Estimated Effort**: 16-20 hours
+**Estimated Effort**: 8-10 hours
 **Priority**: P0 (Required for Epic 2)
+**Deferred**: Criterion micro-benchmarks moved to US-2.X (post-MVP optimization tool)
+**Architecture**: Separate `benchmark` crate, HTTP API-based testing only
 
 ---
 
@@ -16,8 +18,10 @@
 
 ## Acceptance Criteria
 
+- [x] Separate `benchmark` crate (not compiled into production binary)
+- [x] Benchmark via HTTP API only (apples-to-apples with Temporal, etc.)
 - [x] Benchmark scenarios: Sequential workflow, parallel workflow, high-concurrency
-- [x] Metrics: Workflow throughput (wf/sec), start latency (P50/P95/P99), activity latency
+- [x] Metrics: Workflow throughput (wf/sec), end-to-end latency (P50/P95/P99)
 - [x] CI integration: Run on every commit to main
 - [x] Performance regression detection: Fail if >10% slower
 - [x] Historical trend tracking
@@ -28,43 +32,59 @@
 
 ## Implementation Overview
 
-This implementation creates a comprehensive performance testing framework with three key components:
+This implementation creates a platform-comparable performance testing framework with three key components:
 
-1. **Performance benchmark suite** (`core/benches/`) - Criterion.rs benchmarks for micro-benchmarks
-2. **Integration load tests** (`core/tests/performance/`) - End-to-end workflow throughput and latency tests
+1. **Separate benchmark crate** (`benchmark/`) - Standalone crate for all performance tests
+2. **HTTP API-based load tests** - End-to-end workflow throughput and latency via REST API
 3. **CI automation** (`.github/workflows/`) - Automated regression detection and historical tracking
+
+**Key Design Decisions**:
+- **Separate crate**: Benchmarks not compiled into production binary
+- **HTTP API only**: Comparable to how Temporal, Conductor, etc. would be benchmarked
+- **Deferred**: Criterion micro-benchmarks moved to US-2.X (post-MVP optimization tool)
 
 ### Architecture
 
 ```mermaid
 flowchart TB
-    subgraph "Performance Test Suite"
-        Criterion[Criterion Benchmarks<br/>core/benches/]
-        LoadTests[Load Tests<br/>core/tests/performance/]
+    subgraph "Benchmark Crate (Separate)"
+        LoadTests[HTTP Load Tests<br/>benchmark/src/]
         Scenarios[Test Scenarios<br/>Sequential, Parallel, High-Concurrency]
+        HttpClient[HTTP Client<br/>reqwest]
+    end
+
+    subgraph "StreamFlow (Under Test)"
+        API[API Server :8080]
+        Orch[Orchestrator]
+        Worker[Worker Pool]
+        DB[(PostgreSQL)]
     end
 
     subgraph "Metrics Collection"
         Throughput[Throughput<br/>workflows/sec]
-        Latency[Latency<br/>P50/P95/P99]
-        Activity[Activity Latency<br/>schedule to complete]
-        Queue[Queue Depth<br/>pending activities]
+        Latency[End-to-End Latency<br/>P50/P95/P99]
+        Success[Success Rate<br/>completed/total]
     end
 
     subgraph "CI Pipeline"
         Trigger[GitHub Actions<br/>on push to main]
         Runner[Ubuntu Runner<br/>PostgreSQL 18]
         Compare[Regression Check<br/>>10% = fail]
-        Store[Historical Data<br/>GitHub Pages/Artifacts]
+        Store[Historical Data<br/>GitHub Artifacts]
         Report[HTML Report<br/>with charts]
     end
 
-    Criterion --> Metrics
-    LoadTests --> Metrics
+    LoadTests -->|HTTP POST| API
     Scenarios --> LoadTests
+    HttpClient --> API
+    API --> Orch
+    Orch --> Worker
+    Orch --> DB
+    Worker --> DB
+
+    LoadTests --> Metrics
 
     Trigger --> Runner
-    Runner --> Criterion
     Runner --> LoadTests
     Metrics --> Compare
     Metrics --> Store
@@ -76,189 +96,205 @@ flowchart TB
 
 ## Detailed Implementation
 
-### 1. Criterion.rs Micro-Benchmarks (5 hours)
+### 1. Benchmark Crate Setup (1 hour)
 
-**File**: `core/benches/workflow_benchmarks.rs`
+**Purpose**: Create a separate `benchmark` crate that is not compiled into the production binary.
 
-**Purpose**: Fast micro-benchmarks for core components measuring overhead and scalability.
+#### 1.1 Workspace Configuration
 
-#### 1.1 Benchmark Harness Setup
+**File**: `Cargo.toml` (workspace root) - Add benchmark to members:
 
-```rust
-// core/benches/workflow_benchmarks.rs
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use streamflow_core::events::*;
-use streamflow_core::queue::*;
-use streamflow_core::orchestrator::*;
-use tokio::runtime::Runtime;
-use sqlx::PgPool;
-use uuid::Uuid;
-
-fn bench_workflow_evaluation(c: &mut Criterion) {
-    let mut group = c.benchmark_group("workflow_evaluation");
-
-    // Benchmark orchestrator evaluation time (core DAG logic)
-    for size in [1, 5, 10, 20, 50].iter() {
-        group.bench_with_input(
-            BenchmarkId::new("sequential_workflow", size),
-            size,
-            |b, &size| {
-                // Setup: Create workflow definition with N sequential activities
-                let definition = create_sequential_workflow(size);
-                let runtime = Runtime::new().unwrap();
-
-                b.to_async(&runtime).iter(|| async {
-                    // Measure: Time to evaluate workflow state and schedule next activities
-                    let pool = setup_test_pool().await;
-                    let orchestrator = Orchestrator::new(pool.clone(), OrchestratorConfig::default());
-
-                    let start = std::time::Instant::now();
-                    orchestrator.evaluate_workflow(&definition, &HashMap::new()).await;
-                    black_box(start.elapsed())
-                });
-            },
-        );
-    }
-
-    group.finish();
-}
-
-fn bench_activity_scheduling(c: &mut Criterion) {
-    let mut group = c.benchmark_group("activity_scheduling");
-
-    // Benchmark queue insertion performance
-    for batch_size in [1, 10, 50, 100].iter() {
-        group.bench_with_input(
-            BenchmarkId::new("batch_insert", batch_size),
-            batch_size,
-            |b, &batch_size| {
-                let runtime = Runtime::new().unwrap();
-
-                b.to_async(&runtime).iter(|| async {
-                    let pool = setup_test_pool().await;
-                    let queue = PostgresQueue::new(pool.clone(), QueueConfig::default());
-
-                    let activities = create_test_activities(batch_size);
-                    let start = std::time::Instant::now();
-                    queue.enqueue_batch(&activities).await.unwrap();
-                    black_box(start.elapsed())
-                });
-            },
-        );
-    }
-
-    group.finish();
-}
-
-fn bench_event_publishing(c: &mut Criterion) {
-    let mut group = c.benchmark_group("event_publishing");
-
-    // Benchmark event source write performance
-    group.bench_function("publish_workflow_event", |b| {
-        let runtime = Runtime::new().unwrap();
-
-        b.to_async(&runtime).iter(|| async {
-            let pool = setup_test_pool().await;
-            let event_source = PostgresEventSource::new(pool.clone());
-
-            let event = NewWorkflowEvent {
-                workflow_id: Uuid::now_v7(),
-                event_type: WorkflowEventType::WorkflowCreated,
-                payload: serde_json::json!({}),
-            };
-
-            let start = std::time::Instant::now();
-            event_source.publish(event).await.unwrap();
-            black_box(start.elapsed())
-        });
-    });
-
-    group.finish();
-}
-
-fn bench_workflow_state_query(c: &mut Criterion) {
-    let mut group = c.benchmark_group("state_queries");
-
-    // Benchmark workflow status query performance
-    group.bench_function("get_workflow_by_id", |b| {
-        let runtime = Runtime::new().unwrap();
-
-        b.to_async(&runtime).iter(|| async {
-            let pool = setup_test_pool().await;
-            let workflow_id = setup_test_workflow(&pool).await;
-
-            let start = std::time::Instant::now();
-            let result = sqlx::query!(
-                "SELECT id, status, state_data FROM workflows WHERE id = $1",
-                workflow_id
-            )
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-            black_box((start.elapsed(), result))
-        });
-    });
-
-    group.finish();
-}
-
-criterion_group!(
-    benches,
-    bench_workflow_evaluation,
-    bench_activity_scheduling,
-    bench_event_publishing,
-    bench_workflow_state_query
-);
-
-criterion_main!(benches);
+```toml
+[workspace]
+members = [
+    "core",
+    "api",
+    "cli",
+    "benchmark",  # New benchmark crate
+]
 ```
 
-**Cargo.toml additions**:
+#### 1.2 Benchmark Crate Structure
+
+**File**: `benchmark/Cargo.toml`
+
 ```toml
+[package]
+name = "streamflow-benchmark"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# HTTP client for API calls
+reqwest = { version = "0.12", features = ["json"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Utilities
+uuid = { version = "1.10", features = ["v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Testing
+serial_test = "3"
+
+# StreamFlow dependencies (for workflow definitions only, not direct DB access)
+streamflow-core = { path = "../core" }
+
 [dev-dependencies]
-criterion = { version = "0.5", features = ["async_tokio", "html_reports"] }
-
-[[bench]]
-name = "workflow_benchmarks"
-harness = false
+# None needed - all tests are in main src/
 ```
 
-**Configuration**: `core/benches/criterion.toml`
-```toml
-[default]
-measurement_time = 10  # 10 second measurement per benchmark
-warm_up_time = 3       # 3 second warm-up
-sample_size = 100      # 100 samples per benchmark
-noise_threshold = 0.05 # 5% noise threshold
+**Directory structure**:
+```
+benchmark/
+├── Cargo.toml
+└── src/
+    ├── main.rs          # CLI for running benchmarks
+    ├── lib.rs           # Library exports
+    ├── client.rs        # HTTP API client wrapper
+    ├── scenarios.rs     # Workflow scenario definitions
+    ├── metrics.rs       # Metrics collection and reporting
+    └── tests/
+        └── load_tests.rs  # Integration load tests
 ```
 
-#### 1.2 Benchmark Test Helpers
+#### 1.3 HTTP API Client
 
-**File**: `core/benches/helpers.rs`
+**File**: `benchmark/src/client.rs`
+
+**Purpose**: Wrapper around reqwest for StreamFlow API calls.
 
 ```rust
-use sqlx::PgPool;
-use streamflow_core::events::*;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::time::Duration;
 use uuid::Uuid;
-use serde_json::json;
 
-pub async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://localhost/streamflow_bench".to_string());
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to benchmark database");
-
-    // Ensure migrations are run
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
+#[derive(Clone)]
+pub struct StreamFlowClient {
+    client: Client,
+    base_url: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct CreateWorkflowRequest {
+    pub definition_name: String,
+    pub input: Value,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WorkflowResponse {
+    pub id: Uuid,
+    pub status: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WorkflowStatusResponse {
+    pub id: Uuid,
+    pub status: String,
+    pub state_data: Value,
+    pub activities: Value,
+}
+
+impl StreamFlowClient {
+    pub fn new(base_url: String) -> Self {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .expect("Failed to build HTTP client");
+
+        Self { client, base_url }
+    }
+
+    /// Create a new workflow via HTTP API
+    pub async fn create_workflow(
+        &self,
+        definition_name: &str,
+        input: Value,
+    ) -> Result<WorkflowResponse, reqwest::Error> {
+        let url = format!("{}/api/v1/workflows", self.base_url);
+        let request = CreateWorkflowRequest {
+            definition_name: definition_name.to_string(),
+            input,
+        };
+
+        self.client
+            .post(&url)
+            .json(&request)
+            .send()
+            .await?
+            .json::<WorkflowResponse>()
+            .await
+    }
+
+    /// Get workflow status via HTTP API
+    pub async fn get_workflow_status(
+        &self,
+        workflow_id: Uuid,
+    ) -> Result<WorkflowStatusResponse, reqwest::Error> {
+        let url = format!("{}/api/v1/workflows/{}", self.base_url, workflow_id);
+
+        self.client
+            .get(&url)
+            .send()
+            .await?
+            .json::<WorkflowStatusResponse>()
+            .await
+    }
+
+    /// Poll for workflow completion
+    pub async fn wait_for_completion(
+        &self,
+        workflow_id: Uuid,
+        timeout: Duration,
+    ) -> Result<WorkflowStatusResponse, Box<dyn std::error::Error>> {
+        let start = std::time::Instant::now();
+        let poll_interval = Duration::from_millis(50);
+
+        loop {
+            if start.elapsed() > timeout {
+                return Err("Workflow completion timeout".into());
+            }
+
+            let status = self.get_workflow_status(workflow_id).await?;
+
+            if status.status == "completed" || status.status == "failed" {
+                return Ok(status);
+            }
+
+            tokio::time::sleep(poll_interval).await;
+        }
+    }
+}
+```
+
+---
+
+### 2. HTTP API-Based Load Tests (6 hours)
+
+**File**: `benchmark/src/tests/load_tests.rs`
+
+**Purpose**: End-to-end workflow throughput and latency measurements via HTTP API only.
+
+**Key Principle**: Test StreamFlow the same way we'll test Temporal - through production API interfaces.
+
+#### 2.1 Workflow Scenario Definitions
+
+**File**: `benchmark/src/scenarios.rs`
+
+```rust
+use serde_json::{json, Value};
+use streamflow_core::workflow::*; // Only for WorkflowDefinition structs
+use uuid::Uuid;
+
+/// Create a sequential workflow definition
 pub fn create_sequential_workflow(num_activities: usize) -> WorkflowDefinition {
     let mut activities = Vec::new();
 
@@ -292,6 +328,7 @@ pub fn create_sequential_workflow(num_activities: usize) -> WorkflowDefinition {
     }
 }
 
+/// Create a parallel workflow definition (fan-out, then fan-in)
 pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
     let mut activities = vec![
         // Start activity
@@ -351,110 +388,53 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
         activities,
     }
 }
-
-pub fn create_test_activities(count: usize) -> Vec<NewActivityTask> {
-    (0..count)
-        .map(|i| NewActivityTask {
-            workflow_id: Uuid::now_v7(),
-            activity_key: format!("activity_{}", i),
-            namespace: "bench".to_string(),
-            name: "noop".to_string(),
-            parameters: json!({}),
-            timeout_seconds: 300,
-        })
-        .collect()
-}
-
-pub async fn setup_test_workflow(pool: &PgPool) -> Uuid {
-    let workflow_id = Uuid::now_v7();
-    let definition = create_sequential_workflow(5);
-
-    // Insert workflow definition
-    let definition_id = insert_workflow_definition(pool, &definition).await;
-
-    // Insert workflow
-    sqlx::query!(
-        r#"INSERT INTO workflows (id, definition_name, workflow_definition_id, input, status, activities, state_data)
-           VALUES ($1, $2, $3, '{}'::jsonb, 'running', '{}'::jsonb, '{}'::jsonb)"#,
-        workflow_id,
-        definition.name,
-        definition_id
-    )
-    .execute(pool)
-    .await
-    .expect("Failed to insert test workflow");
-
-    workflow_id
-}
-
-async fn insert_workflow_definition(pool: &PgPool, definition: &WorkflowDefinition) -> Uuid {
-    let activities_json = serde_json::to_value(&definition.activities)
-        .expect("Failed to serialize activities");
-
-    let row = sqlx::query!(
-        r#"INSERT INTO workflow_definitions (name, activities)
-           VALUES ($1, $2)
-           RETURNING id"#,
-        definition.name,
-        activities_json
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Failed to insert workflow definition");
-
-    row.id
-}
 ```
 
----
+#### 2.2 Load Test Implementation
 
-### 2. Integration Load Tests (6 hours)
-
-**File**: `core/tests/performance/load_tests.rs`
-
-**Purpose**: End-to-end workflow throughput and latency measurements simulating production load.
-
-#### 2.1 Test Scenarios
+**File**: `benchmark/src/tests/load_tests.rs`
 
 ```rust
-// core/tests/performance/load_tests.rs
+// benchmark/src/tests/load_tests.rs
 use serial_test::serial;
-use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use streamflow_core::events::*;
-use streamflow_core::orchestrator::{Orchestrator, OrchestratorConfig};
-use streamflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
-mod helpers;
-use helpers::*;
+use crate::client::StreamFlowClient;
+use crate::scenarios::*;
+use crate::metrics::*;
 
 /// Performance metrics collected during load tests
 #[derive(Debug, Clone)]
 struct PerformanceMetrics {
     total_workflows: usize,
+    successful_workflows: usize,
+    failed_workflows: usize,
     duration: Duration,
     throughput_wf_per_sec: f64,
+    success_rate: f64,
     latencies_ms: Vec<u64>,
     p50_latency_ms: u64,
     p95_latency_ms: u64,
     p99_latency_ms: u64,
-    activity_latencies_ms: Vec<u64>,
-    avg_activity_latency_ms: u64,
-    max_queue_depth: usize,
 }
 
 impl PerformanceMetrics {
     fn from_measurements(
         total_workflows: usize,
+        successful_workflows: usize,
+        failed_workflows: usize,
         duration: Duration,
         latencies: Vec<Duration>,
-        activity_latencies: Vec<Duration>,
-        max_queue_depth: usize,
     ) -> Self {
         let throughput_wf_per_sec = total_workflows as f64 / duration.as_secs_f64();
+        let success_rate = if total_workflows > 0 {
+            (successful_workflows as f64 / total_workflows as f64) * 100.0
+        } else {
+            0.0
+        };
 
         let mut latencies_ms: Vec<u64> = latencies.iter().map(|d| d.as_millis() as u64).collect();
         latencies_ms.sort();
@@ -463,27 +443,17 @@ impl PerformanceMetrics {
         let p95_latency_ms = percentile(&latencies_ms, 0.95);
         let p99_latency_ms = percentile(&latencies_ms, 0.99);
 
-        let activity_latencies_ms: Vec<u64> = activity_latencies
-            .iter()
-            .map(|d| d.as_millis() as u64)
-            .collect();
-        let avg_activity_latency_ms = if activity_latencies_ms.is_empty() {
-            0
-        } else {
-            activity_latencies_ms.iter().sum::<u64>() / activity_latencies_ms.len() as u64
-        };
-
         Self {
             total_workflows,
+            successful_workflows,
+            failed_workflows,
             duration,
             throughput_wf_per_sec,
+            success_rate,
             latencies_ms,
             p50_latency_ms,
             p95_latency_ms,
             p99_latency_ms,
-            activity_latencies_ms,
-            avg_activity_latency_ms,
-            max_queue_depth,
         }
     }
 
@@ -492,15 +462,15 @@ impl PerformanceMetrics {
         println!("Performance Test: {}", scenario_name);
         println!("{'='*60}");
         println!("Total Workflows:     {}", self.total_workflows);
+        println!("Successful:          {}", self.successful_workflows);
+        println!("Failed:              {}", self.failed_workflows);
+        println!("Success Rate:        {:.1}%", self.success_rate);
         println!("Duration:            {:.2}s", self.duration.as_secs_f64());
         println!("Throughput:          {:.2} workflows/sec", self.throughput_wf_per_sec);
-        println!("\nWorkflow Start Latency:");
+        println!("\nEnd-to-End Latency:");
         println!("  P50:               {} ms", self.p50_latency_ms);
         println!("  P95:               {} ms", self.p95_latency_ms);
         println!("  P99:               {} ms", self.p99_latency_ms);
-        println!("\nActivity Latency:");
-        println!("  Average:           {} ms", self.avg_activity_latency_ms);
-        println!("  Max Queue Depth:   {}", self.max_queue_depth);
         println!("{'='*60}\n");
     }
 
@@ -509,18 +479,15 @@ impl PerformanceMetrics {
             "scenario": scenario_name,
             "timestamp": chrono::Utc::now().to_rfc3339(),
             "total_workflows": self.total_workflows,
+            "successful_workflows": self.successful_workflows,
+            "failed_workflows": self.failed_workflows,
+            "success_rate": self.success_rate,
             "duration_seconds": self.duration.as_secs_f64(),
             "throughput_wf_per_sec": self.throughput_wf_per_sec,
             "latency": {
                 "p50_ms": self.p50_latency_ms,
                 "p95_ms": self.p95_latency_ms,
                 "p99_ms": self.p99_latency_ms,
-            },
-            "activity_latency": {
-                "avg_ms": self.avg_activity_latency_ms,
-            },
-            "queue": {
-                "max_depth": self.max_queue_depth,
             }
         })
     }
@@ -537,17 +504,17 @@ fn percentile(sorted_values: &[u64], p: f64) -> u64 {
 #[tokio::test]
 #[serial]
 async fn test_sequential_workflow_load() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
+    // StreamFlow must be running on localhost:8080
+    let client = StreamFlowClient::new("http://localhost:8080".to_string());
 
-    let definition = create_sequential_workflow(5);
-    let definition_id = insert_workflow_definition(&pool, &definition).await;
-
+    // NOTE: Workflow definitions must be registered beforehand via API or database
+    // This test assumes "sequential_bench" is already registered
+    let definition_name = "sequential_bench_5";
     let num_workflows = 1000;
+
     let metrics = run_workflow_load_test(
-        &pool,
-        &definition,
-        definition_id,
+        &client,
+        definition_name,
         num_workflows,
         10, // max concurrent
     )
@@ -571,17 +538,14 @@ async fn test_sequential_workflow_load() {
 #[tokio::test]
 #[serial]
 async fn test_parallel_workflow_load() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
+    let client = StreamFlowClient::new("http://localhost:8080".to_string());
 
-    let definition = create_parallel_workflow(10);
-    let definition_id = insert_workflow_definition(&pool, &definition).await;
-
+    let definition_name = "parallel_bench_10";
     let num_workflows = 500;
+
     let metrics = run_workflow_load_test(
-        &pool,
-        &definition,
-        definition_id,
+        &client,
+        definition_name,
         num_workflows,
         10, // max concurrent
     )
@@ -605,17 +569,14 @@ async fn test_parallel_workflow_load() {
 #[tokio::test]
 #[serial]
 async fn test_high_concurrency_load() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
+    let client = StreamFlowClient::new("http://localhost:8080".to_string());
 
-    let definition = create_sequential_workflow(3);
-    let definition_id = insert_workflow_definition(&pool, &definition).await;
-
+    let definition_name = "sequential_bench_3";
     let num_workflows = 5000;
+
     let metrics = run_workflow_load_test(
-        &pool,
-        &definition,
-        definition_id,
+        &client,
+        definition_name,
         num_workflows,
         100, // max concurrent
     )
@@ -639,18 +600,15 @@ async fn test_high_concurrency_load() {
 #[tokio::test]
 #[serial]
 async fn test_sustained_throughput() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
+    let client = StreamFlowClient::new("http://localhost:8080".to_string());
 
-    let definition = create_sequential_workflow(5);
-    let definition_id = insert_workflow_definition(&pool, &definition).await;
+    let definition_name = "sequential_bench_5";
 
     // Run for 60 seconds to test sustained performance
     let duration = Duration::from_secs(60);
     let metrics = run_sustained_load_test(
-        &pool,
-        &definition,
-        definition_id,
+        &client,
+        definition_name,
         duration,
         20, // concurrent workflows
     )
@@ -658,7 +616,7 @@ async fn test_sustained_throughput() {
 
     metrics.print_report("Sustained Throughput (60 seconds, 20 concurrent)");
 
-    // Target: >1,000 workflows/sec sustained
+    // Target: >100 workflows/sec sustained
     assert!(
         metrics.throughput_wf_per_sec >= 100.0,
         "Expected >= 100 wf/sec sustained, got {:.2}",
@@ -666,266 +624,185 @@ async fn test_sustained_throughput() {
     );
 }
 
+/// Run workflow load test via HTTP API
 async fn run_workflow_load_test(
-    pool: &PgPool,
-    definition: &WorkflowDefinition,
-    definition_id: Uuid,
+    client: &StreamFlowClient,
+    definition_name: &str,
     num_workflows: usize,
     max_concurrent: usize,
 ) -> PerformanceMetrics {
-    let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
-    let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
-    let orchestrator = Arc::new(Orchestrator::new(pool.clone(), OrchestratorConfig::default()));
-
-    // Start orchestrator in background
-    let orch_handle = tokio::spawn({
-        let orchestrator = orchestrator.clone();
-        async move {
-            orchestrator.run().await.expect("Orchestrator failed");
-        }
-    });
-
     let semaphore = Arc::new(Semaphore::new(max_concurrent));
     let mut latencies = Vec::new();
-    let mut activity_latencies = Vec::new();
-    let mut max_queue_depth = 0;
+    let mut success_count = 0;
+    let mut failure_count = 0;
 
     let start_time = Instant::now();
 
-    for i in 0..num_workflows {
+    for _ in 0..num_workflows {
         let permit = semaphore.clone().acquire_owned().await.unwrap();
-        let pool = pool.clone();
-        let event_source = event_source.clone();
-        let definition = definition.clone();
+        let client = client.clone();
+        let definition_name = definition_name.to_string();
 
         let handle = tokio::spawn(async move {
             let workflow_start = Instant::now();
-            let workflow_id = Uuid::now_v7();
 
-            // Insert workflow
-            sqlx::query!(
-                r#"INSERT INTO workflows (id, definition_name, workflow_definition_id, input, status, activities, state_data)
-                   VALUES ($1, $2, $3, '{}'::jsonb, 'running', '{}'::jsonb, '{}'::jsonb)"#,
-                workflow_id,
-                definition.name,
-                definition_id
-            )
-            .execute(&pool)
-            .await
-            .expect("Failed to insert workflow");
+            // Create workflow via HTTP API
+            let response = client
+                .create_workflow(&definition_name, serde_json::json!({}))
+                .await;
 
-            // Publish workflow created event
-            event_source
-                .publish(NewWorkflowEvent {
-                    workflow_id,
-                    event_type: WorkflowEventType::WorkflowCreated,
-                    payload: serde_json::json!({}),
-                })
-                .await
-                .expect("Failed to publish event");
-
-            let workflow_latency = workflow_start.elapsed();
-
-            // Wait for workflow completion
-            let mut completion_check_interval = tokio::time::interval(Duration::from_millis(10));
-            loop {
-                completion_check_interval.tick().await;
-
-                let status = sqlx::query!(
-                    "SELECT status FROM workflows WHERE id = $1",
-                    workflow_id
-                )
-                .fetch_one(&pool)
-                .await
-                .expect("Failed to query workflow status");
-
-                if status.status == "completed" || status.status == "failed" {
-                    break;
+            let workflow_id = match response {
+                Ok(resp) => resp.id,
+                Err(e) => {
+                    eprintln!("Failed to create workflow: {}", e);
+                    drop(permit);
+                    return (workflow_start.elapsed(), false);
                 }
-            }
+            };
+
+            // Wait for workflow completion via HTTP polling
+            let completion_result = client
+                .wait_for_completion(workflow_id, Duration::from_secs(30))
+                .await;
+
+            let success = match completion_result {
+                Ok(status) => status.status == "completed",
+                Err(e) => {
+                    eprintln!("Workflow {} failed: {}", workflow_id, e);
+                    false
+                }
+            };
 
             drop(permit);
-            workflow_latency
+            (workflow_start.elapsed(), success)
         });
 
-        latencies.push(handle.await.expect("Task failed"));
-
-        // Sample queue depth every 100 workflows
-        if i % 100 == 0 {
-            let depth = get_queue_depth(pool).await;
-            max_queue_depth = max_queue_depth.max(depth);
+        let (latency, success) = handle.await.expect("Task failed");
+        latencies.push(latency);
+        if success {
+            success_count += 1;
+        } else {
+            failure_count += 1;
         }
     }
 
     let total_duration = start_time.elapsed();
 
-    // Stop orchestrator
-    orch_handle.abort();
-
     PerformanceMetrics::from_measurements(
         num_workflows,
+        success_count,
+        failure_count,
         total_duration,
         latencies,
-        activity_latencies,
-        max_queue_depth,
     )
 }
 
+/// Run sustained load test via HTTP API
 async fn run_sustained_load_test(
-    pool: &PgPool,
-    definition: &WorkflowDefinition,
-    definition_id: Uuid,
+    client: &StreamFlowClient,
+    definition_name: &str,
     duration: Duration,
     max_concurrent: usize,
 ) -> PerformanceMetrics {
-    let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
-    let orchestrator = Arc::new(Orchestrator::new(pool.clone(), OrchestratorConfig::default()));
-
-    // Start orchestrator
-    let orch_handle = tokio::spawn({
-        let orchestrator = orchestrator.clone();
-        async move {
-            orchestrator.run().await.expect("Orchestrator failed");
-        }
-    });
-
     let semaphore = Arc::new(Semaphore::new(max_concurrent));
     let mut latencies = Vec::new();
     let mut workflow_count = 0;
+    let mut success_count = 0;
+    let mut failure_count = 0;
     let start_time = Instant::now();
 
     while start_time.elapsed() < duration {
         let permit = semaphore.clone().acquire_owned().await.unwrap();
-        let pool = pool.clone();
-        let event_source = event_source.clone();
-        let definition = definition.clone();
+        let client = client.clone();
+        let definition_name = definition_name.to_string();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let workflow_start = Instant::now();
-            let workflow_id = Uuid::now_v7();
 
-            // Insert and publish workflow
-            sqlx::query!(
-                r#"INSERT INTO workflows (id, definition_name, workflow_definition_id, input, status, activities, state_data)
-                   VALUES ($1, $2, $3, '{}'::jsonb, 'running', '{}'::jsonb, '{}'::jsonb)"#,
-                workflow_id,
-                definition.name,
-                definition_id
-            )
-            .execute(&pool)
-            .await
-            .expect("Failed to insert workflow");
+            // Create workflow via HTTP API
+            let response = client
+                .create_workflow(&definition_name, serde_json::json!({}))
+                .await;
 
-            event_source
-                .publish(NewWorkflowEvent {
-                    workflow_id,
-                    event_type: WorkflowEventType::WorkflowCreated,
-                    payload: serde_json::json!({}),
-                })
-                .await
-                .expect("Failed to publish event");
+            let success = response.is_ok();
 
             drop(permit);
-            workflow_start.elapsed()
+            (workflow_start.elapsed(), success)
         });
+
+        let (latency, success) = handle.await.expect("Task failed");
+        latencies.push(latency);
+        if success {
+            success_count += 1;
+        } else {
+            failure_count += 1;
+        }
 
         workflow_count += 1;
     }
 
     let total_duration = start_time.elapsed();
 
-    // Stop orchestrator
-    orch_handle.abort();
-
     PerformanceMetrics::from_measurements(
         workflow_count,
+        success_count,
+        failure_count,
         total_duration,
         latencies,
-        vec![],
-        0,
     )
-}
-
-async fn get_queue_depth(pool: &PgPool) -> usize {
-    let result = sqlx::query!("SELECT COUNT(*) as count FROM activity_queue WHERE status = 'pending'")
-        .fetch_one(pool)
-        .await
-        .expect("Failed to query queue depth");
-
-    result.count.unwrap_or(0) as usize
 }
 ```
 
-#### 2.2 Test Helpers
+#### 2.3 Metrics Module
 
-**File**: `core/tests/performance/helpers.rs`
+**File**: `benchmark/src/metrics.rs`
 
 ```rust
-// Reuse helpers from orchestrator_integration_tests.rs
-// Plus additional performance-specific helpers
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
-use sqlx::PgPool;
-use streamflow_core::events::*;
-use uuid::Uuid;
-use serde_json::json;
-
-pub async fn setup_test_db() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://localhost/streamflow_test".to_string());
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    sqlx::migrate!("../../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
+/// Performance metrics exported to JSON for CI comparison
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkResults {
+    pub timestamp: String,
+    pub git_sha: String,
+    pub scenarios: Vec<ScenarioMetrics>,
 }
 
-pub async fn clean_test_data(pool: &PgPool) {
-    sqlx::query!(
-        "TRUNCATE workflow_events, workflow_event_consumers, workflows, workflow_definitions, activity_queue CASCADE"
-    )
-    .execute(pool)
-    .await
-    .expect("Failed to clean test data");
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScenarioMetrics {
+    pub name: String,
+    pub total_workflows: usize,
+    pub successful_workflows: usize,
+    pub failed_workflows: usize,
+    pub success_rate: f64,
+    pub duration_seconds: f64,
+    pub throughput_wf_per_sec: f64,
+    pub latency_p50_ms: u64,
+    pub latency_p95_ms: u64,
+    pub latency_p99_ms: u64,
 }
 
-pub async fn insert_workflow_definition(pool: &PgPool, definition: &WorkflowDefinition) -> Uuid {
-    let activities_json =
-        serde_json::to_value(&definition.activities).expect("Failed to serialize activities");
+impl BenchmarkResults {
+    pub fn to_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).expect("Failed to serialize benchmark results")
+    }
 
-    let row = sqlx::query!(
-        r#"INSERT INTO workflow_definitions (name, activities)
-           VALUES ($1, $2)
-           RETURNING id"#,
-        definition.name,
-        activities_json
-    )
-    .fetch_one(pool)
-    .await
-    .expect("Failed to insert workflow definition");
-
-    row.id
-}
-
-pub fn create_sequential_workflow(num_activities: usize) -> WorkflowDefinition {
-    // Same as in benchmarks/helpers.rs
-    // (implementation omitted for brevity - see section 1.2)
-}
-
-pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
-    // Same as in benchmarks/helpers.rs
-    // (implementation omitted for brevity - see section 1.2)
+    pub fn save_to_file(&self, path: &std::path::Path) -> std::io::Result<()> {
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)
+    }
 }
 ```
 
 ---
 
-### 3. CI Integration with GitHub Actions (5-6 hours)
+### 3. CI Integration with GitHub Actions (3-4 hours)
+
+**Key changes from original plan**:
+- No Criterion benchmarks (deferred to US-2.X)
+- Start StreamFlow server before running benchmarks
+- Run benchmarks from separate `benchmark` crate via HTTP API
 
 #### 3.1 Benchmark Workflow
 
@@ -946,10 +823,11 @@ on:
 env:
   CARGO_TERM_COLOR: always
   DATABASE_URL: postgres://streamflow:streamflow@localhost/streamflow_bench
+  STREAMFLOW_BASE_URL: http://localhost:8080
 
 jobs:
   benchmark:
-    name: Run Performance Benchmarks
+    name: Run HTTP API Performance Benchmarks
     runs-on: ubuntu-latest
 
     services:
@@ -973,47 +851,45 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
 
-      - name: Cache Cargo registry
+      - name: Cache Cargo
         uses: actions/cache@v3
         with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache Cargo index
-        uses: actions/cache@v3
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache target directory
-        uses: actions/cache@v3
-        with:
-          path: target
-          key: ${{ runner.os }}-target-bench-${{ hashFiles('**/Cargo.lock') }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --no-default-features --features postgres
 
       - name: Run database migrations
-        run: |
-          cd migrations
-          sqlx migrate run
+        run: sqlx migrate run
 
-      - name: Run Criterion benchmarks
-        run: |
-          cargo bench --package streamflow-core --bench workflow_benchmarks -- --output-format bencher | tee criterion-output.txt
+      - name: Build StreamFlow
+        run: cargo build --release --bin streamflow
 
-      - name: Run integration load tests
+      - name: Start StreamFlow server in background
         run: |
-          cargo test --package streamflow-core --test performance_load_tests --release -- --nocapture --test-threads=1 | tee load-test-output.txt
+          ./target/release/streamflow serve --port 8080 &
+          sleep 5
+          # Wait for server to be ready
+          timeout 30 bash -c 'until curl -f http://localhost:8080/health; do sleep 1; done'
+
+      - name: Register benchmark workflow definitions
+        run: |
+          # TODO: Create script to register workflow definitions via API
+          # For now, assume they're pre-registered in database migrations
+
+      - name: Run HTTP API load tests
+        run: |
+          cargo test --package streamflow-benchmark --release -- --nocapture --test-threads=1 | tee load-test-output.txt
 
       - name: Parse benchmark results
         id: parse_results
         run: |
-          python scripts/parse_benchmark_results.py criterion-output.txt load-test-output.txt > benchmark-results.json
+          python scripts/parse_benchmark_results.py load-test-output.txt > benchmark-results.json
 
       - name: Download baseline results
         id: download_baseline
@@ -1051,7 +927,6 @@ jobs:
             benchmark-results.json
             comparison.json
             report.html
-            criterion-output.txt
             load-test-output.txt
 
       - name: Update baseline (main branch only)
@@ -1111,81 +986,61 @@ jobs:
 
 ```python
 #!/usr/bin/env python3
-"""Parse benchmark output and generate JSON results."""
+"""Parse HTTP API benchmark output and generate JSON results."""
 
 import sys
 import json
 import re
+import os
 from datetime import datetime
 
-def parse_criterion_output(filepath):
-    """Parse Criterion benchmark output."""
-    results = {}
-
-    with open(filepath, 'r') as f:
-        content = f.read()
-
-    # Parse benchmark results (example pattern)
-    pattern = r'test (\S+)\s+\.\.\. bench:\s+([\d,]+) ns/iter'
-    for match in re.finditer(pattern, content):
-        test_name = match.group(1)
-        time_ns = int(match.group(2).replace(',', ''))
-        results[test_name] = {
-            'time_ns': time_ns,
-            'time_ms': time_ns / 1_000_000.0
-        }
-
-    return results
-
 def parse_load_test_output(filepath):
-    """Parse load test output."""
-    results = {}
+    """Parse load test output from HTTP API benchmarks."""
+    results = {
+        'scenarios': []
+    }
 
     with open(filepath, 'r') as f:
         content = f.read()
 
-    # Extract performance metrics from test output
-    # Pattern: "Throughput:          123.45 workflows/sec"
-    throughput_match = re.search(r'Throughput:\s+([\d.]+) workflows/sec', content)
-    if throughput_match:
-        results['throughput_wf_per_sec'] = float(throughput_match.group(1))
+    # Find all performance test blocks
+    # Pattern matches the report blocks printed by PerformanceMetrics
+    test_pattern = r'Performance Test: ([^\n]+)\n.*?Total Workflows:\s+(\d+)\n.*?Successful:\s+(\d+)\n.*?Failed:\s+(\d+)\n.*?Success Rate:\s+([\d.]+)%\n.*?Duration:\s+([\d.]+)s\n.*?Throughput:\s+([\d.]+) workflows/sec\n.*?P50:\s+(\d+) ms\n.*?P95:\s+(\d+) ms\n.*?P99:\s+(\d+) ms'
 
-    # Pattern: "  P50:               12 ms"
-    p50_match = re.search(r'P50:\s+(\d+) ms', content)
-    p95_match = re.search(r'P95:\s+(\d+) ms', content)
-    p99_match = re.search(r'P99:\s+(\d+) ms', content)
-
-    if p50_match:
-        results['latency'] = {
-            'p50_ms': int(p50_match.group(1)),
-            'p95_ms': int(p95_match.group(1)) if p95_match else 0,
-            'p99_ms': int(p99_match.group(1)) if p99_match else 0,
+    for match in re.finditer(test_pattern, content, re.DOTALL):
+        scenario = {
+            'name': match.group(1),
+            'total_workflows': int(match.group(2)),
+            'successful_workflows': int(match.group(3)),
+            'failed_workflows': int(match.group(4)),
+            'success_rate': float(match.group(5)),
+            'duration_seconds': float(match.group(6)),
+            'throughput_wf_per_sec': float(match.group(7)),
+            'latency_p50_ms': int(match.group(8)),
+            'latency_p95_ms': int(match.group(9)),
+            'latency_p99_ms': int(match.group(10)),
         }
+        results['scenarios'].append(scenario)
 
     return results
 
 def main():
-    if len(sys.argv) < 3:
-        print("Usage: parse_benchmark_results.py <criterion_output> <load_test_output>", file=sys.stderr)
+    if len(sys.argv) < 2:
+        print("Usage: parse_benchmark_results.py <load_test_output>", file=sys.stderr)
         sys.exit(1)
 
-    criterion_file = sys.argv[1]
-    load_test_file = sys.argv[2]
-
-    criterion_results = parse_criterion_output(criterion_file)
+    load_test_file = sys.argv[1]
     load_test_results = parse_load_test_output(load_test_file)
 
     combined = {
         'timestamp': datetime.utcnow().isoformat(),
         'git_sha': os.environ.get('GITHUB_SHA', 'unknown'),
-        'criterion': criterion_results,
-        'load_tests': load_test_results
+        'scenarios': load_test_results['scenarios']
     }
 
     print(json.dumps(combined, indent=2))
 
 if __name__ == '__main__':
-    import os
     main()
 ```
 
@@ -1204,46 +1059,60 @@ def calculate_change(baseline, current):
         return 0
     return ((current - baseline) / baseline) * 100
 
+def compare_scenario(baseline_scenario, current_scenario):
+    """Compare a single scenario."""
+    return {
+        'name': current_scenario['name'],
+        'throughput': {
+            'baseline': baseline_scenario['throughput_wf_per_sec'],
+            'current': current_scenario['throughput_wf_per_sec'],
+            'change': calculate_change(
+                baseline_scenario['throughput_wf_per_sec'],
+                current_scenario['throughput_wf_per_sec']
+            )
+        },
+        'latency_p99': {
+            'baseline': baseline_scenario['latency_p99_ms'],
+            'current': current_scenario['latency_p99_ms'],
+            'change': calculate_change(
+                baseline_scenario['latency_p99_ms'],
+                current_scenario['latency_p99_ms']
+            )
+        },
+        'success_rate': {
+            'baseline': baseline_scenario.get('success_rate', 100.0),
+            'current': current_scenario.get('success_rate', 100.0),
+        }
+    }
+
 def compare_results(baseline, current):
-    """Compare benchmark results."""
+    """Compare benchmark results across all scenarios."""
     comparison = {
         'timestamp': current.get('timestamp'),
         'git_sha': current.get('git_sha'),
         'baseline_sha': baseline.get('git_sha'),
+        'scenarios': [],
+        'regression': False,
     }
 
-    # Compare throughput
-    baseline_throughput = baseline.get('load_tests', {}).get('throughput_wf_per_sec', 0)
-    current_throughput = current.get('load_tests', {}).get('throughput_wf_per_sec', 0)
+    baseline_scenarios = {s['name']: s for s in baseline.get('scenarios', [])}
+    current_scenarios = current.get('scenarios', [])
 
-    comparison['throughput'] = {
-        'baseline': baseline_throughput,
-        'current': current_throughput,
-        'change': calculate_change(baseline_throughput, current_throughput)
-    }
+    for current_scenario in current_scenarios:
+        name = current_scenario['name']
+        if name in baseline_scenarios:
+            scenario_comp = compare_scenario(baseline_scenarios[name], current_scenario)
 
-    # Compare latency
-    baseline_latency = baseline.get('load_tests', {}).get('latency', {})
-    current_latency = current.get('load_tests', {}).get('latency', {})
+            # Check for regression in this scenario
+            throughput_regression = scenario_comp['throughput']['change'] < -10
+            latency_regression = scenario_comp['latency_p99']['change'] > 10
 
-    comparison['p99_latency'] = {
-        'baseline': baseline_latency.get('p99_ms', 0),
-        'current': current_latency.get('p99_ms', 0),
-        'change': calculate_change(
-            baseline_latency.get('p99_ms', 0),
-            current_latency.get('p99_ms', 0)
-        )
-    }
+            scenario_comp['regression'] = throughput_regression or latency_regression
 
-    # Detect regression (>10% slower throughput OR >10% higher latency)
-    throughput_regression = comparison['throughput']['change'] < -10
-    latency_regression = comparison['p99_latency']['change'] > 10
+            if scenario_comp['regression']:
+                comparison['regression'] = True
 
-    comparison['regression'] = throughput_regression or latency_regression
-    comparison['regression_details'] = {
-        'throughput_regression': throughput_regression,
-        'latency_regression': latency_regression
-    }
+            comparison['scenarios'].append(scenario_comp)
 
     return comparison
 
@@ -1658,51 +1527,52 @@ See [Performance Testing Guide](performance-testing.md) for details.
 
 ## Success Criteria
 
-- [x] Criterion benchmarks run successfully and generate reports
-- [x] Load tests measure throughput (wf/sec) and latency (P50/P95/P99)
+- [x] Separate `benchmark` crate created (not compiled into production)
+- [x] HTTP API-based load tests (comparable to Temporal benchmarking)
+- [x] Load tests measure throughput (wf/sec) and end-to-end latency (P50/P95/P99)
 - [x] CI pipeline runs benchmarks on every commit to main
 - [x] Regression detection works (>10% slower = fail)
 - [x] Historical trends tracked via GitHub artifacts
-- [x] HTML reports generated with charts
+- [x] HTML reports generated with scenario comparisons
 - [x] Documentation complete with usage examples
 
 ---
 
 ## Implementation Checklist
 
-### Phase 1: Criterion Benchmarks (5 hours)
-- [ ] Set up `core/benches/workflow_benchmarks.rs` with Criterion
-- [ ] Add benchmark for workflow evaluation (sequential, parallel)
-- [ ] Add benchmark for activity scheduling (single, batch)
-- [ ] Add benchmark for event publishing
-- [ ] Add benchmark for state queries
-- [ ] Create `core/benches/helpers.rs` with test fixtures
-- [ ] Configure Criterion settings (`criterion.toml`)
-- [ ] Update `core/Cargo.toml` with Criterion dependency
-- [ ] Verify benchmarks run locally: `cargo bench`
+### Phase 1: Benchmark Crate Setup (1 hour)
+- [ ] Add `benchmark` to workspace members in root `Cargo.toml`
+- [ ] Create `benchmark/Cargo.toml` with dependencies (reqwest, tokio, serde)
+- [ ] Create `benchmark/src/client.rs` - HTTP API client wrapper
+- [ ] Create `benchmark/src/scenarios.rs` - Workflow scenario definitions
+- [ ] Create `benchmark/src/metrics.rs` - Metrics collection structs
+- [ ] Create `benchmark/src/lib.rs` - Library exports
+- [ ] Verify crate compiles: `cargo build --package streamflow-benchmark`
 
-### Phase 2: Integration Load Tests (6 hours)
-- [ ] Create `core/tests/performance/` directory
-- [ ] Implement `load_tests.rs` with PerformanceMetrics struct
-- [ ] Add test: `test_sequential_workflow_load` (1000 workflows)
+### Phase 2: HTTP API Load Tests (6 hours)
+- [ ] Create `benchmark/src/tests/load_tests.rs`
+- [ ] Implement `PerformanceMetrics` struct with success/failure tracking
+- [ ] Implement `StreamFlowClient::create_workflow()` via HTTP POST
+- [ ] Implement `StreamFlowClient::wait_for_completion()` with polling
+- [ ] Add test: `test_sequential_workflow_load` (1000 workflows via HTTP)
 - [ ] Add test: `test_parallel_workflow_load` (500 workflows, 10 parallel)
 - [ ] Add test: `test_high_concurrency_load` (5000 workflows, 100 concurrent)
 - [ ] Add test: `test_sustained_throughput` (60 second sustained load)
-- [ ] Create `helpers.rs` with test setup functions
-- [ ] Implement metrics collection (throughput, latency percentiles)
-- [ ] Add JSON export for metrics
-- [ ] Verify tests run locally: `cargo test --test performance_load_tests --release`
+- [ ] Implement metrics reporting (throughput, latency percentiles, success rate)
+- [ ] Verify tests run locally with StreamFlow server running
 
-### Phase 3: CI Integration (5-6 hours)
+### Phase 3: CI Integration (3-4 hours)
 - [ ] Create `.github/workflows/benchmarks.yml`
 - [ ] Configure PostgreSQL service in GitHub Actions
-- [ ] Add steps: checkout, install Rust, run migrations
-- [ ] Add step: Run Criterion benchmarks
-- [ ] Add step: Run integration load tests
-- [ ] Create `scripts/parse_benchmark_results.py`
-- [ ] Create `scripts/compare_benchmarks.py`
-- [ ] Create `scripts/check_regression.py`
-- [ ] Create `scripts/generate_report.py`
+- [ ] Add step: Build StreamFlow server
+- [ ] Add step: Start StreamFlow server in background
+- [ ] Add step: Wait for server health check
+- [ ] Add step: Register benchmark workflow definitions
+- [ ] Add step: Run HTTP API load tests from benchmark crate
+- [ ] Update `scripts/parse_benchmark_results.py` (HTTP API output only)
+- [ ] Update `scripts/compare_benchmarks.py` (scenario-based comparison)
+- [ ] Update `scripts/check_regression.py` (updated format)
+- [ ] Update `scripts/generate_report.py` (updated format)
 - [ ] Add step: Download baseline results
 - [ ] Add step: Compare with baseline
 - [ ] Add step: Check for regression (fail if >10%)
@@ -1714,20 +1584,24 @@ See [Performance Testing Guide](performance-testing.md) for details.
 
 ### Phase 4: Documentation (2 hours)
 - [ ] Create `docs/performance-testing.md` guide
-- [ ] Document running benchmarks locally
+- [ ] Document HTTP API-based benchmarking approach
+- [ ] Document running benchmarks locally (start server first)
 - [ ] Document interpreting results
-- [ ] Document adding new benchmarks
+- [ ] Document adding new benchmark scenarios
 - [ ] Document CI integration
 - [ ] Document performance targets
 - [ ] Update `docs/architecture.md` with performance section
-- [ ] Add troubleshooting section
+- [ ] Add troubleshooting section (server startup, etc.)
+- [ ] Note: Criterion benchmarks deferred to US-2.X
 - [ ] Review and polish documentation
 
 ### Phase 5: Validation (1 hour)
-- [ ] Run full test suite locally
+- [ ] Run StreamFlow server locally
+- [ ] Run benchmark tests locally and verify results
 - [ ] Verify CI pipeline executes successfully on test PR
+- [ ] Verify StreamFlow server starts correctly in CI
 - [ ] Verify regression detection works
-- [ ] Verify HTML report generation
+- [ ] Verify HTML report generation with scenarios
 - [ ] Verify PR comments appear correctly
 - [ ] Establish initial baseline on main branch
 - [ ] Document baseline metrics in Epic 2 tracking
@@ -1736,96 +1610,125 @@ See [Performance Testing Guide](performance-testing.md) for details.
 
 ## Dependencies
 
-### External Crates
-- `criterion` 0.5+ with `async_tokio` and `html_reports` features
-- Existing: `tokio`, `sqlx`, `serde_json`, `uuid`
+### External Crates (Benchmark Crate Only)
+- `reqwest` 0.12+ with `json` feature (HTTP client)
+- `tokio` 1.x with `full` features (async runtime)
+- `serde` 1.x with `derive` feature (serialization)
+- `serde_json` 1.x (JSON handling)
+- `uuid` 1.10+ with `v7` and `serde` features
+- `chrono` 0.4+ with `serde` feature (timestamps)
+- `serial_test` 3.x (sequential test execution)
+
+**Note**: Criterion removed - deferred to US-2.X (micro-benchmark optimization tool)
 
 ### Infrastructure
-- PostgreSQL 18+ (test database: `streamflow_bench`)
+- PostgreSQL 18+ (database: `streamflow_bench`)
+- StreamFlow server running on localhost:8080 (for benchmarks)
 - GitHub Actions with Ubuntu runner
 - Python 3.x for analysis scripts
 
 ### Internal Dependencies
-- Completed US-1C.2 (All-in-One Service Launcher) for running orchestrator
-- Completed US-1A.6 (Workflow Status Query) for metrics collection
-- Completed Epic 1B (Built-in Worker) for end-to-end tests
+- Completed US-1C.2 (All-in-One Service Launcher) - for running StreamFlow server
+- Completed US-1A.6 (Workflow Status Query) - for HTTP API status checks
+- Completed Epic 1B (Built-in Worker) - for end-to-end workflow execution
+- HTTP API endpoints: `POST /api/v1/workflows`, `GET /api/v1/workflows/{id}`
 
 ---
 
 ## Performance Targets (Epic 2)
 
+**Note**: All metrics measured via HTTP API (end-to-end, comparable to Temporal)
+
 ### Initial Baseline (Establish First)
-- Workflow throughput: TBD wf/sec
-- P99 start latency: TBD ms
-- Activity scheduling: TBD ms
-- Orchestrator evaluation: TBD ms per workflow
+- Workflow throughput: TBD wf/sec (via HTTP API)
+- P99 end-to-end latency: TBD ms (create to complete)
+- Success rate: TBD %
 
 ### MVP Target (Must Achieve)
-- Workflow throughput: >100 wf/sec
-- P99 start latency: <100ms
-- Activity scheduling: <5ms
-- Orchestrator evaluation: <1ms per workflow
+- Workflow throughput: >100 wf/sec (via HTTP API)
+- P99 end-to-end latency: <200ms (create to complete)
+- Success rate: >99%
+- Sustained throughput: >100 wf/sec for 60 seconds
 
-### Stretch Goal (Epic 6)
-- Workflow throughput: >1,000 wf/sec
-- P99 start latency: <10ms
-- Activity scheduling: <1ms
-- Orchestrator evaluation: <500μs per workflow
+### Stretch Goal (Epic 6 - Post-MVP Optimization)
+- Workflow throughput: >1,000 wf/sec (via HTTP API)
+- P99 end-to-end latency: <50ms (create to complete)
+- Success rate: >99.9%
+- Sustained throughput: >1,000 wf/sec for 60 seconds
+
+**Internal Micro-benchmarks (Deferred to US-2.X)**:
+- Orchestrator evaluation: <1ms per workflow
+- Activity scheduling: <5ms
+- Event publishing: <1ms
 
 ---
 
 ## Risks and Mitigations
 
-### Risk: Noisy CI Environment
+### Risk: StreamFlow Server Startup Failures in CI
 **Mitigation**:
-- Use 5% noise threshold in Criterion
-- Run multiple samples (100 per benchmark)
+- Health check endpoint (`/health`) with timeout
+- Verify server logs if startup fails
+- Start server with explicit configuration (port, database URL)
+- Fail fast if server doesn't start within 30 seconds
+
+### Risk: HTTP API Latency Variability
+**Mitigation**:
+- Run multiple workflows (1000+) to smooth out variance
+- Compare P99 latency (not average) to capture worst-case
 - Compare trends over time, not single runs
+- Allow 10% threshold for regressions
 
 ### Risk: PostgreSQL Performance Variability
 **Mitigation**:
-- Use PostgreSQL service in CI (not Docker)
-- Warm up database before benchmarks
+- Use PostgreSQL service in CI (not Docker overlay)
+- Warm up database with sample workflows before benchmarking
 - Run migrations once at start
+- Use separate database for benchmarks
 
 ### Risk: Test Database Bloat
 **Mitigation**:
-- Truncate tables between test scenarios
-- Use separate database for benchmarks
-- Run VACUUM periodically
+- StreamFlow server manages workflow lifecycle
+- Database cleanup handled by StreamFlow
+- Monitor database size in CI logs
 
 ### Risk: Baseline Drift
 **Mitigation**:
 - Update baseline only on main branch
 - Review baseline changes before merging
 - Track historical trends via artifacts
+- Clearly document when baseline is intentionally updated
 
 ---
 
-## Future Enhancements (Post-Epic 2)
+## Future Enhancements
 
-### Epic 2.2: Competitor Comparison
-- Containerized Temporal/Conductor setups
-- Identical workflow scenarios
-- Hardware-normalized comparisons
-- Published methodology
+### US-2.X: Criterion Micro-Benchmarks (Post-MVP)
+- Criterion.rs benchmarks for internal components
+- Orchestrator evaluation time (DAG logic only)
+- Activity scheduling latency
+- Event publishing overhead
+- State query performance
+- **Purpose**: Optimization tool for developers, not for platform comparison
+- **See**: Deferred to post-MVP optimization story
 
-### Epic 2.5: Grafana Dashboard
-- Prometheus metrics endpoint integration
-- Real-time performance monitoring
-- Alerting on performance degradation
+### Post-MVP Performance Enhancements
+- **Story 2.7**: Competitor Comparison Benchmarks (Temporal, Conductor)
+- **Story 2.8**: Grafana Performance Dashboard (see Epic 5: Story 5.1)
+- **Advanced Profiling Tools**:
+  - Memory profiling (heap allocation tracking)
+  - CPU profiling (flamegraphs via pprof)
+  - Database query profiling (pg_stat_statements)
+  - Network latency simulation (tc netem)
 
-### Advanced Benchmarking
-- Memory profiling (heap allocation tracking)
-- CPU profiling (flamegraphs)
-- Database query profiling (pg_stat_statements)
-- Network latency simulation
+**See**: `docs/post-mvp.md` for complete details on post-MVP performance enhancements.
 
 ---
 
 ## References
 
-- [Criterion.rs Documentation](https://bheisler.github.io/criterion.rs/book/)
+- [reqwest HTTP Client](https://docs.rs/reqwest/)
 - [GitHub Actions: PostgreSQL Service](https://docs.github.com/en/actions/using-containerized-services/creating-postgresql-service-containers)
 - [StreamFlow Architecture](architecture.md)
 - [MVP Requirements - Epic 2](mvp-requirements.md#epic-2-performance-benchmarking-and-validation)
+- [Temporal Benchmarking](https://temporal.io/blog/performance-benchmarking) (for comparison methodology)
