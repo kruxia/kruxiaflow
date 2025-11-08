@@ -47,6 +47,7 @@ axum = { workspace = true }
 signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
 tokio-stream = "0.1"
+tokio-util = { workspace = true }
 
 [dev-dependencies]
 serial_test = { workspace = true }

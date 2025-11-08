@@ -12,15 +12,23 @@ use crate::events::{
 use crate::queue::{Activity, ActivityQueue};
 use serde_json::json;
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
 const CONSUMER_ID: &str = "orchestrator";
 
 /// Run the orchestrator main loop
 /// Polls for events, evaluates dependencies, schedules activities
+///
+/// # Arguments
+/// * `event_source` - Event source for polling workflow events
+/// * `activity_queue` - Activity queue for scheduling activities
+/// * `config` - Orchestrator configuration
+/// * `shutdown_token` - Optional cancellation token for graceful shutdown
 pub async fn run_orchestrator(
     event_source: Arc<dyn EventSource>,
     activity_queue: Arc<dyn ActivityQueue>,
     config: OrchestratorConfig,
+    shutdown_token: Option<CancellationToken>,
 ) -> Result<()> {
     let mut backoff = AdaptiveBackoff::new(
         config.poll_interval_min,
@@ -31,6 +39,14 @@ pub async fn run_orchestrator(
     tracing::info!("Orchestrator starting with consumer_id={}", CONSUMER_ID);
 
     loop {
+        // Check if shutdown has been requested
+        if let Some(ref token) = shutdown_token {
+            if token.is_cancelled() {
+                tracing::info!("Shutdown requested, orchestrator stopping gracefully");
+                return Ok(());
+            }
+        }
+
         // Poll for new events (durable position tracking)
         let events = event_source.poll(CONSUMER_ID).await?;
 
@@ -45,6 +61,14 @@ pub async fn run_orchestrator(
 
         // Process each event
         for event in &events {
+            // Check shutdown again before processing each event
+            if let Some(ref token) = shutdown_token {
+                if token.is_cancelled() {
+                    tracing::info!("Shutdown requested during event processing, stopping");
+                    return Ok(());
+                }
+            }
+
             if let Err(e) =
                 process_workflow_event(event, &event_source, &activity_queue, &config).await
             {

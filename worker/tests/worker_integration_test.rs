@@ -8,6 +8,7 @@ use streamflow_core::events::PostgresEventSource;
 use streamflow_core::queue::{Activity, ActivityQueue as _, PostgresQueue, QueueConfig};
 use streamflow_oauth::{AuthConfig, PostgresAuthService};
 use streamflow_worker::{ActivityRegistry, EchoActivity, WorkerConfig, WorkerManager};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 /// Helper to create test database pool
@@ -61,12 +62,14 @@ async fn create_real_server() -> (String, PgPool, tokio::task::JoinHandle<()>) {
 
     let activity_queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
+    let shutdown_token = CancellationToken::new();
 
     let state = AppState::new(
         pool.clone(),
         Arc::new(auth_service),
         activity_queue,
         event_source,
+        shutdown_token,
     );
     let app = app_router(state);
 

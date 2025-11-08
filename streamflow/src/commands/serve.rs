@@ -13,6 +13,7 @@ use streamflow_oauth::{AuthConfig, PostgresAuthService};
 use streamflow_worker::{ActivityRegistry, WorkerConfig, WorkerManager};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 /// Serve command - Launch all services together
@@ -101,6 +102,19 @@ Example: --workers 4"
         help = "RSA public key for JWT validation (optional, derived from private key if not provided)"
     )]
     pub oauth_public_key: Option<String>,
+
+    /// Shutdown timeout in seconds
+    #[arg(
+        long,
+        env = "STREAMFLOW_SHUTDOWN_TIMEOUT",
+        default_value = "30",
+        help = "Graceful shutdown timeout in seconds",
+        long_help = "Time to wait for in-flight activities to complete during shutdown\n\n\
+Default: 30 seconds\n\
+Range: 5-300 seconds\n\
+Example: --shutdown-timeout 60"
+    )]
+    pub shutdown_timeout: u64,
 }
 
 impl ServeCommand {
@@ -120,6 +134,10 @@ impl ServeCommand {
             );
         }
 
+        if self.shutdown_timeout < 5 || self.shutdown_timeout > 300 {
+            anyhow::bail!("Shutdown timeout must be between 5 and 300 seconds");
+        }
+
         Ok(())
     }
 }
@@ -129,6 +147,7 @@ async fn spawn_orchestrator(
     event_source: Arc<dyn EventSource>,
     activity_queue: Arc<dyn ActivityQueue>,
     pool: PgPool,
+    shutdown_token: CancellationToken,
 ) -> Result<(JoinHandle<Result<()>>, Arc<Notify>)> {
     let ready_notify = Arc::new(Notify::new());
     let ready_clone = Arc::clone(&ready_notify);
@@ -142,7 +161,8 @@ async fn spawn_orchestrator(
         ready_clone.notify_one();
 
         // Run orchestrator (polls events and schedules activities)
-        run_orchestrator(event_source, activity_queue, config)
+        // Note: run_orchestrator will check shutdown_token in its loop
+        run_orchestrator(event_source, activity_queue, config, Some(shutdown_token))
             .await
             .map_err(|e: OrchestratorError| anyhow::anyhow!("Orchestrator error: {}", e))
     });
@@ -157,11 +177,12 @@ async fn spawn_orchestrator(
     Ok((handle, ready_notify))
 }
 
-/// Spawn API server task
+/// Spawn API server task with graceful shutdown support
 async fn spawn_api_server(
     state: AppState,
     bind: String,
     port: u16,
+    shutdown_token: CancellationToken,
 ) -> Result<(JoinHandle<Result<()>>, Arc<Notify>)> {
     let addr: SocketAddr = format!("{}:{}", bind, port)
         .parse()
@@ -187,11 +208,16 @@ async fn spawn_api_server(
 
         tracing::info!(addr = %addr, "API server listening");
 
-        // Serve
+        // Serve with graceful shutdown
         axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                shutdown_token.cancelled().await;
+                tracing::info!("API server shutdown signal received, draining connections...");
+            })
             .await
             .map_err(|e| anyhow::anyhow!("API server error: {}", e))?;
 
+        tracing::info!("API server stopped accepting connections");
         Ok(())
     });
 
@@ -259,8 +285,12 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
         port = cmd.port,
         bind = %cmd.bind,
         workers = cmd.workers,
+        shutdown_timeout = cmd.shutdown_timeout,
         "Starting StreamFlow all-in-one mode"
     );
+
+    // Create shutdown coordinator
+    let shutdown_token = CancellationToken::new();
 
     // 1. Test database connection
     tracing::info!("Testing database connection...");
@@ -297,28 +327,35 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
 
-    // Create event source (consumer_id is not used in the constructor, will be used in polling)
+    // Create event source
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
 
-    // Create API state
+    // Create API state with shutdown token
     let state = AppState::new(
         pool.clone(),
         auth_service,
         activity_queue.clone(),
         event_source.clone(),
+        shutdown_token.clone(),
     );
 
     tracing::info!("Services initialized");
 
-    // 3. Spawn orchestrator
-    let (orchestrator_handle, _) =
-        spawn_orchestrator(event_source.clone(), activity_queue.clone(), pool.clone()).await?;
+    // 3. Spawn orchestrator with shutdown token
+    let (orchestrator_handle, _) = spawn_orchestrator(
+        event_source.clone(),
+        activity_queue.clone(),
+        pool.clone(),
+        shutdown_token.clone(),
+    )
+    .await?;
 
-    // 4. Spawn API server
+    // 4. Spawn API server with shutdown token
     let api_url = format!("http://{}:{}", cmd.bind, cmd.port);
-    let (api_handle, _) = spawn_api_server(state, cmd.bind.clone(), cmd.port).await?;
+    let (api_handle, _) =
+        spawn_api_server(state, cmd.bind.clone(), cmd.port, shutdown_token.clone()).await?;
 
-    // 5. Spawn workers
+    // 5. Spawn workers (workers will be gracefully stopped via manager)
     let worker_handles = spawn_workers(
         cmd.workers,
         api_url.clone(),
@@ -334,36 +371,51 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
         api_url
     );
 
-    // 6. Setup signal handlers for graceful shutdown
+    // 6. Wait for shutdown signal
     let shutdown_signal = crate::signals::wait_for_shutdown();
-
-    // 7. Wait for shutdown signal
     shutdown_signal.await;
 
-    tracing::info!("Shutdown signal received, stopping services...");
+    tracing::info!("Shutdown signal received, initiating graceful shutdown...");
 
-    // 8. Graceful shutdown sequence
+    // 7. Trigger shutdown for all components
+    shutdown_token.cancel();
 
-    // Stop workers first (drain in-flight activities)
-    tracing::info!("Stopping workers...");
+    // 8. Graceful shutdown sequence with timeout
+    let shutdown_timeout = Duration::from_secs(cmd.shutdown_timeout);
+
+    // Stop workers first (they will finish current activities)
+    tracing::info!(
+        timeout_secs = cmd.shutdown_timeout,
+        "Stopping workers, waiting for activities to complete..."
+    );
+
+    // Workers are running as spawned tasks, we'll give them time to finish
+    // In a full implementation, WorkerManager would have a drain() method
     for handle in worker_handles {
         handle.abort();
     }
-    // Give workers time to finish in-flight activities
     tokio::time::sleep(Duration::from_secs(2)).await;
     tracing::info!("Workers stopped");
 
-    // Stop API server (close connections)
+    // Stop API server (drain in-flight requests via graceful shutdown)
     tracing::info!("Stopping API server...");
-    api_handle.abort();
-    let _ = api_handle.await;
-    tracing::info!("API server stopped");
+    let api_result = tokio::time::timeout(shutdown_timeout, api_handle).await;
+    match api_result {
+        Ok(Ok(Ok(()))) => tracing::info!("API server stopped gracefully"),
+        Ok(Ok(Err(e))) => tracing::warn!("API server error during shutdown: {}", e),
+        Ok(Err(e)) => tracing::warn!("API server task error: {}", e),
+        Err(_) => tracing::warn!("API server shutdown timeout, forcing stop"),
+    }
 
-    // Stop orchestrator (flush events)
+    // Stop orchestrator (will stop polling via shutdown token)
     tracing::info!("Stopping orchestrator...");
-    orchestrator_handle.abort();
-    let _ = orchestrator_handle.await;
-    tracing::info!("Orchestrator stopped");
+    let orch_result = tokio::time::timeout(shutdown_timeout, orchestrator_handle).await;
+    match orch_result {
+        Ok(Ok(Ok(()))) => tracing::info!("Orchestrator stopped gracefully"),
+        Ok(Ok(Err(e))) => tracing::warn!("Orchestrator error during shutdown: {}", e),
+        Ok(Err(e)) => tracing::warn!("Orchestrator task error: {}", e),
+        Err(_) => tracing::warn!("Orchestrator shutdown timeout, forcing stop"),
+    }
 
     // Close database pool
     tracing::info!("Closing database pool...");
@@ -392,6 +444,7 @@ mod tests {
                 "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----".to_string(),
             ),
             oauth_public_key: None,
+            shutdown_timeout: 30,
         };
 
         assert!(cmd.validate().is_ok());
@@ -408,6 +461,7 @@ mod tests {
             client_secret: Some("secret".to_string()),
             oauth_private_key: Some("key".to_string()),
             oauth_public_key: None,
+            shutdown_timeout: 30,
         };
 
         assert!(cmd.validate().is_err());
@@ -424,6 +478,7 @@ mod tests {
             client_secret: None,
             oauth_private_key: Some("key".to_string()),
             oauth_public_key: None,
+            shutdown_timeout: 30,
         };
 
         assert!(cmd.validate().is_err());

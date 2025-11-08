@@ -20,6 +20,7 @@ description = "High-performance workflow orchestration platform for AI-native wo
 [workspace.dependencies]
 # Async runtime
 tokio = { version = "1.40", features = ["full"] }
+tokio-util = "0.7"
 async-trait = "0.1"
 
 # Database
