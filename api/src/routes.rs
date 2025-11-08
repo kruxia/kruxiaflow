@@ -94,7 +94,8 @@ pub fn protected_routes() -> Router<AppState> {
 /// Middleware stack (outer to inner):
 /// 1. CORS - Cross-origin resource sharing
 /// 2. Request ID - Unique ID for request tracing
-/// 3. Authentication - Protected routes only (applied per-group)
+/// 3. Shutdown check - Return 503 during graceful shutdown (protected routes only)
+/// 4. Authentication - Protected routes only (applied per-group)
 ///
 /// Documentation:
 /// - ReDoc UI served at /api/v1/docs
@@ -111,12 +112,20 @@ pub fn app_router(state: AppState) -> Router {
 
     // Clone state for middleware use
     let auth_state = state.clone();
+    let shutdown_state = state.clone();
 
     Router::new()
         .merge(public_routes())
         .merge(
             protected_routes()
-                // Apply authentication middleware to protected routes only
+                // Apply shutdown check middleware first (returns 503 during shutdown)
+                .layer(axum_middleware::from_fn(move |req, next| {
+                    let state = shutdown_state.clone();
+                    async move {
+                        middleware::shutdown_check(axum::extract::State(state), req, next).await
+                    }
+                }))
+                // Apply authentication middleware to protected routes
                 .layer(axum_middleware::from_fn(move |req, next| {
                     let state = auth_state.clone();
                     async move {
@@ -146,6 +155,7 @@ mod tests {
     use streamflow_core::events::PostgresEventSource;
     use streamflow_core::queue::{PostgresQueue, QueueConfig};
     use streamflow_oauth::{AuthConfig, PostgresAuthService};
+    use tokio_util::sync::CancellationToken;
 
     /// Helper to create test database pool
     async fn setup_test_pool() -> PgPool {
@@ -205,8 +215,15 @@ mod tests {
 
         let activity_queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
         let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
+        let shutdown_token = CancellationToken::new();
 
-        let state = AppState::new(pool, Arc::new(auth_service), activity_queue, event_source);
+        let state = AppState::new(
+            pool,
+            Arc::new(auth_service),
+            activity_queue,
+            event_source,
+            shutdown_token,
+        );
         let router = app_router(state);
 
         // Just verifying it compiles and creates a Router
@@ -245,8 +262,15 @@ mod tests {
 
         let activity_queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
         let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
+        let shutdown_token = CancellationToken::new();
 
-        let state = AppState::new(pool, Arc::new(auth_service), activity_queue, event_source);
+        let state = AppState::new(
+            pool,
+            Arc::new(auth_service),
+            activity_queue,
+            event_source,
+            shutdown_token,
+        );
         let app = app_router(state);
         let server = TestServer::new(app).expect("Failed to create test server");
 
@@ -273,8 +297,15 @@ mod tests {
 
         let activity_queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
         let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
+        let shutdown_token = CancellationToken::new();
 
-        let state = AppState::new(pool, Arc::new(auth_service), activity_queue, event_source);
+        let state = AppState::new(
+            pool,
+            Arc::new(auth_service),
+            activity_queue,
+            event_source,
+            shutdown_token,
+        );
         let app = app_router(state);
         let server = TestServer::new(app).expect("Failed to create test server");
 

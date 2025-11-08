@@ -104,11 +104,13 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
     tracing::info!("Event source initialized (PostgreSQL polling)");
 
     // Create application state with configured infrastructure services
+    let shutdown_token = tokio_util::sync::CancellationToken::new();
     let app_state = streamflow_api::AppState::new(
         db_pool,
         Arc::new(auth_service),
         activity_queue,
         event_source,
+        shutdown_token,
     );
 
     // Create Axum router

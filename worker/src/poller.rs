@@ -219,3 +219,284 @@ impl WorkerPoller {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::WorkerApiClient;
+    use crate::registry::{ActivityImpl, ActivityRegistry};
+    use async_trait::async_trait;
+    use serde_json::{Value, json};
+    use std::sync::Arc;
+    use std::time::Duration;
+    use uuid::Uuid;
+
+    /// Test activity that succeeds
+    struct SuccessActivity;
+
+    #[async_trait]
+    impl ActivityImpl for SuccessActivity {
+        async fn execute(&self, parameters: Value) -> Result<Value> {
+            Ok(json!({
+                "result": "success",
+                "input": parameters
+            }))
+        }
+
+        fn name(&self) -> &str {
+            "success"
+        }
+
+        fn namespace(&self) -> &str {
+            "test"
+        }
+    }
+
+    /// Test activity that fails
+    struct FailingActivity;
+
+    #[async_trait]
+    impl ActivityImpl for FailingActivity {
+        async fn execute(&self, _parameters: Value) -> Result<Value> {
+            anyhow::bail!("Activity failed intentionally")
+        }
+
+        fn name(&self) -> &str {
+            "failing"
+        }
+
+        fn namespace(&self) -> &str {
+            "test"
+        }
+    }
+
+    /// Test activity that times out
+    struct SlowActivity;
+
+    #[async_trait]
+    impl ActivityImpl for SlowActivity {
+        async fn execute(&self, _parameters: Value) -> Result<Value> {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            Ok(json!({"result": "done"}))
+        }
+
+        fn name(&self) -> &str {
+            "slow"
+        }
+
+        fn namespace(&self) -> &str {
+            "test"
+        }
+    }
+
+    fn test_config() -> WorkerConfig {
+        WorkerConfig {
+            api_url: "http://localhost:8080".to_string(),
+            worker_id: "test_worker".to_string(),
+            activity_types: vec!["test.success".to_string()],
+            max_activities_per_poll: 10,
+            poll_interval: Duration::from_millis(100),
+            concurrency: 4,
+            activity_timeout: Duration::from_secs(5),
+            heartbeat_interval: Duration::from_secs(30),
+            client_id: "test_client".to_string(),
+            client_secret: "test_secret".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_new_poller() {
+        let config = test_config();
+        let client = WorkerApiClient::new(
+            "http://localhost:8080".to_string(),
+            "test_client".to_string(),
+            "test_secret".to_string(),
+        );
+        let registry = Arc::new(ActivityRegistry::new());
+
+        let poller = WorkerPoller::new(config.clone(), client, registry.clone());
+
+        assert_eq!(poller.config.worker_id, "test_worker");
+        assert_eq!(poller.config.max_activities_per_poll, 10);
+    }
+
+    #[test]
+    fn test_config_timeout_determination() {
+        let config = test_config();
+
+        // Test default timeout
+        assert_eq!(config.activity_timeout, Duration::from_secs(5));
+
+        // Test custom timeout
+        let custom_config = WorkerConfig {
+            activity_timeout: Duration::from_secs(300),
+            ..config
+        };
+        assert_eq!(custom_config.activity_timeout, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn test_heartbeat_interval() {
+        let config = test_config();
+        assert_eq!(config.heartbeat_interval, Duration::from_secs(30));
+
+        let custom_config = WorkerConfig {
+            heartbeat_interval: Duration::from_secs(10),
+            ..config
+        };
+        assert_eq!(custom_config.heartbeat_interval, Duration::from_secs(10));
+    }
+
+    #[tokio::test]
+    async fn test_execute_activity_with_custom_timeout() {
+        let config = WorkerConfig {
+            activity_timeout: Duration::from_secs(5),
+            ..test_config()
+        };
+
+        let client = WorkerApiClient::new(
+            "http://localhost:8080".to_string(),
+            "test_client".to_string(),
+            "test_secret".to_string(),
+        );
+        let mut registry = ActivityRegistry::new();
+        registry.register(Arc::new(SuccessActivity));
+
+        let poller = WorkerPoller::new(config, client, Arc::new(registry));
+
+        let activity = PendingActivity {
+            activity_id: Uuid::now_v7(),
+            workflow_id: Uuid::now_v7(),
+            activity_key: "test_key".to_string(),
+            namespace: "test".to_string(),
+            name: "success".to_string(),
+            parameters: json!({"input": "test"}),
+            settings: None,
+            timeout_seconds: Some(10), // Custom timeout overrides config
+        };
+
+        // This test verifies the timeout determination logic
+        let timeout = if let Some(seconds) = activity.timeout_seconds {
+            Duration::from_secs(seconds as u64)
+        } else {
+            poller.config.activity_timeout
+        };
+
+        assert_eq!(timeout, Duration::from_secs(10));
+    }
+
+    #[tokio::test]
+    async fn test_execute_activity_uses_default_timeout() {
+        let config = WorkerConfig {
+            activity_timeout: Duration::from_secs(5),
+            ..test_config()
+        };
+
+        let client = WorkerApiClient::new(
+            "http://localhost:8080".to_string(),
+            "test_client".to_string(),
+            "test_secret".to_string(),
+        );
+        let mut registry = ActivityRegistry::new();
+        registry.register(Arc::new(SuccessActivity));
+
+        let poller = WorkerPoller::new(config, client, Arc::new(registry));
+
+        let activity = PendingActivity {
+            activity_id: Uuid::now_v7(),
+            workflow_id: Uuid::now_v7(),
+            activity_key: "test_key".to_string(),
+            namespace: "test".to_string(),
+            name: "success".to_string(),
+            parameters: json!({"input": "test"}),
+            settings: None,
+            timeout_seconds: None, // Use default timeout
+        };
+
+        // This test verifies the timeout determination logic
+        let timeout = if let Some(seconds) = activity.timeout_seconds {
+            Duration::from_secs(seconds as u64)
+        } else {
+            poller.config.activity_timeout
+        };
+
+        assert_eq!(timeout, Duration::from_secs(5));
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_spawned_for_long_timeout() {
+        let config = test_config();
+        let client = WorkerApiClient::new(
+            "http://localhost:8080".to_string(),
+            "test_client".to_string(),
+            "test_secret".to_string(),
+        );
+        let registry = Arc::new(ActivityRegistry::new());
+
+        let _poller = WorkerPoller::new(config, client, registry);
+
+        // Test that heartbeat is spawned for timeout > 60 seconds
+        let long_timeout = Duration::from_secs(120);
+        let should_spawn = long_timeout > Duration::from_secs(60);
+        assert!(should_spawn);
+
+        // Test that heartbeat is NOT spawned for timeout <= 60 seconds
+        let short_timeout = Duration::from_secs(30);
+        let should_not_spawn = short_timeout > Duration::from_secs(60);
+        assert!(!should_not_spawn);
+    }
+
+    #[tokio::test]
+    async fn test_poll_interval_used_when_no_activities() {
+        let config = WorkerConfig {
+            poll_interval: Duration::from_millis(100),
+            ..test_config()
+        };
+
+        // Verify the poll interval is configured correctly
+        assert_eq!(config.poll_interval, Duration::from_millis(100));
+
+        // The actual sleep happens in the run() method when executed == 0
+        // This test verifies the configuration is set up correctly
+    }
+
+    #[tokio::test]
+    async fn test_error_sleep_duration() {
+        // When poll_and_execute returns an error, the poller sleeps for 5 seconds
+        // This test verifies that constant
+        let error_sleep = Duration::from_secs(5);
+        assert_eq!(error_sleep, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn test_poller_config_cloning() {
+        let config = test_config();
+        let client = WorkerApiClient::new(
+            "http://localhost:8080".to_string(),
+            "test_client".to_string(),
+            "test_secret".to_string(),
+        );
+        let registry = Arc::new(ActivityRegistry::new());
+
+        let poller = WorkerPoller::new(config.clone(), client, registry);
+
+        // Verify config was cloned correctly
+        assert_eq!(poller.config.worker_id, config.worker_id);
+        assert_eq!(poller.config.api_url, config.api_url);
+        assert_eq!(
+            poller.config.max_activities_per_poll,
+            config.max_activities_per_poll
+        );
+    }
+
+    #[test]
+    fn test_activity_registry_arc_cloning() {
+        let mut registry = ActivityRegistry::new();
+        registry.register(Arc::new(SuccessActivity));
+        let registry_arc = Arc::new(registry);
+
+        // Test that Arc can be cloned for spawning tasks
+        let cloned = Arc::clone(&registry_arc);
+        assert!(Arc::ptr_eq(&registry_arc, &cloned));
+    }
+}

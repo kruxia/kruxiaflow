@@ -3,6 +3,7 @@ use std::sync::Arc;
 use streamflow_core::events::EventSource;
 use streamflow_core::queue::ActivityQueue;
 use streamflow_oauth::AuthenticationService;
+use tokio_util::sync::CancellationToken;
 
 /// Build metadata captured at compile time
 #[derive(Clone)]
@@ -39,6 +40,9 @@ pub struct AppState {
     /// Swappable: PostgresEventSource → Kafka, NATS, Logical Replication (post-MVP)
     pub event_source: Arc<dyn EventSource>,
 
+    /// Shutdown coordination token for graceful shutdown
+    pub shutdown_token: CancellationToken,
+
     /// Service version from Cargo.toml
     pub version: String,
 
@@ -57,6 +61,7 @@ impl AppState {
     /// * `auth_service` - Authentication service for JWT validation
     /// * `activity_queue` - Activity queue implementation (e.g., PostgresQueue, SqsQueue)
     /// * `event_source` - Event source implementation (e.g., PostgresEventSource, KafkaEventSource)
+    /// * `shutdown_token` - Cancellation token for coordinated shutdown
     ///
     /// # Build Metadata
     /// - `version`: Captured from CARGO_PKG_VERSION at compile time
@@ -68,12 +73,14 @@ impl AppState {
         auth_service: Arc<dyn AuthenticationService>,
         activity_queue: Arc<dyn ActivityQueue>,
         event_source: Arc<dyn EventSource>,
+        shutdown_token: CancellationToken,
     ) -> Self {
         Self {
             db_pool,
             auth_service,
             activity_queue,
             event_source,
+            shutdown_token,
             version: env!("CARGO_PKG_VERSION").to_string(),
             build: AppStateBuild {
                 timestamp: option_env!("BUILD_TIMESTAMP")
@@ -99,6 +106,7 @@ impl AppState {
     /// * `auth_service` - Authentication service for JWT validation
     /// * `activity_queue` - Activity queue implementation
     /// * `event_source` - Event source implementation
+    /// * `shutdown_token` - Cancellation token for coordinated shutdown
     /// * `version` - Service version string
     /// * `build` - Build metadata (timestamp and git hash)
     /// * `features` - List of enabled features
@@ -109,6 +117,7 @@ impl AppState {
         auth_service: Arc<dyn AuthenticationService>,
         activity_queue: Arc<dyn ActivityQueue>,
         event_source: Arc<dyn EventSource>,
+        shutdown_token: CancellationToken,
         version: String,
         build: AppStateBuild,
         features: Vec<String>,
@@ -118,10 +127,16 @@ impl AppState {
             auth_service,
             activity_queue,
             event_source,
+            shutdown_token,
             version,
             build,
             features,
         }
+    }
+
+    /// Check if shutdown has been initiated
+    pub fn is_shutting_down(&self) -> bool {
+        self.shutdown_token.is_cancelled()
     }
 }
 
@@ -288,8 +303,15 @@ mod tests {
         let auth_service = Arc::new(MockAuthService);
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
+        let shutdown_token = CancellationToken::new();
 
-        let state = AppState::new(pool, auth_service, activity_queue, event_source);
+        let state = AppState::new(
+            pool,
+            auth_service,
+            activity_queue,
+            event_source,
+            shutdown_token,
+        );
 
         assert_eq!(state.version, env!("CARGO_PKG_VERSION"));
         assert_eq!(state.features.len(), 4);
@@ -305,6 +327,7 @@ mod tests {
         let auth_service = Arc::new(MockAuthService);
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
+        let shutdown_token = CancellationToken::new();
 
         let build = AppStateBuild {
             timestamp: "2025-01-01T00:00:00Z".to_string(),
@@ -318,6 +341,7 @@ mod tests {
             auth_service,
             activity_queue,
             event_source,
+            shutdown_token,
             "1.2.3".to_string(),
             build.clone(),
             features.clone(),
@@ -335,8 +359,15 @@ mod tests {
         let auth_service = Arc::new(MockAuthService);
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
+        let shutdown_token = CancellationToken::new();
 
-        let state1 = AppState::new(pool, auth_service, activity_queue, event_source);
+        let state1 = AppState::new(
+            pool,
+            auth_service,
+            activity_queue,
+            event_source,
+            shutdown_token,
+        );
         let state2 = state1.clone();
 
         assert_eq!(state1.version, state2.version);
@@ -364,8 +395,15 @@ mod tests {
         let auth_service = Arc::new(MockAuthService);
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
+        let shutdown_token = CancellationToken::new();
 
-        let state = AppState::new(pool, auth_service, activity_queue, event_source);
+        let state = AppState::new(
+            pool,
+            auth_service,
+            activity_queue,
+            event_source,
+            shutdown_token,
+        );
 
         // Build metadata should be set (either from env vars or "unknown")
         assert!(!state.build.timestamp.is_empty());
@@ -378,6 +416,7 @@ mod tests {
         let auth_service = Arc::new(MockAuthService);
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
+        let shutdown_token = CancellationToken::new();
 
         let build = AppStateBuild {
             timestamp: "test".to_string(),
@@ -389,6 +428,7 @@ mod tests {
             auth_service,
             activity_queue,
             event_source,
+            shutdown_token,
             "1.0.0".to_string(),
             build,
             vec![],
@@ -403,8 +443,15 @@ mod tests {
         let auth_service = Arc::new(MockAuthService);
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
+        let shutdown_token = CancellationToken::new();
 
-        let state = AppState::new(pool, auth_service, activity_queue, event_source);
+        let state = AppState::new(
+            pool,
+            auth_service,
+            activity_queue,
+            event_source,
+            shutdown_token,
+        );
 
         // Verify we can access the auth service
         let result = state.auth_service.authenticate_client("test", "test").await;

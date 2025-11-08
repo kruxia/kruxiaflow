@@ -123,3 +123,259 @@ pub enum ConfigError {
     #[error("Missing client secret (STREAMFLOW_CLIENT_SECRET required)")]
     MissingClientSecret,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+
+    /// Helper to clear and set environment variables for tests
+    fn with_env_vars<F>(vars: Vec<(&str, &str)>, test: F)
+    where
+        F: FnOnce(),
+    {
+        // Clear relevant environment variables first
+        let env_vars = [
+            "STREAMFLOW_API_URL",
+            "STREAMFLOW_WORKER_ID",
+            "STREAMFLOW_ACTIVITY_TYPES",
+            "STREAMFLOW_WORKER_CONCURRENCY",
+            "STREAMFLOW_CLIENT_ID",
+            "STREAMFLOW_CLIENT_SECRET",
+        ];
+
+        unsafe {
+            for var in &env_vars {
+                env::remove_var(var);
+            }
+
+            // Set the test variables
+            for (key, value) in vars {
+                env::set_var(key, value);
+            }
+        }
+
+        // Run the test
+        test();
+
+        // Clean up
+        unsafe {
+            for var in &env_vars {
+                env::remove_var(var);
+            }
+        }
+    }
+
+    #[test]
+    fn test_default_config() {
+        let config = WorkerConfig::default();
+
+        assert_eq!(config.api_url, "http://localhost:8080");
+        assert!(config.worker_id.starts_with("worker_"));
+        assert_eq!(config.activity_types, vec!["default.echo"]);
+        assert_eq!(config.max_activities_per_poll, 10);
+        assert_eq!(config.poll_interval, Duration::from_millis(100));
+        assert_eq!(config.concurrency, 4);
+        assert_eq!(config.activity_timeout, Duration::from_secs(300));
+        assert_eq!(config.heartbeat_interval, Duration::from_secs(30));
+        assert_eq!(config.client_id, "worker_client");
+        assert_eq!(config.client_secret, "");
+    }
+
+    #[test]
+    fn test_from_env_with_defaults() {
+        with_env_vars(vec![("STREAMFLOW_CLIENT_SECRET", "test_secret")], || {
+            let config = WorkerConfig::from_env().unwrap();
+
+            assert_eq!(config.api_url, "http://localhost:8080");
+            assert!(config.worker_id.starts_with("worker_"));
+            assert_eq!(config.activity_types, vec!["default.echo"]);
+            assert_eq!(config.concurrency, 4);
+            assert_eq!(config.client_id, "worker_client");
+            assert_eq!(config.client_secret, "test_secret");
+        });
+    }
+
+    #[test]
+    fn test_from_env_with_custom_values() {
+        with_env_vars(
+            vec![
+                ("STREAMFLOW_API_URL", "http://api.example.com:9090"),
+                ("STREAMFLOW_WORKER_ID", "custom_worker_123"),
+                ("STREAMFLOW_ACTIVITY_TYPES", "ns1.activity1, ns2.activity2"),
+                ("STREAMFLOW_WORKER_CONCURRENCY", "8"),
+                ("STREAMFLOW_CLIENT_ID", "custom_client"),
+                ("STREAMFLOW_CLIENT_SECRET", "super_secret"),
+            ],
+            || {
+                let config = WorkerConfig::from_env().unwrap();
+
+                assert_eq!(config.api_url, "http://api.example.com:9090");
+                assert_eq!(config.worker_id, "custom_worker_123");
+                assert_eq!(
+                    config.activity_types,
+                    vec!["ns1.activity1", "ns2.activity2"]
+                );
+                assert_eq!(config.concurrency, 8);
+                assert_eq!(config.client_id, "custom_client");
+                assert_eq!(config.client_secret, "super_secret");
+            },
+        );
+    }
+
+    #[test]
+    fn test_from_env_invalid_concurrency() {
+        with_env_vars(
+            vec![
+                ("STREAMFLOW_WORKER_CONCURRENCY", "not_a_number"),
+                ("STREAMFLOW_CLIENT_SECRET", "secret"),
+            ],
+            || {
+                let result = WorkerConfig::from_env();
+                assert!(result.is_err());
+                assert!(matches!(result, Err(ConfigError::InvalidConcurrency)));
+            },
+        );
+    }
+
+    #[test]
+    fn test_from_env_missing_client_secret() {
+        with_env_vars(vec![], || {
+            let result = WorkerConfig::from_env();
+            assert!(result.is_err());
+            assert!(matches!(result, Err(ConfigError::MissingClientSecret)));
+        });
+    }
+
+    #[test]
+    fn test_validate_no_activity_types() {
+        let mut config = WorkerConfig::default();
+        config.activity_types = vec![];
+        config.client_secret = "secret".to_string();
+
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(matches!(result, Err(ConfigError::NoActivityTypes)));
+    }
+
+    #[test]
+    fn test_validate_invalid_activity_type_format() {
+        let mut config = WorkerConfig::default();
+        config.activity_types = vec!["invalid_format".to_string()];
+        config.client_secret = "secret".to_string();
+
+        let result = config.validate();
+        assert!(result.is_err());
+        match result {
+            Err(ConfigError::InvalidActivityType(msg)) => {
+                assert_eq!(msg, "invalid_format");
+            }
+            _ => panic!("Expected InvalidActivityType error"),
+        }
+    }
+
+    #[test]
+    fn test_validate_multiple_activity_types_one_invalid() {
+        let mut config = WorkerConfig::default();
+        config.activity_types = vec![
+            "valid.activity".to_string(),
+            "invalid".to_string(),
+            "also.valid".to_string(),
+        ];
+        config.client_secret = "secret".to_string();
+
+        let result = config.validate();
+        assert!(result.is_err());
+        match result {
+            Err(ConfigError::InvalidActivityType(msg)) => {
+                assert_eq!(msg, "invalid");
+            }
+            _ => panic!("Expected InvalidActivityType error"),
+        }
+    }
+
+    #[test]
+    fn test_validate_zero_concurrency() {
+        let mut config = WorkerConfig::default();
+        config.concurrency = 0;
+        config.client_secret = "secret".to_string();
+
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(matches!(result, Err(ConfigError::InvalidConcurrency)));
+    }
+
+    #[test]
+    fn test_validate_missing_client_secret() {
+        let mut config = WorkerConfig::default();
+        config.client_secret = "".to_string();
+
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(matches!(result, Err(ConfigError::MissingClientSecret)));
+    }
+
+    #[test]
+    fn test_validate_valid_config() {
+        let mut config = WorkerConfig::default();
+        config.client_secret = "secret".to_string();
+
+        let result = config.validate();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_error_display_messages() {
+        let err = ConfigError::NoActivityTypes;
+        assert_eq!(err.to_string(), "No activity types configured");
+
+        let err = ConfigError::InvalidActivityType("test.bad".to_string());
+        assert_eq!(
+            err.to_string(),
+            "Invalid activity type format: test.bad (must be namespace.name)"
+        );
+
+        let err = ConfigError::InvalidConcurrency;
+        assert_eq!(err.to_string(), "Invalid concurrency value (must be > 0)");
+
+        let err = ConfigError::MissingClientSecret;
+        assert_eq!(
+            err.to_string(),
+            "Missing client secret (STREAMFLOW_CLIENT_SECRET required)"
+        );
+    }
+
+    #[test]
+    fn test_from_env_with_single_activity_type() {
+        with_env_vars(
+            vec![
+                ("STREAMFLOW_ACTIVITY_TYPES", "namespace.single"),
+                ("STREAMFLOW_CLIENT_SECRET", "secret"),
+            ],
+            || {
+                let config = WorkerConfig::from_env().unwrap();
+                assert_eq!(config.activity_types, vec!["namespace.single"]);
+            },
+        );
+    }
+
+    #[test]
+    fn test_from_env_activity_types_with_spaces() {
+        with_env_vars(
+            vec![
+                (
+                    "STREAMFLOW_ACTIVITY_TYPES",
+                    "ns1.act1 , ns2.act2  ,  ns3.act3",
+                ),
+                ("STREAMFLOW_CLIENT_SECRET", "secret"),
+            ],
+            || {
+                let config = WorkerConfig::from_env().unwrap();
+                assert_eq!(
+                    config.activity_types,
+                    vec!["ns1.act1", "ns2.act2", "ns3.act3"]
+                );
+            },
+        );
+    }
+}

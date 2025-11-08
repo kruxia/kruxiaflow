@@ -14,6 +14,7 @@ use streamflow_api::{AppState, AppStateBuild, app_router};
 use streamflow_core::events::PostgresEventSource;
 use streamflow_core::queue::{PostgresQueue, QueueConfig};
 use streamflow_oauth::{AuthConfig, PostgresAuthService};
+use tokio_util::sync::CancellationToken;
 
 /// Helper to create test database pool
 async fn setup_test_pool() -> PgPool {
@@ -93,6 +94,7 @@ async fn setup_test_state() -> AppState {
         Arc::new(auth_service),
         queue,
         event_source,
+        CancellationToken::new(),
         "0.2.0-test".to_string(),
         AppStateBuild {
             timestamp: "2025-10-30T00:00:00Z".to_string(),

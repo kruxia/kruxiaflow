@@ -1080,6 +1080,7 @@ async fn test_run_orchestrator_loop() {
             event_source_clone,
             activity_queue_clone,
             config_clone,
+            None,
         )
         .await
     });
@@ -1150,6 +1151,7 @@ async fn test_orchestrator_backoff_when_no_events() {
             event_source_clone,
             activity_queue_clone,
             config_clone,
+            None,
         )
         .await
     });

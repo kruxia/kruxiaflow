@@ -9,6 +9,7 @@ description = "Built-in activity worker for StreamFlow"
 [dependencies]
 # Async runtime
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 async-trait = { workspace = true }
 
 # HTTP client

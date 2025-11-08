@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 # Workspace dependencies
 tokio.workspace = true
+tokio-util.workspace = true
 async-trait.workspace = true
 sqlx.workspace = true
 uuid.workspace = true

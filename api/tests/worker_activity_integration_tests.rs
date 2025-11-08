@@ -8,6 +8,7 @@ use streamflow_api::{routes::app_router, state::AppState};
 use streamflow_core::events::PostgresEventSource;
 use streamflow_core::queue::{Activity, ActivityQueue, PostgresQueue, QueueConfig};
 use streamflow_oauth::{AuthConfig, PostgresAuthService};
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 /// Helper to create test database pool
@@ -61,12 +62,14 @@ async fn create_test_server() -> (TestServer, PgPool) {
 
     let activity_queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
+    let shutdown_token = CancellationToken::new();
 
     let state = AppState::new(
         pool.clone(),
         Arc::new(auth_service),
         activity_queue,
         event_source,
+        shutdown_token,
     );
     let app = app_router(state);
     let server = TestServer::new(app).expect("Failed to create test server");
