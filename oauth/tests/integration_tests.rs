@@ -2,7 +2,7 @@
 //! Integration tests for OAuth flows
 //!
 //! These tests require a running PostgreSQL database configured via DATABASE_URL.
-//! Run with: scr/test.sh
+//! Run with: scripts/test.sh
 
 use bcrypt::hash;
 use chrono::{Duration, Utc};

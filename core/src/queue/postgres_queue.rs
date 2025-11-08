@@ -3,7 +3,6 @@ use crate::queue::{
     QueueConfig, QueueError, QueuedActivity, Result,
 };
 use async_trait::async_trait;
-use chrono::Utc;
 use sqlx::PgPool;
 use tracing::{debug, error, warn};
 use uuid::Uuid;
@@ -56,7 +55,6 @@ impl ActivityQueue for PostgresQueue {
 
             let timeout = self.extract_timeout(&activity.settings);
             let max_retries = self.extract_max_retries(&activity.settings);
-            let scheduled_for = activity.scheduled_for.unwrap_or_else(Utc::now);
 
             let settings_json = activity
                 .settings
@@ -65,12 +63,14 @@ impl ActivityQueue for PostgresQueue {
                 .transpose()?;
 
             // Idempotent insert - ON CONFLICT DO NOTHING
+            // Use COALESCE($7, NOW()) to default scheduled_for to database NOW() if None
+            // This ensures consistency with claim_next which uses NOW() for comparison
             let result = sqlx::query!(
                 r#"
                 INSERT INTO activity_queue (
                     workflow_id, activity_key, namespace, name,
                     parameters, settings, scheduled_for, timeout_duration, max_retries
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, make_interval(secs => $8), $9)
+                ) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, NOW()), make_interval(secs => $8), $9)
                 ON CONFLICT (workflow_id, activity_key) DO NOTHING
                 "#,
                 workflow_id,
@@ -79,7 +79,7 @@ impl ActivityQueue for PostgresQueue {
                 activity.name,
                 activity.parameters,
                 settings_json,
-                scheduled_for,
+                activity.scheduled_for,
                 timeout as f64,
                 max_retries
             )

@@ -2398,6 +2398,8 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "serde",
+ "serde_json",
  "serial_test",
  "signal-hook",
  "signal-hook-tokio",
