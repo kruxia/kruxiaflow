@@ -331,16 +331,16 @@ async fn test_complete_activity_success() {
 
     assert!(result.is_ok());
 
-    // Verify activity is removed from queue
-    let count = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM activity_queue WHERE id = $1",
+    // Verify activity is marked as completed (soft-delete)
+    let status = sqlx::query_scalar!(
+        r#"SELECT status::text FROM activity_queue WHERE id = $1"#,
         activity_id
     )
     .fetch_one(&pool)
     .await
     .unwrap();
 
-    assert_eq!(count, Some(0));
+    assert_eq!(status, Some("completed".to_string()));
 
     // Verify event was published
     let event = sqlx::query!(
@@ -392,16 +392,12 @@ async fn test_complete_activity_idempotency() {
         .await
         .unwrap();
 
-    // Try to complete again
+    // Try to complete again (should succeed idempotently)
     let result = service
         .complete_activity(activity_id, "worker_01".to_string(), output, None)
         .await;
 
-    assert!(result.is_err());
-    assert!(matches!(
-        result.unwrap_err(),
-        streamflow_core::activity::ActivityWorkerError::ActivityNotFound(_)
-    ));
+    assert!(result.is_ok());
 
     cleanup_activities(&pool, workflow_id).await;
 }
@@ -477,16 +473,16 @@ async fn test_fail_activity_success() {
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), false); // will_retry = false
 
-    // Verify activity is removed from queue
-    let count = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM activity_queue WHERE id = $1",
+    // Verify activity is marked as failed (soft-delete)
+    let status = sqlx::query_scalar!(
+        r#"SELECT status::text FROM activity_queue WHERE id = $1"#,
         activity_id
     )
     .fetch_one(&pool)
     .await
     .unwrap();
 
-    assert_eq!(count, Some(0));
+    assert_eq!(status, Some("failed".to_string()));
 
     // Verify event was published
     let event = sqlx::query!(

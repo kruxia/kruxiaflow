@@ -8,6 +8,8 @@ pub struct OrchestratorConfig {
     pub poll_interval_min: Duration,
     pub poll_interval_max: Duration,
     pub backoff_multiplier: f64,
+    pub workflow_timeout: Duration,
+    pub timeout_check_interval: Duration,
 }
 
 impl OrchestratorConfig {
@@ -16,7 +18,9 @@ impl OrchestratorConfig {
             pool,
             poll_interval_min: Duration::from_millis(10),
             poll_interval_max: Duration::from_millis(500), // Optimized for low latency
-            backoff_multiplier: 1.3, // Optimized for faster convergence
+            backoff_multiplier: 1.3,                       // Optimized for faster convergence
+            workflow_timeout: Duration::from_secs(300),    // 5 minutes default timeout
+            timeout_check_interval: Duration::from_secs(30), // Check every 30 seconds
         }
     }
 
@@ -28,6 +32,16 @@ impl OrchestratorConfig {
 
     pub fn with_backoff_multiplier(mut self, multiplier: f64) -> Self {
         self.backoff_multiplier = multiplier;
+        self
+    }
+
+    pub fn with_workflow_timeout(mut self, timeout: Duration) -> Self {
+        self.workflow_timeout = timeout;
+        self
+    }
+
+    pub fn with_timeout_check_interval(mut self, interval: Duration) -> Self {
+        self.timeout_check_interval = interval;
         self
     }
 }

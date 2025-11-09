@@ -40,3 +40,8 @@ streamflow-api = { path = "../api" }
 streamflow-core = { path = "../core" }
 streamflow-oauth = { path = "../oauth" }
 bcrypt = { workspace = true }
+
+[features]
+# Enable profiling feature for profiling builds
+# This feature gates expensive tracing instrumentation
+profiling = []

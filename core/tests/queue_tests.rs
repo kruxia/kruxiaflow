@@ -453,25 +453,28 @@ async fn test_completion_idempotency() {
         .await
         .expect("First completion should succeed");
 
-    // Complete activity second time (should fail - activity already completed)
+    // Complete activity second time (should succeed idempotently)
     let second_result = queue.complete(claimed.id, worker_id, result).await;
 
-    assert!(second_result.is_err(), "Second completion should fail");
-    assert!(matches!(
-        second_result.unwrap_err(),
-        streamflow_core::queue::QueueError::ActivityNotFound(_)
-    ));
+    assert!(
+        second_result.is_ok(),
+        "Second completion should succeed idempotently"
+    );
 
-    // Verify activity removed from queue
-    let count = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM activity_queue WHERE workflow_id = $1",
-        workflow_id
+    // Verify activity is marked as completed (soft-delete)
+    let status = sqlx::query_scalar!(
+        r#"SELECT status::text FROM activity_queue WHERE id = $1"#,
+        claimed.id
     )
     .fetch_one(&pool)
     .await
-    .expect("Failed to count");
+    .expect("Failed to get status");
 
-    assert_eq!(count, Some(0), "Activity should be removed from queue");
+    assert_eq!(
+        status,
+        Some("completed".to_string()),
+        "Activity should be marked as completed"
+    );
 
     cleanup_queue(&pool, workflow_id).await;
 }

@@ -107,7 +107,7 @@ impl ActivityWorkerService {
         }
 
         if claimed.len() > 0 {
-            tracing::info!(
+            tracing::debug!(
                 worker_id = %worker_id,
                 claimed_count = claimed.len(),
                 "Activities claimed by worker"
@@ -203,7 +203,7 @@ impl ActivityWorkerService {
             })
             .await?;
 
-        tracing::info!(
+        tracing::debug!(
             activity_id = %activity_id,
             workflow_id = %activity.workflow_id,
             activity_key = %activity.activity_key,
@@ -275,7 +275,7 @@ impl ActivityWorkerService {
             })
             .await?;
 
-        tracing::info!(
+        tracing::debug!(
             activity_id = %activity_id,
             workflow_id = %activity.workflow_id,
             activity_key = %activity.activity_key,

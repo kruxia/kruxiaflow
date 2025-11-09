@@ -1,10 +1,23 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+// Use jemalloc for memory profiling support
+#[cfg(all(feature = "profiling", not(target_env = "msvc")))]
+use tikv_jemallocator::Jemalloc;
+
 mod commands;
 mod config;
 mod logging;
 mod signals;
+
+#[cfg(all(feature = "profiling", not(target_env = "msvc")))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
+#[cfg(all(feature = "profiling", not(target_env = "msvc")))]
+#[unsafe(export_name = "_rjem_malloc_conf")]
+#[allow(non_upper_case_globals)]
+pub static _rjem_malloc_conf: &[u8] = b"prof:true\0";
 
 /// StreamFlow - High-performance workflow orchestration
 #[derive(Parser)]

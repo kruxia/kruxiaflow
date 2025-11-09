@@ -1,4 +1,4 @@
-name: Performance Benchmarks
+name: Performance Profiling
 
 on:
   push:
@@ -16,11 +16,11 @@ env:
   # OAuth configuration for CI
   STREAMFLOW_CLIENT_ID: streamflow-ci-client
   STREAMFLOW_OAUTH_TOKEN_ISSUER: http://localhost:8080
-  STREAMFLOW_OAUTH_TOKEN_AUDIENCE: streamflow-benchmark
+  STREAMFLOW_OAUTH_TOKEN_AUDIENCE: streamflow-profiling
 
 jobs:
-  benchmark:
-    name: Run HTTP API Performance Benchmarks
+  profiling:
+    name: Run HTTP API Performance Profiling
     runs-on: ubuntu-latest
 
     services:
@@ -60,11 +60,11 @@ jobs:
       - name: Run database migrations
         run: sqlx migrate run
 
-      - name: Seed OAuth client for benchmarks
-        run: cargo run --package streamflow-benchmark --bin seed-oauth-client
+      - name: Seed OAuth client for profiling
+        run: cargo run --package streamflow-profiling --bin seed-oauth-client
         env:
           STREAMFLOW_CLIENT_ID: streamflow-ci-client
-          STREAMFLOW_CLIENT_SECRET: ${{ secrets.BENCHMARK_CLIENT_SECRET || 'benchmark-client-secret-for-ci' }}
+          STREAMFLOW_CLIENT_SECRET: ${{ secrets.PROFILING_CLIENT_SECRET || 'profiling-client-secret-for-ci' }}
 
       - name: Build StreamFlow
         run: cargo build --release --bin streamflow
@@ -76,33 +76,33 @@ jobs:
           # Wait for server to be ready
           timeout 30 bash -c 'until curl -f http://localhost:8080/health; do sleep 1; done'
 
-      - name: Register benchmark workflow definitions
+      - name: Register profiling workflow definitions
         run: |
           # TODO: Create script to register workflow definitions via API
           # For now, assume they're pre-registered in database migrations
 
       - name: Run HTTP API load tests
         run: |
-          cargo test --package streamflow-benchmark --release -- --nocapture --test-threads=1 | tee load-test-output.txt
+          cargo test --package streamflow-profiling --release -- --nocapture --test-threads=1 | tee load-test-output.txt
 
-      - name: Parse benchmark results
+      - name: Parse profiling results
         id: parse_results
         run: |
-          python scripts/parse_benchmark_results.py load-test-output.txt > benchmark-results.json
+          python scripts/parse_profiling_results.py load-test-output.txt > profiling-results.json
 
       - name: Download baseline results
         id: download_baseline
         continue-on-error: true
         uses: actions/download-artifact@v3
         with:
-          name: benchmark-baseline
+          name: profiling-baseline
           path: baseline/
 
       - name: Compare with baseline
         id: compare
         run: |
-          if [ -f baseline/benchmark-results.json ]; then
-            python scripts/compare_benchmarks.py baseline/benchmark-results.json benchmark-results.json > comparison.json
+          if [ -f baseline/profiling-results.json ]; then
+            python scripts/compare_profiling.py baseline/profiling-results.json profiling-results.json > comparison.json
             echo "has_baseline=true" >> $GITHUB_OUTPUT
           else
             echo "has_baseline=false" >> $GITHUB_OUTPUT
@@ -116,14 +116,14 @@ jobs:
 
       - name: Generate HTML report
         run: |
-          python scripts/generate_report.py benchmark-results.json comparison.json > report.html
+          python scripts/generate_report.py profiling-results.json comparison.json > report.html
 
-      - name: Upload benchmark results
+      - name: Upload profiling results
         uses: actions/upload-artifact@v3
         with:
-          name: benchmark-results-${{ github.sha }}
+          name: profiling-results-${{ github.sha }}
           path: |
-            benchmark-results.json
+            profiling-results.json
             comparison.json
             report.html
             load-test-output.txt
@@ -132,8 +132,8 @@ jobs:
         if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v3
         with:
-          name: benchmark-baseline
-          path: benchmark-results.json
+          name: profiling-baseline
+          path: profiling-results.json
 
       - name: Comment PR with results
         if: github.event_name == 'pull_request' && steps.compare.outputs.has_baseline == 'true'
@@ -143,7 +143,7 @@ jobs:
             const fs = require('fs');
             const comparison = JSON.parse(fs.readFileSync('comparison.json', 'utf8'));
 
-            const body = `## Performance Benchmark Results
+            const body = `## Performance Profiling Results
 
             ### Summary
             - **Throughput**: ${comparison.throughput.current.toFixed(2)} wf/sec (${comparison.throughput.change > 0 ? '+' : ''}${comparison.throughput.change.toFixed(1)}%)

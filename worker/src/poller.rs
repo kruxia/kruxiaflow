@@ -56,6 +56,7 @@ impl WorkerPoller {
     /// Poll for activities and execute them
     ///
     /// Returns number of activities executed.
+    #[cfg_attr(feature = "profiling", tracing::instrument(skip(self), fields(worker_id = %self.config.worker_id)))]
     async fn poll_and_execute(&self) -> Result<usize> {
         // Poll for activities
         let response = self
@@ -63,7 +64,7 @@ impl WorkerPoller {
             .poll_activities(
                 &self.config.worker_id,
                 self.config.activity_types.clone(),
-                self.config.max_activities_per_poll,
+                self.config.poll_max_activities,
             )
             .await
             .context("Failed to poll activities")?;
@@ -72,7 +73,7 @@ impl WorkerPoller {
             return Ok(0);
         }
 
-        tracing::info!(
+        tracing::debug!(
             worker_id = %self.config.worker_id,
             count = response.count,
             "Claimed activities"
@@ -107,14 +108,18 @@ impl WorkerPoller {
     }
 
     /// Execute a single activity
-    async fn execute_activity(&self, activity: PendingActivity) {
-        tracing::info!(
+    #[cfg_attr(feature = "profiling", tracing::instrument(
+        skip(self, activity),
+        fields(
+            worker_id = %self.config.worker_id,
             activity_id = %activity.activity_id,
             activity_key = %activity.activity_key,
             namespace = %activity.namespace,
-            name = %activity.name,
-            "Executing activity"
-        );
+            name = %activity.name
+        )
+    ))]
+    async fn execute_activity(&self, activity: PendingActivity) {
+        tracing::debug!("Executing activity");
 
         // Determine timeout
         let timeout = if let Some(seconds) = activity.timeout_seconds {
@@ -131,56 +136,69 @@ impl WorkerPoller {
         };
 
         // Execute activity
-        let result = self
-            .registry
-            .execute(
-                &activity.namespace,
-                &activity.name,
-                activity.parameters,
-                timeout,
-            )
-            .await;
+        let exec_span = tracing::debug_span!("activity_handler");
+        let result = {
+            let _enter = exec_span.enter();
+            self.registry
+                .execute(
+                    &activity.namespace,
+                    &activity.name,
+                    activity.parameters,
+                    timeout,
+                )
+                .await
+        };
 
         // Report result BEFORE canceling heartbeat to avoid race condition
         // (see Risk section: if we abort heartbeat first, completion API call delay
         // could allow another worker to reclaim the activity as stale)
-        match result {
-            Ok(output) => {
-                if let Err(err) = self
-                    .client
-                    .complete_activity(activity.activity_id, &self.config.worker_id, output, None)
-                    .await
-                {
-                    tracing::error!(
-                        activity_id = %activity.activity_id,
-                        error = ?err,
-                        "Failed to report activity completion"
-                    );
-                }
-            }
-            Err(err) => {
-                tracing::warn!(
-                    activity_id = %activity.activity_id,
-                    error = %err,
-                    "Activity execution failed"
-                );
+        let complete_span = tracing::debug_span!("report_completion");
+        {
+            let _enter = complete_span.enter();
 
-                if let Err(err) = self
-                    .client
-                    .fail_activity(
-                        activity.activity_id,
-                        &self.config.worker_id,
-                        "EXECUTION_ERROR".to_string(),
-                        err.to_string(),
-                        true, // Retryable by default
-                    )
-                    .await
-                {
-                    tracing::error!(
+            match result {
+                Ok(output) => {
+                    if let Err(err) = self
+                        .client
+                        .complete_activity(
+                            activity.activity_id,
+                            &self.config.worker_id,
+                            output,
+                            None,
+                        )
+                        .await
+                    {
+                        tracing::error!(
+                            activity_id = %activity.activity_id,
+                            error = ?err,
+                            "Failed to report activity completion"
+                        );
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(
                         activity_id = %activity.activity_id,
-                        error = ?err,
-                        "Failed to report activity failure"
+                        error = %err,
+                        "Activity execution failed"
                     );
+
+                    if let Err(err) = self
+                        .client
+                        .fail_activity(
+                            activity.activity_id,
+                            &self.config.worker_id,
+                            "EXECUTION_ERROR".to_string(),
+                            err.to_string(),
+                            true, // Retryable by default
+                        )
+                        .await
+                    {
+                        tracing::error!(
+                            activity_id = %activity.activity_id,
+                            error = ?err,
+                            "Failed to report activity failure"
+                        );
+                    }
                 }
             }
         }
@@ -296,7 +314,7 @@ mod tests {
             api_url: "http://localhost:8080".to_string(),
             worker_id: "test_worker".to_string(),
             activity_types: vec!["test.success".to_string()],
-            max_activities_per_poll: 10,
+            poll_max_activities: 10,
             poll_interval: Duration::from_millis(100),
             concurrency: 4,
             activity_timeout: Duration::from_secs(5),
@@ -319,7 +337,7 @@ mod tests {
         let poller = WorkerPoller::new(config.clone(), client, registry.clone());
 
         assert_eq!(poller.config.worker_id, "test_worker");
-        assert_eq!(poller.config.max_activities_per_poll, 10);
+        assert_eq!(poller.config.poll_max_activities, 10);
     }
 
     #[test]
@@ -486,8 +504,8 @@ mod tests {
         assert_eq!(poller.config.worker_id, config.worker_id);
         assert_eq!(poller.config.api_url, config.api_url);
         assert_eq!(
-            poller.config.max_activities_per_poll,
-            config.max_activities_per_poll
+            poller.config.poll_max_activities,
+            config.poll_max_activities
         );
     }
 

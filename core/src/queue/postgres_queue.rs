@@ -36,6 +36,7 @@ impl PostgresQueue {
 
 #[async_trait]
 impl ActivityQueue for PostgresQueue {
+    #[tracing::instrument(skip(self, activities), level = "debug", fields(num_activities = activities.len()))]
     async fn schedule(&self, workflow_id: Uuid, activities: Vec<Activity>) -> Result<()> {
         for activity in activities {
             // Validate parameters are valid JSON
@@ -104,6 +105,7 @@ impl ActivityQueue for PostgresQueue {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self), level = "debug")]
     async fn claim_next(
         &self,
         worker_id: &str,
@@ -121,7 +123,7 @@ impl ActivityQueue for PostgresQueue {
             UPDATE activity_queue
             SET status = 'running'::activity_status,
                 claimed_at = NOW(),
-                claimed_by = $3,
+                claimed_by = $3::TEXT,
                 retry_count = CASE
                     WHEN status = 'running'::activity_status THEN retry_count + 1
                     ELSE retry_count
@@ -215,6 +217,7 @@ impl ActivityQueue for PostgresQueue {
         })
     }
 
+    #[tracing::instrument(skip(self, _result), level = "debug")]
     async fn complete(
         &self,
         activity_id: Uuid,
@@ -222,9 +225,13 @@ impl ActivityQueue for PostgresQueue {
         _result: ActivityResult,
     ) -> Result<()> {
         // Verify the activity is claimed by this worker before completing
+        // Use soft-delete (status='completed') instead of hard-delete to prevent
+        // race condition with in-flight heartbeat requests
         let result = sqlx::query!(
             r#"
-            DELETE FROM activity_queue
+            UPDATE activity_queue
+            SET status = 'completed'::activity_status,
+                completed_at = NOW()
             WHERE id = $1 AND claimed_by = $2 AND status = 'running'::activity_status
             "#,
             activity_id,
@@ -237,7 +244,7 @@ impl ActivityQueue for PostgresQueue {
             debug!(
                 activity_id = %activity_id,
                 worker_id = %worker_id,
-                "Activity completed and removed from queue"
+                "Activity marked as completed"
             );
             Ok(())
         } else {
@@ -263,8 +270,15 @@ impl ActivityQueue for PostgresQueue {
                             "Activity claimed by different worker"
                         );
                         Err(QueueError::ActivityReclaimed)
+                    } else if activity.status == ActivityStatus::Completed {
+                        // Activity already completed - this is idempotent, return success
+                        debug!(
+                            activity_id = %activity_id,
+                            "Activity already completed (idempotent)"
+                        );
+                        Ok(())
                     } else {
-                        // Activity exists but status is wrong (already completed)
+                        // Activity exists but status is wrong
                         warn!(
                             activity_id = %activity_id,
                             status = ?activity.status,
@@ -277,10 +291,10 @@ impl ActivityQueue for PostgresQueue {
                     }
                 }
                 None => {
-                    // Activity already completed (idempotent case)
+                    // Activity doesn't exist (shouldn't happen with soft-delete)
                     debug!(
                         activity_id = %activity_id,
-                        "Activity already completed (not found)"
+                        "Activity not found"
                     );
                     Err(QueueError::ActivityNotFound(activity_id))
                 }
@@ -290,12 +304,13 @@ impl ActivityQueue for PostgresQueue {
 
     async fn heartbeat(&self, activity_id: Uuid, worker_id: &str) -> Result<()> {
         // Reset claimed_at to extend timeout deadline
+        // Only update if status is 'running' - ignore heartbeats for completed activities
         let result = sqlx::query!(
             r#"
             UPDATE activity_queue
             SET claimed_at = NOW()
             WHERE id = $1
-              AND claimed_by = $2
+              AND claimed_by = $2::TEXT
               AND status = 'running'::activity_status
             RETURNING claimed_by
             "#,
@@ -311,24 +326,58 @@ impl ActivityQueue for PostgresQueue {
                 Ok(())
             }
             None => {
-                // Check if activity exists at all
-                let exists =
-                    sqlx::query!("SELECT id FROM activity_queue WHERE id = $1", activity_id)
-                        .fetch_optional(&self.pool)
-                        .await?;
+                // Check if activity exists and its status
+                let exists = sqlx::query!(
+                    r#"
+                    SELECT id, status AS "status: ActivityStatus", claimed_by
+                    FROM activity_queue
+                    WHERE id = $1
+                    "#,
+                    activity_id
+                )
+                .fetch_optional(&self.pool)
+                .await?;
 
-                if exists.is_some() {
-                    // Activity exists but claimed_by doesn't match or status changed
-                    error!(
-                        activity_id = %activity_id,
-                        worker_id = %worker_id,
-                        "Activity reclaimed by another worker"
-                    );
-                    Err(QueueError::ActivityReclaimed)
-                } else {
-                    // Activity doesn't exist (completed or never existed)
-                    error!(activity_id = %activity_id, "Activity not found");
-                    Err(QueueError::ActivityNotFound(activity_id))
+                match exists {
+                    Some(activity) => {
+                        if activity.status == ActivityStatus::Completed
+                            || activity.status == ActivityStatus::Failed
+                        {
+                            // Activity already finished - heartbeat no longer needed
+                            // This is normal for race condition where completion/failure happens
+                            // while heartbeat is in-flight. Return success silently.
+                            debug!(
+                                activity_id = %activity_id,
+                                status = ?activity.status,
+                                "Heartbeat received for finished activity (ignored)"
+                            );
+                            Ok(())
+                        } else if activity.claimed_by.as_deref() != Some(worker_id) {
+                            // Activity exists but claimed_by doesn't match
+                            error!(
+                                activity_id = %activity_id,
+                                worker_id = %worker_id,
+                                "Activity reclaimed by another worker"
+                            );
+                            Err(QueueError::ActivityReclaimed)
+                        } else {
+                            // Activity exists, correct worker, but wrong status
+                            warn!(
+                                activity_id = %activity_id,
+                                status = ?activity.status,
+                                "Activity not in running state"
+                            );
+                            Err(QueueError::InvalidStatus {
+                                expected: "running".to_string(),
+                                actual: format!("{:?}", activity.status),
+                            })
+                        }
+                    }
+                    None => {
+                        // Activity doesn't exist at all
+                        error!(activity_id = %activity_id, "Activity not found");
+                        Err(QueueError::ActivityNotFound(activity_id))
+                    }
                 }
             }
         }
@@ -409,10 +458,18 @@ impl ActivityQueue for PostgresQueue {
                 "Activity requeued for retry"
             );
         } else {
-            // Permanent failure - remove from queue
-            sqlx::query!("DELETE FROM activity_queue WHERE id = $1", activity_id)
-                .execute(&self.pool)
-                .await?;
+            // Permanent failure - mark as failed (soft-delete)
+            sqlx::query!(
+                r#"
+                UPDATE activity_queue
+                SET status = 'failed'::activity_status,
+                    completed_at = NOW()
+                WHERE id = $1
+                "#,
+                activity_id
+            )
+            .execute(&self.pool)
+            .await?;
 
             warn!(
                 activity_id = %activity_id,

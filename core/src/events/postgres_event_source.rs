@@ -19,6 +19,7 @@ impl EventSource for PostgresEventSource {
     /// Publish a workflow event to the event stream
     /// - Idempotent via UNIQUE(workflow_id, event_type, activity_key)
     /// - Database auto-generates id (UUIDv7) and timestamp
+    #[tracing::instrument(skip(self), level = "debug")]
     async fn publish(&self, event: NewWorkflowEvent) -> Result<()> {
         sqlx::query!(
             r#"
@@ -41,6 +42,7 @@ impl EventSource for PostgresEventSource {
     /// - Returns up to 100 events per poll
     /// - Uses LEFT JOIN to get checkpoint in single query
     /// - If no checkpoint exists (first poll), returns events from beginning
+    #[tracing::instrument(skip(self), level = "debug")]
     async fn poll(&self, consumer_id: &str) -> Result<Vec<WorkflowEvent>> {
         let events = sqlx::query_as!(
             WorkflowEvent,
@@ -56,6 +58,8 @@ impl EventSource for PostgresEventSource {
         )
         .fetch_all(&self.pool)
         .await?;
+
+        tracing::debug!(event_count = events.len(), "Polled events");
 
         Ok(events)
     }

@@ -26,3 +26,8 @@ regex = "1"
 tokio = { workspace = true, features = ["test-util"] }
 mockall.workspace = true
 serial_test.workspace = true
+
+[features]
+# Enable profiling feature for detailed instrumentation
+# This feature gates expensive tracing spans in hot paths
+profiling = []

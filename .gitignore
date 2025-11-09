@@ -39,3 +39,7 @@ target/llvm-cov/
 *.lcov
 # "var" directory
 var/
+.cargo/.global-cache
+.cargo/.package-cache
+.cargo/.package-cache-mutate
+*.log
