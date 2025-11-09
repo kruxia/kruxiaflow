@@ -482,7 +482,7 @@ async fn spawn_workers(
         api_url: api_url.clone(),
         worker_id: format!("internal_worker_{}", uuid::Uuid::now_v7()),
         activity_types: registry.activity_types(),
-        max_activities_per_poll: 10,
+        poll_max_activities: 10,
         poll_interval: std::time::Duration::from_millis(100),
         concurrency: worker_count,
         activity_timeout: std::time::Duration::from_secs(300),

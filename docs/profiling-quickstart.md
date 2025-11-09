@@ -26,13 +26,13 @@ This guide shows you how to run comprehensive performance profiling to identify 
 Run the benchmark script with profiling enabled:
 
 ```bash
-# Profile a specific benchmark (must specify --test when profiling)
-./scripts/benchmark.sh --profile --test test_sequential_workflow_load
+# Profile a specific benchmark
+./scripts/profiling.sh --test test_sequential_workflow_load
 
 # Or profile other benchmarks:
-./scripts/benchmark.sh --profile --test test_parallel_workflow_load
-./scripts/benchmark.sh --profile --test test_high_concurrency_load
-./scripts/benchmark.sh --profile --test test_sustained_throughput
+./scripts/profiling.sh --test test_parallel_workflow_load
+./scripts/profiling.sh --test test_high_concurrency_load
+./scripts/profiling.sh --test test_sustained_throughput
 ```
 
 **Note**:

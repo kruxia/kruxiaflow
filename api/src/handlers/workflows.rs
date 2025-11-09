@@ -141,6 +141,15 @@ pub struct SubmitWorkflowResponse {
         ("bearer_auth" = [])
     )
 )]
+#[tracing::instrument(
+    skip(service, claims, request),
+    fields(
+        definition_name = %request.definition_name,
+        version = ?request.version,
+        unique_key = ?request.unique_key,
+        user = %claims.subject()
+    )
+)]
 pub async fn submit_workflow(
     service: WorkflowService,
     Extension(claims): Extension<ValidatedClaims>,
@@ -148,14 +157,6 @@ pub async fn submit_workflow(
 ) -> ApiResult<(StatusCode, Json<SubmitWorkflowResponse>)> {
     // Validate request structure
     request.validate().map_err(AppError::ValidationError)?;
-
-    tracing::info!(
-        definition_name = %request.definition_name,
-        version = ?request.version,
-        unique_key = ?request.unique_key,
-        user = %claims.subject(),
-        "Submitting workflow"
-    );
 
     // Submit workflow via service
     let workflow = service
@@ -212,7 +213,7 @@ pub async fn submit_workflow(
             }
         })?;
 
-    tracing::info!(
+    tracing::debug!(
         workflow_id = %workflow.id,
         definition_name = %workflow.definition_name,
         definition_version = %workflow.definition_version,
@@ -431,17 +432,18 @@ pub struct WorkflowSummary {
         ("bearer_auth" = [])
     )
 )]
+#[tracing::instrument(
+    skip(service, claims),
+    fields(
+        workflow_id = %workflow_id,
+        user = %claims.subject()
+    )
+)]
 pub async fn get_workflow(
     service: WorkflowQueryService,
     Extension(claims): Extension<ValidatedClaims>,
     Path(workflow_id): Path<Uuid>,
 ) -> ApiResult<Json<GetWorkflowResponse>> {
-    tracing::info!(
-        workflow_id = %workflow_id,
-        user = %claims.subject(),
-        "Getting workflow"
-    );
-
     let workflow = service
         .get_workflow(workflow_id)
         .await
@@ -546,6 +548,16 @@ fn parse_activities(activities_json: &serde_json::Value) -> Result<Vec<ActivityS
         ("bearer_auth" = [])
     )
 )]
+#[tracing::instrument(
+    skip(service, claims, query),
+    fields(
+        status = ?query.status,
+        definition_name = ?query.definition_name,
+        limit = query.limit,
+        offset = query.offset,
+        user = %claims.subject()
+    )
+)]
 pub async fn list_workflows(
     service: WorkflowQueryService,
     Extension(claims): Extension<ValidatedClaims>,
@@ -553,15 +565,6 @@ pub async fn list_workflows(
 ) -> ApiResult<Json<ListWorkflowsResponse>> {
     // Validate query parameters
     query.validate().map_err(AppError::ValidationError)?;
-
-    tracing::info!(
-        status = ?query.status,
-        definition_name = ?query.definition_name,
-        limit = query.limit,
-        offset = query.offset,
-        user = %claims.subject(),
-        "Listing workflows"
-    );
 
     let filters = WorkflowFilters {
         status: query.status.clone(),

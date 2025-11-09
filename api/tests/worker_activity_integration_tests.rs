@@ -433,7 +433,7 @@ async fn test_complete_activity_idempotency() {
 
     assert_eq!(response1.status_code(), StatusCode::OK);
 
-    // Try to complete again (should fail with conflict)
+    // Try to complete again (should succeed idempotently)
     let response2 = server
         .post(&format!("/api/v1/activities/{}/complete", activity_id))
         .add_header(
@@ -446,7 +446,7 @@ async fn test_complete_activity_idempotency() {
         }))
         .await;
 
-    assert_eq!(response2.status_code(), StatusCode::NOT_FOUND);
+    assert_eq!(response2.status_code(), StatusCode::OK);
 
     cleanup_test_data(&pool, workflow_id).await;
 }
@@ -641,16 +641,27 @@ async fn test_complete_workflow_end_to_end() {
         assert_eq!(response.status_code(), StatusCode::OK);
     }
 
-    // Verify all activities are removed from queue
-    let count = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM activity_queue WHERE workflow_id = $1",
+    // Verify all activities are marked as completed (soft-delete)
+    let completed_count = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM activity_queue WHERE workflow_id = $1 AND status = 'completed'",
         workflow_id
     )
     .fetch_one(&pool)
     .await
     .unwrap();
 
-    assert_eq!(count, Some(0));
+    assert_eq!(completed_count, Some(3));
+
+    // Verify no activities are still pending or running
+    let active_count = sqlx::query_scalar!(
+        "SELECT COUNT(*) FROM activity_queue WHERE workflow_id = $1 AND status IN ('pending', 'running')",
+        workflow_id
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(active_count, Some(0));
 
     // Verify all events were published
     let event_count = sqlx::query_scalar!(

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE activity_queue\n            SET claimed_at = NOW()\n            WHERE id = $1\n              AND claimed_by = $2::TEXT\n              AND status = 'running'::activity_status\n            RETURNING claimed_by\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "claimed_by",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "16e9713bb9259df91bd85b3d80f5e72c037d39e2906565eae0d5930bbb9fc623"
+}

@@ -159,9 +159,8 @@ pub struct WorkerConfig {
 
     /// Activity types this worker can execute (namespace.name format)
     pub activity_types: Vec<String>,
-
     /// Maximum number of activities to poll per request
-    pub max_activities_per_poll: usize,
+    pub poll_max_activities: usize,
 
     /// Polling interval when no activities available
     pub poll_interval: Duration,
@@ -186,7 +185,7 @@ impl Default for WorkerConfig {
             api_url: "http://localhost:8080".to_string(),
             worker_id: format!("worker_{}", uuid::Uuid::now_v7()),
             activity_types: vec!["default.echo".to_string()],
-            max_activities_per_poll: 10,
+            poll_max_activities: 10,
             poll_interval: Duration::from_millis(100),
             concurrency: 4,
             activity_timeout: Duration::from_secs(300),
@@ -818,7 +817,7 @@ impl WorkerPoller {
             .poll_activities(
                 &self.config.worker_id,
                 self.config.activity_types.clone(),
-                self.config.max_activities_per_poll,
+                self.config.poll_max_activities,
             )
             .await
             .context("Failed to poll activities")?;

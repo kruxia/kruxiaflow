@@ -40,8 +40,23 @@ fn is_activity_ready(
 
     // If no preceding activities, it's a root activity (always ready initially)
     if preceding_keys.is_empty() {
+        tracing::trace!(
+            "Activity {} is a root activity (no dependencies)",
+            activity.key
+        );
         return Ok(true);
     }
+
+    tracing::trace!(
+        "Checking {} dependencies for activity {}: [{}]",
+        preceding_keys.len(),
+        activity.key,
+        preceding_keys
+            .iter()
+            .map(|(k, _)| k.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
 
     // Check all preceding activities are in terminal state (Completed or Failed)
     for (preceding_key, conditions) in &preceding_keys {
@@ -55,6 +70,12 @@ fn is_activity_ready(
             preceding_state.status,
             WorkflowActivityStatus::Completed | WorkflowActivityStatus::Failed
         ) {
+            tracing::trace!(
+                "Activity {} not ready: dependency {} is in state {:?}",
+                activity.key,
+                preceding_key,
+                preceding_state.status
+            );
             return Ok(false); // Dependency not in terminal state yet
         }
 
@@ -63,46 +84,72 @@ fn is_activity_ready(
             // Explicit conditions - evaluate them (can handle Failed case)
             for condition in condition_list {
                 if !evaluate_condition(condition, state)? {
+                    tracing::trace!(
+                        "Activity {} not ready: condition '{}' not satisfied for dependency {}",
+                        activity.key,
+                        condition,
+                        preceding_key
+                    );
                     return Ok(false); // Condition not satisfied
                 }
             }
         } else {
             // No explicit conditions - default to success path only
             if preceding_state.status != WorkflowActivityStatus::Completed {
+                tracing::trace!(
+                    "Activity {} not ready: dependency {} is {:?} (expected Completed)",
+                    activity.key,
+                    preceding_key,
+                    preceding_state.status
+                );
                 return Ok(false); // Only run following activities on success
             }
         }
     }
 
+    tracing::trace!(
+        "Activity {} is ready: all {} dependencies satisfied",
+        activity.key,
+        preceding_keys.len()
+    );
     Ok(true)
 }
 
 /// Get list of preceding activities with their conditions
+/// Deduplicates entries to handle cases where both `preceding` and `following` are defined
 fn get_preceding_activities(
     activity: &ActivityDefinition,
     definition: &WorkflowDefinition,
 ) -> Vec<(String, Option<Vec<String>>)> {
-    let mut preceding = Vec::new();
+    use std::collections::HashMap;
 
-    // Check explicit `preceding` list
+    // Use HashMap to track unique preceding activities by key
+    // If same activity appears twice, keep first occurrence (explicit `preceding` takes priority)
+    let mut preceding_map: HashMap<String, Option<Vec<String>>> = HashMap::new();
+
+    // Check explicit `preceding` list (higher priority)
     if let Some(preceding_list) = &activity.preceding {
         for item in preceding_list {
-            preceding.push((item.activity_key.clone(), item.conditions.clone()));
+            preceding_map.insert(item.activity_key.clone(), item.conditions.clone());
         }
     }
 
-    // Check if other activities list this one in `following`
+    // Check if other activities list this one in `following` (only add if not already present)
     for other_activity in &definition.activities {
         if let Some(following_list) = &other_activity.following {
             for item in following_list {
                 if item.activity_key == activity.key {
-                    preceding.push((other_activity.key.clone(), item.conditions.clone()));
+                    // Only insert if not already present (explicit `preceding` takes priority)
+                    preceding_map
+                        .entry(other_activity.key.clone())
+                        .or_insert_with(|| item.conditions.clone());
                 }
             }
         }
     }
 
-    preceding
+    // Convert HashMap back to Vec
+    preceding_map.into_iter().collect()
 }
 
 /// Evaluate a condition expression

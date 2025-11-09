@@ -182,7 +182,7 @@ impl WorkflowService {
         // Commit transaction
         tx.commit().await?;
 
-        tracing::info!(
+        tracing::debug!(
             workflow_id = %workflow_id,
             definition_name = %definition.name,
             definition_version = %definition.version,

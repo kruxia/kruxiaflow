@@ -1,29 +1,78 @@
 use anyhow::Result;
-use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+use tracing_subscriber::{EnvFilter, fmt, fmt::format::FmtSpan};
+
+/// Determine if verbose tracing metadata should be enabled based on log level
+///
+/// Returns true for debug/trace levels (development/profiling)
+/// Returns false for info/warn/error levels (production)
+fn should_enable_verbose_tracing(log_level: &str) -> bool {
+    // Parse the log level - check if it starts with debug or trace
+    // This handles both simple levels (e.g., "debug") and complex filters (e.g., "debug,sqlx=warn")
+    log_level.to_lowercase().starts_with("debug")
+        || log_level.to_lowercase().starts_with("trace")
+        || log_level.to_lowercase().contains("streamflow=debug")
+        || log_level.to_lowercase().contains("streamflow=trace")
+}
 
 /// Initialize logging based on level and format
+///
+/// Uses direct fmt::Subscriber instead of registry() to prevent memory accumulation
+/// from span metadata. This allows TRACE-level profiling without memory leaks while
+/// maintaining all formatting capabilities. Verbose tracing metadata (file, line,
+/// thread IDs, span events) is enabled only when log_level is set to debug or trace.
 pub fn init(log_level: &str, log_format: &str) -> Result<()> {
     let env_filter = EnvFilter::try_new(log_level).unwrap_or_else(|_| EnvFilter::new("info"));
 
+    // Enable verbose tracing only for debug/trace levels
+    let verbose = should_enable_verbose_tracing(log_level);
+    let span_events = if verbose {
+        FmtSpan::CLOSE
+    } else {
+        FmtSpan::NONE
+    };
+
+    // Use direct fmt::Subscriber instead of registry() to prevent memory accumulation.
+    // The registry stores all span metadata for distributed tracing features we don't use,
+    // causing 300+ MB memory growth at TRACE level. Direct subscriber has zero accumulation.
     match log_format {
         "json" => {
-            tracing_subscriber::registry()
-                .with(env_filter)
-                .with(fmt::layer().json())
-                .init();
+            let subscriber = fmt()
+                .json()
+                .with_env_filter(env_filter)
+                .with_target(true)
+                .with_level(true)
+                .with_file(verbose) // Only in debug/trace
+                .with_line_number(verbose) // Only in debug/trace
+                .with_thread_ids(verbose) // Only in debug/trace
+                .with_timer(fmt::time::uptime())
+                .with_span_events(span_events)
+                .finish();
+
+            tracing::subscriber::set_global_default(subscriber)
+                .map_err(|e| anyhow::anyhow!("Failed to set tracing subscriber: {}", e))?;
         }
         _ => {
-            tracing_subscriber::registry()
-                .with(env_filter)
-                .with(fmt::layer())
-                .init();
+            let subscriber = fmt()
+                .with_env_filter(env_filter)
+                .with_target(true)
+                .with_level(true)
+                .with_file(verbose) // Only in debug/trace
+                .with_line_number(verbose) // Only in debug/trace
+                .with_thread_ids(verbose) // Only in debug/trace
+                .with_timer(fmt::time::uptime())
+                .with_span_events(span_events)
+                .finish();
+
+            tracing::subscriber::set_global_default(subscriber)
+                .map_err(|e| anyhow::anyhow!("Failed to set tracing subscriber: {}", e))?;
         }
     }
 
     tracing::info!(
-        "Logging initialized: level={}, format={}",
+        "Logging initialized: level={}, format={}, verbose_tracing={}, memory_safe=true",
         log_level,
-        log_format
+        log_format,
+        verbose
     );
 
     Ok(())
@@ -108,5 +157,64 @@ mod tests {
         tracing::info!("Test log message");
         tracing::debug!("Test debug message");
         tracing::error!("Test error message");
+    }
+
+    #[test]
+    fn test_should_enable_verbose_tracing_for_debug() {
+        assert!(should_enable_verbose_tracing("debug"));
+        assert!(should_enable_verbose_tracing("DEBUG"));
+        assert!(should_enable_verbose_tracing("debug,sqlx=warn"));
+    }
+
+    #[test]
+    fn test_should_enable_verbose_tracing_for_trace() {
+        assert!(should_enable_verbose_tracing("trace"));
+        assert!(should_enable_verbose_tracing("TRACE"));
+        assert!(should_enable_verbose_tracing("trace,sqlx=info"));
+    }
+
+    #[test]
+    fn test_should_enable_verbose_tracing_for_streamflow_debug() {
+        assert!(should_enable_verbose_tracing("info,streamflow=debug"));
+        assert!(should_enable_verbose_tracing(
+            "warn,streamflow=debug,sqlx=error"
+        ));
+    }
+
+    #[test]
+    fn test_should_enable_verbose_tracing_for_streamflow_trace() {
+        assert!(should_enable_verbose_tracing("info,streamflow=trace"));
+        assert!(should_enable_verbose_tracing(
+            "error,streamflow=trace,sqlx=warn"
+        ));
+    }
+
+    #[test]
+    fn test_should_disable_verbose_tracing_for_info() {
+        assert!(!should_enable_verbose_tracing("info"));
+        assert!(!should_enable_verbose_tracing("INFO"));
+        assert!(!should_enable_verbose_tracing("info,sqlx=warn"));
+    }
+
+    #[test]
+    fn test_should_disable_verbose_tracing_for_warn() {
+        assert!(!should_enable_verbose_tracing("warn"));
+        assert!(!should_enable_verbose_tracing("WARN"));
+        assert!(!should_enable_verbose_tracing("warn,sqlx=error"));
+    }
+
+    #[test]
+    fn test_should_disable_verbose_tracing_for_error() {
+        assert!(!should_enable_verbose_tracing("error"));
+        assert!(!should_enable_verbose_tracing("ERROR"));
+    }
+
+    #[test]
+    fn test_should_disable_verbose_tracing_for_streamflow_info() {
+        // streamflow=info should NOT enable verbose tracing
+        assert!(!should_enable_verbose_tracing("streamflow=info"));
+        assert!(!should_enable_verbose_tracing(
+            "info,streamflow=info,sqlx=warn"
+        ));
     }
 }

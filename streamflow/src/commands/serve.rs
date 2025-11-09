@@ -119,16 +119,16 @@ Example: --shutdown-timeout 60"
     /// Maximum activities per worker poll
     #[arg(
         long,
-        env = "STREAMFLOW_MAX_ACTIVITIES_PER_POLL",
+        env = "STREAMFLOW_POLL_MAX_ACTIVITIES",
         default_value = "10",
         help = "Maximum number of activities each worker claims per poll",
         long_help = "Maximum number of activities each worker claims per poll\n\n\
 Default: 10\n\
 Range: 1-100\n\
 Note: Lower values (1-5) improve work distribution across workers\n\
-Example: --max-activities-per-poll 1"
+Example: --poll-max-activities 1"
     )]
-    pub max_activities_per_poll: usize,
+    pub poll_max_activities: usize,
 }
 
 impl ServeCommand {
@@ -138,7 +138,7 @@ impl ServeCommand {
             anyhow::bail!("Worker count must be between 1 and 100");
         }
 
-        if self.max_activities_per_poll == 0 || self.max_activities_per_poll > 100 {
+        if self.poll_max_activities == 0 || self.poll_max_activities > 100 {
             anyhow::bail!("Max activities per poll must be between 1 and 100");
         }
 
@@ -252,7 +252,7 @@ async fn spawn_api_server(
 /// Spawn worker tasks
 async fn spawn_workers(
     worker_count: usize,
-    max_activities_per_poll: usize,
+    poll_max_activities: usize,
     api_url: String,
     client_id: String,
     client_secret: String,
@@ -275,7 +275,7 @@ async fn spawn_workers(
         api_url: api_url.clone(),
         worker_id: format!("internal_worker_{}", Uuid::now_v7()),
         activity_types: registry.activity_types(),
-        max_activities_per_poll,
+        poll_max_activities,
         poll_interval: Duration::from_millis(100),
         concurrency: worker_count,
         activity_timeout: Duration::from_secs(300),
@@ -379,7 +379,7 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
     // 5. Spawn workers (workers will be gracefully stopped via manager)
     let worker_handles = spawn_workers(
         cmd.workers,
-        cmd.max_activities_per_poll,
+        cmd.poll_max_activities,
         api_url.clone(),
         cmd.client_id.clone(),
         cmd.client_secret.unwrap(),
@@ -392,6 +392,31 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
         "StreamFlow is ready - API available at {}",
         api_url
     );
+
+    // 5.5. Spawn connection pool monitor (logs stats every 30 seconds) - only in profiling mode
+    #[cfg(feature = "profiling")]
+    let pool_monitor = {
+        let pool = pool.clone();
+        let token = shutdown_token.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            loop {
+                tokio::select! {
+                    _ = token.cancelled() => {
+                        tracing::debug!("Pool monitor shutting down");
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        tracing::info!(
+                            pool_size = pool.size(),
+                            pool_idle = pool.num_idle(),
+                            "Connection pool stats"
+                        );
+                    }
+                }
+            }
+        })
+    };
 
     // 6. Wait for shutdown signal
     let shutdown_signal = crate::signals::wait_for_shutdown();
@@ -439,6 +464,13 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
         Err(_) => tracing::warn!("Orchestrator shutdown timeout, forcing stop"),
     }
 
+    // Stop pool monitor (only in profiling mode)
+    #[cfg(feature = "profiling")]
+    {
+        tracing::debug!("Stopping pool monitor...");
+        pool_monitor.abort();
+    }
+
     // Close database pool
     tracing::info!("Closing database pool...");
     pool.close().await;
@@ -467,7 +499,7 @@ mod tests {
             ),
             oauth_public_key: None,
             shutdown_timeout: 30,
-            max_activities_per_poll: 10,
+            poll_max_activities: 10,
         };
 
         assert!(cmd.validate().is_ok());
@@ -485,7 +517,7 @@ mod tests {
             oauth_private_key: Some("key".to_string()),
             oauth_public_key: None,
             shutdown_timeout: 30,
-            max_activities_per_poll: 10,
+            poll_max_activities: 10,
         };
 
         assert!(cmd.validate().is_err());
@@ -499,7 +531,7 @@ mod tests {
             workers: 1,
             orchestrator_id: "orchestrator_default".to_string(),
             client_id: "streamflow_internal_worker".to_string(),
-            max_activities_per_poll: 10,
+            poll_max_activities: 10,
             client_secret: None,
             oauth_private_key: Some("key".to_string()),
             oauth_public_key: None,

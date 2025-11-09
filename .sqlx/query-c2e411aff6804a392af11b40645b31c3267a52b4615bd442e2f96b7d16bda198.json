@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE activity_queue\n            SET status = 'completed'::activity_status,\n                completed_at = NOW()\n            WHERE id = $1 AND claimed_by = $2 AND status = 'running'::activity_status\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c2e411aff6804a392af11b40645b31c3267a52b4615bd442e2f96b7d16bda198"
+}

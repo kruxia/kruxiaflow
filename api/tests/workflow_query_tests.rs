@@ -61,14 +61,14 @@ async fn setup_test_state() -> AppState {
         .expect("Failed to create test auth service");
 
     // Create test client for client_credentials flow
-    sqlx::query!(
+    sqlx::query(
         "INSERT INTO oauth_clients (client_id, client_secret_hash, name, created_at)
          VALUES ($1, $2, $3, NOW())
          ON CONFLICT (client_id) DO NOTHING",
-        "test-client",
-        hash("test-secret", bcrypt::DEFAULT_COST).unwrap(),
-        "Test Client"
     )
+    .bind("test-client")
+    .bind(hash("test-secret", bcrypt::DEFAULT_COST).unwrap())
+    .bind("Test Client")
     .execute(&pool)
     .await
     .expect("Failed to create test client");

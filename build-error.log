@@ -1,0 +1,506 @@
+   Compiling streamflow-core v0.2.0 (/Users/seanharrison/Dropbox/bg/src/streamflow/core)
+   Compiling streamflow-oauth v0.2.0 (/Users/seanharrison/Dropbox/bg/src/streamflow/oauth)
+error: error returned from database: relation "oauth_clients" does not exist
+   --> oauth/src/postgres.rs:110:22
+    |
+110 |           let client = sqlx::query!(
+    |  ______________________^
+111 | |             r#"
+112 | |             SELECT id, client_id, client_secret_hash, name, scopes, is_active
+113 | |             FROM oauth_clients
+...   |
+116 | |             client_id
+117 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "oauth_users" does not exist
+   --> oauth/src/postgres.rs:158:20
+    |
+158 |           let user = sqlx::query!(
+    |  ____________________^
+159 | |             r#"
+160 | |             SELECT id, username, email, password_hash, is_active
+161 | |             FROM oauth_users
+...   |
+164 | |             username
+165 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "oauth_refresh_tokens" does not exist
+   --> oauth/src/postgres.rs:196:9
+    |
+196 | /         sqlx::query!(
+197 | |             r#"
+198 | |             INSERT INTO oauth_refresh_tokens (token_hash, user_id, expires_at)
+199 | |             VALUES ($1, $2, $3)
+...   |
+203 | |             Utc::now() + Duration::days(30)
+204 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "oauth_refresh_tokens" does not exist
+   --> oauth/src/postgres.rs:221:28
+    |
+221 |           let token_record = sqlx::query!(
+    |  ____________________________^
+222 | |             r#"
+223 | |             SELECT id, token_hash, user_id, expires_at, revoked_at
+224 | |             FROM oauth_refresh_tokens
+...   |
+227 | |             token_hash
+228 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "oauth_users" does not exist
+   --> oauth/src/postgres.rs:242:20
+    |
+242 |           let user = sqlx::query!(
+    |  ____________________^
+243 | |             r#"
+244 | |             SELECT id, username, email, is_active
+245 | |             FROM oauth_users
+...   |
+248 | |             token_record.user_id
+249 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "oauth_refresh_tokens" does not exist
+   --> oauth/src/postgres.rs:277:9
+    |
+277 | /         sqlx::query!(
+278 | |             r#"
+279 | |             UPDATE oauth_refresh_tokens
+280 | |             SET revoked_at = NOW()
+...   |
+283 | |             token_record.id
+284 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "oauth_refresh_tokens" does not exist
+   --> oauth/src/postgres.rs:289:9
+    |
+289 | /         sqlx::query!(
+290 | |             r#"
+291 | |             INSERT INTO oauth_refresh_tokens (token_hash, user_id, expires_at)
+292 | |             VALUES ($1, $2, $3)
+...   |
+296 | |             Utc::now() + Duration::days(30)
+297 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "workflow_events" does not exist
+  --> core/src/events/postgres_event_source.rs:30:9
+   |
+30 | /         sqlx::query!(
+31 | |             r#"
+32 | |             INSERT INTO workflow_events (workflow_id, event_type, activity_key, payload)
+33 | |             VALUES ($1, $2, $3, $4)
+...  |
+39 | |             event.payload
+40 | |         )
+   | |_________^
+   |
+   = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "workflow_events" does not exist
+  --> core/src/events/postgres_event_source.rs:58:22
+   |
+58 |           let events = sqlx::query_as!(
+   |  ______________________^
+59 | |             WorkflowEvent,
+60 | |             r#"
+61 | |             SELECT e.id, e.workflow_id, e.event_type as "event_type: WorkflowEventType", e.activity_key, e.payload, e.timestamp
+...  |
+68 | |             consumer_id
+69 | |         )
+   | |_________^
+   |
+   = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_as` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "workflow_event_consumers" does not exist
+  --> core/src/events/postgres_event_source.rs:83:9
+   |
+83 | /         sqlx::query!(
+84 | |             r#"
+85 | |             INSERT INTO workflow_event_consumers (consumer_id, last_event_id, updated_at)
+86 | |             VALUES ($1, $2, NOW())
+...  |
+94 | |             last_event_id
+95 | |         )
+   | |_________^
+   |
+   = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "workflows" does not exist
+   --> core/src/orchestrator/orchestrator.rs:371:27
+    |
+371 |       let stuck_workflows = sqlx::query!(
+    |  ___________________________^
+372 | |         r#"
+373 | |         SELECT id, name
+374 | |         FROM workflows
+...   |
+379 | |         timeout_secs
+380 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "workflows" does not exist
+  --> core/src/orchestrator/workflow_state.rs:48:15
+   |
+48 |       let row = sqlx::query!(
+   |  _______________^
+49 | |         r#"SELECT wd.id, wd.name, wd.activities, wd.created_at
+50 | |            FROM workflows w
+51 | |            JOIN workflow_definitions wd ON wd.id = w.workflow_definition_id
+52 | |            WHERE w.id = $1"#,
+53 | |         workflow_id
+54 | |     )
+   | |_____^
+   |
+   = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "workflows" does not exist
+  --> core/src/orchestrator/workflow_state.rs:77:15
+   |
+77 |       let row = sqlx::query!(
+   |  _______________^
+78 | |         r#"SELECT id, definition_name, status AS "status: WorkflowStatus", activities, state_data
+79 | |            FROM workflows WHERE id = $1"#,
+80 | |         workflow_id
+81 | |     )
+   | |_____^
+   |
+   = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "workflows" does not exist
+   --> core/src/orchestrator/workflow_state.rs:110:5
+    |
+110 | /     sqlx::query!(
+111 | |         r#"UPDATE workflows
+112 | |            SET activities = $1, state_data = $2, status = $3, updated_at = NOW()
+113 | |            WHERE id = $4"#,
+...   |
+117 | |         workflow_id
+118 | |     )
+    | |_____^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "activity_queue" does not exist
+  --> core/src/queue/monitor.rs:56:22
+   |
+56 |           let result = sqlx::query!(
+   |  ______________________^
+57 | |             r#"
+58 | |             DELETE FROM activity_queue
+59 | |             WHERE status = 'running'::activity_status
+...  |
+63 | |             "#
+64 | |         )
+   | |_________^
+   |
+   = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "activity_queue" does not exist
+  --> core/src/queue/postgres_queue.rs:75:26
+   |
+75 |               let result = sqlx::query!(
+   |  __________________________^
+76 | |                 r#"
+77 | |                 INSERT INTO activity_queue (
+78 | |                     workflow_id, activity_key, namespace, name,
+...  |
+91 | |                 max_retries
+92 | |             )
+   | |_____________^
+   |
+   = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "activity_queue" does not exist
+   --> core/src/queue/postgres_queue.rs:134:24
+    |
+134 |           let activity = sqlx::query!(
+    |  ________________________^
+135 | |             r#"
+136 | |             UPDATE activity_queue
+137 | |             SET status = 'running'::activity_status,
+...   |
+166 | |             worker_id
+167 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "activity_queue" does not exist
+   --> core/src/queue/postgres_queue.rs:215:23
+    |
+215 |           let details = sqlx::query!(
+    |  _______________________^
+216 | |             r#"
+217 | |             SELECT workflow_id, activity_key
+218 | |             FROM activity_queue
+...   |
+221 | |             activity_id
+222 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "activity_queue" does not exist
+   --> core/src/queue/postgres_queue.rs:247:22
+    |
+247 |           let result = sqlx::query!(
+    |  ______________________^
+248 | |             r#"
+249 | |             DELETE FROM activity_queue
+250 | |             WHERE id = $1 AND claimed_by = $2 AND status = 'running'::activity_status
+...   |
+253 | |             worker_id
+254 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "activity_queue" does not exist
+   --> core/src/queue/postgres_queue.rs:267:26
+    |
+267 |               let exists = sqlx::query!(
+    |  __________________________^
+268 | |                 r#"
+269 | |                 SELECT id, claimed_by, status AS "status: ActivityStatus"
+270 | |                 FROM activity_queue
+...   |
+273 | |                 activity_id
+274 | |             )
+    | |_____________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "activity_queue" does not exist
+   --> core/src/queue/postgres_queue.rs:315:22
+    |
+315 |           let result = sqlx::query!(
+    |  ______________________^
+316 | |             r#"
+317 | |             UPDATE activity_queue
+318 | |             SET claimed_at = NOW()
+...   |
+325 | |             worker_id
+326 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "activity_queue" does not exist
+   --> core/src/queue/postgres_queue.rs:338:21
+    |
+338 |                     sqlx::query!("SELECT id FROM activity_queue WHERE id = $1", activity_id)
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "activity_queue" does not exist
+   --> core/src/queue/postgres_queue.rs:367:24
+    |
+367 |           let activity = sqlx::query!(
+    |  ________________________^
+368 | |             r#"
+369 | |             SELECT id, workflow_id, activity_key, status AS "status: ActivityStatus",
+370 | |                    claimed_by, retry_count, max_retries, settings
+...   |
+375 | |             activity_id
+376 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "activity_queue" does not exist
+   --> core/src/queue/postgres_queue.rs:411:13
+    |
+411 | /             sqlx::query!(
+412 | |                 r#"
+413 | |                 UPDATE activity_queue
+414 | |                 SET status = 'pending'::activity_status,
+...   |
+421 | |                 activity_id
+422 | |             )
+    | |_____________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "activity_queue" does not exist
+   --> core/src/queue/postgres_queue.rs:435:13
+    |
+435 |             sqlx::query!("DELETE FROM activity_queue WHERE id = $1", activity_id)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "workflows" does not exist
+  --> core/src/workflow/query_service.rs:71:19
+   |
+71 |           let row = sqlx::query!(
+   |  ___________________^
+72 | |             r#"
+73 | |             SELECT id, definition_name, status AS "status: String",
+74 | |                    activities, state_data, created_at, updated_at
+...  |
+78 | |             workflow_id
+79 | |         )
+   | |_________^
+   |
+   = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "workflows" does not exist
+   --> core/src/workflow/query_service.rs:105:20
+    |
+105 |           let rows = sqlx::query!(
+    |  ____________________^
+106 | |             r#"
+107 | |             SELECT id, definition_name, status AS "status: crate::WorkflowStatus",
+108 | |                    created_at, updated_at
+...   |
+122 | |             offset
+123 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "workflows" does not exist
+   --> core/src/workflow/query_service.rs:128:21
+    |
+128 |           let total = sqlx::query_scalar!(
+    |  _____________________^
+129 | |             r#"
+130 | |             SELECT COUNT(*)
+131 | |             FROM workflows
+...   |
+140 | |             filters.created_before
+141 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query_scalar` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "workflow_definitions" does not exist
+  --> core/src/workflow/repository.rs:48:19
+   |
+48 |           let row = sqlx::query!(
+   |  ___________________^
+49 | |             r#"
+50 | |             INSERT INTO workflow_definitions (id, name, activities, created_at)
+51 | |             VALUES ($1, $2, $3, NOW())
+...  |
+56 | |             activities_json
+57 | |         )
+   | |_________^
+   |
+   = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "workflow_definitions" does not exist
+   --> core/src/workflow/repository.rs:96:19
+    |
+ 96 |           let row = sqlx::query!(
+    |  ___________________^
+ 97 | |             r#"
+ 98 | |             SELECT id, name, activities, created_at
+ 99 | |             FROM workflow_definitions
+...   |
+103 | |             created_at
+104 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "workflow_definitions" does not exist
+   --> core/src/workflow/repository.rs:123:19
+    |
+123 |           let row = sqlx::query!(
+    |  ___________________^
+124 | |             r#"
+125 | |             SELECT id, name, activities, created_at
+126 | |             FROM workflow_definitions
+...   |
+131 | |             name
+132 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "workflow_definitions" does not exist
+   --> core/src/workflow/repository.rs:151:20
+    |
+151 |           let rows = sqlx::query!(
+    |  ____________________^
+152 | |             r#"
+153 | |             SELECT id, name, activities, created_at
+154 | |             FROM workflow_definitions
+155 | |             ORDER BY name ASC, created_at DESC
+156 | |             "#
+157 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "workflows" does not exist
+   --> core/src/workflow/service.rs:110:28
+    |
+110 |               let existing = sqlx::query!(
+    |  ____________________________^
+111 | |                 r#"
+112 | |                 SELECT id, definition_name, created_at
+113 | |                 FROM workflows
+...   |
+116 | |                 key
+117 | |             )
+    | |_____________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "workflows" does not exist
+   --> core/src/workflow/service.rs:136:19
+    |
+136 |           let row = sqlx::query!(
+    |  ___________________^
+137 | |             r#"
+138 | |             INSERT INTO workflows (
+139 | |                 id, definition_name, workflow_definition_id,
+...   |
+154 | |             initial_state_data
+155 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: error returned from database: relation "workflow_events" does not exist
+   --> core/src/workflow/service.rs:168:9
+    |
+168 | /         sqlx::query!(
+169 | |             r#"
+170 | |             INSERT INTO workflow_events (id, workflow_id, event_type, activity_key, payload, timestamp)
+171 | |             VALUES ($1, $2, $3, $4, $5, NOW())
+...   |
+177 | |             event_payload
+178 | |         )
+    | |_________^
+    |
+    = note: this error originates in the macro `$crate::sqlx_macros::expand_query` which comes from the expansion of the macro `sqlx::query` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error: could not compile `streamflow-oauth` (lib) due to 7 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `streamflow-core` (lib) due to 28 previous errors

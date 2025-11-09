@@ -7,7 +7,7 @@ members = [
     "dashboard",
     "streamflow",
     "worker",
-    "benchmark",
+    "profiling",
 ]
 resolver = "2"
 
@@ -51,7 +51,7 @@ thiserror = "2.0"
 
 # Logging
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "fmt"] }
 
 # Testing
 mockall = "0.13"
@@ -68,3 +68,10 @@ debug = true        # Enable debug symbols for profiling
 inherits = "release"
 opt-level = 3       # Optimize for speed
 lto = "fat"         # Aggressive cross-crate LTO for maximum speed
+
+[profile.profiling]
+inherits = "release"
+strip = false       # Keep symbols for profiling
+debug = true        # Full debug info for profiling tools
+split-debuginfo = "unpacked"  # Embed debug info in binary on macOS (needed for jeprof)
+lto = "thin"        # Use thin LTO to preserve more symbols than fat LTO

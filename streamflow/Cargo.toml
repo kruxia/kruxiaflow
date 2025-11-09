@@ -30,9 +30,9 @@ serde_json = { workspace = true }
 
 # Internal dependencies
 streamflow-api = { path = "../api" }
-streamflow-core = { path = "../core" }
+streamflow-core = { path = "../core", features = [] }
 streamflow-oauth = { path = "../oauth" }
-streamflow-worker = { path = "../worker" }
+streamflow-worker = { path = "../worker", features = [] }
 
 # Database
 sqlx = { workspace = true }
@@ -49,5 +49,14 @@ signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
 tokio-stream = "0.1"
 tokio-util = { workspace = true }
 
+# Password hashing
+bcrypt = { workspace = true }
+
 [dev-dependencies]
 serial_test = { workspace = true }
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = { version = "0.6", optional=true, features=["profiling"] }
+
+[features]
+profiling = ["tikv-jemallocator", "streamflow-core/profiling", "streamflow-worker/profiling"]

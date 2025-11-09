@@ -24,5 +24,77 @@ services:
       timeout: 5s
       retries: 5
 
+  # streamflow serve in deploy mode
+  streamflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: develop
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      # Database connection (benchmark database)
+      DATABASE_URL: postgres://streamflow:streamflow_dev@postgres:5432/streamflow
+      # Rust build settings
+      CARGO_HOME: /opt/.cargo
+      CARGO_TARGET_DIR: /opt/target
+      STREAMFLOW_CLIENT_ID: streamflow-dev-client
+      STREAMFLOW_CLIENT_SECRET: a_zBZWlw8IsQaQm5C2xJPMgunAj4jkjzp4iTafATVcD8RU02yNEYqwCdLsoXIe8g
+      STREAMFLOW_OAUTH_TOKEN_ISSUER: http://localhost:8080
+      STREAMFLOW_OAUTH_TOKEN_AUDIENCE: streamflow-dev-audience
+      STREAMFLOW_WORKER_COUNT: "20"
+      STREAMFLOW_POLL_MAX_ACTIVITIES: "1"
+      # Logging configuration (can be overridden from host environment)
+      STREAMFLOW_LOG_LEVEL: ${STREAMFLOW_LOG_LEVEL:-info}
+
+    volumes:
+      # Mount source code
+      - ./:/opt/
+      # Persist cargo cache for faster rebuilds
+      - cargo_cache:/opt/.cargo/registry
+      - cargo_git_cache:/opt/.cargo/git
+      - cargo_target_cache:/opt/target
+
+  # streamflow serve in profiling mode. saves jemalloc profiles and memory tracking to /opt/var/
+  streamflow-profiling:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: profiling
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      # Database connection (benchmark database)
+      DATABASE_URL: postgres://streamflow:streamflow_dev@postgres:5432/streamflow_benchmark
+      DATABASE_ADMIN_URL: postgres://streamflow:streamflow_dev@postgres:5432/streamflow
+      # Rust build settings
+      CARGO_HOME: /opt/.cargo
+      CARGO_TARGET_DIR: /opt/target
+      STREAMFLOW_CLIENT_ID: streamflow-dev-client
+      STREAMFLOW_CLIENT_SECRET: a_zBZWlw8IsQaQm5C2xJPMgunAj4jkjzp4iTafATVcD8RU02yNEYqwCdLsoXIe8g
+      STREAMFLOW_OAUTH_TOKEN_ISSUER: http://localhost:8080
+      STREAMFLOW_OAUTH_TOKEN_AUDIENCE: streamflow-dev-audience
+      STREAMFLOW_WORKER_COUNT: "20"
+      STREAMFLOW_POLL_MAX_ACTIVITIES: "1"
+      # Logging configuration (can be overridden from host environment)
+      STREAMFLOW_LOG_LEVEL: ${STREAMFLOW_LOG_LEVEL:-info}
+
+    volumes:
+      # Mount source code
+      - ./:/opt/
+      # Persist cargo cache for faster rebuilds
+      - cargo_cache:/opt/.cargo/registry
+      - cargo_git_cache:/opt/.cargo/git
+      - cargo_target_cache:/opt/target
+
 volumes:
   postgres_data:
+  cargo_cache:
+  cargo_git_cache:
+  cargo_target_cache:
