@@ -174,7 +174,7 @@ pub async fn process_workflow_event(
 
     // 6. Check for workflow completion
     if is_workflow_complete(&state) {
-        tracing::info!("Workflow {} complete", event.workflow_id);
+        // tracing::info!("Workflow {} complete", event.workflow_id);
 
         let completion_event = if is_workflow_failed(&state) {
             NewWorkflowEvent {

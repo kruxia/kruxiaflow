@@ -37,3 +37,5 @@ coverage/
 *.profdata
 target/llvm-cov/
 *.lcov
+# "var" directory
+var/

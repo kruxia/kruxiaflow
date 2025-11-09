@@ -20,8 +20,8 @@ async fn test_orchestrator_config_new_defaults() {
     let config = OrchestratorConfig::new(pool);
 
     assert_eq!(config.poll_interval_min, Duration::from_millis(10));
-    assert_eq!(config.poll_interval_max, Duration::from_secs(5));
-    assert_eq!(config.backoff_multiplier, 1.62);
+    assert_eq!(config.poll_interval_max, Duration::from_millis(500));
+    assert_eq!(config.backoff_multiplier, 1.3);
 }
 
 #[tokio::test]
@@ -32,7 +32,7 @@ async fn test_orchestrator_config_with_poll_interval() {
 
     assert_eq!(config.poll_interval_min, Duration::from_millis(50));
     assert_eq!(config.poll_interval_max, Duration::from_secs(10));
-    assert_eq!(config.backoff_multiplier, 1.62); // Should remain default
+    assert_eq!(config.backoff_multiplier, 1.3); // Should remain default
 }
 
 #[tokio::test]
@@ -41,7 +41,7 @@ async fn test_orchestrator_config_with_backoff_multiplier() {
     let config = OrchestratorConfig::new(pool).with_backoff_multiplier(2.0);
 
     assert_eq!(config.poll_interval_min, Duration::from_millis(10)); // Should remain default
-    assert_eq!(config.poll_interval_max, Duration::from_secs(5)); // Should remain default
+    assert_eq!(config.poll_interval_max, Duration::from_millis(500)); // Should remain default
     assert_eq!(config.backoff_multiplier, 2.0);
 }
 
@@ -106,10 +106,10 @@ async fn test_orchestrator_config_multiple_builder_calls() {
 }
 
 #[tokio::test]
-async fn test_orchestrator_config_golden_ratio_default() {
+async fn test_orchestrator_config_backoff_default() {
     let pool = mock_pool().await;
     let config = OrchestratorConfig::new(pool);
 
-    // Default uses golden ratio (1.62) for backoff
-    assert!((config.backoff_multiplier - 1.62).abs() < 0.01);
+    // Default uses optimized backoff multiplier
+    assert!((config.backoff_multiplier - 1.3).abs() < 0.01);
 }

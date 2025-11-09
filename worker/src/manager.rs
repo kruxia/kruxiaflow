@@ -41,11 +41,12 @@ impl WorkerManager {
         let mut handles = Vec::new();
 
         for i in 0..self.config.concurrency {
-            let poller = WorkerPoller::new(
-                self.config.clone(),
-                client.clone(),
-                Arc::clone(&self.registry),
-            );
+            // Create a unique worker_id for each poller thread
+            let mut poller_config = self.config.clone();
+            poller_config.worker_id = format!("{}_poller_{}", self.config.worker_id, i);
+
+            let poller =
+                WorkerPoller::new(poller_config, client.clone(), Arc::clone(&self.registry));
 
             let handle = tokio::spawn(async move {
                 tracing::info!(poller_id = i, "Starting poller task");

@@ -106,11 +106,13 @@ impl ActivityWorkerService {
             }
         }
 
-        tracing::info!(
-            worker_id = %worker_id,
-            claimed_count = claimed.len(),
-            "Activities claimed by worker"
-        );
+        if claimed.len() > 0 {
+            tracing::info!(
+                worker_id = %worker_id,
+                claimed_count = claimed.len(),
+                "Activities claimed by worker"
+            );
+        }
 
         Ok(claimed)
     }

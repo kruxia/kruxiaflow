@@ -1,0 +1,35 @@
+[package]
+name = "streamflow-benchmark"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Performance benchmarking suite for StreamFlow"
+
+[dependencies]
+# HTTP client for API calls
+reqwest = { version = "0.12", features = ["json"] }
+
+# Async runtime
+tokio = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Utilities
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# Testing
+serial_test = { workspace = true }
+
+# StreamFlow dependencies (for workflow definitions only, not direct DB access)
+streamflow-core = { path = "../core" }
+
+# Database (for seed-oauth-client binary only)
+sqlx = { workspace = true }
+bcrypt = { workspace = true }
+
+[dev-dependencies]
+# None needed - all tests are in main src/
