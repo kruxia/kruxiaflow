@@ -120,13 +120,13 @@ Example: --shutdown-timeout 60"
     #[arg(
         long,
         env = "STREAMFLOW_POLL_MAX_ACTIVITIES",
-        default_value = "10",
+        default_value = "1",
         help = "Maximum number of activities each worker claims per poll",
         long_help = "Maximum number of activities each worker claims per poll\n\n\
-Default: 10\n\
+Default: 1\n\
 Range: 1-100\n\
 Note: Lower values (1-5) improve work distribution across workers\n\
-Example: --poll-max-activities 1"
+Example: --poll-max-activities 10"
     )]
     pub poll_max_activities: usize,
 }

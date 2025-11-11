@@ -23,6 +23,15 @@ ENTRYPOINT [ "/opt/docker-entrypoint-develop.sh" ]
 # The entrypoint script will always run: target/profiling/streamflow serve "$@"
 EXPOSE 8080
 
+# == DEPLOY ==
+FROM develop AS deploy
+ARG SQLX_OFFLINE=true
+COPY ./ ./
+RUN cargo build --release
+ENTRYPOINT [ "/opt/docker-entrypoint-deploy.sh" ]
+# Default command - arguments passed to "streamflow serve"
+EXPOSE 8080
+
 # == PROFILING ==
 # Profiling environment for StreamFlow
 # This provides a Linux environment where jemalloc profiling works correctly
