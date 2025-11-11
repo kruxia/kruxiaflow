@@ -31,7 +31,7 @@
 
 ### StreamFlow Benchmark Structure (Current)
 - **Rust-based**: `benchmark/` crate with load tests in Rust
-- **Shell script orchestration**: `scripts/benchmark.sh` drives the benchmark suite
+- **Shell script orchestration**: `scripts/profiling.sh` drives the benchmark suite
 - **Memory profiling**: `scripts/profile_memory.sh` for memory analysis
 - **Metrics collected**: Throughput (wf/sec), latency (P50/P95/P99), success rate
 - **Output format**: JSON results in `var/benchmark-TIMESTAMP/results.json`
@@ -247,16 +247,6 @@ build-backend = "setuptools.build_meta"
 - **apache-airflow**: Core library for DAG definitions and API client
 - **jinja2**: Template-based HTML report generation
 - **No heavy analytics**: pandas, plotly, pydantic deferred (use Python dicts)
-
-**Alternative**: `requirements.txt` if not using setuptools:
-```txt
-click>=8.1.0
-httpx>=0.27.0
-temporalio>=1.7.0
-apache-airflow>=2.9.0
-apache-airflow-providers-http>=4.0.0
-jinja2>=3.1.0
-```
 
 ### 3. StreamFlow Workflow Definitions (1 hour)
 
