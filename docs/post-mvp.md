@@ -1839,25 +1839,106 @@ activities:
 
 ---
 
-### Story 7.5: Async Event Processing
+### Story 7.5: Parallel Workflow Event Processing (Per-Workflow Task Spawning)
 
-**Priority**: P2 (Medium - Parallelism)
+**Priority**: P2 (Medium - Significant performance improvement with acceptable complexity)
 
 **As** an orchestrator
-**I want** to process multiple events concurrently
-**So that** I maximize CPU utilization and throughput
+**I want** to process events for different workflows concurrently
+**So that** I maximize CPU utilization and achieve 10-100x throughput improvement
 
 **Scope**:
-- Concurrent event processing (Tokio tasks)
-- Configurable concurrency limit
-- Per-workflow locking (prevent duplicate evaluation)
-- Error handling (one event failure doesn't stop others)
-- Metrics on concurrency utilization
+- Group events by workflow_id after polling
+- Spawn one Tokio task per workflow (not per event)
+- Process events for same workflow sequentially within task (maintains ordering)
+- Configurable concurrency limit (semaphore-based backpressure)
+- Per-workflow advisory locking (prevents concurrent evaluation of same workflow)
+- **Per-event checkpointing**: Each event checkpointed immediately after processing (no replay on shutdown)
+- Graceful error handling (one workflow failure doesn't stop others)
+- Enhanced observability (metrics, tracing, health checks)
+
+**Architecture Reference**: See detailed implementation plan in `docs/implementation/US-7.5-parallel-workflow-event-processing.md`
+
+**Performance Targets**:
+- **Multi-workflow throughput**: 10,000-100,000 workflows/sec (10-100x improvement)
+- **Latency P95**: <5ms (5x improvement from ~10ms)
+- **CPU utilization**: 60-80% (improved from ~10% due to I/O bound operations)
+- **Connection pool**: Scale to 2x concurrency (200 connections for concurrency=100)
 
 **Benefits**:
-- Better CPU utilization
-- Higher throughput (process multiple workflows simultaneously)
-- Lower latency (parallel processing)
+- ✅ 10-100x better multi-workflow throughput (many independent workflows)
+- ✅ 5-10x better latency distribution (no head-of-line blocking)
+- ✅ Better CPU utilization (parallel processing during I/O waits)
+- ✅ Maintains correctness (advisory locks serialize same-workflow events)
+- ✅ Maintains at-least-once semantics (checkpoints after task completion)
+- ✅ Graceful degradation (configurable concurrency, semaphore backpressure)
+
+**Trade-offs**:
+- ❌ Increased complexity (~400 LOC vs ~200 LOC for sequential)
+- ❌ Higher connection pool requirements (2x concurrency + overhead)
+- ❌ Longer graceful shutdown (wait for all in-flight workflows)
+- ⚠️ No benefit for single-workflow throughput (advisory locks still serialize)
+
+**Key Design Decisions**:
+1. **Per-workflow grouping**: Events grouped by workflow_id after polling
+2. **Sequential within workflow**: Each task processes its workflow's events in order
+3. **Concurrent across workflows**: Different workflows process in parallel (10-100 concurrent)
+4. **Advisory lock coordination**: PostgreSQL serializes same-workflow events automatically
+5. **Per-event checkpointing**: Each event checkpointed immediately (no replay on shutdown)
+6. **Concurrency semantics**: 0=disabled, 1=sequential (MVP), N=parallel
+
+**Example Scenario**:
+```
+Polled batch: 100 events across 20 workflows
+├── Spawn 20 tasks (one per workflow, limited by semaphore to max_concurrent)
+├── Workflow A task: Process 10 events sequentially
+│   └── Each event checkpointed immediately after processing (advisory lock prevents conflicts)
+├── Workflow B task: Process 5 events sequentially (runs concurrently with Workflow A)
+│   └── Each event checkpointed immediately after processing
+└── ... (18 more workflows processing in parallel, each checkpointing independently)
+└── Await all tasks (collect statistics, no centralized checkpointing needed)
+```
+
+**Configuration**:
+```bash
+# Orchestrator concurrency
+# 0 = disabled (maintenance mode - no workflows process)
+# 1 = sequential (current MVP behavior - one workflow at a time)
+# N = parallel (N workflows process concurrently)
+STREAMFLOW_ORCHESTRATOR_MAX_CONCURRENT=100
+
+# Events to poll per batch (larger = better throughput)
+STREAMFLOW_ORCHESTRATOR_POLL_BATCH_SIZE=100
+
+# Database connection pool must scale (2x concurrency + 40 for API/workers)
+# Example: 100 concurrent = 240 connections
+```
+
+**Rollout Plan**:
+- **Phase 1**: Deploy with max_concurrent=1 (sequential mode - current MVP behavior)
+- **Phase 2**: Gradual increase (1 → 10 → 50 → 100) with monitoring at each step
+- **Phase 3**: Production deployment with max_concurrent=100 as default
+- **Rollback**: Set `STREAMFLOW_ORCHESTRATOR_MAX_CONCURRENT=1` to revert to sequential
+
+**Success Metrics**:
+- ✅ Throughput: >10,000 workflows/sec (10x improvement)
+- ✅ Latency P95: <5ms (5x improvement)
+- ✅ Error rate: <0.1% (no regression)
+- ✅ Connection pool: <90% utilization (no exhaustion)
+
+**Implementation Estimate**: 2-3 weeks
+- Week 1: Core parallel processing logic
+- Week 2: Configuration, resource management, observability
+- Week 3: Testing, load testing, documentation
+
+**When to Use**:
+- ✅ Multi-tenant SaaS (many independent workflows)
+- ✅ Batch processing (thousands of workflows)
+- ✅ High-throughput requirements (>100 workflows/sec)
+- ✅ Real-time applications (P95 latency matters)
+- ❌ Single-tenant with few workflows (<10 concurrent)
+- ❌ Limited database connections (<100 available)
+- ❌ Simplicity preferred over performance
 
 ---
 
