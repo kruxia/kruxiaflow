@@ -1,0 +1,13 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Copy project files
+COPY pyproject.toml .
+
+# Install package in editable mode
+RUN pip install --no-cache-dir -e .
+COPY ./ ./
+
+# Default command
+CMD ["python", "run_benchmark.py", "run"]
