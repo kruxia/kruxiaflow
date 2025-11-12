@@ -47,10 +47,9 @@ NOCAPTURE="--nocapture"
 VERBOSE=""
 OUTPUT_DIR="${PROJECT_DIR}/var/profiling-$(date +%Y%m%d-%H%M%S)"
 COMPARE_BASELINE=""
-TRACE_LEVEL="info"
-BUILD_MODE="release"
+TRACE_LEVEL="trace"
+BUILD_MODE="profiling"
 SUSTAINED_DURATION=120
-
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -136,6 +135,8 @@ if [ -z "$DATABASE_URL" ]; then
     echo -e "${RED}Error: DATABASE_URL environment variable not set${NC}"
     echo "Please set DATABASE_URL in your environment"
     exit 1
+elif [[ ! "$DATABASE_URL" =~ "streamflow_profiling" ]]; then
+    DATABASE_URL="${DATABASE_URL%/*}/streamflow_profiling"
 fi
 
 # Extract database name from DATABASE_URL
@@ -166,7 +167,7 @@ docker exec streamflow-postgres psql -U streamflow -d ${DB_NAME} -c "
     TRUNCATE TABLE activity_queue CASCADE;
     TRUNCATE TABLE workflows CASCADE;
     TRUNCATE TABLE workflow_event_consumers CASCADE;
-" #> /dev/null 2>&1
+" > /dev/null 2>&1
 
 echo -e "${GREEN}Initialization complete${NC}"
 
@@ -247,7 +248,7 @@ for test_name in "${TESTS_TO_RUN[@]}"; do
         TRUNCATE TABLE activity_queue CASCADE;
         TRUNCATE TABLE workflows CASCADE;
         TRUNCATE TABLE workflow_event_consumers CASCADE;
-    " #> /dev/null 2>&1
+    " > /dev/null 2>&1
 
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}Database truncated successfully${NC}"
@@ -289,7 +290,7 @@ fi
 echo ""
 echo -e "${YELLOW}Capturing server logs...${NC}"
 if docker ps --format '{{.Names}}' | grep $CONTAINER_NAME; then
-    docker compose logs $CONTAINER_NAME > "$OUTPUT_DIR/server-logs.txt" 2>&1
+    docker compose logs --timestamps $CONTAINER_NAME > "$OUTPUT_DIR/server-logs.txt" 2>&1
     echo -e "${GREEN}Server logs saved to: $OUTPUT_DIR/server-logs.txt${NC}"
 
     # Extract relevant logs based on trace level

@@ -21,13 +21,13 @@ mkdir -p "$PROFILE_DIR"
 export _RJEM_MALLOC_CONF="prof_active:true,prof_prefix:$PROFILE_DIR/jeprof.out,lg_prof_interval:30"
 
 # Wait for PostgreSQL to be ready
-until psql $DATABASE_ADMIN_URL -c "select 1" > /dev/null 2>&1; do
+until psql ${DATABASE_ADMIN_URL} -c "select 1" > /dev/null 2>&1; do
     echo "Waiting for PostgreSQL to be ready..."
     sleep 1
 done
 
 # Create benchmark database if it doesn't exist
-psql $DATABASE_ADMIN_URL -c "CREATE DATABASE streamflow_benchmark" >/dev/null 2>&1 || true
+psql ${DATABASE_ADMIN_URL} -c "CREATE DATABASE streamflow_profiling" >/dev/null 2>&1
 
 # Run database migrations
 sqlx migrate run
