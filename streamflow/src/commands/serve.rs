@@ -52,12 +52,12 @@ Example: --bind 127.0.0.1"
         short,
         long,
         env = "STREAMFLOW_WORKER_COUNT",
-        default_value = "1",
+        default_value = "4",
         help = "Number of concurrent worker tasks",
         long_help = "Number of concurrent worker tasks to spawn\n\n\
 Default: 1\n\
 Range: 1-100\n\
-Example: --workers 4"
+Example: --workers 20"
     )]
     pub workers: usize,
 
