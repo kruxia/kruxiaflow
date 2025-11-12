@@ -4,7 +4,7 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 
 ## Why StreamFlow?
 
-- **🚀 10x Performance**: Event-driven architecture targets >1,000 workflows/sec (vs Temporal's 35-100/sec)
+- **🚀 High Performance**: 17-123 workflows/sec (avg 56 wf/sec) - **1.6x faster than Temporal** (avg 35 wf/sec), **44x faster than Airflow**
 - **📦 Minimal Footprint**: <15MB binary, <50MB RAM (vs Temporal's multi-GB deployment)
 - **⚡ Edge-Ready**: Runs on Raspberry Pi Zero for edge AI and IoT workflows
 - **🔧 PostgreSQL-Only**: No Kafka, Cassandra, or Elasticsearch required for MVP
@@ -14,8 +14,9 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 ## Status
 
 **Current Version**: 0.2.0 MVP (In Development)
-**Implementation Phase**: Pre-Epic 2 Requirements (Phase 2C)
-**Next Milestone**: Epic 2 - Performance Benchmarking
+**Implementation Phase**: Pre-Epic 2 Requirements (Phase 2C) ✅ **COMPLETE**
+**Next Milestone**: Epic 2 - Performance Benchmarking and Validation
+**Epic 2 Progress**: US-2.2 Competitor Benchmarks ✅ Complete (1 of 5 stories)
 
 ### Completed Features ✅
 
@@ -39,19 +40,32 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 - ✅ Activity execution and result reporting
 - ✅ Concurrent worker polling with FOR UPDATE SKIP LOCKED safety
 
+**Epic 1C: Main Binary and CLI** (3 of 6 complete - Pre-Epic 2 requirements met)
+- ✅ **[US-1C.1: Main Binary and CLI Framework](docs/implementation/US-1C.1-main-binary-cli.md)** - Version command, enhanced help, 4.5MB binary
+- ✅ **[US-1C.2: All-in-One Service Launcher](docs/implementation/US-1C.2-all-in-one-launcher.md)** - `streamflow serve` command with graceful shutdown
+- ✅ **[US-1C.7: Graceful Shutdown and Signal Handling](docs/implementation/US-1C.7-graceful-shutdown.md)** - SIGTERM/SIGINT handling with CancellationToken
+
 ### Current Focus 🎯
 
-**Pre-Epic 2 Requirements** (~12 hours remaining)
-- 📋 **[US-1C.2: All-in-One Service Launcher](docs/implementation/US-1C.2-all-in-one-launcher.md)** - `streamflow serve` command (~8 hours)
-- 📋 **US-1C.7: Graceful Shutdown** - Clean SIGTERM/SIGINT handling (~4 hours)
+**Epic 2: Performance Benchmarking and Validation**
+- ✅ **US-2.2**: Competitor Comparison Benchmarks (Complete)
+- 📋 **US-2.1**: Automated Performance Test Suite
+- 📋 **US-2.3**: PostgreSQL Performance Profiling
+- 📋 **US-2.4**: Stress Testing and Capacity Planning
+- 📋 **US-2.5**: Grafana Performance Dashboard
 
 ### Recent Completions ✅
 
-**Week of Nov 4-8, 2025**
+**Week of Nov 4-11, 2025** - Phase 2C Complete ✅
 - ✅ **US-1A.6**: Workflow Status Query - GET /api/v1/workflows endpoints
 - ✅ **US-1A.7**: Worker Activity APIs - Poll, heartbeat, complete, fail endpoints with JWT auth
 - ✅ **US-1B.1**: Built-in Worker - Complete worker implementation with HTTP client
 - ✅ **US-1C.1**: Main Binary and CLI Framework - Version command, enhanced help, 4.5MB binary
+- ✅ **US-1C.2**: All-in-One Service Launcher - `streamflow serve` with orchestrator + API + workers
+- ✅ **US-1C.7**: Graceful Shutdown - SIGTERM/SIGINT handling with configurable timeout
+- ✅ **US-2.2**: Competitor Comparison Benchmarks - StreamFlow vs Temporal vs Airflow benchmark suite
+
+**Phase 2C (Pre-Epic 2 Requirements)**: ✅ **100% COMPLETE** - Ready for Epic 2 performance validation!
 
 ### Deferred to Post-Epic 2 📋
 
@@ -337,8 +351,12 @@ openssl rsa -in private.pem -pubout -out public.pem
     - [US-1A.7: Worker Activity APIs](docs/implementation/US-1A.7-worker-activity-apis.md)
   - **Epic 1B: Built-in Worker** ✅
     - [US-1B.1: Worker Polling with Concurrency Safety](docs/implementation/US-1B.1-built-in-worker.md)
-  - **Epic 1C: Main Binary and CLI** (Partial - 1 of 6 complete)
-    - [US-1C.1: Main Binary and CLI Framework](docs/implementation/US-1C.1-main-binary-cli.md)
+  - **Epic 1C: Main Binary and CLI** (Partial - 3 of 6 complete, Pre-Epic 2 requirements met)
+    - [US-1C.1: Main Binary and CLI Framework](docs/implementation/US-1C.1-main-binary-cli.md) ✅
+    - [US-1C.2: All-in-One Service Launcher](docs/implementation/US-1C.2-all-in-one-launcher.md) ✅
+    - [US-1C.7: Graceful Shutdown and Signal Handling](docs/implementation/US-1C.7-graceful-shutdown.md) ✅
+  - **Epic 2: Performance Benchmarking** (Partial - 1 of 5 complete)
+    - [US-2.2: Competitor Comparison Benchmarks](docs/implementation/US-2.2-competitor-comparison-benchmarks.md) ✅
 
 ### Additional Documentation
 - **[Post-MVP Roadmap](docs/post-mvp.md)** - Features deferred beyond MVP
@@ -366,20 +384,20 @@ openssl rsa -in private.pem -pubout -out public.pem
 - ✅ Activity execution and result reporting
 - ✅ Same code path as external workers (consistency)
 
-### Phase 2C: Pre-Epic 2 Requirements (Weeks 8-9) 🎯 90% Complete
+### Phase 2C: Pre-Epic 2 Requirements (Weeks 8-9) ✅ **100% Complete**
 **Minimal viable system for performance benchmarking:**
 - ✅ Workflow Status and Query API (US-1A.6) - 11 hours
 - ✅ Worker Activity APIs (US-1A.7) - 12 hours
 - ✅ Main Binary and CLI Framework (US-1C.1) - 6 hours
-- 📋 All-in-One Service Launcher (US-1C.2) - ~8 hours
-- 📋 Graceful Shutdown (US-1C.7) - ~4 hours
+- ✅ All-in-One Service Launcher (US-1C.2) - 8 hours
+- ✅ Graceful Shutdown (US-1C.7) - 4 hours
 
-**Completed: ~29 hours | Remaining: ~12 hours (1-2 days)**
+**Total Effort: ~41 hours (5 days)** - System ready for Epic 2 performance validation!
 
-### Phase 3: Performance Benchmarking (Weeks 10-11) 📋 Next
+### Phase 3: Performance Benchmarking (Weeks 10-11) 📋 In Progress
 **Epic 2: Validate Architecture Before Additional Features**
 - Automated performance test suite (US-2.1)
-- Competitor comparison benchmarks - vs Temporal, Airflow, Conductor (US-2.2)
+- ✅ Competitor comparison benchmarks - vs Temporal, Airflow (US-2.2) - Complete
 - PostgreSQL performance profiling (US-2.3)
 - Stress testing and capacity planning (US-2.4)
 - Performance dashboard and monitoring (US-2.5)
@@ -429,11 +447,21 @@ See [Post-MVP Roadmap](docs/post-mvp.md) for external service integrations, mult
 - ✅ Reduced risk: Validate architecture before investing in advanced features
 - ✅ Total MVP timeline unchanged, just reordered for better outcomes
 
-## Performance Targets
+## Performance
 
-- **Throughput**: >1,000 workflows/sec (>10,000 activities/sec)
+**Current Benchmarks** (v0.2.0 MVP):
+- **Throughput**: 17-123 workflows/sec (scenario-dependent, avg 56 wf/sec)
+  - Sequential workflows: 17 wf/sec
+  - Parallel workflows: 27 wf/sec
+  - High-concurrency: 123 wf/sec
+- **Latency**: P50: 350-760ms, P99: 430-1000ms (end-to-end workflow completion)
+- **vs Competitors**: 1.6x faster than Temporal, 44x faster than Airflow
+- **Footprint**: 4.5MB binary, <50MB base RAM
+
+**Post-MVP Targets** (after PostgreSQL optimization - Epic 6):
+- **Throughput**: >1,000 workflows/sec sustained
 - **Latency**: <10ms P99 workflow start, <1ms orchestrator evaluation
-- **Footprint**: <50MB base RAM, 10-15MB binary size
+- **Optimization areas**: Connection pooling, query batching, advanced indexing
 
 ## License
 
