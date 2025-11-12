@@ -21,7 +21,7 @@ with DAG(
     default_args=default_args,
     schedule_interval=None,
     catchup=False,
-    max_active_runs=1,
+    max_active_runs=1000,  # Allow many concurrent runs for benchmarking
 ) as sequential_bench_5:
     tasks = []
     for i in range(5):
@@ -40,7 +40,7 @@ with DAG(
     default_args=default_args,
     schedule_interval=None,
     catchup=False,
-    max_active_runs=1,
+    max_active_runs=1000,  # Allow many concurrent runs for benchmarking
 ) as sequential_bench_3:
     tasks = []
     for i in range(3):
@@ -59,7 +59,7 @@ with DAG(
     default_args=default_args,
     schedule_interval=None,
     catchup=False,
-    max_active_runs=1,
+    max_active_runs=1000,  # Allow many concurrent runs for benchmarking
 ) as parallel_bench_10:
     start = EchoOperator(
         task_id="start",

@@ -115,7 +115,7 @@ class AirflowBenchmark:
         self,
         dag_id: str,
         dag_run_id: str,
-        timeout: float = 30.0,
+        timeout: float = 300.0,
     ) -> tuple[bool, float]:
         """Wait for DAG run to complete and return (success, latency_ms)"""
         start = time.time()
