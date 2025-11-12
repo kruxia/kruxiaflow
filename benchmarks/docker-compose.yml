@@ -9,7 +9,7 @@ services:
     volumes:
       - streamflow_pg_data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U streamflow"]
+      test: [ "CMD-SHELL", "pg_isready -U streamflow" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -27,14 +27,14 @@ services:
       STREAMFLOW_CLIENT_SECRET: benchmark_secret
       STREAMFLOW_OAUTH_TOKEN_ISSUER: http://localhost:8080
       STREAMFLOW_OAUTH_TOKEN_AUDIENCE: streamflow-dev-audience
-      STREAMFLOW_WORKER_COUNT: "4"
-      STREAMFLOW_POLL_MAX_ACTIVITIES: "1"
+      STREAMFLOW_WORKER_COUNT: "4" # = default
+      STREAMFLOW_POLL_MAX_ACTIVITIES: "1" # = default
       STREAMFLOW_LOG_LEVEL: info
     depends_on:
       - streamflow-postgres
-    command: ["serve"]
+    command: [ "serve" ]
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -60,7 +60,7 @@ services:
       - POSTGRES_PWD=temporal
       - POSTGRES_SEEDS=temporal-postgres
     healthcheck:
-      test: ["CMD", "tctl", "--address", "temporal:7233", "cluster", "health"]
+      test: [ "CMD", "tctl", "--address", "temporal:7233", "cluster", "health" ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -119,7 +119,7 @@ services:
       - ./airflow:/opt/airflow/dags
     command: webserver
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
       interval: 10s
       timeout: 10s
       retries: 5
@@ -143,7 +143,7 @@ services:
       - ./airflow:/opt/airflow/dags
     command: scheduler
     healthcheck:
-      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""]
+      test: [ "CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\"" ]
       interval: 10s
       timeout: 10s
       retries: 5
@@ -163,9 +163,12 @@ services:
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
       - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
       - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+      - AIRFLOW__CELERY__WORKER_CONCURRENCY=4
     volumes:
       - ./airflow:/opt/airflow/dags
     command: celery worker
+    deploy:
+      replicas: 4
 
   # Benchmark runner
   benchmark:
@@ -183,7 +186,7 @@ services:
         condition: service_healthy
     volumes:
       - ./:/app/
-    command: ["python", "run_benchmark.py", "run", "--platform", "all"]
+    command: [ "python", "run_benchmark.py", "run", "--platform", "all" ]
 
 volumes:
   streamflow_pg_data:
