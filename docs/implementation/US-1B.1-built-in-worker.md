@@ -17,7 +17,7 @@
 
 ### Acceptance Criteria
 
-- Workers poll by activity type (namespace.name) via API endpoints
+- Workers poll by activity type (worker.name) via API endpoints
 - PostgreSQL FOR UPDATE SKIP LOCKED prevents conflicts (enforced by API)
 - Workers claim activities atomically
 - Failed workers release activities for retry
@@ -157,7 +157,7 @@ pub struct WorkerConfig {
     /// Worker unique identifier
     pub worker_id: String,
 
-    /// Activity types this worker can execute (namespace.name format)
+    /// Activity types this worker can execute (worker.name format)
     pub activity_types: Vec<String>,
     /// Maximum number of activities to poll per request
     pub poll_max_activities: usize,
@@ -258,7 +258,7 @@ pub enum ConfigError {
     #[error("No activity types configured")]
     NoActivityTypes,
 
-    #[error("Invalid activity type format: {0} (must be namespace.name)")]
+    #[error("Invalid activity type format: {0} (must be worker.name)")]
     InvalidActivityType(String),
 
     #[error("Invalid concurrency value (must be > 0)")]
@@ -572,7 +572,7 @@ pub struct PendingActivity {
     pub activity_id: Uuid,
     pub workflow_id: Uuid,
     pub activity_key: String,
-    pub namespace: String,
+    pub worker: String,
     pub name: String,
     pub parameters: Value,
     pub settings: Option<Value>,
@@ -588,7 +588,7 @@ pub struct PendingActivity {
 
 **Responsibilities**:
 1. Register activity implementations
-2. Map activity types (namespace.name) to implementations
+2. Map activity types (worker.name) to implementations
 3. Execute activities with timeout and error handling
 
 **Implementation**:
@@ -619,8 +619,8 @@ pub trait ActivityImpl: Send + Sync {
     /// Get activity name
     fn name(&self) -> &str;
 
-    /// Get activity namespace
-    fn namespace(&self) -> &str;
+    /// Get activity worker
+    fn worker(&self) -> &str;
 }
 
 /// Activity registry
@@ -639,7 +639,7 @@ impl ActivityRegistry {
 
     /// Register an activity implementation
     pub fn register(&mut self, implementation: Arc<dyn ActivityImpl>) {
-        let key = format!("{}.{}", implementation.namespace(), implementation.name());
+        let key = format!("{}.{}", implementation.worker(), implementation.name());
         tracing::info!("Registering activity: {}", key);
         self.implementations.insert(key, implementation);
     }
@@ -654,12 +654,12 @@ impl ActivityRegistry {
     /// Returns activity output or error.
     pub async fn execute(
         &self,
-        namespace: &str,
+        worker: &str,
         name: &str,
         parameters: Value,
         timeout: Duration,
     ) -> Result<Value> {
-        let key = format!("{}.{}", namespace, name);
+        let key = format!("{}.{}", worker, name);
 
         let implementation = self
             .implementations
@@ -722,8 +722,8 @@ impl ActivityImpl for EchoActivity {
         "echo"
     }
 
-    fn namespace(&self) -> &str {
-        "default"
+    fn worker(&self) -> &str {
+        "builtin"
     }
 }
 ```
@@ -845,7 +845,7 @@ impl WorkerPoller {
         tracing::info!(
             activity_id = %activity.activity_id,
             activity_key = %activity.activity_key,
-            namespace = %activity.namespace,
+            worker = %activity.worker,
             name = %activity.name,
             "Executing activity"
         );
@@ -868,7 +868,7 @@ impl WorkerPoller {
         let result = self
             .registry
             .execute(
-                &activity.namespace,
+                &activity.worker,
                 &activity.name,
                 activity.parameters,
                 timeout,
@@ -1377,7 +1377,7 @@ Custom activities implement the `ActivityImpl` trait:
 pub trait ActivityImpl: Send + Sync {
     async fn execute(&self, parameters: Value) -> Result<Value>;
     fn name(&self) -> &str;
-    fn namespace(&self) -> &str;
+    fn worker(&self) -> &str;
 }
 \`\`\`
 

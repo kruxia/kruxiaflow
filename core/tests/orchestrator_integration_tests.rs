@@ -89,7 +89,7 @@ async fn test_sequential_workflow_integration() {
         activities: vec![
             ActivityDefinition {
                 key: "activity1".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: "step1".to_string(),
                 parameters: json!({}),
                 settings: None,
@@ -101,7 +101,7 @@ async fn test_sequential_workflow_integration() {
             },
             ActivityDefinition {
                 key: "activity2".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: "step2".to_string(),
                 parameters: json!({}),
                 settings: None,
@@ -113,7 +113,7 @@ async fn test_sequential_workflow_integration() {
             },
             ActivityDefinition {
                 key: "activity3".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: "step3".to_string(),
                 parameters: json!({}),
                 settings: None,
@@ -234,7 +234,7 @@ async fn test_parallel_workflow_integration() {
         activities: vec![
             ActivityDefinition {
                 key: "root".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: "root".to_string(),
                 parameters: json!({}),
                 settings: None,
@@ -256,7 +256,7 @@ async fn test_parallel_workflow_integration() {
             },
             ActivityDefinition {
                 key: "parallel1".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: "parallel".to_string(),
                 parameters: json!({}),
                 settings: None,
@@ -265,7 +265,7 @@ async fn test_parallel_workflow_integration() {
             },
             ActivityDefinition {
                 key: "parallel2".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: "parallel".to_string(),
                 parameters: json!({}),
                 settings: None,
@@ -274,7 +274,7 @@ async fn test_parallel_workflow_integration() {
             },
             ActivityDefinition {
                 key: "parallel3".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: "parallel".to_string(),
                 parameters: json!({}),
                 settings: None,
@@ -283,7 +283,7 @@ async fn test_parallel_workflow_integration() {
             },
             ActivityDefinition {
                 key: "join".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: "join".to_string(),
                 parameters: json!({}),
                 settings: None,
@@ -463,7 +463,7 @@ async fn test_conditional_workflow_integration() {
         activities: vec![
             ActivityDefinition {
                 key: "validate".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: "validate".to_string(),
                 parameters: json!({}),
                 settings: None,
@@ -481,7 +481,7 @@ async fn test_conditional_workflow_integration() {
             },
             ActivityDefinition {
                 key: "approve".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: "approve".to_string(),
                 parameters: json!({}),
                 settings: None,
@@ -490,7 +490,7 @@ async fn test_conditional_workflow_integration() {
             },
             ActivityDefinition {
                 key: "reject".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: "reject".to_string(),
                 parameters: json!({}),
                 settings: None,
@@ -595,7 +595,7 @@ async fn test_workflow_completion_success() {
         version: "1.0".to_string(),
         activities: vec![ActivityDefinition {
             key: "only_activity".to_string(),
-            namespace: "test".to_string(),
+            worker: "test".to_string(),
             name: "simple_task".to_string(),
             parameters: json!({}),
             settings: None,
@@ -718,7 +718,7 @@ async fn test_workflow_failure() {
         version: "1.0".to_string(),
         activities: vec![ActivityDefinition {
             key: "failing_activity".to_string(),
-            namespace: "test".to_string(),
+            worker: "test".to_string(),
             name: "fail_task".to_string(),
             parameters: json!({}),
             settings: None,
@@ -846,7 +846,7 @@ async fn test_workflow_completion_with_multiple_activities() {
         activities: vec![
             ActivityDefinition {
                 key: "step1".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: "task1".to_string(),
                 parameters: json!({}),
                 settings: None,
@@ -858,7 +858,7 @@ async fn test_workflow_completion_with_multiple_activities() {
             },
             ActivityDefinition {
                 key: "step2".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: "task2".to_string(),
                 parameters: json!({}),
                 settings: None,
@@ -870,7 +870,7 @@ async fn test_workflow_completion_with_multiple_activities() {
             },
             ActivityDefinition {
                 key: "step3".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: "task3".to_string(),
                 parameters: json!({}),
                 settings: None,
@@ -968,7 +968,7 @@ async fn test_activity_scheduled_events_published() {
         version: "1.0".to_string(),
         activities: vec![ActivityDefinition {
             key: "task".to_string(),
-            namespace: "test".to_string(),
+            worker: "test".to_string(),
             name: "work".to_string(),
             parameters: json!({"param": "value"}),
             settings: None,
@@ -1023,7 +1023,7 @@ async fn test_activity_scheduled_events_published() {
     assert!(activity_scheduled.is_some());
     if let Some(event) = activity_scheduled {
         assert_eq!(event.activity_key.as_deref(), Some("task"));
-        assert_eq!(event.payload.get("namespace").unwrap(), "test");
+        assert_eq!(event.payload.get("worker").unwrap(), "test");
         assert_eq!(event.payload.get("name").unwrap(), "work");
     }
 }
@@ -1041,7 +1041,7 @@ async fn test_run_orchestrator_loop() {
         version: "1.0".to_string(),
         activities: vec![ActivityDefinition {
             key: "task1".to_string(),
-            namespace: "test".to_string(),
+            worker: "test".to_string(),
             name: "work".to_string(),
             parameters: json!({}),
             settings: None,

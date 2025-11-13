@@ -166,7 +166,7 @@ Based on the profiling data, identify the top 3 bottlenecks:
 | Symptom                                      | Root Cause                     | Fix                                                                                             |
 |---------------------------------------------|--------------------------------|--------------------------------------------------------------------------------------------------|
 | Flamegraph shows `sqlx` taking ~80% CPU     | Slow database queries / hot SQL| Add missing indexes, optimize queries (use EXPLAIN ANALYZE), batch statements, add caching      |
-| `EXPLAIN` shows "Seq Scan on activity_queue"| Missing index                  | Create a partial index: `CREATE INDEX CONCURRENTLY idx_activity_queue_pending ON activity_queue(namespace, name, scheduled_for) WHERE status = 'pending';` |
+| `EXPLAIN` shows "Seq Scan on activity_queue"| Missing index                  | Create a partial index: `CREATE INDEX CONCURRENTLY idx_activity_queue_pending ON activity_queue(worker, name, scheduled_for) WHERE status = 'pending';` |
 | Slow queries with high `mean_time_ms`       | Inefficient query or missing index | Rewrite the query, add appropriate indexes, use prepared statements, run `EXPLAIN (ANALYZE, BUFFERS)` |
 | Connection stats show active ≈ max          | Pool exhaustion                | Increase pool `max_connections`, tune min/max, add backpressure or limit concurrent clients     |
 | Flamegraph shows `serde_json` ~30% CPU      | Serialization overhead         | Use binary formats (MessagePack), reuse serializers, reduce payload size, serialize off hot path |
@@ -182,7 +182,7 @@ Based on identified bottlenecks, implement fixes following the priority order in
 ```sql
 -- Activity queue index for pending activities
 CREATE INDEX CONCURRENTLY idx_activity_queue_pending
-ON activity_queue(namespace, name, scheduled_for)
+ON activity_queue(worker, name, scheduled_for)
 WHERE status = 'pending';
 
 -- Event polling index

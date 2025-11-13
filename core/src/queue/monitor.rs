@@ -59,7 +59,7 @@ impl QueueMonitor {
             WHERE status = 'running'::activity_status
               AND NOW() > claimed_at + timeout_duration
               AND retry_count >= max_retries
-            RETURNING id, workflow_id, activity_key, namespace, name, retry_count
+            RETURNING id, workflow_id, activity_key, worker, name, retry_count
             "#
         )
         .fetch_all(&self.pool)
@@ -76,7 +76,7 @@ impl QueueMonitor {
                     activity_id = %row.id,
                     workflow_id = %row.workflow_id,
                     activity_key = %row.activity_key,
-                    namespace = %row.namespace,
+                    worker = %row.worker,
                     name = %row.name,
                     retry_count = row.retry_count,
                     "Activity permanently failed after max retries"
@@ -153,7 +153,7 @@ mod tests {
         sqlx::query!(
             r#"
             INSERT INTO activity_queue (
-                workflow_id, activity_key, namespace, name, parameters,
+                workflow_id, activity_key, worker, name, parameters,
                 status, claimed_at, timeout_duration, retry_count, max_retries
             )
             VALUES (
@@ -238,7 +238,7 @@ mod tests {
         sqlx::query!(
             r#"
             INSERT INTO activity_queue (
-                workflow_id, activity_key, namespace, name, parameters,
+                workflow_id, activity_key, worker, name, parameters,
                 status, retry_count, max_retries, timeout_duration
             )
             VALUES (

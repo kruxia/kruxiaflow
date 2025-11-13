@@ -34,7 +34,7 @@ Per `docs/architecture.md`:
 #[async_trait]
 pub trait ActivityQueue: Send + Sync {
     async fn schedule(&self, workflow_id: Uuid, activities: Vec<Activity>) -> Result<()>;
-    async fn claim_next(&self, namespace: &str, name: &str) -> Result<Option<QueuedActivity>>;
+    async fn claim_next(&self, worker: &str, name: &str) -> Result<Option<QueuedActivity>>;
     async fn complete(&self, activity_id: Uuid, result: ActivityResult) -> Result<()>;
     async fn heartbeat(&self, activity_id: Uuid) -> Result<()>;
 }
@@ -67,7 +67,7 @@ CREATE TABLE activity_queue (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     workflow_id UUID NOT NULL,
     activity_key TEXT NOT NULL,
-    namespace TEXT NOT NULL,
+    worker TEXT NOT NULL,
     name TEXT NOT NULL,
     parameters JSONB NOT NULL,
     settings JSONB,
@@ -87,7 +87,7 @@ CREATE TABLE activity_queue (
 
 -- Index for worker polling (hot path) - covers both pending and stale running activities
 CREATE INDEX idx_queue_claimable
-ON activity_queue(namespace, name, scheduled_for)
+ON activity_queue(worker, name, scheduled_for)
 WHERE (status = 'pending' AND scheduled_for <= NOW())
    OR (status = 'running');
 
@@ -162,7 +162,7 @@ for activity in activities {
         .unwrap_or(config.default_max_retries);
 
     INSERT INTO activity_queue (
-        workflow_id, activity_key, namespace, name,
+        workflow_id, activity_key, worker, name,
         parameters, settings, scheduled_for, timeout_duration, max_retries
     ) VALUES (..., INTERVAL $timeout_duration, $max_retries)
     ON CONFLICT (workflow_id, activity_key) DO NOTHING
@@ -180,7 +180,7 @@ for activity in activities {
 #### 1.2 `claim_next()` - Safe Concurrent Claiming with Stale Activity Detection
 
 **Requirements**:
-- Poll for next pending activity by namespace/name
+- Poll for next pending activity by worker/name
 - **Detect and reclaim stale running activities** (primary timeout recovery mechanism)
 - Use `FOR UPDATE SKIP LOCKED` to prevent conflicts
 - Atomically update status to 'running'
@@ -203,7 +203,7 @@ SET status = 'running',
     END
 WHERE id = (
     SELECT id FROM activity_queue
-    WHERE namespace = $namespace
+    WHERE worker = $worker
       AND name = $name
       AND (
           -- Fresh pending activities
@@ -313,7 +313,7 @@ match rows_updated {
 // Activity to be scheduled
 pub struct Activity {
     pub key: String,              // Unique within workflow (e.g., "validate_payment")
-    pub namespace: String,         // Activity type namespace (e.g., "payments")
+    pub worker: String,         // Activity type worker (e.g., "payments")
     pub name: String,              // Activity type name (e.g., "validate_card")
     pub parameters: serde_json::Value,  // Activity-specific parameters
     pub settings: Option<ActivitySettings>,  // Timeout, retry, budget config
@@ -334,7 +334,7 @@ pub struct QueuedActivity {
     pub id: Uuid,
     pub workflow_id: Uuid,
     pub activity_key: String,
-    pub namespace: String,
+    pub worker: String,
     pub name: String,
     pub parameters: serde_json::Value,
     pub settings: Option<ActivitySettings>,
@@ -374,7 +374,7 @@ DELETE FROM activity_queue
 WHERE status = 'running'
   AND NOW() > claimed_at + timeout_duration
   AND retry_count >= max_retries
-RETURNING workflow_id, activity_key, namespace, name, parameters
+RETURNING workflow_id, activity_key, worker, name, parameters
 
 // For each deleted activity, publish failure event
 For each failed_activity:
@@ -893,7 +893,7 @@ impl Default for QueueConfig {
 
 - **Workflow Events**: Activity completion publishes events (orchestrator consumes)
 - **PostgreSQL Connection Pool**: Shared connection pool (sqlx)
-- **Activity Registry**: Validates namespace/name exists
+- **Activity Registry**: Validates worker/name exists
 - **Workflow State**: Orchestrator queries workflow definition for dependency graph
 
 ### External Dependencies

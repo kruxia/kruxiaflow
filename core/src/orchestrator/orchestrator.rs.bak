@@ -278,7 +278,7 @@ pub async fn process_workflow_event(
                 .iter()
                 .map(|a| Activity {
                     key: a.key.clone(),
-                    namespace: a.namespace.clone(),
+                    worker: a.worker.clone(),
                     name: a.name.clone(),
                     parameters: a.parameters.clone(),
                     settings: a.settings.clone(),
@@ -313,7 +313,7 @@ pub async fn process_workflow_event(
                     event_type: WorkflowEventType::ActivityScheduled,
                     activity_key: Some(activity.key.clone()),
                     payload: json!({
-                        "namespace": activity.namespace,
+                        "worker": activity.worker,
                         "name": activity.name,
                     }),
                 };

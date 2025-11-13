@@ -20,7 +20,7 @@ pub fn create_sequential_workflow(num_activities: usize) -> WorkflowDefinition {
 
         activities.push(ActivityDefinition {
             key,
-            namespace: "default".to_string(),
+            worker: "builtin".to_string(),
             name: Some("echo".to_string()),
             parameters: Some(HashMap::new()),
             preceding: None,
@@ -41,7 +41,7 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
         // Start activity
         ActivityDefinition {
             key: "start".to_string(),
-            namespace: "default".to_string(),
+            worker: "builtin".to_string(),
             name: Some("echo".to_string()),
             parameters: Some(HashMap::new()),
             preceding: None,
@@ -61,7 +61,7 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
     for i in 0..num_parallel {
         activities.push(ActivityDefinition {
             key: format!("parallel_{}", i),
-            namespace: "default".to_string(),
+            worker: "builtin".to_string(),
             name: Some("echo".to_string()),
             parameters: Some(HashMap::new()),
             preceding: Some(vec![ActivityRelationship {
@@ -79,7 +79,7 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
     // End activity (fan-in)
     activities.push(ActivityDefinition {
         key: "end".to_string(),
-        namespace: "default".to_string(),
+        worker: "builtin".to_string(),
         name: Some("echo".to_string()),
         parameters: Some(HashMap::new()),
         preceding: Some(

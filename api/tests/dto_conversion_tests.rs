@@ -12,7 +12,7 @@ fn test_workflow_definition_from_core_to_dto() {
         activities: vec![
             workflow::ActivityDefinition {
                 key: "step1".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: Some("action".to_string()),
                 parameters: Some(HashMap::from([(
                     "key1".to_string(),
@@ -33,7 +33,7 @@ fn test_workflow_definition_from_core_to_dto() {
             },
             workflow::ActivityDefinition {
                 key: "step2".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: None,
                 parameters: None,
                 preceding: Some(vec![workflow::ActivityRelationship {
@@ -56,7 +56,7 @@ fn test_workflow_definition_from_core_to_dto() {
     // Check first activity
     let activity1 = &dto_def.activities[0];
     assert_eq!(activity1.key, "step1");
-    assert_eq!(activity1.namespace, "test");
+    assert_eq!(activity1.worker, "test");
     assert_eq!(activity1.name, Some("action".to_string()));
     assert!(activity1.parameters.is_some());
     assert!(activity1.preceding.is_none());
@@ -81,7 +81,7 @@ fn test_workflow_definition_from_core_to_dto() {
     // Check second activity
     let activity2 = &dto_def.activities[1];
     assert_eq!(activity2.key, "step2");
-    assert_eq!(activity2.namespace, "test");
+    assert_eq!(activity2.worker, "test");
     assert_eq!(activity2.name, None);
     assert!(activity2.parameters.is_none());
     assert!(activity2.preceding.is_some());
@@ -96,7 +96,7 @@ fn test_workflow_definition_from_dto_to_core() {
         name: "test_workflow".to_string(),
         activities: vec![dto::ActivityDefinition {
             key: "step1".to_string(),
-            namespace: "test".to_string(),
+            worker: "test".to_string(),
             name: Some("action".to_string()),
             parameters: Some(HashMap::from([(
                 "key1".to_string(),
@@ -126,7 +126,7 @@ fn test_workflow_definition_from_dto_to_core() {
 
     let activity = &core_def.activities[0];
     assert_eq!(activity.key, "step1");
-    assert_eq!(activity.namespace, "test");
+    assert_eq!(activity.worker, "test");
     assert_eq!(activity.name, Some("action".to_string()));
     assert!(activity.parameters.is_some());
     assert!(activity.following.is_some());
@@ -277,7 +277,7 @@ fn test_activity_definition_with_minimal_fields() {
     // Test core to DTO with minimal fields
     let core_activity = workflow::ActivityDefinition {
         key: "minimal".to_string(),
-        namespace: "test".to_string(),
+        worker: "test".to_string(),
         name: None,
         parameters: None,
         preceding: None,
@@ -287,7 +287,7 @@ fn test_activity_definition_with_minimal_fields() {
 
     let dto_activity: dto::ActivityDefinition = core_activity.clone().into();
     assert_eq!(dto_activity.key, "minimal");
-    assert_eq!(dto_activity.namespace, "test");
+    assert_eq!(dto_activity.worker, "test");
     assert!(dto_activity.name.is_none());
     assert!(dto_activity.parameters.is_none());
     assert!(dto_activity.preceding.is_none());
@@ -297,7 +297,7 @@ fn test_activity_definition_with_minimal_fields() {
     // Test DTO to core with minimal fields
     let dto_activity2 = dto::ActivityDefinition {
         key: "minimal2".to_string(),
-        namespace: "test2".to_string(),
+        worker: "test2".to_string(),
         name: None,
         parameters: None,
         preceding: None,
@@ -307,7 +307,7 @@ fn test_activity_definition_with_minimal_fields() {
 
     let core_activity2: workflow::ActivityDefinition = dto_activity2.clone().into();
     assert_eq!(core_activity2.key, "minimal2");
-    assert_eq!(core_activity2.namespace, "test2");
+    assert_eq!(core_activity2.worker, "test2");
     assert!(core_activity2.name.is_none());
     assert!(core_activity2.parameters.is_none());
     assert!(core_activity2.preceding.is_none());
@@ -323,7 +323,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
         activities: vec![
             workflow::ActivityDefinition {
                 key: "start".to_string(),
-                namespace: "control".to_string(),
+                worker: "control".to_string(),
                 name: None,
                 parameters: None,
                 preceding: None,
@@ -341,7 +341,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
             },
             workflow::ActivityDefinition {
                 key: "middle1".to_string(),
-                namespace: "processing".to_string(),
+                worker: "processing".to_string(),
                 name: Some("process".to_string()),
                 parameters: Some(HashMap::from([(
                     "type".to_string(),
@@ -362,7 +362,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
             },
             workflow::ActivityDefinition {
                 key: "middle2".to_string(),
-                namespace: "processing".to_string(),
+                worker: "processing".to_string(),
                 name: Some("process".to_string()),
                 parameters: Some(HashMap::from([(
                     "type".to_string(),
@@ -386,7 +386,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
             },
             workflow::ActivityDefinition {
                 key: "end".to_string(),
-                namespace: "control".to_string(),
+                worker: "control".to_string(),
                 name: None,
                 parameters: None,
                 preceding: Some(vec![
@@ -419,7 +419,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
         .zip(core_def_back.activities.iter())
     {
         assert_eq!(original.key, round_trip.key);
-        assert_eq!(original.namespace, round_trip.namespace);
+        assert_eq!(original.worker, round_trip.worker);
         assert_eq!(original.name, round_trip.name);
 
         // Check relationship counts match

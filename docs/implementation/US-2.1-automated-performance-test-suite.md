@@ -311,7 +311,7 @@ pub fn create_sequential_workflow(num_activities: usize) -> WorkflowDefinition {
 
         activities.push(ActivityDefinition {
             key,
-            namespace: "bench".to_string(),
+            worker: "bench".to_string(),
             name: "noop".to_string(),
             parameters: json!({}),
             settings: None,
@@ -334,7 +334,7 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
         // Start activity
         ActivityDefinition {
             key: "start".to_string(),
-            namespace: "bench".to_string(),
+            worker: "bench".to_string(),
             name: "noop".to_string(),
             parameters: json!({}),
             settings: None,
@@ -354,7 +354,7 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
     for i in 0..num_parallel {
         activities.push(ActivityDefinition {
             key: format!("parallel_{}", i),
-            namespace: "bench".to_string(),
+            worker: "bench".to_string(),
             name: "noop".to_string(),
             parameters: json!({}),
             settings: None,
@@ -369,7 +369,7 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
     // End activity (fan-in)
     activities.push(ActivityDefinition {
         key: "end".to_string(),
-        namespace: "bench".to_string(),
+        worker: "bench".to_string(),
         name: "noop".to_string(),
         parameters: json!({}),
         settings: None,

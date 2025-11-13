@@ -20,7 +20,7 @@ impl ActivityImpl for EchoActivity {
         "echo"
     }
 
-    fn namespace(&self) -> &str {
-        "default"
+    fn worker(&self) -> &str {
+        "builtin"
     }
 }

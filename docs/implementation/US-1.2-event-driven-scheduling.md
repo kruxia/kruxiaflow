@@ -94,7 +94,7 @@ version: "1.0"
 
 activities:
   - key: validate_payment
-    namespace: payments
+    worker: payments
     name: validate_card
     parameters:
       card_token: "{{ARG.card_token}}"
@@ -104,13 +104,13 @@ activities:
           - "{{validate_payment.valid}} == true"
 
   - key: authorize_card
-    namespace: payments
+    worker: payments
     name: authorize
     following:
       - activity_key: capture_payment
 
   - key: capture_payment
-    namespace: payments
+    worker: payments
     name: capture
 ```
 
@@ -1272,7 +1272,7 @@ async fn process_workflow_event(
                 event_type: "ActivityScheduled".to_string(),
                 activity_key: Some(activity.key.clone()),
                 payload: json!({
-                    "namespace": activity.namespace,
+                    "worker": activity.worker,
                     "name": activity.name,
                 }),
             };
@@ -1380,7 +1380,7 @@ pub struct WorkflowDefinition {
 
 pub struct ActivityDefinition {
     pub key: String,
-    pub namespace: String,
+    pub worker: String,
     pub name: String,
     pub parameters: serde_json::Value,  // May contain templates
     pub settings: Option<ActivitySettings>,
@@ -1446,19 +1446,19 @@ version: "1.0"
 
 activities:
   - key: validate_payment
-    namespace: payments
+    worker: payments
     name: validate_card
     following:
       - activity_key: authorize_card
 
   - key: authorize_card
-    namespace: payments
+    worker: payments
     name: authorize
     following:
       - activity_key: capture_payment
 
   - key: capture_payment
-    namespace: payments
+    worker: payments
     name: capture
 ```
 
@@ -1500,7 +1500,7 @@ version: "1.0"
 
 activities:
   - key: fetch_code
-    namespace: git
+    worker: git
     name: clone_repo
     following:
       - activity_key: security_scan
@@ -1508,19 +1508,19 @@ activities:
       - activity_key: quality_check
 
   - key: security_scan
-    namespace: security
+    worker: security
     name: run_scanner
 
   - key: performance_test
-    namespace: testing
+    worker: testing
     name: run_benchmarks
 
   - key: quality_check
-    namespace: quality
+    worker: quality
     name: run_linter
 
   - key: aggregate_results
-    namespace: reporting
+    worker: reporting
     name: generate_report
     preceding:
       - activity_key: security_scan
@@ -1574,7 +1574,7 @@ version: "1.0"
 
 activities:
   - key: validate_payment
-    namespace: payments
+    worker: payments
     name: validate_card
     following:
       - activity_key: authorize_card
@@ -1585,12 +1585,12 @@ activities:
           - "{{validate_payment.valid}} == false"
 
   - key: authorize_card
-    namespace: payments
+    worker: payments
     name: authorize
     # Continues to capture
 
   - key: decline_payment
-    namespace: payments
+    worker: payments
     name: send_decline_notification
     # Terminal - workflow ends
 ```
