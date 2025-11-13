@@ -120,7 +120,7 @@ members = [
 
 ```toml
 [package]
-name = "streamflow-benchmark"
+name = "streamflow-profiling"
 version = "0.1.0"
 edition = "2021"
 
@@ -884,7 +884,7 @@ jobs:
 
       - name: Run HTTP API load tests
         run: |
-          cargo test --package streamflow-benchmark --release -- --nocapture --test-threads=1 | tee load-test-output.txt
+          cargo test --package streamflow-profiling --release -- --nocapture --test-threads=1 | tee load-test-output.txt
 
       - name: Parse benchmark results
         id: parse_results
@@ -1547,7 +1547,7 @@ See [Performance Testing Guide](performance-testing.md) for details.
 - [ ] Create `benchmark/src/scenarios.rs` - Workflow scenario definitions
 - [ ] Create `benchmark/src/metrics.rs` - Metrics collection structs
 - [ ] Create `benchmark/src/lib.rs` - Library exports
-- [ ] Verify crate compiles: `cargo build --package streamflow-benchmark`
+- [ ] Verify crate compiles: `cargo build --package streamflow-profiling`
 
 ### Phase 2: HTTP API Load Tests (6 hours)
 - [ ] Create `benchmark/src/tests/load_tests.rs`

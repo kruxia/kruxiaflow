@@ -97,14 +97,14 @@ fi
 echo -e "${YELLOW}Setting up profiling database...${NC}"
 
 # Create benchmark database
-docker exec streamflow-postgres psql -U streamflow -c "DROP DATABASE IF EXISTS streamflow_benchmark;" 2>/dev/null || true
-docker exec streamflow-postgres psql -U streamflow -c "CREATE DATABASE streamflow_benchmark;" 2>/dev/null || true
+docker exec streamflow-postgres psql -U streamflow -c "DROP DATABASE IF EXISTS streamflow_profiling;" 2>/dev/null || true
+docker exec streamflow-postgres psql -U streamflow -c "CREATE DATABASE streamflow_profiling;" 2>/dev/null || true
 
 # Run migrations in Docker
-docker-compose run --rm profiling sh -c "cd /opt && sqlx migrate run --source migrations --database-url postgres://streamflow:streamflow_dev@postgres:5432/streamflow_benchmark"
+docker-compose run --rm profiling sh -c "cd /opt && sqlx migrate run --source migrations --database-url postgres://streamflow:streamflow_dev@postgres:5432/streamflow_profiling"
 
 # Seed OAuth client
-docker-compose run --rm profiling sh -c "cd /opt && cargo run --package streamflow-benchmark --bin seed-oauth-client"
+docker-compose run --rm profiling sh -c "cd /opt && cargo run --package streamflow-profiling --bin seed-oauth-client"
 
 echo -e "${GREEN}Database ready${NC}"
 echo ""

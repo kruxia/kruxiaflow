@@ -152,7 +152,7 @@ cargo build --profile profiling --features profiling
 
 Check the benchmark logs:
 ```bash
-tail -100 var/memory-profile-*/streamflow-benchmark.log
+tail -100 var/memory-profile-*/streamflow-profiling.log
 ```
 
 Verify jemalloc config:

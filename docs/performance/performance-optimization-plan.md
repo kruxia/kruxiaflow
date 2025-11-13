@@ -839,7 +839,7 @@ fn init_tracing() {
 Run benchmarks with timing enabled:
 ```bash
 RUST_LOG=streamflow=info,sqlx=debug \
-  cargo test --package streamflow-benchmark --release test_sequential_workflow_load -- --nocapture
+  cargo test --package streamflow-profiling --release test_sequential_workflow_load -- --nocapture
 ```
 
 Look for output like:
@@ -988,7 +988,7 @@ SELECT COUNT(*) as total_connections,
        COUNT(*) FILTER (WHERE state = 'idle') as idle,
        COUNT(*) FILTER (WHERE state = 'idle in transaction') as idle_in_transaction
 FROM pg_stat_activity
-WHERE datname = 'streamflow_benchmark';
+WHERE datname = 'streamflow_profiling';
 
 -- Check for lock waits
 SELECT locktype, relation::regclass, mode, granted, pid, wait_event_type, wait_event
@@ -1024,7 +1024,7 @@ sudo flamegraph -o flamegraph.svg -p $SERVER_PID -- sleep 60 &
 FLAMEGRAPH_PID=$!
 
 # Run benchmark
-cargo test --package streamflow-benchmark --release test_sequential_workflow_load -- --nocapture
+cargo test --package streamflow-profiling --release test_sequential_workflow_load -- --nocapture
 
 # Wait for flamegraph to complete
 wait $FLAMEGRAPH_PID
@@ -1061,7 +1061,7 @@ echo "=== Starting StreamFlow Performance Profiling ==="
 
 # 1. Start server with tracing enabled
 export RUST_LOG=streamflow=debug,sqlx=debug
-export DATABASE_URL=postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamflow_benchmark
+export DATABASE_URL=postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamflow_profiling
 
 echo "Building release binary..."
 cargo build --release
@@ -1082,7 +1082,7 @@ FLAMEGRAPH_PID=$!
 
 # 4. Run benchmark with tracing
 echo "Running sequential workflow benchmark..."
-cargo test --package streamflow-benchmark --release test_sequential_workflow_load -- --nocapture \
+cargo test --package streamflow-profiling --release test_sequential_workflow_load -- --nocapture \
   | tee benchmark-trace.log
 
 # 5. Wait for profiling to complete

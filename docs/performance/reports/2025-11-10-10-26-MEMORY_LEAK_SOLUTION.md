@@ -91,7 +91,7 @@ export STREAMFLOW_LOG_LEVEL=trace
 # Set credentials
 export STREAMFLOW_CLIENT_ID=streamflow-dev-client
 export STREAMFLOW_CLIENT_SECRET=a_zBZWlw8IsQaQm5C2xJPMgunAj4jkjzp4iTafATVcD8RU02yNEYqwCdLsoXIe8g
-export DATABASE_URL=postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamflow_benchmark
+export DATABASE_URL=postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamflow_profiling
 
 # Run 5-minute sustained test
 ./scripts/profiling.sh --test test_sustained_throughput --level trace
@@ -125,7 +125,7 @@ cat $OUTPUT_DIR/memory_analysis.txt | grep "Growth rate"
 
 ```bash
 # Check what accumulated in database during test
-docker exec streamflow-postgres psql -U streamflow -d streamflow_benchmark -c "
+docker exec streamflow-postgres psql -U streamflow -d streamflow_profiling -c "
 SELECT
     'workflows' as table_name,
     COUNT(*) as rows,

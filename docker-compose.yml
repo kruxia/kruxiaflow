@@ -35,6 +35,8 @@ services:
         condition: service_healthy
     ports:
       - "8080:8080"
+    profiles:
+      - develop
     environment:
       # Database connection (benchmark database)
       DATABASE_URL: postgres://streamflow:streamflow_dev@postgres:5432/streamflow
@@ -49,7 +51,6 @@ services:
       STREAMFLOW_POLL_MAX_ACTIVITIES: "1"
       # Logging configuration (can be overridden from host environment)
       STREAMFLOW_LOG_LEVEL: ${STREAMFLOW_LOG_LEVEL:-info}
-
     volumes:
       # Mount source code
       - ./:/opt/
@@ -69,9 +70,11 @@ services:
         condition: service_healthy
     ports:
       - "8080:8080"
+    profiles:
+      - profiling
     environment:
       # Database connection (benchmark database)
-      DATABASE_URL: postgres://streamflow:streamflow_dev@postgres:5432/streamflow_benchmark
+      DATABASE_URL: postgres://streamflow:streamflow_dev@postgres:5432/streamflow_profiling
       DATABASE_ADMIN_URL: postgres://streamflow:streamflow_dev@postgres:5432/streamflow
       # Rust build settings
       CARGO_HOME: /opt/.cargo
@@ -84,7 +87,6 @@ services:
       STREAMFLOW_POLL_MAX_ACTIVITIES: "1"
       # Logging configuration (can be overridden from host environment)
       STREAMFLOW_LOG_LEVEL: ${STREAMFLOW_LOG_LEVEL:-info}
-
     volumes:
       # Mount source code
       - ./:/opt/
