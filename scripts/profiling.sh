@@ -290,7 +290,7 @@ fi
 echo ""
 echo -e "${YELLOW}Capturing server logs...${NC}"
 if docker ps --format '{{.Names}}' | grep $CONTAINER_NAME; then
-    docker compose logs --timestamps $CONTAINER_NAME > "$OUTPUT_DIR/server-logs.txt" 2>&1
+    docker compose logs --timestamps --no-color $CONTAINER_NAME > "$OUTPUT_DIR/server-logs.txt" 2>&1
     echo -e "${GREEN}Server logs saved to: $OUTPUT_DIR/server-logs.txt${NC}"
 
     # Extract relevant logs based on trace level

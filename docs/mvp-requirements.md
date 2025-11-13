@@ -731,10 +731,10 @@ streamflow/
 - **I want** built-in support for all major LLM providers
 - **So that** I can switch providers without code changes and implement automatic fallback
 - **Acceptance Criteria**:
-  - Built-in providers: OpenAI (GPT-4, GPT-3.5), Anthropic (Claude), Google (Gemini), AWS Bedrock, Azure OpenAI, Ollama (local)
-  - `llm_complete` activity with `provider: auto` for automatic fallback
-  - Provider fallback chain: Try OpenAI → Try Anthropic → Try Ollama
-  - Automatic provider selection based on budget
+  - Built-in model providers: OpenAI (GPT-4, GPT-3.5), Anthropic (Claude), Google (Gemini), AWS Bedrock, Azure OpenAI, Ollama (local)
+  - `llm_prompt` activity with automatic model fallback
+  - Model fallback chain: Try Anthropic → OpenAI → Gemini
+  - Automatic model selection based on budget
   - Token streaming support for real-time responses
   - Embedding generation: `embedding_generate` activity
 

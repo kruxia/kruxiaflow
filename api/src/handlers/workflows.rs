@@ -214,10 +214,10 @@ pub async fn submit_workflow(
         })?;
 
     tracing::debug!(
+        event = "WorkflowSubmitted",
         workflow_id = %workflow.id,
         definition_name = %workflow.definition_name,
         definition_version = %workflow.definition_version,
-        "Workflow submitted successfully"
     );
 
     Ok((
