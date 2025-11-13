@@ -65,15 +65,15 @@ services:
       timeout: 5s
       retries: 10
 
-  # Airflow stack
-  airflow-postgres:
-    image: postgres:13
-    environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
-      POSTGRES_DB: airflow
-    volumes:
-      - airflow_pg_data:/var/lib/postgresql/data
+  # # Airflow stack
+  # airflow-postgres:
+  #   image: postgres:13
+  #   environment:
+  #     POSTGRES_USER: airflow
+  #     POSTGRES_PASSWORD: airflow
+  #     POSTGRES_DB: airflow
+  #   volumes:
+  #     - airflow_pg_data:/var/lib/postgresql/data
 
   # airflow-redis:
   #   image: redis:7
