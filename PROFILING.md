@@ -6,7 +6,7 @@ StreamFlow uses jemalloc for memory profiling. On macOS, jeprof has difficulty r
 
 ```bash
 docker compose up -d streamflow-profiling
-DATABASE_URL=postgres://streamflow:streamflow_dev@postgres:5432/streamflow_benchmark \
+DATABASE_URL=postgres://streamflow:streamflow_dev@postgres:5432/streamflow_profiling \
        ./scripts/profiling.sh --test test_sustained_throughput
 docker compose down -t0 streamflow-profiling
 docker compose run --rm -it streamflow-profiling script/profile_memory.sh

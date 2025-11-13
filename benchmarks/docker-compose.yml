@@ -180,10 +180,10 @@ services:
         condition: service_healthy
       temporal:
         condition: service_healthy
-      airflow-webserver:
-        condition: service_healthy
-      airflow-scheduler:
-        condition: service_healthy
+      # airflow-webserver:
+      #   condition: service_healthy
+      # airflow-scheduler:
+      #   condition: service_healthy
     volumes:
       - ./:/app/
     command: [ "python", "run_benchmark.py", "run", "--platform", "all" ]

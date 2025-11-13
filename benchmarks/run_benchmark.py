@@ -40,9 +40,9 @@ async def run_benchmarks(platform: str, output_dir: str):
         temporal_results = await run_temporal_benchmarks()
         all_results.extend(temporal_results)
 
-    if platform in ["airflow", "all"]:
-        airflow_results = await run_airflow_benchmarks()
-        all_results.extend(airflow_results)
+    # if platform in ["airflow", "all"]:
+    #     airflow_results = await run_airflow_benchmarks()
+    #     all_results.extend(airflow_results)
 
     # Save JSON results
     json_path = results_dir / "results.json"

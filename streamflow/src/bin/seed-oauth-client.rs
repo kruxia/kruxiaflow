@@ -1,7 +1,7 @@
 /// Utility to seed admin OAuth client in streamflow database
 ///
 /// Usage:
-///   cargo run --package streamflow-benchmark --bin seed-oauth-client
+///   cargo run --package streamflow-profiling --bin seed-oauth-client
 ///
 /// Requires environment variables:
 ///   - DATABASE_URL: Database connection string

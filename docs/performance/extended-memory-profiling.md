@@ -21,7 +21,7 @@ docker compose logs -f streamflow-profiling
 # 3. Set OAuth credentials
 export STREAMFLOW_CLIENT_ID=streamflow-dev-client
 export STREAMFLOW_CLIENT_SECRET=a_zBZWlw8IsQaQm5C2xJPMgunAj4jkjzp4iTafATVcD8RU02yNEYqwCdLsoXIe8g
-export DATABASE_URL=postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamflow_benchmark
+export DATABASE_URL=postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamflow_profiling
 
 # 4. Run the 5-minute sustained throughput test
 ./scripts/profiling.sh --test test_sustained_throughput
@@ -268,7 +268,7 @@ docker compose up streamflow-profiling -d
 free -h
 
 # Check database status
-docker exec streamflow-postgres psql -U streamflow -d streamflow_benchmark -c "SELECT 1;"
+docker exec streamflow-postgres psql -U streamflow -d streamflow_profiling -c "SELECT 1;"
 
 # Reduce concurrency
 # Edit benchmark/tests/load_tests.rs:

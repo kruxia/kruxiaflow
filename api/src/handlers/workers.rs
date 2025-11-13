@@ -334,7 +334,7 @@ pub async fn poll_activities(
     let count = activities.len();
 
     if count > 0 {
-        tracing::info!(
+        tracing::debug!(
             worker_id = %request.worker_id,
             claimed_count = count,
             "Activities claimed"
@@ -464,7 +464,7 @@ pub async fn complete_activity(
     // Validate request
     request.validate().map_err(AppError::ValidationError)?;
 
-    tracing::info!(
+    tracing::debug!(
         activity_id = %activity_id,
         worker_id = %request.worker_id,
         "Completing activity"
