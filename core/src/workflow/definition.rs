@@ -83,11 +83,11 @@ impl WorkflowDefinition {
             );
         }
 
-        // Validate namespace
-        if activity.namespace.is_empty() {
+        // Validate worker
+        if activity.worker.is_empty() {
             errors.add(
-                &format!("activities[{}].namespace", idx),
-                "Activity namespace cannot be empty",
+                &format!("activities[{}].worker", idx),
+                "Activity worker cannot be empty",
             );
         }
 
@@ -169,10 +169,10 @@ pub struct ActivityDefinition {
     /// Unique key for this activity within the workflow
     pub key: String,
 
-    /// Activity namespace (e.g., "payments", "llm")
-    pub namespace: String,
+    /// Activity worker type (e.g., "builtin", "custom-python")
+    pub worker: String,
 
-    /// Activity name within namespace (e.g., "authorize", "complete")
+    /// Activity name within worker (e.g., "http_request", "postgres_query")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 
@@ -457,7 +457,7 @@ mod tests {
             activities: vec![
                 ActivityDefinition {
                     key: "validate".to_string(),
-                    namespace: "payments".to_string(),
+                    worker: "payments".to_string(),
                     name: Some("validate_card".to_string()),
                     parameters: None,
                     preceding: None,
@@ -469,7 +469,7 @@ mod tests {
                 },
                 ActivityDefinition {
                     key: "authorize".to_string(),
-                    namespace: "payments".to_string(),
+                    worker: "payments".to_string(),
                     name: Some("authorize_card".to_string()),
                     parameters: None,
                     preceding: None,
@@ -489,7 +489,7 @@ mod tests {
             activities: vec![
                 ActivityDefinition {
                     key: "step1".to_string(),
-                    namespace: "test".to_string(),
+                    worker: "test".to_string(),
                     name: None,
                     parameters: None,
                     preceding: None,
@@ -498,7 +498,7 @@ mod tests {
                 },
                 ActivityDefinition {
                     key: "step1".to_string(), // Duplicate!
-                    namespace: "test".to_string(),
+                    worker: "test".to_string(),
                     name: None,
                     parameters: None,
                     preceding: None,
@@ -526,7 +526,7 @@ mod tests {
             name: "test".to_string(),
             activities: vec![ActivityDefinition {
                 key: "step1".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: None,
                 parameters: None,
                 preceding: None,
@@ -557,7 +557,7 @@ mod tests {
             activities: vec![
                 ActivityDefinition {
                     key: "step1".to_string(),
-                    namespace: "test".to_string(),
+                    worker: "test".to_string(),
                     name: None,
                     parameters: None,
                     preceding: None,
@@ -569,7 +569,7 @@ mod tests {
                 },
                 ActivityDefinition {
                     key: "step2".to_string(),
-                    namespace: "test".to_string(),
+                    worker: "test".to_string(),
                     name: None,
                     parameters: None,
                     preceding: None,
@@ -661,7 +661,7 @@ mod tests {
             name: "".to_string(),
             activities: vec![ActivityDefinition {
                 key: "step1".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: None,
                 parameters: None,
                 preceding: None,

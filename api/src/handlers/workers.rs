@@ -12,8 +12,8 @@ use uuid::Uuid;
 /// they can execute. The API returns activities matching those types.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct PollActivitiesRequest {
-    /// Activity types this worker can execute (format: "namespace.name")
-    #[schema(example = json!(["payments.authorize", "payments.capture"]))]
+    /// Activity types this worker can execute (format: "worker.name")
+    #[schema(example = json!(["builtin.http_request", "builtin.postgres_query"]))]
     pub activity_types: Vec<String>,
 
     /// Worker instance ID (for tracking which worker claimed the activity)
@@ -38,15 +38,12 @@ impl PollActivitiesRequest {
             errors.add("activity_types", "At least one activity type is required");
         }
 
-        // Validate activity type format (namespace.name)
+        // Validate activity type format (worker.name)
         for activity_type in &self.activity_types {
             if !activity_type.contains('.') {
                 errors.add(
                     "activity_types",
-                    &format!(
-                        "Invalid format '{}': must be 'namespace.name'",
-                        activity_type
-                    ),
+                    &format!("Invalid format '{}': must be 'worker.name'", activity_type),
                 );
             }
         }
@@ -85,12 +82,12 @@ pub struct PendingActivity {
     #[schema(example = "authorize_card")]
     pub activity_key: String,
 
-    /// Activity namespace
-    #[schema(example = "payments")]
-    pub namespace: String,
+    /// Activity worker type
+    #[schema(example = "builtin")]
+    pub worker: String,
 
     /// Activity name
-    #[schema(example = "authorize")]
+    #[schema(example = "http_request")]
     pub name: String,
 
     /// Activity input parameters
@@ -304,7 +301,7 @@ pub async fn poll_activities(
         "Polling for activities"
     );
 
-    // Parse activity types (namespace.name → (namespace, name))
+    // Parse activity types (worker.name → (worker, name))
     let activity_types: Vec<(String, String)> = request
         .activity_types
         .iter()
@@ -356,7 +353,7 @@ pub async fn poll_activities(
                     activity_id: a.id,
                     workflow_id: a.workflow_id,
                     activity_key: a.activity_key,
-                    namespace: a.namespace,
+                    worker: a.worker,
                     name: a.name,
                     parameters: a.parameters,
                     settings: a.settings,

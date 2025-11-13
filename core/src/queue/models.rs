@@ -6,7 +6,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Activity {
     pub key: String,
-    pub namespace: String,
+    pub worker: String,
     pub name: String,
     pub parameters: serde_json::Value,
     pub settings: Option<ActivitySettings>,
@@ -62,7 +62,7 @@ pub struct QueuedActivity {
     pub id: Uuid,
     pub workflow_id: Uuid,
     pub activity_key: String,
-    pub namespace: String,
+    pub worker: String,
     pub name: String,
     pub parameters: serde_json::Value,
     pub settings: Option<ActivitySettings>,

@@ -8,7 +8,7 @@ def create_sequential_workflow(num_activities: int) -> dict:
     for i in range(num_activities):
         activity = {
             "key": f"activity_{i}",
-            "namespace": "default",
+            "worker": "builtin",
             "name": "echo",
             "parameters": {},
         }
@@ -34,7 +34,7 @@ def create_parallel_workflow(num_parallel: int) -> dict:
         # Start activity (fans out)
         {
             "key": "start",
-            "namespace": "default",
+            "worker": "builtin",
             "name": "echo",
             "parameters": {},
             "following": [
@@ -48,7 +48,7 @@ def create_parallel_workflow(num_parallel: int) -> dict:
     for i in range(num_parallel):
         activities.append({
             "key": f"parallel_{i}",
-            "namespace": "default",
+            "worker": "builtin",
             "name": "echo",
             "parameters": {},
             "preceding": [{"activity_key": "start", "conditions": None}],
@@ -58,7 +58,7 @@ def create_parallel_workflow(num_parallel: int) -> dict:
     # End activity (fan-in)
     activities.append({
         "key": "end",
-        "namespace": "default",
+        "worker": "builtin",
         "name": "echo",
         "parameters": {},
         "preceding": [

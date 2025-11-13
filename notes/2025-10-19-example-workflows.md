@@ -180,7 +180,7 @@ These workflows demonstrate specific StreamFlow patterns in isolation:
 activities:
   # Step 1: Extract data from source
   - name: extract_data
-    namespace: streamflow_examples
+    worker: streamflow_examples
     parameters:
       source: "{{ARG.source}}"  # Optional: source system identifier
       data_size_kb: "{{ARG.data_size_kb}}"  # Optional: KB to generate (default: 5)
@@ -195,7 +195,7 @@ activities:
 
   # Step 2: Transform the extracted data
   - name: transform_data
-    namespace: streamflow_examples
+    worker: streamflow_examples
     parameters:
       extract_result: "{{extract_data}}"  # Full output from extract_data
       operations: "{{ARG.transform_operations}}"  # Optional: ops list (default: ["normalize", "enrich"])
@@ -215,7 +215,7 @@ activities:
 
   # Step 3: Validate the transformed data
   - name: validate_data
-    namespace: streamflow_examples
+    worker: streamflow_examples
     parameters:
       transform_result: "{{transform_data}}"  # Full output from transform_data
       rules: "{{ARG.validation_rules}}"  # Optional: rules list (default: ["schema_check", "data_quality"])
@@ -234,7 +234,7 @@ activities:
 
   # Step 4: Load data to destination
   - name: load_data
-    namespace: streamflow_examples
+    worker: streamflow_examples
     parameters:
       validate_result: "{{validate_data}}"  # Full output from validate_data
       destination: "{{ARG.destination}}"  # Optional: target system (default: "benchmark_output")
@@ -253,7 +253,7 @@ activities:
 
   # Step 5: Complete pipeline and summarize results
   - name: complete_pipeline
-    namespace: streamflow_examples
+    worker: streamflow_examples
     parameters:
       results:  # Map of all previous activity results
         extract: "{{extract_data}}"

@@ -26,11 +26,11 @@ pub trait ActivityQueue: Send + Sync {
     /// Schedule activities to the queue (idempotent via UNIQUE constraint)
     async fn schedule(&self, workflow_id: Uuid, activities: Vec<Activity>) -> Result<()>;
 
-    /// Claim next pending activity for the given namespace/name (includes stale activity detection)
+    /// Claim next pending activity for the given worker/name (includes stale activity detection)
     async fn claim_next(
         &self,
         worker_id: &str,
-        namespace: &str,
+        worker: &str,
         name: &str,
     ) -> Result<Option<QueuedActivity>>;
 

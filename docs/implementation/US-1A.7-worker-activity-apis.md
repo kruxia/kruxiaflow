@@ -19,7 +19,7 @@
 ### Acceptance Criteria
 
 - `POST /api/v1/workers/poll` - Poll for activities by activity type
-  - Request body: `{activity_types: ["namespace.name"], worker_id, max_activities: 10}`
+  - Request body: `{activity_types: ["worker.name"], worker_id, max_activities: 10}`
   - Response: `[{activity_id, workflow_id, activity_key, parameters, timeout}]`
   - Uses ActivityQueue::poll() internally with FOR UPDATE SKIP LOCKED
 - `POST /api/v1/activities/{activity_id}/heartbeat` - Send heartbeat to prevent timeout
@@ -89,7 +89,7 @@ Per `docs/architecture.md` (Activity Queue Interface):
 #[async_trait]
 pub trait ActivityQueue: Send + Sync {
     async fn schedule(&self, workflow_id: Uuid, activities: Vec<Activity>) -> Result<()>;
-    async fn claim_next(&self, namespace: &str, name: &str) -> Result<Option<QueuedActivity>>;
+    async fn claim_next(&self, worker: &str, name: &str) -> Result<Option<QueuedActivity>>;
     async fn complete(&self, activity_id: Uuid, result: ActivityResult) -> Result<()>;
     async fn heartbeat(&self, activity_id: Uuid) -> Result<()>;
 }
@@ -102,7 +102,7 @@ CREATE TABLE activity_queue (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     workflow_id UUID NOT NULL,
     activity_key TEXT NOT NULL,
-    namespace TEXT NOT NULL,
+    worker TEXT NOT NULL,
     name TEXT NOT NULL,
     parameters JSONB NOT NULL,
     settings JSONB,
@@ -117,7 +117,7 @@ CREATE TABLE activity_queue (
 );
 
 CREATE INDEX idx_queue_pending
-ON activity_queue(namespace, name, scheduled_for)
+ON activity_queue(worker, name, scheduled_for)
 WHERE status = 'pending' AND scheduled_for <= NOW();
 ```
 
@@ -170,7 +170,7 @@ use uuid::Uuid;
 /// they can execute. The API returns activities matching those types.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct PollActivitiesRequest {
-    /// Activity types this worker can execute (format: "namespace.name")
+    /// Activity types this worker can execute (format: "worker.name")
     #[schema(example = json!(["payments.authorize", "payments.capture"]))]
     pub activity_types: Vec<String>,
 
@@ -196,12 +196,12 @@ impl PollActivitiesRequest {
             errors.add("activity_types", "At least one activity type is required");
         }
 
-        // Validate activity type format (namespace.name)
+        // Validate activity type format (worker.name)
         for activity_type in &self.activity_types {
             if !activity_type.contains('.') {
                 errors.add(
                     "activity_types",
-                    &format!("Invalid format '{}': must be 'namespace.name'", activity_type),
+                    &format!("Invalid format '{}': must be 'worker.name'", activity_type),
                 );
             }
         }
@@ -240,9 +240,9 @@ pub struct PendingActivity {
     #[schema(example = "authorize_card")]
     pub activity_key: String,
 
-    /// Activity namespace
+    /// Activity worker
     #[schema(example = "payments")]
-    pub namespace: String,
+    pub worker: String,
 
     /// Activity name
     #[schema(example = "authorize")]
@@ -499,7 +499,7 @@ pub struct PendingActivityRecord {
     pub id: Uuid,
     pub workflow_id: Uuid,
     pub activity_key: String,
-    pub namespace: String,
+    pub worker: String,
     pub name: String,
     pub parameters: Value,
     pub settings: Option<Value>,
@@ -525,7 +525,7 @@ impl ActivityWorkerService {
     /// Returns up to max_activities that are ready to execute.
     pub async fn poll_activities(
         &self,
-        activity_types: Vec<(String, String)>,  // Vec of (namespace, name)
+        activity_types: Vec<(String, String)>,  // Vec of (worker, name)
         worker_id: String,
         max_activities: usize,
     ) -> ActivityWorkerResult<Vec<PendingActivityRecord>> {
@@ -533,7 +533,7 @@ impl ActivityWorkerService {
         let mut claimed = Vec::new();
 
         // Poll for each activity type (separate queries for simplicity)
-        for (namespace, name) in activity_types {
+        for (worker, name) in activity_types {
             if claimed.len() >= max_activities {
                 break;
             }
@@ -552,15 +552,15 @@ impl ActivityWorkerService {
                     SELECT id FROM activity_queue
                     WHERE status = 'pending'
                       AND scheduled_for <= NOW()
-                      AND namespace = $1
+                      AND worker = $1
                       AND name = $2
                     ORDER BY scheduled_for ASC
                     LIMIT $4
                     FOR UPDATE SKIP LOCKED
                 )
-                RETURNING id, workflow_id, activity_key, namespace, name, parameters, settings
+                RETURNING id, workflow_id, activity_key, worker, name, parameters, settings
                 "#,
-                namespace,
+                worker,
                 name,
                 worker_id,
                 remaining as i64
@@ -573,7 +573,7 @@ impl ActivityWorkerService {
                     id: row.id,
                     workflow_id: row.workflow_id,
                     activity_key: row.activity_key,
-                    namespace: row.namespace,
+                    worker: row.worker,
                     name: row.name,
                     parameters: row.parameters,
                     settings: row.settings,
@@ -924,7 +924,7 @@ pub async fn poll_activities(
         "Polling for activities"
     );
 
-    // Parse activity types (namespace.name → (namespace, name))
+    // Parse activity types (worker.name → (worker, name))
     let activity_types: Vec<(String, String)> = request
         .activity_types
         .iter()
@@ -973,7 +973,7 @@ pub async fn poll_activities(
                     activity_id: a.id,
                     workflow_id: a.workflow_id,
                     activity_key: a.activity_key,
-                    namespace: a.namespace,
+                    worker: a.worker,
                     name: a.name,
                     parameters: a.parameters,
                     settings: a.settings,
@@ -1230,7 +1230,7 @@ pub async fn fail_activity(
 - Error mapping to HTTP status codes
 - Structured logging
 - Authentication via ValidatedClaims
-- Activity type parsing (namespace.name)
+- Activity type parsing (worker.name)
 
 ---
 
@@ -1463,7 +1463,7 @@ mod tests {
         assert!(result.is_ok());
         let activities = result.unwrap();
         assert_eq!(activities.len(), 1);
-        assert_eq!(activities[0].namespace, "payments");
+        assert_eq!(activities[0].worker, "payments");
     }
 
     #[tokio::test]
@@ -1872,7 +1872,7 @@ Workers poll for activities, execute them, and report results.
       "activity_id": "550e8400-e29b-41d4-a716-446655440000",
       "workflow_id": "660e8400-e29b-41d4-a716-446655440001",
       "activity_key": "authorize_card",
-      "namespace": "payments",
+      "worker": "payments",
       "name": "authorize",
       "parameters": {"card_token": "tok_123", "amount": 100.00},
       "settings": {"timeout": 300},

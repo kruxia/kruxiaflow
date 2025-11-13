@@ -114,7 +114,7 @@ impl WorkerPoller {
             worker_id = %self.config.worker_id,
             activity_id = %activity.activity_id,
             activity_key = %activity.activity_key,
-            namespace = %activity.namespace,
+            worker = %activity.worker,
             name = %activity.name
         )
     ))]
@@ -141,7 +141,7 @@ impl WorkerPoller {
             let _enter = exec_span.enter();
             self.registry
                 .execute(
-                    &activity.namespace,
+                    &activity.worker,
                     &activity.name,
                     activity.parameters,
                     timeout,
@@ -265,7 +265,7 @@ mod tests {
             "success"
         }
 
-        fn namespace(&self) -> &str {
+        fn worker(&self) -> &str {
             "test"
         }
     }
@@ -284,7 +284,7 @@ mod tests {
             "failing"
         }
 
-        fn namespace(&self) -> &str {
+        fn worker(&self) -> &str {
             "test"
         }
     }
@@ -304,7 +304,7 @@ mod tests {
             "slow"
         }
 
-        fn namespace(&self) -> &str {
+        fn worker(&self) -> &str {
             "test"
         }
     }
@@ -388,7 +388,7 @@ mod tests {
             activity_id: Uuid::now_v7(),
             workflow_id: Uuid::now_v7(),
             activity_key: "test_key".to_string(),
-            namespace: "test".to_string(),
+            worker: "test".to_string(),
             name: "success".to_string(),
             parameters: json!({"input": "test"}),
             settings: None,
@@ -426,7 +426,7 @@ mod tests {
             activity_id: Uuid::now_v7(),
             workflow_id: Uuid::now_v7(),
             activity_key: "test_key".to_string(),
-            namespace: "test".to_string(),
+            worker: "test".to_string(),
             name: "success".to_string(),
             parameters: json!({"input": "test"}),
             settings: None,

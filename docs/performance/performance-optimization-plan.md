@@ -688,7 +688,7 @@ impl ActivityQueue for PostgresQueue {
             let insert_span = tracing::info_span!(
                 "queue_insert",
                 activity_key = %activity.key,
-                namespace = %activity.namespace,
+                worker = %activity.worker,
                 name = %activity.name
             );
             let _enter = insert_span.enter();
@@ -703,7 +703,7 @@ impl ActivityQueue for PostgresQueue {
     async fn claim_next(...) -> Result<Option<QueuedActivity>> {
         let span = tracing::info_span!(
             "queue_claim",
-            namespace = %namespace,
+            worker = %worker,
             name = %name
         );
         let _enter = span.enter();
@@ -782,7 +782,7 @@ async fn execute_activity(...) -> Result<()> {
     let span = tracing::info_span!(
         "worker_execute_activity",
         activity_id = %activity.id,
-        namespace = %activity.namespace,
+        worker = %activity.worker,
         name = %activity.name
     );
     let _enter = span.enter();
@@ -907,7 +907,7 @@ WHERE id = (
     SELECT id FROM activity_queue
     WHERE status = 'pending'
       AND scheduled_for <= NOW()
-      AND namespace = 'default'
+      AND worker = 'default'
       AND name = 'echo'
     ORDER BY scheduled_for ASC
     LIMIT 1
@@ -925,7 +925,7 @@ Expected issues:
 ```sql
 EXPLAIN (ANALYZE, BUFFERS, VERBOSE)
 INSERT INTO activity_queue
-(id, workflow_id, activity_key, namespace, name, parameters, settings, scheduled_for, status)
+(id, workflow_id, activity_key, worker, name, parameters, settings, scheduled_for, status)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending')
 ON CONFLICT (workflow_id, activity_key) DO NOTHING;
 ```
@@ -1238,7 +1238,7 @@ if activities_claimed == 0 {
 
 **Activity queue claim query uses `idx_queue_claimable`** ✅:
 - Execution time: **0.014ms** (excellent)
-- Index covers: `(namespace, name, status, scheduled_for)`
+- Index covers: `(worker, name, status, scheduled_for)`
 - Using index scan (not sequential scan)
 
 **No additional indexes needed** for current queries.
@@ -1253,7 +1253,7 @@ if activities_claimed == 0 {
 ```sql
 -- Activity queue pending activities index
 CREATE INDEX CONCURRENTLY idx_activity_queue_pending_scheduled
-ON activity_queue(namespace, name, scheduled_for)
+ON activity_queue(worker, name, scheduled_for)
 WHERE status = 'pending' AND scheduled_for <= NOW();
 
 -- Event polling index
@@ -1303,7 +1303,7 @@ WHERE NOT granted AND locktype = 'advisory';
 async fn poll_activity(...) -> Result<Response> {
     let mut attempts = 0;
     loop {
-        if let Some(activity) = queue.claim_next(namespace, name).await? {
+        if let Some(activity) = queue.claim_next(worker, name).await? {
             return Ok(Json(activity));
         }
 

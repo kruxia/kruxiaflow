@@ -23,8 +23,8 @@ pub trait ActivityImpl: Send + Sync {
     /// Get activity name
     fn name(&self) -> &str;
 
-    /// Get activity namespace
-    fn namespace(&self) -> &str;
+    /// Get activity worker
+    fn worker(&self) -> &str;
 }
 
 /// Activity registry
@@ -43,7 +43,7 @@ impl ActivityRegistry {
 
     /// Register an activity implementation
     pub fn register(&mut self, implementation: Arc<dyn ActivityImpl>) {
-        let key = format!("{}.{}", implementation.namespace(), implementation.name());
+        let key = format!("{}.{}", implementation.worker(), implementation.name());
         tracing::info!("Registering activity: {}", key);
         self.implementations.insert(key, implementation);
     }
@@ -58,12 +58,12 @@ impl ActivityRegistry {
     /// Returns activity output or error.
     pub async fn execute(
         &self,
-        namespace: &str,
+        worker: &str,
         name: &str,
         parameters: Value,
         timeout: Duration,
     ) -> Result<Value> {
-        let key = format!("{}.{}", namespace, name);
+        let key = format!("{}.{}", worker, name);
 
         let implementation = self
             .implementations

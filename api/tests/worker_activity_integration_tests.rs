@@ -98,7 +98,7 @@ async fn schedule_test_activities(pool: &PgPool, workflow_id: Uuid, count: usize
     let activities: Vec<Activity> = (0..count)
         .map(|i| Activity {
             key: format!("activity_{}", i),
-            namespace: "payments".to_string(),
+            worker: "payments".to_string(),
             name: "authorize".to_string(),
             parameters: json!({"amount": 100.0}),
             settings: None,
@@ -197,7 +197,7 @@ async fn test_poll_activities_validation_error() {
     let (server, _pool) = create_test_server().await;
     let token = get_test_token(&server).await;
 
-    // Invalid activity type format (missing namespace)
+    // Invalid activity type format (missing worker)
     let response = server
         .post("/api/v1/workers/poll")
         .add_header(

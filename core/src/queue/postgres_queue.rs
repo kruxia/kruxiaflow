@@ -69,14 +69,14 @@ impl ActivityQueue for PostgresQueue {
             let result = sqlx::query!(
                 r#"
                 INSERT INTO activity_queue (
-                    workflow_id, activity_key, namespace, name,
+                    workflow_id, activity_key, worker, name,
                     parameters, settings, scheduled_for, timeout_duration, max_retries
                 ) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, NOW()), make_interval(secs => $8), $9)
                 ON CONFLICT (workflow_id, activity_key) DO NOTHING
                 "#,
                 workflow_id,
                 activity.key,
-                activity.namespace,
+                activity.worker,
                 activity.name,
                 activity.parameters,
                 settings_json,
@@ -109,7 +109,7 @@ impl ActivityQueue for PostgresQueue {
     async fn claim_next(
         &self,
         worker_id: &str,
-        namespace: &str,
+        worker: &str,
         name: &str,
     ) -> Result<Option<QueuedActivity>> {
         // This query:
@@ -130,7 +130,7 @@ impl ActivityQueue for PostgresQueue {
                 END
             WHERE id = (
                 SELECT id FROM activity_queue
-                WHERE namespace = $1
+                WHERE worker = $1
                   AND name = $2
                   AND (
                       -- Fresh pending activities
@@ -145,10 +145,10 @@ impl ActivityQueue for PostgresQueue {
                 LIMIT 1
                 FOR UPDATE SKIP LOCKED
             )
-            RETURNING id, workflow_id, activity_key, namespace, name,
+            RETURNING id, workflow_id, activity_key, worker, name,
                       parameters, settings, retry_count, claimed_at
             "#,
-            namespace,
+            worker,
             name,
             worker_id
         )
@@ -166,7 +166,7 @@ impl ActivityQueue for PostgresQueue {
                     id: row.id,
                     workflow_id: row.workflow_id,
                     activity_key: row.activity_key,
-                    namespace: row.namespace,
+                    worker: row.worker,
                     name: row.name,
                     parameters: row.parameters,
                     settings,
@@ -192,7 +192,7 @@ impl ActivityQueue for PostgresQueue {
                 Ok(Some(queued))
             }
             None => {
-                debug!(namespace = %namespace, name = %name, "No claimable activities");
+                debug!(worker = %worker, name = %name, "No claimable activities");
                 Ok(None)
             }
         }

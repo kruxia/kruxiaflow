@@ -50,13 +50,13 @@ async fn schedule_test_activity(
     pool: &PgPool,
     workflow_id: Uuid,
     activity_key: &str,
-    namespace: &str,
+    worker: &str,
     name: &str,
 ) {
     let queue = PostgresQueue::new(pool.clone(), QueueConfig::default());
     let activity = Activity {
         key: activity_key.to_string(),
-        namespace: namespace.to_string(),
+        worker: worker.to_string(),
         name: name.to_string(),
         parameters: json!({"test": "data"}),
         settings: None,
@@ -96,7 +96,7 @@ async fn test_poll_activities_success() {
     assert!(result.is_ok());
     let activities = result.unwrap();
     assert_eq!(activities.len(), 2);
-    assert_eq!(activities[0].namespace, "payments");
+    assert_eq!(activities[0].worker, "payments");
 
     cleanup_activities(&pool, workflow_id).await;
 }

@@ -10,7 +10,7 @@ pub struct WorkerConfig {
     /// Worker unique identifier
     pub worker_id: String,
 
-    /// Activity types this worker can execute (namespace.name format)
+    /// Activity types this worker can execute (worker.name format)
     pub activity_types: Vec<String>,
 
     /// Maximum number of activities to poll per request
@@ -114,7 +114,7 @@ pub enum ConfigError {
     #[error("No activity types configured")]
     NoActivityTypes,
 
-    #[error("Invalid activity type format: {0} (must be namespace.name)")]
+    #[error("Invalid activity type format: {0} (must be worker.name)")]
     InvalidActivityType(String),
 
     #[error("Invalid concurrency value (must be > 0)")]
@@ -332,7 +332,7 @@ mod tests {
         let err = ConfigError::InvalidActivityType("test.bad".to_string());
         assert_eq!(
             err.to_string(),
-            "Invalid activity type format: test.bad (must be namespace.name)"
+            "Invalid activity type format: test.bad (must be worker.name)"
         );
 
         let err = ConfigError::InvalidConcurrency;
@@ -349,12 +349,12 @@ mod tests {
     fn test_from_env_with_single_activity_type() {
         with_env_vars(
             vec![
-                ("STREAMFLOW_ACTIVITY_TYPES", "namespace.single"),
+                ("STREAMFLOW_ACTIVITY_TYPES", "worker.single"),
                 ("STREAMFLOW_CLIENT_SECRET", "secret"),
             ],
             || {
                 let config = WorkerConfig::from_env().unwrap();
-                assert_eq!(config.activity_types, vec!["namespace.single"]);
+                assert_eq!(config.activity_types, vec!["worker.single"]);
             },
         );
     }

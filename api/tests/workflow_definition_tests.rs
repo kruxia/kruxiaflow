@@ -131,7 +131,7 @@ async fn test_deploy_workflow_definition() {
         "activities": [
             {
                 "key": "step1",
-                "namespace": "test",
+                "worker": "test",
                 "name": "test_activity"
             }
         ]
@@ -166,7 +166,7 @@ async fn test_deploy_multiple_versions() {
         "activities": [
             {
                 "key": "step1",
-                "namespace": "test"
+                "worker": "test"
             }
         ]
     });
@@ -218,7 +218,7 @@ async fn test_deploy_invalid_workflow() {
         "activities": [
             {
                 "key": "step1",
-                "namespace": "test",
+                "worker": "test",
                 "following": [
                     {
                         "activity_key": "step2" // Doesn't exist!
@@ -259,7 +259,7 @@ async fn test_deploy_workflow_with_cycle() {
         "activities": [
             {
                 "key": "step1",
-                "namespace": "test",
+                "worker": "test",
                 "following": [
                     {
                         "activity_key": "step2"
@@ -268,7 +268,7 @@ async fn test_deploy_workflow_with_cycle() {
             },
             {
                 "key": "step2",
-                "namespace": "test",
+                "worker": "test",
                 "following": [
                     {
                         "activity_key": "step1" // Creates cycle!
@@ -331,11 +331,11 @@ async fn test_deploy_workflow_with_duplicate_activity_keys() {
         "activities": [
             {
                 "key": "step1",
-                "namespace": "test"
+                "worker": "test"
             },
             {
                 "key": "step1", // Duplicate!
-                "namespace": "test"
+                "worker": "test"
             }
         ]
     });
@@ -374,7 +374,7 @@ async fn test_list_workflow_definitions() {
             "activities": [
                 {
                     "key": "step1",
-                    "namespace": "test"
+                    "worker": "test"
                 }
             ]
         });
@@ -432,7 +432,7 @@ async fn test_get_workflow_definition_by_version() {
         "activities": [
             {
                 "key": "step1",
-                "namespace": "test"
+                "worker": "test"
             }
         ]
     });
@@ -482,7 +482,7 @@ async fn test_get_latest_workflow_definition() {
         "activities": [
             {
                 "key": "step1",
-                "namespace": "test"
+                "worker": "test"
             }
         ]
     });
@@ -561,7 +561,7 @@ async fn test_get_nonexistent_version() {
         "activities": [
             {
                 "key": "step1",
-                "namespace": "test"
+                "worker": "test"
             }
         ]
     });
@@ -601,7 +601,7 @@ async fn test_deploy_requires_authentication() {
         "activities": [
             {
                 "key": "step1",
-                "namespace": "test"
+                "worker": "test"
             }
         ]
     });
@@ -654,7 +654,7 @@ async fn test_deploy_complex_workflow_with_dependencies() {
         "activities": [
             {
                 "key": "validate_payment",
-                "namespace": "payments",
+                "worker": "payments",
                 "name": "validate_card",
                 "parameters": {
                     "card_token": "{{ARG.card_token}}"
@@ -668,7 +668,7 @@ async fn test_deploy_complex_workflow_with_dependencies() {
             },
             {
                 "key": "authorize_card",
-                "namespace": "payments",
+                "worker": "payments",
                 "name": "authorize",
                 "parameters": {
                     "amount": "{{ARG.amount}}"
@@ -681,7 +681,7 @@ async fn test_deploy_complex_workflow_with_dependencies() {
             },
             {
                 "key": "capture_payment",
-                "namespace": "payments",
+                "worker": "payments",
                 "name": "capture",
                 "parameters": {
                     "authorization_id": "{{authorize_card.authorization_id}}"

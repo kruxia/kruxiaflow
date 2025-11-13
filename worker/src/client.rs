@@ -303,7 +303,7 @@ pub struct PendingActivity {
     pub activity_id: Uuid,
     pub workflow_id: Uuid,
     pub activity_key: String,
-    pub namespace: String,
+    pub worker: String,
     pub name: String,
     pub parameters: Value,
     pub settings: Option<Value>,

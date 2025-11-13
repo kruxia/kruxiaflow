@@ -545,11 +545,11 @@ FOR VALUES FROM ('2025-10-28') TO ('2025-11-04');
 **Priority**: P3 (Lower - Only needed at very high scale)
 
 **As** a platform engineer managing >50,000 activities/sec
-**I want** the activity queue to be partitioned by namespace or workflow_id
+**I want** the activity queue to be partitioned by worker or workflow_id
 **So that** queue operations scale horizontally
 
 **Scope**:
-- Partition by namespace (different activity types)
+- Partition by worker (different activity types)
 - Partition by workflow_id hash (distribute load)
 - Partition-aware worker polling
 - Query routing to correct partition
@@ -576,7 +576,7 @@ FOR VALUES FROM ('2025-10-28') TO ('2025-11-04');
 
 **Scope**:
 - Add `priority` field to activity_queue table
-- Index on (namespace, name, priority DESC, scheduled_for ASC)
+- Index on (worker, name, priority DESC, scheduled_for ASC)
 - Update claim_next() to consider priority
 - Starvation prevention (age-based boost)
 - Priority inheritance (high-priority workflow → all activities high-priority)
@@ -586,7 +586,7 @@ FOR VALUES FROM ('2025-10-28') TO ('2025-11-04');
 ALTER TABLE activity_queue ADD COLUMN priority INTEGER DEFAULT 0;
 
 CREATE INDEX idx_queue_priority
-ON activity_queue(namespace, name, priority DESC, scheduled_for ASC)
+ON activity_queue(worker, name, priority DESC, scheduled_for ASC)
 WHERE status = 'pending';
 ```
 
@@ -620,7 +620,7 @@ CREATE TABLE activity_failures (
     original_activity_id UUID NOT NULL,
     workflow_id UUID NOT NULL,
     activity_key TEXT NOT NULL,
-    namespace TEXT NOT NULL,
+    worker TEXT NOT NULL,
     name TEXT NOT NULL,
     parameters JSONB NOT NULL,
     error TEXT NOT NULL,
@@ -777,14 +777,14 @@ workflow = Workflow("payment_processing", version="1.0")
 
 validate = Activity(
     key="validate_payment",
-    namespace="payments",
+    worker="payments",
     name="validate_card",
     parameters={"card_token": workflow.arg("card_token")}
 )
 
 authorize = Activity(
     key="authorize_card",
-    namespace="payments",
+    worker="payments",
     name="authorize"
 ).with_preceding(validate).when(validate.outputs.valid == True)
 
@@ -890,7 +890,7 @@ conditions:
 **Scope**:
 - Drag-and-drop workflow designer
 - Visual representation of directed graph
-- Activity palette (namespace/name browser)
+- Activity palette (worker/name browser)
 - Parameter editor with validation
 - Condition builder (visual expression editor)
 - Real-time YAML preview
@@ -957,7 +957,7 @@ conditions:
 ```python
 from streamflow.activity import Activity, activity, Input, Output
 
-@activity(namespace="payments", name="validate_card")
+@activity(worker="payments", name="validate_card")
 class ValidateCardActivity(Activity):
     class Parameters(Input):
         card_token: str
@@ -1039,7 +1039,7 @@ class TestPaymentWorkflow(WorkflowTest):
   - Workflow throughput (workflows/sec)
   - Activity throughput (activities/sec)
   - Orchestration latency (P50, P95, P99)
-  - Queue depth (pending activities by namespace/name)
+  - Queue depth (pending activities by worker/name)
   - Event polling latency
   - Worker count (active workers)
   - Database connection pool utilization
@@ -1052,9 +1052,9 @@ class TestPaymentWorkflow(WorkflowTest):
 ```
 streamflow_workflows_total{status="completed|failed"}
 streamflow_workflow_duration_seconds{quantile="0.5|0.95|0.99"}
-streamflow_activities_total{namespace,name,status}
-streamflow_activity_duration_seconds{namespace,name,quantile}
-streamflow_queue_depth{namespace,name}
+streamflow_activities_total{worker,name,status}
+streamflow_activity_duration_seconds{worker,name,quantile}
+streamflow_queue_depth{worker,name}
 streamflow_orchestrator_evaluation_duration_seconds{quantile}
 streamflow_db_connections{state="idle|active"}
 ```
@@ -1121,7 +1121,7 @@ streamflow_db_connections{state="idle|active"}
   "trace_id": "abc123",
   "workflow_id": "wf_xyz789",
   "activity_id": "act_456",
-  "namespace": "payments",
+  "worker": "payments",
   "name": "authorize_card",
   "duration_ms": 123
 }
@@ -1166,10 +1166,10 @@ Orchestrator Pool
 └─ Orchestrator 3
 
 Worker Pool
-├─ Worker 1 (namespace: payments)
-├─ Worker 2 (namespace: payments)
-├─ Worker 3 (namespace: data)
-└─ Worker 4 (namespace: data)
+├─ Worker 1 (worker: payments)
+├─ Worker 2 (worker: payments)
+├─ Worker 3 (worker: data)
+└─ Worker 4 (worker: data)
 
 PostgreSQL
 ├─ Primary (writes)
@@ -1340,7 +1340,7 @@ POST /api/v1/workflows
 ```yaml
 activities:
   - key: process_order
-    namespace: workflows
+    worker: workflows
     name: subworkflow
     parameters:
       workflow_type: process_payment
@@ -1380,7 +1380,7 @@ activities:
 ```yaml
 activities:
   - key: fetch_users
-    namespace: data
+    worker: data
     name: query_users
     outputs:
       - user_ids  # Returns ["user1", "user2", "user3", ...]
@@ -1389,7 +1389,7 @@ activities:
     type: map  # Special activity type
     over: "{{fetch_users.user_ids}}"
     activity:
-      namespace: users
+      worker: users
       name: send_email
       parameters:
         user_id: "{{item}}"
@@ -1399,7 +1399,7 @@ activities:
     type: reduce
     from: process_users
     activity:
-      namespace: reporting
+      worker: reporting
       name: generate_summary
 ```
 
@@ -1580,7 +1580,7 @@ retry:
 ```yaml
 activities:
   - key: validate_input
-    namespace: validation
+    worker: validation
     name: check_data
     following:
       - activity_key: process_data
@@ -1591,11 +1591,11 @@ activities:
           - "{{validate_input.valid}} == false AND {{validate_input.retry_count}} < 3"
 
   - key: process_data
-    namespace: processing
+    worker: processing
     name: transform
 
   - key: retry_validation
-    namespace: validation
+    worker: validation
     name: check_data_retry
     following:
       - activity_key: validate_input  # Cycle back, but conditional
@@ -1605,13 +1605,13 @@ activities:
 ```yaml
 activities:
   - key: step_a
-    namespace: test
+    worker: test
     name: do_something
     following:
       - activity_key: step_b
 
   - key: step_b
-    namespace: test
+    worker: test
     name: do_something_else
     following:
       - activity_key: step_a  # ERROR: Unconditional cycle detected!
@@ -1655,12 +1655,12 @@ activities:
 ```yaml
 activities:
   - key: fetch_data
-    namespace: api
+    worker: api
     name: get_user_data
     scheduled_for: "2025-10-30T12:00:00Z"  # Absolute time
 
   - key: retry_after_delay
-    namespace: api
+    worker: api
     name: retry_request
     scheduled_for: "+5m"  # 5 minutes from now
 ```
@@ -1669,19 +1669,19 @@ activities:
 ```yaml
 activities:
   - key: call_api_1
-    namespace: external
+    worker: external
     name: api_call
     scheduled_for: "+0s"  # Immediate
 
   - key: call_api_2
-    namespace: external
+    worker: external
     name: api_call
     scheduled_for: "+1s"  # 1 second delay (rate limit)
     preceding:
       - activity_key: call_api_1
 
   - key: call_api_3
-    namespace: external
+    worker: external
     name: api_call
     scheduled_for: "+1s"  # Another 1 second delay
     preceding:
@@ -1692,13 +1692,13 @@ activities:
 ```yaml
 activities:
   - key: check_status
-    namespace: polling
+    worker: polling
     name: get_status
     outputs:
       - retry_after  # Returns delay in seconds
 
   - key: retry_check
-    namespace: polling
+    worker: polling
     name: get_status
     scheduled_for: "{{check_status.retry_after}}s"  # Dynamic delay
     preceding:

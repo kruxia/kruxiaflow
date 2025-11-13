@@ -310,13 +310,13 @@ Detailed flow:
 
 3. **Worker uses token** for all subsequent API requests:
    ```http
-   GET /api/v1/activities/poll?namespace=payments&name=authorize_card
+   GET /api/v1/activities/poll?worker=builtin&name=http_request
    Authorization: Bearer eyJhbGc...
    ```
 
 **Polling Strategy** (via authenticated API endpoint):
 ```http
-GET /api/v1/activities/poll?namespace={namespace}&name={name}
+GET /api/v1/activities/poll?worker={worker}&name={name}
 Authorization: Bearer {token}
 ```
 
@@ -326,7 +326,7 @@ SELECT id, workflow_id, parameters, settings
 FROM activity_queue
 WHERE status = 'pending'
   AND scheduled_for <= NOW()
-  AND namespace = $1
+  AND worker = $1
   AND name = $2
 ORDER BY scheduled_for ASC
 LIMIT 1
@@ -343,11 +343,11 @@ import requests
 import time
 
 class StreamFlowWorker:
-    def __init__(self, api_url, client_id, client_secret, namespace, name):
+    def __init__(self, api_url, client_id, client_secret, worker, name):
         self.api_url = api_url
         self.client_id = client_id
         self.client_secret = client_secret
-        self.namespace = namespace
+        self.worker = worker
         self.name = name
         self.access_token = None
         self.token_expires_at = 0
@@ -373,7 +373,7 @@ class StreamFlowWorker:
 
         response = requests.get(
             f"{self.api_url}/activities/poll",
-            params={"namespace": self.namespace, "name": self.name},
+            params={"worker": self.worker, "name": self.name},
             headers={"Authorization": f"Bearer {self.access_token}"}
         )
         if response.status_code == 200:
@@ -435,7 +435,7 @@ CREATE TABLE activity_queue (
     id UUID PRIMARY KEY,
     workflow_id UUID NOT NULL,
     activity_key TEXT NOT NULL,
-    namespace TEXT NOT NULL,
+    worker TEXT NOT NULL,
     name TEXT NOT NULL,
     parameters JSONB NOT NULL,
     settings JSONB,
@@ -449,7 +449,7 @@ CREATE TABLE activity_queue (
 );
 
 CREATE INDEX idx_queue_pending
-ON activity_queue(namespace, name, scheduled_for)
+ON activity_queue(worker, name, scheduled_for)
 WHERE status = 'pending' AND scheduled_for <= NOW();
 ```
 
@@ -603,7 +603,7 @@ Downstream activities reference artifacts using special template syntax:
 
 ```yaml
 - key: load_data
-  namespace: storage
+  worker: storage
   parameters:
     # Reference artifact by key, not inline data
     input_file: "{{ARTIFACT.transform_data.artifact_ref}}"
@@ -707,7 +707,7 @@ description: "ETL pipeline with large file handling via artifacts"
 activities:
   # Step 1: Extract - Download large CSV from external source
   - key: extract_data
-    namespace: data
+    worker: data
     name: download_file
     parameters:
       source_url: "{{ARG.source_url}}"
@@ -721,7 +721,7 @@ activities:
 
   # Step 2: Transform - Process the data
   - key: transform_data
-    namespace: data
+    worker: data
     name: transform_csv
     parameters:
       # Use artifact reference, not inline data
@@ -737,7 +737,7 @@ activities:
 
   # Step 3: Validate - Check data quality
   - key: validate_data
-    namespace: data
+    worker: data
     name: validate_csv
     parameters:
       input_file: "{{ARTIFACT.transform_data.artifact_ref}}"
@@ -753,7 +753,7 @@ activities:
 
   # Step 4: Load - Upload to destination
   - key: load_data
-    namespace: data
+    worker: data
     name: upload_file
     parameters:
       input_file: "{{ARTIFACT.transform_data.artifact_ref}}"
@@ -1443,7 +1443,7 @@ The same AuthenticationService interface ensures no code changes required in cor
 #[async_trait]
 pub trait ActivityQueue: Send + Sync {
     async fn schedule(&self, workflow_id: Uuid, activities: Vec<Activity>) -> Result<()>;
-    async fn claim_next(&self, namespace: &str, name: &str) -> Result<Option<QueuedActivity>>;
+    async fn claim_next(&self, worker: &str, name: &str) -> Result<Option<QueuedActivity>>;
     async fn complete(&self, activity_id: Uuid, result: ActivityResult) -> Result<()>;
     async fn heartbeat(&self, activity_id: Uuid) -> Result<()>;
 }
@@ -1468,12 +1468,12 @@ impl ActivityQueue for PostgresQueue {
         for activity in activities {
             sqlx::query!(
                 "INSERT INTO activity_queue
-                 (workflow_id, activity_key, namespace, name, parameters, settings, scheduled_for)
+                 (workflow_id, activity_key, worker, name, parameters, settings, scheduled_for)
                  VALUES ($1, $2, $3, $4, $5, $6, $7)
                  ON CONFLICT (workflow_id, activity_key) DO NOTHING",
                 workflow_id,
                 activity.key,
-                activity.namespace,
+                activity.worker,
                 activity.name,
                 activity.parameters,
                 activity.settings,
@@ -1485,7 +1485,7 @@ impl ActivityQueue for PostgresQueue {
         Ok(())
     }
 
-    async fn claim_next(&self, namespace: &str, name: &str) -> Result<Option<QueuedActivity>> {
+    async fn claim_next(&self, worker: &str, name: &str) -> Result<Option<QueuedActivity>> {
         // FOR UPDATE SKIP LOCKED ensures safe concurrent claiming
         let activity = sqlx::query_as!(
             QueuedActivity,
@@ -1497,14 +1497,14 @@ impl ActivityQueue for PostgresQueue {
                  SELECT id FROM activity_queue
                  WHERE status = 'pending'
                    AND scheduled_for <= NOW()
-                   AND namespace = $1
+                   AND worker = $1
                    AND name = $2
                  ORDER BY scheduled_for ASC
                  LIMIT 1
                  FOR UPDATE SKIP LOCKED
              )
              RETURNING *",
-            namespace,
+            worker,
             name,
             Uuid::now_v7()  // Worker instance ID
         )
@@ -2372,7 +2372,7 @@ version: "1.0"
 
 activities:
   - key: validate_payment
-    namespace: payments
+    worker: payments
     name: validate_card
     parameters:
       card_token: "{{ARG.card_token}}"
@@ -2382,7 +2382,7 @@ activities:
           - "{{validate_payment.valid}} == true"
 
   - key: authorize_card
-    namespace: payments
+    worker: payments
     name: authorize
     following:
       - activity_key: capture_payment
@@ -2395,8 +2395,8 @@ For complex workflows requiring type safety and reusable components:
 from streamflow import Workflow, Activity
 
 workflow = Workflow("payment_processing")
-validate = Activity("validate_payment", namespace="payments")
-authorize = Activity("authorize_card", namespace="payments") \
+validate = Activity("validate_payment", worker="payments")
+authorize = Activity("authorize_card", worker="payments") \
     .with_preceding(validate) \
     .when(validate.outputs.valid == True)
 workflow.add_activities(validate, authorize)

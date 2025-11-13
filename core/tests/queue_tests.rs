@@ -49,7 +49,7 @@ async fn test_idempotent_scheduling() {
 
     let activity = Activity {
         key: "test_activity".to_string(),
-        namespace: "test".to_string(),
+        worker: "test".to_string(),
         name: "test_task".to_string(),
         parameters: json!({"key": "value"}),
         settings: None,
@@ -94,7 +94,7 @@ async fn test_concurrent_claiming() {
     let activities: Vec<Activity> = (0..3)
         .map(|i| Activity {
             key: format!("activity_{}", i),
-            namespace: "test".to_string(),
+            worker: "test".to_string(),
             name: "test_task".to_string(),
             parameters: json!({"index": i}),
             settings: None,
@@ -165,7 +165,7 @@ async fn test_stale_activity_recovery() {
     // Schedule activity with short timeout
     let activity = Activity {
         key: "test_activity".to_string(),
-        namespace: "test".to_string(),
+        worker: "test".to_string(),
         name: "test_task".to_string(),
         parameters: json!({"key": "value"}),
         settings: Some(ActivitySettings {
@@ -235,7 +235,7 @@ async fn test_heartbeat_conflict_detection() {
     // Schedule activity
     let activity = Activity {
         key: "test_activity".to_string(),
-        namespace: "test".to_string(),
+        worker: "test".to_string(),
         name: "test_task".to_string(),
         parameters: json!({"key": "value"}),
         settings: Some(ActivitySettings {
@@ -309,7 +309,7 @@ async fn test_max_retries_exhaustion() {
     // Schedule activity with max_retries = 2
     let activity = Activity {
         key: "test_activity".to_string(),
-        namespace: "test".to_string(),
+        worker: "test".to_string(),
         name: "test_task".to_string(),
         parameters: json!({"key": "value"}),
         settings: Some(ActivitySettings {
@@ -420,7 +420,7 @@ async fn test_completion_idempotency() {
     // Schedule activity
     let activity = Activity {
         key: "test_activity".to_string(),
-        namespace: "test".to_string(),
+        worker: "test".to_string(),
         name: "test_task".to_string(),
         parameters: json!({"key": "value"}),
         settings: None,
@@ -491,7 +491,7 @@ async fn test_sequential_ordering() {
     // Schedule first activity
     let activity1 = Activity {
         key: "step1".to_string(),
-        namespace: "test".to_string(),
+        worker: "test".to_string(),
         name: "test_task".to_string(),
         parameters: json!({"step": 1}),
         settings: None,
@@ -530,7 +530,7 @@ async fn test_sequential_ordering() {
     // Now schedule step 2 (simulating orchestrator behavior)
     let activity2 = Activity {
         key: "step2".to_string(),
-        namespace: "test".to_string(),
+        worker: "test".to_string(),
         name: "test_task".to_string(),
         parameters: json!({"step": 2}),
         settings: None,
@@ -566,7 +566,7 @@ async fn test_parallel_execution() {
     let activities: Vec<Activity> = (1..=3)
         .map(|i| Activity {
             key: format!("parallel_{}", i),
-            namespace: "test".to_string(),
+            worker: "test".to_string(),
             name: "test_task".to_string(),
             parameters: json!({"index": i}),
             settings: None,

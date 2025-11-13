@@ -126,7 +126,7 @@ class StreamFlowWorker:
     def poll_activity(self):
         response = requests.get(
             f"{self.api_url}/activities/poll",
-            params={"namespace": self.namespace, "name": self.name},
+            params={"worker": self.worker, "name": self.name},
             headers={"Authorization": f"Bearer {self.access_token}"}
         )
 ```

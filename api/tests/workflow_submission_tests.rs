@@ -125,7 +125,7 @@ async fn deploy_test_workflow(server: &TestServer, token: &str, name: &str) -> S
             "activities": [
                 {
                     "key": "step1",
-                    "namespace": "test",
+                    "worker": "test",
                     "name": "echo",
                     "parameters": {}
                 }

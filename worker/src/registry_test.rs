@@ -9,14 +9,14 @@ mod tests {
 
     struct TestActivity {
         name: String,
-        namespace: String,
+        worker: String,
     }
 
     impl TestActivity {
-        fn new(namespace: &str, name: &str) -> Self {
+        fn new(worker: &str, name: &str) -> Self {
             Self {
                 name: name.to_string(),
-                namespace: namespace.to_string(),
+                worker: worker.to_string(),
             }
         }
     }
@@ -32,8 +32,8 @@ mod tests {
             &self.name
         }
 
-        fn namespace(&self) -> &str {
-            &self.namespace
+        fn worker(&self) -> &str {
+            &self.worker
         }
     }
 
@@ -51,7 +51,7 @@ mod tests {
             "slow"
         }
 
-        fn namespace(&self) -> &str {
+        fn worker(&self) -> &str {
             "test"
         }
     }
@@ -68,7 +68,7 @@ mod tests {
             "failing"
         }
 
-        fn namespace(&self) -> &str {
+        fn worker(&self) -> &str {
             "test"
         }
     }
