@@ -75,100 +75,100 @@ services:
     volumes:
       - airflow_pg_data:/var/lib/postgresql/data
 
-  airflow-redis:
-    image: redis:7
+  # airflow-redis:
+  #   image: redis:7
 
-  airflow-init:
-    image: apache/airflow:2.9.0
-    depends_on:
-      - airflow-postgres
-      - airflow-redis
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@airflow-postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://:@airflow-redis:6379/0
-      - AIRFLOW__CORE__FERNET_KEY=''
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
-      - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
-      - _AIRFLOW_DB_MIGRATE=true
-      - _AIRFLOW_WWW_USER_CREATE=true
-      - _AIRFLOW_WWW_USER_USERNAME=admin
-      - _AIRFLOW_WWW_USER_PASSWORD=admin
-    command: version
+  # airflow-init:
+  #   image: apache/airflow:2.9.0
+  #   depends_on:
+  #     - airflow-postgres
+  #     - airflow-redis
+  #   environment:
+  #     - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+  #     - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+  #     - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@airflow-postgres/airflow
+  #     - AIRFLOW__CELERY__BROKER_URL=redis://:@airflow-redis:6379/0
+  #     - AIRFLOW__CORE__FERNET_KEY=''
+  #     - AIRFLOW__CORE__LOAD_EXAMPLES=False
+  #     - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
+  #     - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+  #     - _AIRFLOW_DB_MIGRATE=true
+  #     - _AIRFLOW_WWW_USER_CREATE=true
+  #     - _AIRFLOW_WWW_USER_USERNAME=admin
+  #     - _AIRFLOW_WWW_USER_PASSWORD=admin
+  #   command: version
 
-  airflow-webserver:
-    image: apache/airflow:2.9.0
-    depends_on:
-      airflow-init:
-        condition: service_completed_successfully
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@airflow-postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://:@airflow-redis:6379/0
-      - AIRFLOW__CORE__FERNET_KEY=''
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
-      - AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL=10
-      - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
-    ports:
-      - "8081:8080"
-    volumes:
-      - ./airflow:/opt/airflow/dags
-    command: webserver
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
-      interval: 10s
-      timeout: 10s
-      retries: 5
+  # airflow-webserver:
+  #   image: apache/airflow:2.9.0
+  #   depends_on:
+  #     airflow-init:
+  #       condition: service_completed_successfully
+  #   environment:
+  #     - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+  #     - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+  #     - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@airflow-postgres/airflow
+  #     - AIRFLOW__CELERY__BROKER_URL=redis://:@airflow-redis:6379/0
+  #     - AIRFLOW__CORE__FERNET_KEY=''
+  #     - AIRFLOW__CORE__LOAD_EXAMPLES=False
+  #     - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
+  #     - AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL=10
+  #     - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+  #   ports:
+  #     - "8081:8080"
+  #   volumes:
+  #     - ./airflow:/opt/airflow/dags
+  #   command: webserver
+  #   healthcheck:
+  #     test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
+  #     interval: 10s
+  #     timeout: 10s
+  #     retries: 5
 
-  airflow-scheduler:
-    image: apache/airflow:2.9.0
-    depends_on:
-      airflow-init:
-        condition: service_completed_successfully
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@airflow-postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://:@airflow-redis:6379/0
-      - AIRFLOW__CORE__FERNET_KEY=''
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
-      - AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL=10
-      - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
-    volumes:
-      - ./airflow:/opt/airflow/dags
-    command: scheduler
-    healthcheck:
-      test: [ "CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\"" ]
-      interval: 10s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
+  # airflow-scheduler:
+  #   image: apache/airflow:2.9.0
+  #   depends_on:
+  #     airflow-init:
+  #       condition: service_completed_successfully
+  #   environment:
+  #     - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+  #     - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+  #     - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@airflow-postgres/airflow
+  #     - AIRFLOW__CELERY__BROKER_URL=redis://:@airflow-redis:6379/0
+  #     - AIRFLOW__CORE__FERNET_KEY=''
+  #     - AIRFLOW__CORE__LOAD_EXAMPLES=False
+  #     - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
+  #     - AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL=10
+  #     - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+  #   volumes:
+  #     - ./airflow:/opt/airflow/dags
+  #   command: scheduler
+  #   healthcheck:
+  #     test: [ "CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\"" ]
+  #     interval: 10s
+  #     timeout: 10s
+  #     retries: 5
+  #     start_period: 30s
 
-  airflow-worker:
-    image: apache/airflow:2.9.0
-    depends_on:
-      airflow-init:
-        condition: service_completed_successfully
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
-      - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@airflow-postgres/airflow
-      - AIRFLOW__CELERY__BROKER_URL=redis://:@airflow-redis:6379/0
-      - AIRFLOW__CORE__FERNET_KEY=''
-      - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
-      - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
-      - AIRFLOW__CELERY__WORKER_CONCURRENCY=16
-    volumes:
-      - ./airflow:/opt/airflow/dags
-    command: celery worker
-    deploy:
-      replicas: 4
+  # airflow-worker:
+  #   image: apache/airflow:2.9.0
+  #   depends_on:
+  #     airflow-init:
+  #       condition: service_completed_successfully
+  #   environment:
+  #     - AIRFLOW__CORE__EXECUTOR=CeleryExecutor
+  #     - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@airflow-postgres/airflow
+  #     - AIRFLOW__CELERY__RESULT_BACKEND=db+postgresql://airflow:airflow@airflow-postgres/airflow
+  #     - AIRFLOW__CELERY__BROKER_URL=redis://:@airflow-redis:6379/0
+  #     - AIRFLOW__CORE__FERNET_KEY=''
+  #     - AIRFLOW__CORE__LOAD_EXAMPLES=False
+  #     - AIRFLOW__API__AUTH_BACKENDS=airflow.api.auth.backend.basic_auth
+  #     - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
+  #     - AIRFLOW__CELERY__WORKER_CONCURRENCY=16
+  #   volumes:
+  #     - ./airflow:/opt/airflow/dags
+  #   command: celery worker
+  #   deploy:
+  #     replicas: 4
 
   # Benchmark runner
   benchmark:
@@ -186,7 +186,7 @@ services:
       #   condition: service_healthy
     volumes:
       - ./:/app/
-    command: [ "python", "run_benchmark.py", "run", "--platform", "streamflow" ]
+    command: [ "python", "run_benchmark.py", "run", "--platform", "all" ]
 
 volumes:
   streamflow_pg_data:
