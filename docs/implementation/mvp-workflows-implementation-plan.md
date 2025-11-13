@@ -30,7 +30,7 @@ examples/
 ├── 02-user-validation.yaml         # 2: Conditional branching
 ├── 03-document-processing.yaml     # 3: Parallel execution
 ├── 04-content-moderation.yaml      # 4: LLM with retry/budget
-├── 05-research-assistant.yaml      # 5: Multi-provider LLM
+├── 05-research-assistant.yaml      # 5: Multi-model LLM
 ├── 06-faq-bot.yaml                 # 6: Semantic caching
 ├── 07-research-agent.yaml          # 7: Iterative workflows
 ├── 09-data-pipeline.yaml           # 9: Advanced storage
@@ -59,11 +59,11 @@ The README.md in the examples directory provides:
 - Prerequisites for running examples (e.g., API keys, test services)
 
 Example table format:
-| Example                       | Slice | Features Demonstrated                                | Prerequisites     |
-|-------------------------------|-------|------------------------------------------------------|-------------------|
-| `01-weather-report.yaml`      | 1     | Sequential workflow, HTTP GET/POST, headers, secrets | Webhook URL       |
-| `02-user-validation.yaml`     | 2     | Conditional branching, PostgreSQL                    | Database, API key |
-| ...                           | ...   | ...                                                  | ...               |
+| Example                       | Slice | Features Demonstrated                                    | Prerequisites     |
+|-------------------------------|-------|----------------------------------------------------------|-------------------|
+| `01-weather-report.yaml`      | 1     | Sequential workflow, HTTP request (GET/POST), headers, secrets | Webhook URL       |
+| `02-user-validation.yaml`     | 2     | Conditional branching, PostgreSQL                        | Database, API key |
+| ...                           | ...   | ...                                                      | ...               |
 
 ---
 
@@ -81,9 +81,10 @@ description: Fetch weather data and send to webhook
 
 activities:
   fetch_weather:
-    activity: http-get
-    # provider: builtin  # Optional - builtin is the default
+    activity: http_request
+    # worker: builtin  # Optional - builtin is the default
     parameters:
+      method: GET
       url: "https://api.weather.gov/gridpoints/TOP/31,80/forecast"
       headers:
         User-Agent: "StreamFlow/0.2"
@@ -91,8 +92,9 @@ activities:
       - forecast
 
   send_notification:
-    activity: http-post
+    activity: http_request
     parameters:
+      method: POST
       url: "{{INPUT.webhook_url}}"
       headers:
         Content-Type: "application/json"
@@ -104,24 +106,24 @@ activities:
 ```
 
 #### YAML Features Implemented
-- ✅ Activity definition with `activity` name and optional `provider` (defaults to `builtin`)
-- ✅ Activity naming: lowercase alphanumeric with hyphens (e.g., `http-get`, `http-post`)
+- ✅ Activity definition with `activity` name and optional `worker` (defaults to `builtin`)
+- ✅ Activity naming: lowercase alphanumeric with underscores (snake_case, e.g., `http_request`, `postgres_query`)
 - ✅ Sequential execution via `depends_on`
 - ✅ Template expressions: `{{INPUT.input_name}}`
 - ✅ Output access: `{{activity_key.output_name}}`
 - ✅ Workflow input parameters
 
 #### Built-in Activities Implemented
-- ✅ `http-get` - HTTP GET request with custom headers (including Authorization)
-- ✅ `http-post` - HTTP POST request with JSON body and custom headers
+- ✅ `http_request` - HTTP request with configurable method (GET, POST, etc.), custom headers (including Authorization), and request body
 
 #### Implementation Tasks
 1. YAML parser for workflow definitions (serde_yaml)
 2. Template expression engine (basic variable substitution)
 3. Workflow graph builder (activities → nodes, depends_on/contributes_to → edges)
 4. HTTP activity executor (reqwest)
-   - GET with custom headers (including Authorization: Bearer, Basic auth)
-   - POST with JSON body and custom headers
+   - Configurable HTTP method (GET, POST, PUT, DELETE, PATCH)
+   - Custom headers (including Authorization: Bearer, Basic auth)
+   - Request body (JSON, form data, etc.)
    - Query parameter support
    - Header templating with secrets ({{SECRET.name}})
 5. Activity result storage and retrieval
@@ -149,8 +151,9 @@ description: Validate user email and store result in database
 
 activities:
   check_email:
-    activity: http-get
+    activity: http_request
     parameters:
+      method: GET
       url: "https://api.emailvalidation.io/validate"
       query:
         email: "{{INPUT.email}}"
@@ -160,7 +163,7 @@ activities:
       - reason
 
   store_valid_user:
-    activity: postgres-execute
+    activity: postgres_query
     parameters:
       db_url: "{{SECRET.db_url}}"
       query: "INSERT INTO valid_users (email, validated_at) VALUES ($1, NOW())"
@@ -171,7 +174,7 @@ activities:
           condition: "{{check_email.valid}} == true"
 
   store_invalid_user:
-    activity: postgres-execute
+    activity: postgres_query
     parameters:
       db_url: "{{SECRET.db_url}}"
       query: "INSERT INTO invalid_users (email, reason, checked_at) VALUES ($1, $2, NOW())"
@@ -183,8 +186,9 @@ activities:
           condition: "{{check_email.valid}} == false"
 
   send_notification:
-    activity: http-post
+    activity: http_request
     parameters:
+      method: POST
       webhook_key: "{{SECRET.webhook_key}}"
       url: "{{INPUT.webhook_url}}"
       body:
@@ -204,8 +208,9 @@ activities:
 - ✅ Secret references: `{{SECRET.name}}`
 
 #### Built-in Activities Implemented
-- ✅ `postgres-execute` - Execute SQL with parameter binding
-- ✅ `postgres-query` - Query SQL and return results
+- ✅ `postgres_query` - Execute SQL queries (SELECT, INSERT, UPDATE, DELETE) with parameter binding
+  - SELECT queries: Returns result rows in outputs
+  - INSERT/UPDATE/DELETE: Returns affected row count and RETURNING clause values in outputs
 
 #### Implementation Tasks
 1. Conditional expression parser (boolean logic)
@@ -238,32 +243,36 @@ description: Fetch documents, process in parallel, aggregate results
 
 activities:
   fetch_doc1:
-    activity: http-get
+    activity: http_request
     parameters:
+      method: GET
       url: "{{INPUT.doc1_url}}"
     outputs:
       - name: doc1
         type: file  # Declares this output is a file, not JSON data
 
   fetch_doc2:
-    activity: http-get
+    activity: http_request
     parameters:
+      method: GET
       url: "{{INPUT.doc2_url}}"
     outputs:
       - name: doc2
         type: file
 
   fetch_doc3:
-    activity: http-get
+    activity: http_request
     parameters:
+      method: GET
       url: "{{INPUT.doc3_url}}"
     outputs:
       - name: doc3
         type: file
 
   process_doc1:
-    activity: http-post
+    activity: http_request
     parameters:
+      method: POST
       url: "{{INPUT.processing_service_url}}"
       files:
         input_doc: "{{FILE.fetch_doc1.document}}"  # Reference file from previous activity
@@ -274,8 +283,9 @@ activities:
       - fetch_doc1
 
   process_doc2:
-    activity: http-post
+    activity: http_request
     parameters:
+      method: POST
       url: "{{INPUT.processing_service_url}}"
       files:
         input_doc: "{{FILE.fetch_doc2.document}}"
@@ -286,8 +296,9 @@ activities:
       - fetch_doc2
 
   process_doc3:
-    activity: http-post
+    activity: http_request
     parameters:
+      method: POST
       url: "{{INPUT.processing_service_url}}"
       files:
         input_doc: "{{FILE.fetch_doc3.document}}"
@@ -298,8 +309,9 @@ activities:
       - fetch_doc3
 
   aggregate_results:
-    activity: http-post
+    activity: http_request
     parameters:
+      method: POST
       url: "{{INPUT.aggregator_url}}"
       files:
         doc1_result: "{{FILE.process_doc1.result}}"
@@ -314,8 +326,9 @@ activities:
       - process_doc3
 
   store_summary:
-    activity: http-post
+    activity: http_request
     parameters:
+      method: POST
       url: "{{INPUT.storage_webhook_url}}"
       files:
         summary: "{{FILE.aggregate_results.summary}}"
@@ -334,8 +347,9 @@ activities:
 - ✅ Parallel file processing without storing content in JSON
 
 #### Built-in Activities Implemented
-- ✅ `http-get` - Download files from HTTP endpoints
-- ✅ `http-post` - Upload files via HTTP multipart/form-data
+- ✅ `http_request` - HTTP request with file download/upload support
+  - GET method: Download files from HTTP endpoints
+  - POST method: Upload files via HTTP multipart/form-data
 - ✅ File management framework (object storage backend)
 
 #### Implementation Tasks
@@ -377,9 +391,9 @@ description: Use LLM to moderate user content with cost control and retry
 
 activities:
   analyze_content:
-    activity: llm-complete
+    activity: llm_prompt
     parameters:
-      provider: anthropic/haiku-4-5
+      model: anthropic/haiku-4-5
       messages:
         - role: system
           content: "You are a content moderation assistant. Analyze the following text and determine if it violates community guidelines."
@@ -401,7 +415,7 @@ activities:
         on_exceeded: abort
 
   store_moderation_result:
-    activity: postgres-execute
+    activity: postgres_query
     parameters:
       query: |
         INSERT INTO moderation_log
@@ -423,7 +437,7 @@ activities:
 - ✅ Budget exceeded action: `abort` or `continue`
 
 #### Built-in Activities Implemented
-- ✅ `llm-complete` - LLM completion with Anthropic / Claude
+- ✅ `llm_prompt` - LLM completion with Anthropic
 - ✅ Cost tracking: Token counting and USD calculation
 - ✅ Retry logic with exponential backoff
 
@@ -435,7 +449,7 @@ activities:
    - Pre-execution budget check
    - Post-execution cost recording
    - Budget exceeded handling
-5. Anthropic / Claude activity executor
+5. Anthropic activity executor
    - API integration (openai crate or reqwest)
    - Token counting
    - Cost calculation (tokens × price per model)
@@ -443,7 +457,7 @@ activities:
 7. End-to-end test: Verify retry on failure, budget enforcement
 
 #### Success Criteria
-- ✅ LLM activity completes successfully with Anthropic / Claude
+- ✅ LLM activity completes successfully with Anthropic
 - ✅ Retries occur on transient failures (rate limits, network errors)
 - ✅ Activity aborts when budget exceeded
 - ✅ Cost tracked accurately in USD
@@ -451,21 +465,21 @@ activities:
 
 ---
 
-### Slice 5: Multi-Provider LLM with Automatic Fallback
+### Slice 5: Multi-Model LLM with Automatic Fallback
 **Duration**: 4-5 days
 **Epic 3**: (No new YAML features - builds on Slice 4)
-**Epic 5**: US-5.1 (Multi-Provider LLM - Complete)
+**Epic 5**: US-5.1 (Multi-Model LLM - Complete)
 
-#### Example Workflow: AI Research Assistant with Provider Fallback
+#### Example Workflow: AI Research Assistant with Model Fallback
 ```yaml
 name: research_assistant
-description: Ask LLM question with automatic provider fallback for reliability
+description: Ask LLM question with automatic model fallback for reliability
 
 activities:
   ask_question:
-    activity: llm-complete
+    activity: llm_prompt
     parameters:
-      provider_chain: # Automatic fallback chain
+      model_chain: # Automatic fallback chain
         - anthropic/haiku-4-5
         - openai/gpt-4-turbo
         - gemini/2-5-flash
@@ -486,7 +500,7 @@ activities:
         on_exceeded: abort
 
   store_response:
-    activity: postgres-execute
+    activity: postgres_query
     parameters:
       query: |
         INSERT INTO research_log
@@ -502,29 +516,29 @@ activities:
 ```
 
 #### YAML Features Implemented
-- ✅ Provider fallback configuration
-- ✅ `provider_chain:` with fallback chain
+- ✅ Model fallback configuration
+- ✅ `model_chain:` with fallback chain
 
 #### Built-in Activities Implemented
-- ✅ `llm-complete` - OpenAI provider
-- ✅ `llm-complete` - Gemini provider
-- ✅ Provider fallback logic (try each in order until success)
+- ✅ `llm_prompt` - OpenAI model
+- ✅ `llm_prompt` - Gemini model
+- ✅ Model fallback logic (try each in order until success)
 
 #### Implementation Tasks
-1. Provider abstraction layer (trait for LLM providers)
+1. Model abstraction layer (trait for LLM models)
 2. OpenAI API integration
 3. Gemini API integration
-4. Provider fallback engine
-   - Try providers in order
-   - Record which provider succeeded
-5. Provider-specific cost calculation
-6. End-to-end test: Verify fallback to next provider on failure
+4. Model fallback engine
+   - Try models in order
+   - Record which model succeeded
+5. Model-specific cost calculation
+6. End-to-end test: Verify fallback to next model on failure
 
 #### Success Criteria
 - ✅ Multiple LLM providers supported (OpenAI, Anthropic, Gemini)
-- ✅ Automatic fallback on provider failure or rate limits
-- ✅ Track which provider was used
-- ✅ Cost calculated correctly per provider
+- ✅ Automatic fallback on model failure or rate limits
+- ✅ Track which model was used
+- ✅ Cost calculated correctly per model
 
 ---
 
@@ -540,9 +554,9 @@ description: Answer FAQs using LLM with aggressive caching for cost savings
 
 activities:
   answer_question:
-    activity: llm-complete
+    activity: llm_prompt
     parameters:
-      provider: anthropic/haiku-4-5
+      model: anthropic/haiku-4-5
       messages:
         - role: system
           content: "You are a helpful FAQ assistant. Answer questions concisely."
@@ -557,15 +571,15 @@ activities:
       cache:
         enabled: true
         ttl_seconds: 3600  # Cache for 1 hour
-        key: 
-          - llm-complete
-          - "{{parameters.provider}}"
+        key:
+          - llm_prompt
+          - "{{parameters.model}}"
           - "{{parameters.messages}}"
       budget:
         limit_usd: 0.10
 
   store_answer:
-    activity: postgres-execute
+    activity: postgres_query
     parameters:
       query: |
         INSERT INTO faq_log
@@ -620,8 +634,9 @@ description: Iteratively search and evaluate until sufficient information gather
 
 activities:
   search_information:
-    activity: http-post
+    activity: http_request
     parameters:
+      method: POST
       url: "https://api.search.com/query"
       body:
         query: "{{INPUT.research_topic}}"
@@ -638,9 +653,9 @@ activities:
             {{evaluate_sufficiency.remaining_budget_usd}} > 0.10
 
   evaluate_sufficiency:
-    activity: llm-complete
+    activity: llm_prompt
     parameters:
-      provider: anthropic/haiku-4-5
+      model: anthropic/haiku-4-5
       messages:
         - role: system
           content: |
@@ -669,9 +684,9 @@ activities:
       - search_information
 
   compile_report:
-    activity: llm-complete
+    activity: llm_prompt
     parameters:
-      provider: anthropic/sonnet-4-5
+      model: anthropic/sonnet-4-5
       messages:
         - role: system
           content: "Compile a comprehensive research report from all gathered information."
@@ -697,8 +712,9 @@ activities:
           condition: "{{evaluate_sufficiency.sufficient}} == true"
 
   publish_success:
-    activity: http-post
+    activity: http_request
     parameters:
+      method: POST
       url: "{{INPUT.publish_url}}"
       files:
         report: "{{FILE.compile_report.report}}"
@@ -711,8 +727,9 @@ activities:
       - compile_report
 
   publish_failure:
-    activity: http-post
+    activity: http_request
     parameters:
+      method: POST
       url: "{{INPUT.publish_url}}"
       body:
         status: "failed"
@@ -790,7 +807,7 @@ description: ETL pipeline demonstrating advanced file management with external s
 activities:
   # Fetch raw data from external S3 bucket (not workflow storage)
   fetch_raw_data:
-    activity: s3-get
+    activity: s3_get
     parameters:
       bucket: "{{INPUT.source_bucket}}"
       key: "raw/data-{{INPUT.date}}.csv"
@@ -801,7 +818,7 @@ activities:
 
   # Transform the data (reads from workflow storage, writes to workflow storage)
   transform_data:
-    activity: python-script
+    activity: python_script
     parameters:
       script: |
         import pandas as pd
@@ -816,7 +833,7 @@ activities:
         type: file
 
   validate_output:
-    activity: python-script
+    activity: python_script
     parameters:
       script: |
         import pandas as pd
@@ -833,7 +850,7 @@ activities:
 
   # Upload result to external destination S3 bucket
   upload_result:
-    activity: s3-put
+    activity: s3_put
     parameters:
       bucket: "{{INPUT.dest_bucket}}"
       key: "processed/data-{{INPUT.date}}.parquet"
@@ -847,7 +864,7 @@ activities:
 
   # Delete source file from external S3 (not workflow storage)
   cleanup_source:
-    activity: s3-delete
+    activity: s3_delete
     parameters:
       bucket: "{{INPUT.source_bucket}}"
       key: "raw/data-{{INPUT.date}}.csv"
@@ -862,11 +879,11 @@ activities:
 - ✅ Mixed file and JSON outputs in same workflow
 
 #### Built-in Activities Implemented
-- ✅ `s3-get` - Fetch file from external S3 bucket into workflow storage
-- ✅ `s3-put` - Upload file from workflow storage to external S3 bucket
-- ✅ `s3-delete` - Delete file from external S3 bucket
-- ✅ `s3-list` - List files in external S3 bucket (for dynamic workflows)
-- ✅ `python-script` - Execute Python with file inputs/outputs
+- ✅ `s3_get` - Fetch file from external S3 bucket into workflow storage
+- ✅ `s3_put` - Upload file from workflow storage to external S3 bucket
+- ✅ `s3_delete` - Delete file from external S3 bucket
+- ✅ `s3_list` - List files in external S3 bucket (for dynamic workflows)
+- ✅ `python_script` - Execute Python with file inputs/outputs
 - ✅ Multi-cloud support (GCS, Azure Blob, MinIO)
 
 #### Implementation Tasks
@@ -910,8 +927,9 @@ description: Process order with API calls and database transaction
 
 activities:
   validate_inventory:
-    activity: http-get
+    activity: http_request
     parameters:
+      method: GET
       url: "https://api.inventory.com/check"
       query:
         product_id: "{{INPUT.product_id}}"
@@ -927,8 +945,9 @@ activities:
         backoff: exponential
 
   reserve_inventory:
-    activity: http-post
+    activity: http_request
     parameters:
+      method: POST
       url: "https://api.inventory.com/reserve"
       body:
         product_id: "{{INPUT.product_id}}"
@@ -942,8 +961,9 @@ activities:
           condition: "{{validate_inventory.available}} == true"
 
   process_payment:
-    activity: http-post
+    activity: http_request
     parameters:
+      method: POST
       url: "https://api.payment.com/charge"
       body:
         amount: "{{INPUT.amount}}"
@@ -960,7 +980,7 @@ activities:
       - reserve_inventory
 
   record_order:
-    activity: postgres-transaction
+    activity: postgres_transaction
     parameters:
       statements:
         - query: |
@@ -987,8 +1007,9 @@ activities:
       - process_payment
 
   send_confirmation:
-    activity: http-post
+    activity: http_request
     parameters:
+      method: POST
       url: "{{INPUT.notification_webhook}}"
       body:
         order_id: "{{record_order.order_id}}"
@@ -999,17 +1020,17 @@ activities:
 ```
 
 #### Built-in Activities Implemented
-- ✅ `http-request` - Generic HTTP request (any method)
-- ✅ `http-graphql` - GraphQL query execution
+- ✅ `http_request` - Generic HTTP request (any method)
+- ✅ `http_graphql` - GraphQL query execution
 - ✅ HTTP authentication patterns:
   - Bearer token: `Authorization: Bearer {{SECRET.token}}`
   - Basic auth: `Authorization: Basic <base64(user:pass)>`
   - API key header: `X-API-Key: {{SECRET.api_key}}`
   - Custom auth headers
-- ✅ `postgres-transaction` - Multi-statement transaction
-- ✅ `postgres-query` - Query with result parsing
-- ✅ `sqlite-query` - SQLite support
-- ✅ `redis-get` / `redis-set` - Redis operations
+- ✅ `postgres_transaction` - Multi-statement transaction
+- ✅ `postgres_query` - Execute SQL queries (SELECT, INSERT, UPDATE, DELETE)
+- ✅ `sqlite_query` - SQLite support
+- ✅ `redis_get` / `redis_set` - Redis operations
 
 #### Implementation Tasks
 1. HTTP activity enhancements
@@ -1019,14 +1040,18 @@ activities:
    - Basic auth helper (optional: base64 encoding of user:pass)
    - OAuth 2.0 authentication flow (token exchange)
    - Request/response logging
-2. PostgreSQL transaction support
+2. PostgreSQL query activity
+   - Support for SELECT, INSERT, UPDATE, DELETE
+   - RETURNING clause support for INSERT/UPDATE/DELETE
+   - Returns result rows for SELECT, metadata for INSERT/UPDATE/DELETE
+3. PostgreSQL transaction support
    - Multi-statement transactions (BEGIN, COMMIT, ROLLBACK)
    - RETURNING clause support
    - Transaction rollback on error
-3. SQLite activity executor
-4. Redis activity executor (get, set, delete, expire)
-5. Connection pooling for databases
-6. End-to-end test: Transaction rollback on error, HTTP auth methods
+4. SQLite activity executor
+5. Redis activity executor (get, set, delete, expire)
+6. Connection pooling for databases
+7. End-to-end test: Transaction rollback on error, HTTP auth methods
 
 #### Success Criteria
 - ✅ HTTP supports all major methods and auth types
@@ -1044,20 +1069,20 @@ activities:
 **Epic 5**: US-5.7 (Notification Activities)
 
 #### Activities
-- `slack.send_message` - Send Slack notification
-- `email.send` - Send email via SMTP
-- `discord.send` - Discord webhook
-- `teams.send` - Microsoft Teams notification
+- `slack_send_message` - Send Slack notification
+- `email_send` - Send email via SMTP
+- `discord_send` - Discord webhook
+- `teams_send` - Microsoft Teams notification
 
 ### Slice 12: Edge/IoT Activities (Unique Differentiator)
 **Duration**: 4-5 days
 **Epic 5**: US-5.8 (Edge/IoT Activities)
 
 #### Activities
-- `gpio.read` / `gpio.write` - Raspberry Pi GPIO
-- `i2c.communicate` - I2C device communication
-- `camera.capture` - Capture image from camera
-- `gps.location` - Get GPS coordinates
+- `gpio_read` / `gpio_write` - Raspberry Pi GPIO
+- `i2c_communicate` - I2C device communication
+- `camera_capture` - Capture image from camera
+- `gps_location` - Get GPS coordinates
 
 ---
 
@@ -1078,7 +1103,7 @@ activities:
 | 2          | 3-4 days | Conditional branching, secrets                        | PostgreSQL execute/query                   | 6-8             |
 | 3          | 4-5 days | Parallel execution (fan-out/fan-in), file management  | File outputs & references                  | 10-13           |
 | 4          | 5-6 days | Activity settings (retry, timeout, budget)            | LLM (Anthropic), cost tracking             | 15-19           |
-| 5          | 4-5 days | Provider fallback                                     | LLM (OpenAI, Gemini)                       | 19-24           |
+| 5          | 4-5 days | Model fallback.                                       | LLM (OpenAI, Gemini)                       | 19-24           |
 | 6          | 3-4 days | Caching settings                                      | Semantic caching (Redis)                   | 22-28           |
 | 7          | 5-6 days | Iterative workflows, loops, iteration-scoped outputs  | (Combined existing)                        | 27-34           |
 | 8          | 3-4 days | (Enhancements)                                        | Advanced file management, external storage | 30-38           |
@@ -1094,7 +1119,7 @@ activities:
 - **Demo**: Multi-document processing pipeline with file handling
 
 **Checkpoint 2** (After Slice 6 - ~22-28 days):
-- ✅ LLM activities with multiple providers (Anthropic, OpenAI, Gemini)
+- ✅ LLM activities with multiple model providers (Anthropic, OpenAI, Gemini)
 - ✅ Cost tracking and budget enforcement
 - ✅ Caching for cost savings
 - ✅ Retry and timeout mechanisms
@@ -1129,14 +1154,14 @@ activities:
 
 | User Story                    | Slices  | Status       |
 |-------------------------------|---------|--------------|
-| US-5.1: Multi-Provider LLM    | 4, 5    | ✅ Complete  |
+| US-5.1: Multi-Model LLM       | 4, 5    | ✅ Complete  |
 | US-5.2: AI Cost Tracking      | 4       | ✅ Complete  |
 | US-5.3: Semantic Caching      | 6       | ✅ Complete  |
-| US-5.4: Object Storage      | 3, 8    | ✅ Complete  |
-| US-5.5: HTTP Operations     | 1, 9    | ✅ Complete  |
-| US-5.6: Database Operations | 2, 9    | ✅ Complete  |
-| US-5.7: Notifications       | Post-MVP| 🔮 Post-MVP |
-| US-5.8: Edge/IoT            | Post-MVP| 🔮 Post-MVP |
+| US-5.4: Object Storage        | 3, 8    | ✅ Complete  |
+| US-5.5: HTTP Operations       | 1, 9    | ✅ Complete  |
+| US-5.6: Database Operations   | 2, 9    | ✅ Complete  |
+| US-5.7: Notifications         | Post-MVP| 🔮 Post-MVP |
+| US-5.8: Edge/IoT              | Post-MVP| 🔮 Post-MVP |
 
 ---
 
@@ -1170,8 +1195,8 @@ Each slice includes:
 
 ### Technical Risks
 
-**R1: LLM Provider API Changes**
-- Mitigation: Abstract provider interface, version API calls
+**R1: LLM Model Provider API Changes**
+- Mitigation: Abstract model provider interface, version API calls
 - Fallback: Document required API versions
 
 **R2: Large File Handling Performance**
@@ -1243,44 +1268,50 @@ All HTTP activities support:
 - Request/response body handling
 
 Activities:
-- `http-get` - HTTP GET request with headers and query params
-- `http-post` - HTTP POST request with headers and JSON body
-- `http-put` - HTTP PUT request with headers and JSON body
-- `http-delete` - HTTP DELETE request with headers
-- `http-request` - Generic HTTP request (any method, full control)
-- `http-graphql` - GraphQL query with authentication
+- `http_request` - Generic HTTP request (configurable method: GET, POST, PUT, DELETE, PATCH, etc.)
+  - Supports all HTTP methods via `method` parameter
+  - Full control over headers, query params, request body, and files
+- `http_graphql` - GraphQL query with authentication
 
 ### Database Activities
-- `postgres-execute` - Execute SQL statement
-- `postgres-query` - Query SQL and return results
-- `postgres-transaction` - Multi-statement transaction
-- `sqlite-query` - SQLite query
-- `redis-get` - Redis GET
-- `redis-set` - Redis SET
+- `postgres_query` - Execute SQL queries with parameter binding
+  - SELECT: Returns result rows
+  - INSERT/UPDATE/DELETE: Returns affected row count and RETURNING clause values
+  - Supports parameterized queries for SQL injection prevention
+- `postgres_transaction` - Multi-statement atomic transaction
+  - Multiple SQL statements executed atomically
+  - Automatic rollback on error
+  - RETURNING clause support
+- `sqlite_query` - SQLite query execution (same interface as postgres_query)
+- `redis_get` - Redis GET operation
+- `redis_set` - Redis SET operation
 
 ### LLM Activities
-- `llm-complete` - LLM completion (OpenAI, Anthropic, Gemini)
-- `llm-embed` - Generate embeddings (future)
+- `llm_prompt` - LLM completion (OpenAI, Anthropic, Gemini)
+- `llm_embed` - Generate embeddings (future)
 
 ### External Storage Activities
 **Note**: File management is a cross-cutting framework capability. These activities provide integration with external storage services (not workflow storage).
 
-- `s3-get` - Fetch file from external S3 bucket into workflow storage
-- `s3-put` - Upload file from workflow storage to external S3 bucket
-- `s3-list` - List files in external S3 bucket
-- `s3-delete` - Delete file from external S3 bucket
-- `gcs-get` / `gcs-put` / `gcs-list` / `gcs-delete` - Google Cloud Storage
-- `azure-blob-get` / `azure-blob-put` / `azure-blob-list` / `azure-blob-delete` - Azure Blob Storage
-- `minio-get` / `minio-put` / `minio-list` / `minio-delete` - MinIO (self-hosted S3-compatible)
+- `s3_get` - Fetch file from external S3 bucket into workflow storage
+- `s3_put` - Upload file from workflow storage to external S3 bucket
+- `s3_list` - List files in external S3 bucket
+- `s3_delete` - Delete file from external S3 bucket
+- `gcs_get` / `gcs_put` / `gcs_list` / `gcs_delete` - Google Cloud Storage
+- `azure_blob_get` / `azure_blob_put` / `azure_blob_list` / `azure_blob_delete` - Azure Blob Storage
+- `minio_get` / `minio_put` / `minio_list` / `minio_delete` - MinIO (self-hosted S3-compatible)
+
+### Scripting Activities
+- `python_script` - Execute Python script with file inputs/outputs
 
 ### Notification Activities (Post-MVP)
-- `slack-send-message`
-- `email-send`
-- `discord-send`
-- `teams-send`
+- `slack_send_message`
+- `email_send`
+- `discord_send`
+- `teams_send`
 
 ### Edge/IoT Activities (Post-MVP)
-- `gpio-read` / `gpio-write`
-- `i2c-communicate`
-- `camera-capture`
-- `gps-location`
+- `gpio_read` / `gpio_write`
+- `i2c_communicate`
+- `camera_capture`
+- `gps_location`

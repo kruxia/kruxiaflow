@@ -83,7 +83,7 @@ services:
       STREAMFLOW_CLIENT_SECRET: a_zBZWlw8IsQaQm5C2xJPMgunAj4jkjzp4iTafATVcD8RU02yNEYqwCdLsoXIe8g
       STREAMFLOW_OAUTH_TOKEN_ISSUER: http://localhost:8080
       STREAMFLOW_OAUTH_TOKEN_AUDIENCE: streamflow-dev-audience
-      STREAMFLOW_WORKER_COUNT: "20"
+      STREAMFLOW_WORKER_COUNT: "1"
       STREAMFLOW_POLL_MAX_ACTIVITIES: "1"
       # Logging configuration (can be overridden from host environment)
       STREAMFLOW_LOG_LEVEL: ${STREAMFLOW_LOG_LEVEL:-info}

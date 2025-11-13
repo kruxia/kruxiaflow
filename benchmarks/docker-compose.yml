@@ -27,8 +27,8 @@ services:
       STREAMFLOW_CLIENT_SECRET: benchmark_secret
       STREAMFLOW_OAUTH_TOKEN_ISSUER: http://localhost:8080
       STREAMFLOW_OAUTH_TOKEN_AUDIENCE: streamflow-dev-audience
-      STREAMFLOW_WORKER_COUNT: "4" # = default
-      STREAMFLOW_POLL_MAX_ACTIVITIES: "1" # = default
+      STREAMFLOW_WORKER_COUNT: "1" # default = 4
+      STREAMFLOW_POLL_MAX_ACTIVITIES: "1" # default
       STREAMFLOW_LOG_LEVEL: info
     depends_on:
       - streamflow-postgres
@@ -186,7 +186,7 @@ services:
       #   condition: service_healthy
     volumes:
       - ./:/app/
-    command: [ "python", "run_benchmark.py", "run", "--platform", "all" ]
+    command: [ "python", "run_benchmark.py", "run", "--platform", "streamflow" ]
 
 volumes:
   streamflow_pg_data:
