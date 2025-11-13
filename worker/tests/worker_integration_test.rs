@@ -99,7 +99,7 @@ async fn schedule_test_activities(pool: &PgPool, workflow_id: Uuid, count: usize
     let activities: Vec<Activity> = (0..count)
         .map(|i| Activity {
             key: format!("activity_{}", i),
-            namespace: "default".to_string(),
+            worker: "builtin".to_string(),
             name: "echo".to_string(),
             parameters: json!({"test": format!("value_{}", i)}),
             settings: None,
@@ -136,7 +136,7 @@ async fn test_worker_poll_and_execute_echo() {
     let config = WorkerConfig {
         api_url: server_url,
         worker_id: "test_worker".to_string(),
-        activity_types: vec!["default.echo".to_string()],
+        activity_types: vec!["builtin.echo".to_string()],
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
         concurrency: 1,
@@ -203,7 +203,7 @@ async fn test_worker_concurrency() {
     let config = WorkerConfig {
         api_url: server_url,
         worker_id: "test_worker_concurrent".to_string(),
-        activity_types: vec!["default.echo".to_string()],
+        activity_types: vec!["builtin.echo".to_string()],
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
         concurrency: 4,

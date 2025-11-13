@@ -45,10 +45,10 @@ pub struct ActivityDefinition {
     /// Unique key for this activity within the workflow
     pub key: String,
 
-    /// Activity namespace (e.g., "payments", "llm")
-    pub namespace: String,
+    /// Activity worker type (e.g., "builtin", "custom-python")
+    pub worker: String,
 
-    /// Activity name within namespace (e.g., "authorize", "complete")
+    /// Activity name within worker (e.g., "http_request", "postgres_query")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 
@@ -73,7 +73,7 @@ impl From<streamflow_core::workflow::ActivityDefinition> for ActivityDefinition 
     fn from(def: streamflow_core::workflow::ActivityDefinition) -> Self {
         Self {
             key: def.key,
-            namespace: def.namespace,
+            worker: def.worker,
             name: def.name,
             parameters: def.parameters,
             preceding: def
@@ -91,7 +91,7 @@ impl From<ActivityDefinition> for streamflow_core::workflow::ActivityDefinition 
     fn from(def: ActivityDefinition) -> Self {
         Self {
             key: def.key,
-            namespace: def.namespace,
+            worker: def.worker,
             name: def.name,
             parameters: def.parameters,
             preceding: def

@@ -16,7 +16,7 @@ mod tests {
                     "activity_id": activity_id,
                     "workflow_id": workflow_id,
                     "activity_key": "test_activity",
-                    "namespace": "default",
+                    "worker": "builtin",
                     "name": "echo",
                     "parameters": {"test": "value"},
                     "settings": null,
@@ -33,7 +33,7 @@ mod tests {
         assert_eq!(response.activities.len(), 1);
         assert_eq!(response.activities[0].activity_id, activity_id);
         assert_eq!(response.activities[0].workflow_id, workflow_id);
-        assert_eq!(response.activities[0].namespace, "default");
+        assert_eq!(response.activities[0].worker, "builtin");
         assert_eq!(response.activities[0].name, "echo");
     }
 
@@ -46,7 +46,7 @@ mod tests {
             "activity_id": activity_id,
             "workflow_id": workflow_id,
             "activity_key": "test_activity",
-            "namespace": "payments",
+            "worker": "payments",
             "name": "authorize",
             "parameters": {"amount": 100.50},
             "settings": {"retry_limit": 3},
@@ -59,7 +59,7 @@ mod tests {
         assert_eq!(activity.activity_id, activity_id);
         assert_eq!(activity.workflow_id, workflow_id);
         assert_eq!(activity.activity_key, "test_activity");
-        assert_eq!(activity.namespace, "payments");
+        assert_eq!(activity.worker, "payments");
         assert_eq!(activity.name, "authorize");
         assert_eq!(activity.timeout_seconds, Some(600));
         assert!(activity.settings.is_some());

@@ -35,7 +35,7 @@ pub struct WorkflowDefinition {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActivityDefinition {
     pub key: String,
-    pub namespace: String,
+    pub worker: String,
     pub name: String,
     pub parameters: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]

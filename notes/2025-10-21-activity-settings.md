@@ -90,7 +90,7 @@ Minimal Example (Using Defaults):
 ```yaml
 activities:
   - key: simple_activity
-    namespace: example
+    worker: example
     workflow_id: workflow_{{uuid}}
     parameters:
       input: "data"

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            DELETE FROM activity_queue\n            WHERE status = 'running'::activity_status\n              AND NOW() > claimed_at + timeout_duration\n              AND retry_count >= max_retries\n            RETURNING id, workflow_id, activity_key, namespace, name, retry_count\n            ",
+  "query": "\n            DELETE FROM activity_queue\n            WHERE status = 'running'::activity_status\n              AND NOW() > claimed_at + timeout_duration\n              AND retry_count >= max_retries\n            RETURNING id, workflow_id, activity_key, worker, name, retry_count\n            ",
   "describe": {
     "columns": [
       {
@@ -20,7 +20,7 @@
       },
       {
         "ordinal": 3,
-        "name": "namespace",
+        "name": "worker",
         "type_info": "Text"
       },
       {

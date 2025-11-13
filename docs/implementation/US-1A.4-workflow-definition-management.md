@@ -100,7 +100,7 @@ name: payment_processing
 
 activities:
   - key: validate_payment
-    namespace: payments
+    worker: payments
     name: validate_card
     parameters:
       card_token: "{{ARG.card_token}}"
@@ -110,7 +110,7 @@ activities:
           - "{{validate_payment.valid}} == true"
 
   - key: authorize_card
-    namespace: payments
+    worker: payments
     name: authorize
     parameters:
       amount: "{{ARG.amount}}"
@@ -118,7 +118,7 @@ activities:
       - activity_key: capture_payment
 
   - key: capture_payment
-    namespace: payments
+    worker: payments
     name: capture
     parameters:
       authorization_id: "{{authorize_card.authorization_id}}"
@@ -178,10 +178,10 @@ pub struct ActivityDefinition {
     /// Unique key for this activity within the workflow
     pub key: String,
 
-    /// Activity namespace (e.g., "payments", "llm")
-    pub namespace: String,
+    /// Activity worker (e.g., "payments", "llm")
+    pub worker: String,
 
-    /// Activity name within namespace (e.g., "authorize", "complete")
+    /// Activity name within worker (e.g., "authorize", "complete")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 
@@ -327,11 +327,11 @@ impl WorkflowDefinition {
             );
         }
 
-        // Validate namespace
-        if activity.namespace.is_empty() {
+        // Validate worker
+        if activity.worker.is_empty() {
             errors.add(
-                &format!("activities[{}].namespace", idx),
-                "Activity namespace cannot be empty",
+                &format!("activities[{}].worker", idx),
+                "Activity worker cannot be empty",
             );
         }
 
@@ -1253,7 +1253,7 @@ mod tests {
             activities: vec![
                 ActivityDefinition {
                     key: "validate".to_string(),
-                    namespace: "payments".to_string(),
+                    worker: "payments".to_string(),
                     name: Some("validate_card".to_string()),
                     parameters: None,
                     preceding: None,
@@ -1265,7 +1265,7 @@ mod tests {
                 },
                 ActivityDefinition {
                     key: "authorize".to_string(),
-                    namespace: "payments".to_string(),
+                    worker: "payments".to_string(),
                     name: Some("authorize_card".to_string()),
                     parameters: None,
                     preceding: None,
@@ -1287,7 +1287,7 @@ mod tests {
             activities: vec![
                 ActivityDefinition {
                     key: "step1".to_string(),
-                    namespace: "test".to_string(),
+                    worker: "test".to_string(),
                     name: None,
                     parameters: None,
                     preceding: None,
@@ -1296,7 +1296,7 @@ mod tests {
                 },
                 ActivityDefinition {
                     key: "step1".to_string(), // Duplicate!
-                    namespace: "test".to_string(),
+                    worker: "test".to_string(),
                     name: None,
                     parameters: None,
                     preceding: None,
@@ -1320,7 +1320,7 @@ mod tests {
             description: None,
             activities: vec![ActivityDefinition {
                 key: "step1".to_string(),
-                namespace: "test".to_string(),
+                worker: "test".to_string(),
                 name: None,
                 parameters: None,
                 preceding: None,
@@ -1347,7 +1347,7 @@ mod tests {
             activities: vec![
                 ActivityDefinition {
                     key: "step1".to_string(),
-                    namespace: "test".to_string(),
+                    worker: "test".to_string(),
                     name: None,
                     parameters: None,
                     preceding: None,
@@ -1359,7 +1359,7 @@ mod tests {
                 },
                 ActivityDefinition {
                     key: "step2".to_string(),
-                    namespace: "test".to_string(),
+                    worker: "test".to_string(),
                     name: None,
                     parameters: None,
                     preceding: None,
@@ -1400,7 +1400,7 @@ async fn test_deploy_workflow_definition() {
         "activities": [
             {
                 "key": "step1",
-                "namespace": "test",
+                "worker": "test",
                 "name": "test_activity"
             }
         ]
@@ -1431,7 +1431,7 @@ async fn test_deploy_multiple_versions() {
         "activities": [
             {
                 "key": "step1",
-                "namespace": "test"
+                "worker": "test"
             }
         ]
     });
@@ -1475,7 +1475,7 @@ async fn test_deploy_invalid_workflow() {
         "activities": [
             {
                 "key": "step1",
-                "namespace": "test",
+                "worker": "test",
                 "following": [
                     {
                         "activity_key": "step2" // Doesn't exist!
@@ -1510,7 +1510,7 @@ async fn test_list_workflow_definitions() {
             "activities": [
                 {
                     "key": "step1",
-                    "namespace": "test"
+                    "worker": "test"
                 }
             ]
         });
@@ -1545,7 +1545,7 @@ async fn test_get_workflow_definition_by_version() {
         "activities": [
             {
                 "key": "step1",
-                "namespace": "test"
+                "worker": "test"
             }
         ]
     });
@@ -1583,7 +1583,7 @@ async fn test_get_latest_workflow_definition() {
         "activities": [
             {
                 "key": "step1",
-                "namespace": "test"
+                "worker": "test"
             }
         ]
     });
@@ -1642,7 +1642,7 @@ async fn test_deploy_requires_authentication() {
         "activities": [
             {
                 "key": "step1",
-                "namespace": "test"
+                "worker": "test"
             }
         ]
     });
@@ -1713,7 +1713,7 @@ Workflow definitions are deployed separately from workflow execution. This allow
   "activities": [
     {
       "key": "validate_payment",
-      "namespace": "payments",
+      "worker": "payments",
       "name": "validate_card",
       "parameters": {
         "card_token": "{{ARG.card_token}}"
@@ -1727,7 +1727,7 @@ Workflow definitions are deployed separately from workflow execution. This allow
     },
     {
       "key": "authorize_card",
-      "namespace": "payments",
+      "worker": "payments",
       "name": "authorize",
       "parameters": {
         "amount": "{{ARG.amount}}"
@@ -1944,7 +1944,7 @@ StreamFlow uses automatic timestamp-based versioning:
 
 ### Search and Filtering
 - Filter by name pattern
-- Filter by namespace
+- Filter by worker
 - Full-text search in descriptions
 - Filter by activity types used
 
@@ -1966,7 +1966,7 @@ StreamFlow uses automatic timestamp-based versioning:
 - Version comparison (diff between versions)
 
 ### Advanced Validation
-- Activity type registry (validate activity.namespace + activity.name exist)
+- Activity type registry (validate activity.worker + activity.name exist)
 - Parameter schema validation
 - Template expression validation
 - Resource limit checks (max activities, max depth)

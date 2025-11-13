@@ -11,7 +11,7 @@ CREATE TABLE activity_queue (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
     workflow_id UUID NOT NULL,
     activity_key TEXT NOT NULL,
-    namespace TEXT NOT NULL,
+    worker TEXT NOT NULL,
     name TEXT NOT NULL,
     parameters JSONB NOT NULL,
     settings JSONB,
@@ -33,7 +33,7 @@ CREATE TABLE activity_queue (
 -- Note: We can't use NOW() in the WHERE clause as it's not immutable
 -- The query will filter on scheduled_for at runtime
 CREATE INDEX idx_queue_claimable
-ON activity_queue(namespace, name, status, scheduled_for)
+ON activity_queue(worker, name, status, scheduled_for)
 WHERE status IN ('pending', 'running');
 
 -- Index for timeout queries (stale activity detection)

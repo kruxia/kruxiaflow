@@ -35,7 +35,7 @@ pub struct PendingActivityRecord {
     pub id: Uuid,
     pub workflow_id: Uuid,
     pub activity_key: String,
-    pub namespace: String,
+    pub worker: String,
     pub name: String,
     pub parameters: Value,
     pub settings: Option<Value>,
@@ -47,7 +47,7 @@ impl From<QueuedActivity> for PendingActivityRecord {
             id: qa.id,
             workflow_id: qa.workflow_id,
             activity_key: qa.activity_key,
-            namespace: qa.namespace,
+            worker: qa.worker,
             name: qa.name,
             parameters: qa.parameters,
             settings: qa.settings.map(|s| serde_json::to_value(s).unwrap()),
@@ -83,17 +83,17 @@ impl ActivityWorkerService {
     /// Returns up to max_activities that are ready to execute.
     pub async fn poll_activities(
         &self,
-        activity_types: Vec<(String, String)>, // Vec of (namespace, name)
+        activity_types: Vec<(String, String)>, // Vec of (worker, name)
         worker_id: String,
         max_activities: usize,
     ) -> ActivityWorkerResult<Vec<PendingActivityRecord>> {
         let mut claimed = Vec::new();
 
         // Poll for each activity type until we reach max_activities
-        for (namespace, name) in activity_types {
+        for (worker, name) in activity_types {
             while claimed.len() < max_activities {
                 // Delegate to ActivityQueue
-                match self.queue.claim_next(&worker_id, &namespace, &name).await? {
+                match self.queue.claim_next(&worker_id, &worker, &name).await? {
                     Some(activity) => {
                         claimed.push(PendingActivityRecord::from(activity));
                     }

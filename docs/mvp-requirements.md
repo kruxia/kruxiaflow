@@ -200,7 +200,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 - **So that** I can execute activities in distributed environments without direct database access
 - **Acceptance Criteria**:
   - `POST /api/v1/workers/poll` - Poll for activities by activity type
-    - Request body: `{activity_types: ["namespace.name"], worker_id, max_activities: 10}`
+    - Request body: `{activity_types: ["worker.name"], worker_id, max_activities: 10}`
     - Response: `[{activity_id, workflow_id, activity_key, parameters, timeout}]`
     - Uses ActivityQueue::poll() internally with FOR UPDATE SKIP LOCKED
   - `POST /api/v1/activities/{activity_id}/heartbeat` - Send heartbeat to prevent timeout
@@ -281,7 +281,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 - **I want** multiple workers (built-in and external) to safely poll the activity queue without conflicts
 - **So that** we can scale horizontally without coordination overhead
 - **Acceptance Criteria**:
-  - Workers poll by activity type (namespace.name) via API endpoints
+  - Workers poll by activity type (worker.name) via API endpoints
   - PostgreSQL FOR UPDATE SKIP LOCKED prevents conflicts (enforced by API)
   - Workers claim activities atomically
   - Failed workers release activities for retry
@@ -361,7 +361,7 @@ The built-in worker is implemented as an HTTP client to the API server rather th
   - `streamflow api` - Launch API server only
     - Flags: `--port` (default 8080), `--bind` (default 0.0.0.0)
   - `streamflow worker` - Launch worker only
-    - Flags: `--activity-types` (namespace.name list), `--api-url`, `--worker-id`
+    - Flags: `--activity-types` (worker.name list), `--api-url`, `--worker-id`
   - Each service can run on different hosts/containers
   - Environment variable configuration: `DATABASE_URL`, `STREAMFLOW_API_URL`, etc.
 - **Deferral Rationale**: All-in-one mode (US-1C.2) is sufficient for Epic 2 benchmarking. Distributed deployment can be validated after performance baseline is established.
@@ -561,7 +561,7 @@ streamflow/
 - **I want** to define workflows in simple YAML without programming
 - **So that** I can rapidly prototype and iterate on AI pipelines
 - **Acceptance Criteria**:
-  - Activities defined with key, namespace, name, parameters
+  - Activities defined with key, worker, name, parameters
   - Sequential execution via `following_key` edges
   - Template expressions for parameter passing: `{{validate_payment.card_token}}`
   - Support for workflow input: `{{ARG.amount}}`

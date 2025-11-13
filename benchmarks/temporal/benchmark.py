@@ -14,11 +14,11 @@ class TemporalBenchmark:
     def __init__(
         self,
         host: str = "temporal:7233",
-        namespace: str = "default",
+        worker: str = "builtin",
         task_queue: str = "benchmark-queue",
     ):
         self.host = host
-        self.namespace = namespace
+        self.worker = worker
         self.task_queue = task_queue
         self.client: Client | None = None
         self.worker: Worker | None = None
@@ -26,7 +26,7 @@ class TemporalBenchmark:
 
     async def setup(self) -> None:
         """Connect to Temporal and start worker"""
-        self.client = await Client.connect(self.host, namespace=self.namespace)
+        self.client = await Client.connect(self.host, worker=self.worker)
 
         # Start worker
         self.worker = Worker(
