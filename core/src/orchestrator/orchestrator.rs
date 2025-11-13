@@ -281,7 +281,7 @@ pub async fn process_workflow_event(
     // 5. Schedule ready activities to queue
     if !ready_activities.is_empty() {
         let schedule_start = std::time::Instant::now();
-        tracing::info!(
+        tracing::debug!(
             "Scheduling {} activities for workflow {}: [{}]",
             ready_activities.len(),
             event.workflow_id,
@@ -397,6 +397,12 @@ pub async fn process_workflow_event(
         };
 
         state.status = new_status;
+
+        // Log workflow completion at info level
+        tracing::debug!(
+            event = if is_workflow_failed(&state) { "WorkflowFailed" } else { "WorkflowCompleted" },
+            workflow_id = %event.workflow_id,
+        );
     }
 
     // 7. Save updated materialized state back to workflows table

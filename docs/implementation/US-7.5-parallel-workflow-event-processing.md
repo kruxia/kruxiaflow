@@ -170,18 +170,18 @@ async fn workflow_task_loop(...) {
 
 ## Comparison Matrix
 
-| Metric | MVP Sequential | Ephemeral Tasks | Long-Lived Tasks | Best |
-|--------|---------------|-----------------|------------------|------|
-| **Throughput** | 18 wf/s | 3,280 wf/s | 18,182 wf/s | Long-lived (1,010x) |
-| **Latency P50** | 30,000 ms | 152 ms | 55 ms | Long-lived (545x) |
-| **Latency P95** | 52,000 ms | 280 ms | 60 ms | Long-lived (867x) |
-| **Latency P99** | 54,000 ms | 300 ms | 65 ms | Long-lived (831x) |
-| **CPU utilization** | 15-20% | 60-80% | 70-90% | Long-lived |
-| **Memory (1K wf)** | 20 MB | 100 MB | 500 MB - 5 GB | MVP |
-| **DB connections** | 2-3 | 50-100 | 200-300 | MVP |
-| **Code complexity** | Low (200 LOC) | Medium (400 LOC) | High (800 LOC) | MVP |
-| **Head-of-line blocking** | Yes (all) | Per-batch | No | Long-lived |
-| **Event replay on crash** | None | Some (batch) | Minimal (gaps) | Long-lived |
+| Metric                      | MVP Sequential | Ephemeral Tasks   | Long-Lived Tasks | Best                |
+|-----------------------------|----------------|-------------------|------------------|---------------------|
+| **Throughput**              | 18 wf/s        | 3,280 wf/s        | 18,182 wf/s      | Long-lived (1,010x) |
+| **Latency P50**             | 30,000 ms      | 152 ms            | 55 ms            | Long-lived (545x)   |
+| **Latency P95**             | 52,000 ms      | 280 ms            | 60 ms            | Long-lived (867x)   |
+| **Latency P99**             | 54,000 ms      | 300 ms            | 65 ms            | Long-lived (831x)   |
+| **CPU utilization**         | 15-20%         | 60-80%            | 70-90%           | Long-lived          |
+| **Memory (1K wf)**          | 20 MB          | 100 MB            | 500 MB - 5 GB    | MVP                 |
+| **DB connections**          | 2-3            | 50-100            | 200-300          | MVP                 |
+| **Code complexity**         | Low (200 LOC)  | Medium (400 LOC)  | High (800 LOC)   | MVP                 |
+| **Head-of-line blocking**   | Yes (all)      | Per-batch         | No               | Long-lived          |
+| **Event replay on crash**   | None           | Some (batch)      | Minimal (gaps)   | Long-lived          |
 
 ---
 
@@ -1275,13 +1275,13 @@ STREAMFLOW_DB_MAX_CONNECTIONS=240  # 2x max_concurrent + 40
 
 ### Tuning Guide
 
-| Deployment Scale | max_concurrent | poll_batch | DB connections | Memory |
-|------------------|---------------|------------|----------------|--------|
-| MVP/Sequential | 1 | 100 | 20 | 20 MB |
-| Small (10 wf/s) | 10 | 100 | 40 | 50 MB |
-| Medium (100 wf/s) | 50 | 500 | 140 | 100 MB |
-| Large (1,000 wf/s) | 100 | 1,000 | 240 | 200 MB |
-| Very Large (10,000 wf/s) | 200 | 2,000 | 440 | 500 MB |
+| Deployment Scale          | max_concurrent | poll_batch | DB connections | Memory |
+|---------------------------|----------------|------------|----------------|--------|
+| MVP/Sequential            | 1              | 100        | 20             | 20 MB  |
+| Small (10 wf/s)           | 10             | 100        | 40             | 50 MB  |
+| Medium (100 wf/s)         | 50             | 500        | 140            | 100 MB |
+| Large (1,000 wf/s)        | 100            | 1,000      | 240            | 200 MB |
+| Very Large (10,000 wf/s)  | 200            | 2,000      | 440            | 500 MB |
 
 ---
 
