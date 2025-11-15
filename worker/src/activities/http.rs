@@ -110,6 +110,11 @@ pub struct HttpRequestParams {
     /// Request timeout in seconds (overrides default 30s)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u64>,
+
+    /// Whether to include response body (default: true)
+    /// Set to false for HEAD requests or when only status/headers are needed
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub include_body: Option<bool>,
 }
 
 /// HTTP response (serializable snapshot)
@@ -224,12 +229,19 @@ impl ActivityImpl for HttpRequestActivity {
         let params: HttpRequestParams = serde_json::from_value(parameters)
             .context("Failed to parse HTTP request parameters")?;
 
+        // Check if we should include body (default: true, except for HEAD requests)
+        let include_body = params.include_body.unwrap_or(true)
+            && !params.method.eq_ignore_ascii_case("HEAD");
+
         // Execute HTTP request
         let response = self.executor.execute(params).await?;
 
-        // Convert response to JSON based on content type
-        // For JSON responses, parse the body; for text, store as string
-        let http_response = if let Some(content_type) = response.headers().get("content-type") {
+        // Convert response based on whether body should be included
+        let http_response = if !include_body {
+            // Metadata only (status/headers) - don't load body into memory
+            HttpResponse::from_response_metadata(response).await?
+        } else if let Some(content_type) = response.headers().get("content-type") {
+            // Body requested - parse based on content type
             let content_type_str = content_type.to_str().unwrap_or("");
             if content_type_str.contains("application/json") {
                 HttpResponse::from_response_json(response).await?
@@ -296,6 +308,7 @@ mod tests {
             query: Some(HashMap::from([("test".to_string(), "value".to_string())])),
             body: None,
             timeout_seconds: None,
+            include_body: None,
         };
 
         let response = executor.execute(params).await.unwrap();
@@ -323,6 +336,7 @@ mod tests {
                 "number": 42
             })),
             timeout_seconds: None,
+            include_body: None,
         };
 
         let response = executor.execute(params).await.unwrap();
@@ -347,6 +361,7 @@ mod tests {
             query: None,
             body: None,
             timeout_seconds: None,
+            include_body: None,
         };
 
         let response = executor.execute(params).await.unwrap();
@@ -373,6 +388,7 @@ mod tests {
             query: None,
             body: None,
             timeout_seconds: None,
+            include_body: None,
         };
 
         let response = executor.execute(params).await.unwrap();
@@ -397,6 +413,7 @@ mod tests {
             query: None,
             body: None,
             timeout_seconds: None,
+            include_body: None,
         };
 
         let response = executor.execute(params).await.unwrap();
@@ -425,6 +442,7 @@ mod tests {
             query: None,
             body: None,
             timeout_seconds: None,
+            include_body: None,
         };
 
         let response = executor.execute(params).await.unwrap();
@@ -482,5 +500,65 @@ mod tests {
         let response = result.get("response").unwrap();
         assert_eq!(response.get("status").unwrap(), 200);
         assert_eq!(response.get("success").unwrap(), true);
+    }
+
+    #[tokio::test]
+    async fn test_http_request_activity_head_excludes_body() {
+        let activity = HttpRequestActivity::new();
+
+        let params = json!({
+            "method": "HEAD",
+            "url": "https://httpbin.org/get"
+        });
+
+        let result = activity.execute(params).await.unwrap();
+
+        assert!(result.get("response").is_some());
+        let response = result.get("response").unwrap();
+        assert_eq!(response.get("status").unwrap(), 200);
+        assert_eq!(response.get("success").unwrap(), true);
+        // HEAD requests should not include body
+        assert!(response.get("body").is_none() || response.get("body").unwrap().is_null());
+    }
+
+    #[tokio::test]
+    async fn test_http_request_activity_include_body_false() {
+        let activity = HttpRequestActivity::new();
+
+        let params = json!({
+            "method": "GET",
+            "url": "https://httpbin.org/get",
+            "include_body": false
+        });
+
+        let result = activity.execute(params).await.unwrap();
+
+        assert!(result.get("response").is_some());
+        let response = result.get("response").unwrap();
+        assert_eq!(response.get("status").unwrap(), 200);
+        assert_eq!(response.get("success").unwrap(), true);
+        // Body should be excluded when include_body is false
+        assert!(response.get("body").is_none() || response.get("body").unwrap().is_null());
+    }
+
+    #[tokio::test]
+    async fn test_http_request_activity_include_body_true() {
+        let activity = HttpRequestActivity::new();
+
+        let params = json!({
+            "method": "GET",
+            "url": "https://httpbin.org/get",
+            "include_body": true
+        });
+
+        let result = activity.execute(params).await.unwrap();
+
+        assert!(result.get("response").is_some());
+        let response = result.get("response").unwrap();
+        assert_eq!(response.get("status").unwrap(), 200);
+        assert_eq!(response.get("success").unwrap(), true);
+        // Body should be included when include_body is true
+        assert!(response.get("body").is_some());
+        assert!(!response.get("body").unwrap().is_null());
     }
 }

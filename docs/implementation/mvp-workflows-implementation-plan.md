@@ -250,8 +250,8 @@ activities:
     activity: http_request
     parameters:
       method: POST
-      webhook_key: "{{SECRET.webhook_key}}"
-      url: "{{INPUT.webhook_url}}"
+      webhook_key: "{{SECRET.notification_webhook_key}}"
+      url: "{{INPUT.notification_webhook_url}}"
       body:
         email: "{{INPUT.email}}"
         status: "{{check_email.valid}}"
