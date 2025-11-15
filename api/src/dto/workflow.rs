@@ -50,7 +50,7 @@ pub struct ActivityDefinition {
 
     /// Activity name within worker (e.g., "http_request", "postgres_query")
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
+    pub activity_name: Option<String>,
 
     /// Activity parameters (can include template expressions)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -74,7 +74,7 @@ impl From<streamflow_core::workflow::ActivityDefinition> for ActivityDefinition 
         Self {
             key: def.key,
             worker: def.worker,
-            name: def.name,
+            activity_name: def.activity_name,
             parameters: def.parameters,
             preceding: def
                 .preceding
@@ -92,7 +92,7 @@ impl From<ActivityDefinition> for streamflow_core::workflow::ActivityDefinition 
         Self {
             key: def.key,
             worker: def.worker,
-            name: def.name,
+            activity_name: def.activity_name,
             parameters: def.parameters,
             preceding: def
                 .preceding

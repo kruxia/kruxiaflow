@@ -1,0 +1,49 @@
+name: weather_report_dynamic
+activities:
+  - key: geocode
+    activity_name: http_request
+    parameters:
+      method: GET
+      url: "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+      query:
+        address: "{{INPUT.city}}, {{INPUT.state}}"
+        benchmark: "2020"
+        format: "json"
+    outputs:
+      - response
+
+  - key: get_grid
+    activity_name: http_request
+    parameters:
+      method: GET
+      url: "https://api.weather.gov/points/{{geocode.response.json.result.addressMatches[0].coordinates.y}},{{geocode.response.json.result.addressMatches[0].coordinates.x}}"
+    outputs:
+      - response
+    depends_on:
+      - geocode
+
+  - key: fetch_forecast
+    activity_name: http_request
+    parameters:
+      method: GET
+      url: "{{get_grid.response.json.properties.forecast}}"
+    outputs:
+      - response
+    depends_on:
+      - get_grid
+
+  - key: send_notification
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.webhook_url}}"
+      headers:
+        Content-Type: "application/json"
+      body:
+        city: "{{INPUT.city}}"
+        state: "{{INPUT.state}}"
+        temperature: "{{fetch_forecast.response.json.properties.periods[0].temperature}}"
+        conditions: "{{fetch_forecast.response.json.properties.periods[0].shortForecast}}"
+        detailed_forecast: "{{fetch_forecast.response.json.properties.periods[0].detailedForecast}}"
+    depends_on:
+      - fetch_forecast

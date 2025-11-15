@@ -49,7 +49,7 @@ fn test_find_ready_root_activities() {
             ActivityDefinition {
                 key: "root1".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,
@@ -58,7 +58,7 @@ fn test_find_ready_root_activities() {
             ActivityDefinition {
                 key: "root2".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,
@@ -90,7 +90,7 @@ fn test_find_ready_sequential_workflow() {
             ActivityDefinition {
                 key: "activity1".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,
@@ -102,7 +102,7 @@ fn test_find_ready_sequential_workflow() {
             ActivityDefinition {
                 key: "activity2".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,
@@ -114,7 +114,7 @@ fn test_find_ready_sequential_workflow() {
             ActivityDefinition {
                 key: "activity3".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,
@@ -182,7 +182,7 @@ fn test_find_ready_parallel_fanout() {
             ActivityDefinition {
                 key: "root".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,
@@ -204,7 +204,7 @@ fn test_find_ready_parallel_fanout() {
             ActivityDefinition {
                 key: "parallel1".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,
@@ -213,7 +213,7 @@ fn test_find_ready_parallel_fanout() {
             ActivityDefinition {
                 key: "parallel2".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,
@@ -222,7 +222,7 @@ fn test_find_ready_parallel_fanout() {
             ActivityDefinition {
                 key: "parallel3".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,
@@ -261,7 +261,7 @@ fn test_find_ready_parallel_fanin() {
             ActivityDefinition {
                 key: "parallel1".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,
@@ -270,7 +270,7 @@ fn test_find_ready_parallel_fanin() {
             ActivityDefinition {
                 key: "parallel2".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,
@@ -279,7 +279,7 @@ fn test_find_ready_parallel_fanin() {
             ActivityDefinition {
                 key: "join".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: Some(vec![
@@ -396,7 +396,7 @@ fn test_conditional_branching() {
             ActivityDefinition {
                 key: "validate".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,
@@ -414,7 +414,7 @@ fn test_conditional_branching() {
             ActivityDefinition {
                 key: "approve".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,
@@ -423,7 +423,7 @@ fn test_conditional_branching() {
             ActivityDefinition {
                 key: "reject".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,
@@ -534,7 +534,7 @@ fn test_skip_already_scheduled_activities() {
         activities: vec![ActivityDefinition {
             key: "activity1".to_string(),
             worker: "test".to_string(),
-            name: "activity".to_string(),
+            activity_name: "activity".to_string(),
             parameters: json!({}),
             settings: None,
             preceding: None,
@@ -577,7 +577,7 @@ fn test_failed_activity_without_conditions_blocks_following() {
             ActivityDefinition {
                 key: "step1".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,
@@ -589,7 +589,7 @@ fn test_failed_activity_without_conditions_blocks_following() {
             ActivityDefinition {
                 key: "step2".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,
@@ -626,7 +626,7 @@ fn test_failed_activity_with_explicit_condition_allows_following() {
             ActivityDefinition {
                 key: "process".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,
@@ -645,7 +645,7 @@ fn test_failed_activity_with_explicit_condition_allows_following() {
             ActivityDefinition {
                 key: "handle_success".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,
@@ -654,7 +654,7 @@ fn test_failed_activity_with_explicit_condition_allows_following() {
             ActivityDefinition {
                 key: "handle_failure".to_string(),
                 worker: "test".to_string(),
-                name: "activity".to_string(),
+                activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
                 preceding: None,

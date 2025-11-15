@@ -7,7 +7,7 @@ use uuid::Uuid;
 pub struct Activity {
     pub key: String,
     pub worker: String,
-    pub name: String,
+    pub activity_name: String,
     pub parameters: serde_json::Value,
     pub settings: Option<ActivitySettings>,
     pub scheduled_for: Option<DateTime<Utc>>,
@@ -63,7 +63,7 @@ pub struct QueuedActivity {
     pub workflow_id: Uuid,
     pub activity_key: String,
     pub worker: String,
-    pub name: String,
+    pub activity_name: String,
     pub parameters: serde_json::Value,
     pub settings: Option<ActivitySettings>,
     pub retry_count: i32,

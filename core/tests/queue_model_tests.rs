@@ -71,7 +71,7 @@ fn test_activity_serialization() {
     let activity = Activity {
         key: "act1".to_string(),
         worker: "builtin".to_string(),
-        name: "TestActivity".to_string(),
+        activity_name: "TestActivity".to_string(),
         parameters: json!({"input": "data"}),
         settings: None,
         scheduled_for: None,
@@ -100,7 +100,7 @@ fn test_activity_with_settings() {
     let activity = Activity {
         key: "act1".to_string(),
         worker: "builtin".to_string(),
-        name: "TestActivity".to_string(),
+        activity_name: "TestActivity".to_string(),
         parameters: json!({}),
         settings: Some(settings),
         scheduled_for: None,
@@ -117,7 +117,7 @@ fn test_activity_with_scheduled_for() {
     let activity = Activity {
         key: "act1".to_string(),
         worker: "builtin".to_string(),
-        name: "TestActivity".to_string(),
+        activity_name: "TestActivity".to_string(),
         parameters: json!({}),
         settings: None,
         scheduled_for: Some(scheduled),
@@ -132,7 +132,7 @@ fn test_activity_clone() {
     let activity1 = Activity {
         key: "act1".to_string(),
         worker: "ns".to_string(),
-        name: "Activity".to_string(),
+        activity_name: "Activity".to_string(),
         parameters: json!({"key": "value"}),
         settings: None,
         scheduled_for: None,
@@ -141,7 +141,7 @@ fn test_activity_clone() {
     let activity2 = activity1.clone();
     assert_eq!(activity1.key, activity2.key);
     assert_eq!(activity1.worker, activity2.worker);
-    assert_eq!(activity1.name, activity2.name);
+    assert_eq!(activity1.activity_name, activity2.activity_name);
 }
 
 // ============================================================================
@@ -376,7 +376,7 @@ fn test_queued_activity_serialization() {
         workflow_id,
         activity_key: "act1".to_string(),
         worker: "builtin".to_string(),
-        name: "TestActivity".to_string(),
+        activity_name: "TestActivity".to_string(),
         parameters: json!({"input": "data"}),
         settings: None,
         retry_count: 2,
@@ -411,7 +411,7 @@ fn test_queued_activity_with_settings() {
         workflow_id,
         activity_key: "act1".to_string(),
         worker: "builtin".to_string(),
-        name: "TestActivity".to_string(),
+        activity_name: "TestActivity".to_string(),
         parameters: json!({}),
         settings: Some(settings),
         retry_count: 0,
@@ -433,7 +433,7 @@ fn test_queued_activity_clone() {
         workflow_id,
         activity_key: "act1".to_string(),
         worker: "ns".to_string(),
-        name: "Activity".to_string(),
+        activity_name: "Activity".to_string(),
         parameters: json!({}),
         settings: None,
         retry_count: 1,

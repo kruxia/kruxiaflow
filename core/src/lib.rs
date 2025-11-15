@@ -29,4 +29,5 @@ pub use workflow::{
     ActivityDefinition, ActivityRelationship, BackoffStrategy, RepositoryError, RetrySettings,
     StoredWorkflowDefinition, ValidationError, ValidationErrors, WorkflowDefinition,
     WorkflowDefinitionRepository, WorkflowSettings,
+    template::{TemplateContext, TemplateError, resolve_template, resolve_template_value},
 };
