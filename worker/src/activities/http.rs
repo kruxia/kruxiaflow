@@ -1,17 +1,23 @@
+use crate::registry::ActivityImpl;
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use reqwest::{Client, Method};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::Duration;
 
+// ============================================================================
+// HTTP Executor (low-level HTTP client)
+// ============================================================================
+
 /// HTTP activity executor
-pub struct HttpActivity {
+struct HttpExecutor {
     client: Client,
 }
 
-impl HttpActivity {
-    pub fn new() -> Self {
+impl HttpExecutor {
+    fn new() -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
@@ -24,7 +30,7 @@ impl HttpActivity {
     ///
     /// Returns a reqwest::Response with the body stream unconsumed.
     /// Use HttpResponse::from_response() to consume the stream as needed.
-    pub async fn execute(&self, params: HttpRequestParams) -> Result<reqwest::Response> {
+    async fn execute(&self, params: HttpRequestParams) -> Result<reqwest::Response> {
         // Build request
         let method = params
             .method
@@ -74,7 +80,7 @@ impl HttpActivity {
     }
 }
 
-impl Default for HttpActivity {
+impl Default for HttpExecutor {
     fn default() -> Self {
         Self::new()
     }
@@ -126,7 +132,7 @@ impl HttpResponse {
     ///
     /// This loads the entire response body into memory and parses as JSON.
     /// Use this only when you need the JSON data in workflow state.
-    pub async fn from_response_json(response: reqwest::Response) -> Result<Self> {
+    async fn from_response_json(response: reqwest::Response) -> Result<Self> {
         let status = response.status().as_u16();
         let success = response.status().is_success();
 
@@ -146,7 +152,7 @@ impl HttpResponse {
     ///
     /// This loads the entire response body into memory as a string.
     /// Use this only when you need the text data in workflow state.
-    pub async fn from_response_text(response: reqwest::Response) -> Result<Self> {
+    async fn from_response_text(response: reqwest::Response) -> Result<Self> {
         let status = response.status().as_u16();
         let success = response.status().is_success();
 
@@ -166,7 +172,7 @@ impl HttpResponse {
     ///
     /// Use this when you only need status/headers, not the body.
     /// Body stream is discarded without loading into memory.
-    pub async fn from_response_metadata(response: reqwest::Response) -> Result<Self> {
+    async fn from_response_metadata(response: reqwest::Response) -> Result<Self> {
         let status = response.status().as_u16();
         let success = response.status().is_success();
 
@@ -184,13 +190,104 @@ impl HttpResponse {
     // This will stream large responses directly to S3/object storage without loading into memory
 }
 
+// ============================================================================
+// HTTP Activity (ActivityImpl wrapper for built-in worker)
+// ============================================================================
+
+/// HTTP request activity (built-in worker)
+///
+/// Executes HTTP requests with configurable method, headers, body, etc.
+pub struct HttpRequestActivity {
+    executor: HttpExecutor,
+}
+
+impl HttpRequestActivity {
+    pub fn new() -> Self {
+        Self {
+            executor: HttpExecutor::new(),
+        }
+    }
+}
+
+impl Default for HttpRequestActivity {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl ActivityImpl for HttpRequestActivity {
+    async fn execute(&self, parameters: Value) -> Result<Value> {
+        tracing::debug!("Executing http_request activity with parameters: {:?}", parameters);
+
+        // Parse parameters from JSON
+        let params: HttpRequestParams = serde_json::from_value(parameters)
+            .context("Failed to parse HTTP request parameters")?;
+
+        // Execute HTTP request
+        let response = self.executor.execute(params).await?;
+
+        // Convert response to JSON based on content type
+        // For JSON responses, parse the body; for text, store as string
+        let http_response = if let Some(content_type) = response.headers().get("content-type") {
+            let content_type_str = content_type.to_str().unwrap_or("");
+            if content_type_str.contains("application/json") {
+                HttpResponse::from_response_json(response).await?
+            } else {
+                HttpResponse::from_response_text(response).await?
+            }
+        } else {
+            // No content-type, try JSON first, fall back to metadata only
+            let status = response.status();
+            match response.json::<Value>().await {
+                Ok(json_body) => HttpResponse {
+                    status: status.as_u16(),
+                    success: status.is_success(),
+                    body: Some(json_body),
+                },
+                Err(_) => {
+                    // If JSON parsing fails, we can't get the body again (stream consumed)
+                    // Return metadata only
+                    HttpResponse {
+                        status: status.as_u16(),
+                        success: status.is_success(),
+                        body: None,
+                    }
+                }
+            }
+        };
+
+        // Serialize HttpResponse to JSON for output
+        let output = json!({
+            "response": http_response
+        });
+
+        tracing::debug!("HTTP request completed with status: {}", http_response.status);
+
+        Ok(output)
+    }
+
+    fn name(&self) -> &str {
+        "http_request"
+    }
+
+    fn worker(&self) -> &str {
+        "builtin"
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    // Executor tests
     #[tokio::test]
-    async fn test_http_get_request() {
-        let activity = HttpActivity::new();
+    async fn test_http_executor_get_request() {
+        let executor = HttpExecutor::new();
 
         let params = HttpRequestParams {
             method: "GET".to_string(),
@@ -201,7 +298,7 @@ mod tests {
             timeout_seconds: None,
         };
 
-        let response = activity.execute(params).await.unwrap();
+        let response = executor.execute(params).await.unwrap();
         let http_response = HttpResponse::from_response_json(response).await.unwrap();
 
         assert_eq!(http_response.status, 200);
@@ -210,8 +307,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_http_post_request() {
-        let activity = HttpActivity::new();
+    async fn test_http_executor_post_request() {
+        let executor = HttpExecutor::new();
 
         let params = HttpRequestParams {
             method: "POST".to_string(),
@@ -228,7 +325,7 @@ mod tests {
             timeout_seconds: None,
         };
 
-        let response = activity.execute(params).await.unwrap();
+        let response = executor.execute(params).await.unwrap();
         let http_response = HttpResponse::from_response_json(response).await.unwrap();
 
         assert_eq!(http_response.status, 200);
@@ -238,7 +335,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_http_request_with_headers() {
-        let activity = HttpActivity::new();
+        let executor = HttpExecutor::new();
 
         let params = HttpRequestParams {
             method: "GET".to_string(),
@@ -252,7 +349,7 @@ mod tests {
             timeout_seconds: None,
         };
 
-        let response = activity.execute(params).await.unwrap();
+        let response = executor.execute(params).await.unwrap();
         let http_response = HttpResponse::from_response_json(response).await.unwrap();
 
         assert_eq!(http_response.status, 200);
@@ -267,7 +364,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_http_response_metadata_only() {
-        let activity = HttpActivity::new();
+        let executor = HttpExecutor::new();
 
         let params = HttpRequestParams {
             method: "GET".to_string(),
@@ -278,7 +375,7 @@ mod tests {
             timeout_seconds: None,
         };
 
-        let response = activity.execute(params).await.unwrap();
+        let response = executor.execute(params).await.unwrap();
         let http_response = HttpResponse::from_response_metadata(response)
             .await
             .unwrap();
@@ -291,7 +388,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_default_user_agent() {
-        let activity = HttpActivity::new();
+        let executor = HttpExecutor::new();
 
         let params = HttpRequestParams {
             method: "GET".to_string(),
@@ -302,7 +399,7 @@ mod tests {
             timeout_seconds: None,
         };
 
-        let response = activity.execute(params).await.unwrap();
+        let response = executor.execute(params).await.unwrap();
         let http_response = HttpResponse::from_response_json(response).await.unwrap();
 
         assert_eq!(http_response.status, 200);
@@ -316,7 +413,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_user_agent_can_be_overridden() {
-        let activity = HttpActivity::new();
+        let executor = HttpExecutor::new();
 
         let params = HttpRequestParams {
             method: "GET".to_string(),
@@ -330,7 +427,7 @@ mod tests {
             timeout_seconds: None,
         };
 
-        let response = activity.execute(params).await.unwrap();
+        let response = executor.execute(params).await.unwrap();
         let http_response = HttpResponse::from_response_json(response).await.unwrap();
 
         assert_eq!(http_response.status, 200);
@@ -340,5 +437,50 @@ mod tests {
         let headers = body["headers"].as_object().unwrap();
         let user_agent = headers.get("User-Agent").unwrap().as_str().unwrap();
         assert_eq!(user_agent, "CustomAgent/1.0");
+    }
+
+    // Activity wrapper tests
+    #[tokio::test]
+    async fn test_http_request_activity_get() {
+        let activity = HttpRequestActivity::new();
+
+        let params = json!({
+            "method": "GET",
+            "url": "https://httpbin.org/get",
+            "query": {
+                "test": "value"
+            }
+        });
+
+        let result = activity.execute(params).await.unwrap();
+
+        assert!(result.get("response").is_some());
+        let response = result.get("response").unwrap();
+        assert_eq!(response.get("status").unwrap(), 200);
+        assert_eq!(response.get("success").unwrap(), true);
+    }
+
+    #[tokio::test]
+    async fn test_http_request_activity_post() {
+        let activity = HttpRequestActivity::new();
+
+        let params = json!({
+            "method": "POST",
+            "url": "https://httpbin.org/post",
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "body": {
+                "test": "data",
+                "number": 42
+            }
+        });
+
+        let result = activity.execute(params).await.unwrap();
+
+        assert!(result.get("response").is_some());
+        let response = result.get("response").unwrap();
+        assert_eq!(response.get("status").unwrap(), 200);
+        assert_eq!(response.get("success").unwrap(), true);
     }
 }

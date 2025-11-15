@@ -175,21 +175,25 @@ activities:
 1. **YAML Support** - Added `serde_yaml` dependency and parsing/serialization methods
 2. **Template Engine** - Complete variable substitution system with type preservation
 3. **HTTP Activity** - Full-featured HTTP client with reqwest
-4. **Example Workflow** - Weather report pipeline demonstrating sequential execution
-5. **Test Coverage** - 14 new tests covering YAML parsing, templates, and HTTP activities
+4. **Example Workflows** - Weather report pipelines demonstrating sequential execution and activity chaining
+5. **Test Coverage** - 21 new tests covering YAML parsing (5), templates (10), and HTTP activities (6)
 
-**What's next (integration phase):**
-1. Create built-in worker that executes HTTP activities
-2. Integrate activity executor with orchestrator event flow
-3. Connect template engine to activity parameter resolution
-4. End-to-end workflow execution tests
-5. API endpoint for submitting YAML workflows
+**What's next (integration phase):** *(All completed for Example 1)*
+1. ✅ Create built-in worker that executes HTTP activities
+2. ✅ Integrate activity executor with orchestrator event flow
+3. ✅ Connect template engine to activity parameter resolution
+4. ✅ End-to-end workflow execution tests
+5. ✅ Unified API endpoint accepting both JSON and YAML workflows (JSON is valid YAML)
 
 **Files Created/Modified:**
 - `core/src/workflow/template.rs` - Template expression engine (new)
 - `core/src/workflow/definition.rs` - Added YAML parsing methods
 - `activity/src/http.rs` - HTTP activity executor (new)
+- `worker/src/activities/http.rs` - HTTP activity worker implementation (new)
+- `api/src/handlers/workflow_definitions.rs` - Modified to accept both JSON and YAML via unified endpoint
+- `api/tests/yaml_workflow_e2e_tests.rs` - End-to-end workflow test (new)
 - `examples/01-weather-report.yaml` - Example workflow (new)
+- `examples/01b-weather-report-dynamic.yaml` - Advanced sequential workflow with chaining (new)
 - `examples/README.md` - Examples documentation (new)
 - `core/tests/yaml_workflow_tests.rs` - YAML parsing tests (new)
 - Updated Cargo.toml files for dependencies
@@ -228,7 +232,7 @@ activities:
         - "{{INPUT.email}}"
     depends_on:
       - check_email:
-          condition: "{{check_email.valid}} == true"
+          condition: "{{check_email.valid == true}}"
 
   store_invalid_user:
     activity: postgres_query
@@ -240,7 +244,7 @@ activities:
         - "{{check_email.reason}}"
     depends_on:
       - check_email:
-          condition: "{{check_email.valid}} == false"
+          condition: "{{check_email.valid == false}}"
 
   send_notification:
     activity: http_request
@@ -253,9 +257,9 @@ activities:
         status: "{{check_email.valid}}"
     depends_on:
       - store_valid_user:
-          condition: "{{check_email.valid}} == true"
+          condition: "{{check_email.valid == true}}"
       - store_invalid_user:
-          condition: "{{check_email.valid}} != true"
+          condition: "{{check_email.valid != true}}"
 ```
 
 #### YAML Features Implemented
@@ -270,12 +274,12 @@ activities:
   - INSERT/UPDATE/DELETE: Returns affected row count and RETURNING clause values in outputs
 
 #### Implementation Tasks
-1. Conditional expression parser (boolean logic)
-2. Edge evaluation engine (check conditions before scheduling)
-3. Secret management (read from environment or config)
-4. PostgreSQL activity executor
+1. **Conditional edge evaluation** - MiniJinja template engine evaluates condition expressions to boolean values
+2. **Edge evaluation engine** - Check MiniJinja-evaluated conditions before scheduling dependent activities
+3. **Secret management** - Add SECRET context to MiniJinja template resolution
+4. **PostgreSQL activity executor**
    - SQL execution with parameterized queries
-   - Query with result parsing
+   - Query result parsing and output storage
 5. Branching logic in orchestrator
 6. End-to-end test: Workflow branches based on HTTP response
 
@@ -780,7 +784,7 @@ activities:
         limit_usd: 1.00
     depends_on:
       - evaluate_sufficiency:
-          condition: "{{evaluate_sufficiency.sufficient}} == true"
+          condition: "{{evaluate_sufficiency.sufficient == true}}"
 
   publish_success:
     activity: http_request
@@ -1029,7 +1033,7 @@ activities:
       - reservation_id
     depends_on:
       - validate_inventory:
-          condition: "{{validate_inventory.available}} == true"
+          condition: "{{validate_inventory.available == true}}"
 
   process_payment:
     activity: http_request
@@ -1171,7 +1175,7 @@ activities:
       delay_seconds: 300  # Wait 5 minutes after validation completes
     depends_on:
       - validate_reminder:
-          condition: "{{validate_reminder.validation_result.valid}} == true"
+          condition: "{{validate_reminder.validation_result.valid == true}}"
 
   # Step 3: Wait 1 hour before second reminder
   send_second_reminder:
