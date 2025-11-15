@@ -612,12 +612,43 @@ streamflow/
 - **I want** declarative control over activity behavior
 - **So that** I don't need custom code for common patterns
 - **Acceptance Criteria**:
-  - Timeout configuration per activity
-  - Retry policy: max_attempts, backoff strategy (exponential)
+  - **Timeout configuration**: `timeout_seconds: 300` sets activity execution timeout
+  - **Retry policy**: Automatic retry with exponential backoff
+    - `max_attempts: 5` - Maximum retry attempts (default: 1, no retries)
+    - `strategy: exponential` or `fixed` - Backoff strategy
+    - `base_seconds: 2` - Base delay between retries
+    - `factor: 2` - Exponential multiplier (for exponential strategy)
+    - `max_seconds: 300` - Maximum backoff delay cap
+  - **Retry logic location**: Orchestrator event handlers (NOT database or workers)
+    - Orchestrator consumes `ActivityFailed` events
+    - Orchestrator checks retry settings from workflow definition
+    - Orchestrator calculates backoff delay: `base_seconds * factor^(attempt-1)` capped at `max_seconds`
+    - Orchestrator decides: retry (schedule with delay) or fail permanently
+    - Orchestrator publishes new `ActivityScheduled` event with `scheduled_for` = NOW() + backoff
+  - **Retry state tracking**:
+    - Current attempt count stored in `workflows.state_data` JSONB
+    - Attempt history captured in `workflow_events` table (immutable event log)
   - Budget limits per activity: `budget.limit: 2.00` (USD)
   - Budget action on exceeded: `abort` or `continue`
   - Result caching: `cache: true`, `cache_ttl: 3600`
   - Non-deterministic flag: `deterministic: false` for LLM calls
+- **Example**:
+  ```yaml
+  activities:
+    - key: process_payment
+      worker: payments
+      name: charge_card
+      settings:
+        timeout_seconds: 30
+        retry:
+          max_attempts: 5
+          strategy: exponential
+          base_seconds: 2
+          factor: 2
+          max_seconds: 300
+  ```
+- **Design Decision**: Retry logic implemented in orchestrator (not queue or workers) for clean separation of concerns and event-driven architecture
+- **Source**: Absurd analysis Section 3 - Automatic Retry with Exponential Backoff
 
 **US-3.6: YAML Validation and CLI Tooling**
 - **As** a data engineer migrating from Airflow
@@ -647,11 +678,77 @@ streamflow/
     - Show activity dependencies clearly
     - Highlight conditional edges and loops
   - **Activity Type Registry**:
-    - Built-in activity type definitions with schemas
-    - Schema defines parameters, outputs, and validation rules for each activity
-    - Registry used by validation to check activity correctness
-- **Implementation Duration**: 4-5 days
+
+**US-3.7: Activity Scheduling and Delays**
+- **As** a workflow developer
+- **I want** to schedule activities for future execution or delay them by a specified duration
+- **So that** I can implement rate limiting, scheduled reports, delayed notifications, and time-based workflows
+- **Acceptance Criteria**:
+  - **Relative delays**: `settings.delay_seconds` delays activity execution by specified seconds after it becomes ready
+  - **Absolute scheduling**: `settings.scheduled_at` schedules activity for specific ISO 8601 timestamp
+  - **Template support**: `scheduled_at` supports template expressions like `{{INPUT.deadline}}`
+  - **Validation**: Cannot specify both `delay_seconds` and `scheduled_at` (mutually exclusive)
+  - **Infrastructure**: Leverages existing `activity_queue.scheduled_for` column (no schema changes)
+  - **Worker behavior**: Workers only claim activities where `scheduled_for <= NOW()`
+  - **Use cases**:
+    - Rate limiting: Delay between API calls to respect rate limits
+    - Scheduled reports: Run daily/weekly at specific time
+    - Delayed notifications: Send reminder 1 hour after event
+    - Time-based workflows: Execute activities at predetermined times
+- **Example**:
+  ```yaml
+  activities:
+    send_first_reminder:
+      activity: http_request
+      settings:
+        delay_seconds: 300  # Wait 5 minutes
+
+    send_daily_report:
+      activity: generate_report
+      settings:
+        scheduled_at: "{{INPUT.report_time}}"  # ISO timestamp
+  ```
+- **Non-Goal (Post-MVP)**: Event-driven suspension (waiting for external events) - see absurd analysis Phase 2
+- **Implementation Duration**: 2-3 days
 - **Dependencies**: Requires workflow parser, activity executors from Slices 1-7
+
+**US-3.8: Database Cleanup with TTL**
+- **As** a platform operator
+- **I want** automatic cleanup of completed workflows to prevent unbounded database growth
+- **So that** the system remains performant and storage costs don't grow indefinitely
+- **Acceptance Criteria**:
+  - **Tables eligible for cleanup**:
+    - ✅ `workflows` table - completed/failed workflows after retention period
+    - ✅ `activity_queue` table - completed activities after retention period
+    - ❌ `workflow_events` table - **NEVER delete** (audit trail, compliance requirement)
+  - **Configuration** (environment variables):
+    - `STREAMFLOW_CLEANUP_ENABLED=true` - Enable/disable cleanup worker
+    - `STREAMFLOW_CLEANUP_WORKFLOW_TTL_DAYS=7` - Delete completed workflows after N days
+    - `STREAMFLOW_CLEANUP_INTERVAL_HOURS=1` - Run cleanup every N hours
+    - `STREAMFLOW_CLEANUP_BATCH_SIZE=1000` - Process N records per batch
+  - **Cleanup worker implementation**:
+    - Background tokio task runs on configurable interval
+    - Batch deletion to prevent long transactions
+    - Respects foreign key dependencies (delete in correct order)
+    - Stored procedure: `cleanup_workflows(ttl_days, batch_size) RETURNS INTEGER`
+    - Stored procedure: `cleanup_expired_artifacts() RETURNS INTEGER`
+  - **Cleanup behavior**:
+    - Find workflows where `status IN ('Completed', 'Failed', 'Cancelled')`
+    - AND `updated_at < NOW() - ttl_days`
+    - Delete related activity_queue records first
+    - Delete workflow artifacts (including Large Objects)
+    - Delete workflow record
+    - DO NOT delete workflow_events (preserve audit trail)
+  - **Observability**:
+    - Log cleanup operations with count of deleted records
+    - Metrics: `streamflow_cleanup_workflows_deleted_total`
+    - Metrics: `streamflow_cleanup_last_run_timestamp`
+- **Design Decision**: `workflow_events` must never be deleted for auditability and compliance
+  - Event history provides complete audit trail of all workflow executions
+  - Post-MVP: Use table partitioning to manage query performance (see post-mvp.md Story 2.3)
+- **Source**: Absurd analysis Section 5 - Cleanup Strategy with TTL
+- **Implementation Duration**: 2-3 days
+- **Dependencies**: Requires database schema, workflow lifecycle management
 
 ---
 
