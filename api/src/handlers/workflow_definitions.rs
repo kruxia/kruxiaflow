@@ -10,10 +10,10 @@ use serde::{Deserialize, Serialize};
 use streamflow_core::workflow::{RepositoryError, WorkflowDefinitionRepository};
 use utoipa::ToSchema;
 
-/// Deploy workflow definition request
+/// Deploy workflow definition request (accepts both JSON and YAML)
 ///
 /// Note: Version is auto-generated at deployment time (timestamp-based).
-/// Users only provide the workflow name and definition.
+/// Users provide the workflow as either JSON or YAML (JSON is valid YAML).
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct DeployWorkflowDefinitionRequest {
     /// Workflow definition (version auto-generated)
@@ -88,13 +88,18 @@ pub struct GetWorkflowDefinitionQuery {
 ///
 /// Endpoint: POST /api/v1/workflow_definitions
 ///
-/// Validates and stores a workflow definition. The version is automatically
-/// generated from the deployment timestamp (format: YYYYmmdd.HHMMSS.uuuuuu).
+/// Accepts workflow definitions in either JSON or YAML format (JSON is valid YAML).
+/// The version is automatically generated from the deployment timestamp.
 ///
 /// Validation includes:
-/// - Syntax validation (valid YAML structure)
+/// - Syntax validation (valid YAML/JSON structure)
 /// - Semantic validation (activity references, no cycles)
 /// - Graph structure validation (no cycles)
+///
+/// Content-Type headers:
+/// - application/json - JSON format
+/// - text/yaml or application/yaml - YAML format
+/// - If not specified, parses as YAML (handles both)
 ///
 /// Returns 409 Conflict if a definition with the same name and timestamp already exists
 /// (virtually impossible due to microsecond precision).
@@ -102,7 +107,7 @@ pub struct GetWorkflowDefinitionQuery {
     post,
     path = "/api/v1/workflow_definitions",
     tag = "Workflow Definitions",
-    request_body = DeployWorkflowDefinitionRequest,
+    request_body(content = String, description = "Workflow definition in JSON or YAML format", content_type = "application/json"),
     responses(
         (status = 201, description = "Workflow definition deployed successfully", body = DeployWorkflowDefinitionResponse),
         (status = 401, description = "Unauthorized"),
@@ -116,17 +121,29 @@ pub struct GetWorkflowDefinitionQuery {
 pub async fn deploy_workflow_definition(
     repo: WorkflowDefinitionRepository,
     Extension(claims): Extension<ValidatedClaims>,
-    Json(request): Json<DeployWorkflowDefinitionRequest>,
+    body: String,
 ) -> ApiResult<(StatusCode, Json<DeployWorkflowDefinitionResponse>)> {
     tracing::info!(
-        workflow_name = %request.definition.name,
         user = %claims.subject(),
-        "Deploying workflow definition (version will be auto-generated)"
+        "Deploying workflow definition from YAML/JSON (version will be auto-generated)"
+    );
+
+    // Parse as YAML (this handles both JSON and YAML since JSON is valid YAML)
+    let definition = streamflow_core::workflow::WorkflowDefinition::from_yaml(&body)
+        .map_err(|e| {
+            tracing::warn!("Workflow parsing/validation failed: {:?}", e);
+            AppError::ValidationError(ValidationErrors::from_workflow_validation(e))
+        })?;
+
+    tracing::info!(
+        workflow_name = %definition.name,
+        activity_count = definition.activities.len(),
+        "Workflow parsed successfully, storing definition"
     );
 
     // Store definition (includes validation)
     let stored = repo
-        .store(request.definition.into())
+        .store(definition)
         .await
         .map_err(|e| match e {
             RepositoryError::ValidationError(ve) => {

@@ -10,7 +10,7 @@ use streamflow_core::{
     QueueConfig, orchestrator::OrchestratorError, run_orchestrator,
 };
 use streamflow_oauth::{AuthConfig, PostgresAuthService};
-use streamflow_worker::{ActivityRegistry, WorkerConfig, WorkerManager};
+use streamflow_worker::{WorkerConfig, WorkerManager};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -263,13 +263,8 @@ async fn spawn_workers(
         "Starting workers"
     );
 
-    // Create activity registry with built-in activities
-    let mut registry = ActivityRegistry::new();
-    registry.register(Arc::new(streamflow_worker::activities::EchoActivity));
-
-    // TODO: Register more built-in activities here
-    // registry.register(Arc::new(HttpRequestActivity));
-    // registry.register(Arc::new(LlmCompleteActivity));
+    // Create activity registry with all built-in activities pre-registered
+    let registry = streamflow_worker::register_builtin_activities();
 
     let config = WorkerConfig {
         api_url: api_url.clone(),
