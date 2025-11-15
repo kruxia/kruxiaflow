@@ -42,7 +42,7 @@ async fn test_store_and_get_workflow_definition() {
         activities: vec![ActivityDefinition {
             key: "activity1".to_string(),
             worker: "test".to_string(),
-            name: Some("Test Activity".to_string()),
+            activity_name: Some("Test Activity".to_string()),
             parameters: None,
             preceding: None,
             following: None,
@@ -84,7 +84,7 @@ async fn test_get_latest_workflow_definition() {
         activities: vec![ActivityDefinition {
             key: "activity1".to_string(),
             worker: "test".to_string(),
-            name: None,
+            activity_name: None,
             parameters: None,
             preceding: None,
             following: None,
@@ -98,7 +98,7 @@ async fn test_get_latest_workflow_definition() {
             ActivityDefinition {
                 key: "activity1".to_string(),
                 worker: "test".to_string(),
-                name: None,
+                activity_name: None,
                 parameters: None,
                 preceding: None,
                 following: None,
@@ -107,7 +107,7 @@ async fn test_get_latest_workflow_definition() {
             ActivityDefinition {
                 key: "activity2".to_string(),
                 worker: "test".to_string(),
-                name: None,
+                activity_name: None,
                 parameters: None,
                 preceding: None,
                 following: None,
@@ -149,7 +149,7 @@ async fn test_list_workflow_definitions() {
         activities: vec![ActivityDefinition {
             key: "activity1".to_string(),
             worker: "test".to_string(),
-            name: None,
+            activity_name: None,
             parameters: None,
             preceding: None,
             following: None,
@@ -162,7 +162,7 @@ async fn test_list_workflow_definitions() {
         activities: vec![ActivityDefinition {
             key: "activity1".to_string(),
             worker: "test".to_string(),
-            name: None,
+            activity_name: None,
             parameters: None,
             preceding: None,
             following: None,
@@ -239,7 +239,7 @@ async fn test_workflow_definition_with_dependencies() {
             ActivityDefinition {
                 key: "step1".to_string(),
                 worker: "test".to_string(),
-                name: None,
+                activity_name: None,
                 parameters: None,
                 preceding: None,
                 following: Some(vec![ActivityRelationship {
@@ -251,7 +251,7 @@ async fn test_workflow_definition_with_dependencies() {
             ActivityDefinition {
                 key: "step2".to_string(),
                 worker: "test".to_string(),
-                name: None,
+                activity_name: None,
                 parameters: None,
                 preceding: Some(vec![ActivityRelationship {
                     activity_key: "step1".to_string(),

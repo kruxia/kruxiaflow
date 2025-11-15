@@ -2,6 +2,7 @@ pub mod definition;
 pub mod query_service;
 pub mod repository;
 pub mod service;
+pub mod template;
 
 pub use definition::{
     ActivityDefinition, ActivityRelationship, ActivitySettings, BackoffStrategy, RetrySettings,

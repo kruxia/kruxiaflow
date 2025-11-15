@@ -115,7 +115,7 @@ impl WorkerPoller {
             activity_id = %activity.activity_id,
             activity_key = %activity.activity_key,
             worker = %activity.worker,
-            name = %activity.name
+            activity_name = %activity.activity_name
         )
     ))]
     async fn execute_activity(&self, activity: PendingActivity) {
@@ -142,7 +142,7 @@ impl WorkerPoller {
             self.registry
                 .execute(
                     &activity.worker,
-                    &activity.name,
+                    &activity.activity_name,
                     activity.parameters,
                     timeout,
                 )
@@ -389,7 +389,7 @@ mod tests {
             workflow_id: Uuid::now_v7(),
             activity_key: "test_key".to_string(),
             worker: "test".to_string(),
-            name: "success".to_string(),
+            activity_name: "success".to_string(),
             parameters: json!({"input": "test"}),
             settings: None,
             timeout_seconds: Some(10), // Custom timeout overrides config
@@ -427,7 +427,7 @@ mod tests {
             workflow_id: Uuid::now_v7(),
             activity_key: "test_key".to_string(),
             worker: "test".to_string(),
-            name: "success".to_string(),
+            activity_name: "success".to_string(),
             parameters: json!({"input": "test"}),
             settings: None,
             timeout_seconds: None, // Use default timeout

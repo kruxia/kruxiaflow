@@ -51,13 +51,13 @@ async fn schedule_test_activity(
     workflow_id: Uuid,
     activity_key: &str,
     worker: &str,
-    name: &str,
+    activity_name: &str,
 ) {
     let queue = PostgresQueue::new(pool.clone(), QueueConfig::default());
     let activity = Activity {
         key: activity_key.to_string(),
         worker: worker.to_string(),
-        name: name.to_string(),
+        activity_name: activity_name.to_string(),
         parameters: json!({"test": "data"}),
         settings: None,
         scheduled_for: None,

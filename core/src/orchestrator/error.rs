@@ -31,6 +31,9 @@ pub enum OrchestratorError {
 
     #[error("Invalid condition expression: {0}")]
     InvalidCondition(String),
+
+    #[error("Template resolution failed: {0}")]
+    TemplateFailed(String),
 }
 
 pub type Result<T> = std::result::Result<T, OrchestratorError>;

@@ -1,0 +1,23 @@
+name: weather_report
+activities:
+  - key: fetch_weather
+    activity_name: http_request
+    parameters:
+      method: GET
+      url: "https://api.weather.gov/gridpoints/LOT/76,73/forecast"
+    outputs:
+      - response
+
+  - key: send_notification
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.webhook_url}}"
+      headers:
+        Content-Type: "application/json"
+      body:
+        temperature: "{{fetch_weather.response.json.properties.periods[0].temperature}}"
+        conditions: "{{fetch_weather.response.json.properties.periods[0].shortForecast}}"
+        workflow_id: "{{WORKFLOW.id}}"
+    depends_on:
+      - fetch_weather

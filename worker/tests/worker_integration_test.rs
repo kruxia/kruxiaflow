@@ -100,7 +100,7 @@ async fn schedule_test_activities(pool: &PgPool, workflow_id: Uuid, count: usize
         .map(|i| Activity {
             key: format!("activity_{}", i),
             worker: "builtin".to_string(),
-            name: "echo".to_string(),
+            activity_name: "echo".to_string(),
             parameters: json!({"test": format!("value_{}", i)}),
             settings: None,
             scheduled_for: None,

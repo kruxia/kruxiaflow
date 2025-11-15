@@ -99,7 +99,7 @@ async fn schedule_test_activities(pool: &PgPool, workflow_id: Uuid, count: usize
         .map(|i| Activity {
             key: format!("activity_{}", i),
             worker: "payments".to_string(),
-            name: "authorize".to_string(),
+            activity_name: "authorize".to_string(),
             parameters: json!({"amount": 100.0}),
             settings: None,
             scheduled_for: None,

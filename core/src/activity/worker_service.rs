@@ -36,7 +36,7 @@ pub struct PendingActivityRecord {
     pub workflow_id: Uuid,
     pub activity_key: String,
     pub worker: String,
-    pub name: String,
+    pub activity_name: String,
     pub parameters: Value,
     pub settings: Option<Value>,
 }
@@ -48,7 +48,7 @@ impl From<QueuedActivity> for PendingActivityRecord {
             workflow_id: qa.workflow_id,
             activity_key: qa.activity_key,
             worker: qa.worker,
-            name: qa.name,
+            activity_name: qa.activity_name,
             parameters: qa.parameters,
             settings: qa.settings.map(|s| serde_json::to_value(s).unwrap()),
         }

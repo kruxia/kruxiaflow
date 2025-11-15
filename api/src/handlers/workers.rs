@@ -88,7 +88,7 @@ pub struct PendingActivity {
 
     /// Activity name
     #[schema(example = "http_request")]
-    pub name: String,
+    pub activity_name: String,
 
     /// Activity input parameters
     #[schema(example = json!({"card_token": "tok_123", "amount": 100.00}))]
@@ -354,7 +354,7 @@ pub async fn poll_activities(
                     workflow_id: a.workflow_id,
                     activity_key: a.activity_key,
                     worker: a.worker,
-                    name: a.name,
+                    activity_name: a.activity_name,
                     parameters: a.parameters,
                     settings: a.settings,
                     timeout_seconds,

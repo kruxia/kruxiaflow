@@ -50,7 +50,7 @@ async fn test_idempotent_scheduling() {
     let activity = Activity {
         key: "test_activity".to_string(),
         worker: "test".to_string(),
-        name: "test_task".to_string(),
+        activity_name: "test_task".to_string(),
         parameters: json!({"key": "value"}),
         settings: None,
         scheduled_for: None,
@@ -95,7 +95,7 @@ async fn test_concurrent_claiming() {
         .map(|i| Activity {
             key: format!("activity_{}", i),
             worker: "test".to_string(),
-            name: "test_task".to_string(),
+            activity_name: "test_task".to_string(),
             parameters: json!({"index": i}),
             settings: None,
             scheduled_for: None,
@@ -166,7 +166,7 @@ async fn test_stale_activity_recovery() {
     let activity = Activity {
         key: "test_activity".to_string(),
         worker: "test".to_string(),
-        name: "test_task".to_string(),
+        activity_name: "test_task".to_string(),
         parameters: json!({"key": "value"}),
         settings: Some(ActivitySettings {
             timeout: Some(TimeoutConfig {
@@ -236,7 +236,7 @@ async fn test_heartbeat_conflict_detection() {
     let activity = Activity {
         key: "test_activity".to_string(),
         worker: "test".to_string(),
-        name: "test_task".to_string(),
+        activity_name: "test_task".to_string(),
         parameters: json!({"key": "value"}),
         settings: Some(ActivitySettings {
             timeout: Some(TimeoutConfig {
@@ -310,7 +310,7 @@ async fn test_max_retries_exhaustion() {
     let activity = Activity {
         key: "test_activity".to_string(),
         worker: "test".to_string(),
-        name: "test_task".to_string(),
+        activity_name: "test_task".to_string(),
         parameters: json!({"key": "value"}),
         settings: Some(ActivitySettings {
             timeout: Some(TimeoutConfig {
@@ -421,7 +421,7 @@ async fn test_completion_idempotency() {
     let activity = Activity {
         key: "test_activity".to_string(),
         worker: "test".to_string(),
-        name: "test_task".to_string(),
+        activity_name: "test_task".to_string(),
         parameters: json!({"key": "value"}),
         settings: None,
         scheduled_for: None,
@@ -492,7 +492,7 @@ async fn test_sequential_ordering() {
     let activity1 = Activity {
         key: "step1".to_string(),
         worker: "test".to_string(),
-        name: "test_task".to_string(),
+        activity_name: "test_task".to_string(),
         parameters: json!({"step": 1}),
         settings: None,
         scheduled_for: None,
@@ -531,7 +531,7 @@ async fn test_sequential_ordering() {
     let activity2 = Activity {
         key: "step2".to_string(),
         worker: "test".to_string(),
-        name: "test_task".to_string(),
+        activity_name: "test_task".to_string(),
         parameters: json!({"step": 2}),
         settings: None,
         scheduled_for: None,
@@ -567,7 +567,7 @@ async fn test_parallel_execution() {
         .map(|i| Activity {
             key: format!("parallel_{}", i),
             worker: "test".to_string(),
-            name: "test_task".to_string(),
+            activity_name: "test_task".to_string(),
             parameters: json!({"index": i}),
             settings: None,
             scheduled_for: None,

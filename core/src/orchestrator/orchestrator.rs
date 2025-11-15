@@ -10,7 +10,9 @@ use crate::events::{
     EventSource, NewWorkflowEvent, WorkflowEvent, WorkflowEventType, WorkflowStatus,
 };
 use crate::queue::{Activity, ActivityQueue};
+use crate::workflow::template::{TemplateContext, resolve_template_value};
 use serde_json::json;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -119,6 +121,49 @@ pub async fn run_orchestrator(
         // This caps polling rate at ~1000/sec (with 1ms min) even under heavy load
         tokio::time::sleep(backoff.current()).await;
     }
+}
+
+/// Build TemplateContext from WorkflowState for resolving template expressions
+fn build_template_context(
+    state: &super::workflow_state::WorkflowState,
+    workflow_id: uuid::Uuid,
+) -> TemplateContext {
+    let mut context = TemplateContext::new();
+
+    // Add workflow inputs from state_data
+    if let serde_json::Value::Object(state_obj) = &state.state_data {
+        let inputs: HashMap<String, serde_json::Value> = state_obj
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        context = context.with_inputs(inputs);
+    }
+
+    // Add activity outputs
+    for (activity_key, activity_state) in &state.activities {
+        if let Some(outputs) = &activity_state.outputs {
+            // Parse outputs into a HashMap
+            if let serde_json::Value::Object(outputs_obj) = outputs {
+                let outputs_map: HashMap<String, serde_json::Value> = outputs_obj
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                context.add_activity_output(activity_key.clone(), outputs_map);
+            }
+        }
+    }
+
+    // Add workflow-level variables
+    context.workflow.insert(
+        "id".to_string(),
+        serde_json::Value::String(workflow_id.to_string()),
+    );
+    context.workflow.insert(
+        "status".to_string(),
+        serde_json::Value::String(state.status.to_string()),
+    );
+
+    context
 }
 
 /// Process a single workflow event
@@ -296,17 +341,38 @@ pub async fn process_workflow_event(
         {
             let _enter = schedule_span.enter();
 
-            let activities_to_schedule: Vec<Activity> = ready_activities
-                .iter()
-                .map(|a| Activity {
+            // Build template context for resolving parameters
+            let context_span = profile_span!("build_template_context");
+            let template_context = {
+                let _enter = context_span.enter();
+                build_template_context(&state, event.workflow_id)
+            };
+
+            // Resolve templates in activity parameters
+            let mut activities_to_schedule = Vec::new();
+            for a in &ready_activities {
+                // Resolve template expressions in parameters
+                let resolved_params = match resolve_template_value(&a.parameters, &template_context)
+                {
+                    Ok(resolved) => resolved,
+                    Err(e) => {
+                        tracing::error!("Template resolution failed for activity {}: {}", a.key, e);
+                        return Err(super::OrchestratorError::TemplateFailed(format!(
+                            "Failed to resolve templates in activity {}: {}",
+                            a.key, e
+                        )));
+                    }
+                };
+
+                activities_to_schedule.push(Activity {
                     key: a.key.clone(),
                     worker: a.worker.clone(),
-                    name: a.name.clone(),
-                    parameters: a.parameters.clone(),
+                    activity_name: a.activity_name.clone(),
+                    parameters: resolved_params,
                     settings: a.settings.clone(),
                     scheduled_for: None, // Schedule immediately (delayed scheduling deferred post-MVP)
-                })
-                .collect();
+                });
+            }
 
             activity_queue
                 .schedule(event.workflow_id, activities_to_schedule)
@@ -336,7 +402,7 @@ pub async fn process_workflow_event(
                     activity_key: Some(activity.key.clone()),
                     payload: json!({
                         "worker": activity.worker,
-                        "name": activity.name,
+                        "activity_name": activity.activity_name,
                     }),
                 };
                 event_source.publish(scheduled_event).await?;

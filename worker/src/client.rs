@@ -304,7 +304,7 @@ pub struct PendingActivity {
     pub workflow_id: Uuid,
     pub activity_key: String,
     pub worker: String,
-    pub name: String,
+    pub activity_name: String,
     pub parameters: Value,
     pub settings: Option<Value>,
     pub timeout_seconds: Option<i64>,

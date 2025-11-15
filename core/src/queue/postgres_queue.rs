@@ -77,7 +77,7 @@ impl ActivityQueue for PostgresQueue {
                 workflow_id,
                 activity.key,
                 activity.worker,
-                activity.name,
+                activity.activity_name,
                 activity.parameters,
                 settings_json,
                 activity.scheduled_for,
@@ -145,7 +145,7 @@ impl ActivityQueue for PostgresQueue {
                 LIMIT 1
                 FOR UPDATE SKIP LOCKED
             )
-            RETURNING id, workflow_id, activity_key, worker, name,
+            RETURNING id, workflow_id, activity_key, worker, name as activity_name,
                       parameters, settings, retry_count, claimed_at
             "#,
             worker,
@@ -167,7 +167,7 @@ impl ActivityQueue for PostgresQueue {
                     workflow_id: row.workflow_id,
                     activity_key: row.activity_key,
                     worker: row.worker,
-                    name: row.name,
+                    activity_name: row.activity_name,
                     parameters: row.parameters,
                     settings,
                     retry_count: row.retry_count,
