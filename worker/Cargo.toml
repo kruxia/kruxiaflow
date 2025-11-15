@@ -12,7 +12,7 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 async-trait = { workspace = true }
 
-# HTTP client
+# HTTP client (for HTTP activity)
 reqwest = { version = "0.12", features = ["json"] }
 
 # UUID and time

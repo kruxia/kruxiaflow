@@ -2553,23 +2553,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "streamflow-activity"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "chrono",
- "reqwest",
- "serde",
- "serde_json",
- "streamflow-core",
- "thiserror 2.0.17",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "streamflow-api"
 version = "0.2.0"
 dependencies = [
@@ -2581,12 +2564,14 @@ dependencies = [
  "chrono",
  "futures",
  "jsonwebtoken",
+ "reqwest",
  "serde",
  "serde_json",
  "serial_test",
  "sqlx",
  "streamflow-core",
  "streamflow-oauth",
+ "streamflow-worker",
  "thiserror 2.0.17",
  "tokio",
  "tokio-util",
