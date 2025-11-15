@@ -498,45 +498,149 @@ STREAMFLOW_ORCHESTRATOR_STATE_CACHE_TTL=300     # 5 minutes idle expiration
 
 ---
 
-### Story 2.3: Event Table Partitioning
+### Story 2.3: Event Table Partitioning for Long-Term Audit Retention
 
-**Priority**: P2 (Medium - Improves query performance over time)
+**Priority**: P1 (High - Critical for production auditability at scale)
 
 **As** a platform engineer managing high event volume
 **I want** the workflow_events table to be partitioned by time
-**So that** queries remain fast as event volume grows
+**So that** queries remain fast while retaining complete audit history indefinitely
+
+**Background**:
+- **workflow_events must NEVER be deleted** - provides complete audit trail for compliance
+- Unlike workflows/activity_queue (cleaned up via TTL), events are kept forever
+- As event volume grows, query performance degrades without partitioning
+- Partitioning enables fast queries while preserving all historical data
 
 **Scope**:
-- Time-based partitioning (weekly or monthly)
-- Automated partition management (pg_partman or custom)
-- Partition creation ahead of time
-- Old partition archival/deletion
+- Time-based partitioning (monthly recommended for audit data)
+- Automated partition management (pg_partman or custom Rust tool)
+- Partition creation ahead of time (auto-create next 3 months)
+- **NO partition deletion** - old partitions retained forever (audit requirement)
+- Partition archival to cold storage (optional - move old partitions to archive tablespace)
 - Index management per partition
-- Query optimization for partitioned tables
+- Query optimization for partitioned tables (partition pruning)
+- Monitoring partition sizes and query performance
 
-**Architecture Reference**: `docs/implementation/US-1.2-event-driven-scheduling.md` (Future Enhancements: Event Table Partitioning)
+**Architecture Reference**:
+- `docs/implementation/US-1.2-event-driven-scheduling.md` (Future Enhancements: Event Table Partitioning)
+- `docs/2025-11-14-analysis-absurd-orchestrator.md` Section 5 (Cleanup Strategy)
 
 **Benefits**:
-- Faster queries (partition pruning)
-- Easier archival (drop old partitions)
-- Better vacuum performance
-- Index maintenance scoped to partitions
+- **Faster queries** - Partition pruning limits scans to relevant time ranges
+- **Scalable audit retention** - Keep all events forever without performance degradation
+- **Better vacuum performance** - VACUUM scoped to recent partitions
+- **Index maintenance** - Smaller indexes per partition, faster rebuilds
+- **Optional cold storage** - Archive old partitions to cheaper storage
+- **Compliance ready** - Complete audit trail with efficient access
 
 **Implementation**:
 ```sql
-CREATE TABLE workflow_events (
+-- Convert workflow_events to partitioned table (requires downtime or migration)
+CREATE TABLE workflow_events_new (
     id UUID NOT NULL,
     workflow_id UUID NOT NULL,
     event_type TEXT NOT NULL,
     activity_key TEXT,
     payload JSONB NOT NULL,
-    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (id, timestamp)  -- Timestamp must be in primary key for partitioning
 ) PARTITION BY RANGE (timestamp);
 
--- Create partitions per week
-CREATE TABLE workflow_events_2025_w44 PARTITION OF workflow_events
-FOR VALUES FROM ('2025-10-28') TO ('2025-11-04');
+-- Create initial partitions (monthly)
+CREATE TABLE workflow_events_2025_11 PARTITION OF workflow_events_new
+FOR VALUES FROM ('2025-11-01') TO ('2025-12-01');
+
+CREATE TABLE workflow_events_2025_12 PARTITION OF workflow_events_new
+FOR VALUES FROM ('2025-12-01') TO ('2026-01-01');
+
+CREATE TABLE workflow_events_2026_01 PARTITION OF workflow_events_new
+FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
+
+-- Indexes on partitioned table (automatically created on each partition)
+CREATE INDEX idx_workflow_events_workflow_id
+ON workflow_events_new(workflow_id, timestamp DESC);
+
+CREATE INDEX idx_workflow_events_type
+ON workflow_events_new(event_type, timestamp DESC);
+
+-- Automated partition management (Rust background task)
+-- Creates new partitions 3 months in advance
+-- Monitors partition sizes and query performance
 ```
+
+**Partition Management Tool**:
+```rust
+// Background task to auto-create partitions
+pub async fn manage_event_partitions(pool: &PgPool) -> Result<()> {
+    let next_months = get_upcoming_months(3); // Next 3 months
+
+    for month in next_months {
+        let partition_name = format!("workflow_events_{}", month.format("%Y_%m"));
+        let start_date = month.format("%Y-%m-01");
+        let end_date = (month + Duration::days(32)).format("%Y-%m-01"); // Next month
+
+        // Create partition if doesn't exist
+        sqlx::query(&format!(
+            "CREATE TABLE IF NOT EXISTS {} PARTITION OF workflow_events
+             FOR VALUES FROM ('{}') TO ('{}')",
+            partition_name, start_date, end_date
+        ))
+        .execute(pool)
+        .await?;
+
+        info!("Ensured partition {} exists", partition_name);
+    }
+
+    Ok(())
+}
+```
+
+**Migration Strategy**:
+1. **Phase 1**: Enable partitioning on new deployment (before MVP launch)
+2. **Phase 2** (If converting existing table):
+   - Create new partitioned table with `_new` suffix
+   - Copy data in batches with time-based filtering
+   - Minimal downtime swap (rename tables atomically)
+   - Validate data integrity
+3. **Automation**: Deploy partition management background task
+4. **Monitoring**: Track partition sizes, query performance, disk usage
+
+**Query Performance**:
+```sql
+-- Query with partition pruning (fast - scans only November 2025 partition)
+SELECT * FROM workflow_events
+WHERE workflow_id = $1
+  AND timestamp >= '2025-11-01'
+  AND timestamp < '2025-12-01';
+
+-- Without partition pruning (slower - scans all partitions)
+SELECT * FROM workflow_events
+WHERE workflow_id = $1;  -- No timestamp filter
+```
+
+**Archival Strategy** (Optional):
+- Move partitions >1 year old to archive tablespace (cheaper storage)
+- Keep indexes on archive partitions (queries still work, just slower)
+- Never delete partitions (audit requirement)
+
+**Monitoring**:
+- Partition count (should grow monthly)
+- Partition sizes (MB per partition)
+- Query performance by time range (P95 latency)
+- Disk usage trend (should be linear growth)
+
+**Trade-offs**:
+- Migration complexity (converting existing table)
+- Timestamp must be in primary key (schema constraint)
+- Queries without timestamp filter slower (full table scan)
+- Storage grows indefinitely (mitigated by compression/archival)
+
+**Success Criteria**:
+- Queries with timestamp filter <100ms P95 (even with billions of events)
+- Partition creation automated (no manual intervention)
+- Complete audit trail preserved (zero data loss)
+- Disk usage predictable and linear
 
 ---
 
@@ -568,32 +672,131 @@ FOR VALUES FROM ('2025-10-28') TO ('2025-11-04');
 
 ### Story 2.5: Priority Queues
 
-**Priority**: P2 (Medium - Common requirement)
+**Priority**: P2 (Medium - Common requirement for production)
 
 **As** a workflow developer
 **I want** to assign priorities to activities
 **So that** critical workflows execute before background jobs
 
+**Background**:
+Currently, StreamFlow's activity queue processes activities in FIFO order (by `scheduled_for`). This means high-priority interactive workflows can be blocked behind low-priority batch jobs, causing SLA violations.
+
 **Scope**:
 - Add `priority` field to activity_queue table
+- Integer priority: 1 (highest) to 9 (lowest), default 5 (normal)
 - Index on (worker, name, priority DESC, scheduled_for ASC)
-- Update claim_next() to consider priority
-- Starvation prevention (age-based boost)
-- Priority inheritance (high-priority workflow → all activities high-priority)
+- Update claim_next() to order by priority first, then scheduled_for
+- Starvation prevention (age-based boost after threshold)
+- Priority configuration in YAML workflow definitions
+- Metrics: queue depth by priority level
 
 **Schema**:
 ```sql
-ALTER TABLE activity_queue ADD COLUMN priority INTEGER DEFAULT 0;
+ALTER TABLE activity_queue ADD COLUMN priority INTEGER NOT NULL DEFAULT 5;
 
+-- New index for priority-aware polling
 CREATE INDEX idx_queue_priority
 ON activity_queue(worker, name, priority DESC, scheduled_for ASC)
 WHERE status = 'pending';
+
+-- Drop old index (replaced by priority-aware version)
+DROP INDEX IF EXISTS idx_queue_polling;
+```
+
+**claim_next() Update**:
+```sql
+-- Updated query in claim_next() stored procedure
+SELECT id, workflow_id, activity_key, worker, activity_name, parameters, settings
+FROM activity_queue
+WHERE status = 'pending'
+  AND scheduled_for <= NOW()
+  AND worker = $1
+  AND activity_name = $2
+ORDER BY priority ASC,      -- Lower number = higher priority
+         scheduled_for ASC  -- FIFO within same priority
+LIMIT 1
+FOR UPDATE SKIP LOCKED;
+```
+
+**YAML Configuration** (Workflow Definition):
+```yaml
+activities:
+  # Critical real-time payment processing
+  - key: authorize_payment
+    worker: payments
+    name: charge_card
+    parameters:
+      card_token: "{{INPUT.card_token}}"
+      amount: "{{INPUT.amount}}"
+    settings:
+      priority: 1  # Highest priority - execute immediately
+      timeout_seconds: 30
+
+  # Normal priority notification
+  - key: send_confirmation
+    worker: notifications
+    name: send_email
+    parameters:
+      recipient: "{{INPUT.email}}"
+    settings:
+      priority: 5  # Normal priority (default)
+      timeout_seconds: 60
+
+  # Low priority batch report
+  - key: generate_analytics
+    worker: analytics
+    name: daily_summary
+    parameters:
+      date: "{{WORKFLOW.created_at}}"
+    settings:
+      priority: 9  # Lowest priority - runs when idle
+      timeout_seconds: 3600
+```
+
+**Starvation Prevention**:
+```rust
+// After activity sits in queue for threshold, boost priority
+// Prevents low-priority activities from starving indefinitely
+const STARVATION_THRESHOLD: Duration = Duration::from_secs(600); // 10 minutes
+const PRIORITY_BOOST: i32 = 2;  // Boost by 2 levels
+
+// In claim_next() logic
+if activity.scheduled_for + STARVATION_THRESHOLD < now() {
+    effective_priority = max(1, activity.priority - PRIORITY_BOOST);
+}
 ```
 
 **Benefits**:
-- SLA guarantees for critical workflows
-- Better resource utilization
-- Fairness with starvation prevention
+- ✅ SLA guarantees for critical workflows (payments, user-facing operations)
+- ✅ Batch jobs don't block interactive workflows
+- ✅ Better resource utilization (high-value work first)
+- ✅ Fairness with starvation prevention (age-based boost)
+- ✅ Simple integer priority (1-9 scale, easy to understand)
+- ✅ No need for separate queue tables (single table with priority column)
+- ✅ Metrics: Monitor queue depth by priority level
+
+**Trade-offs**:
+- Adds complexity to queue polling logic
+- Index size increases (priority column added)
+- Starvation prevention requires periodic boost calculation
+- Priority decisions require workflow design consideration
+
+**Testing**:
+- Unit test: Priority ordering in claim_next()
+- Unit test: Starvation prevention boost
+- Integration test: High-priority activities execute before low-priority
+- Load test: Verify no starvation under high load
+- Metrics test: Queue depth by priority tracked correctly
+
+**Success Criteria**:
+- ✅ Priority 1 activities execute within 1 second (P95) under normal load
+- ✅ No activity waits >10 minutes regardless of priority (starvation prevention)
+- ✅ Queue depth metrics show distribution by priority level
+- ✅ Workflow definitions can specify priority per activity
+- ✅ Default priority 5 applied when not specified
+
+**Architecture Reference**:
+- `docs/2025-11-14-analysis-absurd-orchestrator.md` Section 10 (Multiple Queue Support)
 
 ---
 
@@ -1275,6 +1478,189 @@ PostgreSQL
 
 ---
 
+### Story 5.8: Activity Timeout Detection and Auto-Recovery
+
+**Priority**: P1 (High - Production reliability)
+
+**As** a platform engineer running StreamFlow in production
+**I want** automatic detection and recovery from timed-out activities
+**So that** workflows don't hang forever when workers crash or become unresponsive
+
+**Background**:
+StreamFlow currently has heartbeat endpoints (`POST /api/v1/activities/{id}/heartbeat`) but no automatic timeout detection. When a worker crashes mid-execution or becomes unresponsive, the activity remains in "running" state indefinitely, causing workflow hangs.
+
+**Current State**:
+- ✅ Heartbeat endpoint exists for workers to extend timeouts
+- ❌ No background timeout detection process
+- ❌ No automatic failure/retry for timed-out activities
+- ✅ Timeout configuration per activity (`settings.timeout`)
+
+**Scope**:
+- Background timeout detector process
+- Automatic detection of expired activities (no heartbeat within timeout window)
+- Automatic failure + retry for timed-out activities
+- Configurable timeout per activity (via `settings.timeout_seconds`)
+- Configurable detection interval (default: 10 seconds)
+- Metrics: timeout detection count, recovery success rate
+
+**Implementation**:
+
+**Background Detector (Rust)**:
+```rust
+pub async fn run_timeout_detector(
+    pool: PgPool,
+    config: TimeoutConfig,
+    shutdown_token: CancellationToken,
+) {
+    let mut interval = tokio::time::interval(config.check_interval);
+
+    loop {
+        if shutdown_token.is_cancelled() {
+            break;
+        }
+
+        interval.tick().await;
+
+        match detect_and_fail_expired_activities(&pool).await {
+            Ok(count) if count > 0 => {
+                warn!("Detected and failed {} expired activities", count);
+            }
+            Err(e) => {
+                error!("Timeout detection failed: {}", e);
+            }
+            _ => {}
+        }
+    }
+}
+
+async fn detect_and_fail_expired_activities(pool: &PgPool) -> Result<i64> {
+    // Find activities where claimed_at + timeout < NOW() and no recent heartbeat
+    // Use claimed_at as the starting point, since that's when worker claimed it
+    let expired = sqlx::query!(
+        r#"
+        SELECT id, workflow_id, activity_key, claimed_by, timeout_seconds
+        FROM activity_queue
+        WHERE status = 'running'::activity_status
+          AND claimed_at + make_interval(secs => timeout_seconds) < NOW()
+        LIMIT 100
+        "#
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let count = expired.len() as i64;
+
+    // For each expired activity, fail it (triggers retry logic)
+    for activity in expired {
+        warn!(
+            activity_id = %activity.id,
+            workflow_id = %activity.workflow_id,
+            activity_key = %activity.activity_key,
+            claimed_by = ?activity.claimed_by,
+            timeout_seconds = activity.timeout_seconds,
+            "Activity timed out, failing for retry"
+        );
+
+        // Call activity_queue.fail() to trigger retry logic
+        // This will respect max_retries and retry_count
+        let _ = sqlx::query!(
+            r#"
+            UPDATE activity_queue
+            SET status = 'pending'::activity_status,
+                claimed_by = NULL,
+                claimed_at = NULL,
+                scheduled_for = NOW(),
+                retry_count = retry_count + 1
+            WHERE id = $1
+              AND retry_count < max_retries
+            "#,
+            activity.id
+        )
+        .execute(pool)
+        .await;
+
+        // If max retries exceeded, mark as failed permanently
+        let _ = sqlx::query!(
+            r#"
+            UPDATE activity_queue
+            SET status = 'failed'::activity_status,
+                completed_at = NOW()
+            WHERE id = $1
+              AND retry_count >= max_retries
+            "#,
+            activity.id
+        )
+        .execute(pool)
+        .await;
+
+        // Publish ActivityFailed event for orchestrator
+        // ... (event publishing logic)
+    }
+
+    Ok(count)
+}
+```
+
+**Configuration**:
+```bash
+STREAMFLOW_TIMEOUT_CHECK_INTERVAL_SECONDS=10  # How often to check for timeouts
+STREAMFLOW_DEFAULT_ACTIVITY_TIMEOUT_SECONDS=300  # Default timeout if not specified
+```
+
+**Activity Settings** (YAML):
+```yaml
+activities:
+  - key: long_running_task
+    worker: data
+    name: process_large_dataset
+    settings:
+      timeout_seconds: 3600  # 1 hour timeout
+      max_retries: 3         # Retry up to 3 times
+```
+
+**Heartbeat Usage** (Worker SDK):
+```rust
+// Worker extends timeout by calling heartbeat during long operations
+for chunk in large_dataset.chunks() {
+    process_chunk(chunk).await?;
+
+    // Extend timeout (resets claimed_at timestamp)
+    worker.heartbeat(activity_id).await?;
+}
+```
+
+**Benefits**:
+- ✅ Automatic recovery from worker crashes
+- ✅ Workflows don't hang indefinitely
+- ✅ No manual intervention needed
+- ✅ Respects retry logic (max_retries, exponential backoff)
+- ✅ Configurable timeouts per activity
+- ✅ Metrics for monitoring timeout frequency
+
+**Trade-offs**:
+- Background process adds overhead (minimal - runs every 10s)
+- False positives possible if detection interval > timeout (mitigated by heartbeats)
+- Workers must implement heartbeat for long-running activities
+
+**Testing**:
+- Unit test: Timeout detection logic
+- Integration test: Simulate worker crash mid-execution
+- Integration test: Verify heartbeat extends timeout
+- Load test: Verify detector handles high activity volume
+- Chaos test: Kill workers randomly, verify auto-recovery
+
+**Success Criteria**:
+- ✅ Activities time out within 2x detection interval of actual timeout
+- ✅ Timed-out activities retry automatically (respecting max_retries)
+- ✅ Heartbeats successfully extend timeouts
+- ✅ Metrics show timeout detection and recovery rates
+- ✅ No false positives under normal operation
+
+**Architecture Reference**:
+- `docs/2025-11-14-analysis-absurd-orchestrator.md` Section 8 (Timeout Detection with Heartbeats)
+
+---
+
 ## Epic 6: Advanced Workflow Features
 
 **Goal**: Enable sophisticated workflow patterns beyond basic sequential/parallel execution.
@@ -1484,32 +1870,262 @@ schedule:
 
 ### Story 6.6: Workflow Cancellation
 
-**Priority**: P2 (Medium - Error handling)
+**Priority**: P2 (Medium - Operational control)
 
 **As** a workflow operator
 **I want** to cancel a running workflow
 **So that** I can stop workflows that are stuck or no longer needed
 
+**Background**:
+Currently, workflows run to completion or fail. There's no way to abort a running workflow, which is problematic for:
+- Duplicate submissions (user retries)
+- Runaway workflows (infinite loops)
+- Cost control (expensive LLM workflows)
+- Testing/development (quick cleanup)
+
 **Scope**:
-- Cancel workflow API
-- Graceful cancellation (finish running activities)
-- Forced cancellation (immediate stop)
-- Cleanup of resources (artifacts, queue entries)
-- Cancellation events (publish to event stream)
-- Status: "cancelled" (terminal state)
-- Reason tracking (why cancelled)
+- Cancel workflow API endpoint
+- Graceful cancellation (let running activities finish)
+- Forced cancellation (immediate termination)
+- Cleanup of resources (artifacts, pending activities)
+- Cancellation events (publish to workflow_events)
+- Terminal status: "cancelled"
+- Reason tracking (audit trail)
+- No explicit cancellation checks in activities (use heartbeat mechanism)
 
 **API**:
-```bash
-POST /api/v1/workflows/{id}/cancel
-{"reason": "Duplicate submission", "force": false}
+
+**Endpoint**: `POST /api/v1/workflows/{id}/cancel`
+
+**Request**:
+```json
+{
+  "reason": "Duplicate submission detected",
+  "force": false  // true = immediate, false = graceful
+}
+```
+
+**Response**:
+```json
+{
+  "workflow_id": "abc-123",
+  "status": "cancelled",
+  "cancelled_at": "2025-11-15T10:30:00Z",
+  "reason": "Duplicate submission detected",
+  "activities_terminated": 3,
+  "activities_completed": 2
+}
+```
+
+**Implementation**:
+
+**Database Changes**:
+```sql
+-- Add cancelled_at timestamp
+ALTER TABLE workflows ADD COLUMN cancelled_at TIMESTAMPTZ;
+ALTER TABLE workflows ADD COLUMN cancellation_reason TEXT;
+
+-- Add cancelled status to workflow_status enum
+ALTER TYPE workflow_status ADD VALUE IF NOT EXISTS 'cancelled';
+```
+
+**Cancellation Logic** (Rust):
+```rust
+pub async fn cancel_workflow(
+    pool: &PgPool,
+    workflow_id: Uuid,
+    reason: String,
+    force: bool,
+) -> Result<CancellationResult> {
+    let mut tx = pool.begin().await?;
+
+    // Update workflow status
+    sqlx::query!(
+        r#"
+        UPDATE workflows
+        SET status = 'cancelled'::workflow_status,
+            cancelled_at = NOW(),
+            cancellation_reason = $2,
+            updated_at = NOW()
+        WHERE id = $1 AND status NOT IN ('completed'::workflow_status, 'failed'::workflow_status)
+        "#,
+        workflow_id,
+        reason
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    if force {
+        // Forced cancellation: Remove all pending activities immediately
+        let terminated = sqlx::query!(
+            r#"
+            DELETE FROM activity_queue
+            WHERE workflow_id = $1 AND status = 'pending'::activity_status
+            "#,
+            workflow_id
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+
+        // Mark running activities as cancelled (they'll be cleaned up when heartbeat fails)
+        sqlx::query!(
+            r#"
+            UPDATE activity_queue
+            SET status = 'failed'::activity_status,
+                completed_at = NOW()
+            WHERE workflow_id = $1 AND status = 'running'::activity_status
+            "#,
+            workflow_id
+        )
+        .execute(&mut *tx)
+        .await?;
+    } else {
+        // Graceful cancellation: Only remove pending activities
+        let terminated = sqlx::query!(
+            r#"
+            DELETE FROM activity_queue
+            WHERE workflow_id = $1 AND status = 'pending'::activity_status
+            "#,
+            workflow_id
+        )
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+
+        // Running activities continue until completion
+        // (no explicit cancellation checks needed)
+    }
+
+    // Publish WorkflowCancelled event
+    sqlx::query!(
+        r#"
+        INSERT INTO workflow_events (id, workflow_id, event_type, payload, timestamp)
+        VALUES ($1, $2, $3, $4, NOW())
+        "#,
+        Uuid::now_v7(),
+        workflow_id,
+        "WorkflowCancelled" as WorkflowEventType,
+        json!({"reason": reason, "force": force})
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(CancellationResult { ... })
+}
+```
+
+**Cancellation Detection** (Long-Running Activities):
+
+StreamFlow uses **heartbeat mechanism** instead of explicit cancellation checks:
+
+```rust
+// Worker SDK (simplified - NO explicit cancellation checks needed)
+impl Worker {
+    pub async fn execute_long_activity(&self, activity: Activity) -> Result<Output> {
+        // For long-running activities, send heartbeats
+        let heartbeat_interval = Duration::from_secs(30);
+        let mut heartbeat_ticker = tokio::time::interval(heartbeat_interval);
+
+        loop {
+            tokio::select! {
+                // Process work
+                result = process_chunk() => {
+                    if result.is_done() {
+                        return Ok(result.output);
+                    }
+                }
+
+                // Send heartbeat periodically
+                _ = heartbeat_ticker.tick() => {
+                    // Heartbeat endpoint will return 404 or error if workflow cancelled
+                    match self.heartbeat(activity.id).await {
+                        Ok(_) => continue,  // Workflow still active
+                        Err(HeartbeatError::WorkflowCancelled) => {
+                            return Err(Error::Cancelled);  // Graceful exit
+                        }
+                        Err(e) => return Err(e),
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+**Heartbeat Enhancement** (Detects Cancellation):
+```rust
+// Update heartbeat endpoint to check workflow cancellation
+pub async fn heartbeat_activity(
+    pool: &PgPool,
+    activity_id: Uuid,
+    worker_id: &str,
+) -> Result<HeartbeatResponse> {
+    // Check if workflow was cancelled
+    let workflow_status = sqlx::query_scalar!(
+        r#"
+        SELECT w.status AS "status: WorkflowStatus"
+        FROM workflows w
+        JOIN activity_queue a ON w.id = a.workflow_id
+        WHERE a.id = $1
+        "#,
+        activity_id
+    )
+    .fetch_one(pool)
+    .await?;
+
+    if workflow_status == WorkflowStatus::Cancelled {
+        return Err(HeartbeatError::WorkflowCancelled);
+    }
+
+    // Normal heartbeat logic
+    // ...
+}
 ```
 
 **Benefits**:
-- Clean up stuck workflows
-- Stop expensive workflows (cost control)
-- Handle duplicate submissions
-- Better operational control
+- ✅ Clean up stuck workflows (infinite loops, hung workers)
+- ✅ Stop expensive workflows (cost control for LLM workflows)
+- ✅ Handle duplicate submissions gracefully
+- ✅ Better operational control (UI cancel buttons)
+- ✅ **No explicit cancellation checks** - uses existing heartbeat mechanism
+- ✅ Short-running activities don't need changes (complete before cancellation matters)
+- ✅ Long-running activities detect cancellation via heartbeat errors
+
+**Design Decision - Why Not Explicit Cancellation Checks**:
+
+StreamFlow uses heartbeat mechanism instead of absurd's `ctx.isCancelled()` checks:
+
+1. **Heartbeats already exist** - Long-running activities already send heartbeats
+2. **Simpler worker SDKs** - No need for cancellation context passing
+3. **Sufficient for use case** - Cancellation within heartbeat interval (30s) is acceptable
+4. **Short activities don't care** - Activities that run <30s complete before cancellation matters
+5. **Graceful exit** - Heartbeat failure triggers graceful activity exit
+
+**Trade-offs**:
+- Cancellation latency = heartbeat interval (30 seconds typical)
+- Short-running activities may complete before cancellation takes effect
+- Acceptable trade-off for simpler implementation
+
+**Testing**:
+- Unit test: Graceful vs forced cancellation logic
+- Integration test: Cancel workflow with pending activities
+- Integration test: Cancel workflow with running activities
+- Integration test: Heartbeat fails when workflow cancelled
+- E2E test: UI cancel button workflow
+
+**Success Criteria**:
+- ✅ Cancelled workflows transition to "cancelled" status
+- ✅ Pending activities removed from queue
+- ✅ Running activities detect cancellation within 2x heartbeat interval
+- ✅ Graceful cancellation completes running activities
+- ✅ Forced cancellation terminates immediately
+- ✅ WorkflowCancelled event published
+
+**Architecture Reference**:
+- `docs/2025-11-14-analysis-absurd-orchestrator.md` Section 11 (Cancellation Support)
 
 ---
 
@@ -1970,13 +2586,15 @@ Post-MVP features are prioritized using:
 - Epic 1: S3 artifact storage (1.8)
 - Epic 2: Compiled workflows (2.1)
 - Epic 2: Workflow state caching (2.2)
+- **Epic 2: Event table partitioning (2.3)** - Critical for audit compliance at scale
 - Epic 4: Python SDK (4.1)
 - Epic 5: Metrics and monitoring (5.1)
 - Epic 5: High availability setup (5.4)
+- **Epic 5: Activity timeout detection (5.8)** - Prevent hung workflows from worker crashes
 - Epic 6: Workflow versioning (6.1)
 - Epic 7: Read replicas (7.1)
 
-**Value**: Production-ready for high-scale deployments with external auth and high throughput.
+**Value**: Production-ready for high-scale deployments with external auth, high throughput, scalable audit retention, and automatic timeout recovery.
 
 ---
 
@@ -1994,8 +2612,9 @@ Post-MVP features are prioritized using:
 - Epic 5: Distributed tracing (5.2)
 - Epic 6: Subworkflows (6.2)
 - Epic 6: Workflow pause/resume (6.4)
+- **Epic 6: Workflow cancellation (6.6)** - Operational control via heartbeat mechanism
 
-**Value**: SaaS-ready with multi-tenancy, better DX tools, and advanced workflow features.
+**Value**: SaaS-ready with multi-tenancy, better DX tools, and advanced workflow features including operational controls (pause/resume/cancel).
 
 ---
 

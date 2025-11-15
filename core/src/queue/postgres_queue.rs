@@ -390,7 +390,12 @@ impl ActivityQueue for PostgresQueue {
         retryable: bool,
         result: ActivityResult,
     ) -> Result<bool> {
+        // Begin explicit transaction to hold FOR UPDATE lock throughout the operation
+        // This prevents race condition where lock is released between SELECT and UPDATE
+        let mut tx = self.pool.begin().await?;
+
         // Get activity details to determine if we should retry
+        // FOR UPDATE lock is held until transaction commits
         let activity = sqlx::query!(
             r#"
             SELECT id, workflow_id, activity_key, status AS "status: ActivityStatus",
@@ -401,7 +406,7 @@ impl ActivityQueue for PostgresQueue {
             "#,
             activity_id
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or(QueueError::ActivityNotFound(activity_id))?;
 
@@ -447,7 +452,7 @@ impl ActivityQueue for PostgresQueue {
                 "#,
                 activity_id
             )
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
 
             debug!(
@@ -468,7 +473,7 @@ impl ActivityQueue for PostgresQueue {
                 "#,
                 activity_id
             )
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
 
             warn!(
@@ -479,6 +484,9 @@ impl ActivityQueue for PostgresQueue {
                 "Activity permanently failed"
             );
         }
+
+        // Commit transaction - releases FOR UPDATE lock
+        tx.commit().await?;
 
         Ok(will_retry)
     }

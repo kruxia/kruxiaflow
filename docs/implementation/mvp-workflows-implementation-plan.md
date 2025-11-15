@@ -33,8 +33,9 @@ examples/
 ├── 05-research-assistant.yaml      # 5: Multi-model LLM
 ├── 06-faq-bot.yaml                 # 6: Semantic caching
 ├── 07-research-agent.yaml          # 7: Iterative workflows
-├── 09-data-pipeline.yaml           # 9: Advanced storage
-├── 10-order-processing.yaml        # 10: HTTP/DB advanced
+├── 08-data-pipeline.yaml           # 8: Advanced file storage
+├── 09-order-processing.yaml        # 9: HTTP/DB advanced
+├── 10-reminder-system.yaml         # 10: Scheduled/delayed activities
 └── README.md                       # Index of examples with descriptions
 ```
 
@@ -461,11 +462,13 @@ activities:
       - cost_usd
       - tokens_used
     settings:
+      timeout_seconds: 30
       retry:
         max_attempts: 3
-        backoff: exponential
-        initial_delay_ms: 1000
-      timeout_seconds: 30
+        strategy: exponential  # or "fixed"
+        base_seconds: 2
+        factor: 2
+        max_seconds: 60
       budget:
         limit_usd: 0.50
         on_exceeded: abort
@@ -499,7 +502,13 @@ activities:
 
 #### Implementation Tasks
 1. Activity settings parser (retry, timeout, budget)
-2. Retry engine with exponential backoff
+2. **Orchestrator retry logic** (NOT in queue or workers):
+   - Add `handle_activity_failed_event()` in orchestrator
+   - Check retry settings from workflow definition
+   - Calculate backoff delay: `base_seconds * factor^(attempt-1)` capped at `max_seconds`
+   - Track attempt count in `workflows.state_data` JSONB
+   - Publish `ActivityScheduled` event with `scheduled_for` = NOW() + backoff
+   - Record attempt history in `workflow_events` (immutable event log)
 3. Timeout enforcement (tokio timeout)
 4. Budget tracking service
    - Pre-execution budget check
@@ -511,6 +520,12 @@ activities:
    - Cost calculation (tokens × price per model)
 6. Cost storage in PostgreSQL
 7. End-to-end test: Verify retry on failure, budget enforcement
+   - Test: Activity fails, orchestrator schedules retry with backoff
+   - Test: Max attempts reached, activity fails permanently
+   - Test: Exponential backoff delay increases correctly
+   - Test: Fixed backoff delay remains constant
+
+**Design Note**: Retry logic implemented in orchestrator event handlers (NOT database stored procedures or workers) for clean separation of concerns and horizontal scalability. See absurd analysis Section 3.
 
 #### Success Criteria
 - ✅ LLM activity completes successfully with Anthropic
@@ -1118,6 +1133,310 @@ activities:
 
 ---
 
+### Example 10: Scheduled and Delayed Activities
+**Duration**: 2-3 days
+**Epic 3**: US-3.7 (Activity Scheduling and Delays)
+**Epic 5**: (No new activities - exposes existing infrastructure)
+**Status**: Not Started
+
+#### Example Workflow: Scheduled Reminder System
+```yaml
+name: reminder_system
+description: Send reminders at scheduled times with delays between steps
+
+activities:
+  # Step 1: Process initial request immediately
+  validate_reminder:
+    activity: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.validation_api}}"
+      body:
+        recipient: "{{INPUT.recipient}}"
+        message: "{{INPUT.message}}"
+    outputs:
+      - validation_result
+
+  # Step 2: Wait 5 minutes before sending first reminder
+  send_first_reminder:
+    activity: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.notification_webhook}}"
+      body:
+        recipient: "{{INPUT.recipient}}"
+        message: "Reminder: {{INPUT.message}}"
+        attempt: 1
+    settings:
+      delay_seconds: 300  # Wait 5 minutes after validation completes
+    depends_on:
+      - validate_reminder:
+          condition: "{{validate_reminder.validation_result.valid}} == true"
+
+  # Step 3: Wait 1 hour before second reminder
+  send_second_reminder:
+    activity: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.notification_webhook}}"
+      body:
+        recipient: "{{INPUT.recipient}}"
+        message: "Second reminder: {{INPUT.message}}"
+        attempt: 2
+    settings:
+      delay_seconds: 3600  # Wait 1 hour after first reminder
+    depends_on:
+      - send_first_reminder
+
+  # Step 4: Schedule final reminder for specific time
+  send_final_reminder:
+    activity: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.notification_webhook}}"
+      body:
+        recipient: "{{INPUT.recipient}}"
+        message: "Final reminder: {{INPUT.message}}"
+        attempt: 3
+    settings:
+      scheduled_at: "{{INPUT.deadline}}"  # Absolute ISO timestamp
+    depends_on:
+      - send_second_reminder
+```
+
+#### YAML Features Implemented
+
+**New Features (US-3.7)**:
+- ✅ `settings.delay_seconds` - Delay activity execution by specified seconds
+- ✅ `settings.scheduled_at` - Schedule activity for absolute timestamp (ISO 8601)
+- ✅ Template support in `scheduled_at` - Dynamic scheduling from workflow inputs
+
+**Existing Features Used**:
+- Sequential dependencies (`depends_on`)
+- Conditional execution
+- Template expressions (`{{INPUT.*}}`)
+- HTTP request activity
+
+#### Built-in Activities Implemented
+
+**No New Activities**:
+- Uses existing `http_request` activity
+- Scheduling is a YAML feature, not an activity feature
+
+#### Implementation Tasks
+
+**1. Update ActivitySettings Model**
+- Add `delay_seconds: Option<u64>` field
+- Add `scheduled_at: Option<String>` field (ISO 8601 timestamp)
+- Validation: `scheduled_at` must be valid ISO 8601 or template expression
+- Validation: Cannot specify both `delay_seconds` and `scheduled_at`
+
+**2. Update Orchestrator Activity Scheduling**
+- When scheduling activity, check `settings.delay_seconds`
+- If present, calculate `scheduled_for = NOW() + delay_seconds`
+- If `scheduled_at` present, parse timestamp and use as `scheduled_for`
+- Template evaluation: Resolve `{{INPUT.*}}` expressions before parsing timestamp
+
+**3. Database Changes**
+- ✅ **No changes needed** - `activity_queue.scheduled_for` already exists
+- ✅ Worker polling already filters by `scheduled_for <= NOW()`
+
+**4. Testing**
+- Unit tests for ActivitySettings validation
+- Integration test: Verify delayed activity doesn't execute early
+- Integration test: Verify scheduled activity executes at correct time
+- Integration test: Verify template resolution in `scheduled_at`
+- End-to-end test with example workflow
+
+**5. Documentation**
+- Update workflow definition language docs
+- Add scheduling examples to documentation
+- Document use cases: rate limiting, delayed retries, scheduled reports
+
+#### Success Criteria
+
+**Functional**:
+- ✅ Activities can be delayed by seconds (`delay_seconds`)
+- ✅ Activities can be scheduled for absolute time (`scheduled_at`)
+- ✅ Templates work in `scheduled_at` parameter
+- ✅ Workers don't claim activities before `scheduled_for` time
+- ✅ Validation prevents both `delay_seconds` and `scheduled_at` together
+- ✅ Example workflow `examples/10-reminder-system.yaml` runs successfully
+
+**Non-Functional**:
+- ✅ No performance degradation (existing index supports scheduled queries)
+- ✅ Scheduled activities don't consume worker resources while waiting
+- ✅ Time precision: Activities execute within 1 second of scheduled time (polling interval)
+
+#### Implementation Notes
+
+**Why This is Simple**:
+- Database infrastructure already exists (`activity_queue.scheduled_for`)
+- Workers already filter by `scheduled_for <= NOW()`
+- Just need to expose in YAML and wire up in orchestrator
+
+**Design Decisions**:
+1. **Relative vs Absolute Time**:
+   - `delay_seconds`: Relative to when activity becomes ready (simple, common case)
+   - `scheduled_at`: Absolute timestamp (for scheduled reports, deadlines)
+2. **Mutually Exclusive**: Cannot specify both (validation error)
+3. **Template Support**: `scheduled_at` can use templates for dynamic scheduling
+4. **No Event Suspension (Yet)**: This example only covers time-based delays, not external events
+
+**Post-MVP Enhancement**:
+- Event-driven suspension (`wait_for_event` activity) - see absurd analysis Section 2, Phase 2
+
+---
+
+### Infrastructure: Database Cleanup Worker (US-3.8)
+**Duration**: 2-3 days
+**Epic 3**: US-3.8 (Database Cleanup with TTL)
+**Purpose**: Prevent unbounded database growth by cleaning up completed workflows
+
+#### Overview
+
+Automatic cleanup of completed workflows after configurable retention period to prevent unbounded database growth. **Critical**: `workflow_events` table is NEVER cleaned up (audit trail requirement).
+
+#### Implementation Tasks
+
+**1. Stored Procedures**
+
+Create cleanup stored procedures:
+
+```sql
+-- Cleanup completed workflows (NOT workflow_events)
+CREATE OR REPLACE FUNCTION cleanup_workflows(
+    p_ttl_days INTEGER DEFAULT 7,
+    p_batch_size INTEGER DEFAULT 1000
+) RETURNS INTEGER AS $$
+DECLARE
+    v_deleted INTEGER := 0;
+    v_workflow_ids UUID[];
+BEGIN
+    -- Find workflows to delete
+    SELECT ARRAY_AGG(id) INTO v_workflow_ids
+    FROM workflows
+    WHERE status IN ('Completed', 'Failed', 'Cancelled')
+      AND updated_at < NOW() - (p_ttl_days || ' days')::INTERVAL
+    LIMIT p_batch_size;
+
+    IF v_workflow_ids IS NULL THEN
+        RETURN 0;
+    END IF;
+
+    -- Delete in dependency order
+    DELETE FROM activity_queue WHERE workflow_id = ANY(v_workflow_ids);
+    -- NOTE: workflow_events NOT deleted - kept forever for audit trail
+    DELETE FROM workflows WHERE id = ANY(v_workflow_ids);
+
+    GET DIAGNOSTICS v_deleted = ROW_COUNT;
+    RETURN v_deleted;
+END;
+$$ LANGUAGE plpgsql;
+```
+
+**2. Background Cleanup Worker**
+
+Implement tokio background task:
+
+```rust
+pub struct CleanupWorker {
+    pool: PgPool,
+    config: CleanupConfig,
+}
+
+pub struct CleanupConfig {
+    pub enabled: bool,
+    pub workflow_ttl_days: i32,
+    pub interval_hours: u64,
+    pub batch_size: i32,
+}
+
+impl CleanupWorker {
+    pub async fn run(self) {
+        let mut interval = tokio::time::interval(
+            Duration::from_secs(self.config.interval_hours * 3600)
+        );
+
+        loop {
+            interval.tick().await;
+
+            if !self.config.enabled {
+                continue;
+            }
+
+            let deleted = sqlx::query_scalar!(
+                "SELECT cleanup_workflows($1, $2)",
+                self.config.workflow_ttl_days,
+                self.config.batch_size
+            )
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0);
+
+            if deleted > 0 {
+                info!("Cleaned up {} workflows", deleted);
+            }
+        }
+    }
+}
+```
+
+**3. Configuration (Environment Variables)**
+
+```bash
+STREAMFLOW_CLEANUP_ENABLED=true
+STREAMFLOW_CLEANUP_WORKFLOW_TTL_DAYS=7
+STREAMFLOW_CLEANUP_INTERVAL_HOURS=1
+STREAMFLOW_CLEANUP_BATCH_SIZE=1000
+```
+
+**4. Integration with `streamflow serve`**
+
+Launch cleanup worker alongside orchestrator and API server:
+
+```rust
+tokio::spawn(cleanup_worker.run());
+```
+
+**5. Observability**
+
+- Log cleanup operations with deleted count
+- Metrics: `streamflow_cleanup_workflows_deleted_total`
+- Metrics: `streamflow_cleanup_last_run_timestamp_seconds`
+
+#### Success Criteria
+
+**Functional**:
+- ✅ Completed workflows deleted after TTL expires
+- ✅ `workflow_events` table NEVER cleaned up (audit requirement)
+- ✅ Batch deletion prevents long transactions
+- ✅ Configurable via environment variables
+- ✅ Can be disabled for testing/development
+
+**Non-Functional**:
+- ✅ Cleanup runs in background without blocking orchestrator
+- ✅ Handles large batches efficiently (< 1 second per 1000 workflows)
+- ✅ No race conditions with running workflows
+
+#### Design Decisions
+
+**Tables Cleanup Strategy**:
+| Table             | Cleanup Strategy                          | Retention    |
+|-------------------|-------------------------------------------|--------------|
+| workflows         | ✅ Delete after TTL (default: 7 days)     | Configurable |
+| activity_queue    | ✅ Delete after completion/TTL            | Configurable |
+| workflow_events   | ❌ **NEVER delete** (audit trail)         | Forever      |
+
+**Why workflow_events is Never Deleted**:
+- Audit trail and compliance requirement
+- Provides complete history of all workflow executions
+- Post-MVP: Use table partitioning for query performance (see post-mvp.md Story 2.3)
+
+**Source**: Absurd analysis Section 5 - Cleanup Strategy with TTL
+
+---
+
 ## Post-MVP Examples (Optional Enhancements)
 
 ### Example 11: Notification Activities
@@ -1145,11 +1464,11 @@ activities:
 ## Implementation Schedule
 
 ### Phase Overview
-- **Total Duration**: 35-45 days (7-9 weeks)
+- **Total Duration**: 37-50 days (7.5-10 weeks)
 - **Examples 1-7**: Core MVP workflow features (27-34 days)
-- **Examples 8-9**: Advanced features (6-8 days)
-- **US-3.6**: CLI Tooling (4-5 days, can run in parallel with Examples 8-9)
-- **Total MVP**: 37-47 days
+- **Examples 8-10**: Advanced features (8-11 days)
+- **US-3.6**: CLI Tooling (4-5 days, can run in parallel with Examples 8-10)
+- **Total MVP**: 39-52 days
 
 ### Detailed Schedule
 
@@ -1159,12 +1478,13 @@ activities:
 | 2          | 3-4 days | Conditional branching, secrets                        | PostgreSQL execute/query                   | 6-8             |
 | 3          | 4-5 days | Parallel execution (fan-out/fan-in), file management  | File outputs & references                  | 10-13           |
 | 4          | 5-6 days | Activity settings (retry, timeout, budget)            | LLM (Anthropic), cost tracking             | 15-19           |
-| 5          | 4-5 days | Model fallback.                                       | LLM (OpenAI, Gemini)                       | 19-24           |
+| 5          | 4-5 days | Model fallback                                        | LLM (OpenAI, Gemini)                       | 19-24           |
 | 6          | 3-4 days | Caching settings                                      | Semantic caching (Redis)                   | 22-28           |
 | 7          | 5-6 days | Iterative workflows, loops, iteration-scoped outputs  | (Combined existing)                        | 27-34           |
 | 8          | 3-4 days | (Enhancements)                                        | Advanced file management, external storage | 30-38           |
 | 9          | 3-4 days | (Enhancements)                                        | HTTP/DB advanced features                  | 33-42           |
-| **US-3.6** | 4-5 days | **CLI Tooling** (validate, test, visualize)          | (Cross-cutting tooling)                    | **37-47**       |
+| 10         | 2-3 days | **Activity scheduling** (delay_seconds, scheduled_at) | (Exposes existing infrastructure)          | 35-45           |
+| **US-3.6** | 4-5 days | **CLI Tooling** (validate, test, visualize)          | (Cross-cutting tooling)                    | **39-52**       |
 
 ### Milestone Checkpoints
 
@@ -1187,24 +1507,26 @@ activities:
 - ✅ Complete Epic 3 and core Epic 5
 - **Demo**: Agentic research workflow + CLI tools
 
-**Final MVP** (After Example 10 - ~37-47 days):
-- ✅ All Epic 3 requirements complete
+**Final MVP** (After Example 10 - ~39-52 days):
+- ✅ All Epic 3 requirements complete (including scheduling)
 - ✅ All critical Epic 5 requirements complete
 - ✅ Production-ready workflow capabilities
-- **Demo**: End-to-end order processing with transactions
+- ✅ Activity scheduling for delayed and scheduled execution
+- **Demo**: Complete system with scheduled workflows, transactions, and advanced features
 
 ---
 
 ## Epic 3 Coverage Matrix
 
-| User Story                    | Examples  | Status       |
-|-------------------------------|---------|--------------|
-| US-3.1: Sequential Workflows  | 1, 2, 3 | ✅ Complete  |
-| US-3.2: Conditional Branching | 2, 7    | ✅ Complete  |
-| US-3.3: Parallel Execution    | 3       | ✅ Complete  |
-| US-3.4: Iterative Workflows   | 7       | ✅ Complete  |
-| US-3.5: Activity Settings     | 4, 6    | ✅ Complete  |
-| US-3.6: YAML Validation       | US-3.6  | ✅ Complete  |
+| User Story                         | Examples  | Status        |
+|------------------------------------|---------|---------------|
+| US-3.1: Sequential Workflows       | 1, 2, 3 | ✅ Complete   |
+| US-3.2: Conditional Branching      | 2, 7    | ✅ Complete   |
+| US-3.3: Parallel Execution         | 3       | ✅ Complete   |
+| US-3.4: Iterative Workflows        | 7       | ✅ Complete   |
+| US-3.5: Activity Settings          | 4, 6    | ✅ Complete   |
+| US-3.6: YAML Validation            | US-3.6  | ✅ Complete   |
+| US-3.7: Activity Scheduling/Delays | 10      | Not Started   |
 
 ## Epic 5 Coverage Matrix
 
