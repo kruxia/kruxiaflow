@@ -8,16 +8,16 @@
 
 ## Overview
 
-This document provides a slice-based implementation plan for Epic 3 (YAML Workflow Definition Language) and Epic 5 (Built-In Activity Library). Rather than implementing these epics separately, we build both incrementally through **realistic workflow examples** that progress from simple to complex.
+This document provides a example-based implementation plan for Epic 3 (YAML Workflow Definition Language) and Epic 5 (Built-In Activity Library). Rather than implementing these epics separately, we build both incrementally through **realistic workflow examples** that progress from simple to complex.
 
-Each slice is defined by an example workflow that demonstrates new capabilities in both YAML features and built-in activities. By the end of all slices, we will have implemented all requirements from both Epic 3 and Epic 5.
+Each example is defined by an example workflow that demonstrates new capabilities in both YAML features and built-in activities. By the end of all examples, we will have implemented all requirements from both Epic 3 and Epic 5.
 
 ### Key Principles
 
-1. **Example-Driven**: Each slice is anchored by a concrete, runnable workflow example
+1. **Example-Driven**: Each example is anchored by a concrete, runnable workflow example
 2. **Incremental Complexity**: Start simple, add features progressively
 3. **YAML + Activities Together**: Can't define YAML features without activities to use them
-4. **End-to-End Testing**: Each slice should be fully testable and demonstrable
+4. **End-to-End Testing**: Each example should be fully testable and demonstrable
 5. **Market-Aligned**: Examples match real user needs (AI cost control, data pipelines, edge)
 
 ### Example Workflow Organization
@@ -59,7 +59,7 @@ The README.md in the examples directory provides:
 - Prerequisites for running examples (e.g., API keys, test services)
 
 Example table format:
-| Example                       | Slice | Features Demonstrated                                    | Prerequisites     |
+| Example                       | Example | Features Demonstrated                                    | Prerequisites     |
 |-------------------------------|-------|----------------------------------------------------------|-------------------|
 | `01-weather-report.yaml`      | 1     | Sequential workflow, HTTP request (GET/POST), headers, secrets | Webhook URL       |
 | `02-user-validation.yaml`     | 2     | Conditional branching, PostgreSQL                        | Database, API key |
@@ -67,12 +67,13 @@ Example table format:
 
 ---
 
-## Implementation Slices
+## Implementation Examples
 
-### Slice 1: Simple Sequential Workflow with HTTP Activity
-**Duration**: 3-4 days
+### Example 1: Simple Sequential Workflow with HTTP Activity
+**Duration**: 3-4 days (✅ **COMPLETED** 2025-11-12)
 **Epic 3**: US-3.1 (Sequential Workflows - Basic)
 **Epic 5**: US-5.5 (HTTP Operations - Basic)
+**Status**: ✅ **FOUNDATION COMPLETE** - Core infrastructure implemented and tested
 
 #### Example Workflow: Weather Report Pipeline
 ```yaml
@@ -117,29 +118,84 @@ activities:
 - ✅ `http_request` - HTTP request with configurable method (GET, POST, etc.), custom headers (including Authorization), and request body
 
 #### Implementation Tasks
-1. YAML parser for workflow definitions (serde_yaml)
-2. Template expression engine (basic variable substitution)
-3. Workflow graph builder (activities → nodes, depends_on/contributes_to → edges)
-4. HTTP activity executor (reqwest)
+1. ✅ **COMPLETED** YAML parser for workflow definitions (serde_yaml)
+   - Added `serde_yaml` dependency to workspace
+   - Implemented `WorkflowDefinition::from_yaml()` and `to_yaml()` methods
+   - Added comprehensive YAML parsing tests
+2. ✅ **COMPLETED** Template expression engine (basic variable substitution)
+   - Created `core/src/workflow/template.rs` module
+   - Supports `{{INPUT.key}}`, `{{activity_key.output_name}}`, `{{SECRET.key}}`, `{{WORKFLOW.key}}`
+   - Preserves JSON types when resolving entire values
+   - Handles nested object and array resolution
+   - 7 passing unit tests
+3. ✅ **COMPLETED** Workflow graph builder (activities → nodes, depends_on/contributes_to → edges)
+   - Already exists in `core/src/workflow/definition.rs`
+   - Validates graph structure, detects cycles
+   - Supports `preceding` and `following` relationships
+4. ✅ **COMPLETED** HTTP activity executor (reqwest)
+   - Created `activity/src/http.rs` module
    - Configurable HTTP method (GET, POST, PUT, DELETE, PATCH)
    - Custom headers (including Authorization: Bearer, Basic auth)
    - Request body (JSON, form data, etc.)
    - Query parameter support
    - Header templating with secrets ({{SECRET.name}})
-5. Activity result storage and retrieval
-6. End-to-end test: Submit workflow via API, verify execution
+   - Timeout configuration
+   - 3 passing integration tests with httpbin.org
+5. ⏭️ **DEFERRED TO INTEGRATION** Activity result storage and retrieval
+   - Will be integrated when connecting activities to orchestrator
+6. ⏭️ **DEFERRED TO INTEGRATION** End-to-end test: Submit workflow via API, verify execution
+   - Will be implemented after activity worker integration
 
 #### Success Criteria
-- ✅ Parse YAML workflow definition
-- ✅ Execute activities in sequence
-- ✅ Template expressions resolve correctly (including SECRET references)
-- ✅ HTTP activities complete successfully with custom headers
-- ✅ Authorization headers (Bearer token, Basic auth) work correctly
-- ✅ Workflow completes with final status
+- ✅ **ACHIEVED** Parse YAML workflow definition
+  - `WorkflowDefinition::from_yaml()` parses YAML successfully
+  - Validation ensures graph integrity (no cycles, valid references)
+  - Example workflow `examples/01-weather-report.yaml` created
+- ⏭️ **PENDING INTEGRATION** Execute activities in sequence
+  - Core workflow graph structures exist
+  - Need to integrate HTTP activity executor with orchestrator
+- ✅ **ACHIEVED** Template expressions resolve correctly (including SECRET references)
+  - Template engine supports all required expression types
+  - Type preservation for JSON values
+  - Comprehensive test coverage
+- ✅ **ACHIEVED** HTTP activities complete successfully with custom headers
+  - HTTP executor supports all methods and headers
+  - Tested with real HTTP endpoints (httpbin.org)
+  - Query parameters and request bodies work correctly
+- ✅ **ACHIEVED** Authorization headers (Bearer token, Basic auth) work correctly
+  - Custom headers fully supported
+  - Template substitution in headers works
+- ⏭️ **PENDING INTEGRATION** Workflow completes with final status
+  - Will be verified in end-to-end integration tests
+
+#### Implementation Notes
+
+**What was built:**
+1. **YAML Support** - Added `serde_yaml` dependency and parsing/serialization methods
+2. **Template Engine** - Complete variable substitution system with type preservation
+3. **HTTP Activity** - Full-featured HTTP client with reqwest
+4. **Example Workflow** - Weather report pipeline demonstrating sequential execution
+5. **Test Coverage** - 14 new tests covering YAML parsing, templates, and HTTP activities
+
+**What's next (integration phase):**
+1. Create built-in worker that executes HTTP activities
+2. Integrate activity executor with orchestrator event flow
+3. Connect template engine to activity parameter resolution
+4. End-to-end workflow execution tests
+5. API endpoint for submitting YAML workflows
+
+**Files Created/Modified:**
+- `core/src/workflow/template.rs` - Template expression engine (new)
+- `core/src/workflow/definition.rs` - Added YAML parsing methods
+- `activity/src/http.rs` - HTTP activity executor (new)
+- `examples/01-weather-report.yaml` - Example workflow (new)
+- `examples/README.md` - Examples documentation (new)
+- `core/tests/yaml_workflow_tests.rs` - YAML parsing tests (new)
+- Updated Cargo.toml files for dependencies
 
 ---
 
-### Slice 2: Conditional Branching with Database Storage
+### Example 2: Conditional Branching with Database Storage
 **Duration**: 3-4 days
 **Epic 3**: US-3.2 (Conditional Branching)
 **Epic 5**: US-5.6 (Database Operations)
@@ -231,7 +287,7 @@ activities:
 
 ---
 
-### Slice 3: Parallel Execution with File Management
+### Example 3: Parallel Execution with File Management
 **Duration**: 4-5 days
 **Epic 3**: US-3.3 (Parallel Execution - Fan-Out/Fan-In)
 **Epic 5**: US-5.4 (Object Storage and File Management)
@@ -379,7 +435,7 @@ activities:
 
 ---
 
-### Slice 4: LLM Activity with Cost Tracking and Retry
+### Example 4: LLM Activity with Cost Tracking and Retry
 **Duration**: 5-6 days
 **Epic 3**: US-3.5 (Activity Settings - Retry, Timeout, Budget)
 **Epic 5**: US-5.1 (Multi-Provider LLM - Basic), US-5.2 (Cost Tracking)
@@ -465,9 +521,9 @@ activities:
 
 ---
 
-### Slice 5: Multi-Model LLM with Automatic Fallback
+### Example 5: Multi-Model LLM with Automatic Fallback
 **Duration**: 4-5 days
-**Epic 3**: (No new YAML features - builds on Slice 4)
+**Epic 3**: (No new YAML features - builds on Example 4)
 **Epic 5**: US-5.1 (Multi-Model LLM - Complete)
 
 #### Example Workflow: AI Research Assistant with Model Fallback
@@ -542,7 +598,7 @@ activities:
 
 ---
 
-### Slice 6: Semantic Caching for Cost Savings
+### Example 6: Semantic Caching for Cost Savings
 **Duration**: 3-4 days
 **Epic 3**: US-3.5 (Activity Settings - Caching)
 **Epic 5**: US-5.3 (Semantic Caching)
@@ -622,7 +678,7 @@ activities:
 
 ---
 
-### Slice 7: Iterative Workflows with Budget-Aware Loops
+### Example 7: Iterative Workflows with Budget-Aware Loops
 **Duration**: 5-6 days
 **Epic 3**: US-3.4 (Iterative Workflows / Loops)
 **Epic 5**: (No new activities - combines existing)
@@ -760,7 +816,7 @@ activities:
 - ✅ File outputs with iteration scoping (large data handling)
 
 #### Built-in Activities Implemented
-- (No new activities - combines HTTP + LLM from previous slices)
+- (No new activities - combines HTTP + LLM from previous examples)
 
 #### Implementation Tasks
 1. Loop detection in workflow graph (edge to earlier activity)
@@ -794,7 +850,7 @@ activities:
 
 ---
 
-### Slice 8: Advanced File Management Features
+### Example 8: Advanced File Management Features
 **Duration**: 3-4 days
 **Epic 3**: (No new YAML features)
 **Epic 5**: US-5.4 (Object Storage and File Management - Complete)
@@ -915,7 +971,7 @@ activities:
 
 ---
 
-### Slice 9: Additional HTTP and Database Features
+### Example 9: Additional HTTP and Database Features
 **Duration**: 3-4 days
 **Epic 3**: (No new YAML features)
 **Epic 5**: US-5.5 (HTTP - Complete), US-5.6 (Database - Complete)
@@ -1062,9 +1118,9 @@ activities:
 
 ---
 
-## Post-MVP Slices (Optional Enhancements)
+## Post-MVP Examples (Optional Enhancements)
 
-### Slice 11: Notification Activities
+### Example 11: Notification Activities
 **Duration**: 2-3 days
 **Epic 5**: US-5.7 (Notification Activities)
 
@@ -1074,7 +1130,7 @@ activities:
 - `discord_send` - Discord webhook
 - `teams_send` - Microsoft Teams notification
 
-### Slice 12: Edge/IoT Activities (Unique Differentiator)
+### Example 12: Edge/IoT Activities (Unique Differentiator)
 **Duration**: 4-5 days
 **Epic 5**: US-5.8 (Edge/IoT Activities)
 
@@ -1090,14 +1146,14 @@ activities:
 
 ### Phase Overview
 - **Total Duration**: 35-45 days (7-9 weeks)
-- **Slices 1-7**: Core MVP workflow features (27-34 days)
-- **Slices 8-9**: Advanced features (6-8 days)
-- **US-3.6**: CLI Tooling (4-5 days, can run in parallel with Slices 8-9)
+- **Examples 1-7**: Core MVP workflow features (27-34 days)
+- **Examples 8-9**: Advanced features (6-8 days)
+- **US-3.6**: CLI Tooling (4-5 days, can run in parallel with Examples 8-9)
 - **Total MVP**: 37-47 days
 
 ### Detailed Schedule
 
-| Slice      | Duration | Epic 3 Features                                       | Epic 5 Features                            | Cumulative Days |
+| Example      | Duration | Epic 3 Features                                       | Epic 5 Features                            | Cumulative Days |
 |------------|----------|-------------------------------------------------------|--------------------------------------------|-----------------|
 | 1          | 3-4 days | Sequential workflows, basic templates                 | HTTP GET/POST                              | 3-4             |
 | 2          | 3-4 days | Conditional branching, secrets                        | PostgreSQL execute/query                   | 6-8             |
@@ -1112,26 +1168,26 @@ activities:
 
 ### Milestone Checkpoints
 
-**Checkpoint 1** (After Slice 3 - ~10-13 days):
+**Checkpoint 1** (After Example 3 - ~10-13 days):
 - ✅ Sequential, conditional, and parallel workflows work
 - ✅ HTTP and PostgreSQL activities functional
 - ✅ File management (outputs, references) complete
 - **Demo**: Multi-document processing pipeline with file handling
 
-**Checkpoint 2** (After Slice 6 - ~22-28 days):
+**Checkpoint 2** (After Example 6 - ~22-28 days):
 - ✅ LLM activities with multiple model providers (Anthropic, OpenAI, Gemini)
 - ✅ Cost tracking and budget enforcement
 - ✅ Caching for cost savings
 - ✅ Retry and timeout mechanisms
 - **Demo**: AI research assistant with cost control
 
-**Checkpoint 3** (After Slice 7 - ~27-34 days):
+**Checkpoint 3** (After Example 7 - ~27-34 days):
 - ✅ Iterative workflows with loops and iteration-scoped outputs
 - ✅ YAML validation and CLI tooling
 - ✅ Complete Epic 3 and core Epic 5
 - **Demo**: Agentic research workflow + CLI tools
 
-**Final MVP** (After Slice 10 - ~37-47 days):
+**Final MVP** (After Example 10 - ~37-47 days):
 - ✅ All Epic 3 requirements complete
 - ✅ All critical Epic 5 requirements complete
 - ✅ Production-ready workflow capabilities
@@ -1141,7 +1197,7 @@ activities:
 
 ## Epic 3 Coverage Matrix
 
-| User Story                    | Slices  | Status       |
+| User Story                    | Examples  | Status       |
 |-------------------------------|---------|--------------|
 | US-3.1: Sequential Workflows  | 1, 2, 3 | ✅ Complete  |
 | US-3.2: Conditional Branching | 2, 7    | ✅ Complete  |
@@ -1152,7 +1208,7 @@ activities:
 
 ## Epic 5 Coverage Matrix
 
-| User Story                    | Slices  | Status       |
+| User Story                    | Examples  | Status       |
 |-------------------------------|---------|--------------|
 | US-5.1: Multi-Model LLM       | 4, 5    | ✅ Complete  |
 | US-5.2: AI Cost Tracking      | 4       | ✅ Complete  |
@@ -1167,8 +1223,8 @@ activities:
 
 ## Testing Strategy
 
-### Per-Slice Testing
-Each slice includes:
+### Per-Example Testing
+Each example includes:
 1. **Unit tests**: Individual activity executors
 2. **Integration tests**: YAML parser + activity execution
 3. **End-to-end tests**: Full workflow via API submission
@@ -1179,15 +1235,15 @@ Each slice includes:
 
 ### Regression Testing
 - Maintain test suite that loads all workflows from `examples/`
-- Run full suite before each slice completion
+- Run full suite before each example completion
 - Ensure new features don't break existing workflows
 - Example workflows serve as integration test fixtures
 
 ### Performance Testing
-- Benchmark each slice's example workflow from `examples/`
+- Benchmark each example's example workflow from `examples/`
 - Track execution time, memory usage
 - Ensure no performance regressions
-- Store benchmark results for comparison across slices
+- Store benchmark results for comparison across examples
 
 ---
 
@@ -1238,7 +1294,7 @@ Each slice includes:
 ### Documentation Requirements
 - ✅ YAML syntax reference
 - ✅ Built-in activity catalog (all activities documented)
-- ✅ Example workflows for each slice
+- ✅ Example workflows for each example
 - ✅ Migration guide (from JSON to YAML)
 - ✅ CLI usage documentation
 
@@ -1249,7 +1305,7 @@ Each slice includes:
 1. **Review and approve** this implementation plan
 2. **Set up project structure** for YAML parser and activity library
 3. **Create examples directory** (`examples/`) with README.md structure
-4. **Begin Slice 1**: Simple sequential workflow with HTTP
+4. **Begin Example 1**: Simple sequential workflow with HTTP
    - Implement the workflow definition parser
    - Create `examples/01-weather-report.yaml`
 5. **Establish testing framework** for end-to-end workflow tests

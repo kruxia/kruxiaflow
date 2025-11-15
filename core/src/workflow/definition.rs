@@ -13,6 +13,38 @@ pub struct WorkflowDefinition {
 }
 
 impl WorkflowDefinition {
+    /// Parse workflow definition from YAML string
+    pub fn from_yaml(yaml: &str) -> Result<Self, ValidationError> {
+        let definition: WorkflowDefinition = serde_yaml::from_str(yaml)
+            .map_err(|e| ValidationError::SingleError(format!("Failed to parse YAML: {}", e)))?;
+
+        definition.validate()?;
+        Ok(definition)
+    }
+
+    /// Parse workflow definition from JSON string
+    pub fn from_json(json: &str) -> Result<Self, ValidationError> {
+        let definition: WorkflowDefinition = serde_json::from_str(json)
+            .map_err(|e| ValidationError::SingleError(format!("Failed to parse JSON: {}", e)))?;
+
+        definition.validate()?;
+        Ok(definition)
+    }
+
+    /// Serialize workflow definition to YAML string
+    pub fn to_yaml(&self) -> Result<String, ValidationError> {
+        serde_yaml::to_string(self).map_err(|e| {
+            ValidationError::SingleError(format!("Failed to serialize to YAML: {}", e))
+        })
+    }
+
+    /// Serialize workflow definition to JSON string
+    pub fn to_json(&self) -> Result<String, ValidationError> {
+        serde_json::to_string_pretty(self).map_err(|e| {
+            ValidationError::SingleError(format!("Failed to serialize to JSON: {}", e))
+        })
+    }
+
     /// Validate workflow definition structure
     pub fn validate(&self) -> Result<(), ValidationError> {
         let mut errors = ValidationErrors::new();
@@ -174,7 +206,7 @@ pub struct ActivityDefinition {
 
     /// Activity name within worker (e.g., "http_request", "postgres_query")
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
+    pub activity_name: Option<String>,
 
     /// Activity parameters (can include template expressions)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -458,7 +490,7 @@ mod tests {
                 ActivityDefinition {
                     key: "validate".to_string(),
                     worker: "payments".to_string(),
-                    name: Some("validate_card".to_string()),
+                    activity_name: Some("validate_card".to_string()),
                     parameters: None,
                     preceding: None,
                     following: Some(vec![ActivityRelationship {
@@ -470,7 +502,7 @@ mod tests {
                 ActivityDefinition {
                     key: "authorize".to_string(),
                     worker: "payments".to_string(),
-                    name: Some("authorize_card".to_string()),
+                    activity_name: Some("authorize_card".to_string()),
                     parameters: None,
                     preceding: None,
                     following: None,
@@ -490,7 +522,7 @@ mod tests {
                 ActivityDefinition {
                     key: "step1".to_string(),
                     worker: "test".to_string(),
-                    name: None,
+                    activity_name: None,
                     parameters: None,
                     preceding: None,
                     following: None,
@@ -499,7 +531,7 @@ mod tests {
                 ActivityDefinition {
                     key: "step1".to_string(), // Duplicate!
                     worker: "test".to_string(),
-                    name: None,
+                    activity_name: None,
                     parameters: None,
                     preceding: None,
                     following: None,
@@ -527,7 +559,7 @@ mod tests {
             activities: vec![ActivityDefinition {
                 key: "step1".to_string(),
                 worker: "test".to_string(),
-                name: None,
+                activity_name: None,
                 parameters: None,
                 preceding: None,
                 following: Some(vec![ActivityRelationship {
@@ -558,7 +590,7 @@ mod tests {
                 ActivityDefinition {
                     key: "step1".to_string(),
                     worker: "test".to_string(),
-                    name: None,
+                    activity_name: None,
                     parameters: None,
                     preceding: None,
                     following: Some(vec![ActivityRelationship {
@@ -570,7 +602,7 @@ mod tests {
                 ActivityDefinition {
                     key: "step2".to_string(),
                     worker: "test".to_string(),
-                    name: None,
+                    activity_name: None,
                     parameters: None,
                     preceding: None,
                     following: Some(vec![ActivityRelationship {
@@ -662,7 +694,7 @@ mod tests {
             activities: vec![ActivityDefinition {
                 key: "step1".to_string(),
                 worker: "test".to_string(),
-                name: None,
+                activity_name: None,
                 parameters: None,
                 preceding: None,
                 following: None,

@@ -59,11 +59,11 @@ impl ActivityRegistry {
     pub async fn execute(
         &self,
         worker: &str,
-        name: &str,
+        activity_name: &str,
         parameters: Value,
         timeout: Duration,
     ) -> Result<Value> {
-        let key = format!("{}.{}", worker, name);
+        let key = format!("{}.{}", worker, activity_name);
 
         let implementation = self
             .implementations

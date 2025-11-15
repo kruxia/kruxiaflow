@@ -17,7 +17,7 @@ mod tests {
                     "workflow_id": workflow_id,
                     "activity_key": "test_activity",
                     "worker": "builtin",
-                    "name": "echo",
+                    "activity_name": "echo",
                     "parameters": {"test": "value"},
                     "settings": null,
                     "timeout_seconds": 300
@@ -34,7 +34,7 @@ mod tests {
         assert_eq!(response.activities[0].activity_id, activity_id);
         assert_eq!(response.activities[0].workflow_id, workflow_id);
         assert_eq!(response.activities[0].worker, "builtin");
-        assert_eq!(response.activities[0].name, "echo");
+        assert_eq!(response.activities[0].activity_name, "echo");
     }
 
     #[tokio::test]
@@ -47,7 +47,7 @@ mod tests {
             "workflow_id": workflow_id,
             "activity_key": "test_activity",
             "worker": "payments",
-            "name": "authorize",
+            "activity_name": "authorize",
             "parameters": {"amount": 100.50},
             "settings": {"retry_limit": 3},
             "timeout_seconds": 600
@@ -60,7 +60,7 @@ mod tests {
         assert_eq!(activity.workflow_id, workflow_id);
         assert_eq!(activity.activity_key, "test_activity");
         assert_eq!(activity.worker, "payments");
-        assert_eq!(activity.name, "authorize");
+        assert_eq!(activity.activity_name, "authorize");
         assert_eq!(activity.timeout_seconds, Some(600));
         assert!(activity.settings.is_some());
     }

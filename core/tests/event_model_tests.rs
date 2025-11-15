@@ -279,7 +279,7 @@ fn test_workflow_definition_with_activities() {
     let activity = ActivityDefinition {
         key: "act1".to_string(),
         worker: "builtin".to_string(),
-        name: "TestActivity".to_string(),
+        activity_name: "TestActivity".to_string(),
         parameters: json!({"param": "value"}),
         settings: None,
         preceding: None,
@@ -307,7 +307,7 @@ fn test_activity_definition_serialization() {
     let activity = ActivityDefinition {
         key: "activity1".to_string(),
         worker: "test".to_string(),
-        name: "TestActivity".to_string(),
+        activity_name: "TestActivity".to_string(),
         parameters: json!({"input": "data"}),
         settings: None,
         preceding: None,
@@ -326,7 +326,7 @@ fn test_activity_definition_with_dependencies() {
     let activity = ActivityDefinition {
         key: "act2".to_string(),
         worker: "builtin".to_string(),
-        name: "DependentActivity".to_string(),
+        activity_name: "DependentActivity".to_string(),
         parameters: json!({}),
         settings: None,
         preceding: Some(vec![DependencyEdge {
@@ -350,7 +350,7 @@ fn test_activity_definition_clone() {
     let activity1 = ActivityDefinition {
         key: "act1".to_string(),
         worker: "ns".to_string(),
-        name: "Activity".to_string(),
+        activity_name: "Activity".to_string(),
         parameters: json!({"key": "value"}),
         settings: None,
         preceding: None,
@@ -360,7 +360,7 @@ fn test_activity_definition_clone() {
     let activity2 = activity1.clone();
     assert_eq!(activity1.key, activity2.key);
     assert_eq!(activity1.worker, activity2.worker);
-    assert_eq!(activity1.name, activity2.name);
+    assert_eq!(activity1.activity_name, activity2.activity_name);
 }
 
 // ============================================================================

@@ -15,12 +15,14 @@ uuid.workspace = true
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 
 # Additional dependencies
 regex = "1"
+minijinja = "2.6"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
