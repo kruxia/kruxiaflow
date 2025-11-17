@@ -213,10 +213,7 @@ pub struct ActivityDefinition {
     pub parameters: Option<HashMap<String, serde_json::Value>>,
 
     /// Activities that must complete before this one
-    #[serde(
-        alias = "depends_on",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(alias = "depends_on", skip_serializing_if = "Option::is_none")]
     pub preceding: Option<Vec<ActivityRelationship>>,
 
     /// Activities that should run after this one
@@ -244,7 +241,6 @@ impl<'de> Deserialize<'de> for ActivityRelationship {
     where
         D: serde::Deserializer<'de>,
     {
-
         #[derive(Deserialize)]
         #[serde(untagged)]
         enum ActivityRelationshipHelper {
