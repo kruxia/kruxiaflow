@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reqwest::{Client, Method};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -223,15 +223,18 @@ impl Default for HttpRequestActivity {
 #[async_trait]
 impl ActivityImpl for HttpRequestActivity {
     async fn execute(&self, parameters: Value) -> Result<Value> {
-        tracing::debug!("Executing http_request activity with parameters: {:?}", parameters);
+        tracing::debug!(
+            "Executing http_request activity with parameters: {:?}",
+            parameters
+        );
 
         // Parse parameters from JSON
         let params: HttpRequestParams = serde_json::from_value(parameters)
             .context("Failed to parse HTTP request parameters")?;
 
         // Check if we should include body (default: true, except for HEAD requests)
-        let include_body = params.include_body.unwrap_or(true)
-            && !params.method.eq_ignore_ascii_case("HEAD");
+        let include_body =
+            params.include_body.unwrap_or(true) && !params.method.eq_ignore_ascii_case("HEAD");
 
         // Execute HTTP request
         let response = self.executor.execute(params).await?;
@@ -274,7 +277,10 @@ impl ActivityImpl for HttpRequestActivity {
             "response": http_response
         });
 
-        tracing::debug!("HTTP request completed with status: {}", http_response.status);
+        tracing::debug!(
+            "HTTP request completed with status: {}",
+            http_response.status
+        );
 
         Ok(output)
     }

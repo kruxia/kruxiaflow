@@ -2,7 +2,7 @@ use crate::registry::ActivityImpl;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::postgres::{PgPool, PgPoolOptions, PgRow};
 use sqlx::{Column, Row};
 use std::collections::HashMap;
@@ -139,7 +139,7 @@ impl PostgresExecutor {
                         return Err(anyhow::anyhow!(
                             "Unsupported parameter type: {}",
                             param.to_string()
-                        ))
+                        ));
                     }
                 };
             }
@@ -151,7 +151,10 @@ impl PostgresExecutor {
         match query_type {
             QueryType::Select => {
                 // Execute SELECT query and fetch results
-                let rows = query.fetch_all(&pool).await.context("Failed to execute SELECT query")?;
+                let rows = query
+                    .fetch_all(&pool)
+                    .await
+                    .context("Failed to execute SELECT query")?;
 
                 // Convert rows to JSON
                 let results: Vec<Value> = rows
@@ -304,7 +307,10 @@ impl Default for PostgresQueryActivity {
 #[async_trait]
 impl ActivityImpl for PostgresQueryActivity {
     async fn execute(&self, parameters: Value) -> Result<Value> {
-        tracing::debug!("Executing postgres_query activity with parameters: {:?}", parameters);
+        tracing::debug!(
+            "Executing postgres_query activity with parameters: {:?}",
+            parameters
+        );
 
         // Parse parameters from JSON
         let params: PostgresQueryParams = serde_json::from_value(parameters)
@@ -314,8 +320,8 @@ impl ActivityImpl for PostgresQueryActivity {
         let result = self.executor.execute(params).await?;
 
         // Serialize result to JSON for output
-        let output = serde_json::to_value(&result)
-            .context("Failed to serialize PostgreSQL query result")?;
+        let output =
+            serde_json::to_value(&result).context("Failed to serialize PostgreSQL query result")?;
 
         tracing::debug!("PostgreSQL query completed");
 

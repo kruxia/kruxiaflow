@@ -38,6 +38,7 @@ pub enum WorkflowActivityStatus {
     Running,      // Worker executing
     Completed,    // Finished successfully
     Failed,       // Failed permanently
+    Skipped,      // Skipped due to unsatisfied conditional dependencies
 }
 
 /// Load workflow definition from database

@@ -190,7 +190,7 @@ impl ActivityWorkerService {
         // Service-layer responsibility: Publish ActivityCompleted event via EventSource
         let event_payload = serde_json::json!({
             "activity_key": activity.activity_key,
-            "output": output,
+            "outputs": output,
             "cost_usd": cost_usd
         });
 

@@ -257,11 +257,18 @@ pub fn evaluate_condition(condition: &str, context: &TemplateContext) -> Result<
 }
 
 /// Check if workflow is complete (all activities in terminal state)
+///
+/// A workflow is complete when all activities have reached a terminal state:
+/// - Completed: Successfully executed
+/// - Failed: Permanently failed
+/// - Skipped: Not executed due to unsatisfied conditional dependencies
 pub fn is_workflow_complete(state: &WorkflowState) -> bool {
     state.activities.values().all(|activity| {
         matches!(
             activity.status,
-            WorkflowActivityStatus::Completed | WorkflowActivityStatus::Failed
+            WorkflowActivityStatus::Completed
+                | WorkflowActivityStatus::Failed
+                | WorkflowActivityStatus::Skipped
         )
     })
 }
@@ -272,4 +279,62 @@ pub fn is_workflow_failed(state: &WorkflowState) -> bool {
         .activities
         .values()
         .any(|activity| matches!(activity.status, WorkflowActivityStatus::Failed))
+}
+
+/// Find activities that should be marked as Skipped
+///
+/// An activity should be skipped when:
+/// - Status is NotScheduled (not yet processed)
+/// - All preceding activities are in terminal states (Completed, Failed, or Skipped)
+/// - No applicable dependencies exist (all conditional dependencies have false conditions)
+pub fn find_skipped_activities<'a>(
+    definition: &'a WorkflowDefinition,
+    state: &WorkflowState,
+) -> Result<Vec<&'a ActivityDefinition>> {
+    let mut skipped = Vec::new();
+
+    for activity in &definition.activities {
+        // Only consider NotScheduled activities
+        if let Some(activity_state) = state.activities.get(&activity.key) {
+            if activity_state.status != WorkflowActivityStatus::NotScheduled {
+                continue;
+            }
+        }
+
+        // Get preceding activities
+        let preceding_keys = get_preceding_activities(activity, definition);
+
+        // If no preceding activities, it's a root activity and should not be skipped
+        if preceding_keys.is_empty() {
+            continue;
+        }
+
+        // Check if all preceding activities are in terminal states
+        let mut all_preceding_terminal = true;
+        for (preceding_key, _) in &preceding_keys {
+            if let Some(preceding_state) = state.activities.get(preceding_key) {
+                if !matches!(
+                    preceding_state.status,
+                    WorkflowActivityStatus::Completed
+                        | WorkflowActivityStatus::Failed
+                        | WorkflowActivityStatus::Skipped
+                ) {
+                    all_preceding_terminal = false;
+                    break;
+                }
+            }
+        }
+
+        if !all_preceding_terminal {
+            continue;
+        }
+
+        // Check if activity is ready (has applicable dependencies)
+        // If not ready and all preceding are terminal, it should be skipped
+        if !is_activity_ready(activity, definition, state)? {
+            skipped.push(activity);
+        }
+    }
+
+    Ok(skipped)
 }

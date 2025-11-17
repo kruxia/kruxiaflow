@@ -7,7 +7,6 @@
 /// 4. Orchestrator completes workflow
 ///
 /// Uses only local healthcheck endpoints (no external network calls).
-
 use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -17,7 +16,9 @@ use streamflow_core::events::PostgresEventSource;
 use streamflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
 use streamflow_core::{OrchestratorConfig, run_orchestrator};
 use streamflow_oauth::{AuthConfig, PostgresAuthService};
-use streamflow_worker::{ActivityRegistry, HttpRequestActivity, PostgresQueryActivity, WorkerConfig, WorkerManager};
+use streamflow_worker::{
+    ActivityRegistry, HttpRequestActivity, PostgresQueryActivity, WorkerConfig, WorkerManager,
+};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -48,7 +49,7 @@ async fn create_test_oauth_client(pool: &PgPool, client_id: &str, client_secret:
     sqlx::query(
         "INSERT INTO oauth_clients (client_id, client_secret_hash, name, created_at)
          VALUES ($1, $2, $3, NOW())
-         ON CONFLICT (client_id) DO NOTHING"
+         ON CONFLICT (client_id) DO NOTHING",
     )
     .bind(client_id)
     .bind(&secret_hash)
@@ -72,7 +73,10 @@ async fn get_test_token(api_url: &str, client_id: &str, client_secret: &str) -> 
         .await
         .expect("Failed to get token");
 
-    let result: serde_json::Value = response.json().await.expect("Failed to parse token response");
+    let result: serde_json::Value = response
+        .json()
+        .await
+        .expect("Failed to parse token response");
     result["access_token"].as_str().unwrap().to_string()
 }
 
@@ -90,8 +94,8 @@ async fn test_yaml_workflow_end_to_end_with_healthcheck() {
         jwt_audience: "test".to_string(),
         token_ttl: 3600,
     };
-    let auth_service = PostgresAuthService::new(pool.clone(), auth_config)
-        .expect("Failed to create auth service");
+    let auth_service =
+        PostgresAuthService::new(pool.clone(), auth_config).expect("Failed to create auth service");
 
     // Create OAuth clients
     create_test_oauth_client(&pool, "test_client", "test_secret").await;
@@ -308,13 +312,12 @@ activities:
     );
 
     // Verify workflow in database - just check activities completed
-    let workflow_activities: (serde_json::Value,) = sqlx::query_as(
-        "SELECT activities FROM workflows WHERE id = $1"
-    )
-    .bind(workflow_id)
-    .fetch_one(&pool)
-    .await
-    .expect("Failed to fetch workflow from database");
+    let workflow_activities: (serde_json::Value,) =
+        sqlx::query_as("SELECT activities FROM workflows WHERE id = $1")
+            .bind(workflow_id)
+            .fetch_one(&pool)
+            .await
+            .expect("Failed to fetch workflow from database");
 
     let activities_obj = workflow_activities.0.as_object().unwrap();
 
@@ -328,8 +331,14 @@ activities:
     println!("Readiness status: {:?}", check_readiness["status"]);
 
     // Activity status is lowercase in the database (from WorkflowActivityStatus enum)
-    assert_eq!(check_liveness["status"], "completed", "Liveness check did not complete");
-    assert_eq!(check_readiness["status"], "completed", "Readiness check did not complete");
+    assert_eq!(
+        check_liveness["status"], "completed",
+        "Liveness check did not complete"
+    );
+    assert_eq!(
+        check_readiness["status"], "completed",
+        "Readiness check did not complete"
+    );
 
     // Verify HTTP responses were successful
     println!("Liveness activity: {:?}", check_liveness);
@@ -366,12 +375,21 @@ async fn test_conditional_branching_workflow() {
     // Setup: Create database pool
     let pool = setup_test_pool().await;
 
-    // Create test tables for the workflow
+    // Create test tables for the workflow (clean up first to avoid stale data)
+    sqlx::query("DROP TABLE IF EXISTS valid_users")
+        .execute(&pool)
+        .await
+        .ok();
+    sqlx::query("DROP TABLE IF EXISTS invalid_users")
+        .execute(&pool)
+        .await
+        .ok();
+
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS valid_users (
             email TEXT PRIMARY KEY,
             validated_at TIMESTAMPTZ NOT NULL
-        )"
+        )",
     )
     .execute(&pool)
     .await
@@ -382,7 +400,7 @@ async fn test_conditional_branching_workflow() {
             email TEXT PRIMARY KEY,
             reason TEXT,
             checked_at TIMESTAMPTZ NOT NULL
-        )"
+        )",
     )
     .execute(&pool)
     .await
@@ -396,8 +414,8 @@ async fn test_conditional_branching_workflow() {
         jwt_audience: "test".to_string(),
         token_ttl: 3600,
     };
-    let auth_service = PostgresAuthService::new(pool.clone(), auth_config)
-        .expect("Failed to create auth service");
+    let auth_service =
+        PostgresAuthService::new(pool.clone(), auth_config).expect("Failed to create auth service");
 
     // Create OAuth clients
     create_test_oauth_client(&pool, "test_client", "test_secret").await;
@@ -511,7 +529,7 @@ activities:
         - "success@example.com"
     depends_on:
       - activity_key: check_health
-        condition: "{{% raw %}}{{{{check_health.response.success == true}}}}{{% endraw %}}"
+        condition: "{{{{check_health.response.success == true}}}}"
 
   - key: store_failure
     worker: builtin
@@ -524,7 +542,7 @@ activities:
         - "Health check failed"
     depends_on:
       - activity_key: check_health
-        condition: "{{% raw %}}{{{{check_health.response.success != true}}}}{{% endraw %}}"
+        condition: "{{{{check_health.response.success != true}}}}"
 "#,
         api_url, db_url, db_url
     );
@@ -625,10 +643,28 @@ activities:
     }
 
     // Verify workflow completed successfully
-    assert!(
-        final_status.is_some(),
-        "Workflow did not complete within timeout"
-    );
+    if final_status.is_none() {
+        // Workflow timed out - print diagnostic information
+        let status_response = client
+            .get(format!("{}/api/v1/workflows/{}", api_url, workflow_id))
+            .header("Authorization", format!("Bearer {}", token))
+            .send()
+            .await
+            .expect("Failed to get workflow status");
+
+        if status_response.status() == reqwest::StatusCode::OK {
+            let status_result: serde_json::Value = status_response
+                .json()
+                .await
+                .expect("Failed to parse status response");
+
+            println!("Workflow timed out. Final state:");
+            println!("{}", serde_json::to_string_pretty(&status_result).unwrap());
+        }
+
+        panic!("Workflow did not complete within timeout");
+    }
+
     assert_eq!(
         final_status.unwrap(),
         "completed",
@@ -637,19 +673,17 @@ activities:
 
     // Verify conditional branching worked correctly
     // Since health check should succeed, only valid_users should have a record
-    let valid_count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM valid_users WHERE email = 'success@example.com'"
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("Failed to query valid_users");
+    let valid_count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM valid_users WHERE email = 'success@example.com'")
+            .fetch_one(&pool)
+            .await
+            .expect("Failed to query valid_users");
 
-    let invalid_count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM invalid_users WHERE email = 'failure@example.com'"
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("Failed to query invalid_users");
+    let invalid_count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM invalid_users WHERE email = 'failure@example.com'")
+            .fetch_one(&pool)
+            .await
+            .expect("Failed to query invalid_users");
 
     // Health check should succeed, so success branch should execute
     assert_eq!(valid_count.0, 1, "Expected one record in valid_users");

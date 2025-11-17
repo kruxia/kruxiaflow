@@ -3,7 +3,7 @@ use streamflow_core::events::{
     ActivityDefinition, DependencyEdge, WorkflowDefinition, WorkflowStatus,
 };
 use streamflow_core::orchestrator::{
-    build_condition_context, ActivityState, WorkflowActivityStatus, WorkflowState,
+    ActivityState, WorkflowActivityStatus, WorkflowState, build_condition_context,
     evaluate_condition, find_ready_activities, is_workflow_complete, is_workflow_failed,
 };
 use uuid::Uuid;
@@ -388,6 +388,27 @@ fn test_evaluate_condition_string_comparison() {
     let result = evaluate_condition("{{activity1.result == 'approved'}}", &context)
         .expect("Failed to evaluate condition");
     assert!(result);
+}
+
+#[test]
+fn test_evaluate_condition_nested_boolean() {
+    let state = create_test_state_with_activities(vec![(
+        "check_health",
+        WorkflowActivityStatus::Completed,
+        Some(json!({"response": {"status": 200, "success": true}})),
+    )]);
+
+    let context = build_condition_context(&state);
+
+    // Test positive condition
+    let result = evaluate_condition("{{check_health.response.success == true}}", &context)
+        .expect("Failed to evaluate condition");
+    assert!(result, "Expected condition to be true");
+
+    // Test negative condition
+    let result = evaluate_condition("{{check_health.response.success != true}}", &context)
+        .expect("Failed to evaluate condition");
+    assert!(!result, "Expected condition to be false");
 }
 
 #[test]

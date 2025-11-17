@@ -129,8 +129,8 @@ pub async fn deploy_workflow_definition(
     );
 
     // Parse as YAML (this handles both JSON and YAML since JSON is valid YAML)
-    let definition = streamflow_core::workflow::WorkflowDefinition::from_yaml(&body)
-        .map_err(|e| {
+    let definition =
+        streamflow_core::workflow::WorkflowDefinition::from_yaml(&body).map_err(|e| {
             tracing::warn!("Workflow parsing/validation failed: {:?}", e);
             AppError::ValidationError(ValidationErrors::from_workflow_validation(e))
         })?;
@@ -142,39 +142,36 @@ pub async fn deploy_workflow_definition(
     );
 
     // Store definition (includes validation)
-    let stored = repo
-        .store(definition)
-        .await
-        .map_err(|e| match e {
-            RepositoryError::ValidationError(ve) => {
-                tracing::warn!("Workflow definition validation failed: {:?}", ve);
-                AppError::ValidationError(ValidationErrors::from_workflow_validation(ve))
-            }
-            RepositoryError::DuplicateVersion { name, version } => {
-                tracing::warn!(
-                    "Duplicate workflow definition: {} version {}",
-                    name,
-                    version
-                );
-                AppError::Conflict(format!(
-                    "Workflow definition '{}' version '{}' already exists",
-                    name, version
-                ))
-            }
-            RepositoryError::DatabaseError(e) => {
-                tracing::error!("Database error storing workflow definition: {:?}", e);
-                AppError::DatabaseError(e)
-            }
-            RepositoryError::SerializationError(e) => {
-                tracing::error!("Serialization error: {:?}", e);
-                AppError::InternalError(anyhow::anyhow!(e))
-            }
-            RepositoryError::InvalidVersion { .. } => {
-                // This shouldn't happen in deploy (no version provided by user)
-                tracing::error!("Unexpected InvalidVersion error during deploy: {:?}", e);
-                AppError::InternalError(anyhow::anyhow!(e))
-            }
-        })?;
+    let stored = repo.store(definition).await.map_err(|e| match e {
+        RepositoryError::ValidationError(ve) => {
+            tracing::warn!("Workflow definition validation failed: {:?}", ve);
+            AppError::ValidationError(ValidationErrors::from_workflow_validation(ve))
+        }
+        RepositoryError::DuplicateVersion { name, version } => {
+            tracing::warn!(
+                "Duplicate workflow definition: {} version {}",
+                name,
+                version
+            );
+            AppError::Conflict(format!(
+                "Workflow definition '{}' version '{}' already exists",
+                name, version
+            ))
+        }
+        RepositoryError::DatabaseError(e) => {
+            tracing::error!("Database error storing workflow definition: {:?}", e);
+            AppError::DatabaseError(e)
+        }
+        RepositoryError::SerializationError(e) => {
+            tracing::error!("Serialization error: {:?}", e);
+            AppError::InternalError(anyhow::anyhow!(e))
+        }
+        RepositoryError::InvalidVersion { .. } => {
+            // This shouldn't happen in deploy (no version provided by user)
+            tracing::error!("Unexpected InvalidVersion error during deploy: {:?}", e);
+            AppError::InternalError(anyhow::anyhow!(e))
+        }
+    })?;
 
     Ok((
         StatusCode::CREATED,
