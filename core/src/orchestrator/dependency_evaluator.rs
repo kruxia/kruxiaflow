@@ -7,8 +7,8 @@ use std::collections::HashMap;
 /// Find activities that are ready to be scheduled
 /// An activity is ready when:
 /// - Status is NotScheduled (not already in queue)
-/// - All activities in `preceding` list are Completed
-/// - All conditions on `preceding` relationships are satisfied
+/// - All activities in `depends_on` list are Completed
+/// - All conditions on `depends_on` relationships are satisfied
 pub fn find_ready_activities<'a>(
     definition: &'a WorkflowDefinition,
     state: &WorkflowState,
@@ -35,14 +35,14 @@ pub fn find_ready_activities<'a>(
 /// Check if an activity is ready to be scheduled
 fn is_activity_ready(
     activity: &ActivityDefinition,
-    definition: &WorkflowDefinition,
+    _definition: &WorkflowDefinition,
     state: &WorkflowState,
 ) -> Result<bool> {
-    // Get list of preceding activities from definition
-    let preceding_keys = get_preceding_activities(activity, definition);
+    // Get list of dependencies from definition
+    let dependencies = get_dependencies(activity);
 
-    // If no preceding activities, it's a root activity (always ready initially)
-    if preceding_keys.is_empty() {
+    // If no dependencies, it's a root activity (always ready initially)
+    if dependencies.is_empty() {
         tracing::trace!(
             "Activity {} is a root activity (no dependencies)",
             activity.key
@@ -52,36 +52,36 @@ fn is_activity_ready(
 
     tracing::trace!(
         "Checking {} dependencies for activity {}: [{}]",
-        preceding_keys.len(),
+        dependencies.len(),
         activity.key,
-        preceding_keys
+        dependencies
             .iter()
             .map(|(k, _)| k.as_str())
             .collect::<Vec<_>>()
             .join(", ")
     );
 
-    // Check all preceding activities are satisfied (ALL must be satisfied - AND semantics)
+    // Check all dependencies are satisfied (ALL must be satisfied - AND semantics)
     // Track if we found at least one dependency that needs to be satisfied
     let mut found_applicable_dependency = false;
 
-    for (preceding_key, conditions) in &preceding_keys {
-        let preceding_state = state
+    for (dependency_key, conditions) in &dependencies {
+        let dependency_state = state
             .activities
-            .get(preceding_key)
-            .ok_or_else(|| OrchestratorError::ActivityNotFound(preceding_key.clone()))?;
+            .get(dependency_key)
+            .ok_or_else(|| OrchestratorError::ActivityNotFound(dependency_key.clone()))?;
 
         // Check if dependency is in terminal state FIRST
         // (must check this before evaluating conditions since conditions may reference outputs)
         if !matches!(
-            preceding_state.status,
+            dependency_state.status,
             WorkflowActivityStatus::Completed | WorkflowActivityStatus::Failed
         ) {
             tracing::trace!(
                 "Activity {} not ready: dependency {} is in state {:?}",
                 activity.key,
-                preceding_key,
-                preceding_state.status
+                dependency_key,
+                dependency_state.status
             );
             return Ok(false); // Dependency not in terminal state yet
         }
@@ -99,7 +99,7 @@ fn is_activity_ready(
                     tracing::trace!(
                         "Activity {} dependency {} skipped: condition '{}' not satisfied",
                         activity.key,
-                        preceding_key,
+                        dependency_key,
                         condition
                     );
                     break;
@@ -117,26 +117,26 @@ fn is_activity_ready(
             // No explicit conditions - this dependency is always applicable
             found_applicable_dependency = true;
 
-            // Preceding activity must be Completed (not just Failed)
-            if preceding_state.status != WorkflowActivityStatus::Completed {
+            // Dependency activity must be Completed (not just Failed)
+            if dependency_state.status != WorkflowActivityStatus::Completed {
                 tracing::trace!(
                     "Activity {} not ready: dependency {} is {:?} (expected Completed)",
                     activity.key,
-                    preceding_key,
-                    preceding_state.status
+                    dependency_key,
+                    dependency_state.status
                 );
-                return Ok(false); // Only run following activities on success
+                return Ok(false); // Only run dependent activities on success
             }
         }
     }
 
     // If activity has dependencies but none were applicable (all conditions false),
     // then this activity should not be scheduled
-    if !preceding_keys.is_empty() && !found_applicable_dependency {
+    if !dependencies.is_empty() && !found_applicable_dependency {
         tracing::trace!(
             "Activity {} not ready: has {} dependencies but none have satisfied conditions",
             activity.key,
-            preceding_keys.len()
+            dependencies.len()
         );
         return Ok(false);
     }
@@ -148,41 +148,18 @@ fn is_activity_ready(
     Ok(true)
 }
 
-/// Get list of preceding activities with their conditions
-/// Deduplicates entries to handle cases where both `preceding` and `following` are defined
-fn get_preceding_activities(
-    activity: &ActivityDefinition,
-    definition: &WorkflowDefinition,
-) -> Vec<(String, Option<Vec<String>>)> {
-    use std::collections::HashMap;
-
-    // Use HashMap to track unique preceding activities by key
-    // If same activity appears twice, keep first occurrence (explicit `preceding` takes priority)
-    let mut preceding_map: HashMap<String, Option<Vec<String>>> = HashMap::new();
-
-    // Check explicit `preceding` list (higher priority)
-    if let Some(preceding_list) = &activity.preceding {
-        for item in preceding_list {
-            preceding_map.insert(item.activity_key.clone(), item.conditions.clone());
-        }
+/// Get list of dependencies (activities this activity depends on) with their conditions
+/// After normalization, only depends_on is populated, so this is a simple extraction
+fn get_dependencies(activity: &ActivityDefinition) -> Vec<(String, Option<Vec<String>>)> {
+    // After normalization, only depends_on is populated
+    if let Some(depends_on_list) = &activity.depends_on {
+        depends_on_list
+            .iter()
+            .map(|item| (item.activity_key.clone(), item.conditions.clone()))
+            .collect()
+    } else {
+        Vec::new()
     }
-
-    // Check if other activities list this one in `following` (only add if not already present)
-    for other_activity in &definition.activities {
-        if let Some(following_list) = &other_activity.following {
-            for item in following_list {
-                if item.activity_key == activity.key {
-                    // Only insert if not already present (explicit `preceding` takes priority)
-                    preceding_map
-                        .entry(other_activity.key.clone())
-                        .or_insert_with(|| item.conditions.clone());
-                }
-            }
-        }
-    }
-
-    // Convert HashMap back to Vec
-    preceding_map.into_iter().collect()
 }
 
 /// Build template context from workflow state for condition evaluation
@@ -285,7 +262,7 @@ pub fn is_workflow_failed(state: &WorkflowState) -> bool {
 ///
 /// An activity should be skipped when:
 /// - Status is NotScheduled (not yet processed)
-/// - All preceding activities are in terminal states (Completed, Failed, or Skipped)
+/// - All dependencies are in terminal states (Completed, Failed, or Skipped)
 /// - No applicable dependencies exist (all conditional dependencies have false conditions)
 pub fn find_skipped_activities<'a>(
     definition: &'a WorkflowDefinition,
@@ -301,36 +278,36 @@ pub fn find_skipped_activities<'a>(
             }
         }
 
-        // Get preceding activities
-        let preceding_keys = get_preceding_activities(activity, definition);
+        // Get dependencies
+        let dependencies = get_dependencies(activity);
 
-        // If no preceding activities, it's a root activity and should not be skipped
-        if preceding_keys.is_empty() {
+        // If no dependencies, it's a root activity and should not be skipped
+        if dependencies.is_empty() {
             continue;
         }
 
-        // Check if all preceding activities are in terminal states
-        let mut all_preceding_terminal = true;
-        for (preceding_key, _) in &preceding_keys {
-            if let Some(preceding_state) = state.activities.get(preceding_key) {
+        // Check if all dependencies are in terminal states
+        let mut all_dependencies_terminal = true;
+        for (dependency_key, _) in &dependencies {
+            if let Some(dependency_state) = state.activities.get(dependency_key) {
                 if !matches!(
-                    preceding_state.status,
+                    dependency_state.status,
                     WorkflowActivityStatus::Completed
                         | WorkflowActivityStatus::Failed
                         | WorkflowActivityStatus::Skipped
                 ) {
-                    all_preceding_terminal = false;
+                    all_dependencies_terminal = false;
                     break;
                 }
             }
         }
 
-        if !all_preceding_terminal {
+        if !all_dependencies_terminal {
             continue;
         }
 
         // Check if activity is ready (has applicable dependencies)
-        // If not ready and all preceding are terminal, it should be skipped
+        // If not ready and all dependencies are terminal, it should be skipped
         if !is_activity_ready(activity, definition, state)? {
             skipped.push(activity);
         }

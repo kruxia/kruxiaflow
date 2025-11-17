@@ -2476,7 +2476,7 @@ retry:
 
 **Scope**:
 - Validate workflow definition structure (YAML/JSON schema)
-- Validate activity references (all `preceding`/`following` keys exist)
+- Validate activity references (all `depends_on`/`dependency_of` keys exist)
 - **Cycle detection in workflow graph**
 - **Ensure all cycles are conditional** (unconditional cycles rejected)
 - Validate parameter templates (proper syntax)
@@ -2496,7 +2496,7 @@ activities:
   - key: validate_input
     worker: validation
     name: check_data
-    following:
+    dependency_of:
       - activity_key: process_data
         conditions:
           - "{{validate_input.valid}} == true"
@@ -2511,7 +2511,7 @@ activities:
   - key: retry_validation
     worker: validation
     name: check_data_retry
-    following:
+    dependency_of:
       - activity_key: validate_input  # Cycle back, but conditional
 ```
 
@@ -2521,13 +2521,13 @@ activities:
   - key: step_a
     worker: test
     name: do_something
-    following:
+    dependency_of:
       - activity_key: step_b
 
   - key: step_b
     worker: test
     name: do_something_else
-    following:
+    dependency_of:
       - activity_key: step_a  # ERROR: Unconditional cycle detected!
 ```
 
@@ -2591,14 +2591,14 @@ activities:
     worker: external
     name: api_call
     scheduled_for: "+1s"  # 1 second delay (rate limit)
-    preceding:
+    depends_on:
       - activity_key: call_api_1
 
   - key: call_api_3
     worker: external
     name: api_call
     scheduled_for: "+1s"  # Another 1 second delay
-    preceding:
+    depends_on:
       - activity_key: call_api_2
 ```
 
@@ -2615,7 +2615,7 @@ activities:
     worker: polling
     name: get_status
     scheduled_for: "{{check_status.retry_after}}s"  # Dynamic delay
-    preceding:
+    depends_on:
       - activity_key: check_status
 ```
 

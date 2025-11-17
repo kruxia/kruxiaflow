@@ -15,19 +15,21 @@ pub struct WorkflowDefinition {
 impl WorkflowDefinition {
     /// Parse workflow definition from YAML string
     pub fn from_yaml(yaml: &str) -> Result<Self, ValidationError> {
-        let definition: WorkflowDefinition = serde_yaml::from_str(yaml)
+        let mut definition: WorkflowDefinition = serde_yaml::from_str(yaml)
             .map_err(|e| ValidationError::SingleError(format!("Failed to parse YAML: {}", e)))?;
 
         definition.validate()?;
+        definition.normalize();
         Ok(definition)
     }
 
     /// Parse workflow definition from JSON string
     pub fn from_json(json: &str) -> Result<Self, ValidationError> {
-        let definition: WorkflowDefinition = serde_json::from_str(json)
+        let mut definition: WorkflowDefinition = serde_json::from_str(json)
             .map_err(|e| ValidationError::SingleError(format!("Failed to parse JSON: {}", e)))?;
 
         definition.validate()?;
+        definition.normalize();
         Ok(definition)
     }
 
@@ -141,17 +143,18 @@ impl WorkflowDefinition {
         }
 
         // Validate all activity references
+        // Note: Validation happens before normalization, so we check both fields
         for activity in &self.activities {
-            // Validate preceding references
-            if let Some(preceding) = &activity.preceding {
-                for rel in preceding {
+            // Validate depends_on references
+            if let Some(depends_on) = &activity.depends_on {
+                for rel in depends_on {
                     if !activity_keys.contains(&rel.activity_key) {
                         errors.add(
-                            &format!("activity.{}.preceding", activity.key),
+                            &format!("activity.{}.depends_on", activity.key),
                             &format!("Referenced activity not found: {}", rel.activity_key),
                         );
                     } else {
-                        // Add edge: preceding -> current
+                        // Add edge: dependency -> current
                         graph
                             .get_mut(rel.activity_key.as_str())
                             .unwrap()
@@ -160,16 +163,16 @@ impl WorkflowDefinition {
                 }
             }
 
-            // Validate following references
-            if let Some(following) = &activity.following {
-                for rel in following {
+            // Validate dependency_of references (before normalization clears them)
+            if let Some(dependency_of) = &activity.dependency_of {
+                for rel in dependency_of {
                     if !activity_keys.contains(&rel.activity_key) {
                         errors.add(
-                            &format!("activity.{}.following", activity.key),
+                            &format!("activity.{}.dependency_of", activity.key),
                             &format!("Referenced activity not found: {}", rel.activity_key),
                         );
                     } else {
-                        // Add edge: current -> following
+                        // Add edge: current -> dependent
                         graph
                             .get_mut(activity.key.as_str())
                             .unwrap()
@@ -193,6 +196,60 @@ impl WorkflowDefinition {
             Err(errors)
         }
     }
+
+    /// Normalize the workflow definition by converting all dependency_of
+    /// relationships into depends_on relationships.
+    ///
+    /// After normalization:
+    /// - All activities have only depends_on populated (if they have dependencies)
+    /// - All dependency_of fields are cleared
+    /// - The dependency graph is represented in a single canonical form
+    pub fn normalize(&mut self) {
+        use std::collections::HashMap;
+
+        // Build a map of activity_key -> dependencies to add
+        let mut dependencies_to_add: HashMap<String, Vec<ActivityRelationship>> = HashMap::new();
+
+        // Pass 1: For each activity with dependency_of,
+        // record that those targets should depend on this activity
+        for activity in &self.activities {
+            if let Some(dependency_of_list) = &activity.dependency_of {
+                for relationship in dependency_of_list {
+                    // The target activity should depend on this activity
+                    dependencies_to_add
+                        .entry(relationship.activity_key.clone())
+                        .or_insert_with(Vec::new)
+                        .push(ActivityRelationship {
+                            activity_key: activity.key.clone(),
+                            conditions: relationship.conditions.clone(),
+                        });
+                }
+            }
+        }
+
+        // Pass 2: Add the computed dependencies to each activity's depends_on
+        for activity in &mut self.activities {
+            if let Some(new_deps) = dependencies_to_add.remove(&activity.key) {
+                let depends_on = activity.depends_on.get_or_insert_with(Vec::new);
+                depends_on.extend(new_deps);
+
+                // Deduplicate (same activity might be referenced from both directions)
+                depends_on.sort_by(|a, b| {
+                    a.activity_key.cmp(&b.activity_key).then_with(|| {
+                        format!("{:?}", a.conditions).cmp(&format!("{:?}", b.conditions))
+                    })
+                });
+                depends_on.dedup_by(|a, b| {
+                    a.activity_key == b.activity_key && a.conditions == b.conditions
+                });
+            }
+        }
+
+        // Pass 3: Clear all dependency_of fields (no longer needed)
+        for activity in &mut self.activities {
+            activity.dependency_of = None;
+        }
+    }
 }
 
 /// Activity definition within a workflow
@@ -213,12 +270,12 @@ pub struct ActivityDefinition {
     pub parameters: Option<HashMap<String, serde_json::Value>>,
 
     /// Activities that must complete before this one
-    #[serde(alias = "depends_on", skip_serializing_if = "Option::is_none")]
-    pub preceding: Option<Vec<ActivityRelationship>>,
-
-    /// Activities that should run after this one
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub following: Option<Vec<ActivityRelationship>>,
+    pub depends_on: Option<Vec<ActivityRelationship>>,
+
+    /// Activities that depend on this one (input only, cleared after normalization)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dependency_of: Option<Vec<ActivityRelationship>>,
 
     /// Activity-level settings (timeout, retry, etc.)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -539,8 +596,8 @@ mod tests {
                     worker: "payments".to_string(),
                     activity_name: Some("validate_card".to_string()),
                     parameters: None,
-                    preceding: None,
-                    following: Some(vec![ActivityRelationship {
+                    depends_on: None,
+                    dependency_of: Some(vec![ActivityRelationship {
                         activity_key: "authorize".to_string(),
                         conditions: None,
                     }]),
@@ -551,8 +608,8 @@ mod tests {
                     worker: "payments".to_string(),
                     activity_name: Some("authorize_card".to_string()),
                     parameters: None,
-                    preceding: None,
-                    following: None,
+                    depends_on: None,
+                    dependency_of: None,
                     settings: None,
                 },
             ],
@@ -571,8 +628,8 @@ mod tests {
                     worker: "test".to_string(),
                     activity_name: None,
                     parameters: None,
-                    preceding: None,
-                    following: None,
+                    depends_on: None,
+                    dependency_of: None,
                     settings: None,
                 },
                 ActivityDefinition {
@@ -580,8 +637,8 @@ mod tests {
                     worker: "test".to_string(),
                     activity_name: None,
                     parameters: None,
-                    preceding: None,
-                    following: None,
+                    depends_on: None,
+                    dependency_of: None,
                     settings: None,
                 },
             ],
@@ -608,8 +665,8 @@ mod tests {
                 worker: "test".to_string(),
                 activity_name: None,
                 parameters: None,
-                preceding: None,
-                following: Some(vec![ActivityRelationship {
+                depends_on: None,
+                dependency_of: Some(vec![ActivityRelationship {
                     activity_key: "step2".to_string(), // Doesn't exist!
                     conditions: None,
                 }]),
@@ -639,8 +696,8 @@ mod tests {
                     worker: "test".to_string(),
                     activity_name: None,
                     parameters: None,
-                    preceding: None,
-                    following: Some(vec![ActivityRelationship {
+                    depends_on: None,
+                    dependency_of: Some(vec![ActivityRelationship {
                         activity_key: "step2".to_string(),
                         conditions: None,
                     }]),
@@ -651,8 +708,8 @@ mod tests {
                     worker: "test".to_string(),
                     activity_name: None,
                     parameters: None,
-                    preceding: None,
-                    following: Some(vec![ActivityRelationship {
+                    depends_on: None,
+                    dependency_of: Some(vec![ActivityRelationship {
                         activity_key: "step1".to_string(), // Cycle!
                         conditions: None,
                     }]),
@@ -743,8 +800,8 @@ mod tests {
                 worker: "test".to_string(),
                 activity_name: None,
                 parameters: None,
-                preceding: None,
-                following: None,
+                depends_on: None,
+                dependency_of: None,
                 settings: None,
             }],
         };

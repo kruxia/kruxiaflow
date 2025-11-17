@@ -41,9 +41,9 @@ pub struct ActivityDefinition {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<crate::queue::ActivitySettings>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub preceding: Option<Vec<DependencyEdge>>,
+    pub depends_on: Option<Vec<DependencyEdge>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub following: Option<Vec<DependencyEdge>>,
+    pub dependency_of: Option<Vec<DependencyEdge>>,
 }
 
 /// Dependency edge between activities

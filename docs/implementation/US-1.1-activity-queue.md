@@ -447,7 +447,7 @@ pub enum QueueError {
 
 **Implementation**:
 1. Orchestrator evaluates workflow directed graph
-2. Only schedules activities when ALL `preceding` dependencies are completed
+2. Only schedules activities when ALL `depends_on` dependencies are completed
 3. Activity appears in queue only when ready
 4. Workers cannot claim activity until it's in queue
 
@@ -455,11 +455,11 @@ pub enum QueueError {
 ```yaml
 activities:
   - key: validate_payment
-    following:
+    dependency_of:
       - activity_key: authorize_card
 
   - key: authorize_card
-    following:
+    dependency_of:
       - activity_key: capture_payment
 
   - key: capture_payment
@@ -498,13 +498,13 @@ activities:
 ```yaml
 activities:
   - key: fetch_data
-    following:
+    dependency_of:
       - activity_key: analyze_security
       - activity_key: analyze_performance
       - activity_key: analyze_quality
 
   - key: aggregate_results
-    preceding:
+    depends_on:
       - activity_key: analyze_security
       - activity_key: analyze_performance
       - activity_key: analyze_quality

@@ -38,14 +38,14 @@ start → [parallel_0, parallel_1, ..., parallel_9] → end
 
 **Activity Relationships** (from `benchmark/src/scenarios.rs`):
 1. **start** activity:
-   - `following: [parallel_0, ..., parallel_9]` (fan-out to 10)
+   - `dependency_of: [parallel_0, ..., parallel_9]` (fan-out to 10)
 
 2. **Each parallel activity** (parallel_0 through parallel_9):
-   - `preceding: [start]`
-   - `following: [end]`
+   - `depends_on: [start]`
+   - `dependency_of: [end]`
 
 3. **end** activity:
-   - `preceding: [parallel_0, ..., parallel_9]` (fan-in from 10)
+   - `depends_on: [parallel_0, ..., parallel_9]` (fan-in from 10)
 
 **Key Constraint**: Running with **ONLY 1 WORKER**, so parallel activities execute sequentially
 
@@ -62,16 +62,16 @@ fn get_preceding_activities(
 ) -> Vec<(String, Option<Vec<String>>)> {
     let mut preceding = Vec::new();
 
-    // Check explicit `preceding` list
-    if let Some(preceding_list) = &activity.preceding {
+    // Check explicit `depends_on` list
+    if let Some(preceding_list) = &activity.depends_on {
         for item in preceding_list {
             preceding.push((item.activity_key.clone(), item.conditions.clone()));
         }
     }
 
-    // Check if other activities list this one in `following`
+    // Check if other activities list this one in `dependency_of`
     for other_activity in &definition.activities {
-        if let Some(following_list) = &other_activity.following {
+        if let Some(following_list) = &other_activity.dependency_of {
             for item in following_list {
                 if item.activity_key == activity.key {
                     preceding.push((other_activity.key.clone(), item.conditions.clone()));
@@ -85,19 +85,19 @@ fn get_preceding_activities(
 ```
 
 **Issue**: This function collects BOTH:
-- Explicit `preceding` relationships
-- Implicit `preceding` inferred from `following` relationships
+- Explicit `depends_on` relationships
+- Implicit `depends_on` inferred from `dependency_of` relationships
 
 **Impact on `end` activity**:
-- Explicit `preceding`: [parallel_0, ..., parallel_9] (10 items)
-- Implicit (from `following`): [parallel_0, ..., parallel_9] (10 items)
+- Explicit `depends_on`: [parallel_0, ..., parallel_9] (10 items)
+- Implicit (from `dependency_of`): [parallel_0, ..., parallel_9] (10 items)
 - **Result**: 20 dependencies instead of 10 (each appears twice!)
 
 **Symptoms**:
 - Performance degradation (checking each dependency twice)
 - Potential logic errors if dependency checks have side effects
 
-**Fix**: Deduplicate the preceding list OR only use one source (prefer explicit `preceding`)
+**Fix**: Deduplicate the preceding list OR only use one source (prefer explicit `depends_on`)
 
 ---
 
@@ -283,8 +283,8 @@ fn get_preceding_activities(
     let mut preceding = Vec::new();
     let mut seen = HashSet::new();
 
-    // Check explicit `preceding` list
-    if let Some(preceding_list) = &activity.preceding {
+    // Check explicit `depends_on` list
+    if let Some(preceding_list) = &activity.depends_on {
         for item in preceding_list {
             if seen.insert(item.activity_key.clone()) {
                 preceding.push((item.activity_key.clone(), item.conditions.clone()));
@@ -292,9 +292,9 @@ fn get_preceding_activities(
         }
     }
 
-    // Check if other activities list this one in `following`
+    // Check if other activities list this one in `dependency_of`
     for other_activity in &definition.activities {
-        if let Some(following_list) = &other_activity.following {
+        if let Some(following_list) = &other_activity.dependency_of {
             for item in following_list {
                 if item.activity_key == activity.key && seen.insert(other_activity.key.clone()) {
                     preceding.push((other_activity.key.clone(), item.conditions.clone()));

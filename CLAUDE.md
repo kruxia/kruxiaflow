@@ -78,12 +78,16 @@ sequenceDiagram
 
 ### Workflow Definition Language
 
-- Workflows are defined as **Directed Graphs** where nodes are activities and edges are defined by `preceding`/`following` relationships
-- **Never use "edges" terminology** in workflow definitions - always use `preceding` and `following`
+- Workflows are defined as **Directed Graphs** where nodes are activities and edges are defined by dependency relationships
+- **Never use "edges" terminology** in workflow definitions - always use `depends_on` and `dependency_of`
 - Activities can specify:
-  - `following: [list of activities that come after this one]` (fan-out)
-  - `preceding: [list of activities that must complete before this one]` (fan-in)
+  - `depends_on: [list of activities that must complete before this one]` (fan-in)
+  - `dependency_of: [list of activities that depend on this one]` (fan-out)
   - Conditions on these relationships
+- **Normalization**: Internally, workflows are normalized to use only `depends_on` for simplicity
+  - User-facing YAML/JSON supports both `depends_on` and `dependency_of`
+  - After parsing, `dependency_of` relationships are converted to `depends_on` on the target activities
+  - All orchestration logic uses the normalized `depends_on` representation
 
 ### Service Interface Pattern
 

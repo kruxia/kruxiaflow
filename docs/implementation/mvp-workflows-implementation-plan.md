@@ -141,7 +141,7 @@ activities:
 3. ✅ **COMPLETED** Workflow graph builder (activities → nodes, depends_on/contributes_to → edges)
    - Already exists in `core/src/workflow/definition.rs`
    - Validates graph structure, detects cycles
-   - Supports `preceding` and `following` relationships
+   - Supports `depends_on` and `dependency_of` relationships
 4. ✅ **COMPLETED** HTTP activity executor (reqwest)
    - Created `activity/src/http.rs` module
    - Configurable HTTP method (GET, POST, PUT, DELETE, PATCH)
@@ -277,7 +277,7 @@ activities:
 - ✅ Comparison operators: `==`, `!=` (full MiniJinja expression support)
 - ✅ Multiple edges from single activity (fan-out with conditions)
 - ✅ Secret references: `{{SECRET.name}}`
-- ✅ `depends_on` as alias for `preceding` (user-friendly YAML syntax)
+- ✅ `depends_on` as alias for `depends_on` (user-friendly YAML syntax)
 - ✅ Flexible condition syntax: both `condition` (single) and `conditions` (array)
 
 #### Built-in Activities Implemented

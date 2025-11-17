@@ -219,7 +219,7 @@ async fn test_deploy_invalid_workflow() {
             {
                 "key": "step1",
                 "worker": "test",
-                "following": [
+                "dependency_of": [
                     {
                         "activity_key": "step2" // Doesn't exist!
                     }
@@ -260,7 +260,7 @@ async fn test_deploy_workflow_with_cycle() {
             {
                 "key": "step1",
                 "worker": "test",
-                "following": [
+                "dependency_of": [
                     {
                         "activity_key": "step2"
                     }
@@ -269,7 +269,7 @@ async fn test_deploy_workflow_with_cycle() {
             {
                 "key": "step2",
                 "worker": "test",
-                "following": [
+                "dependency_of": [
                     {
                         "activity_key": "step1" // Creates cycle!
                     }
