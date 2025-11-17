@@ -1,8 +1,8 @@
 # StreamFlow v0.2 Product Requirements Document
 
-**Version**: 0.9.0
-**Date**: November 8, 2025
-**Status**: In Development (Epics 1, 1A, 1B, 1C Partial Complete - 90% to Epic 2)
+**Version**: 0.9.2
+**Date**: November 16, 2025
+**Status**: In Development (Epics 1, 1A, 1B, 1C Complete - Epic 3 Examples 1-2 Complete)
 **Target Release**: Q1 2026
 
 ---
@@ -1717,40 +1717,62 @@ flowchart TB
 - ✅ Worker authentication via JWT
 - ✅ Activity execution and result reporting via API
 
-**Phase 2C: Pre-Epic 2 Requirements (Weeks 8-9)** 🎯 **90% Complete**
-- ✅ **US-1A.6**: Workflow Status and Query API (11 hours) ✅
+**Phase 2C: Pre-Epic 2 Requirements (Weeks 8-9)** ✅ **COMPLETE**
+- ✅ **US-1A.6**: Workflow Status and Query API (11 hours)
   - GET /api/v1/workflows/{id}
   - GET /api/v1/workflows/{id}/activities
   - GET /api/v1/workflows with filters and pagination
-- ✅ **US-1A.7**: Worker Activity APIs (12 hours) ✅
+- ✅ **US-1A.7**: Worker Activity APIs (12 hours)
   - POST /api/v1/workers/poll
   - POST /api/v1/activities/{id}/heartbeat
   - POST /api/v1/activities/{id}/complete
   - POST /api/v1/activities/{id}/fail
-- ✅ **US-1C.1**: Main Binary and CLI Framework (6 hours) ✅
+- ✅ **US-1C.1**: Main Binary and CLI Framework (6 hours)
   - Single binary with clap CLI
   - Version command with build metadata
   - Binary size: 4.5MB (well under 15MB target)
-- 📋 **US-1C.2**: All-in-One Service Launcher (~8 hours)
+- ✅ **US-1C.2**: All-in-One Service Launcher (8 hours)
   - `streamflow serve` launches all services
   - Shared connection pool
-- 📋 **US-1C.7**: Graceful Shutdown (~4 hours)
+- ✅ **US-1C.7**: Graceful Shutdown (4 hours)
   - SIGTERM/SIGINT handling
   - Worker drain and connection cleanup
 
-**Completed: 29 hours | Remaining: ~12 hours (1-2 days)**
+**Completed: 41 hours | Epic 1 Complete**
 
-**Phase 3: Performance Benchmarking (Weeks 10-11)** 📋 **Next**
-- **Epic 2**: Establish performance baseline and competitive advantage
-  - Programmatic workflow definitions for benchmarks (Rust structs, JSON)
-  - Automated performance test suite (US-2.1)
-  - Competitor comparison benchmarks (US-2.2)
-  - PostgreSQL performance profiling (US-2.3)
-  - Stress testing and capacity planning (US-2.4)
-  - Performance dashboard and monitoring (US-2.5)
-  - **Target**: Prove >1,000 workflows/sec vs competitors' 35-100/sec
+**Phase 3: YAML Workflows - Examples 1-2 (Weeks 10-11)** ✅ **COMPLETE**
+- ✅ **Example 1**: Sequential workflow with HTTP activity
+  - YAML parser and workflow definition
+  - Template expression engine ({{INPUT.*}}, {{activity.output}}, {{SECRET.*}})
+  - HTTP activity executor with custom headers
+  - Example workflows: weather-report.yaml, weather-report-dynamic.yaml
+- ✅ **Example 2**: Conditional branching with PostgreSQL
+  - MiniJinja conditional evaluation
+  - PostgreSQL activity executor
+  - depends_on alias and flexible condition syntax
+  - Example workflow: user-validation.yaml
+  - Comprehensive end-to-end tests
 
-**Phase 4: Complete Epic 1A/1C (Week 12)** 📋 **Post-Epic 2**
+**Phase 4: Epic 3 Examples 3-10 (Weeks 12-18)** 🎯 **IN PROGRESS**
+- 📋 **Example 3**: Parallel execution with file management (4-5 days)
+- 📋 **Example 4**: LLM with cost tracking and retry (5-6 days)
+- 📋 **Example 5**: Multi-model LLM fallback (4-5 days)
+- 📋 **Example 6**: Semantic caching (3-4 days)
+- 📋 **Example 7**: Iterative workflows/loops (5-6 days)
+- 📋 **Example 8**: Advanced file management (3-4 days)
+- 📋 **Example 9**: HTTP/DB advanced features (3-4 days)
+- 📋 **Example 10**: Scheduled/delayed activities (2-3 days)
+
+**Phase 5: Epic 2 Performance Benchmarking** 📋 **DEFERRED**
+- Establish performance baseline after Epic 3 completion
+- Automated performance test suite (US-2.1)
+- Competitor comparison benchmarks (US-2.2)
+- PostgreSQL performance profiling (US-2.3)
+- Stress testing and capacity planning (US-2.4)
+- Performance dashboard and monitoring (US-2.5)
+- **Target**: Prove >1,000 workflows/sec vs competitors' 35-100/sec
+
+**Phase 6: Complete Epic 1A/1C (Post-Epic 3)** 📋 **DEFERRED**
 - 📋 **US-1A.8**: Activity Results and Output Retrieval (~8 hours)
 - 📋 **US-1A.9**: WebSocket Streaming for Real-Time Updates (~15 hours)
 - 📋 **US-1C.3**: Individual Service Launchers (~5 hours)
@@ -1758,18 +1780,14 @@ flowchart TB
 - 📋 **US-1C.5**: Database Migration Management (~3 hours)
 - 📋 **US-1C.6**: Health Checks and Service Monitoring (~5 hours)
 
-**Total Phase 4: ~40 hours (5 days)**
+**Total Phase 6: ~40 hours (5 days)**
 
-**Phase 5: YAML DSL + Programmatic Definition (Weeks 13-16)**
-- **Epic 3**: YAML workflow definition language
-  - Sequential, parallel, conditional, and loop workflows
-  - Activity settings (retry, timeout, budget)
-  - YAML validation and tooling
+**Phase 7: Programmatic Definition (Post-MVP)** 📋 **DEFERRED**
 - **Epic 4**: Python and JavaScript builder APIs
   - Compilation pipeline (code → YAML)
   - 5+ examples per language
 
-**Phase 6: PostgreSQL Optimization (Weeks 17-20)**
+**Phase 8: PostgreSQL Optimization (Post-MVP)** 📋 **DEFERRED**
 - **Epic 6**: Query optimization based on Epic 2 benchmark insights
   - Connection pooling and batching
   - Advanced indexing strategy
@@ -1777,7 +1795,7 @@ flowchart TB
   - Target validation: >1,000 workflows/sec sustained
   - Final competitive benchmark comparisons
 
-**Phase 7: Developer Experience (Weeks 21-24)**
+**Phase 9: Developer Experience (Post-MVP)** 📋 **DEFERRED**
 - **Epic 9**: VS Code extension, migration tools, complete documentation
   - CLI tools for workflow lifecycle
   - Migration tools (Temporal, Airflow)
@@ -1808,6 +1826,7 @@ flowchart TB
 | 0.9     | 2025-11-06 | Claude Code | Revised epic sequencing: Split Epic 1A and 1C into Pre-Epic 2 (US-1A.6,7 and US-1C.1,2,7) and Post-Epic 2 (US-1A.8,9 and US-1C.3,4,5,6). Pre-Epic 2 stories provide minimal viable system for benchmarking. Post-Epic 2 stories will be informed by performance insights. Updated implementation roadmap to show phased approach. All deferred stories remain in MVP scope, just resequenced for better risk management and earlier performance validation. |
 | 0.9.0   | 2025-11-08 | Claude Code | Implementation progress update: Completed US-1A.6 (Workflow Status Query), US-1A.7 (Worker Activity APIs), US-1B.1 (Built-in Worker), and US-1C.1 (Main Binary and CLI Framework). Epic 1B now complete. Phase 2C is 90% complete with only US-1C.2 and US-1C.7 remaining (~12 hours). Binary size: 4.5MB (well under 15MB target). Ready for Epic 2 benchmarking after US-1C.2/1C.7 completion. |
 | 0.9.1   | 2025-11-08 | Claude Code | Refined US-2.5 (Performance Dashboard) to focus exclusively on Grafana capabilities: Prometheus metrics endpoint, Grafana dashboard template, PostgreSQL datasource, and alerting rules. Deferred custom web UI for workflow inspection to Epic 10 (US-10.1). Updated US-10.1 to clarify it complements Grafana with workflow-level debugging and inspection capabilities. |
+| 0.9.2   | 2025-11-16 | Claude Code | Implementation progress update: Epic 1 (1A, 1B, 1C) complete. Epic 3 Examples 1-2 complete with YAML workflows, template engine, HTTP and PostgreSQL activities. Updated roadmap to reflect focus on Epic 3 (YAML Workflows) before Epic 2 (Performance Benchmarking). Example-driven implementation approach proving effective. |
 
 **Approval:**
 
