@@ -93,11 +93,8 @@ async fn test_sequential_workflow_integration() {
                 activity_name: "step1".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: Some(vec![DependencyEdge {
-                    activity_key: "activity2".to_string(),
-                    conditions: None,
-                }]),
+                depends_on: None,
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "activity2".to_string(),
@@ -105,11 +102,11 @@ async fn test_sequential_workflow_integration() {
                 activity_name: "step2".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: Some(vec![DependencyEdge {
-                    activity_key: "activity3".to_string(),
+                depends_on: Some(vec![DependencyEdge {
+                    activity_key: "activity1".to_string(),
                     conditions: None,
                 }]),
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "activity3".to_string(),
@@ -117,8 +114,11 @@ async fn test_sequential_workflow_integration() {
                 activity_name: "step3".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: Some(vec![DependencyEdge {
+                    activity_key: "activity2".to_string(),
+                    conditions: None,
+                }]),
+                dependency_of: None,
             },
         ],
     };
@@ -238,21 +238,8 @@ async fn test_parallel_workflow_integration() {
                 activity_name: "root".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: Some(vec![
-                    DependencyEdge {
-                        activity_key: "parallel1".to_string(),
-                        conditions: None,
-                    },
-                    DependencyEdge {
-                        activity_key: "parallel2".to_string(),
-                        conditions: None,
-                    },
-                    DependencyEdge {
-                        activity_key: "parallel3".to_string(),
-                        conditions: None,
-                    },
-                ]),
+                depends_on: None,
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "parallel1".to_string(),
@@ -260,8 +247,11 @@ async fn test_parallel_workflow_integration() {
                 activity_name: "parallel".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: Some(vec![DependencyEdge {
+                    activity_key: "root".to_string(),
+                    conditions: None,
+                }]),
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "parallel2".to_string(),
@@ -269,8 +259,11 @@ async fn test_parallel_workflow_integration() {
                 activity_name: "parallel".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: Some(vec![DependencyEdge {
+                    activity_key: "root".to_string(),
+                    conditions: None,
+                }]),
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "parallel3".to_string(),
@@ -278,8 +271,11 @@ async fn test_parallel_workflow_integration() {
                 activity_name: "parallel".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: Some(vec![DependencyEdge {
+                    activity_key: "root".to_string(),
+                    conditions: None,
+                }]),
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "join".to_string(),
@@ -287,7 +283,7 @@ async fn test_parallel_workflow_integration() {
                 activity_name: "join".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: Some(vec![
+                depends_on: Some(vec![
                     DependencyEdge {
                         activity_key: "parallel1".to_string(),
                         conditions: None,
@@ -301,7 +297,7 @@ async fn test_parallel_workflow_integration() {
                         conditions: None,
                     },
                 ]),
-                following: None,
+                dependency_of: None,
             },
         ],
     };
@@ -467,17 +463,8 @@ async fn test_conditional_workflow_integration() {
                 activity_name: "validate".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: Some(vec![
-                    DependencyEdge {
-                        activity_key: "approve".to_string(),
-                        conditions: Some(vec!["{{validate.valid == true}}".to_string()]),
-                    },
-                    DependencyEdge {
-                        activity_key: "reject".to_string(),
-                        conditions: Some(vec!["{{validate.valid == false}}".to_string()]),
-                    },
-                ]),
+                depends_on: None,
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "approve".to_string(),
@@ -485,8 +472,11 @@ async fn test_conditional_workflow_integration() {
                 activity_name: "approve".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: Some(vec![DependencyEdge {
+                    activity_key: "validate".to_string(),
+                    conditions: Some(vec!["{{validate.valid == true}}".to_string()]),
+                }]),
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "reject".to_string(),
@@ -494,8 +484,11 @@ async fn test_conditional_workflow_integration() {
                 activity_name: "reject".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: Some(vec![DependencyEdge {
+                    activity_key: "validate".to_string(),
+                    conditions: Some(vec!["{{validate.valid == false}}".to_string()]),
+                }]),
+                dependency_of: None,
             },
         ],
     };
@@ -599,8 +592,8 @@ async fn test_workflow_completion_success() {
             activity_name: "simple_task".to_string(),
             parameters: json!({}),
             settings: None,
-            preceding: None,
-            following: None,
+            depends_on: None,
+            dependency_of: None,
         }],
     };
 
@@ -722,8 +715,8 @@ async fn test_workflow_failure() {
             activity_name: "fail_task".to_string(),
             parameters: json!({}),
             settings: None,
-            preceding: None,
-            following: None,
+            depends_on: None,
+            dependency_of: None,
         }],
     };
 
@@ -850,8 +843,8 @@ async fn test_workflow_completion_with_multiple_activities() {
                 activity_name: "task1".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: Some(vec![DependencyEdge {
+                depends_on: None,
+                dependency_of: Some(vec![DependencyEdge {
                     activity_key: "step2".to_string(),
                     conditions: None,
                 }]),
@@ -862,8 +855,8 @@ async fn test_workflow_completion_with_multiple_activities() {
                 activity_name: "task2".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: Some(vec![DependencyEdge {
+                depends_on: None,
+                dependency_of: Some(vec![DependencyEdge {
                     activity_key: "step3".to_string(),
                     conditions: None,
                 }]),
@@ -874,8 +867,8 @@ async fn test_workflow_completion_with_multiple_activities() {
                 activity_name: "task3".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: None,
+                dependency_of: None,
             },
         ],
     };
@@ -972,8 +965,8 @@ async fn test_activity_scheduled_events_published() {
             activity_name: "work".to_string(),
             parameters: json!({"param": "value"}),
             settings: None,
-            preceding: None,
-            following: None,
+            depends_on: None,
+            dependency_of: None,
         }],
     };
 
@@ -1045,8 +1038,8 @@ async fn test_run_orchestrator_loop() {
             activity_name: "work".to_string(),
             parameters: json!({}),
             settings: None,
-            preceding: None,
-            following: None,
+            depends_on: None,
+            dependency_of: None,
         }],
     };
 

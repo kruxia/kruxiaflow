@@ -18,8 +18,8 @@ fn test_workflow_definition_from_core_to_dto() {
                     "key1".to_string(),
                     serde_json::json!("value1"),
                 )])),
-                preceding: None,
-                following: Some(vec![workflow::ActivityRelationship {
+                depends_on: None,
+                dependency_of: Some(vec![workflow::ActivityRelationship {
                     activity_key: "step2".to_string(),
                     conditions: Some(vec!["condition1".to_string()]),
                 }]),
@@ -36,11 +36,11 @@ fn test_workflow_definition_from_core_to_dto() {
                 worker: "test".to_string(),
                 activity_name: None,
                 parameters: None,
-                preceding: Some(vec![workflow::ActivityRelationship {
+                depends_on: Some(vec![workflow::ActivityRelationship {
                     activity_key: "step1".to_string(),
                     conditions: None,
                 }]),
-                following: None,
+                dependency_of: None,
                 settings: None,
             },
         ],
@@ -59,10 +59,10 @@ fn test_workflow_definition_from_core_to_dto() {
     assert_eq!(activity1.worker, "test");
     assert_eq!(activity1.activity_name, Some("action".to_string()));
     assert!(activity1.parameters.is_some());
-    assert!(activity1.preceding.is_none());
-    assert!(activity1.following.is_some());
+    assert!(activity1.depends_on.is_none());
+    assert!(activity1.dependency_of.is_some());
 
-    let following = activity1.following.as_ref().unwrap();
+    let following = activity1.dependency_of.as_ref().unwrap();
     assert_eq!(following.len(), 1);
     assert_eq!(following[0].activity_key, "step2");
     assert_eq!(
@@ -84,8 +84,8 @@ fn test_workflow_definition_from_core_to_dto() {
     assert_eq!(activity2.worker, "test");
     assert_eq!(activity2.activity_name, None);
     assert!(activity2.parameters.is_none());
-    assert!(activity2.preceding.is_some());
-    assert!(activity2.following.is_none());
+    assert!(activity2.depends_on.is_some());
+    assert!(activity2.dependency_of.is_none());
     assert!(activity2.settings.is_none());
 }
 
@@ -102,8 +102,8 @@ fn test_workflow_definition_from_dto_to_core() {
                 "key1".to_string(),
                 serde_json::json!("value1"),
             )])),
-            preceding: None,
-            following: Some(vec![dto::ActivityRelationship {
+            depends_on: None,
+            dependency_of: Some(vec![dto::ActivityRelationship {
                 activity_key: "step2".to_string(),
                 conditions: None,
             }]),
@@ -129,7 +129,7 @@ fn test_workflow_definition_from_dto_to_core() {
     assert_eq!(activity.worker, "test");
     assert_eq!(activity.activity_name, Some("action".to_string()));
     assert!(activity.parameters.is_some());
-    assert!(activity.following.is_some());
+    assert!(activity.dependency_of.is_some());
 
     // Check settings conversion
     let settings = activity.settings.as_ref().unwrap();
@@ -280,8 +280,8 @@ fn test_activity_definition_with_minimal_fields() {
         worker: "test".to_string(),
         activity_name: None,
         parameters: None,
-        preceding: None,
-        following: None,
+        depends_on: None,
+        dependency_of: None,
         settings: None,
     };
 
@@ -290,8 +290,8 @@ fn test_activity_definition_with_minimal_fields() {
     assert_eq!(dto_activity.worker, "test");
     assert!(dto_activity.activity_name.is_none());
     assert!(dto_activity.parameters.is_none());
-    assert!(dto_activity.preceding.is_none());
-    assert!(dto_activity.following.is_none());
+    assert!(dto_activity.depends_on.is_none());
+    assert!(dto_activity.dependency_of.is_none());
     assert!(dto_activity.settings.is_none());
 
     // Test DTO to core with minimal fields
@@ -300,8 +300,8 @@ fn test_activity_definition_with_minimal_fields() {
         worker: "test2".to_string(),
         activity_name: None,
         parameters: None,
-        preceding: None,
-        following: None,
+        depends_on: None,
+        dependency_of: None,
         settings: None,
     };
 
@@ -310,8 +310,8 @@ fn test_activity_definition_with_minimal_fields() {
     assert_eq!(core_activity2.worker, "test2");
     assert!(core_activity2.activity_name.is_none());
     assert!(core_activity2.parameters.is_none());
-    assert!(core_activity2.preceding.is_none());
-    assert!(core_activity2.following.is_none());
+    assert!(core_activity2.depends_on.is_none());
+    assert!(core_activity2.dependency_of.is_none());
     assert!(core_activity2.settings.is_none());
 }
 
@@ -326,8 +326,8 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                 worker: "control".to_string(),
                 activity_name: None,
                 parameters: None,
-                preceding: None,
-                following: Some(vec![
+                depends_on: None,
+                dependency_of: Some(vec![
                     workflow::ActivityRelationship {
                         activity_key: "middle1".to_string(),
                         conditions: None,
@@ -347,11 +347,11 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                     "type".to_string(),
                     serde_json::json!("fast"),
                 )])),
-                preceding: Some(vec![workflow::ActivityRelationship {
+                depends_on: Some(vec![workflow::ActivityRelationship {
                     activity_key: "start".to_string(),
                     conditions: None,
                 }]),
-                following: Some(vec![workflow::ActivityRelationship {
+                dependency_of: Some(vec![workflow::ActivityRelationship {
                     activity_key: "end".to_string(),
                     conditions: None,
                 }]),
@@ -368,11 +368,11 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                     "type".to_string(),
                     serde_json::json!("slow"),
                 )])),
-                preceding: Some(vec![workflow::ActivityRelationship {
+                depends_on: Some(vec![workflow::ActivityRelationship {
                     activity_key: "start".to_string(),
                     conditions: Some(vec!["branch".to_string()]),
                 }]),
-                following: Some(vec![workflow::ActivityRelationship {
+                dependency_of: Some(vec![workflow::ActivityRelationship {
                     activity_key: "end".to_string(),
                     conditions: None,
                 }]),
@@ -389,7 +389,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                 worker: "control".to_string(),
                 activity_name: None,
                 parameters: None,
-                preceding: Some(vec![
+                depends_on: Some(vec![
                     workflow::ActivityRelationship {
                         activity_key: "middle1".to_string(),
                         conditions: None,
@@ -399,7 +399,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                         conditions: None,
                     },
                 ]),
-                following: None,
+                dependency_of: None,
                 settings: None,
             },
         ],
@@ -424,12 +424,12 @@ fn test_workflow_with_multiple_activities_and_relationships() {
 
         // Check relationship counts match
         assert_eq!(
-            original.preceding.as_ref().map(|p| p.len()),
-            round_trip.preceding.as_ref().map(|p| p.len())
+            original.depends_on.as_ref().map(|p| p.len()),
+            round_trip.depends_on.as_ref().map(|p| p.len())
         );
         assert_eq!(
-            original.following.as_ref().map(|f| f.len()),
-            round_trip.following.as_ref().map(|f| f.len())
+            original.dependency_of.as_ref().map(|f| f.len()),
+            round_trip.dependency_of.as_ref().map(|f| f.len())
         );
     }
 }

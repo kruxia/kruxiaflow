@@ -315,7 +315,7 @@ pub fn create_sequential_workflow(num_activities: usize) -> WorkflowDefinition {
             name: "noop".to_string(),
             parameters: json!({}),
             settings: None,
-            preceding: None,
+            depends_on: None,
             following,
         });
     }
@@ -338,8 +338,8 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
             name: "noop".to_string(),
             parameters: json!({}),
             settings: None,
-            preceding: None,
-            following: Some(
+            depends_on: None,
+            dependency_of: Some(
                 (0..num_parallel)
                     .map(|i| DependencyEdge {
                         activity_key: format!("parallel_{}", i),
@@ -358,8 +358,8 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
             name: "noop".to_string(),
             parameters: json!({}),
             settings: None,
-            preceding: Some(vec!["start".to_string()]),
-            following: Some(vec![DependencyEdge {
+            depends_on: Some(vec!["start".to_string()]),
+            dependency_of: Some(vec![DependencyEdge {
                 activity_key: "end".to_string(),
                 conditions: None,
             }]),
@@ -373,12 +373,12 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
         name: "noop".to_string(),
         parameters: json!({}),
         settings: None,
-        preceding: Some(
+        depends_on: Some(
             (0..num_parallel)
                 .map(|i| format!("parallel_{}", i))
                 .collect()
         ),
-        following: None,
+        dependency_of: None,
     });
 
     WorkflowDefinition {

@@ -298,273 +298,64 @@ impl ActivityImpl for HttpRequestActivity {
 // Tests
 // ============================================================================
 
+// Note: HTTP activity tests are in tests/http_activity_integration_test.rs
+// These integration tests use the local StreamFlow API server instead of
+// external services to ensure reliable, isolated testing.
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // Executor tests
-    #[tokio::test]
-    async fn test_http_executor_get_request() {
+    #[test]
+    fn test_http_executor_creation() {
         let executor = HttpExecutor::new();
-
-        let params = HttpRequestParams {
-            method: "GET".to_string(),
-            url: "https://httpbin.org/get".to_string(),
-            headers: None,
-            query: Some(HashMap::from([("test".to_string(), "value".to_string())])),
-            body: None,
-            timeout_seconds: None,
-            include_body: None,
-        };
-
-        let response = executor.execute(params).await.unwrap();
-        let http_response = HttpResponse::from_response_json(response).await.unwrap();
-
-        assert_eq!(http_response.status, 200);
-        assert!(http_response.success);
-        assert!(http_response.body.is_some());
+        // Verify executor can be created
+        assert!(std::mem::size_of_val(&executor) > 0);
     }
 
-    #[tokio::test]
-    async fn test_http_executor_post_request() {
-        let executor = HttpExecutor::new();
-
+    #[test]
+    fn test_http_request_params_serialization() {
         let params = HttpRequestParams {
-            method: "POST".to_string(),
-            url: "https://httpbin.org/post".to_string(),
+            method: "GET".to_string(),
+            url: "http://example.com".to_string(),
             headers: Some(HashMap::from([(
                 "Content-Type".to_string(),
                 "application/json".to_string(),
             )])),
-            query: None,
-            body: Some(serde_json::json!({
-                "test": "data",
-                "number": 42
-            })),
-            timeout_seconds: None,
-            include_body: None,
+            query: Some(HashMap::from([("key".to_string(), "value".to_string())])),
+            body: Some(json!({"test": "data"})),
+            timeout_seconds: Some(30),
+            include_body: Some(true),
         };
 
-        let response = executor.execute(params).await.unwrap();
-        let http_response = HttpResponse::from_response_json(response).await.unwrap();
+        // Verify params can be serialized and deserialized
+        let json = serde_json::to_string(&params).unwrap();
+        let deserialized: HttpRequestParams = serde_json::from_str(&json).unwrap();
 
-        assert_eq!(http_response.status, 200);
-        assert!(http_response.success);
-        assert!(http_response.body.is_some());
+        assert_eq!(deserialized.method, "GET");
+        assert_eq!(deserialized.url, "http://example.com");
+        assert_eq!(deserialized.timeout_seconds, Some(30));
+        assert_eq!(deserialized.include_body, Some(true));
     }
 
-    #[tokio::test]
-    async fn test_http_request_with_headers() {
-        let executor = HttpExecutor::new();
-
-        let params = HttpRequestParams {
-            method: "GET".to_string(),
-            url: "https://httpbin.org/headers".to_string(),
-            headers: Some(HashMap::from([
-                ("User-Agent".to_string(), "StreamFlow/0.2".to_string()),
-                ("Authorization".to_string(), "Bearer test_token".to_string()),
-            ])),
-            query: None,
-            body: None,
-            timeout_seconds: None,
-            include_body: None,
+    #[test]
+    fn test_http_response_creation() {
+        let response = HttpResponse {
+            status: 200,
+            success: true,
+            body: Some(json!({"message": "success"})),
         };
 
-        let response = executor.execute(params).await.unwrap();
-        let http_response = HttpResponse::from_response_json(response).await.unwrap();
-
-        assert_eq!(http_response.status, 200);
-        assert!(http_response.success);
-
-        // Verify headers were sent
-        let body = http_response.body.as_ref().unwrap();
-        let headers = body["headers"].as_object().unwrap();
-        assert!(headers.contains_key("Authorization"));
-        assert!(headers.contains_key("User-Agent"));
+        assert_eq!(response.status, 200);
+        assert!(response.success);
+        assert!(response.body.is_some());
     }
 
-    #[tokio::test]
-    async fn test_http_response_metadata_only() {
-        let executor = HttpExecutor::new();
-
-        let params = HttpRequestParams {
-            method: "GET".to_string(),
-            url: "https://httpbin.org/get".to_string(),
-            headers: None,
-            query: None,
-            body: None,
-            timeout_seconds: None,
-            include_body: None,
-        };
-
-        let response = executor.execute(params).await.unwrap();
-        let http_response = HttpResponse::from_response_metadata(response)
-            .await
-            .unwrap();
-
-        assert_eq!(http_response.status, 200);
-        assert!(http_response.success);
-        // Body should not be loaded
-        assert!(http_response.body.is_none());
-    }
-
-    #[tokio::test]
-    async fn test_default_user_agent() {
-        let executor = HttpExecutor::new();
-
-        let params = HttpRequestParams {
-            method: "GET".to_string(),
-            url: "https://httpbin.org/headers".to_string(),
-            headers: None,
-            query: None,
-            body: None,
-            timeout_seconds: None,
-            include_body: None,
-        };
-
-        let response = executor.execute(params).await.unwrap();
-        let http_response = HttpResponse::from_response_json(response).await.unwrap();
-
-        assert_eq!(http_response.status, 200);
-
-        // Verify default User-Agent was sent
-        let body = http_response.body.as_ref().unwrap();
-        let headers = body["headers"].as_object().unwrap();
-        let user_agent = headers.get("User-Agent").unwrap().as_str().unwrap();
-        assert!(user_agent.contains("StreamFlow"));
-    }
-
-    #[tokio::test]
-    async fn test_user_agent_can_be_overridden() {
-        let executor = HttpExecutor::new();
-
-        let params = HttpRequestParams {
-            method: "GET".to_string(),
-            url: "https://httpbin.org/headers".to_string(),
-            headers: Some(HashMap::from([(
-                "User-Agent".to_string(),
-                "CustomAgent/1.0".to_string(),
-            )])),
-            query: None,
-            body: None,
-            timeout_seconds: None,
-            include_body: None,
-        };
-
-        let response = executor.execute(params).await.unwrap();
-        let http_response = HttpResponse::from_response_json(response).await.unwrap();
-
-        assert_eq!(http_response.status, 200);
-
-        // Verify custom User-Agent overrode default
-        let body = http_response.body.as_ref().unwrap();
-        let headers = body["headers"].as_object().unwrap();
-        let user_agent = headers.get("User-Agent").unwrap().as_str().unwrap();
-        assert_eq!(user_agent, "CustomAgent/1.0");
-    }
-
-    // Activity wrapper tests
-    #[tokio::test]
-    async fn test_http_request_activity_get() {
+    #[test]
+    fn test_http_request_activity_name_and_worker() {
         let activity = HttpRequestActivity::new();
 
-        let params = json!({
-            "method": "GET",
-            "url": "https://httpbin.org/get",
-            "query": {
-                "test": "value"
-            }
-        });
-
-        let result = activity.execute(params).await.unwrap();
-
-        assert!(result.get("response").is_some());
-        let response = result.get("response").unwrap();
-        assert_eq!(response.get("status").unwrap(), 200);
-        assert_eq!(response.get("success").unwrap(), true);
-    }
-
-    #[tokio::test]
-    async fn test_http_request_activity_post() {
-        let activity = HttpRequestActivity::new();
-
-        let params = json!({
-            "method": "POST",
-            "url": "https://httpbin.org/post",
-            "headers": {
-                "Content-Type": "application/json"
-            },
-            "body": {
-                "test": "data",
-                "number": 42
-            }
-        });
-
-        let result = activity.execute(params).await.unwrap();
-
-        assert!(result.get("response").is_some());
-        let response = result.get("response").unwrap();
-        assert_eq!(response.get("status").unwrap(), 200);
-        assert_eq!(response.get("success").unwrap(), true);
-    }
-
-    #[tokio::test]
-    async fn test_http_request_activity_head_excludes_body() {
-        let activity = HttpRequestActivity::new();
-
-        let params = json!({
-            "method": "HEAD",
-            "url": "https://httpbin.org/get"
-        });
-
-        let result = activity.execute(params).await.unwrap();
-
-        assert!(result.get("response").is_some());
-        let response = result.get("response").unwrap();
-        assert_eq!(response.get("status").unwrap(), 200);
-        assert_eq!(response.get("success").unwrap(), true);
-        // HEAD requests should not include body
-        assert!(response.get("body").is_none() || response.get("body").unwrap().is_null());
-    }
-
-    #[tokio::test]
-    async fn test_http_request_activity_include_body_false() {
-        let activity = HttpRequestActivity::new();
-
-        let params = json!({
-            "method": "GET",
-            "url": "https://httpbin.org/get",
-            "include_body": false
-        });
-
-        let result = activity.execute(params).await.unwrap();
-
-        assert!(result.get("response").is_some());
-        let response = result.get("response").unwrap();
-        assert_eq!(response.get("status").unwrap(), 200);
-        assert_eq!(response.get("success").unwrap(), true);
-        // Body should be excluded when include_body is false
-        assert!(response.get("body").is_none() || response.get("body").unwrap().is_null());
-    }
-
-    #[tokio::test]
-    async fn test_http_request_activity_include_body_true() {
-        let activity = HttpRequestActivity::new();
-
-        let params = json!({
-            "method": "GET",
-            "url": "https://httpbin.org/get",
-            "include_body": true
-        });
-
-        let result = activity.execute(params).await.unwrap();
-
-        assert!(result.get("response").is_some());
-        let response = result.get("response").unwrap();
-        assert_eq!(response.get("status").unwrap(), 200);
-        assert_eq!(response.get("success").unwrap(), true);
-        // Body should be included when include_body is true
-        assert!(response.get("body").is_some());
-        assert!(!response.get("body").unwrap().is_null());
+        assert_eq!(activity.name(), "http_request");
+        assert_eq!(activity.worker(), "builtin");
     }
 }

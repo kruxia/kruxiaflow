@@ -44,8 +44,8 @@ async fn test_store_and_get_workflow_definition() {
             worker: "test".to_string(),
             activity_name: Some("Test Activity".to_string()),
             parameters: None,
-            preceding: None,
-            following: None,
+            depends_on: None,
+            dependency_of: None,
             settings: None,
         }],
     };
@@ -86,8 +86,8 @@ async fn test_get_latest_workflow_definition() {
             worker: "test".to_string(),
             activity_name: None,
             parameters: None,
-            preceding: None,
-            following: None,
+            depends_on: None,
+            dependency_of: None,
             settings: None,
         }],
     };
@@ -100,8 +100,8 @@ async fn test_get_latest_workflow_definition() {
                 worker: "test".to_string(),
                 activity_name: None,
                 parameters: None,
-                preceding: None,
-                following: None,
+                depends_on: None,
+                dependency_of: None,
                 settings: None,
             },
             ActivityDefinition {
@@ -109,8 +109,8 @@ async fn test_get_latest_workflow_definition() {
                 worker: "test".to_string(),
                 activity_name: None,
                 parameters: None,
-                preceding: None,
-                following: None,
+                depends_on: None,
+                dependency_of: None,
                 settings: None,
             },
         ],
@@ -151,8 +151,8 @@ async fn test_list_workflow_definitions() {
             worker: "test".to_string(),
             activity_name: None,
             parameters: None,
-            preceding: None,
-            following: None,
+            depends_on: None,
+            dependency_of: None,
             settings: None,
         }],
     };
@@ -164,8 +164,8 @@ async fn test_list_workflow_definitions() {
             worker: "test".to_string(),
             activity_name: None,
             parameters: None,
-            preceding: None,
-            following: None,
+            depends_on: None,
+            dependency_of: None,
             settings: None,
         }],
     };
@@ -241,8 +241,8 @@ async fn test_workflow_definition_with_dependencies() {
                 worker: "test".to_string(),
                 activity_name: None,
                 parameters: None,
-                preceding: None,
-                following: Some(vec![ActivityRelationship {
+                depends_on: None,
+                dependency_of: Some(vec![ActivityRelationship {
                     activity_key: "step2".to_string(),
                     conditions: None,
                 }]),
@@ -253,11 +253,11 @@ async fn test_workflow_definition_with_dependencies() {
                 worker: "test".to_string(),
                 activity_name: None,
                 parameters: None,
-                preceding: Some(vec![ActivityRelationship {
+                depends_on: Some(vec![ActivityRelationship {
                     activity_key: "step1".to_string(),
                     conditions: None,
                 }]),
-                following: None,
+                dependency_of: None,
                 settings: None,
             },
         ],
@@ -272,7 +272,14 @@ async fn test_workflow_definition_with_dependencies() {
         .unwrap();
 
     assert_eq!(retrieved.activities.len(), 2);
-    assert!(retrieved.activities[0].following.as_ref().unwrap().len() > 0);
+    assert!(
+        retrieved.activities[0]
+            .dependency_of
+            .as_ref()
+            .unwrap()
+            .len()
+            > 0
+    );
 
     clean_test_data(&pool).await;
 }

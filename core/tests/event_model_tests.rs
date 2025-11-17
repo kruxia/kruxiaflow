@@ -282,8 +282,8 @@ fn test_workflow_definition_with_activities() {
         activity_name: "TestActivity".to_string(),
         parameters: json!({"param": "value"}),
         settings: None,
-        preceding: None,
-        following: None,
+        depends_on: None,
+        dependency_of: None,
     };
 
     let def = WorkflowDefinition {
@@ -310,8 +310,8 @@ fn test_activity_definition_serialization() {
         activity_name: "TestActivity".to_string(),
         parameters: json!({"input": "data"}),
         settings: None,
-        preceding: None,
-        following: None,
+        depends_on: None,
+        dependency_of: None,
     };
 
     let json = serde_json::to_string(&activity).unwrap();
@@ -329,11 +329,11 @@ fn test_activity_definition_with_dependencies() {
         activity_name: "DependentActivity".to_string(),
         parameters: json!({}),
         settings: None,
-        preceding: Some(vec![DependencyEdge {
+        depends_on: Some(vec![DependencyEdge {
             activity_key: "act1".to_string(),
             conditions: None,
         }]),
-        following: Some(vec![DependencyEdge {
+        dependency_of: Some(vec![DependencyEdge {
             activity_key: "act3".to_string(),
             conditions: Some(vec!["success".to_string()]),
         }]),
@@ -353,8 +353,8 @@ fn test_activity_definition_clone() {
         activity_name: "Activity".to_string(),
         parameters: json!({"key": "value"}),
         settings: None,
-        preceding: None,
-        following: None,
+        depends_on: None,
+        dependency_of: None,
     };
 
     let activity2 = activity1.clone();

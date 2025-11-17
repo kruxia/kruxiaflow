@@ -562,7 +562,7 @@ streamflow/
 - **So that** I can rapidly prototype and iterate on AI pipelines
 - **Acceptance Criteria**:
   - Activities defined with key, worker, name, parameters
-  - Sequential execution via `following_key` edges
+  - Sequential execution via `dependent_key` edges
   - Template expressions for parameter passing: `{{validate_payment.card_token}}`
   - Support for workflow input: `{{ARG.amount}}`
   - Outputs declared per activity
@@ -584,8 +584,8 @@ streamflow/
 - **I want** to execute multiple activities in parallel and aggregate results
 - **So that** I can maximize throughput for independent operations
 - **Acceptance Criteria**:
-  - Multiple `following_key` edges for fan-out
-  - Multiple `preceding_key` edges for fan-in (join point)
+  - Multiple `dependent_key` edges for fan-out
+  - Multiple `dependency_key` edges for fan-in (join point)
   - Join waits for ALL preceding activities to complete
   - Access to all parallel results: `{{analyze_security.results}}`
   - Static parallel: Fixed number of activities

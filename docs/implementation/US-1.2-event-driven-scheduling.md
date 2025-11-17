@@ -83,9 +83,9 @@ pub trait EventSource: Send + Sync {
 ### Workflow Definition Language (Section: Workflow Definition Languages)
 
 **Directed Graph Structure**:
-- Activities define `preceding` and/or `following` relationships
+- Activities define `depends_on` and/or `dependency_of` relationships
 - Orchestrator evaluates graph to determine when activities become ready
-- Activity is ready when: ALL `preceding` activities completed AND conditions satisfied
+- Activity is ready when: ALL `depends_on` activities completed AND conditions satisfied
 
 **Example YAML**:
 ```yaml
@@ -98,7 +98,7 @@ activities:
     name: validate_card
     parameters:
       card_token: "{{ARG.card_token}}"
-    following:
+    dependency_of:
       - activity_key: authorize_card
         conditions:
           - "{{validate_payment.valid}} == true"
@@ -106,7 +106,7 @@ activities:
   - key: authorize_card
     worker: payments
     name: authorize
-    following:
+    dependency_of:
       - activity_key: capture_payment
 
   - key: capture_payment
@@ -939,8 +939,8 @@ async fn reconstruct_state_from_events(
 
 **Responsibilities**:
 1. Evaluate workflow directed graph to find ready activities
-2. Check if all `preceding` activities are completed
-3. Evaluate conditions on `preceding`/`following` relationships
+2. Check if all `depends_on` activities are completed
+3. Evaluate conditions on `depends_on`/`dependency_of` relationships
 4. Support parallel execution (fan-out/fan-in)
 5. Detect workflow completion
 
@@ -951,8 +951,8 @@ async fn reconstruct_state_from_events(
 **Requirements**:
 - Activity is ready when:
   - Status is `NotScheduled` (not already in queue)
-  - All activities in `preceding` list are `Completed`
-  - All conditions on `preceding` relationships are satisfied
+  - All activities in `depends_on` list are `Completed`
+  - All conditions on `depends_on` relationships are satisfied
 - Return list of activities to schedule
 - Handle activities with no dependencies (root activities)
 
@@ -988,17 +988,17 @@ fn is_activity_ready(
     state: &WorkflowState,
 ) -> Result<bool> {
     // Get list of preceding activities from definition
-    let preceding_keys = get_preceding_activities(activity, definition);
+    let dependency_keys = get_preceding_activities(activity, definition);
 
     // If no preceding activities, it's a root activity (always ready initially)
-    if preceding_keys.is_empty() {
+    if dependency_keys.is_empty() {
         return Ok(true);
     }
 
     // Check all preceding activities are completed
-    for preceding_key in &preceding_keys {
-        let preceding_state = state.activities.get(preceding_key)
-            .ok_or_else(|| Error::ActivityNotFound(preceding_key.clone()))?;
+    for dependency_key in &dependency_keys {
+        let preceding_state = state.activities.get(dependency_key)
+            .ok_or_else(|| Error::ActivityNotFound(dependency_key.clone()))?;
 
         if preceding_state.status != ActivityStatus::Completed {
             return Ok(false);  // Dependency not satisfied
@@ -1006,8 +1006,8 @@ fn is_activity_ready(
     }
 
     // Check all conditions on relationships
-    for preceding_key in &preceding_keys {
-        let conditions = get_conditions(activity, preceding_key, definition)?;
+    for dependency_key in &dependency_keys {
+        let conditions = get_conditions(activity, dependency_key, definition)?;
 
         for condition in conditions {
             if !evaluate_condition(condition, state)? {
@@ -1020,7 +1020,7 @@ fn is_activity_ready(
 }
 ```
 
-**Determining `preceding` Activities**:
+**Determining `depends_on` Activities**:
 ```rust
 // Pseudocode
 fn get_preceding_activities(
@@ -1029,16 +1029,16 @@ fn get_preceding_activities(
 ) -> Vec<String> {
     let mut preceding = Vec::new();
 
-    // Check explicit `preceding` list
-    if let Some(preceding_list) = &activity.preceding {
+    // Check explicit `depends_on` list
+    if let Some(preceding_list) = &activity.depends_on {
         for item in preceding_list {
             preceding.push(item.activity_key.clone());
         }
     }
 
-    // Check if other activities list this one in `following`
+    // Check if other activities list this one in `dependency_of`
     for other_activity in &definition.activities {
-        if let Some(following_list) = &other_activity.following {
+        if let Some(following_list) = &other_activity.dependency_of {
             for item in following_list {
                 if item.activity_key == activity.key {
                     preceding.push(other_activity.key.clone());
@@ -1384,8 +1384,8 @@ pub struct ActivityDefinition {
     pub name: String,
     pub parameters: serde_json::Value,  // May contain templates
     pub settings: Option<ActivitySettings>,
-    pub preceding: Option<Vec<DependencyEdge>>,
-    pub following: Option<Vec<DependencyEdge>>,
+    pub depends_on: Option<Vec<DependencyEdge>>,
+    pub dependency_of: Option<Vec<DependencyEdge>>,
 }
 
 pub struct DependencyEdge {
@@ -1448,13 +1448,13 @@ activities:
   - key: validate_payment
     worker: payments
     name: validate_card
-    following:
+    dependency_of:
       - activity_key: authorize_card
 
   - key: authorize_card
     worker: payments
     name: authorize
-    following:
+    dependency_of:
       - activity_key: capture_payment
 
   - key: capture_payment
@@ -1502,7 +1502,7 @@ activities:
   - key: fetch_code
     worker: git
     name: clone_repo
-    following:
+    dependency_of:
       - activity_key: security_scan
       - activity_key: performance_test
       - activity_key: quality_check
@@ -1522,7 +1522,7 @@ activities:
   - key: aggregate_results
     worker: reporting
     name: generate_report
-    preceding:
+    depends_on:
       - activity_key: security_scan
       - activity_key: performance_test
       - activity_key: quality_check
@@ -1576,7 +1576,7 @@ activities:
   - key: validate_payment
     worker: payments
     name: validate_card
-    following:
+    dependency_of:
       - activity_key: authorize_card
         conditions:
           - "{{validate_payment.valid}} == true"
