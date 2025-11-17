@@ -396,7 +396,204 @@ STREAMFLOW_STORAGE_S3_REGION=us-east-1
 
 ---
 
-### Story 1.11: Redis Result Caching
+### Story 1.11: Per-Workflow Storage Configuration
+
+**Priority**: P2 (Medium - Enterprise requirement, complements Story 1.9)
+
+**As** an enterprise workflow developer
+**I want** to specify external object storage per workflow
+**So that** workflow artifacts stay in my organization's storage for compliance and cost control
+
+**Background**:
+Currently, all workflows use a single system-wide storage backend configured via environment variables. This requires copying data from user-owned buckets into StreamFlow's managed storage, which:
+- Increases storage costs (duplicate data)
+- Creates compliance issues (sensitive data must stay in specific buckets)
+- Adds latency (cross-bucket transfers)
+- Complicates data sovereignty requirements
+
+**Scope**:
+- Workflow-level storage configuration in YAML workflow definitions
+- Storage factory pattern to create per-workflow storage instances
+- Support for workflow-specific credentials via Secrets Management
+- Storage instance caching (reuse across workflow executions)
+- Fallback behavior when user storage unavailable
+- Lifecycle management (cleanup cached storage instances)
+- Security validation (workflow can only access its designated storage)
+- Documentation and examples for external storage setup
+
+**Architecture Reference**: `docs/architecture.md` (WorkflowStorage interface)
+
+**Dependencies**:
+- US-5.4 (Object Storage and File Management) - base infrastructure
+- US-11.6 (Secrets Management) - credential storage for user buckets
+- Story 1.9 (S3-Compatible Storage) - S3 provider implementation
+
+**Workflow Configuration Example**:
+```yaml
+workflow: etl_pipeline
+version: "1.0"
+
+# Workflow-level storage configuration
+storage:
+  provider: s3
+  bucket: my-company-data-lake
+  region: us-west-2
+  endpoint: https://s3.us-west-2.amazonaws.com
+  credentials_secret: etl_pipeline_s3_creds  # Reference to secret in Secrets Management
+  path_prefix: "workflows/etl"  # Optional: scope to specific path
+  retention_days: 30  # Optional: lifecycle policy
+
+activities:
+  - key: extract_data
+    worker: data
+    name: download_file
+    parameters:
+      source_url: "{{ARG.source_url}}"
+      artifact_key: "raw_data.csv"
+    outputs:
+      - artifact_ref  # Stored in my-company-data-lake/workflows/etl/...
+```
+
+**Alternative: Reference existing user data without copy**:
+```yaml
+workflow: process_user_data
+version: "1.0"
+
+storage:
+  provider: s3
+  bucket: user-uploads-bucket  # User's existing bucket
+  region: eu-west-1
+  credentials_secret: user_bucket_readonly_creds
+  mode: reference_only  # Don't copy, just reference existing files
+
+activities:
+  - key: analyze_file
+    worker: analytics
+    name: process_csv
+    parameters:
+      # Reference file already in user's bucket (no copy needed)
+      input_file: "{{ARG.existing_file_key}}"
+```
+
+**Implementation Details**:
+
+**Storage Factory** (Rust):
+```rust
+pub struct WorkflowStorageFactory {
+    default_storage: Arc<dyn WorkflowStorage>,
+    secrets_manager: Arc<dyn SecretsManager>,
+    storage_cache: RwLock<HashMap<String, Arc<dyn WorkflowStorage>>>,
+}
+
+impl WorkflowStorageFactory {
+    pub async fn get_storage(
+        &self,
+        workflow_def: &WorkflowDefinition,
+    ) -> Result<Arc<dyn WorkflowStorage>> {
+        // Use workflow-specific storage if configured
+        if let Some(storage_config) = &workflow_def.storage {
+            let cache_key = storage_config.cache_key();
+
+            // Check cache first
+            if let Some(storage) = self.storage_cache.read().await.get(&cache_key) {
+                return Ok(storage.clone());
+            }
+
+            // Create new storage instance
+            let credentials = self.secrets_manager
+                .get_secret(&storage_config.credentials_secret)
+                .await?;
+
+            let storage = create_storage_backend(storage_config, credentials)?;
+
+            // Cache for reuse
+            self.storage_cache.write().await.insert(cache_key, storage.clone());
+
+            Ok(storage)
+        } else {
+            // Fall back to system default storage
+            Ok(self.default_storage.clone())
+        }
+    }
+}
+```
+
+**Activity Context Enhancement**:
+```rust
+pub struct ActivityContext {
+    pub workflow_id: Uuid,
+    pub activity_key: String,
+    pub storage: Arc<dyn WorkflowStorage>,  // Per-workflow, not global
+    // ...
+}
+```
+
+**Benefits**:
+- ✅ **Compliance**: Keep sensitive data in organization-controlled buckets
+- ✅ **Cost optimization**: Avoid duplicate storage and cross-bucket transfer fees
+- ✅ **Data sovereignty**: Ensure data stays in specific geographic regions
+- ✅ **Integration**: Work directly with existing data lakes and warehouses
+- ✅ **Multi-cloud**: Different workflows can use different cloud providers
+- ✅ **No data migration**: Process existing data in place (reference_only mode)
+- ✅ **Security**: Credentials isolated per workflow via Secrets Management
+
+**Trade-offs**:
+- Increased complexity (multiple storage backends active simultaneously)
+- Credential management overhead (per-workflow credentials)
+- User responsible for storage availability and lifecycle
+- Potential performance variance (user's bucket might be slower/in different region)
+- Testing complexity (validate multiple backend scenarios)
+
+**Use Cases**:
+1. **Regulatory compliance**: Healthcare/finance data must stay in specific buckets
+2. **Data lake integration**: Process data in existing S3 data lake without copying
+3. **Customer data isolation**: Multi-tenant SaaS with per-customer storage
+4. **Cost optimization**: Large datasets processed in place (no transfer costs)
+5. **Geographic requirements**: EU workflows use EU buckets, US workflows use US buckets
+
+**Lifecycle Considerations**:
+- **Reference-only mode**: StreamFlow doesn't manage lifecycle (user's responsibility)
+- **Managed mode**: StreamFlow can still apply retention policies to workflow artifacts
+- **Storage unavailability**: Workflow fails gracefully with clear error message
+- **Credential rotation**: Support for credential updates without workflow redeployment
+
+**Security Validation**:
+- Workflow can only access storage specified in its definition
+- Activities receive pre-configured storage instance (no credential access)
+- Secret references validated against Secrets Management permissions
+- Audit logging for storage access (which workflow accessed which bucket)
+
+**Testing Strategy**:
+- Unit tests: Storage factory caching and credential handling
+- Integration tests: Multiple workflows with different storage backends simultaneously
+- E2E tests: Workflow execution with external S3 bucket
+- Security tests: Verify cross-workflow storage isolation
+- Failure tests: Storage unavailable scenarios, credential errors
+
+**Success Criteria**:
+- ✅ Workflows can specify custom S3/GCS/Azure storage
+- ✅ Multiple workflows with different storage backends run concurrently
+- ✅ Storage instances cached and reused efficiently
+- ✅ Credentials managed securely via Secrets Management
+- ✅ Clear error messages when storage unavailable
+- ✅ No performance regression vs system-default storage
+- ✅ Complete documentation with examples
+
+**Implementation Estimate**: 7-11 days
+- Design & specification: 1-2 days
+- Core implementation: 3-5 days
+- Testing (multiple backends, credentials, fallback): 2-3 days
+- Documentation: 1 day
+
+**Rollout Plan**:
+- **Phase 1**: Implement storage factory with system default fallback
+- **Phase 2**: Add S3 per-workflow configuration (after Story 1.9 complete)
+- **Phase 3**: Extend to GCS/Azure (leverage existing providers)
+- **Phase 4**: Add reference_only mode for existing user data
+
+---
+
+### Story 1.12: Redis Result Caching
 
 **Priority**: P2 (Medium - Performance optimization)
 
@@ -644,7 +841,108 @@ WHERE workflow_id = $1;  -- No timestamp filter
 
 ---
 
-### Story 2.4: Activity Queue Partitioning
+### Story 2.4: PostgreSQL Activity Pool Cache Enhancements
+
+**Priority**: P3 (Lower - Optimization for specific edge cases)
+
+**As** a platform engineer running the postgres_query built-in activity
+**I want** advanced pool caching features (eviction, cache metrics)
+**So that** I can optimize connection management for edge cases
+
+**Background**:
+The postgres_query built-in activity caches PostgreSQL connection pools by database URL to avoid connection overhead. MVP implementation uses a simple cache with no eviction. This works well for typical workflows (connecting to 1-3 databases), but edge cases may benefit from advanced cache management.
+
+**Current MVP Implementation**:
+- ✅ Connection pool cache (HashMap by db_url)
+- ✅ System-level pool configuration via environment variables
+- ✅ Reasonable defaults (max_connections=5, acquire_timeout=30s)
+- ✅ Environment variables:
+  - `STREAMFLOW_POSTGRES_POOL_MAX_CONNECTIONS` (default: 5)
+  - `STREAMFLOW_POSTGRES_POOL_MIN_CONNECTIONS` (default: none)
+  - `STREAMFLOW_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECS` (default: 30)
+  - `STREAMFLOW_POSTGRES_POOL_MAX_LIFETIME_SECS` (default: none)
+  - `STREAMFLOW_POSTGRES_POOL_IDLE_TIMEOUT_SECS` (default: none)
+- ❌ No cache eviction (pools live forever)
+- ❌ No cache size limits
+- ❌ No cache metrics
+
+**Scope**:
+- **Automatic cache eviction**: Evict pools not used in last N minutes
+- **Configurable eviction interval**: Background task frequency (default: 5 minutes)
+- **Configurable idle threshold**: Evict pools idle for N minutes (default: 10 minutes)
+- **Cache size limits**: Maximum number of cached pools (default: unlimited)
+- **Cache metrics**: Pool count, eviction count, cache hit/miss rate
+
+**Configuration Example**:
+```bash
+# PostgreSQL activity pool settings (MVP - already supported)
+STREAMFLOW_POSTGRES_POOL_MAX_CONNECTIONS=10            # Default: 5
+STREAMFLOW_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECS=60      # Default: 30
+
+# PostgreSQL activity pool cache settings (Post-MVP)
+STREAMFLOW_POSTGRES_POOL_CACHE_MAX_SIZE=100            # Default: unlimited
+STREAMFLOW_POSTGRES_POOL_EVICTION_INTERVAL_SECS=300    # 5 minutes
+STREAMFLOW_POSTGRES_POOL_IDLE_THRESHOLD_SECS=600       # 10 minutes
+```
+
+**Eviction Logic**:
+```rust
+// Background task runs every eviction_interval
+pub async fn evict_idle_pools(
+    pool_cache: Arc<RwLock<HashMap<String, (PgPool, Instant)>>>,
+    idle_threshold: Duration,
+) {
+    let mut cache = pool_cache.write().await;
+    let now = Instant::now();
+
+    cache.retain(|db_url, (pool, last_used)| {
+        let age = now.duration_since(*last_used);
+        if age > idle_threshold {
+            info!("Evicting idle pool for {} (idle for {:?})", db_url, age);
+            false  // Remove from cache
+        } else {
+            true  // Keep in cache
+        }
+    });
+}
+```
+
+**Benefits**:
+- ✅ Prevents unbounded cache growth
+- ✅ Releases unused database connections
+- ✅ Configurable for different use cases
+- ✅ Metrics for monitoring cache behavior
+
+**Trade-offs**:
+- Adds complexity (background eviction task)
+- Pool recreation overhead if evicted too aggressively
+- Configuration tuning required for optimal behavior
+
+**Testing**:
+- Unit test: Eviction logic removes idle pools
+- Integration test: Verify pool reuse within idle threshold
+- Integration test: Verify pool eviction after idle threshold
+- Load test: Cache behavior under high pool churn
+
+**Success Criteria**:
+- ✅ Idle pools evicted within 2x eviction interval
+- ✅ Cache size stays below max_size limit
+- ✅ Metrics show cache hit rate >90% for typical workflows
+- ✅ No performance regression vs MVP (simple cache)
+
+**When to Use**:
+- ✅ Workflows connecting to many ephemeral databases (>10)
+- ✅ Multi-tenant SaaS with per-tenant databases
+- ✅ Memory-constrained environments
+- ❌ Typical workflows connecting to 1-3 databases (MVP cache sufficient)
+
+**Architecture Reference**:
+- `worker/src/activities/postgres.rs:20` (PoolConfig with environment variables)
+- `worker/src/activities/postgres.rs:75` (get_pool method with cache logic)
+
+---
+
+### Story 2.5: Activity Queue Partitioning
 
 **Priority**: P3 (Lower - Only needed at very high scale)
 
@@ -670,7 +968,7 @@ WHERE workflow_id = $1;  -- No timestamp filter
 
 ---
 
-### Story 2.5: Priority Queues
+### Story 2.6: Priority Queues
 
 **Priority**: P2 (Medium - Common requirement for production)
 
@@ -800,7 +1098,7 @@ if activity.scheduled_for + STARVATION_THRESHOLD < now() {
 
 ---
 
-### Story 2.6: Dead Letter Queue
+### Story 2.7: Dead Letter Queue
 
 **Priority**: P2 (Medium - Improves debuggability)
 
