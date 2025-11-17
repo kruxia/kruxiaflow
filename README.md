@@ -14,9 +14,9 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 ## Status
 
 **Current Version**: 0.2.0 MVP (In Development)
-**Implementation Phase**: Pre-Epic 2 Requirements (Phase 2C) ✅ **COMPLETE**
-**Next Milestone**: Epic 2 - Performance Benchmarking and Validation
-**Epic 2 Progress**: US-2.2 Competitor Benchmarks ✅ Complete (1 of 5 stories)
+**Implementation Phase**: Epic 3 YAML Workflows (Examples 1-2 Complete)
+**Next Milestone**: Example 3 - Parallel Execution with File Management
+**Progress**: Epic 1 Complete ✅ | Epic 3 Examples 1-2 Complete ✅
 
 ### Completed Features ✅
 
@@ -40,42 +40,71 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 - ✅ Activity execution and result reporting
 - ✅ Concurrent worker polling with FOR UPDATE SKIP LOCKED safety
 
-**Epic 1C: Main Binary and CLI** (3 of 6 complete - Pre-Epic 2 requirements met)
+**Epic 1C: Main Binary and CLI** (Complete)
 - ✅ **[US-1C.1: Main Binary and CLI Framework](docs/implementation/US-1C.1-main-binary-cli.md)** - Version command, enhanced help, 4.5MB binary
 - ✅ **[US-1C.2: All-in-One Service Launcher](docs/implementation/US-1C.2-all-in-one-launcher.md)** - `streamflow serve` command with graceful shutdown
 - ✅ **[US-1C.7: Graceful Shutdown and Signal Handling](docs/implementation/US-1C.7-graceful-shutdown.md)** - SIGTERM/SIGINT handling with CancellationToken
 
+**Epic 3: YAML Workflow Definition Language** (In Progress - Examples 1-2 Complete)
+- ✅ **Example 1: Sequential Workflow** - HTTP activity, template expressions, YAML parser
+  - Sequential workflows with `depends_on`
+  - Template expressions: `{{INPUT.*}}`, `{{activity.output}}`, `{{SECRET.*}}`
+  - HTTP activity with custom headers and query parameters
+  - Example workflows: `01-weather-report.yaml`, `01b-weather-report-dynamic.yaml`
+- ✅ **Example 2: Conditional Branching** - PostgreSQL activity, MiniJinja conditionals
+  - Conditional execution with MiniJinja template engine
+  - PostgreSQL activity with parameterized queries
+  - Flexible condition syntax (single or array)
+  - Example workflow: `02-user-validation.yaml`
+- 📋 **Example 3**: Parallel execution with file management (Next)
+
 ### Current Focus 🎯
 
-**Epic 2: Performance Benchmarking and Validation**
-- ✅ **US-2.2**: Competitor Comparison Benchmarks (Complete)
-- 📋 **US-2.1**: Automated Performance Test Suite
-- 📋 **US-2.3**: PostgreSQL Performance Profiling
-- 📋 **US-2.4**: Stress Testing and Capacity Planning
-- 📋 **US-2.5**: Grafana Performance Dashboard
+**Epic 3: YAML Workflows - Example-Driven Implementation**
+- Implementing Epic 3 (YAML DSL) and Epic 5 (Built-in Activities) together through realistic workflow examples
+- Example 3 (Next): Parallel execution (fan-out/fan-in) with file storage
+- See [MVP Workflows Implementation Plan](docs/implementation/mvp-workflows-implementation-plan.md) for full roadmap
 
 ### Recent Completions ✅
 
-**Week of Nov 4-11, 2025** - Phase 2C Complete ✅
-- ✅ **US-1A.6**: Workflow Status Query - GET /api/v1/workflows endpoints
-- ✅ **US-1A.7**: Worker Activity APIs - Poll, heartbeat, complete, fail endpoints with JWT auth
-- ✅ **US-1B.1**: Built-in Worker - Complete worker implementation with HTTP client
-- ✅ **US-1C.1**: Main Binary and CLI Framework - Version command, enhanced help, 4.5MB binary
-- ✅ **US-1C.2**: All-in-One Service Launcher - `streamflow serve` with orchestrator + API + workers
-- ✅ **US-1C.7**: Graceful Shutdown - SIGTERM/SIGINT handling with configurable timeout
-- ✅ **US-2.2**: Competitor Comparison Benchmarks - StreamFlow vs Temporal vs Airflow benchmark suite
+**Week of Nov 11-16, 2025** - Epic 3 Examples 1-2 Complete ✅
+- ✅ **Example 1**: Sequential Workflow
+  - YAML parser with workflow definition support
+  - Template expression engine (MiniJinja) for `{{INPUT.*}}`, `{{activity.output}}`, `{{SECRET.*}}`
+  - HTTP activity executor with custom headers, query parameters
+  - End-to-end workflow tests
+  - Example workflows: `01-weather-report.yaml`, `01b-weather-report-dynamic.yaml`
+- ✅ **Example 2**: Conditional Branching
+  - MiniJinja conditional evaluation in dependency edges
+  - PostgreSQL activity with parameterized queries and connection pooling
+  - Flexible condition syntax (single condition or array of conditions)
+  - `depends_on` alias for user-friendly YAML
+  - Example workflow: `02-user-validation.yaml`
+  - Comprehensive end-to-end tests for conditional workflows
 
-**Phase 2C (Pre-Epic 2 Requirements)**: ✅ **100% COMPLETE** - Ready for Epic 2 performance validation!
+**Week of Nov 4-11, 2025** - Epic 1 Complete ✅
+- ✅ All Epic 1A, 1B, 1C user stories complete
+- ✅ API Server with full workflow and worker APIs
+- ✅ Built-in Worker using HTTP client
+- ✅ Main Binary with `streamflow serve` command
+- ✅ Graceful shutdown with SIGTERM/SIGINT handling
 
-### Deferred to Post-Epic 2 📋
+### Deferred Features 📋
 
-These features will be implemented after Epic 2 performance validation informs their design:
+**Post-Epic 3 (YAML Workflows)**:
 - 📋 **US-1A.8**: Activity Results and Output Retrieval (~8 hours)
 - 📋 **US-1A.9**: WebSocket Streaming for Real-Time Updates (~15 hours)
 - 📋 **US-1C.3**: Individual Service Launchers (~5 hours)
 - 📋 **US-1C.4**: Configuration Management (~4 hours)
 - 📋 **US-1C.5**: Database Migration CLI (~3 hours)
 - 📋 **US-1C.6**: Health Checks and Service Monitoring (~5 hours)
+
+**Epic 2: Performance Benchmarking** (Deferred until after Epic 3):
+- ✅ **US-2.2**: Competitor Comparison Benchmarks (Complete)
+- 📋 **US-2.1**: Automated Performance Test Suite
+- 📋 **US-2.3**: PostgreSQL Performance Profiling
+- 📋 **US-2.4**: Stress Testing and Capacity Planning
+- 📋 **US-2.5**: Grafana Performance Dashboard
 
 ## Quick Start
 
@@ -384,7 +413,7 @@ openssl rsa -in private.pem -pubout -out public.pem
 - ✅ Activity execution and result reporting
 - ✅ Same code path as external workers (consistency)
 
-### Phase 2C: Pre-Epic 2 Requirements (Weeks 8-9) ✅ **100% Complete**
+### Phase 2C: Pre-Epic 2 Requirements (Weeks 8-9) ✅ **COMPLETE**
 **Minimal viable system for performance benchmarking:**
 - ✅ Workflow Status and Query API (US-1A.6) - 11 hours
 - ✅ Worker Activity APIs (US-1A.7) - 12 hours
@@ -392,19 +421,45 @@ openssl rsa -in private.pem -pubout -out public.pem
 - ✅ All-in-One Service Launcher (US-1C.2) - 8 hours
 - ✅ Graceful Shutdown (US-1C.7) - 4 hours
 
-**Total Effort: ~41 hours (5 days)** - System ready for Epic 2 performance validation!
+**Total Effort: ~41 hours (5 days)** - Epic 1 Complete!
 
-### Phase 3: Performance Benchmarking (Weeks 10-11) 📋 In Progress
-**Epic 2: Validate Architecture Before Additional Features**
+### Phase 3: YAML Workflows - Examples 1-2 (Weeks 10-11) ✅ **COMPLETE**
+**Epic 3: YAML Workflow Definition Language (Example-Driven)**
+- ✅ Example 1: Sequential workflow with HTTP activity
+  - YAML parser and workflow definition
+  - Template expression engine ({{INPUT.*}}, {{activity.output}}, {{SECRET.*}})
+  - HTTP activity executor with custom headers
+  - Example workflows: weather-report.yaml, weather-report-dynamic.yaml
+- ✅ Example 2: Conditional branching with PostgreSQL
+  - MiniJinja conditional evaluation
+  - PostgreSQL activity executor
+  - depends_on alias and flexible condition syntax
+  - Example workflow: user-validation.yaml
+
+### Phase 4: YAML Workflows - Examples 3-10 (Weeks 12-18) 🎯 **IN PROGRESS**
+**Continuing Epic 3 + Epic 5 (Built-in Activities)**
+- 📋 Example 3: Parallel execution with file management (4-5 days) - **Next**
+- 📋 Example 4: LLM with cost tracking and retry (5-6 days)
+- 📋 Example 5: Multi-model LLM fallback (4-5 days)
+- 📋 Example 6: Semantic caching (3-4 days)
+- 📋 Example 7: Iterative workflows/loops (5-6 days)
+- 📋 Example 8: Advanced file management (3-4 days)
+- 📋 Example 9: HTTP/DB advanced features (3-4 days)
+- 📋 Example 10: Scheduled/delayed activities (2-3 days)
+
+**Total: ~32-42 days (6-8 weeks)** - See [MVP Workflows Implementation Plan](docs/implementation/mvp-workflows-implementation-plan.md)
+
+### Phase 5: Performance Benchmarking (Post-Epic 3) 📋 **DEFERRED**
+**Epic 2: Validate Architecture After YAML Implementation**
 - Automated performance test suite (US-2.1)
-- ✅ Competitor comparison benchmarks - vs Temporal, Airflow (US-2.2) - Complete
+- ✅ Competitor comparison benchmarks (US-2.2) - Already complete
 - PostgreSQL performance profiling (US-2.3)
 - Stress testing and capacity planning (US-2.4)
 - Performance dashboard and monitoring (US-2.5)
-- **Target**: Prove >1,000 workflows/sec vs competitors' 35-100/sec
+- **Target**: Prove >1,000 workflows/sec
 
-### Phase 4: Complete Epic 1A/1C (Week 12) 📋 Post-Epic 2
-**Features informed by Epic 2 performance insights:**
+### Phase 6: Complete Epic 1A/1C (Post-Epic 3) 📋 **DEFERRED**
+**Features informed by Epic 3 insights:**
 - Activity Results and Output Retrieval (US-1A.8) - ~8 hours
 - WebSocket Streaming for Real-Time Updates (US-1A.9) - ~15 hours
 - Individual Service Launchers (US-1C.3) - ~5 hours
@@ -412,26 +467,19 @@ openssl rsa -in private.pem -pubout -out public.pem
 - Database Migration CLI (US-1C.5) - ~3 hours
 - Health Checks and Service Monitoring (US-1C.6) - ~5 hours
 
-**Total: ~40 hours (5 days)**
-
-### Phase 5: YAML DSL + Programmatic Definition (Weeks 13-16) 📋 Planned
-**Epic 3: YAML Workflow Definition Language**
-- Declarative sequential, parallel, and conditional workflows
-- Template expressions and activity settings
-- YAML validation and tooling
-
+### Phase 7: Programmatic Definition (Post-MVP) 📋 **DEFERRED**
 **Epic 4: Python/JavaScript Builder APIs**
 - Compilation pipeline (code → YAML)
 - 5+ examples per language
 
-### Phase 6: PostgreSQL Optimization (Weeks 17-20) 📋 Planned
+### Phase 8: PostgreSQL Optimization (Post-MVP) 📋 **DEFERRED**
 **Epic 6: Query optimization based on Epic 2 insights**
 - Connection pooling and batching
 - Advanced indexing strategy
 - Partitioning for time-series data
 - Target validation: >1,000 workflows/sec sustained
 
-### Phase 7: Developer Experience (Weeks 21-24) 📋 Planned
+### Phase 9: Developer Experience (Post-MVP) 📋 **DEFERRED**
 **Epic 9: Tools and Migration**
 - CLI tools for workflow lifecycle
 - VS Code extension
@@ -441,11 +489,12 @@ openssl rsa -in private.pem -pubout -out public.pem
 ### Beyond MVP
 See [Post-MVP Roadmap](docs/post-mvp.md) for external service integrations, multi-tenancy, advanced features, and enterprise operations.
 
-**Key Benefits of Revised Sequencing**:
-- ✅ Performance validation 4-5 days earlier
-- ✅ Epic 2 insights inform remaining Epic 1A/1C implementation decisions
-- ✅ Reduced risk: Validate architecture before investing in advanced features
-- ✅ Total MVP timeline unchanged, just reordered for better outcomes
+**Key Benefits of Example-Driven Approach**:
+- ✅ Epic 3 (YAML) and Epic 5 (Activities) implemented together through realistic workflows
+- ✅ Each example is a runnable, testable workflow demonstrating new capabilities
+- ✅ Incremental complexity: Sequential → Conditional → Parallel → Loops → LLM
+- ✅ End-to-end validation at each step ensures production-ready features
+- ✅ Examples serve as documentation and learning resources
 
 ## Performance
 

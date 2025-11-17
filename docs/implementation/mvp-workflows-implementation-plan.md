@@ -1,8 +1,8 @@
 # MVP Workflows Implementation Plan
 
-**Version**: 1.0
-**Date**: 2025-11-11
-**Status**: Planning
+**Version**: 1.1
+**Date**: 2025-11-16
+**Status**: In Progress (Examples 1-2 Complete, Example 3 Next)
 
 ---
 
@@ -27,9 +27,9 @@ Workflow examples are organized as follows:
 **Implemented Examples** (in `examples/`):
 ```
 examples/
-├── 01-weather-report.yaml          # 1: Sequential workflow (✅ IMPLEMENTED)
-├── 01b-weather-report-dynamic.yaml # 1b: Dynamic templates variant (✅ IMPLEMENTED)
-├── 02-user-validation.yaml         # 2: Conditional branching (🚧 IN PROGRESS)
+├── 01-weather-report.yaml          # 1: Sequential workflow (✅ COMPLETE)
+├── 01b-weather-report-dynamic.yaml # 1b: Dynamic templates variant (✅ COMPLETE)
+├── 02-user-validation.yaml         # 2: Conditional branching (✅ COMPLETE)
 └── README.md                       # Index of examples with descriptions
 ```
 
@@ -1570,24 +1570,24 @@ tokio::spawn(cleanup_worker.run());
 
 | User Story                         | Examples  | Status        |
 |------------------------------------|---------|---------------|
-| US-3.1: Sequential Workflows       | 1, 2, 3 | ✅ Complete   |
-| US-3.2: Conditional Branching      | 2, 7    | ✅ Complete (MiniJinja evaluation, depends_on alias)   |
-| US-3.3: Parallel Execution         | 3       | ✅ Complete   |
-| US-3.4: Iterative Workflows        | 7       | ✅ Complete   |
-| US-3.5: Activity Settings          | 4, 6    | ✅ Complete   |
-| US-3.6: YAML Validation            | US-3.6  | ✅ Complete   |
-| US-3.7: Activity Scheduling/Delays | 10      | Not Started   |
+| US-3.1: Sequential Workflows       | 1, 2    | ✅ Complete   |
+| US-3.2: Conditional Branching      | 2       | ✅ Complete (MiniJinja evaluation, depends_on alias)   |
+| US-3.3: Parallel Execution         | 3       | 📋 Next       |
+| US-3.4: Iterative Workflows        | 7       | 📋 Planned    |
+| US-3.5: Activity Settings          | 4, 6    | 📋 Planned    |
+| US-3.6: YAML Validation            | US-3.6  | 📋 Planned    |
+| US-3.7: Activity Scheduling/Delays | 10      | 📋 Planned    |
 
 ## Epic 5 Coverage Matrix
 
 | User Story                    | Examples  | Status       |
 |-------------------------------|---------|--------------|
-| US-5.1: Multi-Model LLM       | 4, 5    | ✅ Complete  |
-| US-5.2: AI Cost Tracking      | 4       | ✅ Complete  |
-| US-5.3: Semantic Caching      | 6       | ✅ Complete  |
-| US-5.4: Object Storage        | 3, 8    | ✅ Complete  |
-| US-5.5: HTTP Operations       | 1, 9    | ✅ Complete  |
-| US-5.6: Database Operations   | 2, 9    | ✅ Complete (postgres_query implemented)  |
+| US-5.1: Multi-Model LLM       | 4, 5    | 📋 Planned  |
+| US-5.2: AI Cost Tracking      | 4       | 📋 Planned  |
+| US-5.3: Semantic Caching      | 6       | 📋 Planned  |
+| US-5.4: Object Storage        | 3, 8    | 📋 Next     |
+| US-5.5: HTTP Operations       | 1       | ✅ Complete (Basic GET/POST with headers, query params) |
+| US-5.6: Database Operations   | 2       | ✅ Complete (postgres_query with parameterized queries) |
 | US-5.7: Notifications         | Post-MVP| 🔮 Post-MVP |
 | US-5.8: Edge/IoT              | Post-MVP| 🔮 Post-MVP |
 
