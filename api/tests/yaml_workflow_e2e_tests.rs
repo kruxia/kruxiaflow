@@ -17,7 +17,7 @@ use streamflow_core::events::PostgresEventSource;
 use streamflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
 use streamflow_core::{OrchestratorConfig, run_orchestrator};
 use streamflow_oauth::{AuthConfig, PostgresAuthService};
-use streamflow_worker::{ActivityRegistry, HttpRequestActivity, WorkerConfig, WorkerManager};
+use streamflow_worker::{ActivityRegistry, HttpRequestActivity, PostgresQueryActivity, WorkerConfig, WorkerManager};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -355,6 +355,317 @@ activities:
     }
 
     println!("✅ End-to-end YAML workflow test passed!");
+
+    // Cleanup
+    shutdown_token.cancel();
+}
+
+#[tokio::test]
+#[serial]
+async fn test_conditional_branching_workflow() {
+    // Setup: Create database pool
+    let pool = setup_test_pool().await;
+
+    // Create test tables for the workflow
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS valid_users (
+            email TEXT PRIMARY KEY,
+            validated_at TIMESTAMPTZ NOT NULL
+        )"
+    )
+    .execute(&pool)
+    .await
+    .expect("Failed to create valid_users table");
+
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS invalid_users (
+            email TEXT PRIMARY KEY,
+            reason TEXT,
+            checked_at TIMESTAMPTZ NOT NULL
+        )"
+    )
+    .execute(&pool)
+    .await
+    .expect("Failed to create invalid_users table");
+
+    // Create auth service
+    let auth_config = AuthConfig {
+        rsa_private_key_pem: test_rsa_private_key(),
+        rsa_public_key_pem: Some(test_rsa_public_key()),
+        jwt_issuer: "test".to_string(),
+        jwt_audience: "test".to_string(),
+        token_ttl: 3600,
+    };
+    let auth_service = PostgresAuthService::new(pool.clone(), auth_config)
+        .expect("Failed to create auth service");
+
+    // Create OAuth clients
+    create_test_oauth_client(&pool, "test_client", "test_secret").await;
+    create_test_oauth_client(&pool, "test_worker", "test_worker_secret").await;
+
+    // Create shared services
+    let activity_queue: Arc<dyn ActivityQueue> =
+        Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
+    let shutdown_token = CancellationToken::new();
+
+    // Start API server
+    let state = AppState::new(
+        pool.clone(),
+        Arc::new(auth_service),
+        activity_queue.clone(),
+        event_source.clone(),
+        shutdown_token.clone(),
+    );
+    let app = app_router(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind");
+    let addr = listener.local_addr().expect("Failed to get address");
+    let api_url = format!("http://{}", addr);
+
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("Server failed to start");
+    });
+
+    // Give server time to start
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Get token for API calls
+    let token = get_test_token(&api_url, "test_client", "test_secret").await;
+
+    // Start orchestrator
+    let orchestrator_event_source = event_source.clone();
+    let orchestrator_queue = activity_queue.clone();
+    let orchestrator_pool = pool.clone();
+    let orchestrator_shutdown = shutdown_token.clone();
+    tokio::spawn(async move {
+        let config = OrchestratorConfig::new(orchestrator_pool);
+        run_orchestrator(
+            orchestrator_event_source,
+            orchestrator_queue,
+            config,
+            Some(orchestrator_shutdown),
+        )
+        .await
+        .expect("Orchestrator failed");
+    });
+
+    // Give orchestrator time to start
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Start worker with HTTP and PostgreSQL activities
+    let mut registry = ActivityRegistry::new();
+    registry.register(Arc::new(HttpRequestActivity::new()));
+    registry.register(Arc::new(PostgresQueryActivity::new()));
+
+    let worker_config = WorkerConfig {
+        api_url: api_url.clone(),
+        worker_id: format!("test_worker_{}", Uuid::now_v7()),
+        activity_types: registry.activity_types(),
+        poll_max_activities: 10,
+        poll_interval: Duration::from_millis(100),
+        concurrency: 1,
+        activity_timeout: Duration::from_secs(30),
+        heartbeat_interval: Duration::from_secs(30),
+        client_id: "test_worker".to_string(),
+        client_secret: "test_worker_secret".to_string(),
+    };
+
+    let manager = WorkerManager::new(worker_config, registry);
+    let _worker_handles = manager.start().await.expect("Failed to start worker");
+
+    // Give worker time to start and authenticate
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Get database URL for workflow
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+    });
+
+    // Create YAML workflow with conditional branching
+    let workflow_yaml = format!(
+        r#"
+name: conditional_test
+description: Test conditional branching with database storage
+
+activities:
+  - key: check_health
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: GET
+      url: "{}/health"
+    outputs:
+      - response
+
+  - key: store_success
+    worker: builtin
+    activity_name: postgres_query
+    parameters:
+      db_url: "{}"
+      query: "INSERT INTO valid_users (email, validated_at) VALUES ($1, NOW())"
+      params:
+        - "success@example.com"
+    depends_on:
+      - activity_key: check_health
+        condition: "{{% raw %}}{{{{check_health.response.success == true}}}}{{% endraw %}}"
+
+  - key: store_failure
+    worker: builtin
+    activity_name: postgres_query
+    parameters:
+      db_url: "{}"
+      query: "INSERT INTO invalid_users (email, reason, checked_at) VALUES ($1, $2, NOW())"
+      params:
+        - "failure@example.com"
+        - "Health check failed"
+    depends_on:
+      - activity_key: check_health
+        condition: "{{% raw %}}{{{{check_health.response.success != true}}}}{{% endraw %}}"
+"#,
+        api_url, db_url, db_url
+    );
+
+    // Deploy workflow
+    let client = reqwest::Client::new();
+    let deploy_response = client
+        .post(format!("{}/api/v1/workflow_definitions", api_url))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "text/yaml")
+        .body(workflow_yaml)
+        .send()
+        .await
+        .expect("Failed to deploy workflow");
+
+    assert_eq!(
+        deploy_response.status(),
+        reqwest::StatusCode::CREATED,
+        "Deploy failed: {:?}",
+        deploy_response.text().await
+    );
+
+    let deploy_result: serde_json::Value = deploy_response
+        .json()
+        .await
+        .expect("Failed to parse deploy response");
+
+    let definition_name = deploy_result["name"].as_str().unwrap();
+    let definition_version = deploy_result["version"].as_str().unwrap();
+
+    println!(
+        "Deployed workflow: {} version {}",
+        definition_name, definition_version
+    );
+
+    // Submit workflow for execution
+    let submit_response = client
+        .post(format!("{}/api/v1/workflows", api_url))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "definition_name": definition_name,
+            "version": definition_version,
+            "input": {}
+        }))
+        .send()
+        .await
+        .expect("Failed to submit workflow");
+
+    assert_eq!(
+        submit_response.status(),
+        reqwest::StatusCode::CREATED,
+        "Submit failed: {:?}",
+        submit_response.text().await
+    );
+
+    let submit_result: serde_json::Value = submit_response
+        .json()
+        .await
+        .expect("Failed to parse submit response");
+
+    let workflow_id = submit_result["workflow_id"]
+        .as_str()
+        .unwrap()
+        .parse::<Uuid>()
+        .unwrap();
+
+    println!("Submitted workflow: {}", workflow_id);
+
+    // Poll for workflow completion
+    let start = std::time::Instant::now();
+    let timeout = Duration::from_secs(30);
+    let mut final_status = None;
+
+    while start.elapsed() < timeout {
+        let status_response = client
+            .get(format!("{}/api/v1/workflows/{}", api_url, workflow_id))
+            .header("Authorization", format!("Bearer {}", token))
+            .send()
+            .await
+            .expect("Failed to get workflow status");
+
+        if status_response.status() == reqwest::StatusCode::OK {
+            let status_result: serde_json::Value = status_response
+                .json()
+                .await
+                .expect("Failed to parse status response");
+
+            let status = status_result["status"].as_str().unwrap();
+            println!("Workflow status: {}", status);
+
+            if status == "completed" || status == "failed" {
+                final_status = Some(status.to_string());
+                break;
+            }
+        }
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    // Verify workflow completed successfully
+    assert!(
+        final_status.is_some(),
+        "Workflow did not complete within timeout"
+    );
+    assert_eq!(
+        final_status.unwrap(),
+        "completed",
+        "Workflow did not complete successfully"
+    );
+
+    // Verify conditional branching worked correctly
+    // Since health check should succeed, only valid_users should have a record
+    let valid_count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM valid_users WHERE email = 'success@example.com'"
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to query valid_users");
+
+    let invalid_count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM invalid_users WHERE email = 'failure@example.com'"
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to query invalid_users");
+
+    // Health check should succeed, so success branch should execute
+    assert_eq!(valid_count.0, 1, "Expected one record in valid_users");
+    assert_eq!(invalid_count.0, 0, "Expected no records in invalid_users");
+
+    println!("✅ Conditional branching test passed!");
+
+    // Cleanup test tables
+    sqlx::query("DROP TABLE IF EXISTS valid_users")
+        .execute(&pool)
+        .await
+        .ok();
+    sqlx::query("DROP TABLE IF EXISTS invalid_users")
+        .execute(&pool)
+        .await
+        .ok();
 
     // Cleanup
     shutdown_token.cancel();

@@ -471,11 +471,11 @@ async fn test_conditional_workflow_integration() {
                 following: Some(vec![
                     DependencyEdge {
                         activity_key: "approve".to_string(),
-                        conditions: Some(vec!["{{validate.valid}} == true".to_string()]),
+                        conditions: Some(vec!["{{validate.valid == true}}".to_string()]),
                     },
                     DependencyEdge {
                         activity_key: "reject".to_string(),
-                        conditions: Some(vec!["{{validate.valid}} == false".to_string()]),
+                        conditions: Some(vec!["{{validate.valid == false}}".to_string()]),
                     },
                 ]),
             },

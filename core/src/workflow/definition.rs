@@ -213,7 +213,10 @@ pub struct ActivityDefinition {
     pub parameters: Option<HashMap<String, serde_json::Value>>,
 
     /// Activities that must complete before this one
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        alias = "depends_on",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub preceding: Option<Vec<ActivityRelationship>>,
 
     /// Activities that should run after this one
@@ -226,7 +229,7 @@ pub struct ActivityDefinition {
 }
 
 /// Relationship between activities (edge in the directed graph)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ActivityRelationship {
     /// Key of the related activity
     pub activity_key: String,
@@ -234,6 +237,54 @@ pub struct ActivityRelationship {
     /// Optional conditions that must be satisfied for this edge to activate
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conditions: Option<Vec<String>>,
+}
+
+impl<'de> Deserialize<'de> for ActivityRelationship {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum ActivityRelationshipHelper {
+            // Simple string: "activity_key"
+            Simple(String),
+            // Full object: {activity_key: "key", conditions: [...]}
+            Full {
+                activity_key: String,
+                #[serde(alias = "condition")]
+                conditions: Option<ConditionOrConditions>,
+            },
+        }
+
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum ConditionOrConditions {
+            Single(String),
+            Multiple(Vec<String>),
+        }
+
+        match ActivityRelationshipHelper::deserialize(deserializer)? {
+            ActivityRelationshipHelper::Simple(activity_key) => Ok(ActivityRelationship {
+                activity_key,
+                conditions: None,
+            }),
+            ActivityRelationshipHelper::Full {
+                activity_key,
+                conditions,
+            } => {
+                let conditions = conditions.map(|c| match c {
+                    ConditionOrConditions::Single(s) => vec![s],
+                    ConditionOrConditions::Multiple(v) => v,
+                });
+                Ok(ActivityRelationship {
+                    activity_key,
+                    conditions,
+                })
+            }
+        }
+    }
 }
 
 /// Workflow-level settings

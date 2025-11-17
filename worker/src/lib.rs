@@ -6,7 +6,7 @@ pub mod manager;
 pub mod poller;
 pub mod registry;
 
-pub use activities::{EchoActivity, HttpRequestActivity};
+pub use activities::{EchoActivity, HttpRequestActivity, PostgresQueryActivity};
 pub use builtin::register_builtin_activities;
 pub use client::WorkerApiClient;
 pub use config::WorkerConfig;

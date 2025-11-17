@@ -1,5 +1,8 @@
 use super::{OrchestratorError, Result, WorkflowActivityStatus, WorkflowState};
 use crate::events::{ActivityDefinition, WorkflowDefinition};
+use crate::workflow::template::{TemplateContext, resolve_template_value};
+use serde_json::Value;
+use std::collections::HashMap;
 
 /// Find activities that are ready to be scheduled
 /// An activity is ready when:
@@ -58,14 +61,18 @@ fn is_activity_ready(
             .join(", ")
     );
 
-    // Check all preceding activities are in terminal state (Completed or Failed)
+    // Check all preceding activities are satisfied (ALL must be satisfied - AND semantics)
+    // Track if we found at least one dependency that needs to be satisfied
+    let mut found_applicable_dependency = false;
+
     for (preceding_key, conditions) in &preceding_keys {
         let preceding_state = state
             .activities
             .get(preceding_key)
             .ok_or_else(|| OrchestratorError::ActivityNotFound(preceding_key.clone()))?;
 
-        // Preceding activity must be in terminal state before we can proceed
+        // Check if dependency is in terminal state FIRST
+        // (must check this before evaluating conditions since conditions may reference outputs)
         if !matches!(
             preceding_state.status,
             WorkflowActivityStatus::Completed | WorkflowActivityStatus::Failed
@@ -79,22 +86,38 @@ fn is_activity_ready(
             return Ok(false); // Dependency not in terminal state yet
         }
 
-        // Check conditions on this relationship
+        // Now check conditions (if any)
         if let Some(condition_list) = conditions {
-            // Explicit conditions - evaluate them (can handle Failed case)
+            // Build template context for condition evaluation
+            let context = build_condition_context(state);
+
+            // Check if conditions are satisfied
+            let mut conditions_satisfied = true;
             for condition in condition_list {
-                if !evaluate_condition(condition, state)? {
+                if !evaluate_condition(condition, &context)? {
+                    conditions_satisfied = false;
                     tracing::trace!(
-                        "Activity {} not ready: condition '{}' not satisfied for dependency {}",
+                        "Activity {} dependency {} skipped: condition '{}' not satisfied",
                         activity.key,
-                        condition,
-                        preceding_key
+                        preceding_key,
+                        condition
                     );
-                    return Ok(false); // Condition not satisfied
+                    break;
                 }
             }
+
+            // If conditions are not satisfied, skip this dependency entirely
+            if !conditions_satisfied {
+                continue;
+            }
+
+            // Conditions are satisfied, so this dependency is applicable
+            found_applicable_dependency = true;
         } else {
-            // No explicit conditions - default to success path only
+            // No explicit conditions - this dependency is always applicable
+            found_applicable_dependency = true;
+
+            // Preceding activity must be Completed (not just Failed)
             if preceding_state.status != WorkflowActivityStatus::Completed {
                 tracing::trace!(
                     "Activity {} not ready: dependency {} is {:?} (expected Completed)",
@@ -107,10 +130,20 @@ fn is_activity_ready(
         }
     }
 
+    // If activity has dependencies but none were applicable (all conditions false),
+    // then this activity should not be scheduled
+    if !preceding_keys.is_empty() && !found_applicable_dependency {
+        tracing::trace!(
+            "Activity {} not ready: has {} dependencies but none have satisfied conditions",
+            activity.key,
+            preceding_keys.len()
+        );
+        return Ok(false);
+    }
+
     tracing::trace!(
-        "Activity {} is ready: all {} dependencies satisfied",
-        activity.key,
-        preceding_keys.len()
+        "Activity {} is ready: all applicable dependencies satisfied",
+        activity.key
     );
     Ok(true)
 }
@@ -152,70 +185,75 @@ fn get_preceding_activities(
     preceding_map.into_iter().collect()
 }
 
-/// Evaluate a condition expression
-/// For MVP: Simple string-based evaluation
-/// Supports: {{activity.field}} template substitution and == comparison
-pub fn evaluate_condition(condition: &str, state: &WorkflowState) -> Result<bool> {
-    // Resolve template variables like {{activity.field}}
-    let resolved = resolve_template_variables(condition, state)?;
-    let resolved = resolved.trim();
+/// Build template context from workflow state for condition evaluation
+pub fn build_condition_context(state: &WorkflowState) -> TemplateContext {
+    let mut context = TemplateContext::new();
 
-    // Handle boolean literals
-    if resolved == "true" {
-        return Ok(true);
-    }
-    if resolved == "false" {
-        return Ok(false);
+    // Add workflow inputs from state_data
+    if let Value::Object(state_obj) = &state.state_data {
+        let inputs: HashMap<String, Value> = state_obj
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        context = context.with_inputs(inputs);
     }
 
-    // Handle == comparisons
-    if resolved.contains("==") {
-        let parts: Vec<&str> = resolved.split("==").collect();
-        if parts.len() == 2 {
-            let left = parts[0].trim();
-            let right = parts[1].trim();
-            return Ok(left == right);
-        }
-    }
-
-    // Handle != comparisons
-    if resolved.contains("!=") {
-        let parts: Vec<&str> = resolved.split("!=").collect();
-        if parts.len() == 2 {
-            let left = parts[0].trim();
-            let right = parts[1].trim();
-            return Ok(left != right);
-        }
-    }
-
-    // Default: treat non-empty string as true
-    Ok(!resolved.is_empty())
-}
-
-/// Resolve template variables like {{activity.field}} with actual values
-fn resolve_template_variables(template: &str, state: &WorkflowState) -> Result<String> {
-    let mut result = template.to_string();
-
-    // Find and replace all {{activity.field}} patterns
+    // Add activity outputs
     for (activity_key, activity_state) in &state.activities {
         if let Some(outputs) = &activity_state.outputs {
-            // Replace {{activity_key.field}} with outputs[field]
-            if let Some(obj) = outputs.as_object() {
-                for (field, value) in obj {
-                    let pattern = format!("{{{{{}.{}}}}}", activity_key, field);
-                    let replacement = match value {
-                        serde_json::Value::String(s) => s.clone(),
-                        serde_json::Value::Bool(b) => b.to_string(),
-                        serde_json::Value::Number(n) => n.to_string(),
-                        _ => value.to_string().trim_matches('"').to_string(),
-                    };
-                    result = result.replace(&pattern, &replacement);
-                }
+            if let Value::Object(outputs_obj) = outputs {
+                let outputs_map: HashMap<String, Value> = outputs_obj
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect();
+                context.add_activity_output(activity_key.clone(), outputs_map);
             }
         }
     }
 
-    Ok(result)
+    context
+}
+
+/// Evaluate a condition expression using MiniJinja template engine
+/// Supports full expression syntax: ==, !=, >, <, AND, OR, etc.
+/// Example: "{{check_email.valid == true}}"
+pub fn evaluate_condition(condition: &str, context: &TemplateContext) -> Result<bool> {
+    // Resolve the condition expression as a template
+    let condition_value = Value::String(condition.to_string());
+
+    match resolve_template_value(&condition_value, context) {
+        Ok(resolved) => {
+            // The result should be a boolean
+            match resolved {
+                Value::Bool(b) => Ok(b),
+                Value::String(s) => {
+                    // Handle string boolean representations
+                    let s_lower = s.to_lowercase();
+                    if s_lower == "true" {
+                        Ok(true)
+                    } else if s_lower == "false" {
+                        Ok(false)
+                    } else {
+                        // Non-empty string is truthy
+                        Ok(!s.is_empty())
+                    }
+                }
+                Value::Number(n) => {
+                    // Non-zero is truthy
+                    Ok(n.as_f64().map(|f| f != 0.0).unwrap_or(false))
+                }
+                Value::Null => Ok(false),
+                _ => {
+                    // Arrays/objects are truthy if non-empty
+                    Ok(true)
+                }
+            }
+        }
+        Err(e) => Err(OrchestratorError::TemplateFailed(format!(
+            "Failed to evaluate condition '{}': {}",
+            condition, e
+        ))),
+    }
 }
 
 /// Check if workflow is complete (all activities in terminal state)
