@@ -1,8 +1,8 @@
 # StreamFlow Architecture
 
 **Version**: 0.2 MVP
-**Last Updated**: 2025-11-06
-**Status**: Phase 2C - Pre-Epic 2 Requirements
+**Last Updated**: 2025-11-16
+**Status**: Epic 1 Complete - Epic 3 Examples 1-2 Complete
 
 ---
 
@@ -2374,29 +2374,57 @@ See [Performance Testing Guide](performance-testing.md) for details on running a
 
 ### YAML DSL (Primary)
 
+**Status**: ✅ Implemented (Examples 1-2 Complete)
+
 Declarative workflow definitions covering 70-80% of use cases. Activities are defined with their `depends_on` and/or `dependency_of` relationships to form a directed graph:
 
 ```yaml
-workflow: payment_processing
-version: "1.0"
+name: payment_processing
+description: Process payment with validation and authorization
 
 activities:
-  - key: validate_payment
-    worker: payments
-    name: validate_card
+  validate_payment:
+    activity: validate_card
+    worker: payments  # Optional - defaults to "builtin"
     parameters:
-      card_token: "{{ARG.card_token}}"
-    dependency_of:
-      - activity_key: authorize_card
-        conditions:
-          - "{{validate_payment.valid}} == true"
+      card_token: "{{INPUT.card_token}}"
+    outputs:
+      - valid
+      - reason
 
-  - key: authorize_card
+  authorize_card:
+    activity: authorize
     worker: payments
-    name: authorize
-    dependency_of:
-      - activity_key: capture_payment
+    parameters:
+      card_token: "{{INPUT.card_token}}"
+      authorization_id: "{{validate_payment.authorization_id}}"
+    depends_on:
+      - validate_payment:
+          condition: "{{validate_payment.valid}} == true"
+
+  capture_payment:
+    activity: capture
+    worker: payments
+    depends_on:
+      - authorize_card
 ```
+
+**Implemented Features** (Example 1-2):
+- Sequential workflows with `depends_on`
+- Template expressions: `{{INPUT.*}}`, `{{activity_key.output}}`, `{{SECRET.*}}`, `{{WORKFLOW.*}}`
+- Conditional execution with MiniJinja expressions
+- HTTP activity with custom headers and query parameters
+- PostgreSQL activity with parameterized queries
+- Flexible condition syntax: single `condition` or array `conditions`
+- User-friendly alias: `depends_on` (in addition to `depends_on`)
+
+**Planned Features** (Examples 3-10):
+- Parallel execution (fan-out/fan-in)
+- File outputs and `{{FILE.*}}` references
+- Iterative workflows with loops
+- Activity settings (retry, timeout, budget)
+- LLM activities with cost tracking
+- Semantic caching
 
 ### Programmatic (Python/JavaScript/Rust)
 
