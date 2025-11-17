@@ -358,7 +358,7 @@ async fn test_complete_activity_success() {
     .unwrap();
 
     assert_eq!(event.event_type, "ActivityCompleted");
-    assert_eq!(event.payload["output"], output);
+    assert_eq!(event.payload["outputs"], output);
     assert_eq!(event.payload["cost_usd"], 0.05);
 
     cleanup_activities(&pool, workflow_id).await;

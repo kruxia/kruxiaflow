@@ -1,6 +1,8 @@
 use super::{
     AdaptiveBackoff, OrchestratorConfig, Result,
-    dependency_evaluator::{find_ready_activities, is_workflow_complete, is_workflow_failed},
+    dependency_evaluator::{
+        find_ready_activities, find_skipped_activities, is_workflow_complete, is_workflow_failed,
+    },
     workflow_state::{
         WorkflowActivityStatus, apply_event_to_state, initialize_workflow_state,
         load_materialized_state, load_workflow_definition, save_materialized_state,
@@ -419,6 +421,27 @@ pub async fn process_workflow_event(
             event.workflow_id,
             event.event_type
         );
+    }
+
+    // 5.5. Mark activities as Skipped if they can never be scheduled
+    let skipped_activities = find_skipped_activities(&definition, &state)?;
+    if !skipped_activities.is_empty() {
+        tracing::debug!(
+            "Marking {} activities as skipped for workflow {}: [{}]",
+            skipped_activities.len(),
+            event.workflow_id,
+            skipped_activities
+                .iter()
+                .map(|a| a.key.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+
+        for activity in skipped_activities {
+            if let Some(activity_state) = state.activities.get_mut(&activity.key) {
+                activity_state.status = WorkflowActivityStatus::Skipped;
+            }
+        }
     }
 
     // 6. Check for workflow completion
