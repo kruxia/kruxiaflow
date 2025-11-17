@@ -15,6 +15,9 @@ async-trait = { workspace = true }
 # HTTP client (for HTTP activity)
 reqwest = { version = "0.12", features = ["json"] }
 
+# Database client (for PostgreSQL activity)
+sqlx = { workspace = true }
+
 # UUID and time
 uuid = { workspace = true }
 

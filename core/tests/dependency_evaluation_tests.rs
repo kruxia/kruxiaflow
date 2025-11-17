@@ -3,8 +3,8 @@ use streamflow_core::events::{
     ActivityDefinition, DependencyEdge, WorkflowDefinition, WorkflowStatus,
 };
 use streamflow_core::orchestrator::{
-    ActivityState, WorkflowActivityStatus, WorkflowState, evaluate_condition,
-    find_ready_activities, is_workflow_complete, is_workflow_failed,
+    build_condition_context, ActivityState, WorkflowActivityStatus, WorkflowState,
+    evaluate_condition, find_ready_activities, is_workflow_complete, is_workflow_failed,
 };
 use uuid::Uuid;
 
@@ -342,7 +342,8 @@ fn test_evaluate_condition_true() {
         Some(json!({"valid": true})),
     )]);
 
-    let result = evaluate_condition("{{activity1.valid}} == true", &state)
+    let context = build_condition_context(&state);
+    let result = evaluate_condition("{{activity1.valid == true}}", &context)
         .expect("Failed to evaluate condition");
     assert!(result);
 }
@@ -355,7 +356,8 @@ fn test_evaluate_condition_false() {
         Some(json!({"valid": false})),
     )]);
 
-    let result = evaluate_condition("{{activity1.valid}} == true", &state)
+    let context = build_condition_context(&state);
+    let result = evaluate_condition("{{activity1.valid == true}}", &context)
         .expect("Failed to evaluate condition");
     assert!(!result);
 }
@@ -368,7 +370,8 @@ fn test_evaluate_condition_not_equal() {
         Some(json!({"status": "success"})),
     )]);
 
-    let result = evaluate_condition("{{activity1.status}} != failed", &state)
+    let context = build_condition_context(&state);
+    let result = evaluate_condition("{{activity1.status != 'failed'}}", &context)
         .expect("Failed to evaluate condition");
     assert!(result);
 }
@@ -381,7 +384,8 @@ fn test_evaluate_condition_string_comparison() {
         Some(json!({"result": "approved"})),
     )]);
 
-    let result = evaluate_condition("{{activity1.result}} == approved", &state)
+    let context = build_condition_context(&state);
+    let result = evaluate_condition("{{activity1.result == 'approved'}}", &context)
         .expect("Failed to evaluate condition");
     assert!(result);
 }
@@ -403,11 +407,11 @@ fn test_conditional_branching() {
                 following: Some(vec![
                     DependencyEdge {
                         activity_key: "approve".to_string(),
-                        conditions: Some(vec!["{{validate.valid}} == true".to_string()]),
+                        conditions: Some(vec!["{{validate.valid == true}}".to_string()]),
                     },
                     DependencyEdge {
                         activity_key: "reject".to_string(),
-                        conditions: Some(vec!["{{validate.valid}} == false".to_string()]),
+                        conditions: Some(vec!["{{validate.valid == false}}".to_string()]),
                     },
                 ]),
             },
@@ -633,12 +637,12 @@ fn test_failed_activity_with_explicit_condition_allows_following() {
                 following: Some(vec![
                     DependencyEdge {
                         activity_key: "handle_success".to_string(),
-                        conditions: Some(vec!["{{process.success}} == true".to_string()]),
+                        conditions: Some(vec!["{{process.success == true}}".to_string()]),
                     },
                     DependencyEdge {
                         activity_key: "handle_failure".to_string(),
                         // Explicit condition checking for failure
-                        conditions: Some(vec!["{{process.error}} != null".to_string()]),
+                        conditions: Some(vec!["{{process.error != null}}".to_string()]),
                     },
                 ]),
             },
