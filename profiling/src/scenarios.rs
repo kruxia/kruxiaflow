@@ -9,7 +9,7 @@ pub fn create_sequential_workflow(num_activities: usize) -> WorkflowDefinition {
 
     for i in 0..num_activities {
         let key = format!("activity_{}", i);
-        let following = if i < num_activities - 1 {
+        let dependency_of = if i < num_activities - 1 {
             Some(vec![ActivityRelationship {
                 activity_key: format!("activity_{}", i + 1),
                 conditions: None,
@@ -23,8 +23,8 @@ pub fn create_sequential_workflow(num_activities: usize) -> WorkflowDefinition {
             worker: "builtin".to_string(),
             activity_name: Some("echo".to_string()),
             parameters: Some(HashMap::new()),
-            preceding: None,
-            following,
+            depends_on: None,
+            dependency_of,
             settings: None,
         });
     }
@@ -44,8 +44,8 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
             worker: "builtin".to_string(),
             activity_name: Some("echo".to_string()),
             parameters: Some(HashMap::new()),
-            preceding: None,
-            following: Some(
+            depends_on: None,
+            dependency_of: Some(
                 (0..num_parallel)
                     .map(|i| ActivityRelationship {
                         activity_key: format!("parallel_{}", i),
@@ -64,11 +64,11 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
             worker: "builtin".to_string(),
             activity_name: Some("echo".to_string()),
             parameters: Some(HashMap::new()),
-            preceding: Some(vec![ActivityRelationship {
+            depends_on: Some(vec![ActivityRelationship {
                 activity_key: "start".to_string(),
                 conditions: None,
             }]),
-            following: Some(vec![ActivityRelationship {
+            dependency_of: Some(vec![ActivityRelationship {
                 activity_key: "end".to_string(),
                 conditions: None,
             }]),
@@ -82,7 +82,7 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
         worker: "builtin".to_string(),
         activity_name: Some("echo".to_string()),
         parameters: Some(HashMap::new()),
-        preceding: Some(
+        depends_on: Some(
             (0..num_parallel)
                 .map(|i| ActivityRelationship {
                     activity_key: format!("parallel_{}", i),
@@ -90,7 +90,7 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
                 })
                 .collect(),
         ),
-        following: None,
+        dependency_of: None,
         settings: None,
     });
 
@@ -114,10 +114,10 @@ mod tests {
         assert!(workflow.validate().is_ok());
 
         // Check first activity has following
-        assert!(workflow.activities[0].following.is_some());
+        assert!(workflow.activities[0].dependency_of.is_some());
 
         // Check last activity has no following
-        assert!(workflow.activities[4].following.is_none());
+        assert!(workflow.activities[4].dependency_of.is_none());
     }
 
     #[test]
@@ -134,11 +134,11 @@ mod tests {
         // Check start activity fans out to 10 activities
         let start_activity = &workflow.activities[0];
         assert_eq!(start_activity.key, "start");
-        assert_eq!(start_activity.following.as_ref().unwrap().len(), 10);
+        assert_eq!(start_activity.dependency_of.as_ref().unwrap().len(), 10);
 
         // Check end activity has 10 preceding
         let end_activity = &workflow.activities[11];
         assert_eq!(end_activity.key, "end");
-        assert_eq!(end_activity.preceding.as_ref().unwrap().len(), 10);
+        assert_eq!(end_activity.depends_on.as_ref().unwrap().len(), 10);
     }
 }

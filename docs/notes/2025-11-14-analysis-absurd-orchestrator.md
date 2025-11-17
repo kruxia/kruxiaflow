@@ -136,7 +136,7 @@ Activity-level checkpointing is redundant in StreamFlow's architecture. The work
 5. **No additional complexity** - Leverage existing orchestration instead of adding new mechanism
 
 **Best Practice**:
-If work needs checkpointing, split it into multiple activities with `preceding`/`following` relationships:
+If work needs checkpointing, split it into multiple activities with `depends_on`/`dependency_of` relationships:
 
 ```yaml
 # Instead of checkpoints within one activity, use multiple activities:
@@ -144,24 +144,24 @@ activities:
   - key: download_data
     worker: data
     name: download
-    following: [validate_data]
+    dependency_of: [validate_data]
 
   - key: validate_data
     worker: data
     name: validate
-    preceding: [download_data]
-    following: [transform_data]
+    depends_on: [download_data]
+    dependency_of: [transform_data]
 
   - key: transform_data
     worker: data
     name: transform
-    preceding: [validate_data]
-    following: [upload_results]
+    depends_on: [validate_data]
+    dependency_of: [upload_results]
 
   - key: upload_results
     worker: data
     name: upload
-    preceding: [transform_data]
+    depends_on: [transform_data]
 ```
 
 This approach provides the same durability benefits without adding checkpoint infrastructure.
@@ -241,7 +241,7 @@ Expose existing scheduling infrastructure in workflow definition language and ad
   parameters:
     event_name: "approval_{{submit_for_approval.request_id}}"
     timeout_seconds: 3600
-  following:
+  dependency_of:
     - activity_key: process_approval
 
 # Example 2: Schedule delayed execution (using existing infrastructure)

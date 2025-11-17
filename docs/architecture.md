@@ -716,7 +716,7 @@ activities:
       - artifact_ref      # Reference to uploaded artifact
       - size_bytes
       - row_count
-    following:
+    dependency_of:
       - activity_key: transform_data
 
   # Step 2: Transform - Process the data
@@ -732,7 +732,7 @@ activities:
       - artifact_ref
       - row_count
       - dropped_rows
-    following:
+    dependency_of:
       - activity_key: validate_data
 
   # Step 3: Validate - Check data quality
@@ -746,7 +746,7 @@ activities:
       - valid
       - error_count
       - errors        # Small array of errors, stored in state
-    following:
+    dependency_of:
       - activity_key: load_data
         conditions:
           - "{{validate_data.valid}} == true"
@@ -829,7 +829,7 @@ sequenceDiagram
 ### Activity Scheduling (Idempotent)
 
 Activities are only scheduled when:
-1. All preceding activities have completed
+1. All dependencies (`depends_on` activities) have completed
 2. All conditions on those relationships are satisfied
 3. Activity not already queued or completed
 
@@ -843,10 +843,20 @@ ON CONFLICT (workflow_id, activity_key) DO NOTHING;
 
 Workflows are defined as **Directed Graphs** where:
 - **Nodes**: Activities to be executed
-- **Directed edges**: Relationships between activities defined by `preceding` and `following` declarations
+- **Directed edges**: Relationships between activities defined by `depends_on` and `dependency_of` declarations
 - **Conditions**: Optional predicates that must be satisfied for edges to activate
 
 The orchestrator evaluates this graph to determine when activities become ready for execution.
+
+#### Internal Normalization
+
+For simplicity and performance, workflows are normalized to use only `depends_on` internally:
+- **User-facing YAML/JSON**: Supports both `depends_on` and `dependency_of`
+- **Validation**: Checks both fields before normalization
+- **Normalization**: Converts `dependency_of` relationships to `depends_on` on target activities
+- **Orchestration**: Uses only the normalized `depends_on` representation
+
+This eliminates the need for expensive reverse lookups during orchestration (O(n) instead of O(n*m)).
 
 ### Sequential Execution
 
@@ -856,10 +866,10 @@ Sequential execution is guaranteed because activities only enter the queue when 
 # Example: Sequential workflow
 activities:
   - key: step1
-    following:
+    dependency_of:
       - activity_key: step2
   - key: step2
-    following:
+    dependency_of:
       - activity_key: step3
   - key: step3
 ```
@@ -878,22 +888,22 @@ Parallel execution happens naturally when multiple activities become ready simul
 # Example: Parallel workflow (fan-out and fan-in)
 activities:
   - key: fetch_data
-    following:
+    dependency_of:
       - activity_key: analyze_security
       - activity_key: analyze_performance
       - activity_key: analyze_quality
 
   - key: analyze_security
-    # No following/preceding = terminal or joins elsewhere
+    # No depends_on/dependency_of = terminal or joins elsewhere
 
   - key: analyze_performance
-    # No following/preceding = terminal or joins elsewhere
+    # No depends_on/dependency_of = terminal or joins elsewhere
 
   - key: analyze_quality
-    # No following/preceding = terminal or joins elsewhere
+    # No depends_on/dependency_of = terminal or joins elsewhere
 
   - key: aggregate_results
-    preceding:
+    depends_on:
       - activity_key: analyze_security
       - activity_key: analyze_performance
       - activity_key: analyze_quality
@@ -2364,7 +2374,7 @@ See [Performance Testing Guide](performance-testing.md) for details on running a
 
 ### YAML DSL (Primary)
 
-Declarative workflow definitions covering 70-80% of use cases. Activities are defined with their `preceding` and/or `following` relationships to form a directed graph:
+Declarative workflow definitions covering 70-80% of use cases. Activities are defined with their `depends_on` and/or `dependency_of` relationships to form a directed graph:
 
 ```yaml
 workflow: payment_processing
@@ -2376,7 +2386,7 @@ activities:
     name: validate_card
     parameters:
       card_token: "{{ARG.card_token}}"
-    following:
+    dependency_of:
       - activity_key: authorize_card
         conditions:
           - "{{validate_payment.valid}} == true"
@@ -2384,7 +2394,7 @@ activities:
   - key: authorize_card
     worker: payments
     name: authorize
-    following:
+    dependency_of:
       - activity_key: capture_payment
 ```
 
@@ -2397,12 +2407,12 @@ from streamflow import Workflow, Activity
 workflow = Workflow("payment_processing")
 validate = Activity("validate_payment", worker="payments")
 authorize = Activity("authorize_card", worker="payments") \
-    .with_preceding(validate) \
+    .with_depends_on(validate) \
     .when(validate.outputs.valid == True)
 workflow.add_activities(validate, authorize)
 ```
 
-**Key insight**: Programmatic definitions **compile to YAML at deployment time**, not runtime. This provides type safety and IDE support while maintaining the same <1ms runtime performance as hand-written YAML. The compiled YAML uses the same `preceding`/`following` structure to define the directed graph.
+**Key insight**: Programmatic definitions **compile to YAML at deployment time**, not runtime. This provides type safety and IDE support while maintaining the same <1ms runtime performance as hand-written YAML. The compiled YAML uses the same `depends_on`/`dependency_of` structure to define the directed graph.
 
 ---
 

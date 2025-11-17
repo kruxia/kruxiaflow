@@ -52,8 +52,8 @@ fn test_find_ready_root_activities() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: None,
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "root2".to_string(),
@@ -61,8 +61,8 @@ fn test_find_ready_root_activities() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: None,
+                dependency_of: None,
             },
         ],
     };
@@ -93,11 +93,8 @@ fn test_find_ready_sequential_workflow() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: Some(vec![DependencyEdge {
-                    activity_key: "activity2".to_string(),
-                    conditions: None,
-                }]),
+                depends_on: None,
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "activity2".to_string(),
@@ -105,11 +102,11 @@ fn test_find_ready_sequential_workflow() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: Some(vec![DependencyEdge {
-                    activity_key: "activity3".to_string(),
+                depends_on: Some(vec![DependencyEdge {
+                    activity_key: "activity1".to_string(),
                     conditions: None,
                 }]),
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "activity3".to_string(),
@@ -117,8 +114,11 @@ fn test_find_ready_sequential_workflow() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: Some(vec![DependencyEdge {
+                    activity_key: "activity2".to_string(),
+                    conditions: None,
+                }]),
+                dependency_of: None,
             },
         ],
     };
@@ -185,8 +185,8 @@ fn test_find_ready_parallel_fanout() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: Some(vec![
+                depends_on: None,
+                dependency_of: Some(vec![
                     DependencyEdge {
                         activity_key: "parallel1".to_string(),
                         conditions: None,
@@ -207,8 +207,8 @@ fn test_find_ready_parallel_fanout() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: None,
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "parallel2".to_string(),
@@ -216,8 +216,8 @@ fn test_find_ready_parallel_fanout() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: None,
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "parallel3".to_string(),
@@ -225,8 +225,8 @@ fn test_find_ready_parallel_fanout() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: None,
+                dependency_of: None,
             },
         ],
     };
@@ -264,8 +264,8 @@ fn test_find_ready_parallel_fanin() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: None,
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "parallel2".to_string(),
@@ -273,8 +273,8 @@ fn test_find_ready_parallel_fanin() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: None,
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "join".to_string(),
@@ -282,7 +282,7 @@ fn test_find_ready_parallel_fanin() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: Some(vec![
+                depends_on: Some(vec![
                     DependencyEdge {
                         activity_key: "parallel1".to_string(),
                         conditions: None,
@@ -292,7 +292,7 @@ fn test_find_ready_parallel_fanin() {
                         conditions: None,
                     },
                 ]),
-                following: None,
+                dependency_of: None,
             },
         ],
     };
@@ -424,17 +424,8 @@ fn test_conditional_branching() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: Some(vec![
-                    DependencyEdge {
-                        activity_key: "approve".to_string(),
-                        conditions: Some(vec!["{{validate.valid == true}}".to_string()]),
-                    },
-                    DependencyEdge {
-                        activity_key: "reject".to_string(),
-                        conditions: Some(vec!["{{validate.valid == false}}".to_string()]),
-                    },
-                ]),
+                depends_on: None,
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "approve".to_string(),
@@ -442,8 +433,11 @@ fn test_conditional_branching() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: Some(vec![DependencyEdge {
+                    activity_key: "validate".to_string(),
+                    conditions: Some(vec!["{{validate.valid == true}}".to_string()]),
+                }]),
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "reject".to_string(),
@@ -451,8 +445,11 @@ fn test_conditional_branching() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: Some(vec![DependencyEdge {
+                    activity_key: "validate".to_string(),
+                    conditions: Some(vec!["{{validate.valid == false}}".to_string()]),
+                }]),
+                dependency_of: None,
             },
         ],
     };
@@ -562,8 +559,8 @@ fn test_skip_already_scheduled_activities() {
             activity_name: "activity".to_string(),
             parameters: json!({}),
             settings: None,
-            preceding: None,
-            following: None,
+            depends_on: None,
+            dependency_of: None,
         }],
     };
 
@@ -605,11 +602,8 @@ fn test_failed_activity_without_conditions_blocks_following() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: Some(vec![DependencyEdge {
-                    activity_key: "step2".to_string(),
-                    conditions: None, // No conditions = success path only
-                }]),
+                depends_on: None,
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "step2".to_string(),
@@ -617,8 +611,11 @@ fn test_failed_activity_without_conditions_blocks_following() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: Some(vec![DependencyEdge {
+                    activity_key: "step1".to_string(),
+                    conditions: None, // No conditions = success path only
+                }]),
+                dependency_of: None,
             },
         ],
     };
@@ -654,18 +651,8 @@ fn test_failed_activity_with_explicit_condition_allows_following() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: Some(vec![
-                    DependencyEdge {
-                        activity_key: "handle_success".to_string(),
-                        conditions: Some(vec!["{{process.success == true}}".to_string()]),
-                    },
-                    DependencyEdge {
-                        activity_key: "handle_failure".to_string(),
-                        // Explicit condition checking for failure
-                        conditions: Some(vec!["{{process.error != null}}".to_string()]),
-                    },
-                ]),
+                depends_on: None,
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "handle_success".to_string(),
@@ -673,8 +660,11 @@ fn test_failed_activity_with_explicit_condition_allows_following() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: Some(vec![DependencyEdge {
+                    activity_key: "process".to_string(),
+                    conditions: Some(vec!["{{process.success == true}}".to_string()]),
+                }]),
+                dependency_of: None,
             },
             ActivityDefinition {
                 key: "handle_failure".to_string(),
@@ -682,8 +672,12 @@ fn test_failed_activity_with_explicit_condition_allows_following() {
                 activity_name: "activity".to_string(),
                 parameters: json!({}),
                 settings: None,
-                preceding: None,
-                following: None,
+                depends_on: Some(vec![DependencyEdge {
+                    activity_key: "process".to_string(),
+                    // Explicit condition checking for failure
+                    conditions: Some(vec!["{{process.error != null}}".to_string()]),
+                }]),
+                dependency_of: None,
             },
         ],
     };

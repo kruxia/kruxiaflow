@@ -58,11 +58,11 @@ pub struct ActivityDefinition {
 
     /// Activities that must complete before this one
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub preceding: Option<Vec<ActivityRelationship>>,
+    pub depends_on: Option<Vec<ActivityRelationship>>,
 
-    /// Activities that should run after this one
+    /// Activities that depend on this one (input only, cleared after normalization)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub following: Option<Vec<ActivityRelationship>>,
+    pub dependency_of: Option<Vec<ActivityRelationship>>,
 
     /// Activity-level settings (timeout, retry, etc.)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -76,11 +76,11 @@ impl From<streamflow_core::workflow::ActivityDefinition> for ActivityDefinition 
             worker: def.worker,
             activity_name: def.activity_name,
             parameters: def.parameters,
-            preceding: def
-                .preceding
+            depends_on: def
+                .depends_on
                 .map(|v| v.into_iter().map(Into::into).collect()),
-            following: def
-                .following
+            dependency_of: def
+                .dependency_of
                 .map(|v| v.into_iter().map(Into::into).collect()),
             settings: def.settings.map(Into::into),
         }
@@ -94,11 +94,11 @@ impl From<ActivityDefinition> for streamflow_core::workflow::ActivityDefinition 
             worker: def.worker,
             activity_name: def.activity_name,
             parameters: def.parameters,
-            preceding: def
-                .preceding
+            depends_on: def
+                .depends_on
                 .map(|v| v.into_iter().map(Into::into).collect()),
-            following: def
-                .following
+            dependency_of: def
+                .dependency_of
                 .map(|v| v.into_iter().map(Into::into).collect()),
             settings: def.settings.map(Into::into),
         }

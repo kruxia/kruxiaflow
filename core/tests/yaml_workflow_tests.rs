@@ -13,7 +13,7 @@ activities:
       url: "https://api.weather.gov/gridpoints/TOP/31,80/forecast"
       headers:
         User-Agent: "StreamFlow/0.2"
-    following:
+    dependency_of:
       - activity_key: send_notification
 
   - key: send_notification
@@ -48,12 +48,11 @@ activities:
         "https://api.weather.gov/gridpoints/TOP/31,80/forecast"
     );
 
-    // Check following relationship
-    let following = fetch_weather.following.as_ref().unwrap();
-    assert_eq!(following.len(), 1);
-    assert_eq!(following[0].activity_key, "send_notification");
+    // After normalization, dependency_of is cleared and converted to depends_on on target
+    // So fetch_weather.dependency_of is None, but send_notification.depends_on contains fetch_weather
+    assert!(fetch_weather.dependency_of.is_none());
 
-    // Check second activity
+    // Check second activity has the normalized dependency
     let send_notification = &workflow.activities[1];
     assert_eq!(send_notification.key, "send_notification");
     assert_eq!(send_notification.worker, "builtin");
@@ -61,6 +60,11 @@ activities:
     let params = send_notification.parameters.as_ref().unwrap();
     assert_eq!(params["method"], "POST");
     assert_eq!(params["url"], "{{INPUT.webhook_url}}");
+
+    // After normalization, send_notification should depend on fetch_weather
+    let depends_on = send_notification.depends_on.as_ref().unwrap();
+    assert_eq!(depends_on.len(), 1);
+    assert_eq!(depends_on[0].activity_key, "fetch_weather");
 }
 
 #[test]
@@ -70,7 +74,7 @@ name: test_workflow
 activities:
   - key: step1
     worker: test
-    following:
+    dependency_of:
       - activity_key: step2
   - key: step2
     worker: test
@@ -106,11 +110,11 @@ name: test_cycle
 activities:
   - key: step1
     worker: test
-    following:
+    dependency_of:
       - activity_key: step2
   - key: step2
     worker: test
-    following:
+    dependency_of:
       - activity_key: step1
 "#;
 

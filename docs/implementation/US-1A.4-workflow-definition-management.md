@@ -93,7 +93,7 @@ CREATE TABLE workflow_definitions (
   - Single source of truth (created_at)
 
 **Workflow Definition Structure**:
-Per architecture.md, workflows are defined as directed graphs using `preceding` and `following` relationships:
+Per architecture.md, workflows are defined as directed graphs using `depends_on` and `dependency_of` relationships:
 
 ```yaml
 name: payment_processing
@@ -104,7 +104,7 @@ activities:
     name: validate_card
     parameters:
       card_token: "{{ARG.card_token}}"
-    following:
+    dependency_of:
       - activity_key: authorize_card
         conditions:
           - "{{validate_payment.valid}} == true"
@@ -114,7 +114,7 @@ activities:
     name: authorize
     parameters:
       amount: "{{ARG.amount}}"
-    following:
+    dependency_of:
       - activity_key: capture_payment
 
   - key: capture_payment
@@ -191,11 +191,11 @@ pub struct ActivityDefinition {
 
     /// Activities that must complete before this one
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub preceding: Option<Vec<ActivityRelationship>>,
+    pub depends_on: Option<Vec<ActivityRelationship>>,
 
     /// Activities that should run after this one
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub following: Option<Vec<ActivityRelationship>>,
+    pub dependency_of: Option<Vec<ActivityRelationship>>,
 
     /// Activity-level settings (timeout, retry, etc.)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -358,11 +358,11 @@ impl WorkflowDefinition {
         // Validate all activity references
         for activity in &self.activities {
             // Validate preceding references
-            if let Some(preceding) = &activity.preceding {
+            if let Some(preceding) = &activity.depends_on {
                 for rel in preceding {
                     if !activity_keys.contains(&rel.activity_key) {
                         errors.add(
-                            &format!("activity.{}.preceding", activity.key),
+                            &format!("activity.{}.depends_on", activity.key),
                             &format!("Referenced activity not found: {}", rel.activity_key),
                         );
                     } else {
@@ -376,11 +376,11 @@ impl WorkflowDefinition {
             }
 
             // Validate following references
-            if let Some(following) = &activity.following {
+            if let Some(following) = &activity.dependency_of {
                 for rel in following {
                     if !activity_keys.contains(&rel.activity_key) {
                         errors.add(
-                            &format!("activity.{}.following", activity.key),
+                            &format!("activity.{}.dependency_of", activity.key),
                             &format!("Referenced activity not found: {}", rel.activity_key),
                         );
                     } else {
@@ -1256,8 +1256,8 @@ mod tests {
                     worker: "payments".to_string(),
                     name: Some("validate_card".to_string()),
                     parameters: None,
-                    preceding: None,
-                    following: Some(vec![ActivityRelationship {
+                    depends_on: None,
+                    dependency_of: Some(vec![ActivityRelationship {
                         activity_key: "authorize".to_string(),
                         conditions: None,
                     }]),
@@ -1268,8 +1268,8 @@ mod tests {
                     worker: "payments".to_string(),
                     name: Some("authorize_card".to_string()),
                     parameters: None,
-                    preceding: None,
-                    following: None,
+                    depends_on: None,
+                    dependency_of: None,
                     settings: None,
                 },
             ],
@@ -1290,8 +1290,8 @@ mod tests {
                     worker: "test".to_string(),
                     name: None,
                     parameters: None,
-                    preceding: None,
-                    following: None,
+                    depends_on: None,
+                    dependency_of: None,
                     settings: None,
                 },
                 ActivityDefinition {
@@ -1299,8 +1299,8 @@ mod tests {
                     worker: "test".to_string(),
                     name: None,
                     parameters: None,
-                    preceding: None,
-                    following: None,
+                    depends_on: None,
+                    dependency_of: None,
                     settings: None,
                 },
             ],
@@ -1323,8 +1323,8 @@ mod tests {
                 worker: "test".to_string(),
                 name: None,
                 parameters: None,
-                preceding: None,
-                following: Some(vec![ActivityRelationship {
+                depends_on: None,
+                dependency_of: Some(vec![ActivityRelationship {
                     activity_key: "step2".to_string(), // Doesn't exist!
                     conditions: None,
                 }]),
@@ -1350,8 +1350,8 @@ mod tests {
                     worker: "test".to_string(),
                     name: None,
                     parameters: None,
-                    preceding: None,
-                    following: Some(vec![ActivityRelationship {
+                    depends_on: None,
+                    dependency_of: Some(vec![ActivityRelationship {
                         activity_key: "step2".to_string(),
                         conditions: None,
                     }]),
@@ -1362,8 +1362,8 @@ mod tests {
                     worker: "test".to_string(),
                     name: None,
                     parameters: None,
-                    preceding: None,
-                    following: Some(vec![ActivityRelationship {
+                    depends_on: None,
+                    dependency_of: Some(vec![ActivityRelationship {
                         activity_key: "step1".to_string(), // Cycle!
                         conditions: None,
                     }]),
@@ -1993,7 +1993,7 @@ StreamFlow uses automatic timestamp-based versioning:
 ## Implementation Notes
 
 **Key Design Decisions**:
-1. **Directed Graph Structure**: Activities use `preceding`/`following` relationships (never "edges")
+1. **Directed Graph Structure**: Activities use `depends_on`/`dependency_of` relationships (never "edges")
 2. **JSONB Storage**: Stores only the activities array (not full WorkflowDefinition) to avoid redundancy since name is in a separate column
 3. **created_at as Version**: Database timestamp is the version (no separate column)
    - Formatted as `YYYYmmdd.HHMMSS.uuuuuu` in API for human-scannability

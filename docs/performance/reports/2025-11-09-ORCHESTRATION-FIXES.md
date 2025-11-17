@@ -10,7 +10,7 @@
 **File**: `core/src/orchestrator/dependency_evaluator.rs:80-115`
 
 **Problem**:
-- `get_preceding_activities()` was collecting dependencies from BOTH `preceding` and `following` lists
+- `get_preceding_activities()` was collecting dependencies from BOTH `depends_on` and `dependency_of` lists
 - For parallel_bench_10's `end` activity: 20 dependencies instead of 10 (each appeared twice)
 - Caused performance degradation and wasted CPU cycles
 
@@ -19,16 +19,16 @@
 // Use HashMap to deduplicate dependencies
 let mut preceding_map: HashMap<String, Option<Vec<String>>> = HashMap::new();
 
-// Explicit `preceding` list takes priority
-if let Some(preceding_list) = &activity.preceding {
+// Explicit `depends_on` list takes priority
+if let Some(preceding_list) = &activity.depends_on {
     for item in preceding_list {
         preceding_map.insert(item.activity_key.clone(), item.conditions.clone());
     }
 }
 
-// Only add from `following` if not already present
+// Only add from `dependency_of` if not already present
 for other_activity in &definition.activities {
-    if let Some(following_list) = &other_activity.following {
+    if let Some(following_list) = &other_activity.dependency_of {
         for item in following_list {
             if item.activity_key == activity.key {
                 preceding_map
