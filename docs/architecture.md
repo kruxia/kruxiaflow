@@ -882,7 +882,9 @@ Execution timeline:
 
 ### Parallel Execution
 
-Parallel execution happens naturally when multiple activities become ready simultaneously:
+Parallel execution happens naturally when multiple activities become ready simultaneously. The orchestrator evaluates dependencies and schedules all ready activities in a single batch.
+
+#### Fan-Out and Fan-In Patterns
 
 ```yaml
 # Example: Parallel workflow (fan-out and fan-in)
@@ -909,11 +911,84 @@ activities:
       - activity_key: analyze_quality
 ```
 
-Execution timeline:
+**Execution timeline**:
 - t=0: fetch_data scheduled
 - t=1: fetch_data completes → all 3 analyze_* scheduled simultaneously
 - t=2-4: Workers execute analyze_* in parallel (any order)
 - t=5: Last analysis completes → aggregate_results scheduled
+
+**Fan-Out**: One activity (`fetch_data`) has multiple downstream dependents → multiple activities become ready simultaneously
+
+**Fan-In**: One activity (`aggregate_results`) depends on multiple activities → waits for ALL dependencies to complete before becoming ready
+
+#### Implementation Details
+
+**Dependency Evaluation** (`core/src/orchestrator/dependency_evaluator.rs`):
+```rust
+// Returns Vec of ALL ready activities (not just one)
+pub fn find_ready_activities<'a>(
+    &self,
+    definition: &'a WorkflowDefinition,
+    state: &WorkflowState,
+) -> Vec<&'a ActivityDefinition> {
+    definition
+        .activities
+        .iter()
+        .filter(|activity| {
+            self.is_activity_ready(activity, state).unwrap_or(false)
+        })
+        .collect()  // All ready activities returned together
+}
+```
+
+**Batch Scheduling** (`core/src/orchestrator/orchestrator.rs`):
+```rust
+// 1: Find all ready activities
+let ready_activities = dependency_evaluator.find_ready_activities(definition, &state);
+
+// 2: Build activities_to_schedule Vec with resolved parameters
+let mut activities_to_schedule = Vec::new();
+for activity_def in ready_activities {
+    let resolved_params = template_resolver.resolve_activity_parameters(...)?;
+    activities_to_schedule.push(QueueActivity { ... });
+}
+
+// 3: Schedule ALL ready activities in single database call
+activity_queue.schedule(event.workflow_id, activities_to_schedule).await?;
+```
+
+**Concurrent Worker Claims** (`core/src/queue/postgres_queue.rs`):
+```sql
+-- FOR UPDATE SKIP LOCKED enables lock-free concurrent claims
+SELECT workflow_id, activity_key, ...
+FROM activity_queue
+WHERE status = 'pending' OR (status = 'running' AND stale)
+ORDER BY scheduled_for ASC
+LIMIT $1
+FOR UPDATE SKIP LOCKED;  -- Workers don't block each other
+```
+
+**Race Condition Prevention** (`core/src/orchestrator/orchestrator.rs`):
+```rust
+// Workflow-level advisory lock ensures only one orchestrator
+// processes a workflow at a time (prevents concurrent state updates)
+sqlx::query!(
+    "SELECT pg_advisory_xact_lock(hashtext($1::text))",
+    event.workflow_id.to_string()
+)
+.execute(&mut *tx)
+.await?;
+
+// Lock is transaction-scoped - released on commit
+// Different workflows can be processed in parallel by different orchestrator instances
+```
+
+**Key Design Principles**:
+- **Stateless orchestrator**: Multiple orchestrator instances can run in parallel
+- **Workflow-level locking**: Advisory locks prevent race conditions on individual workflows
+- **Lock-free queue**: `FOR UPDATE SKIP LOCKED` allows concurrent worker claims
+- **Batch scheduling**: All ready activities scheduled in single transaction (idempotent via UNIQUE constraint)
+- **AND semantics**: Fan-in activities require ALL dependencies to be satisfied (not just some)
 
 ### Long-Running Activities
 
