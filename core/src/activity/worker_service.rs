@@ -1,5 +1,6 @@
 use crate::events::{EventSource, NewWorkflowEvent, WorkflowEventType};
 use crate::queue::{ActivityQueue, ActivityResult, QueueError, QueuedActivity};
+use rust_decimal::Decimal;
 use serde_json::Value;
 use std::sync::Arc;
 use thiserror::Error;
@@ -158,7 +159,7 @@ impl ActivityWorkerService {
         activity_id: Uuid,
         worker_id: String,
         outputs: Value,
-        cost_usd: Option<f64>,
+        cost_usd: Option<Decimal>,
     ) -> ActivityWorkerResult<()> {
         // Get activity details before completion (needed for event publishing)
         // This is read-only and doesn't modify state

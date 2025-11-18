@@ -1,6 +1,8 @@
+use rust_decimal::Decimal;
 use serde_json::json;
 use serial_test::serial;
 use sqlx::PgPool;
+use std::str::FromStr;
 use std::sync::Arc;
 use streamflow_core::activity::ActivityWorkerService;
 use streamflow_core::events::{EventSource, PostgresEventSource};
@@ -326,7 +328,7 @@ async fn test_complete_activity_success() {
             activity_id,
             "worker_01".to_string(),
             output.clone(),
-            Some(0.05),
+            Some(Decimal::from_str("0.05").unwrap()),
         )
         .await;
 
@@ -360,7 +362,7 @@ async fn test_complete_activity_success() {
 
     assert_eq!(event.event_type, "ActivityCompleted");
     assert_eq!(event.payload["outputs"], output);
-    assert_eq!(event.payload["cost_usd"], 0.05);
+    assert_eq!(event.payload["cost_usd"], "0.05");
 
     cleanup_activities(&pool, workflow_id).await;
 }
