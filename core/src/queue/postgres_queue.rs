@@ -63,6 +63,12 @@ impl ActivityQueue for PostgresQueue {
                 .map(|s| serde_json::to_value(s))
                 .transpose()?;
 
+            let output_definitions_json = activity
+                .output_definitions
+                .as_ref()
+                .map(|o| serde_json::to_value(o))
+                .transpose()?;
+
             // Idempotent insert - ON CONFLICT DO NOTHING
             // Use COALESCE($7, NOW()) to default scheduled_for to database NOW() if None
             // This ensures consistency with claim_next which uses NOW() for comparison
@@ -70,8 +76,8 @@ impl ActivityQueue for PostgresQueue {
                 r#"
                 INSERT INTO activity_queue (
                     workflow_id, activity_key, worker, name,
-                    parameters, settings, scheduled_for, timeout_duration, max_retries
-                ) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, NOW()), make_interval(secs => $8), $9)
+                    parameters, settings, scheduled_for, timeout_duration, max_retries, output_definitions
+                ) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, NOW()), make_interval(secs => $8), $9, $10)
                 ON CONFLICT (workflow_id, activity_key) DO NOTHING
                 "#,
                 workflow_id,
@@ -82,7 +88,8 @@ impl ActivityQueue for PostgresQueue {
                 settings_json,
                 activity.scheduled_for,
                 timeout as f64,
-                max_retries
+                max_retries,
+                output_definitions_json
             )
             .execute(&self.pool)
             .await?;
@@ -146,7 +153,7 @@ impl ActivityQueue for PostgresQueue {
                 FOR UPDATE SKIP LOCKED
             )
             RETURNING id, workflow_id, activity_key, worker, name as activity_name,
-                      parameters, settings, retry_count, claimed_at
+                      parameters, settings, retry_count, claimed_at, output_definitions
             "#,
             worker,
             name,
@@ -162,6 +169,11 @@ impl ActivityQueue for PostgresQueue {
                     .map(|v| serde_json::from_value(v))
                     .transpose()?;
 
+                let output_definitions = row
+                    .output_definitions
+                    .map(|v| serde_json::from_value(v))
+                    .transpose()?;
+
                 let queued = QueuedActivity {
                     id: row.id,
                     workflow_id: row.workflow_id,
@@ -172,6 +184,7 @@ impl ActivityQueue for PostgresQueue {
                     settings,
                     retry_count: row.retry_count,
                     claimed_at: row.claimed_at.unwrap(),
+                    output_definitions,
                 };
 
                 if queued.retry_count > 0 {

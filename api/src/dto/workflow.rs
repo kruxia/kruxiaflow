@@ -64,6 +64,11 @@ pub struct ActivityDefinition {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dependency_of: Option<Vec<ActivityRelationship>>,
 
+    /// Activity output definitions (name and type)
+    #[serde(rename = "outputs")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_definitions: Option<Vec<ActivityOutputDefinition>>,
+
     /// Activity-level settings (timeout, retry, etc.)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<ActivitySettings>,
@@ -82,6 +87,9 @@ impl From<streamflow_core::workflow::ActivityDefinition> for ActivityDefinition 
             dependency_of: def
                 .dependency_of
                 .map(|v| v.into_iter().map(Into::into).collect()),
+            output_definitions: def
+                .output_definitions
+                .map(|v| v.into_iter().map(Into::into).collect()),
             settings: def.settings.map(Into::into),
         }
     }
@@ -94,6 +102,9 @@ impl From<ActivityDefinition> for streamflow_core::workflow::ActivityDefinition 
             worker: def.worker,
             activity_name: def.activity_name,
             parameters: def.parameters,
+            output_definitions: def
+                .output_definitions
+                .map(|v| v.into_iter().map(Into::into).collect()),
             depends_on: def
                 .depends_on
                 .map(|v| v.into_iter().map(Into::into).collect()),
@@ -221,6 +232,71 @@ impl From<BackoffStrategy> for streamflow_core::workflow::BackoffStrategy {
         match strategy {
             BackoffStrategy::Fixed => Self::Fixed,
             BackoffStrategy::Exponential => Self::Exponential,
+        }
+    }
+}
+
+/// Activity output definition
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ActivityOutputDefinition {
+    /// Output name (key for referencing in templates)
+    pub name: String,
+
+    /// Output type (default: value)
+    #[serde(default)]
+    #[serde(rename = "type")]
+    pub output_type: OutputType,
+}
+
+impl From<streamflow_core::workflow::ActivityOutputDefinition> for ActivityOutputDefinition {
+    fn from(output: streamflow_core::workflow::ActivityOutputDefinition) -> Self {
+        Self {
+            name: output.name,
+            output_type: output.output_type.into(),
+        }
+    }
+}
+
+impl From<ActivityOutputDefinition> for streamflow_core::workflow::ActivityOutputDefinition {
+    fn from(output: ActivityOutputDefinition) -> Self {
+        Self {
+            name: output.name,
+            output_type: output.output_type.into(),
+        }
+    }
+}
+
+/// Output type enumeration
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputType {
+    /// Default: JSON value
+    #[default]
+    Value,
+
+    /// File reference
+    File,
+
+    /// Folder reference (post-MVP)
+    Folder,
+}
+
+impl From<streamflow_core::workflow::OutputType> for OutputType {
+    fn from(output_type: streamflow_core::workflow::OutputType) -> Self {
+        match output_type {
+            streamflow_core::workflow::OutputType::Value => Self::Value,
+            streamflow_core::workflow::OutputType::File => Self::File,
+            streamflow_core::workflow::OutputType::Folder => Self::Folder,
+        }
+    }
+}
+
+impl From<OutputType> for streamflow_core::workflow::OutputType {
+    fn from(output_type: OutputType) -> Self {
+        match output_type {
+            OutputType::Value => Self::Value,
+            OutputType::File => Self::File,
+            OutputType::Folder => Self::Folder,
         }
     }
 }

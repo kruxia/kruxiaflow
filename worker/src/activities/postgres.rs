@@ -1,3 +1,4 @@
+use crate::activity_result::ActivityResult;
 use crate::registry::ActivityImpl;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -306,7 +307,7 @@ impl Default for PostgresQueryActivity {
 
 #[async_trait]
 impl ActivityImpl for PostgresQueryActivity {
-    async fn execute(&self, parameters: Value) -> Result<Value> {
+    async fn execute(&self, parameters: Value) -> Result<ActivityResult> {
         tracing::debug!(
             "Executing postgres_query activity with parameters: {:?}",
             parameters
@@ -325,7 +326,7 @@ impl ActivityImpl for PostgresQueryActivity {
 
         tracing::debug!("PostgreSQL query completed");
 
-        Ok(output)
+        Ok(ActivityResult::value("result", output))
     }
 
     fn name(&self) -> &str {
@@ -363,8 +364,10 @@ mod tests {
 
         let result = activity.execute(params).await.unwrap();
 
-        assert!(result.get("rows").is_some());
-        let rows = result.get("rows").unwrap().as_array().unwrap();
+        let output_value = result.to_json_value();
+        let result_obj = output_value.get("result").unwrap();
+        assert!(result_obj.get("rows").is_some());
+        let rows = result_obj.get("rows").unwrap().as_array().unwrap();
         assert_eq!(rows.len(), 1);
 
         let row = &rows[0];
@@ -385,8 +388,10 @@ mod tests {
 
         let result = activity.execute(params).await.unwrap();
 
-        assert!(result.get("rows").is_some());
-        let rows = result.get("rows").unwrap().as_array().unwrap();
+        let output_value = result.to_json_value();
+        let result_obj = output_value.get("result").unwrap();
+        assert!(result_obj.get("rows").is_some());
+        let rows = result_obj.get("rows").unwrap().as_array().unwrap();
         assert_eq!(rows.len(), 1);
 
         let row = &rows[0];
@@ -415,8 +420,10 @@ mod tests {
 
         let result = activity.execute(params).await.unwrap();
 
-        assert!(result.get("rows_affected").is_some());
-        assert_eq!(result.get("rows_affected").unwrap(), 1);
+        let output_value = result.to_json_value();
+        let result_obj = output_value.get("result").unwrap();
+        assert!(result_obj.get("rows_affected").is_some());
+        assert_eq!(result_obj.get("rows_affected").unwrap(), 1);
 
         // Cleanup
         let cleanup = json!({
@@ -454,8 +461,10 @@ mod tests {
 
         let result = activity.execute(params).await.unwrap();
 
-        assert!(result.get("rows_affected").is_some());
-        assert_eq!(result.get("rows_affected").unwrap(), 1);
+        let output_value = result.to_json_value();
+        let result_obj = output_value.get("result").unwrap();
+        assert!(result_obj.get("rows_affected").is_some());
+        assert_eq!(result_obj.get("rows_affected").unwrap(), 1);
 
         // Cleanup
         let cleanup = json!({
@@ -475,7 +484,9 @@ mod tests {
             "query": "SELECT 'first' as result"
         });
         let result1 = activity.execute(params1).await.unwrap();
-        assert!(result1.get("rows").is_some());
+        let output_value1 = result1.to_json_value();
+        let result_obj1 = output_value1.get("result").unwrap();
+        assert!(result_obj1.get("rows").is_some());
 
         // Second query should reuse cached pool
         let params2 = json!({
@@ -483,9 +494,11 @@ mod tests {
             "query": "SELECT 'second' as result"
         });
         let result2 = activity.execute(params2).await.unwrap();
-        assert!(result2.get("rows").is_some());
+        let output_value = result2.to_json_value();
+        let result_obj = output_value.get("result").unwrap();
+        assert!(result_obj.get("rows").is_some());
 
-        let rows = result2.get("rows").unwrap().as_array().unwrap();
+        let rows = result_obj.get("rows").unwrap().as_array().unwrap();
         assert_eq!(rows[0].get("result").unwrap(), "second");
     }
 }

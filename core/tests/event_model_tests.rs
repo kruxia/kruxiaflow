@@ -284,6 +284,7 @@ fn test_workflow_definition_with_activities() {
         settings: None,
         depends_on: None,
         dependency_of: None,
+        output_definitions: None,
     };
 
     let def = WorkflowDefinition {
@@ -312,6 +313,7 @@ fn test_activity_definition_serialization() {
         settings: None,
         depends_on: None,
         dependency_of: None,
+        output_definitions: None,
     };
 
     let json = serde_json::to_string(&activity).unwrap();
@@ -337,6 +339,7 @@ fn test_activity_definition_with_dependencies() {
             activity_key: "act3".to_string(),
             conditions: Some(vec!["success".to_string()]),
         }]),
+        output_definitions: None,
     };
 
     let json = serde_json::to_string(&activity).unwrap();
@@ -355,6 +358,7 @@ fn test_activity_definition_clone() {
         settings: None,
         depends_on: None,
         dependency_of: None,
+        output_definitions: None,
     };
 
     let activity2 = activity1.clone();

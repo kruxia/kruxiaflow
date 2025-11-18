@@ -30,6 +30,7 @@ fn test_workflow_definition_from_core_to_dto() {
                         backoff: workflow::BackoffStrategy::Exponential,
                     }),
                 }),
+                output_definitions: None,
             },
             workflow::ActivityDefinition {
                 key: "step2".to_string(),
@@ -42,6 +43,7 @@ fn test_workflow_definition_from_core_to_dto() {
                 }]),
                 dependency_of: None,
                 settings: None,
+                output_definitions: None,
             },
         ],
     };
@@ -114,6 +116,7 @@ fn test_workflow_definition_from_dto_to_core() {
                     backoff: dto::BackoffStrategy::Fixed,
                 }),
             }),
+            output_definitions: None,
         }],
     };
 
@@ -283,6 +286,7 @@ fn test_activity_definition_with_minimal_fields() {
         depends_on: None,
         dependency_of: None,
         settings: None,
+        output_definitions: None,
     };
 
     let dto_activity: dto::ActivityDefinition = core_activity.clone().into();
@@ -303,6 +307,7 @@ fn test_activity_definition_with_minimal_fields() {
         depends_on: None,
         dependency_of: None,
         settings: None,
+        output_definitions: None,
     };
 
     let core_activity2: workflow::ActivityDefinition = dto_activity2.clone().into();
@@ -338,6 +343,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                     },
                 ]),
                 settings: None,
+                output_definitions: None,
             },
             workflow::ActivityDefinition {
                 key: "middle1".to_string(),
@@ -359,6 +365,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                     timeout: Some(100),
                     retry: None,
                 }),
+                output_definitions: None,
             },
             workflow::ActivityDefinition {
                 key: "middle2".to_string(),
@@ -383,6 +390,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                         backoff: workflow::BackoffStrategy::Fixed,
                     }),
                 }),
+                output_definitions: None,
             },
             workflow::ActivityDefinition {
                 key: "end".to_string(),
@@ -401,6 +409,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                 ]),
                 dependency_of: None,
                 settings: None,
+                output_definitions: None,
             },
         ],
     };

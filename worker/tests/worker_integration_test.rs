@@ -62,6 +62,7 @@ async fn create_real_server() -> (String, PgPool, tokio::task::JoinHandle<()>) {
 
     let activity_queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
+    let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
     let shutdown_token = CancellationToken::new();
 
     let state = AppState::new(
@@ -69,6 +70,7 @@ async fn create_real_server() -> (String, PgPool, tokio::task::JoinHandle<()>) {
         Arc::new(auth_service),
         activity_queue,
         event_source,
+        workflow_storage.clone(),
         shutdown_token,
     );
     let app = app_router(state);
@@ -104,6 +106,7 @@ async fn schedule_test_activities(pool: &PgPool, workflow_id: Uuid, count: usize
             parameters: json!({"test": format!("value_{}", i)}),
             settings: None,
             scheduled_for: None,
+            output_definitions: None,
         })
         .collect();
 
@@ -149,7 +152,8 @@ async fn test_worker_poll_and_execute_echo() {
     // Create worker with EchoActivity
     let mut registry = ActivityRegistry::new();
     registry.register(Arc::new(EchoActivity));
-    let manager = WorkerManager::new(config, registry);
+    let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
+    let manager = WorkerManager::new(config, registry, workflow_storage);
 
     // Start worker
     let handles = manager.start().await.expect("Worker should start");
@@ -216,7 +220,8 @@ async fn test_worker_concurrency() {
     // Create worker with EchoActivity
     let mut registry = ActivityRegistry::new();
     registry.register(Arc::new(EchoActivity));
-    let manager = WorkerManager::new(config, registry);
+    let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
+    let manager = WorkerManager::new(config, registry, workflow_storage);
 
     // Start worker
     let handles = manager.start().await.expect("Worker should start");
@@ -249,7 +254,7 @@ async fn test_worker_concurrency() {
 #[serial]
 async fn test_worker_authentication_failure() {
     // Setup: Start real API server
-    let (server_url, _pool, server_handle) = create_real_server().await;
+    let (server_url, pool, server_handle) = create_real_server().await;
 
     // Configure worker with invalid credentials
     let config = WorkerConfig {
@@ -268,7 +273,8 @@ async fn test_worker_authentication_failure() {
     // Create worker with EchoActivity
     let mut registry = ActivityRegistry::new();
     registry.register(Arc::new(EchoActivity));
-    let manager = WorkerManager::new(config, registry);
+    let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
+    let manager = WorkerManager::new(config, registry, workflow_storage);
 
     // Start worker - it should fail to authenticate but not crash
     let handles = manager.start().await.expect("Worker should start");

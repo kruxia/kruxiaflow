@@ -1,3 +1,4 @@
+use crate::workflow::outputs::{ActivityOutput, ActivityOutputDefinition};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -11,6 +12,9 @@ pub struct Activity {
     pub parameters: serde_json::Value,
     pub settings: Option<ActivitySettings>,
     pub scheduled_for: Option<DateTime<Utc>>,
+    /// Output definitions from workflow definition (for file handling)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_definitions: Option<Vec<ActivityOutputDefinition>>,
 }
 
 /// Activity settings (retry, timeout, budget config)
@@ -68,20 +72,77 @@ pub struct QueuedActivity {
     pub settings: Option<ActivitySettings>,
     pub retry_count: i32,
     pub claimed_at: DateTime<Utc>,
+    /// Output definitions from workflow definition (for file handling)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_definitions: Option<Vec<ActivityOutputDefinition>>,
 }
 
 /// Activity result from worker
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActivityResult {
     pub success: bool,
+    /// Structured outputs with types (Value, File, or Folder)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub outputs: Option<serde_json::Value>,
+    pub outputs: Option<Vec<ActivityOutput>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<TokenUsage>,
+}
+
+impl ActivityResult {
+    /// Create a successful result with value outputs
+    pub fn success(outputs: serde_json::Value) -> Self {
+        // Convert JSON object to Vec<ActivityOutput> with type Value
+        let outputs_vec = if let serde_json::Value::Object(map) = outputs {
+            Some(
+                map.into_iter()
+                    .map(|(k, v)| ActivityOutput::value(k, v))
+                    .collect(),
+            )
+        } else {
+            None
+        };
+
+        Self {
+            success: true,
+            outputs: outputs_vec,
+            error: None,
+            cost_usd: None,
+            token_usage: None,
+        }
+    }
+
+    /// Create a failure result
+    pub fn failure(error: impl Into<String>) -> Self {
+        Self {
+            success: false,
+            outputs: None,
+            error: Some(error.into()),
+            cost_usd: None,
+            token_usage: None,
+        }
+    }
+
+    /// Create a successful result with structured outputs
+    pub fn with_outputs(outputs: Vec<ActivityOutput>) -> Self {
+        Self {
+            success: true,
+            outputs: Some(outputs),
+            error: None,
+            cost_usd: None,
+            token_usage: None,
+        }
+    }
+
+    /// Add cost tracking
+    pub fn with_cost(mut self, cost_usd: f64, token_usage: Option<TokenUsage>) -> Self {
+        self.cost_usd = Some(cost_usd);
+        self.token_usage = token_usage;
+        self
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

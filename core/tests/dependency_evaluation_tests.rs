@@ -6,10 +6,15 @@ use streamflow_core::orchestrator::{
     ActivityState, WorkflowActivityStatus, WorkflowState, build_condition_context,
     evaluate_condition, find_ready_activities, is_workflow_complete, is_workflow_failed,
 };
+use streamflow_core::workflow::{ActivityOutput, OutputType};
 use uuid::Uuid;
 
 fn create_test_state_with_activities(
-    activities: Vec<(&str, WorkflowActivityStatus, Option<serde_json::Value>)>,
+    activities: Vec<(
+        &str,
+        WorkflowActivityStatus,
+        Option<Vec<streamflow_core::workflow::ActivityOutput>>,
+    )>,
 ) -> WorkflowState {
     let workflow_id = Uuid::now_v7();
     let activities_map = activities
@@ -54,6 +59,7 @@ fn test_find_ready_root_activities() {
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "root2".to_string(),
@@ -63,6 +69,7 @@ fn test_find_ready_root_activities() {
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
+                output_definitions: None,
             },
         ],
     };
@@ -95,6 +102,7 @@ fn test_find_ready_sequential_workflow() {
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "activity2".to_string(),
@@ -107,6 +115,7 @@ fn test_find_ready_sequential_workflow() {
                     conditions: None,
                 }]),
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "activity3".to_string(),
@@ -119,6 +128,7 @@ fn test_find_ready_sequential_workflow() {
                     conditions: None,
                 }]),
                 dependency_of: None,
+                output_definitions: None,
             },
         ],
     };
@@ -140,7 +150,11 @@ fn test_find_ready_sequential_workflow() {
         (
             "activity1",
             WorkflowActivityStatus::Completed,
-            Some(json!({"result": "success"})),
+            Some(vec![ActivityOutput {
+                name: "result".to_string(),
+                output_type: OutputType::Value,
+                value: json!("success"),
+            }]),
         ),
         ("activity2", WorkflowActivityStatus::NotScheduled, None),
         ("activity3", WorkflowActivityStatus::NotScheduled, None),
@@ -156,12 +170,20 @@ fn test_find_ready_sequential_workflow() {
         (
             "activity1",
             WorkflowActivityStatus::Completed,
-            Some(json!({"result": "success"})),
+            Some(vec![ActivityOutput {
+                name: "result".to_string(),
+                output_type: OutputType::Value,
+                value: json!("success"),
+            }]),
         ),
         (
             "activity2",
             WorkflowActivityStatus::Completed,
-            Some(json!({"result": "success"})),
+            Some(vec![ActivityOutput {
+                name: "result".to_string(),
+                output_type: OutputType::Value,
+                value: json!("success"),
+            }]),
         ),
         ("activity3", WorkflowActivityStatus::NotScheduled, None),
     ]);
@@ -200,6 +222,7 @@ fn test_find_ready_parallel_fanout() {
                         conditions: None,
                     },
                 ]),
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "parallel1".to_string(),
@@ -209,6 +232,7 @@ fn test_find_ready_parallel_fanout() {
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "parallel2".to_string(),
@@ -218,6 +242,7 @@ fn test_find_ready_parallel_fanout() {
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "parallel3".to_string(),
@@ -227,6 +252,7 @@ fn test_find_ready_parallel_fanout() {
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
+                output_definitions: None,
             },
         ],
     };
@@ -236,7 +262,11 @@ fn test_find_ready_parallel_fanout() {
         (
             "root",
             WorkflowActivityStatus::Completed,
-            Some(json!({"result": "success"})),
+            Some(vec![ActivityOutput {
+                name: "result".to_string(),
+                output_type: OutputType::Value,
+                value: json!("success"),
+            }]),
         ),
         ("parallel1", WorkflowActivityStatus::NotScheduled, None),
         ("parallel2", WorkflowActivityStatus::NotScheduled, None),
@@ -266,6 +296,7 @@ fn test_find_ready_parallel_fanin() {
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "parallel2".to_string(),
@@ -275,6 +306,7 @@ fn test_find_ready_parallel_fanin() {
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "join".to_string(),
@@ -293,6 +325,7 @@ fn test_find_ready_parallel_fanin() {
                     },
                 ]),
                 dependency_of: None,
+                output_definitions: None,
             },
         ],
     };
@@ -302,7 +335,11 @@ fn test_find_ready_parallel_fanin() {
         (
             "parallel1",
             WorkflowActivityStatus::Completed,
-            Some(json!({"result": "success"})),
+            Some(vec![ActivityOutput {
+                name: "result".to_string(),
+                output_type: OutputType::Value,
+                value: json!("success"),
+            }]),
         ),
         ("parallel2", WorkflowActivityStatus::NotScheduled, None),
         ("join", WorkflowActivityStatus::NotScheduled, None),
@@ -318,12 +355,20 @@ fn test_find_ready_parallel_fanin() {
         (
             "parallel1",
             WorkflowActivityStatus::Completed,
-            Some(json!({"result": "success"})),
+            Some(vec![ActivityOutput {
+                name: "result".to_string(),
+                output_type: OutputType::Value,
+                value: json!("success"),
+            }]),
         ),
         (
             "parallel2",
             WorkflowActivityStatus::Completed,
-            Some(json!({"result": "success"})),
+            Some(vec![ActivityOutput {
+                name: "result".to_string(),
+                output_type: OutputType::Value,
+                value: json!("success"),
+            }]),
         ),
         ("join", WorkflowActivityStatus::NotScheduled, None),
     ]);
@@ -339,7 +384,11 @@ fn test_evaluate_condition_true() {
     let state = create_test_state_with_activities(vec![(
         "activity1",
         WorkflowActivityStatus::Completed,
-        Some(json!({"valid": true})),
+        Some(vec![ActivityOutput {
+            name: "valid".to_string(),
+            output_type: OutputType::Value,
+            value: json!(true),
+        }]),
     )]);
 
     let context = build_condition_context(&state);
@@ -353,7 +402,11 @@ fn test_evaluate_condition_false() {
     let state = create_test_state_with_activities(vec![(
         "activity1",
         WorkflowActivityStatus::Completed,
-        Some(json!({"valid": false})),
+        Some(vec![ActivityOutput {
+            name: "valid".to_string(),
+            output_type: OutputType::Value,
+            value: json!(false),
+        }]),
     )]);
 
     let context = build_condition_context(&state);
@@ -367,7 +420,11 @@ fn test_evaluate_condition_not_equal() {
     let state = create_test_state_with_activities(vec![(
         "activity1",
         WorkflowActivityStatus::Completed,
-        Some(json!({"status": "success"})),
+        Some(vec![ActivityOutput {
+            name: "status".to_string(),
+            output_type: OutputType::Value,
+            value: json!("success"),
+        }]),
     )]);
 
     let context = build_condition_context(&state);
@@ -381,7 +438,11 @@ fn test_evaluate_condition_string_comparison() {
     let state = create_test_state_with_activities(vec![(
         "activity1",
         WorkflowActivityStatus::Completed,
-        Some(json!({"result": "approved"})),
+        Some(vec![ActivityOutput {
+            name: "result".to_string(),
+            output_type: OutputType::Value,
+            value: json!("approved"),
+        }]),
     )]);
 
     let context = build_condition_context(&state);
@@ -395,7 +456,11 @@ fn test_evaluate_condition_nested_boolean() {
     let state = create_test_state_with_activities(vec![(
         "check_health",
         WorkflowActivityStatus::Completed,
-        Some(json!({"response": {"status": 200, "success": true}})),
+        Some(vec![ActivityOutput {
+            name: "response".to_string(),
+            output_type: OutputType::Value,
+            value: json!({"status": 200, "success": true}),
+        }]),
     )]);
 
     let context = build_condition_context(&state);
@@ -426,6 +491,7 @@ fn test_conditional_branching() {
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "approve".to_string(),
@@ -438,6 +504,7 @@ fn test_conditional_branching() {
                     conditions: Some(vec!["{{validate.valid == true}}".to_string()]),
                 }]),
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "reject".to_string(),
@@ -450,6 +517,7 @@ fn test_conditional_branching() {
                     conditions: Some(vec!["{{validate.valid == false}}".to_string()]),
                 }]),
                 dependency_of: None,
+                output_definitions: None,
             },
         ],
     };
@@ -459,7 +527,11 @@ fn test_conditional_branching() {
         (
             "validate",
             WorkflowActivityStatus::Completed,
-            Some(json!({"valid": true})),
+            Some(vec![ActivityOutput {
+                name: "valid".to_string(),
+                output_type: OutputType::Value,
+                value: json!(true),
+            }]),
         ),
         ("approve", WorkflowActivityStatus::NotScheduled, None),
         ("reject", WorkflowActivityStatus::NotScheduled, None),
@@ -475,7 +547,11 @@ fn test_conditional_branching() {
         (
             "validate",
             WorkflowActivityStatus::Completed,
-            Some(json!({"valid": false})),
+            Some(vec![ActivityOutput {
+                name: "valid".to_string(),
+                output_type: OutputType::Value,
+                value: json!(false),
+            }]),
         ),
         ("approve", WorkflowActivityStatus::NotScheduled, None),
         ("reject", WorkflowActivityStatus::NotScheduled, None),
@@ -493,12 +569,20 @@ fn test_is_workflow_complete() {
         (
             "activity1",
             WorkflowActivityStatus::Completed,
-            Some(json!({"result": "success"})),
+            Some(vec![ActivityOutput {
+                name: "result".to_string(),
+                output_type: OutputType::Value,
+                value: json!("success"),
+            }]),
         ),
         (
             "activity2",
             WorkflowActivityStatus::Completed,
-            Some(json!({"result": "success"})),
+            Some(vec![ActivityOutput {
+                name: "result".to_string(),
+                output_type: OutputType::Value,
+                value: json!("success"),
+            }]),
         ),
     ]);
 
@@ -509,7 +593,11 @@ fn test_is_workflow_complete() {
         (
             "activity1",
             WorkflowActivityStatus::Completed,
-            Some(json!({"result": "success"})),
+            Some(vec![ActivityOutput {
+                name: "result".to_string(),
+                output_type: OutputType::Value,
+                value: json!("success"),
+            }]),
         ),
         ("activity2", WorkflowActivityStatus::Pending, None),
     ]);
@@ -523,7 +611,11 @@ fn test_is_workflow_failed() {
         (
             "activity1",
             WorkflowActivityStatus::Completed,
-            Some(json!({"result": "success"})),
+            Some(vec![ActivityOutput {
+                name: "result".to_string(),
+                output_type: OutputType::Value,
+                value: json!("success"),
+            }]),
         ),
         ("activity2", WorkflowActivityStatus::Failed, None),
     ]);
@@ -535,12 +627,20 @@ fn test_is_workflow_failed() {
         (
             "activity1",
             WorkflowActivityStatus::Completed,
-            Some(json!({"result": "success"})),
+            Some(vec![ActivityOutput {
+                name: "result".to_string(),
+                output_type: OutputType::Value,
+                value: json!("success"),
+            }]),
         ),
         (
             "activity2",
             WorkflowActivityStatus::Completed,
-            Some(json!({"result": "success"})),
+            Some(vec![ActivityOutput {
+                name: "result".to_string(),
+                output_type: OutputType::Value,
+                value: json!("success"),
+            }]),
         ),
     ]);
 
@@ -561,6 +661,7 @@ fn test_skip_already_scheduled_activities() {
             settings: None,
             depends_on: None,
             dependency_of: None,
+            output_definitions: None,
         }],
     };
 
@@ -579,7 +680,11 @@ fn test_skip_already_scheduled_activities() {
     let state = create_test_state_with_activities(vec![(
         "activity1",
         WorkflowActivityStatus::Completed,
-        Some(json!({"result": "success"})),
+        Some(vec![ActivityOutput {
+            name: "result".to_string(),
+            output_type: OutputType::Value,
+            value: json!("success"),
+        }]),
     )]);
 
     let ready =
@@ -604,6 +709,7 @@ fn test_failed_activity_without_conditions_blocks_following() {
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "step2".to_string(),
@@ -616,6 +722,7 @@ fn test_failed_activity_without_conditions_blocks_following() {
                     conditions: None, // No conditions = success path only
                 }]),
                 dependency_of: None,
+                output_definitions: None,
             },
         ],
     };
@@ -653,6 +760,7 @@ fn test_failed_activity_with_explicit_condition_allows_following() {
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "handle_success".to_string(),
@@ -665,6 +773,7 @@ fn test_failed_activity_with_explicit_condition_allows_following() {
                     conditions: Some(vec!["{{process.success == true}}".to_string()]),
                 }]),
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "handle_failure".to_string(),
@@ -678,6 +787,7 @@ fn test_failed_activity_with_explicit_condition_allows_following() {
                     conditions: Some(vec!["{{process.error != null}}".to_string()]),
                 }]),
                 dependency_of: None,
+                output_definitions: None,
             },
         ],
     };
@@ -687,7 +797,18 @@ fn test_failed_activity_with_explicit_condition_allows_following() {
         (
             "process",
             WorkflowActivityStatus::Failed,
-            Some(json!({"error": "Something went wrong", "success": false})),
+            Some(vec![
+                ActivityOutput {
+                    name: "error".to_string(),
+                    output_type: OutputType::Value,
+                    value: json!("Something went wrong"),
+                },
+                ActivityOutput {
+                    name: "success".to_string(),
+                    output_type: OutputType::Value,
+                    value: json!(false),
+                },
+            ]),
         ),
         ("handle_success", WorkflowActivityStatus::NotScheduled, None),
         ("handle_failure", WorkflowActivityStatus::NotScheduled, None),

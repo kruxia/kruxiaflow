@@ -75,6 +75,7 @@ fn test_activity_serialization() {
         parameters: json!({"input": "data"}),
         settings: None,
         scheduled_for: None,
+        output_definitions: None,
     };
 
     let json = serde_json::to_string(&activity).unwrap();
@@ -104,6 +105,7 @@ fn test_activity_with_settings() {
         parameters: json!({}),
         settings: Some(settings),
         scheduled_for: None,
+        output_definitions: None,
     };
 
     let json = serde_json::to_string(&activity).unwrap();
@@ -121,6 +123,7 @@ fn test_activity_with_scheduled_for() {
         parameters: json!({}),
         settings: None,
         scheduled_for: Some(scheduled),
+        output_definitions: None,
     };
 
     let json = serde_json::to_string(&activity).unwrap();
@@ -136,6 +139,7 @@ fn test_activity_clone() {
         parameters: json!({"key": "value"}),
         settings: None,
         scheduled_for: None,
+        output_definitions: None,
     };
 
     let activity2 = activity1.clone();
@@ -379,6 +383,7 @@ fn test_queued_activity_serialization() {
         activity_name: "TestActivity".to_string(),
         parameters: json!({"input": "data"}),
         settings: None,
+        output_definitions: None,
         retry_count: 2,
         claimed_at,
     };
@@ -414,6 +419,7 @@ fn test_queued_activity_with_settings() {
         activity_name: "TestActivity".to_string(),
         parameters: json!({}),
         settings: Some(settings),
+        output_definitions: None,
         retry_count: 0,
         claimed_at: Utc::now(),
     };
@@ -436,6 +442,7 @@ fn test_queued_activity_clone() {
         activity_name: "Activity".to_string(),
         parameters: json!({}),
         settings: None,
+        output_definitions: None,
         retry_count: 1,
         claimed_at: Utc::now(),
     };
@@ -453,7 +460,11 @@ fn test_queued_activity_clone() {
 fn test_activity_result_success() {
     let result = ActivityResult {
         success: true,
-        outputs: Some(json!({"result": "ok"})),
+        outputs: Some(vec![streamflow_core::workflow::ActivityOutput {
+            name: "result".to_string(),
+            output_type: streamflow_core::workflow::OutputType::Value,
+            value: json!("ok"),
+        }]),
         error: None,
         cost_usd: Some(0.50),
         token_usage: Some(TokenUsage {
@@ -507,7 +518,11 @@ fn test_activity_result_skips_none_fields() {
 fn test_activity_result_clone() {
     let result1 = ActivityResult {
         success: true,
-        outputs: Some(json!({"key": "value"})),
+        outputs: Some(vec![streamflow_core::workflow::ActivityOutput {
+            name: "key".to_string(),
+            output_type: streamflow_core::workflow::OutputType::Value,
+            value: json!("value"),
+        }]),
         error: None,
         cost_usd: Some(1.25),
         token_usage: None,

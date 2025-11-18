@@ -4,6 +4,7 @@ use crate::poller::WorkerPoller;
 use crate::registry::ActivityRegistry;
 use anyhow::Result;
 use std::sync::Arc;
+use streamflow_core::storage::WorkflowStorage;
 use tokio::task::JoinHandle;
 
 /// Worker manager
@@ -12,13 +13,19 @@ use tokio::task::JoinHandle;
 pub struct WorkerManager {
     config: WorkerConfig,
     registry: Arc<ActivityRegistry>,
+    storage: Arc<dyn WorkflowStorage>,
 }
 
 impl WorkerManager {
-    pub fn new(config: WorkerConfig, registry: ActivityRegistry) -> Self {
+    pub fn new(
+        config: WorkerConfig,
+        registry: ActivityRegistry,
+        storage: Arc<dyn WorkflowStorage>,
+    ) -> Self {
         Self {
             config,
             registry: Arc::new(registry),
+            storage,
         }
     }
 
@@ -45,8 +52,12 @@ impl WorkerManager {
             let mut poller_config = self.config.clone();
             poller_config.worker_id = format!("{}_poller_{}", self.config.worker_id, i);
 
-            let poller =
-                WorkerPoller::new(poller_config, client.clone(), Arc::clone(&self.registry));
+            let poller = WorkerPoller::new(
+                poller_config,
+                client.clone(),
+                Arc::clone(&self.registry),
+                Arc::clone(&self.storage),
+            );
 
             let handle = tokio::spawn(async move {
                 tracing::info!(poller_id = i, "Starting poller task");

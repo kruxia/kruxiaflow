@@ -61,6 +61,7 @@ async fn schedule_test_activity(
         parameters: json!({"test": "data"}),
         settings: None,
         scheduled_for: None,
+        output_definitions: None,
     };
 
     queue

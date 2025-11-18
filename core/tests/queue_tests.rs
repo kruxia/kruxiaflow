@@ -54,6 +54,7 @@ async fn test_idempotent_scheduling() {
         parameters: json!({"key": "value"}),
         settings: None,
         scheduled_for: None,
+        output_definitions: None,
     };
 
     // Schedule activity first time
@@ -99,6 +100,7 @@ async fn test_concurrent_claiming() {
             parameters: json!({"index": i}),
             settings: None,
             scheduled_for: None,
+            output_definitions: None,
         })
         .collect();
 
@@ -182,6 +184,7 @@ async fn test_stale_activity_recovery() {
             deterministic: true,
         }),
         scheduled_for: None,
+        output_definitions: None,
     };
 
     queue
@@ -252,6 +255,7 @@ async fn test_heartbeat_conflict_detection() {
             deterministic: true,
         }),
         scheduled_for: None,
+        output_definitions: None,
     };
 
     queue
@@ -326,6 +330,7 @@ async fn test_max_retries_exhaustion() {
             deterministic: true,
         }),
         scheduled_for: None,
+        output_definitions: None,
     };
 
     queue
@@ -425,6 +430,7 @@ async fn test_completion_idempotency() {
         parameters: json!({"key": "value"}),
         settings: None,
         scheduled_for: None,
+        output_definitions: None,
     };
 
     queue
@@ -441,7 +447,11 @@ async fn test_completion_idempotency() {
 
     let result = ActivityResult {
         success: true,
-        outputs: Some(json!({"result": "success"})),
+        outputs: Some(vec![streamflow_core::workflow::ActivityOutput {
+            name: "result".to_string(),
+            output_type: streamflow_core::workflow::OutputType::Value,
+            value: json!("success"),
+        }]),
         error: None,
         cost_usd: None,
         token_usage: None,
@@ -496,6 +506,7 @@ async fn test_sequential_ordering() {
         parameters: json!({"step": 1}),
         settings: None,
         scheduled_for: None,
+        output_definitions: None,
     };
 
     queue
@@ -535,6 +546,7 @@ async fn test_sequential_ordering() {
         parameters: json!({"step": 2}),
         settings: None,
         scheduled_for: None,
+        output_definitions: None,
     };
 
     queue
@@ -571,6 +583,7 @@ async fn test_parallel_execution() {
             parameters: json!({"index": i}),
             settings: None,
             scheduled_for: None,
+            output_definitions: None,
         })
         .collect();
 

@@ -1,3 +1,4 @@
+use super::outputs::ActivityOutputDefinition;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -268,6 +269,11 @@ pub struct ActivityDefinition {
     /// Activity parameters (can include template expressions)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<HashMap<String, serde_json::Value>>,
+
+    /// Activity output definitions (name and type)
+    #[serde(rename = "outputs")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_definitions: Option<Vec<ActivityOutputDefinition>>,
 
     /// Activities that must complete before this one
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -602,6 +608,7 @@ mod tests {
                         conditions: None,
                     }]),
                     settings: None,
+                    output_definitions: None,
                 },
                 ActivityDefinition {
                     key: "authorize".to_string(),
@@ -611,6 +618,7 @@ mod tests {
                     depends_on: None,
                     dependency_of: None,
                     settings: None,
+                    output_definitions: None,
                 },
             ],
         };
@@ -631,6 +639,7 @@ mod tests {
                     depends_on: None,
                     dependency_of: None,
                     settings: None,
+                    output_definitions: None,
                 },
                 ActivityDefinition {
                     key: "step1".to_string(), // Duplicate!
@@ -640,6 +649,7 @@ mod tests {
                     depends_on: None,
                     dependency_of: None,
                     settings: None,
+                    output_definitions: None,
                 },
             ],
         };
@@ -671,6 +681,7 @@ mod tests {
                     conditions: None,
                 }]),
                 settings: None,
+                output_definitions: None,
             }],
         };
 
@@ -702,6 +713,7 @@ mod tests {
                         conditions: None,
                     }]),
                     settings: None,
+                    output_definitions: None,
                 },
                 ActivityDefinition {
                     key: "step2".to_string(),
@@ -714,6 +726,7 @@ mod tests {
                         conditions: None,
                     }]),
                     settings: None,
+                    output_definitions: None,
                 },
             ],
         };
@@ -803,6 +816,7 @@ mod tests {
                 depends_on: None,
                 dependency_of: None,
                 settings: None,
+                output_definitions: None,
             }],
         };
 

@@ -76,12 +76,14 @@ async fn setup_test_state() -> AppState {
 
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
+    let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
 
     AppState::with_metadata(
         pool,
         Arc::new(auth_service),
         queue,
         event_source,
+        workflow_storage,
         CancellationToken::new(),
         "0.2.0-test".to_string(),
         AppStateBuild {
