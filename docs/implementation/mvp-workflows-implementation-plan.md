@@ -666,12 +666,12 @@ activities:
 
 ---
 
-### Example 6: Semantic Caching for Cost Savings
+### Example 6: Semantic Caching and RAG with Embeddings
 **Duration**: 3-4 days
 **Epic 3**: US-3.5 (Activity Settings - Caching)
-**Epic 5**: US-5.3 (Semantic Caching)
+**Epic 5**: US-5.1 (Embedding Generation), US-5.3 (Semantic Caching)
 
-#### Example Workflow: FAQ Bot with Caching
+#### Example Workflow 6a: FAQ Bot with Semantic Caching
 ```yaml
 name: faq_bot
 description: Answer FAQs using LLM with aggressive caching for cost savings
@@ -718,31 +718,303 @@ activities:
       - answer_question
 ```
 
+#### Example Workflow 6b: RAG Index Builder
+```yaml
+name: rag_index_builder
+description: Build a vector search index by embedding document chunks and storing them in PostgreSQL with pgvector
+
+# This workflow demonstrates:
+# - Embedding generation using OpenAI
+# - Batch embedding processing
+# - PostgreSQL vector storage with pgvector extension
+# - Creating a searchable knowledge base
+
+# Prerequisites:
+# - PostgreSQL with pgvector extension installed
+# - OpenAI API key configured
+# - Database table created:
+#   CREATE EXTENSION IF NOT EXISTS vector;
+#   CREATE TABLE document_chunks (
+#     id SERIAL PRIMARY KEY,
+#     content TEXT NOT NULL,
+#     embedding vector(1536),
+#     metadata JSONB,
+#     created_at TIMESTAMP DEFAULT NOW()
+#   );
+#   CREATE INDEX ON document_chunks USING ivfflat (embedding vector_cosine_ops);
+
+activities:
+  # Generate embeddings for document chunks
+  generate_embeddings:
+    activity: embedding_generate
+    worker: ai
+    parameters:
+      provider: openai
+      model: text-embedding-3-small
+      input: "{{INPUT.chunks}}"  # Array of text chunks
+    outputs:
+      - embeddings
+
+  # Store chunks with embeddings (simplified 3-chunk example)
+  store_chunk_1:
+    activity: postgres_query
+    worker: builtin
+    parameters:
+      db_url: "{{SECRET.db_url}}"
+      query: |
+        INSERT INTO document_chunks (content, embedding, metadata)
+        VALUES ($1, $2::vector, $3::jsonb)
+        RETURNING id
+      params:
+        - "{{INPUT.chunks[0]}}"
+        - "{{generate_embeddings.embeddings.embeddings[0]}}"
+        - '{"source": "{{INPUT.source}}", "chunk_index": 0}'
+    depends_on:
+      - generate_embeddings
+
+  store_chunk_2:
+    activity: postgres_query
+    worker: builtin
+    parameters:
+      db_url: "{{SECRET.db_url}}"
+      query: |
+        INSERT INTO document_chunks (content, embedding, metadata)
+        VALUES ($1, $2::vector, $3::jsonb)
+        RETURNING id
+      params:
+        - "{{INPUT.chunks[1]}}"
+        - "{{generate_embeddings.embeddings.embeddings[1]}}"
+        - '{"source": "{{INPUT.source}}", "chunk_index": 1}'
+    depends_on:
+      - generate_embeddings
+
+  store_chunk_3:
+    activity: postgres_query
+    worker: builtin
+    parameters:
+      db_url: "{{SECRET.db_url}}"
+      query: |
+        INSERT INTO document_chunks (content, embedding, metadata)
+        VALUES ($1, $2::vector, $3::jsonb)
+        RETURNING id
+      params:
+        - "{{INPUT.chunks[2]}}"
+        - "{{generate_embeddings.embeddings.embeddings[2]}}"
+        - '{"source": "{{INPUT.source}}", "chunk_index": 2}'
+    depends_on:
+      - generate_embeddings
+
+  # Confirm indexing complete
+  confirm_indexing:
+    activity: http_request
+    worker: builtin
+    parameters:
+      method: POST
+      url: "{{INPUT.notification_webhook_url}}"
+      headers:
+        Content-Type: "application/json"
+      body:
+        status: "indexing_complete"
+        workflow_id: "{{WORKFLOW.id}}"
+        chunks_indexed: 3
+        cost_usd: "{{generate_embeddings.cost_usd}}"
+        source: "{{INPUT.source}}"
+    depends_on:
+      - store_chunk_1
+      - store_chunk_2
+      - store_chunk_3
+```
+
+#### Example Workflow 6c: RAG Query and Q&A
+```yaml
+name: rag_query
+description: Answer questions using RAG (Retrieval-Augmented Generation) with embeddings and LLM
+
+# This workflow demonstrates:
+# - Embedding a user question
+# - Semantic search using pgvector
+# - Passing retrieved context to LLM
+# - Classic RAG pattern (embed → search → augment → generate)
+
+# Prerequisites:
+# - PostgreSQL with pgvector extension and populated document_chunks table
+# - OpenAI API key for embeddings
+# - Anthropic API key for LLM
+
+activities:
+  # Step 1: Generate embedding for user question
+  embed_question:
+    activity: embedding_generate
+    worker: ai
+    parameters:
+      provider: openai
+      model: text-embedding-3-small
+      input:
+        - "{{INPUT.question}}"
+    outputs:
+      - embeddings
+
+  # Step 2: Search for similar chunks using vector similarity
+  search_similar_chunks:
+    activity: postgres_query
+    worker: builtin
+    parameters:
+      db_url: "{{SECRET.db_url}}"
+      query: |
+        SELECT content, metadata, (embedding <=> $1::vector) AS distance
+        FROM document_chunks
+        ORDER BY embedding <=> $1::vector
+        LIMIT 3
+      params:
+        - "{{embed_question.embeddings.embeddings[0]}}"
+    outputs:
+      - rows
+    depends_on:
+      - embed_question
+
+  # Step 3: Generate answer using LLM with retrieved context
+  generate_answer:
+    activity: llm_prompt
+    worker: ai
+    parameters:
+      provider: anthropic
+      model: claude-3-5-sonnet-20241022
+      messages:
+        - role: system
+          content: |
+            You are a helpful assistant. Answer the user's question using ONLY the context provided.
+            If the context doesn't contain relevant information, say so.
+        - role: user
+          content: |
+            Context from knowledge base:
+            {% for chunk in search_similar_chunks.rows %}
+            ---
+            {{ chunk.content }}
+            (Source: {{ chunk.metadata.source }}, Distance: {{ chunk.distance }})
+            {% endfor %}
+            ---
+
+            Question: {{INPUT.question}}
+
+            Please answer the question based on the context above.
+      max_tokens: 500
+    outputs:
+      - response
+      - cost_usd
+    settings:
+      budget:
+        limit_usd: 0.50
+    depends_on:
+      - search_similar_chunks
+
+  # Step 4: Store Q&A result for analytics
+  store_qa_result:
+    activity: postgres_query
+    worker: builtin
+    parameters:
+      db_url: "{{SECRET.db_url}}"
+      query: |
+        INSERT INTO qa_log
+        (question, answer, chunks_used, embedding_cost, llm_cost, total_cost, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      params:
+        - "{{INPUT.question}}"
+        - "{{generate_answer.response}}"
+        - 3
+        - "{{embed_question.cost_usd}}"
+        - "{{generate_answer.cost_usd}}"
+        - "{{embed_question.cost_usd + generate_answer.cost_usd}}"
+    depends_on:
+      - generate_answer
+
+  # Step 5: Return answer to user
+  send_response:
+    activity: http_request
+    worker: builtin
+    parameters:
+      method: POST
+      url: "{{INPUT.response_webhook_url}}"
+      headers:
+        Content-Type: "application/json"
+      body:
+        question: "{{INPUT.question}}"
+        answer: "{{generate_answer.response}}"
+        sources_count: 3
+        total_cost_usd: "{{embed_question.cost_usd + generate_answer.cost_usd}}"
+        workflow_id: "{{WORKFLOW.id}}"
+    depends_on:
+      - store_qa_result
+```
+
 #### YAML Features Implemented
 - ✅ Cache settings: `enabled`, `ttl_seconds`, `key`
 - ✅ Cache hit indicator in output
+- ✅ Array template expressions: Access array elements from activity outputs
+- ✅ MiniJinja loops in LLM prompts: `{% for item in array %}`
+- ✅ Vector type support in PostgreSQL queries: `$1::vector` casting
 
 #### Built-in Activities Implemented
+- ✅ `embedding_generate` - Generate text embeddings using OpenAI
 - ✅ Caching layer for LLM activities
 - ✅ Redis-backed cache (optional dependency)
 - ✅ Cache key generation from parameters
+- ✅ PostgreSQL pgvector support for vector similarity search
 
 #### Implementation Tasks
-1. Caching service trait (abstract cache backend)
-2. Redis cache implementation (redis crate)
-3. Cache key generation (hash of relevant parameters)
-4. Cache lookup before activity execution
-5. Cache storage after activity completion
-6. TTL expiration (handled by Redis)
-7. Graceful degradation when Redis unavailable
-8. End-to-end test: Verify cache hit, check cost_usd = 0.0 on hit
+
+**Embedding Generation (RAG Foundation)**:
+1. Implement `embedding_generate` activity (from US-5.1 implementation plan)
+   - OpenAI embeddings API integration
+   - Batch embedding support (array of inputs)
+   - Cost tracking for embedding generation
+   - Return embeddings as array of vectors
+2. PostgreSQL pgvector setup documentation
+   - CREATE EXTENSION vector
+   - Vector column type definition
+   - Vector similarity search operators (<=>)
+   - IVFFlat index creation
+3. Vector support in postgres_query activity
+   - Accept vector arrays as parameters
+   - Type casting support: `$1::vector`
+   - JSONB metadata handling
+
+**Semantic Caching**:
+4. Caching service trait (abstract cache backend)
+5. Redis cache implementation (redis crate)
+6. Cache key generation (hash of relevant parameters)
+7. Cache lookup before activity execution
+8. Cache storage after activity completion
+9. TTL expiration (handled by Redis)
+10. Graceful degradation when Redis unavailable
+
+**Testing**:
+11. End-to-end test: FAQ bot with caching (verify cache hit, cost_usd = 0.0)
+12. End-to-end test: RAG indexing workflow (6b-rag-indexing.yaml)
+13. End-to-end test: RAG query workflow (6c-rag-query.yaml)
+14. Integration test: pgvector similarity search
 
 #### Success Criteria
+
+**Embedding Generation and RAG**:
+- ✅ `embedding_generate` activity generates embeddings for text arrays
+- ✅ Embeddings stored correctly in PostgreSQL with pgvector
+- ✅ Vector similarity search returns relevant chunks
+- ✅ RAG indexing workflow completes successfully
+- ✅ RAG query workflow retrieves context and generates answers
+- ✅ Cost tracking works for embeddings
+- ✅ MiniJinja loops work in LLM prompts for context aggregation
+
+**Semantic Caching**:
 - ✅ Cache hit returns cached result (cost_usd = 0.0)
 - ✅ Cache miss executes activity and stores result
 - ✅ TTL expiration works correctly
 - ✅ Works with Redis when available
 - ✅ Gracefully degrades without Redis (no caching, workflow continues)
+
+**Integration**:
+- ✅ All three Example 6 workflows execute end-to-end
+- ✅ RAG demonstrates practical use of embeddings
+- ✅ Caching demonstrates cost optimization
 
 ---
 

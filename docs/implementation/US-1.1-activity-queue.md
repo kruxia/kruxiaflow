@@ -326,7 +326,6 @@ pub struct ActivitySettings {
     pub timeout: Option<TimeoutConfig>,
     pub budget: Option<BudgetConfig>,
     pub cache: Option<CacheConfig>,
-    pub deterministic: bool,  // Default: true
 }
 
 // Queued activity returned to worker

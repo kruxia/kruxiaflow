@@ -798,12 +798,12 @@ activities:
 
 **Priority**: P2 (Medium - Performance optimization)
 
-**As** a workflow developer with deterministic activities
+**As** a workflow developer
 **I want** StreamFlow to cache activity results in Redis
 **So that** repeated executions with the same inputs are instant
 
 **Scope**:
-- Redis integration for deterministic activity results
+- Redis integration for activity results
 - Cache key generation from activity inputs
 - TTL configuration per activity type
 - Cache invalidation strategies
