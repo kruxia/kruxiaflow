@@ -249,21 +249,31 @@ activities:
 
 ### 2. Create Test Mock Services
 
-Since this example needs external services for processing and aggregation, we need to set up mock services for testing.
+**Important Distinction**:
+- **Example YAML workflow** (`examples/03-document-processing.yaml`): Uses httpbin.org URLs for demonstration purposes - users can run this example against public endpoints
+- **Automated integration tests** (`api/tests/example_03_e2e_test.rs`): Must use local mock HTTP endpoints - tests cannot depend on external services per project guidelines
 
-**Option A: Use httpbin.org** (Simplest for MVP)
-- Already used in Examples 1 and 2
-- Supports file uploads via POST
-- Returns request data for verification
-- No local setup required
+**Mock Service Requirements for Tests**:
+- Create simple HTTP service in test environment (similar to approach in existing tests)
+- Implement document download endpoint (GET, returns file content)
+- Implement document processing endpoint (POST with multipart/form-data file upload, returns processed file)
+- Implement aggregation endpoint (POST with multiple file uploads, returns summary file)
+- Implement storage endpoint (POST with file upload)
+- All endpoints must support:
+  - File streaming (no full memory load)
+  - Multipart form data
+  - Custom headers
+  - Response with file content
 
-**Option B: Local Mock Service** (Better for testing)
-- Create simple HTTP service in `api/tests/mock_services/`
-- Implement document processing endpoint (accepts file, returns processed file)
-- Implement aggregation endpoint (accepts multiple files, returns summary)
-- More control over responses, better for testing edge cases
-
-**Decision**: Start with httpbin.org for simplicity, add local mocks if needed for specific test scenarios.
+**Implementation Approach**:
+- Use in-process mock HTTP server (similar to existing test pattern in `yaml_workflow_e2e_tests.rs`)
+- Launch mock server with `axum::serve` on random port in test setup
+- Mock server provides endpoints that the workflow activities call
+- StreamFlow API server also runs in-process (same pattern as existing tests)
+- Both servers run in the same test process, spawned as tokio tasks
+- Generate small test files (< 1KB) for fast test execution
+- Mock endpoints return synthetic responses that validate file handling
+- Tests verify parallel execution timing and fan-in behavior
 
 ---
 
@@ -272,30 +282,93 @@ Since this example needs external services for processing and aggregation, we ne
 **File**: `api/tests/example_03_e2e_test.rs`
 
 ```rust
+/// Create mock HTTP server for document processing endpoints
+/// This server simulates external document processing services
+fn create_mock_processing_server() -> axum::Router {
+    use axum::{Router, routing::{get, post}, extract::Multipart, http::StatusCode};
+    use axum::response::IntoResponse;
+
+    Router::new()
+        // Document download endpoints (GET)
+        .route("/documents/:doc_id", get(|_| async {
+            (StatusCode::OK, "Mock document content")
+        }))
+        // Document processing endpoint (POST with file upload)
+        .route("/process", post(|_multipart: Multipart| async {
+            (StatusCode::OK, "Mock processed result")
+        }))
+        // Aggregation endpoint (POST with multiple file uploads)
+        .route("/aggregate", post(|_multipart: Multipart| async {
+            (StatusCode::OK, "Mock aggregated summary")
+        }))
+        // Storage endpoint (POST with file upload)
+        .route("/store", post(|_multipart: Multipart| async {
+            (StatusCode::OK, "Mock storage confirmation")
+        }))
+}
+
 #[tokio::test]
+#[serial]
 async fn test_example_03_parallel_document_processing() {
-    // Setup
-    let test_env = TestEnvironment::new().await;
-    test_env.start_services().await;
+    // Setup database and services (similar to yaml_workflow_e2e_tests.rs)
+    let pool = setup_test_pool().await;
+    let activity_queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
+    let workflow_storage = Arc::new(PostgresStorage::new(pool.clone()));
+    let shutdown_token = CancellationToken::new();
+
+    // Start mock HTTP server for document processing endpoints
+    let mock_app = create_mock_processing_server();
+    let mock_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind mock server");
+    let mock_addr = mock_listener.local_addr().expect("Failed to get mock address");
+    let mock_url = format!("http://{}", mock_addr);
+
+    tokio::spawn(async move {
+        axum::serve(mock_listener, mock_app)
+            .await
+            .expect("Mock server failed");
+    });
+
+    // Start StreamFlow API server
+    let state = AppState::new(
+        pool.clone(),
+        Arc::new(auth_service),
+        activity_queue.clone(),
+        event_source.clone(),
+        workflow_storage.clone(),
+        shutdown_token.clone(),
+    );
+    let app = app_router(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("Failed to bind API");
+    let addr = listener.local_addr().expect("Failed to get address");
+    let api_url = format!("http://{}", addr);
+
+    tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .expect("API server failed");
+    });
+
+    // Start orchestrator and worker (same as existing tests)
+    // ... orchestrator and worker setup ...
 
     // Load workflow from examples/03-document-processing.yaml
     let workflow_yaml = include_str!("../../examples/03-document-processing.yaml");
     let workflow_def: WorkflowDefinition = serde_yaml::from_str(workflow_yaml)
         .expect("Failed to parse workflow YAML");
 
-    // Create test documents (small PDFs or text files)
-    let doc1_url = test_env.create_test_document("doc1.txt", b"Content for document 1");
-    let doc2_url = test_env.create_test_document("doc2.txt", b"Content for document 2");
-    let doc3_url = test_env.create_test_document("doc3.txt", b"Content for document 3");
-
-    // Create workflow input
+    // Create workflow input pointing to mock server
     let input = json!({
-        "doc1_url": doc1_url,
-        "doc2_url": doc2_url,
-        "doc3_url": doc3_url,
-        "processing_service_url": test_env.processing_service_url(),
-        "aggregator_url": test_env.aggregator_url(),
-        "storage_webhook_url": test_env.storage_webhook_url(),
+        "doc1_url": format!("{}/documents/doc1", mock_url),
+        "doc2_url": format!("{}/documents/doc2", mock_url),
+        "doc3_url": format!("{}/documents/doc3", mock_url),
+        "processing_service_url": format!("{}/process", mock_url),
+        "aggregator_url": format!("{}/aggregate", mock_url),
+        "storage_webhook_url": format!("{}/store", mock_url),
     });
 
     // Submit workflow

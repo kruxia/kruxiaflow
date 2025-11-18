@@ -39,6 +39,7 @@ pub struct PendingActivityRecord {
     pub activity_name: String,
     pub parameters: Value,
     pub settings: Option<Value>,
+    pub output_definitions: Option<Value>,
 }
 
 impl From<QueuedActivity> for PendingActivityRecord {
@@ -51,6 +52,9 @@ impl From<QueuedActivity> for PendingActivityRecord {
             activity_name: qa.activity_name,
             parameters: qa.parameters,
             settings: qa.settings.map(|s| serde_json::to_value(s).unwrap()),
+            output_definitions: qa
+                .output_definitions
+                .map(|defs| serde_json::to_value(defs).unwrap()),
         }
     }
 }
@@ -153,7 +157,7 @@ impl ActivityWorkerService {
         &self,
         activity_id: Uuid,
         worker_id: String,
-        output: Value,
+        outputs: Value,
         cost_usd: Option<f64>,
     ) -> ActivityWorkerResult<()> {
         // Get activity details before completion (needed for event publishing)
@@ -169,13 +173,8 @@ impl ActivityWorkerService {
 
         // Delegate to ActivityQueue to complete the activity
         // This handles worker verification and queue removal atomically
-        let result = ActivityResult {
-            success: true,
-            outputs: Some(output.clone()),
-            error: None,
-            cost_usd,
-            token_usage: None,
-        };
+        let mut result = ActivityResult::success(outputs.clone());
+        result.cost_usd = cost_usd;
 
         self.queue
             .complete(activity_id, &worker_id, result)
@@ -188,9 +187,11 @@ impl ActivityWorkerService {
             })?;
 
         // Service-layer responsibility: Publish ActivityCompleted event via EventSource
+        // IMPORTANT: outputs must be an object mapping names to values (e.g., {"response": {...}})
+        // The orchestrator will convert this to Vec<ActivityOutput> using output_definitions
         let event_payload = serde_json::json!({
             "activity_key": activity.activity_key,
-            "outputs": output,
+            "outputs": outputs,
             "cost_usd": cost_usd
         });
 

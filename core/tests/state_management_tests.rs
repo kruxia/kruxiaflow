@@ -4,6 +4,7 @@ use streamflow_core::events::{WorkflowEvent, WorkflowEventType, WorkflowStatus};
 use streamflow_core::orchestrator::{
     ActivityState, WorkflowActivityStatus, WorkflowState, apply_event_to_state,
 };
+use streamflow_core::workflow::outputs::{ActivityOutput, OutputType};
 use uuid::Uuid;
 
 #[test]
@@ -108,7 +109,14 @@ fn test_apply_activity_completed_event() {
 
     let activity = state.activities.get("activity1").unwrap();
     assert_eq!(activity.status, WorkflowActivityStatus::Completed);
-    assert_eq!(activity.outputs, Some(json!({"result": "success"})));
+    assert_eq!(
+        activity.outputs,
+        Some(vec![ActivityOutput {
+            name: "result".to_string(),
+            output_type: OutputType::Value,
+            value: json!("success"),
+        }])
+    );
     assert!(activity.completed_at.is_some());
 }
 
@@ -284,11 +292,25 @@ fn test_apply_multiple_events_sequential() {
     // Verify final state
     let activity1 = state.activities.get("activity1").unwrap();
     assert_eq!(activity1.status, WorkflowActivityStatus::Completed);
-    assert_eq!(activity1.outputs, Some(json!({"value": 42})));
+    assert_eq!(
+        activity1.outputs,
+        Some(vec![ActivityOutput {
+            name: "value".to_string(),
+            output_type: OutputType::Value,
+            value: json!(42),
+        }])
+    );
 
     let activity2 = state.activities.get("activity2").unwrap();
     assert_eq!(activity2.status, WorkflowActivityStatus::Completed);
-    assert_eq!(activity2.outputs, Some(json!({"value": 100})));
+    assert_eq!(
+        activity2.outputs,
+        Some(vec![ActivityOutput {
+            name: "value".to_string(),
+            output_type: OutputType::Value,
+            value: json!(100),
+        }])
+    );
 }
 
 #[test]

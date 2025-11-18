@@ -215,6 +215,8 @@ mod tests {
 
         let activity_queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
         let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
+        let workflow_storage =
+            Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
         let shutdown_token = CancellationToken::new();
 
         let state = AppState::new(
@@ -222,6 +224,7 @@ mod tests {
             Arc::new(auth_service),
             activity_queue,
             event_source,
+            workflow_storage,
             shutdown_token,
         );
         let router = app_router(state);
@@ -262,6 +265,8 @@ mod tests {
 
         let activity_queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
         let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
+        let workflow_storage =
+            Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
         let shutdown_token = CancellationToken::new();
 
         let state = AppState::new(
@@ -269,6 +274,7 @@ mod tests {
             Arc::new(auth_service),
             activity_queue,
             event_source,
+            workflow_storage,
             shutdown_token,
         );
         let app = app_router(state);
@@ -297,6 +303,8 @@ mod tests {
 
         let activity_queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
         let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
+        let workflow_storage =
+            Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
         let shutdown_token = CancellationToken::new();
 
         let state = AppState::new(
@@ -304,6 +312,7 @@ mod tests {
             Arc::new(auth_service),
             activity_queue,
             event_source,
+            workflow_storage,
             shutdown_token,
         );
         let app = app_router(state);

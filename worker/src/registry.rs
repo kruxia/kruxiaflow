@@ -5,6 +5,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::activity_result::ActivityResult;
+
 /// Activity implementation trait
 ///
 /// All activity implementations must implement this trait.
@@ -16,9 +18,9 @@ pub trait ActivityImpl: Send + Sync {
     /// * `parameters` - Activity input parameters
     ///
     /// # Returns
-    /// * `Ok(output)` - Activity output on success
+    /// * `Ok(ActivityResult)` - Activity result with outputs on success
     /// * `Err(error)` - Activity error on failure
-    async fn execute(&self, parameters: Value) -> Result<Value>;
+    async fn execute(&self, parameters: Value) -> Result<ActivityResult>;
 
     /// Get activity name
     fn name(&self) -> &str;
@@ -55,14 +57,14 @@ impl ActivityRegistry {
 
     /// Execute an activity
     ///
-    /// Returns activity output or error.
+    /// Returns activity result or error.
     pub async fn execute(
         &self,
         worker: &str,
         activity_name: &str,
         parameters: Value,
         timeout: Duration,
-    ) -> Result<Value> {
+    ) -> Result<ActivityResult> {
         let key = format!("{}.{}", worker, activity_name);
 
         let implementation = self

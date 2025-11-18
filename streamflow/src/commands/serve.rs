@@ -256,6 +256,7 @@ async fn spawn_workers(
     api_url: String,
     client_id: String,
     client_secret: String,
+    workflow_storage: Arc<dyn streamflow_core::WorkflowStorage>,
 ) -> Result<Vec<JoinHandle<()>>> {
     tracing::info!(
         count = worker_count,
@@ -279,7 +280,7 @@ async fn spawn_workers(
         client_secret,
     };
 
-    let manager = WorkerManager::new(config, registry);
+    let manager = WorkerManager::new(config, registry, workflow_storage);
     let handles = manager.start().await?;
 
     // Wait a moment for workers to authenticate
@@ -346,12 +347,17 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
     // Create event source
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
 
+    // Create workflow storage
+    let workflow_storage: Arc<dyn streamflow_core::WorkflowStorage> =
+        Arc::new(streamflow_core::PostgresStorage::new(pool.clone()));
+
     // Create API state with shutdown token
     let state = AppState::new(
         pool.clone(),
         auth_service,
         activity_queue.clone(),
         event_source.clone(),
+        workflow_storage.clone(),
         shutdown_token.clone(),
     );
 
@@ -378,6 +384,7 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
         api_url.clone(),
         cmd.client_id.clone(),
         cmd.client_secret.unwrap(),
+        workflow_storage.clone(),
     )
     .await?;
 

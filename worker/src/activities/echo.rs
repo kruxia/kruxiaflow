@@ -1,3 +1,4 @@
+use crate::activity_result::ActivityResult;
 use crate::registry::ActivityImpl;
 use anyhow::Result;
 use async_trait::async_trait;
@@ -10,10 +11,10 @@ pub struct EchoActivity;
 
 #[async_trait]
 impl ActivityImpl for EchoActivity {
-    async fn execute(&self, parameters: Value) -> Result<Value> {
+    async fn execute(&self, parameters: Value) -> Result<ActivityResult> {
         tracing::debug!("Executing echo activity with parameters: {:?}", parameters);
 
-        Ok(parameters)
+        Ok(ActivityResult::value("echo", parameters))
     }
 
     fn name(&self) -> &str {

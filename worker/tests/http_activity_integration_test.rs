@@ -61,6 +61,7 @@ async fn create_real_server() -> (String, PgPool, tokio::task::JoinHandle<()>) {
 
     let activity_queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
+    let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
     let shutdown_token = CancellationToken::new();
 
     let state = AppState::new(
@@ -68,6 +69,7 @@ async fn create_real_server() -> (String, PgPool, tokio::task::JoinHandle<()>) {
         Arc::new(auth_service),
         activity_queue,
         event_source,
+        workflow_storage,
         shutdown_token,
     );
     let app = app_router(state);
@@ -105,8 +107,9 @@ async fn test_http_get_request() {
 
     let result = activity.execute(params).await.unwrap();
 
-    assert!(result.get("response").is_some());
-    let response = result.get("response").unwrap();
+    let output_value = result.to_json_value();
+    assert!(output_value.get("response").is_some());
+    let response = output_value.get("response").unwrap();
     assert_eq!(response.get("status").unwrap(), 200);
     assert_eq!(response.get("success").unwrap(), true);
 
@@ -129,8 +132,9 @@ async fn test_http_get_with_query_params() {
 
     let result = activity.execute(params).await.unwrap();
 
-    assert!(result.get("response").is_some());
-    let response = result.get("response").unwrap();
+    let output_value = result.to_json_value();
+    assert!(output_value.get("response").is_some());
+    let response = output_value.get("response").unwrap();
     assert_eq!(response.get("status").unwrap(), 200);
     assert_eq!(response.get("success").unwrap(), true);
 
@@ -158,8 +162,9 @@ async fn test_http_post_request_with_json_body() {
 
     let result = activity.execute(params).await.unwrap();
 
-    assert!(result.get("response").is_some());
-    let response = result.get("response").unwrap();
+    let output_value = result.to_json_value();
+    assert!(output_value.get("response").is_some());
+    let response = output_value.get("response").unwrap();
     assert_eq!(response.get("status").unwrap(), 200);
     assert_eq!(response.get("success").unwrap(), true);
 
@@ -187,8 +192,9 @@ async fn test_http_request_with_custom_headers() {
 
     let result = activity.execute(params).await.unwrap();
 
-    assert!(result.get("response").is_some());
-    let response = result.get("response").unwrap();
+    let output_value = result.to_json_value();
+    assert!(output_value.get("response").is_some());
+    let response = output_value.get("response").unwrap();
     assert_eq!(response.get("status").unwrap(), 200);
     assert_eq!(response.get("success").unwrap(), true);
 
@@ -208,8 +214,9 @@ async fn test_http_head_request_excludes_body() {
 
     let result = activity.execute(params).await.unwrap();
 
-    assert!(result.get("response").is_some());
-    let response = result.get("response").unwrap();
+    let output_value = result.to_json_value();
+    assert!(output_value.get("response").is_some());
+    let response = output_value.get("response").unwrap();
     assert_eq!(response.get("status").unwrap(), 200);
     assert_eq!(response.get("success").unwrap(), true);
     // HEAD requests should not include body
@@ -232,8 +239,9 @@ async fn test_http_request_include_body_false() {
 
     let result = activity.execute(params).await.unwrap();
 
-    assert!(result.get("response").is_some());
-    let response = result.get("response").unwrap();
+    let output_value = result.to_json_value();
+    assert!(output_value.get("response").is_some());
+    let response = output_value.get("response").unwrap();
     assert_eq!(response.get("status").unwrap(), 200);
     assert_eq!(response.get("success").unwrap(), true);
     // Body should be excluded when include_body is false
@@ -256,8 +264,9 @@ async fn test_http_request_include_body_true() {
 
     let result = activity.execute(params).await.unwrap();
 
-    assert!(result.get("response").is_some());
-    let response = result.get("response").unwrap();
+    let output_value = result.to_json_value();
+    assert!(output_value.get("response").is_some());
+    let response = output_value.get("response").unwrap();
     assert_eq!(response.get("status").unwrap(), 200);
     assert_eq!(response.get("success").unwrap(), true);
     // Body should be included
@@ -279,8 +288,9 @@ async fn test_http_request_default_user_agent() {
 
     let result = activity.execute(params).await.unwrap();
 
-    assert!(result.get("response").is_some());
-    let response = result.get("response").unwrap();
+    let output_value = result.to_json_value();
+    assert!(output_value.get("response").is_some());
+    let response = output_value.get("response").unwrap();
     assert_eq!(response.get("status").unwrap(), 200);
     assert_eq!(response.get("success").unwrap(), true);
 
@@ -303,8 +313,9 @@ async fn test_http_request_404_not_found() {
 
     let result = activity.execute(params).await.unwrap();
 
-    assert!(result.get("response").is_some());
-    let response = result.get("response").unwrap();
+    let output_value = result.to_json_value();
+    assert!(output_value.get("response").is_some());
+    let response = output_value.get("response").unwrap();
     assert_eq!(response.get("status").unwrap(), 404);
     assert_eq!(response.get("success").unwrap(), false);
 
@@ -325,8 +336,9 @@ async fn test_http_request_with_timeout() {
 
     let result = activity.execute(params).await.unwrap();
 
-    assert!(result.get("response").is_some());
-    let response = result.get("response").unwrap();
+    let output_value = result.to_json_value();
+    assert!(output_value.get("response").is_some());
+    let response = output_value.get("response").unwrap();
     assert_eq!(response.get("status").unwrap(), 200);
     assert_eq!(response.get("success").unwrap(), true);
 

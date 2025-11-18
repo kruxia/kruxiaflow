@@ -308,6 +308,7 @@ pub struct PendingActivity {
     pub parameters: Value,
     pub settings: Option<Value>,
     pub timeout_seconds: Option<i64>,
+    pub output_definitions: Option<Value>,
 }
 
 #[cfg(test)]

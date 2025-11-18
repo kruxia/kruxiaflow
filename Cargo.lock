@@ -2588,8 +2588,11 @@ name = "streamflow-core"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "async-stream",
  "async-trait",
+ "bytes",
  "chrono",
+ "futures",
  "minijinja",
  "mockall",
  "regex",
@@ -2666,6 +2669,8 @@ dependencies = [
  "axum",
  "axum-test",
  "bcrypt",
+ "bytes",
+ "futures",
  "mockall",
  "reqwest",
  "serde",

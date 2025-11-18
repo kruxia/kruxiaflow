@@ -128,12 +128,20 @@ pub enum ConfigError {
 mod tests {
     use super::*;
     use std::env;
+    use std::sync::Mutex;
+
+    // Mutex to serialize tests that modify environment variables
+    // This prevents test interference when running in parallel
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     /// Helper to clear and set environment variables for tests
     fn with_env_vars<F>(vars: Vec<(&str, &str)>, test: F)
     where
         F: FnOnce(),
     {
+        // Acquire mutex to ensure only one test modifies env vars at a time
+        let _lock = ENV_MUTEX.lock().unwrap();
+
         // Clear relevant environment variables first
         let env_vars = [
             "STREAMFLOW_API_URL",
@@ -164,6 +172,8 @@ mod tests {
                 env::remove_var(var);
             }
         }
+
+        // Mutex is automatically released when _lock goes out of scope
     }
 
     #[test]

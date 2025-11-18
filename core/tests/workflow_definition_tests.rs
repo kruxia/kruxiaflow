@@ -47,6 +47,7 @@ async fn test_store_and_get_workflow_definition() {
             depends_on: None,
             dependency_of: None,
             settings: None,
+            output_definitions: None,
         }],
     };
 
@@ -89,6 +90,7 @@ async fn test_get_latest_workflow_definition() {
             depends_on: None,
             dependency_of: None,
             settings: None,
+            output_definitions: None,
         }],
     };
 
@@ -103,6 +105,7 @@ async fn test_get_latest_workflow_definition() {
                 depends_on: None,
                 dependency_of: None,
                 settings: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "activity2".to_string(),
@@ -112,6 +115,7 @@ async fn test_get_latest_workflow_definition() {
                 depends_on: None,
                 dependency_of: None,
                 settings: None,
+                output_definitions: None,
             },
         ],
     };
@@ -154,6 +158,7 @@ async fn test_list_workflow_definitions() {
             depends_on: None,
             dependency_of: None,
             settings: None,
+            output_definitions: None,
         }],
     };
 
@@ -167,6 +172,7 @@ async fn test_list_workflow_definitions() {
             depends_on: None,
             dependency_of: None,
             settings: None,
+            output_definitions: None,
         }],
     };
 
@@ -247,6 +253,7 @@ async fn test_workflow_definition_with_dependencies() {
                     conditions: None,
                 }]),
                 settings: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "step2".to_string(),
@@ -259,6 +266,7 @@ async fn test_workflow_definition_with_dependencies() {
                 }]),
                 dependency_of: None,
                 settings: None,
+                output_definitions: None,
             },
         ],
     };

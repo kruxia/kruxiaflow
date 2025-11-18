@@ -593,7 +593,208 @@ pub struct ActivityContext {
 
 ---
 
-### Story 1.12: Redis Result Caching
+### Story 1.12: Advanced File Handling Features
+
+**Priority**: P2 (Medium - Enhanced file workflow capabilities)
+
+**As** a workflow developer working with complex file processing
+**I want** advanced file handling features beyond basic upload/download
+**So that** I can build production-grade file processing pipelines
+
+**Background**:
+US-5.4 (Object Storage and File Management) delivered MVP file handling with:
+- ✅ PostgreSQL Large Objects storage backend
+- ✅ File output type (`type: file`)
+- ✅ HTTP file download (GET with `download_to_file` parameter)
+- ✅ FileExecutor temp directory management
+- ✅ Automatic file upload/cleanup
+- ✅ Template resolution (`{{FILE.activity.output}}`)
+
+This story enhances file handling with production features deferred from the MVP.
+
+**Scope**:
+
+**1. HTTP File Upload via Multipart Form Data**
+- POST requests with file attachments
+- Multipart/form-data encoding
+- Multiple files per request
+- Mixed form fields and files
+- Progress tracking for large uploads
+
+**2. Folder Outputs**
+- New output type: `type: folder`
+- Activities can produce directories of files
+- Template resolution: `{{FOLDER.activity.output}}`
+- Recursive upload/download of directory trees
+- Preserve directory structure
+- Efficient handling of many small files
+
+**3. File Versioning**
+- Track file versions across workflow executions
+- Version metadata (version number, timestamp, workflow_id)
+- Retrieve specific file versions
+- Compare versions (diff support)
+- Retention policies for old versions
+
+**4. File Compression**
+- Automatic compression for large files (gzip, zstd)
+- Compression level configuration per activity
+- Transparent decompression on download
+- Size reduction metrics
+- CPU vs storage cost trade-offs
+
+**5. File Encryption at Rest**
+- Encrypt files before storage (AES-256)
+- Key management integration
+- Transparent decryption on download
+- Per-workflow encryption keys
+- Compliance support (HIPAA, PCI-DSS)
+
+**6. Presigned URLs**
+- Generate presigned URLs for direct client upload
+- Bypass StreamFlow for large file transfers
+- Configurable expiration (1 hour - 7 days)
+- Security validation (workflow ownership)
+- Works with S3, GCS, Azure Blob
+
+**7. CDN Integration**
+- Serve files via CDN for fast global access
+- CloudFlare, Fastly, AWS CloudFront support
+- Cache invalidation on file updates
+- Geographic distribution
+- Reduced latency for downloads
+
+**8. Large File Performance**
+- Validate streaming with files >100MB, >1GB, >10GB
+- Chunked upload/download (multipart)
+- Parallel chunk transfers
+- Progress reporting
+- Memory profiling (ensure no full file loads)
+- Throughput benchmarks
+
+**Dependencies**:
+- ✅ US-5.4 (Object Storage) - base infrastructure
+- Story 1.9 (S3 Storage) - for presigned URLs and CDN
+- Secrets Management - for encryption keys
+
+**Implementation Details**:
+
+**HTTP Multipart Upload Example**:
+```yaml
+activities:
+  - key: process_document
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "https://api.example.com/process"
+      files:
+        document: "{{FILE.download_doc.file}}"
+        metadata: "{{FILE.prepare_metadata.json}}"
+      form_data:
+        user_id: "{{INPUT.user_id}}"
+        priority: "high"
+```
+
+**Folder Output Example**:
+```yaml
+activities:
+  - key: generate_reports
+    worker: analytics
+    activity_name: generate_monthly_reports
+    outputs:
+      - name: reports
+        type: folder  # Directory of PDF files
+
+  - key: upload_reports
+    worker: builtin
+    activity_name: s3_upload_folder
+    parameters:
+      folder: "{{FOLDER.generate_reports.reports}}"
+      bucket: "company-reports"
+      prefix: "monthly/{{INPUT.month}}"
+```
+
+**File Versioning API**:
+```rust
+// Get latest version
+let file = storage.download_file(workflow_id, activity_key, filename).await?;
+
+// Get specific version
+let file_v2 = storage.download_file_version(workflow_id, activity_key, filename, 2).await?;
+
+// List versions
+let versions = storage.list_file_versions(workflow_id, activity_key, filename).await?;
+```
+
+**Presigned URL Example**:
+```yaml
+activities:
+  - key: generate_upload_url
+    worker: builtin
+    activity_name: generate_presigned_url
+    parameters:
+      operation: put_object
+      expiration_seconds: 3600
+      filename: "user_document.pdf"
+    outputs:
+      - name: upload_url
+        type: value
+
+  # Client uploads directly to S3/GCS using presigned URL
+  # No file passes through StreamFlow
+```
+
+**Benefits**:
+- **Multipart upload**: Handle complex API integrations
+- **Folder outputs**: Process entire datasets (images, logs, exports)
+- **Versioning**: Debug issues, compare results, rollback
+- **Compression**: Reduce storage costs by 60-90%
+- **Encryption**: Meet compliance requirements
+- **Presigned URLs**: Reduce StreamFlow bandwidth costs
+- **CDN**: Fast global file access
+- **Large file support**: Process TB-scale datasets
+
+**Trade-offs**:
+- Increased complexity in FileExecutor
+- Additional storage metadata (versions, compression, encryption)
+- Key management overhead (encryption)
+- CDN integration complexity
+- Testing scope expands significantly
+
+**Success Criteria**:
+- ✅ HTTP POST with multipart/form-data works
+- ✅ Folder outputs upload/download correctly
+- ✅ File versions tracked and retrievable
+- ✅ Compression reduces storage by >50% for test files
+- ✅ Encryption/decryption transparent to activities
+- ✅ Presigned URLs work with S3/GCS
+- ✅ Files >10GB stream correctly (no OOM)
+- ✅ All features documented with examples
+
+**Implementation Estimate**: 12-18 days
+- HTTP multipart: 2-3 days
+- Folder outputs: 3-4 days
+- Versioning: 2-3 days
+- Compression: 1-2 days
+- Encryption: 2-3 days
+- Presigned URLs: 1-2 days
+- CDN integration: 2-3 days
+- Large file testing: 1-2 days
+- Documentation: 1 day
+
+**Rollout Plan**:
+- **Phase 1**: HTTP multipart upload (most requested)
+- **Phase 2**: Folder outputs (enables dataset processing)
+- **Phase 3**: Compression (storage cost reduction)
+- **Phase 4**: Versioning (debugging and compliance)
+- **Phase 5**: Encryption (security compliance)
+- **Phase 6**: Presigned URLs & CDN (performance optimization)
+- **Phase 7**: Large file validation (stress testing)
+
+---
+
+### Story 1.13: Redis Result Caching
 
 **Priority**: P2 (Medium - Performance optimization)
 

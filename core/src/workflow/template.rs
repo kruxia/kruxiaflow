@@ -1,3 +1,4 @@
+use super::{ActivityOutput, OutputType};
 use minijinja::{Environment, Value as MiniValue};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -30,8 +31,8 @@ pub struct TemplateContext {
     /// Workflow inputs provided at runtime
     pub inputs: HashMap<String, Value>,
 
-    /// Activity outputs (key = activity_key, value = outputs)
-    pub outputs: HashMap<String, HashMap<String, Value>>,
+    /// Activity outputs (key = activity_key, value = structured outputs with type info)
+    pub outputs: HashMap<String, Vec<ActivityOutput>>,
 
     /// Secrets (e.g., API keys)
     pub secrets: HashMap<String, String>,
@@ -60,7 +61,7 @@ impl TemplateContext {
         self
     }
 
-    pub fn add_activity_output(&mut self, activity_key: String, outputs: HashMap<String, Value>) {
+    pub fn add_activity_output(&mut self, activity_key: String, outputs: Vec<ActivityOutput>) {
         self.outputs.insert(activity_key, outputs);
     }
 
@@ -101,17 +102,91 @@ impl TemplateContext {
             )),
         );
 
-        // Add activity outputs as top-level keys
+        // Add activity outputs as top-level keys (for Value-type outputs)
+        // Also build FILE and FOLDER context maps
+        let mut file_map: HashMap<String, HashMap<String, String>> = HashMap::new();
+        let mut folder_map: HashMap<String, HashMap<String, String>> = HashMap::new();
+
         for (activity_key, outputs) in &self.outputs {
-            context_map.insert(
-                activity_key.clone(),
-                serde_json_to_minijinja(&Value::Object(
-                    outputs
-                        .iter()
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .collect(),
-                )),
+            let mut value_outputs = HashMap::new();
+            let mut file_outputs = HashMap::new();
+            let mut folder_outputs = HashMap::new();
+
+            for output in outputs {
+                match output.output_type {
+                    OutputType::Value => {
+                        value_outputs.insert(output.name.clone(), output.value.clone());
+                    }
+                    OutputType::File => {
+                        if let Some(file_ref) = output.value.as_str() {
+                            file_outputs.insert(output.name.clone(), file_ref.to_string());
+                        }
+                    }
+                    OutputType::Folder => {
+                        if let Some(folder_ref) = output.value.as_str() {
+                            folder_outputs.insert(output.name.clone(), folder_ref.to_string());
+                        }
+                    }
+                }
+            }
+
+            // Add value outputs as top-level activity key
+            if !value_outputs.is_empty() {
+                context_map.insert(
+                    activity_key.clone(),
+                    serde_json_to_minijinja(&Value::Object(value_outputs.into_iter().collect())),
+                );
+            }
+
+            // Add to FILE map
+            if !file_outputs.is_empty() {
+                file_map.insert(activity_key.clone(), file_outputs);
+            }
+
+            // Add to FOLDER map
+            if !folder_outputs.is_empty() {
+                folder_map.insert(activity_key.clone(), folder_outputs);
+            }
+        }
+
+        // Add FILE context
+        if !file_map.is_empty() {
+            let file_value = Value::Object(
+                file_map
+                    .into_iter()
+                    .map(|(k, v)| {
+                        (
+                            k,
+                            Value::Object(
+                                v.into_iter()
+                                    .map(|(name, ref_str)| (name, Value::String(ref_str)))
+                                    .collect(),
+                            ),
+                        )
+                    })
+                    .collect(),
             );
+            context_map.insert("FILE".to_string(), serde_json_to_minijinja(&file_value));
+        }
+
+        // Add FOLDER context
+        if !folder_map.is_empty() {
+            let folder_value = Value::Object(
+                folder_map
+                    .into_iter()
+                    .map(|(k, v)| {
+                        (
+                            k,
+                            Value::Object(
+                                v.into_iter()
+                                    .map(|(name, ref_str)| (name, Value::String(ref_str)))
+                                    .collect(),
+                            ),
+                        )
+                    })
+                    .collect(),
+            );
+            context_map.insert("FOLDER".to_string(), serde_json_to_minijinja(&folder_value));
         }
 
         MiniValue::from_object(context_map)
@@ -333,10 +408,21 @@ mod tests {
 
     #[test]
     fn test_resolve_activity_output_template() {
+        use crate::workflow::{ActivityOutput, OutputType};
+
         let mut context = TemplateContext::new();
-        let mut outputs = HashMap::new();
-        outputs.insert("temperature".to_string(), Value::Number(72.into()));
-        outputs.insert("conditions".to_string(), Value::String("sunny".to_string()));
+        let outputs = vec![
+            ActivityOutput {
+                name: "temperature".to_string(),
+                output_type: OutputType::Value,
+                value: Value::Number(72.into()),
+            },
+            ActivityOutput {
+                name: "conditions".to_string(),
+                output_type: OutputType::Value,
+                value: Value::String("sunny".to_string()),
+            },
+        ];
         context.add_activity_output("fetch_weather".to_string(), outputs);
 
         let template =
@@ -359,10 +445,21 @@ mod tests {
 
     #[test]
     fn test_resolve_template_value_preserves_types() {
+        use crate::workflow::{ActivityOutput, OutputType};
+
         let mut context = TemplateContext::new();
-        let mut outputs = HashMap::new();
-        outputs.insert("temperature".to_string(), Value::Number(72.into()));
-        outputs.insert("valid".to_string(), Value::Bool(true));
+        let outputs = vec![
+            ActivityOutput {
+                name: "temperature".to_string(),
+                output_type: OutputType::Value,
+                value: Value::Number(72.into()),
+            },
+            ActivityOutput {
+                name: "valid".to_string(),
+                output_type: OutputType::Value,
+                value: Value::Bool(true),
+            },
+        ];
         context.add_activity_output("check".to_string(), outputs);
 
         // When entire value is a template, preserve type
@@ -377,13 +474,18 @@ mod tests {
 
     #[test]
     fn test_resolve_template_value_in_object() {
+        use crate::workflow::{ActivityOutput, OutputType};
+
         let mut context = TemplateContext::new();
         context.inputs.insert(
             "email".to_string(),
             Value::String("test@example.com".to_string()),
         );
-        let mut outputs = HashMap::new();
-        outputs.insert("valid".to_string(), Value::Bool(true));
+        let outputs = vec![ActivityOutput {
+            name: "valid".to_string(),
+            output_type: OutputType::Value,
+            value: Value::Bool(true),
+        }];
         context.add_activity_output("check_email".to_string(), outputs);
 
         let object = serde_json::json!({
@@ -426,11 +528,13 @@ mod tests {
 
     #[test]
     fn test_nested_path_access() {
+        use crate::workflow::{ActivityOutput, OutputType};
+
         let mut context = TemplateContext::new();
-        let mut outputs = HashMap::new();
-        outputs.insert(
-            "response".to_string(),
-            serde_json::json!({
+        let outputs = vec![ActivityOutput {
+            name: "response".to_string(),
+            output_type: OutputType::Value,
+            value: serde_json::json!({
                 "json": {
                     "properties": {
                         "periods": [
@@ -439,7 +543,7 @@ mod tests {
                     }
                 }
             }),
-        );
+        }];
         context.add_activity_output("fetch_weather".to_string(), outputs);
 
         let value = Value::String(

@@ -1,3 +1,4 @@
+use crate::activity_result::ActivityResult;
 use crate::registry::ActivityImpl;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -115,6 +116,12 @@ pub struct HttpRequestParams {
     /// Set to false for HEAD requests or when only status/headers are needed
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub include_body: Option<bool>,
+
+    /// Optional filename to download response body to
+    /// When set, streams response to file instead of loading into memory
+    /// File will be created in the current working directory
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_to_file: Option<String>,
 }
 
 /// HTTP response (serializable snapshot)
@@ -222,16 +229,77 @@ impl Default for HttpRequestActivity {
 
 #[async_trait]
 impl ActivityImpl for HttpRequestActivity {
-    async fn execute(&self, parameters: Value) -> Result<Value> {
+    async fn execute(&self, parameters: Value) -> Result<ActivityResult> {
         tracing::debug!(
             "Executing http_request activity with parameters: {:?}",
             parameters
         );
 
+        // Extract temp directory if provided (internal parameter injected by worker)
+        let temp_dir = parameters
+            .get("_streamflow_temp_dir")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
         // Parse parameters from JSON
         let params: HttpRequestParams = serde_json::from_value(parameters)
             .context("Failed to parse HTTP request parameters")?;
 
+        // Check if we should download to file
+        let download_filename = params.download_to_file.clone();
+        if let Some(filename) = download_filename {
+            tracing::debug!("Downloading response to file: {}", filename);
+
+            // Execute HTTP request
+            let response = self.executor.execute(params).await?;
+            let status = response.status();
+            let success = status.is_success();
+
+            // Stream response body to file
+            use tokio::fs::File;
+            use tokio::io::AsyncWriteExt;
+
+            // Determine output directory (use temp_dir if provided, otherwise current dir)
+            let output_path = if let Some(ref dir) = temp_dir {
+                std::path::PathBuf::from(dir).join(&filename)
+            } else {
+                std::path::PathBuf::from(&filename)
+            };
+
+            let mut file = File::create(&output_path)
+                .await
+                .context("Failed to create output file")?;
+
+            // Read response bytes and write to file
+            let bytes = response
+                .bytes()
+                .await
+                .context("Failed to read response bytes")?;
+
+            let total_bytes = bytes.len() as u64;
+            file.write_all(&bytes)
+                .await
+                .context("Failed to write bytes to file")?;
+
+            file.sync_all().await.context("Failed to sync file")?;
+
+            tracing::debug!(
+                "Downloaded {} bytes to file: {}",
+                total_bytes,
+                output_path.display()
+            );
+
+            // Return metadata only (file will be picked up by FileExecutor)
+            let http_response = HttpResponse {
+                status: status.as_u16(),
+                success,
+                body: None,
+            };
+
+            return Ok(ActivityResult::value("response", json!(http_response)));
+        }
+
+        // Normal flow (no file download)
         // Check if we should include body (default: true, except for HEAD requests)
         let include_body =
             params.include_body.unwrap_or(true) && !params.method.eq_ignore_ascii_case("HEAD");
@@ -272,17 +340,13 @@ impl ActivityImpl for HttpRequestActivity {
             }
         };
 
-        // Serialize HttpResponse to JSON for output
-        let output = json!({
-            "response": http_response
-        });
-
         tracing::debug!(
             "HTTP request completed with status: {}",
             http_response.status
         );
 
-        Ok(output)
+        // Return as ActivityResult
+        Ok(ActivityResult::value("response", json!(http_response)))
     }
 
     fn name(&self) -> &str {
@@ -326,6 +390,7 @@ mod tests {
             body: Some(json!({"test": "data"})),
             timeout_seconds: Some(30),
             include_body: Some(true),
+            download_to_file: None,
         };
 
         // Verify params can be serialized and deserialized
