@@ -178,13 +178,7 @@ pub fn build_condition_context(state: &WorkflowState) -> TemplateContext {
     // Add activity outputs
     for (activity_key, activity_state) in &state.activities {
         if let Some(outputs) = &activity_state.outputs {
-            if let Value::Object(outputs_obj) = outputs {
-                let outputs_map: HashMap<String, Value> = outputs_obj
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect();
-                context.add_activity_output(activity_key.clone(), outputs_map);
-            }
+            context.add_activity_output(activity_key.clone(), outputs.clone());
         }
     }
 

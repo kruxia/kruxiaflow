@@ -107,7 +107,13 @@ pub async fn run_orchestrator(
                 process_workflow_event(event, &event_source, &activity_queue, &config).await
             {
                 // Log error but continue processing
-                tracing::error!("Failed to process event {}: {}", event.id, e);
+                tracing::error!(
+                    event_id = %event.id,
+                    workflow_id = %event.workflow_id,
+                    event_type = ?event.event_type,
+                    error = %e,
+                    "Failed to process event"
+                );
                 // Note: Event position is NOT updated on error, will be reprocessed
                 continue;
             }
@@ -144,14 +150,7 @@ fn build_template_context(
     // Add activity outputs
     for (activity_key, activity_state) in &state.activities {
         if let Some(outputs) = &activity_state.outputs {
-            // Parse outputs into a HashMap
-            if let serde_json::Value::Object(outputs_obj) = outputs {
-                let outputs_map: HashMap<String, serde_json::Value> = outputs_obj
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect();
-                context.add_activity_output(activity_key.clone(), outputs_map);
-            }
+            context.add_activity_output(activity_key.clone(), outputs.clone());
         }
     }
 
@@ -373,6 +372,7 @@ pub async fn process_workflow_event(
                     parameters: resolved_params,
                     settings: a.settings.clone(),
                     scheduled_for: None, // Schedule immediately (delayed scheduling deferred post-MVP)
+                    output_definitions: a.output_definitions.clone(),
                 });
             }
 

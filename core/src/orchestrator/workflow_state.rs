@@ -1,8 +1,9 @@
 use super::{OrchestratorError, Result};
 use crate::events::{WorkflowDefinition, WorkflowEvent, WorkflowEventType, WorkflowStatus};
+use crate::workflow::ActivityOutput;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 use sqlx::PgConnection;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -22,7 +23,8 @@ pub struct WorkflowState {
 pub struct ActivityState {
     pub key: String,
     pub status: WorkflowActivityStatus,
-    pub outputs: Option<serde_json::Value>,
+    /// Structured outputs with type information (Value, File, or Folder)
+    pub outputs: Option<Vec<ActivityOutput>>,
     pub error: Option<String>,
     pub started_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
@@ -190,7 +192,22 @@ pub fn apply_event_to_state(state: &mut WorkflowState, event: &WorkflowEvent) ->
 
             if let Some(activity) = state.activities.get_mut(activity_key) {
                 activity.status = WorkflowActivityStatus::Completed;
-                activity.outputs = event.payload.get("outputs").cloned();
+
+                // Convert flat outputs object to Vec<ActivityOutput>
+                // Event payload has: {"outputs": {"response": {...}, "data": {...}}}
+                // We need: [ActivityOutput { name: "response", type: "value", value: {...} }, ...]
+                activity.outputs = event.payload.get("outputs").and_then(|v| {
+                    if let Value::Object(outputs_map) = v {
+                        let outputs: Vec<ActivityOutput> = outputs_map
+                            .iter()
+                            .map(|(name, value)| ActivityOutput::value(name.clone(), value.clone()))
+                            .collect();
+                        Some(outputs)
+                    } else {
+                        None
+                    }
+                });
+
                 activity.completed_at = Some(Utc::now());
             }
         }

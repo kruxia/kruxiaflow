@@ -2,6 +2,7 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use streamflow_core::events::EventSource;
 use streamflow_core::queue::ActivityQueue;
+use streamflow_core::storage::WorkflowStorage;
 use streamflow_oauth::AuthenticationService;
 use tokio_util::sync::CancellationToken;
 
@@ -40,6 +41,10 @@ pub struct AppState {
     /// Swappable: PostgresEventSource → Kafka, NATS, Logical Replication (post-MVP)
     pub event_source: Arc<dyn EventSource>,
 
+    /// Workflow storage for file artifacts
+    /// Swappable: PostgresStorage → S3, Filesystem (post-MVP)
+    pub workflow_storage: Arc<dyn WorkflowStorage>,
+
     /// Shutdown coordination token for graceful shutdown
     pub shutdown_token: CancellationToken,
 
@@ -61,6 +66,7 @@ impl AppState {
     /// * `auth_service` - Authentication service for JWT validation
     /// * `activity_queue` - Activity queue implementation (e.g., PostgresQueue, SqsQueue)
     /// * `event_source` - Event source implementation (e.g., PostgresEventSource, KafkaEventSource)
+    /// * `workflow_storage` - Workflow storage implementation (e.g., PostgresStorage, S3Storage)
     /// * `shutdown_token` - Cancellation token for coordinated shutdown
     ///
     /// # Build Metadata
@@ -73,6 +79,7 @@ impl AppState {
         auth_service: Arc<dyn AuthenticationService>,
         activity_queue: Arc<dyn ActivityQueue>,
         event_source: Arc<dyn EventSource>,
+        workflow_storage: Arc<dyn WorkflowStorage>,
         shutdown_token: CancellationToken,
     ) -> Self {
         Self {
@@ -80,6 +87,7 @@ impl AppState {
             auth_service,
             activity_queue,
             event_source,
+            workflow_storage,
             shutdown_token,
             version: env!("CARGO_PKG_VERSION").to_string(),
             build: AppStateBuild {
@@ -106,6 +114,7 @@ impl AppState {
     /// * `auth_service` - Authentication service for JWT validation
     /// * `activity_queue` - Activity queue implementation
     /// * `event_source` - Event source implementation
+    /// * `workflow_storage` - Workflow storage implementation
     /// * `shutdown_token` - Cancellation token for coordinated shutdown
     /// * `version` - Service version string
     /// * `build` - Build metadata (timestamp and git hash)
@@ -117,6 +126,7 @@ impl AppState {
         auth_service: Arc<dyn AuthenticationService>,
         activity_queue: Arc<dyn ActivityQueue>,
         event_source: Arc<dyn EventSource>,
+        workflow_storage: Arc<dyn WorkflowStorage>,
         shutdown_token: CancellationToken,
         version: String,
         build: AppStateBuild,
@@ -127,6 +137,7 @@ impl AppState {
             auth_service,
             activity_queue,
             event_source,
+            workflow_storage,
             shutdown_token,
             version,
             build,
@@ -144,10 +155,14 @@ impl AppState {
 mod tests {
     use super::*;
     use async_trait::async_trait;
+    use futures::stream::{self, Stream};
     use sqlx::PgPool;
+    use std::pin::Pin;
     use streamflow_core::events::{EventError, NewWorkflowEvent, WorkflowEvent};
     use streamflow_core::queue::{Activity, ActivityResult, QueuedActivity};
+    use streamflow_core::storage::{FileMetadata, StorageError};
     use streamflow_oauth::{AuthResponse, AuthResult, AuthenticationService, Claims, JwtKey};
+    use tokio_util::bytes::Bytes;
     use uuid::Uuid;
 
     // Mock authentication service for testing
@@ -155,6 +170,9 @@ mod tests {
 
     // Mock activity queue for testing
     struct MockActivityQueue;
+
+    // Mock workflow storage for testing
+    struct MockWorkflowStorage;
 
     #[async_trait]
     impl ActivityQueue for MockActivityQueue {
@@ -236,6 +254,87 @@ mod tests {
     }
 
     #[async_trait]
+    impl WorkflowStorage for MockWorkflowStorage {
+        async fn upload_file(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+            _filename: &str,
+            _content_type: Option<&str>,
+            _data: Pin<
+                Box<dyn Stream<Item = std::result::Result<Bytes, std::io::Error>> + Send + Unpin>,
+            >,
+        ) -> Result<FileMetadata, StorageError> {
+            Ok(FileMetadata {
+                workflow_id: Uuid::now_v7(),
+                activity_key: "test".to_string(),
+                filename: "test.txt".to_string(),
+                size: 0,
+                content_type: None,
+                created_at: chrono::Utc::now(),
+            })
+        }
+
+        async fn download_file(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+            _filename: &str,
+        ) -> Result<
+            Pin<Box<dyn Stream<Item = std::result::Result<Bytes, std::io::Error>> + Send>>,
+            StorageError,
+        > {
+            Ok(Box::pin(stream::empty()))
+        }
+
+        async fn get_file_metadata(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+            _filename: &str,
+        ) -> Result<FileMetadata, StorageError> {
+            Ok(FileMetadata {
+                workflow_id: Uuid::now_v7(),
+                activity_key: "test".to_string(),
+                filename: "test.txt".to_string(),
+                size: 0,
+                content_type: None,
+                created_at: chrono::Utc::now(),
+            })
+        }
+
+        async fn list_files(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+        ) -> Result<Vec<FileMetadata>, StorageError> {
+            Ok(vec![])
+        }
+
+        async fn delete_file(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+            _filename: &str,
+        ) -> Result<(), StorageError> {
+            Ok(())
+        }
+
+        async fn delete_workflow_files(&self, _workflow_id: Uuid) -> Result<(), StorageError> {
+            Ok(())
+        }
+
+        async fn get_file_reference(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+            _filename: &str,
+        ) -> Result<String, StorageError> {
+            Ok("mock://test/file.txt".to_string())
+        }
+    }
+
+    #[async_trait]
     impl AuthenticationService for MockAuthService {
         async fn authenticate_client(
             &self,
@@ -303,6 +402,7 @@ mod tests {
         let auth_service = Arc::new(MockAuthService);
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
+        let workflow_storage = Arc::new(MockWorkflowStorage);
         let shutdown_token = CancellationToken::new();
 
         let state = AppState::new(
@@ -310,6 +410,7 @@ mod tests {
             auth_service,
             activity_queue,
             event_source,
+            workflow_storage,
             shutdown_token,
         );
 
@@ -327,6 +428,7 @@ mod tests {
         let auth_service = Arc::new(MockAuthService);
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
+        let workflow_storage = Arc::new(MockWorkflowStorage);
         let shutdown_token = CancellationToken::new();
 
         let build = AppStateBuild {
@@ -341,6 +443,7 @@ mod tests {
             auth_service,
             activity_queue,
             event_source,
+            workflow_storage,
             shutdown_token,
             "1.2.3".to_string(),
             build.clone(),
@@ -359,6 +462,7 @@ mod tests {
         let auth_service = Arc::new(MockAuthService);
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
+        let workflow_storage = Arc::new(MockWorkflowStorage);
         let shutdown_token = CancellationToken::new();
 
         let state1 = AppState::new(
@@ -366,6 +470,7 @@ mod tests {
             auth_service,
             activity_queue,
             event_source,
+            workflow_storage,
             shutdown_token,
         );
         let state2 = state1.clone();
@@ -395,6 +500,7 @@ mod tests {
         let auth_service = Arc::new(MockAuthService);
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
+        let workflow_storage = Arc::new(MockWorkflowStorage);
         let shutdown_token = CancellationToken::new();
 
         let state = AppState::new(
@@ -402,6 +508,7 @@ mod tests {
             auth_service,
             activity_queue,
             event_source,
+            workflow_storage,
             shutdown_token,
         );
 
@@ -416,6 +523,7 @@ mod tests {
         let auth_service = Arc::new(MockAuthService);
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
+        let workflow_storage = Arc::new(MockWorkflowStorage);
         let shutdown_token = CancellationToken::new();
 
         let build = AppStateBuild {
@@ -428,6 +536,7 @@ mod tests {
             auth_service,
             activity_queue,
             event_source,
+            workflow_storage,
             shutdown_token,
             "1.0.0".to_string(),
             build,
@@ -443,6 +552,7 @@ mod tests {
         let auth_service = Arc::new(MockAuthService);
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
+        let workflow_storage = Arc::new(MockWorkflowStorage);
         let shutdown_token = CancellationToken::new();
 
         let state = AppState::new(
@@ -450,6 +560,7 @@ mod tests {
             auth_service,
             activity_queue,
             event_source,
+            workflow_storage,
             shutdown_token,
         );
 

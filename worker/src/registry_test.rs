@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use crate::activity_result::ActivityResult;
     use crate::registry::*;
     use anyhow::Result;
     use async_trait::async_trait;
@@ -23,9 +24,9 @@ mod tests {
 
     #[async_trait]
     impl ActivityImpl for TestActivity {
-        async fn execute(&self, parameters: Value) -> Result<Value> {
+        async fn execute(&self, parameters: Value) -> Result<ActivityResult> {
             // Echo the parameters back
-            Ok(parameters)
+            Ok(ActivityResult::value("result", parameters))
         }
 
         fn name(&self) -> &str {
@@ -41,10 +42,10 @@ mod tests {
 
     #[async_trait]
     impl ActivityImpl for SlowActivity {
-        async fn execute(&self, _parameters: Value) -> Result<Value> {
+        async fn execute(&self, _parameters: Value) -> Result<ActivityResult> {
             // Sleep for 2 seconds to test timeout
             tokio::time::sleep(Duration::from_secs(2)).await;
-            Ok(json!({"result": "done"}))
+            Ok(ActivityResult::value("result", json!("done")))
         }
 
         fn name(&self) -> &str {
@@ -60,7 +61,7 @@ mod tests {
 
     #[async_trait]
     impl ActivityImpl for FailingActivity {
-        async fn execute(&self, _parameters: Value) -> Result<Value> {
+        async fn execute(&self, _parameters: Value) -> Result<ActivityResult> {
             anyhow::bail!("This activity always fails")
         }
 
@@ -112,7 +113,7 @@ mod tests {
 
         assert!(result.is_ok());
         let output = result.unwrap();
-        assert_eq!(output, input);
+        assert_eq!(output.to_json_value().get("result"), Some(&input));
     }
 
     #[tokio::test]

@@ -1,9 +1,12 @@
 use crate::client::{PendingActivity, WorkerApiClient};
 use crate::config::WorkerConfig;
+use crate::file_executor::FileExecutor;
 use crate::registry::ActivityRegistry;
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use std::time::Duration;
+use streamflow_core::storage::WorkflowStorage;
+use streamflow_core::workflow::ActivityOutputDefinition;
 
 /// Worker poller task
 ///
@@ -12,6 +15,7 @@ pub struct WorkerPoller {
     config: WorkerConfig,
     client: WorkerApiClient,
     registry: Arc<ActivityRegistry>,
+    storage: Arc<dyn WorkflowStorage>,
 }
 
 impl WorkerPoller {
@@ -19,11 +23,13 @@ impl WorkerPoller {
         config: WorkerConfig,
         client: WorkerApiClient,
         registry: Arc<ActivityRegistry>,
+        storage: Arc<dyn WorkflowStorage>,
     ) -> Self {
         Self {
             config,
             client,
             registry,
+            storage,
         }
     }
 
@@ -87,11 +93,13 @@ impl WorkerPoller {
             let client = self.client.clone();
             let registry = Arc::clone(&self.registry);
 
+            let storage = Arc::clone(&self.storage);
             tasks.push(tokio::spawn(async move {
                 let poller = WorkerPoller {
                     config,
                     client,
                     registry,
+                    storage,
                 };
                 poller.execute_activity(activity).await;
             }));
@@ -135,6 +143,43 @@ impl WorkerPoller {
             None
         };
 
+        // Parse output definitions if provided
+        let output_definitions: Option<Vec<ActivityOutputDefinition>> = activity
+            .output_definitions
+            .as_ref()
+            .and_then(|defs| serde_json::from_value(defs.clone()).ok());
+
+        // Create FileExecutor if we have file outputs
+        let file_executor = if output_definitions.is_some() {
+            match FileExecutor::new(
+                activity.workflow_id,
+                activity.activity_key.clone(),
+                Arc::clone(&self.storage),
+            )
+            .await
+            {
+                Ok(executor) => Some(executor),
+                Err(err) => {
+                    tracing::error!("Failed to create file executor: {:?}", err);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Inject temp directory into parameters for file outputs
+        let mut parameters = activity.parameters;
+        if let Some(executor) = &file_executor {
+            // Add _streamflow_temp_dir to parameters (internal use only)
+            if let Some(obj) = parameters.as_object_mut() {
+                obj.insert(
+                    "_streamflow_temp_dir".to_string(),
+                    serde_json::Value::String(executor.temp_dir().display().to_string()),
+                );
+            }
+        }
+
         // Execute activity
         let exec_span = tracing::debug_span!("activity_handler");
         let result = {
@@ -143,7 +188,7 @@ impl WorkerPoller {
                 .execute(
                     &activity.worker,
                     &activity.activity_name,
-                    activity.parameters,
+                    parameters,
                     timeout,
                 )
                 .await
@@ -157,14 +202,41 @@ impl WorkerPoller {
             let _enter = complete_span.enter();
 
             match result {
-                Ok(output) => {
+                Ok(mut activity_result) => {
+                    // Process file outputs if we have a file executor
+                    if let (Some(executor), Some(defs)) = (&file_executor, &output_definitions) {
+                        tracing::debug!("Processing file outputs");
+
+                        // Get legacy output for file processing
+                        let output_value = activity_result.to_json_value();
+
+                        match executor.process_file_outputs(defs, output_value).await {
+                            Ok(file_outputs) => {
+                                // Merge file outputs with existing outputs
+                                activity_result.outputs.extend(file_outputs);
+                                tracing::debug!(
+                                    "File outputs processed, total outputs: {}",
+                                    activity_result.outputs.len()
+                                );
+                            }
+                            Err(err) => {
+                                tracing::error!("Failed to process file outputs: {:?}", err);
+                                // Continue with execution - don't fail the activity
+                            }
+                        }
+                    }
+
+                    // Convert ActivityResult to JSON value format for API
+                    let output = activity_result.to_json_value();
+                    let cost_usd = activity_result.cost_usd;
+
                     if let Err(err) = self
                         .client
                         .complete_activity(
                             activity.activity_id,
                             &self.config.worker_id,
                             output,
-                            None,
+                            cost_usd,
                         )
                         .await
                     {
@@ -209,6 +281,13 @@ impl WorkerPoller {
         if let Some(handle) = heartbeat_handle {
             handle.abort();
         }
+
+        // Cleanup file executor temp directory
+        if let Some(executor) = file_executor {
+            if let Err(err) = executor.cleanup().await {
+                tracing::warn!("Failed to cleanup file executor: {:?}", err);
+            }
+        }
     }
 
     /// Spawn heartbeat task
@@ -241,24 +320,103 @@ impl WorkerPoller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::activity_result::ActivityResult;
     use crate::client::WorkerApiClient;
     use crate::registry::{ActivityImpl, ActivityRegistry};
     use async_trait::async_trait;
     use serde_json::{Value, json};
     use std::sync::Arc;
     use std::time::Duration;
+    use streamflow_core::WorkflowStorage;
+    use streamflow_core::workflow::ActivityOutput;
     use uuid::Uuid;
+
+    // Mock storage for tests
+    struct MockStorage;
+
+    #[async_trait]
+    impl WorkflowStorage for MockStorage {
+        async fn upload_file(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+            _filename: &str,
+            _content_type: Option<&str>,
+            _data: std::pin::Pin<
+                Box<
+                    dyn futures::Stream<Item = Result<bytes::Bytes, std::io::Error>> + Send + Unpin,
+                >,
+            >,
+        ) -> streamflow_core::storage::Result<streamflow_core::storage::FileMetadata> {
+            unimplemented!("Mock storage not implemented")
+        }
+
+        async fn download_file(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+            _filename: &str,
+        ) -> streamflow_core::storage::Result<
+            std::pin::Pin<
+                Box<dyn futures::Stream<Item = Result<bytes::Bytes, std::io::Error>> + Send>,
+            >,
+        > {
+            unimplemented!("Mock storage not implemented")
+        }
+
+        async fn get_file_metadata(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+            _filename: &str,
+        ) -> streamflow_core::storage::Result<streamflow_core::storage::FileMetadata> {
+            unimplemented!("Mock storage not implemented")
+        }
+
+        async fn list_files(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+        ) -> streamflow_core::storage::Result<Vec<streamflow_core::storage::FileMetadata>> {
+            unimplemented!("Mock storage not implemented")
+        }
+
+        async fn delete_file(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+            _filename: &str,
+        ) -> streamflow_core::storage::Result<()> {
+            unimplemented!("Mock storage not implemented")
+        }
+
+        async fn delete_workflow_files(
+            &self,
+            _workflow_id: Uuid,
+        ) -> streamflow_core::storage::Result<()> {
+            unimplemented!("Mock storage not implemented")
+        }
+
+        async fn get_file_reference(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+            _filename: &str,
+        ) -> streamflow_core::storage::Result<String> {
+            unimplemented!("Mock storage not implemented")
+        }
+    }
 
     /// Test activity that succeeds
     struct SuccessActivity;
 
     #[async_trait]
     impl ActivityImpl for SuccessActivity {
-        async fn execute(&self, parameters: Value) -> Result<Value> {
-            Ok(json!({
-                "result": "success",
-                "input": parameters
-            }))
+        async fn execute(&self, parameters: Value) -> Result<ActivityResult> {
+            Ok(ActivityResult::values(vec![
+                ActivityOutput::value("result", json!("success")),
+                ActivityOutput::value("input", parameters),
+            ]))
         }
 
         fn name(&self) -> &str {
@@ -276,7 +434,7 @@ mod tests {
 
     #[async_trait]
     impl ActivityImpl for FailingActivity {
-        async fn execute(&self, _parameters: Value) -> Result<Value> {
+        async fn execute(&self, _parameters: Value) -> Result<ActivityResult> {
             anyhow::bail!("Activity failed intentionally")
         }
 
@@ -295,9 +453,9 @@ mod tests {
 
     #[async_trait]
     impl ActivityImpl for SlowActivity {
-        async fn execute(&self, _parameters: Value) -> Result<Value> {
+        async fn execute(&self, _parameters: Value) -> Result<ActivityResult> {
             tokio::time::sleep(Duration::from_secs(10)).await;
-            Ok(json!({"result": "done"}))
+            Ok(ActivityResult::value("result", json!("done")))
         }
 
         fn name(&self) -> &str {
@@ -333,8 +491,9 @@ mod tests {
             "test_secret".to_string(),
         );
         let registry = Arc::new(ActivityRegistry::new());
+        let storage = Arc::new(MockStorage);
 
-        let poller = WorkerPoller::new(config.clone(), client, registry.clone());
+        let poller = WorkerPoller::new(config.clone(), client, registry.clone(), storage);
 
         assert_eq!(poller.config.worker_id, "test_worker");
         assert_eq!(poller.config.poll_max_activities, 10);
@@ -381,8 +540,9 @@ mod tests {
         );
         let mut registry = ActivityRegistry::new();
         registry.register(Arc::new(SuccessActivity));
+        let storage = Arc::new(MockStorage);
 
-        let poller = WorkerPoller::new(config, client, Arc::new(registry));
+        let poller = WorkerPoller::new(config, client, Arc::new(registry), storage);
 
         let activity = PendingActivity {
             activity_id: Uuid::now_v7(),
@@ -393,6 +553,7 @@ mod tests {
             parameters: json!({"input": "test"}),
             settings: None,
             timeout_seconds: Some(10), // Custom timeout overrides config
+            output_definitions: None,
         };
 
         // This test verifies the timeout determination logic
@@ -419,8 +580,9 @@ mod tests {
         );
         let mut registry = ActivityRegistry::new();
         registry.register(Arc::new(SuccessActivity));
+        let storage = Arc::new(MockStorage);
 
-        let poller = WorkerPoller::new(config, client, Arc::new(registry));
+        let poller = WorkerPoller::new(config, client, Arc::new(registry), storage);
 
         let activity = PendingActivity {
             activity_id: Uuid::now_v7(),
@@ -431,6 +593,7 @@ mod tests {
             parameters: json!({"input": "test"}),
             settings: None,
             timeout_seconds: None, // Use default timeout
+            output_definitions: None,
         };
 
         // This test verifies the timeout determination logic
@@ -452,8 +615,9 @@ mod tests {
             "test_secret".to_string(),
         );
         let registry = Arc::new(ActivityRegistry::new());
+        let storage = Arc::new(MockStorage);
 
-        let _poller = WorkerPoller::new(config, client, registry);
+        let _poller = WorkerPoller::new(config, client, registry, storage);
 
         // Test that heartbeat is spawned for timeout > 60 seconds
         let long_timeout = Duration::from_secs(120);
@@ -497,8 +661,9 @@ mod tests {
             "test_secret".to_string(),
         );
         let registry = Arc::new(ActivityRegistry::new());
+        let storage = Arc::new(MockStorage);
 
-        let poller = WorkerPoller::new(config.clone(), client, registry);
+        let poller = WorkerPoller::new(config.clone(), client, registry, storage);
 
         // Verify config was cloned correctly
         assert_eq!(poller.config.worker_id, config.worker_id);

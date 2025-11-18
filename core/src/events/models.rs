@@ -40,6 +40,9 @@ pub struct ActivityDefinition {
     pub parameters: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<crate::queue::ActivitySettings>,
+    #[serde(rename = "outputs")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_definitions: Option<Vec<crate::workflow::ActivityOutputDefinition>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub depends_on: Option<Vec<DependencyEdge>>,
     #[serde(skip_serializing_if = "Option::is_none")]

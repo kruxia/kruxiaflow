@@ -95,6 +95,7 @@ async fn test_sequential_workflow_integration() {
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "activity2".to_string(),
@@ -107,6 +108,7 @@ async fn test_sequential_workflow_integration() {
                     conditions: None,
                 }]),
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "activity3".to_string(),
@@ -119,6 +121,7 @@ async fn test_sequential_workflow_integration() {
                     conditions: None,
                 }]),
                 dependency_of: None,
+                output_definitions: None,
             },
         ],
     };
@@ -240,6 +243,7 @@ async fn test_parallel_workflow_integration() {
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "parallel1".to_string(),
@@ -252,6 +256,7 @@ async fn test_parallel_workflow_integration() {
                     conditions: None,
                 }]),
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "parallel2".to_string(),
@@ -264,6 +269,7 @@ async fn test_parallel_workflow_integration() {
                     conditions: None,
                 }]),
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "parallel3".to_string(),
@@ -276,6 +282,7 @@ async fn test_parallel_workflow_integration() {
                     conditions: None,
                 }]),
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "join".to_string(),
@@ -298,6 +305,7 @@ async fn test_parallel_workflow_integration() {
                     },
                 ]),
                 dependency_of: None,
+                output_definitions: None,
             },
         ],
     };
@@ -465,6 +473,7 @@ async fn test_conditional_workflow_integration() {
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "approve".to_string(),
@@ -477,6 +486,7 @@ async fn test_conditional_workflow_integration() {
                     conditions: Some(vec!["{{validate.valid == true}}".to_string()]),
                 }]),
                 dependency_of: None,
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "reject".to_string(),
@@ -489,6 +499,7 @@ async fn test_conditional_workflow_integration() {
                     conditions: Some(vec!["{{validate.valid == false}}".to_string()]),
                 }]),
                 dependency_of: None,
+                output_definitions: None,
             },
         ],
     };
@@ -594,6 +605,7 @@ async fn test_workflow_completion_success() {
             settings: None,
             depends_on: None,
             dependency_of: None,
+            output_definitions: None,
         }],
     };
 
@@ -717,6 +729,7 @@ async fn test_workflow_failure() {
             settings: None,
             depends_on: None,
             dependency_of: None,
+            output_definitions: None,
         }],
     };
 
@@ -848,6 +861,7 @@ async fn test_workflow_completion_with_multiple_activities() {
                     activity_key: "step2".to_string(),
                     conditions: None,
                 }]),
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "step2".to_string(),
@@ -860,6 +874,7 @@ async fn test_workflow_completion_with_multiple_activities() {
                     activity_key: "step3".to_string(),
                     conditions: None,
                 }]),
+                output_definitions: None,
             },
             ActivityDefinition {
                 key: "step3".to_string(),
@@ -869,6 +884,7 @@ async fn test_workflow_completion_with_multiple_activities() {
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
+                output_definitions: None,
             },
         ],
     };
@@ -967,6 +983,7 @@ async fn test_activity_scheduled_events_published() {
             settings: None,
             depends_on: None,
             dependency_of: None,
+            output_definitions: None,
         }],
     };
 
@@ -1040,6 +1057,7 @@ async fn test_run_orchestrator_loop() {
             settings: None,
             depends_on: None,
             dependency_of: None,
+            output_definitions: None,
         }],
     };
 

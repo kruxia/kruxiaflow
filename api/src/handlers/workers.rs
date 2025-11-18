@@ -101,6 +101,11 @@ pub struct PendingActivity {
     /// Timeout in seconds (extracted from settings for convenience)
     #[schema(example = 300)]
     pub timeout_seconds: Option<i64>,
+
+    /// Output definitions (for file outputs)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(example = json!([{"name": "document", "type": "file"}]))]
+    pub output_definitions: Option<serde_json::Value>,
 }
 
 /// Poll for activities response
@@ -358,6 +363,7 @@ pub async fn poll_activities(
                     parameters: a.parameters,
                     settings: a.settings,
                     timeout_seconds,
+                    output_definitions: a.output_definitions,
                 }
             })
             .collect(),
