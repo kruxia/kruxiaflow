@@ -4,8 +4,9 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use streamflow_core::queue::{
     Activity, ActivityQueue, ActivityResult, ActivitySettings, PostgresQueue, QueueConfig,
-    QueueMonitor, RetryConfig, TimeoutConfig,
+    QueueMonitor,
 };
+use streamflow_core::workflow::{BackoffStrategy, RetryPolicy};
 use tokio::time::{Duration, sleep};
 use uuid::Uuid;
 
@@ -24,6 +25,13 @@ async fn setup_test_pool() -> PgPool {
         .run(&pool)
         .await
         .expect("Failed to run migrations");
+
+    // Truncate activity_queue table to ensure clean state for tests
+    // Safe because tests run serially with #[serial]
+    sqlx::query!("TRUNCATE TABLE activity_queue")
+        .execute(&pool)
+        .await
+        .expect("Failed to truncate activity_queue");
 
     pool
 }
@@ -171,17 +179,17 @@ async fn test_stale_activity_recovery() {
         activity_name: "test_task".to_string(),
         parameters: json!({"key": "value"}),
         settings: Some(ActivitySettings {
-            timeout: Some(TimeoutConfig {
-                timeout: 1, // 1 second timeout
-                heartbeat: None,
-            }),
-            retry: Some(RetryConfig {
+            timeout_seconds: Some(1), // 1 second timeout
+            retry: Some(RetryPolicy {
                 max_attempts: 3,
-                backoff: None,
+                strategy: BackoffStrategy::Fixed,
+                base_seconds: 2,
+                factor: 2.0,
+                max_seconds: 300,
             }),
             budget: None,
-            cache: None,
-            deterministic: true,
+            cache: false,
+            cache_ttl: None,
         }),
         scheduled_for: None,
         output_definitions: None,
@@ -242,17 +250,17 @@ async fn test_heartbeat_conflict_detection() {
         activity_name: "test_task".to_string(),
         parameters: json!({"key": "value"}),
         settings: Some(ActivitySettings {
-            timeout: Some(TimeoutConfig {
-                timeout: 1,
-                heartbeat: Some(10),
-            }),
-            retry: Some(RetryConfig {
+            timeout_seconds: Some(1),
+            retry: Some(RetryPolicy {
                 max_attempts: 3,
-                backoff: None,
+                strategy: BackoffStrategy::Fixed,
+                base_seconds: 2,
+                factor: 2.0,
+                max_seconds: 300,
             }),
             budget: None,
-            cache: None,
-            deterministic: true,
+            cache: false,
+            cache_ttl: None,
         }),
         scheduled_for: None,
         output_definitions: None,
@@ -305,29 +313,31 @@ async fn test_heartbeat_conflict_detection() {
 async fn test_max_retries_exhaustion() {
     let pool = setup_test_pool().await;
     let mut config = QueueConfig::default();
-    config.default_timeout = Duration::from_millis(500);
+    config.default_timeout = Duration::from_secs(1);
 
     let queue = PostgresQueue::new(pool.clone(), config.clone());
     let workflow_id = Uuid::now_v7();
 
-    // Schedule activity with max_retries = 2
+    // Schedule activity with max_attempts = 2
+    // This allows: initial claim (retry_count 0) + 1 retry (retry_count 1) = 2 total claims
+    // Then retry_count becomes 2, and 2 < 2 is false, so no more claims
     let activity = Activity {
         key: "test_activity".to_string(),
         worker: "test".to_string(),
         activity_name: "test_task".to_string(),
         parameters: json!({"key": "value"}),
         settings: Some(ActivitySettings {
-            timeout: Some(TimeoutConfig {
-                timeout: 0, // Very short timeout (uses default minimum)
-                heartbeat: None,
-            }),
-            retry: Some(RetryConfig {
-                max_attempts: 2,
-                backoff: None,
+            timeout_seconds: Some(1), // Very short timeout
+            retry: Some(RetryPolicy {
+                max_attempts: 2, // 2 allows: initial + 1 retry = 2 claims, then retry_count=2 blocks further claims
+                strategy: BackoffStrategy::Fixed,
+                base_seconds: 2,
+                factor: 2.0,
+                max_seconds: 300,
             }),
             budget: None,
-            cache: None,
-            deterministic: true,
+            cache: false,
+            cache_ttl: None,
         }),
         scheduled_for: None,
         output_definitions: None,
@@ -356,8 +366,8 @@ async fn test_max_retries_exhaustion() {
             i, expected_retry_count
         );
 
-        // Wait for timeout
-        sleep(Duration::from_millis(600)).await;
+        // Wait for timeout (timeout_seconds is 1, so wait longer)
+        sleep(Duration::from_millis(1200)).await;
     }
 
     // Try to claim again - should not return activity (retry_count >= max_retries)

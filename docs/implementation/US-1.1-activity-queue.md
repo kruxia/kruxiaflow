@@ -345,7 +345,7 @@ pub struct ActivityResult {
     pub success: bool,
     pub outputs: Option<serde_json::Value>,
     pub error: Option<String>,
-    pub cost_usd: Option<f64>,
+    pub cost_usd: Option<Decimal>,
     pub token_usage: Option<TokenUsage>,
 }
 ```

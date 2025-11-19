@@ -2,6 +2,7 @@ use super::{OrchestratorError, Result};
 use crate::events::{WorkflowDefinition, WorkflowEvent, WorkflowEventType, WorkflowStatus};
 use crate::workflow::ActivityOutput;
 use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::PgConnection;
@@ -28,7 +29,40 @@ pub struct ActivityState {
     pub error: Option<String>,
     pub started_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
-    pub retry_count: u32,
+
+    /// Current attempt number (1-based)
+    #[serde(default = "default_attempt")]
+    pub attempt: u32,
+
+    /// Last error message from failed attempt
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+
+    /// Accumulated cost in USD across all attempts
+    #[serde(default)]
+    pub accumulated_cost_usd: Decimal,
+}
+
+fn default_attempt() -> u32 {
+    1
+}
+
+impl ActivityState {
+    /// Increment the attempt counter for retry
+    pub fn increment_attempt(&mut self) {
+        self.attempt += 1;
+    }
+
+    /// Set the last error message
+    pub fn set_error(&mut self, error: String) {
+        self.last_error = Some(error.clone());
+        self.error = Some(error);
+    }
+
+    /// Add cost to accumulated total
+    pub fn add_cost(&mut self, cost: Decimal) {
+        self.accumulated_cost_usd += cost;
+    }
 }
 
 /// Activity status in workflow (different from queue status)
@@ -145,7 +179,9 @@ pub async fn initialize_workflow_state(
                 error: None,
                 started_at: None,
                 completed_at: None,
-                retry_count: 0,
+                attempt: 1,
+                last_error: None,
+                accumulated_cost_usd: Decimal::ZERO,
             },
         );
     }

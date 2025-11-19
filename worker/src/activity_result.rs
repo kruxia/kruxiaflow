@@ -1,3 +1,4 @@
+use rust_decimal::Decimal;
 use serde_json::Value;
 use streamflow_core::workflow::{ActivityOutput, OutputType};
 
@@ -11,7 +12,7 @@ pub struct ActivityResult {
     pub outputs: Vec<ActivityOutput>,
 
     /// Optional cost tracking in USD
-    pub cost_usd: Option<f64>,
+    pub cost_usd: Option<Decimal>,
 }
 
 impl ActivityResult {
@@ -61,11 +62,13 @@ impl ActivityResult {
     /// ```
     /// use serde_json::json;
     /// use streamflow_worker::ActivityResult;
+    /// use rust_decimal::Decimal;
+    /// use std::str::FromStr;
     ///
     /// let result = ActivityResult::value("result", json!({"data": "..."}))
-    ///     .with_cost(0.05); // $0.05
+    ///     .with_cost(Decimal::from_str("0.05").unwrap()); // $0.05
     /// ```
-    pub fn with_cost(mut self, cost_usd: f64) -> Self {
+    pub fn with_cost(mut self, cost_usd: Decimal) -> Self {
         self.cost_usd = Some(cost_usd);
         self
     }
@@ -187,9 +190,11 @@ mod tests {
 
     #[test]
     fn test_with_cost() {
-        let result = ActivityResult::value("result", json!({})).with_cost(0.05);
+        use std::str::FromStr;
+        let result = ActivityResult::value("result", json!({}))
+            .with_cost(Decimal::from_str("0.05").unwrap());
 
-        assert_eq!(result.cost_usd, Some(0.05));
+        assert_eq!(result.cost_usd, Some(Decimal::from_str("0.05").unwrap()));
     }
 
     #[test]

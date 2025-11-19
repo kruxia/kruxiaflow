@@ -7,6 +7,7 @@
 //! From/Into conversions, allowing the API layer to derive ToSchema without
 //! adding utoipa as a dependency to the core crate.
 
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use utoipa::ToSchema;
@@ -146,22 +147,96 @@ impl From<ActivityRelationship> for streamflow_core::workflow::ActivityRelations
 }
 
 /// Activity-level settings
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
 pub struct ActivitySettings {
     /// Activity timeout in seconds
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub timeout: Option<u64>,
+    pub timeout_seconds: Option<u64>,
 
     /// Retry configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retry: Option<RetrySettings>,
+
+    /// Budget configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget: Option<BudgetSettings>,
+
+    /// Enable result caching
+    #[serde(default)]
+    pub cache: bool,
+
+    /// Cache TTL in seconds
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_ttl: Option<u64>,
+}
+
+/// Budget configuration for activities
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BudgetSettings {
+    /// Budget limit in USD
+    pub limit: Decimal,
+
+    /// Action when budget exceeded
+    #[serde(default)]
+    pub action: BudgetAction,
+}
+
+/// Action to take when budget is exceeded
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum BudgetAction {
+    /// Abort workflow execution
+    #[default]
+    Abort,
+
+    /// Continue with warning
+    Continue,
+}
+
+impl From<streamflow_core::workflow::BudgetSettings> for BudgetSettings {
+    fn from(settings: streamflow_core::workflow::BudgetSettings) -> Self {
+        Self {
+            limit: settings.limit,
+            action: settings.action.into(),
+        }
+    }
+}
+
+impl From<BudgetSettings> for streamflow_core::workflow::BudgetSettings {
+    fn from(settings: BudgetSettings) -> Self {
+        Self {
+            limit: settings.limit,
+            action: settings.action.into(),
+        }
+    }
+}
+
+impl From<streamflow_core::workflow::BudgetAction> for BudgetAction {
+    fn from(action: streamflow_core::workflow::BudgetAction) -> Self {
+        match action {
+            streamflow_core::workflow::BudgetAction::Abort => Self::Abort,
+            streamflow_core::workflow::BudgetAction::Continue => Self::Continue,
+        }
+    }
+}
+
+impl From<BudgetAction> for streamflow_core::workflow::BudgetAction {
+    fn from(action: BudgetAction) -> Self {
+        match action {
+            BudgetAction::Abort => Self::Abort,
+            BudgetAction::Continue => Self::Continue,
+        }
+    }
 }
 
 impl From<streamflow_core::workflow::ActivitySettings> for ActivitySettings {
     fn from(settings: streamflow_core::workflow::ActivitySettings) -> Self {
         Self {
-            timeout: settings.timeout,
+            timeout_seconds: settings.timeout_seconds,
             retry: settings.retry.map(Into::into),
+            budget: settings.budget.map(Into::into),
+            cache: settings.cache,
+            cache_ttl: settings.cache_ttl,
         }
     }
 }
@@ -169,8 +244,11 @@ impl From<streamflow_core::workflow::ActivitySettings> for ActivitySettings {
 impl From<ActivitySettings> for streamflow_core::workflow::ActivitySettings {
     fn from(settings: ActivitySettings) -> Self {
         Self {
-            timeout: settings.timeout,
+            timeout_seconds: settings.timeout_seconds,
             retry: settings.retry.map(Into::into),
+            budget: settings.budget.map(Into::into),
+            cache: settings.cache,
+            cache_ttl: settings.cache_ttl,
         }
     }
 }
@@ -183,27 +261,57 @@ pub struct RetrySettings {
 
     /// Backoff strategy
     #[serde(default = "default_backoff")]
-    pub backoff: BackoffStrategy,
+    pub strategy: BackoffStrategy,
+
+    /// Base delay in seconds between retries (default: 2)
+    #[serde(default = "default_base_seconds")]
+    pub base_seconds: u64,
+
+    /// Exponential multiplier (default: 2.0)
+    #[serde(default = "default_factor")]
+    pub factor: f64,
+
+    /// Maximum backoff delay cap in seconds (default: 300)
+    #[serde(default = "default_max_seconds")]
+    pub max_seconds: u64,
 }
 
 fn default_backoff() -> BackoffStrategy {
     BackoffStrategy::Exponential
 }
 
-impl From<streamflow_core::workflow::RetrySettings> for RetrySettings {
-    fn from(settings: streamflow_core::workflow::RetrySettings) -> Self {
+fn default_base_seconds() -> u64 {
+    2
+}
+
+fn default_factor() -> f64 {
+    2.0
+}
+
+fn default_max_seconds() -> u64 {
+    300
+}
+
+impl From<streamflow_core::workflow::RetryPolicy> for RetrySettings {
+    fn from(settings: streamflow_core::workflow::RetryPolicy) -> Self {
         Self {
             max_attempts: settings.max_attempts,
-            backoff: settings.backoff.into(),
+            strategy: settings.strategy.into(),
+            base_seconds: settings.base_seconds,
+            factor: settings.factor,
+            max_seconds: settings.max_seconds,
         }
     }
 }
 
-impl From<RetrySettings> for streamflow_core::workflow::RetrySettings {
+impl From<RetrySettings> for streamflow_core::workflow::RetryPolicy {
     fn from(settings: RetrySettings) -> Self {
         Self {
             max_attempts: settings.max_attempts,
-            backoff: settings.backoff.into(),
+            strategy: settings.strategy.into(),
+            base_seconds: settings.base_seconds,
+            factor: settings.factor,
+            max_seconds: settings.max_seconds,
         }
     }
 }

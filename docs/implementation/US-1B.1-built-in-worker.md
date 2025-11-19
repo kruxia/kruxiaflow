@@ -463,7 +463,7 @@ impl WorkerApiClient {
         activity_id: Uuid,
         worker_id: &str,
         output: Value,
-        cost_usd: Option<f64>,
+        cost_usd: Option<Decimal>,
     ) -> Result<()> {
         let token = self.get_token().await?;
 
@@ -472,7 +472,7 @@ impl WorkerApiClient {
             worker_id: String,
             output: Value,
             #[serde(skip_serializing_if = "Option::is_none")]
-            cost_usd: Option<f64>,
+            cost_usd: Option<Decimal>,
         }
 
         let response = self

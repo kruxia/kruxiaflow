@@ -1,7 +1,11 @@
 use crate::workflow::outputs::{ActivityOutput, ActivityOutputDefinition};
 use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+// Re-export ActivitySettings from workflow module for backward compatibility
+pub use crate::workflow::ActivitySettings;
 
 /// Activity to be scheduled
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -15,49 +19,6 @@ pub struct Activity {
     /// Output definitions from workflow definition (for file handling)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_definitions: Option<Vec<ActivityOutputDefinition>>,
-}
-
-/// Activity settings (retry, timeout, budget config)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ActivitySettings {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub retry: Option<RetryConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timeout: Option<TimeoutConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub budget: Option<BudgetConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cache: Option<CacheConfig>,
-    #[serde(default = "default_deterministic")]
-    pub deterministic: bool,
-}
-
-fn default_deterministic() -> bool {
-    true
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RetryConfig {
-    pub max_attempts: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub backoff: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TimeoutConfig {
-    pub timeout: u64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub heartbeat: Option<u64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BudgetConfig {
-    pub max_cost_usd: f64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CacheConfig {
-    pub ttl: u64,
 }
 
 /// Queued activity returned to worker
@@ -87,7 +48,7 @@ pub struct ActivityResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cost_usd: Option<f64>,
+    pub cost_usd: Option<Decimal>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<TokenUsage>,
 }
@@ -138,7 +99,7 @@ impl ActivityResult {
     }
 
     /// Add cost tracking
-    pub fn with_cost(mut self, cost_usd: f64, token_usage: Option<TokenUsage>) -> Self {
+    pub fn with_cost(mut self, cost_usd: Decimal, token_usage: Option<TokenUsage>) -> Self {
         self.cost_usd = Some(cost_usd);
         self.token_usage = token_usage;
         self

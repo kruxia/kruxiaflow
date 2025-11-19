@@ -1,6 +1,7 @@
 use crate::error::{ApiResult, AppError, ValidationErrors};
 use crate::middleware::auth::ValidatedClaims;
 use axum::{Extension, Json, extract::Path};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use streamflow_core::activity::{ActivityWorkerError, ActivityWorkerService};
 use utoipa::ToSchema;
@@ -168,7 +169,7 @@ pub struct CompleteActivityRequest {
     /// Cost in USD (for AI/LLM activities, optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(example = 0.015)]
-    pub cost_usd: Option<f64>,
+    pub cost_usd: Option<Decimal>,
 }
 
 impl CompleteActivityRequest {
@@ -186,7 +187,7 @@ impl CompleteActivityRequest {
 
         // Validate cost_usd if provided
         if let Some(cost) = self.cost_usd {
-            if cost < 0.0 {
+            if cost < Decimal::ZERO {
                 errors.add("cost_usd", "Cost must be non-negative");
             }
         }
