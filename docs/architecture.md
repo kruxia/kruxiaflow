@@ -2396,7 +2396,7 @@ spec:
 - Workflow definitions (LRU cache, optional)
 
 **Redis (Optional)**:
-- Result caching for deterministic activities
+- Result caching for activities
 - NOT required for core functionality
 - Graceful degradation when unavailable
 
@@ -2436,7 +2436,7 @@ spec:
 
 ### Optional Dependencies
 
-**Redis**: Result caching for deterministic activities (post-MVP)
+**Redis**: Result caching for activities (post-MVP)
 
 **Auth0/Okta**: External identity provider for JWT validation
 
