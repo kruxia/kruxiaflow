@@ -1,0 +1,127 @@
+name: process_documents
+description: Fetch multiple documents in parallel, process each, and aggregate results
+
+# Workflow demonstrates:
+# - Parallel execution (fan-out/fan-in)
+# - HTTP requests (GET/POST)
+# - Multiple depends_on relationships
+
+activities:
+  # === PARALLEL FETCH (Fan-Out) ===
+  # These three activities have no dependencies and execute in parallel
+
+  - key: fetch_doc1
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: GET
+      url: "{{INPUT.doc1_url}}"
+    outputs:
+      - response
+
+  - key: fetch_doc2
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: GET
+      url: "{{INPUT.doc2_url}}"
+    outputs:
+      - response
+
+  - key: fetch_doc3
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: GET
+      url: "{{INPUT.doc3_url}}"
+    outputs:
+      - response
+
+  # === PARALLEL PROCESS (Fan-Out) ===
+  # Each process activity depends on its corresponding fetch activity
+  # These also execute in parallel (independent dependencies)
+
+  - key: process_doc1
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.processing_service_url}}"
+      body:
+        document_data: "{{fetch_doc1.response.body}}"
+        operation: extract_text
+        language: en
+    outputs:
+      - response
+    depends_on:
+      - fetch_doc1
+
+  - key: process_doc2
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.processing_service_url}}"
+      body:
+        document_data: "{{fetch_doc2.response.body}}"
+        operation: extract_text
+        language: en
+    outputs:
+      - response
+    depends_on:
+      - fetch_doc2
+
+  - key: process_doc3
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.processing_service_url}}"
+      body:
+        document_data: "{{fetch_doc3.response.body}}"
+        operation: extract_text
+        language: en
+    outputs:
+      - response
+    depends_on:
+      - fetch_doc3
+
+  # === FAN-IN AGGREGATION ===
+  # This activity waits for ALL three process activities to complete
+
+  - key: aggregate_results
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.aggregator_url}}"
+      body:
+        workflow_id: "{{WORKFLOW.id}}"
+        doc1_result: "{{process_doc1.response.body}}"
+        doc2_result: "{{process_doc2.response.body}}"
+        doc3_result: "{{process_doc3.response.body}}"
+        operation: summarize
+    outputs:
+      - response
+    depends_on:
+      - process_doc1
+      - process_doc2
+      - process_doc3  # Fan-in: waits for all three
+
+  # === FINAL STORAGE ===
+  # Store the final summary
+
+  - key: store_summary
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.storage_webhook_url}}"
+      body:
+        workflow_id: "{{WORKFLOW.id}}"
+        summary: "{{aggregate_results.response.body}}"
+        document_count: 3
+    outputs:
+      - response
+    depends_on:
+      - aggregate_results

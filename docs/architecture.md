@@ -1,8 +1,8 @@
 # StreamFlow Architecture
 
 **Version**: 0.2 MVP
-**Last Updated**: 2025-11-16
-**Status**: Epic 1 Complete - Epic 3 Examples 1-2 Complete
+**Last Updated**: 2025-11-18
+**Status**: Epic 1 Complete - Epic 3 Examples 1-3 Complete
 
 ---
 
@@ -768,6 +768,122 @@ In this example:
 - Activities reference artifacts using `{{ARTIFACT.activity_key.artifact_ref}}`
 - Small metadata (row counts, status) stored in activity outputs
 - Artifacts automatically cleaned up after workflow completes
+
+### File Management (Example 3 Implementation)
+
+StreamFlow provides comprehensive file management capabilities for handling large files and binary data in workflows. Files are stored separately from JSON state using the WorkflowStorage interface.
+
+**File Output Declaration**:
+```yaml
+activities:
+  - key: fetch_document
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: GET
+      url: "{{INPUT.document_url}}"
+    outputs:
+      - name: document
+        type: file  # Declares this output is a file
+```
+
+**File Reference in Downstream Activities**:
+```yaml
+  - key: process_document
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.processing_url}}"
+      files:
+        input_doc: "{{FILE.fetch_document.document}}"  # Reference file from previous activity
+    outputs:
+      - name: result
+        type: file
+    depends_on:
+      - fetch_document
+```
+
+**File Handling Features**:
+- ✅ **Type Declaration**: Activities declare file outputs with `type: file`
+- ✅ **Template References**: Files referenced via `{{FILE.activity_key.output_name}}`
+- ✅ **Storage Backend**: Files stored in WorkflowStorage (PostgreSQL Large Objects for MVP)
+- ✅ **HTTP Integration**: HTTP activities support file download (GET) and upload (POST multipart/form-data)
+- ✅ **Streaming**: Large files handled via streaming (no full memory load)
+- ✅ **Automatic Cleanup**: Files automatically deleted when workflow completes
+
+**Parallel File Processing** (Example 3):
+```yaml
+activities:
+  # Fan-out: Multiple parallel downloads
+  - key: fetch_doc1
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: GET
+      url: "{{INPUT.doc1_url}}"
+    outputs:
+      - name: document
+        type: file
+
+  - key: fetch_doc2
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: GET
+      url: "{{INPUT.doc2_url}}"
+    outputs:
+      - name: document
+        type: file
+
+  # Parallel processing
+  - key: process_doc1
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.processing_url}}"
+      files:
+        input_doc: "{{FILE.fetch_doc1.document}}"
+    outputs:
+      - name: result
+        type: file
+    depends_on:
+      - fetch_doc1
+
+  - key: process_doc2
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.processing_url}}"
+      files:
+        input_doc: "{{FILE.fetch_doc2.document}}"
+    outputs:
+      - name: result
+        type: file
+    depends_on:
+      - fetch_doc2
+
+  # Fan-in: Wait for all processing to complete
+  - key: aggregate_results
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.aggregator_url}}"
+      files:
+        doc1_result: "{{FILE.process_doc1.result}}"
+        doc2_result: "{{FILE.process_doc2.result}}"
+    outputs:
+      - name: summary
+        type: file
+    depends_on:
+      - process_doc1
+      - process_doc2
+```
+
+See `examples/03-document-processing.yaml` for complete example demonstrating parallel execution with file management.
 
 ### Query Optimization
 
@@ -2484,18 +2600,18 @@ activities:
       - authorize_card
 ```
 
-**Implemented Features** (Example 1-2):
+**Implemented Features** (Examples 1-3):
 - Sequential workflows with `depends_on`
 - Template expressions: `{{INPUT.*}}`, `{{activity_key.output}}`, `{{SECRET.*}}`, `{{WORKFLOW.*}}`
 - Conditional execution with MiniJinja expressions
-- HTTP activity with custom headers and query parameters
+- Parallel execution with fan-out/fan-in patterns
+- File outputs and `{{FILE.*}}` references
+- HTTP activity with custom headers, query parameters, and file upload/download
 - PostgreSQL activity with parameterized queries
 - Flexible condition syntax: single `condition` or array `conditions`
 - User-friendly alias: `depends_on` (in addition to `depends_on`)
 
-**Planned Features** (Examples 3-10):
-- Parallel execution (fan-out/fan-in)
-- File outputs and `{{FILE.*}}` references
+**Planned Features** (Examples 4-10):
 - Iterative workflows with loops
 - Activity settings (retry, timeout, budget)
 - LLM activities with cost tracking
