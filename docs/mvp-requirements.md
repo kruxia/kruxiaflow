@@ -631,7 +631,6 @@ streamflow/
   - Budget limits per activity: `budget.limit: 2.00` (USD)
   - Budget action on exceeded: `abort` or `continue`
   - Result caching: `cache: true`, `cache_ttl: 3600`
-  - Non-deterministic flag: `deterministic: false` for LLM calls
 - **Example**:
   ```yaml
   activities:
@@ -850,7 +849,7 @@ streamflow/
 
 **US-5.3: Semantic Caching for Cost Savings**
 - **As** an AI startup engineer
-- **I want** automatic result caching for deterministic LLM calls
+- **I want** automatic result caching for LLM calls
 - **So that** I save 50-80% on LLM costs for repeated queries
 - **Acceptance Criteria**:
   - Activity setting: `cache: true`
@@ -1032,11 +1031,11 @@ streamflow/
 - **I want** LLM results persisted immediately to prevent re-execution on crash
 - **So that** workflows are reliable despite non-deterministic activities
 - **Acceptance Criteria**:
-  - Activity setting: `deterministic: false`
-  - Non-deterministic results persisted immediately to database
+  - Non-deterministic activity results (e.g., LLM calls) persisted immediately to database
   - On workflow replay after crash, use previous result (don't re-execute)
   - Prevents different outputs on retry (e.g., "The cat sat" vs "The dog ran")
   - Crash recovery example documented
+  - **Note**: Implementation approach TBD (consider default behavior vs. explicit setting)
 
 **US-7.3: Multi-Model Routing with Cost Optimization**
 - **As** an AI startup engineer
