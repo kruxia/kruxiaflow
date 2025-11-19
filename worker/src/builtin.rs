@@ -3,8 +3,7 @@
 /// This module provides default registration for all built-in activities.
 ///
 use crate::activities::{
-    EchoActivity, EmbeddingActivity, HttpRequestActivity, LLMPromptActivity,
-    PostgresQueryActivity,
+    EchoActivity, EmbeddingActivity, HttpRequestActivity, LLMPromptActivity, PostgresQueryActivity,
 };
 use crate::registry::ActivityRegistry;
 use std::sync::Arc;

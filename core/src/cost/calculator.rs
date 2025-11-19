@@ -1,5 +1,6 @@
 use anyhow::Result;
 use rust_decimal::Decimal;
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::collections::HashMap;
 
@@ -7,7 +8,7 @@ pub struct CostCalculator {
     pool: PgPool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelPricing {
     pub input_price_per_million: Decimal,
     pub output_price_per_million: Decimal,

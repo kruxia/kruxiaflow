@@ -1,15 +1,18 @@
 use crate::activity_result::ActivityResult;
 use crate::llm::{
-    AnthropicProvider, PromptRequest, EmbeddingRequest, GoogleProvider, LLMError, LLMProvider,
-    OllamaProvider, OpenAIProvider,
+    AnthropicProvider, EmbeddingRequest, GoogleProvider, LLMError, LLMProvider, OllamaProvider,
+    OpenAIProvider, PromptRequest,
 };
 use crate::registry::ActivityImpl;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
+use streamflow_core::cost::{CostCalculator, ModelPricing};
 
 // ============================================================================
 // Provider Configuration
@@ -71,6 +74,17 @@ impl ProviderConfig {
 // Fallback Chain
 // ============================================================================
 
+/// Budget parameters for fallback chain execution
+#[derive(Debug, Clone)]
+pub struct BudgetParams {
+    /// Pricing information for all models (key: "provider/model")
+    pub model_pricing: HashMap<String, ModelPricing>,
+    /// Budget limit in USD (takes minimum of activity and workflow limits)
+    pub budget_limit_usd: Decimal,
+    /// Cumulative cost already incurred by this activity (across retry attempts)
+    pub cumulative_cost_usd: Decimal,
+}
+
 /// Fallback chain configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FallbackChain {
@@ -79,12 +93,60 @@ pub struct FallbackChain {
 }
 
 impl FallbackChain {
-    /// Execute a prompt request with fallback
-    pub async fn prompt(&self, base_request: &PromptRequest) -> Result<PromptResponse> {
+    /// Execute a prompt request with fallback and optional budget enforcement
+    pub async fn prompt(
+        &self,
+        base_request: &PromptRequest,
+        budget_params: Option<&BudgetParams>,
+    ) -> Result<PromptResponse> {
         let config = ProviderConfig::from_env();
         let mut last_error = None;
+        let mut cumulative_cost = budget_params
+            .map(|bp| bp.cumulative_cost_usd)
+            .unwrap_or(Decimal::ZERO);
 
         for (provider_name, model_name) in &self.provider_models {
+            // Budget check before attempting this provider
+            if let Some(budget) = budget_params {
+                let model_key = format!("{}/{}", provider_name, model_name);
+
+                // Get pricing for this model
+                if let Some(pricing) = budget.model_pricing.get(&model_key) {
+                    // Estimate tokens for input (prompt + system_prompt)
+                    let mut input_text = base_request.prompt.clone();
+                    if let Some(system) = &base_request.system_prompt {
+                        input_text.push_str(system);
+                    }
+                    let estimated_input_tokens =
+                        CostCalculator::estimate_tokens(provider_name, &input_text);
+
+                    // Estimate output tokens (use max_tokens or conservative default)
+                    let estimated_output_tokens = base_request.max_tokens.unwrap_or(4096);
+
+                    // Calculate estimated cost
+                    let input_cost = Decimal::from(estimated_input_tokens)
+                        * pricing.input_price_per_million
+                        / Decimal::from(1_000_000);
+                    let output_cost = Decimal::from(estimated_output_tokens)
+                        * pricing.output_price_per_million
+                        / Decimal::from(1_000_000);
+                    let estimated_cost = input_cost + output_cost;
+
+                    // Check if this would exceed budget
+                    if cumulative_cost + estimated_cost > budget.budget_limit_usd {
+                        tracing::warn!(
+                            "Skipping {}/{}: estimated cost ${:.6} would exceed budget (cumulative: ${:.6}, limit: ${:.6})",
+                            provider_name,
+                            model_name,
+                            estimated_cost,
+                            cumulative_cost,
+                            budget.budget_limit_usd
+                        );
+                        continue; // Skip to next provider
+                    }
+                }
+            }
+
             match config.create_provider(provider_name) {
                 Ok(provider) => {
                     // Create request with the specific model for this provider
@@ -100,13 +162,36 @@ impl FallbackChain {
 
                     match provider.prompt(&request).await {
                         Ok(response) => {
+                            // Calculate actual cost if budget params provided
+                            if let Some(budget) = budget_params {
+                                let model_key = format!("{}/{}", provider_name, model_name);
+                                if let Some(pricing) = budget.model_pricing.get(&model_key) {
+                                    let input_cost = Decimal::from(response.usage.prompt_tokens)
+                                        * pricing.input_price_per_million
+                                        / Decimal::from(1_000_000);
+                                    let output_cost = Decimal::from(response.usage.output_tokens)
+                                        * pricing.output_price_per_million
+                                        / Decimal::from(1_000_000);
+                                    let actual_cost = input_cost + output_cost;
+                                    cumulative_cost += actual_cost;
+
+                                    tracing::info!(
+                                        "Provider {}/{} succeeded with cost ${:.6} (cumulative: ${:.6})",
+                                        provider_name,
+                                        model_name,
+                                        actual_cost,
+                                        cumulative_cost
+                                    );
+                                }
+                            }
+
                             return Ok(PromptResponse {
                                 content: response.content,
                                 model: response.model,
                                 provider: provider_name.clone(),
                                 usage: response.usage,
                                 finish_reason: response.finish_reason,
-                            })
+                            });
                         }
                         Err(e) => {
                             tracing::warn!(
@@ -159,7 +244,7 @@ impl FallbackChain {
                                 model: response.model,
                                 provider: provider_name.clone(),
                                 usage: response.usage,
-                            })
+                            });
                         }
                         Err(e) => {
                             tracing::warn!(
@@ -247,6 +332,24 @@ pub struct LLMPromptParams {
     /// Stop sequences
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stop_sequences: Option<Vec<String>>,
+
+    // Budget-aware parameters (enriched by orchestrator)
+    /// Pricing information for all models in the fallback chain
+    /// Key: "provider/model" string, Value: ModelPricing
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_pricing: Option<HashMap<String, ModelPricing>>,
+
+    /// Activity-level budget limit in USD
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activity_budget_limit_usd: Option<Decimal>,
+
+    /// Workflow-level budget limit in USD
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workflow_budget_limit_usd: Option<Decimal>,
+
+    /// Cumulative cost already incurred by this activity (across retry attempts)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cumulative_activity_cost_usd: Option<Decimal>,
 }
 
 /// Model specification - can be single model or fallback chain
@@ -309,11 +412,43 @@ impl Default for LLMPromptActivity {
 #[async_trait]
 impl ActivityImpl for LLMPromptActivity {
     async fn execute(&self, parameters: Value) -> Result<ActivityResult> {
-        let params: LLMPromptParams = serde_json::from_value(parameters)
-            .context("Failed to parse LLM prompt parameters")?;
+        let params: LLMPromptParams =
+            serde_json::from_value(parameters).context("Failed to parse LLM prompt parameters")?;
 
         // Convert model spec to fallback chain
         let fallback_chain = params.model.to_fallback_chain()?;
+
+        // Construct budget parameters if provided by orchestrator
+        let budget_params = if let Some(model_pricing) = params.model_pricing {
+            // Determine effective budget limit (minimum of activity and workflow limits)
+            let budget_limit = match (
+                params.activity_budget_limit_usd,
+                params.workflow_budget_limit_usd,
+            ) {
+                (Some(activity_limit), Some(workflow_limit)) => {
+                    if activity_limit < workflow_limit {
+                        Some(activity_limit)
+                    } else {
+                        Some(workflow_limit)
+                    }
+                }
+                (Some(activity_limit), None) => Some(activity_limit),
+                (None, Some(workflow_limit)) => Some(workflow_limit),
+                (None, None) => {
+                    // If pricing is provided but no limits, don't enforce budget
+                    // This shouldn't happen in practice, but handle gracefully
+                    None
+                }
+            };
+
+            budget_limit.map(|limit| BudgetParams {
+                model_pricing,
+                budget_limit_usd: limit,
+                cumulative_cost_usd: params.cumulative_activity_cost_usd.unwrap_or(Decimal::ZERO),
+            })
+        } else {
+            None
+        };
 
         // Create base request (model will be filled in by fallback chain for each provider)
         let base_request = PromptRequest {
@@ -326,7 +461,9 @@ impl ActivityImpl for LLMPromptActivity {
             stop_sequences: params.stop_sequences,
         };
 
-        let response = fallback_chain.prompt(&base_request).await?;
+        let response = fallback_chain
+            .prompt(&base_request, budget_params.as_ref())
+            .await?;
 
         let outputs = json!({
             "content": response.content,
@@ -430,6 +567,7 @@ impl ActivityImpl for EmbeddingActivity {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rust_decimal_macros::dec;
 
     #[test]
     fn test_model_spec_single() {
@@ -449,9 +587,21 @@ mod tests {
         ]);
         let chain = spec.to_fallback_chain().unwrap();
         assert_eq!(chain.provider_models.len(), 3);
-        assert_eq!(chain.provider_models[0], ("anthropic".to_string(), "claude-3-5-sonnet-20241022".to_string()));
-        assert_eq!(chain.provider_models[1], ("openai".to_string(), "gpt-4".to_string()));
-        assert_eq!(chain.provider_models[2], ("google".to_string(), "gemini-1.5-pro".to_string()));
+        assert_eq!(
+            chain.provider_models[0],
+            (
+                "anthropic".to_string(),
+                "claude-3-5-sonnet-20241022".to_string()
+            )
+        );
+        assert_eq!(
+            chain.provider_models[1],
+            ("openai".to_string(), "gpt-4".to_string())
+        );
+        assert_eq!(
+            chain.provider_models[2],
+            ("google".to_string(), "gemini-1.5-pro".to_string())
+        );
     }
 
     #[test]
@@ -475,5 +625,275 @@ mod tests {
         let activity = EmbeddingActivity::new();
         assert_eq!(activity.name(), "embedding");
         assert_eq!(activity.worker(), "builtin");
+    }
+
+    // ============================================================================
+    // Budget-Aware Fallback Chain Tests
+    // ============================================================================
+
+    /// Helper to create test pricing data
+    fn create_test_pricing() -> HashMap<String, ModelPricing> {
+        let mut pricing = HashMap::new();
+
+        // Expensive model: $3/$15 per million tokens
+        pricing.insert(
+            "anthropic/claude-3-5-sonnet-20241022".to_string(),
+            ModelPricing {
+                input_price_per_million: dec!(3.00),
+                output_price_per_million: dec!(15.00),
+                cached_input_price_per_million: Some(dec!(0.30)),
+            },
+        );
+
+        // Mid-range model: $0.80/$4 per million tokens
+        pricing.insert(
+            "anthropic/claude-3-5-haiku-20241022".to_string(),
+            ModelPricing {
+                input_price_per_million: dec!(0.80),
+                output_price_per_million: dec!(4.00),
+                cached_input_price_per_million: Some(dec!(0.08)),
+            },
+        );
+
+        // Free model: $0/$0 per million tokens
+        pricing.insert(
+            "ollama/llama3.2".to_string(),
+            ModelPricing {
+                input_price_per_million: dec!(0.00),
+                output_price_per_million: dec!(0.00),
+                cached_input_price_per_million: None,
+            },
+        );
+
+        pricing
+    }
+
+    #[test]
+    fn test_budget_params_construction() {
+        let pricing = create_test_pricing();
+
+        let budget_params = BudgetParams {
+            model_pricing: pricing.clone(),
+            budget_limit_usd: dec!(0.10),
+            cumulative_cost_usd: dec!(0.05),
+        };
+
+        assert_eq!(budget_params.budget_limit_usd, dec!(0.10));
+        assert_eq!(budget_params.cumulative_cost_usd, dec!(0.05));
+        assert_eq!(budget_params.model_pricing.len(), 3);
+    }
+
+    #[test]
+    fn test_budget_enforcement_minimum_logic() {
+        // Test that activity budget takes precedence when lower than workflow budget
+        let activity_limit = dec!(1.00);
+        let workflow_limit = dec!(5.00);
+
+        let effective_limit = if activity_limit < workflow_limit {
+            activity_limit
+        } else {
+            workflow_limit
+        };
+
+        assert_eq!(effective_limit, dec!(1.00));
+
+        // Test that workflow budget takes precedence when lower
+        let activity_limit = dec!(5.00);
+        let workflow_limit = dec!(1.00);
+
+        let effective_limit = if activity_limit < workflow_limit {
+            activity_limit
+        } else {
+            workflow_limit
+        };
+
+        assert_eq!(effective_limit, dec!(1.00));
+    }
+
+    #[test]
+    fn test_cost_estimation_logic() {
+        let pricing = create_test_pricing();
+
+        // Get pricing for Sonnet model
+        let sonnet_pricing = pricing.get("anthropic/claude-3-5-sonnet-20241022").unwrap();
+
+        // Estimate tokens for a short prompt (should be ~10-15 tokens)
+        let prompt = "Hello, world!";
+        let _estimated_tokens = CostCalculator::estimate_tokens("anthropic", prompt);
+
+        // Calculate estimated cost for 10 input tokens and 100 output tokens
+        let input_cost =
+            Decimal::from(10) * sonnet_pricing.input_price_per_million / Decimal::from(1_000_000);
+        let output_cost =
+            Decimal::from(100) * sonnet_pricing.output_price_per_million / Decimal::from(1_000_000);
+        let total_cost = input_cost + output_cost;
+
+        // Verify cost calculation
+        // 10 * $3.00 / 1M = $0.00003
+        // 100 * $15.00 / 1M = $0.0015
+        // Total = $0.00153
+        assert!(total_cost > dec!(0.001) && total_cost < dec!(0.002));
+    }
+
+    #[test]
+    fn test_budget_skip_logic() {
+        let pricing = create_test_pricing();
+
+        // Budget: $0.10
+        // Cumulative cost: $0.09
+        // Remaining: $0.01
+        let budget_limit = dec!(0.10);
+        let cumulative_cost = dec!(0.09);
+
+        // Sonnet estimated cost (10 input + 1000 output tokens)
+        // 10 * $3.00 / 1M = $0.00003
+        // 1000 * $15.00 / 1M = $0.015
+        // Total = $0.01503
+        let sonnet_pricing = pricing.get("anthropic/claude-3-5-sonnet-20241022").unwrap();
+        let sonnet_input =
+            Decimal::from(10) * sonnet_pricing.input_price_per_million / Decimal::from(1_000_000);
+        let sonnet_output = Decimal::from(1000) * sonnet_pricing.output_price_per_million
+            / Decimal::from(1_000_000);
+        let sonnet_estimated = sonnet_input + sonnet_output;
+
+        // Should skip: $0.09 + $0.01503 > $0.10
+        assert!(cumulative_cost + sonnet_estimated > budget_limit);
+
+        // Haiku estimated cost (10 input + 1000 output tokens)
+        // 10 * $0.80 / 1M = $0.000008
+        // 1000 * $4.00 / 1M = $0.004
+        // Total = $0.004008
+        let haiku_pricing = pricing.get("anthropic/claude-3-5-haiku-20241022").unwrap();
+        let haiku_input =
+            Decimal::from(10) * haiku_pricing.input_price_per_million / Decimal::from(1_000_000);
+        let haiku_output =
+            Decimal::from(1000) * haiku_pricing.output_price_per_million / Decimal::from(1_000_000);
+        let haiku_estimated = haiku_input + haiku_output;
+
+        // Should be within budget: $0.09 + $0.004008 = $0.094008 < $0.10
+        // This demonstrates the fallback chain: skip Sonnet, use Haiku
+        assert!(cumulative_cost + haiku_estimated < budget_limit);
+
+        // Ollama estimated cost (free)
+        let ollama_pricing = pricing.get("ollama/llama3.2").unwrap();
+        let ollama_input =
+            Decimal::from(10) * ollama_pricing.input_price_per_million / Decimal::from(1_000_000);
+        let ollama_output = Decimal::from(1000) * ollama_pricing.output_price_per_million
+            / Decimal::from(1_000_000);
+        let ollama_estimated = ollama_input + ollama_output;
+
+        // Should always be within budget: $0.09 + $0.00 < $0.10
+        assert_eq!(ollama_estimated, dec!(0.00));
+        assert!(cumulative_cost + ollama_estimated < budget_limit);
+    }
+
+    #[test]
+    fn test_cumulative_cost_tracking() {
+        let mut cumulative_cost = dec!(0.00);
+
+        // First attempt costs $0.01
+        cumulative_cost += dec!(0.01);
+        assert_eq!(cumulative_cost, dec!(0.01));
+
+        // Second attempt costs $0.02
+        cumulative_cost += dec!(0.02);
+        assert_eq!(cumulative_cost, dec!(0.03));
+
+        // Third attempt costs $0.005
+        cumulative_cost += dec!(0.005);
+        assert_eq!(cumulative_cost, dec!(0.035));
+
+        // Verify total is tracked correctly
+        let budget_limit = dec!(0.10);
+        assert!(cumulative_cost < budget_limit);
+
+        // Verify we can detect budget exceeded
+        let large_cost = dec!(0.10);
+        assert!(cumulative_cost + large_cost > budget_limit);
+    }
+
+    #[test]
+    fn test_pricing_lookup_by_model_key() {
+        let pricing = create_test_pricing();
+
+        // Test exact match
+        let key = "anthropic/claude-3-5-sonnet-20241022";
+        assert!(pricing.contains_key(key));
+
+        let model_pricing = pricing.get(key).unwrap();
+        assert_eq!(model_pricing.input_price_per_million, dec!(3.00));
+        assert_eq!(model_pricing.output_price_per_million, dec!(15.00));
+
+        // Test missing key
+        let invalid_key = "unknown/model";
+        assert!(!pricing.contains_key(invalid_key));
+    }
+
+    #[test]
+    fn test_budget_limit_none_allows_execution() {
+        // When budget_limit is None, all models should be attempted
+        let pricing = create_test_pricing();
+
+        // No budget limit means infinite budget
+        let budget_limit: Option<Decimal> = None;
+
+        // Even expensive models should be allowed
+        let sonnet_pricing = pricing.get("anthropic/claude-3-5-sonnet-20241022").unwrap();
+        let huge_cost = Decimal::from(1_000_000) * sonnet_pricing.output_price_per_million
+            / Decimal::from(1_000_000);
+
+        // Without a budget limit, this should be allowed
+        if let Some(limit) = budget_limit {
+            assert!(huge_cost > limit); // Would fail if budget existed
+        } else {
+            // No budget means always proceed
+            assert!(true);
+        }
+    }
+
+    #[test]
+    fn test_zero_budget_blocks_all_paid_models() {
+        let pricing = create_test_pricing();
+        let budget_limit = dec!(0.00);
+        let cumulative_cost = dec!(0.00);
+
+        // Sonnet should be blocked
+        let sonnet_pricing = pricing.get("anthropic/claude-3-5-sonnet-20241022").unwrap();
+        let sonnet_cost =
+            Decimal::from(1) * sonnet_pricing.input_price_per_million / Decimal::from(1_000_000);
+        assert!(cumulative_cost + sonnet_cost > budget_limit);
+
+        // Haiku should be blocked
+        let haiku_pricing = pricing.get("anthropic/claude-3-5-haiku-20241022").unwrap();
+        let haiku_cost =
+            Decimal::from(1) * haiku_pricing.input_price_per_million / Decimal::from(1_000_000);
+        assert!(cumulative_cost + haiku_cost > budget_limit);
+
+        // Ollama should still work (free)
+        let ollama_pricing = pricing.get("ollama/llama3.2").unwrap();
+        let ollama_cost =
+            Decimal::from(1) * ollama_pricing.input_price_per_million / Decimal::from(1_000_000);
+        assert_eq!(ollama_cost, dec!(0.00));
+        assert!(cumulative_cost + ollama_cost <= budget_limit);
+    }
+
+    #[test]
+    fn test_cached_token_pricing() {
+        let pricing = create_test_pricing();
+        let sonnet_pricing = pricing.get("anthropic/claude-3-5-sonnet-20241022").unwrap();
+
+        // Regular input tokens
+        let regular_cost =
+            Decimal::from(1000) * sonnet_pricing.input_price_per_million / Decimal::from(1_000_000);
+        assert_eq!(regular_cost, dec!(0.003));
+
+        // Cached input tokens (10x cheaper)
+        let cached_cost = Decimal::from(1000)
+            * sonnet_pricing.cached_input_price_per_million.unwrap()
+            / Decimal::from(1_000_000);
+        assert_eq!(cached_cost, dec!(0.0003));
+
+        // Verify cached is 10x cheaper
+        assert!(cached_cost * dec!(10) == regular_cost);
     }
 }

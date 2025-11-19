@@ -110,4 +110,3 @@ pub enum LLMError {
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
 }
-

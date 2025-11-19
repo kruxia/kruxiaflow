@@ -292,7 +292,8 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let provider = AnthropicProvider::with_base_url("invalid-key".to_string(), mock_server.uri());
+        let provider =
+            AnthropicProvider::with_base_url("invalid-key".to_string(), mock_server.uri());
 
         let request = PromptRequest {
             model: "claude-3-sonnet-20240229".to_string(),
