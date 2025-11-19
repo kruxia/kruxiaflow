@@ -1,0 +1,83 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH search_criteria AS (\n            SELECT\n                UNNEST($1::text[]) as provider_filter,\n                UNNEST($2::text[]) as model_filter\n        )\n        SELECT DISTINCT\n            id, provider, name, display_name,\n            input_price_per_million, output_price_per_million,\n            cached_input_price_per_million,\n            supports_completion, supports_embeddings,\n            context_window, max_output_tokens\n        FROM llm_models\n        WHERE EXISTS (\n            SELECT 1 FROM search_criteria c\n            WHERE (c.provider_filter IS NULL OR provider = c.provider_filter)\n              AND (c.model_filter IS NULL OR name = c.model_filter)\n        )\n        ORDER BY provider, name\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "provider",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "input_price_per_million",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 5,
+        "name": "output_price_per_million",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 6,
+        "name": "cached_input_price_per_million",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 7,
+        "name": "supports_completion",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "supports_embeddings",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "context_window",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "max_output_tokens",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "c086c3faee01f4184041a3b7282f5cc85307f0c0a76b665c42b1aee2fe9a732a"
+}

@@ -27,7 +27,7 @@ bytes = "1.8"
 futures = "0.3"
 
 # Database
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json", "migrate"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json", "migrate", "rust_decimal"] }
 
 # UUID and time
 uuid = { version = "1.10", features = ["v7", "serde"] }

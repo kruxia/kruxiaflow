@@ -1,4 +1,5 @@
 pub mod activity;
+pub mod cost;
 pub mod events;
 pub mod orchestrator;
 pub mod queue;
@@ -8,6 +9,11 @@ pub mod workflow;
 // Re-export specific items to avoid ambiguity
 pub use activity::{
     ActivityWorkerError, ActivityWorkerResult, ActivityWorkerService, PendingActivityRecord,
+};
+
+pub use cost::{
+    ActivityCostRecord, BudgetCheckResult, BudgetStatus, CostCalculator, CostError, CostTracker,
+    ModelPricing,
 };
 
 pub use events::{

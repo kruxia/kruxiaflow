@@ -2,7 +2,10 @@
 ///
 /// This module provides default registration for all built-in activities.
 ///
-use crate::activities::{EchoActivity, HttpRequestActivity, PostgresQueryActivity};
+use crate::activities::{
+    EchoActivity, EmbeddingActivity, HttpRequestActivity, LLMPromptActivity,
+    PostgresQueryActivity,
+};
 use crate::registry::ActivityRegistry;
 use std::sync::Arc;
 
@@ -12,6 +15,8 @@ use std::sync::Arc;
 /// - `builtin.echo` - Echo activity (for testing)
 /// - `builtin.http_request` - HTTP request activity
 /// - `builtin.postgres_query` - PostgreSQL query activity
+/// - `builtin.llm_prompt` - LLM prompt completion activity
+/// - `builtin.embedding` - LLM embedding generation activity
 ///
 /// # Example
 ///
@@ -33,8 +38,11 @@ pub fn register_builtin_activities() -> ActivityRegistry {
     // Register PostgreSQL query activity
     registry.register(Arc::new(PostgresQueryActivity::new()));
 
+    // Register LLM activities
+    registry.register(Arc::new(LLMPromptActivity::new()));
+    registry.register(Arc::new(EmbeddingActivity::new()));
+
     // Future built-in activities will be registered here:
-    // registry.register(Arc::new(LlmPromptActivity::new()));
     // registry.register(Arc::new(S3OperationActivity::new()));
 
     registry
@@ -53,8 +61,10 @@ mod tests {
         assert!(activity_types.contains(&"builtin.echo".to_string()));
         assert!(activity_types.contains(&"builtin.http_request".to_string()));
         assert!(activity_types.contains(&"builtin.postgres_query".to_string()));
+        assert!(activity_types.contains(&"builtin.llm_prompt".to_string()));
+        assert!(activity_types.contains(&"builtin.embedding".to_string()));
 
-        // Should have exactly 3 activities
-        assert_eq!(activity_types.len(), 3);
+        // Should have exactly 5 activities
+        assert_eq!(activity_types.len(), 5);
     }
 }

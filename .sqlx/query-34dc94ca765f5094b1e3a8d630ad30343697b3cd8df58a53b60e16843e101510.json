@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT name, display_name, api_endpoint,\n               supports_completion, supports_embeddings, supports_streaming,\n               requires_api_key\n        FROM llm_providers\n        ORDER BY name\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "api_endpoint",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "supports_completion",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "supports_embeddings",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "supports_streaming",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "requires_api_key",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "34dc94ca765f5094b1e3a8d630ad30343697b3cd8df58a53b60e16843e101510"
+}

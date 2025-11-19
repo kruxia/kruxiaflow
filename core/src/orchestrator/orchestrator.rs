@@ -8,11 +8,13 @@ use super::{
         load_materialized_state, load_workflow_definition, save_materialized_state,
     },
 };
+use crate::cost::{ActivityCostRecord, CostCalculator, CostTracker};
 use crate::events::{
     EventSource, NewWorkflowEvent, WorkflowEvent, WorkflowEventType, WorkflowStatus,
 };
 use crate::queue::{Activity, ActivityQueue};
 use crate::workflow::template::{TemplateContext, resolve_template_value};
+use crate::workflow::BudgetAction;
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -452,6 +454,39 @@ pub async fn process_workflow_event(
         event.workflow_id
     );
 
+    // 3.5. Record costs for completed LLM activities
+    if event.event_type == WorkflowEventType::ActivityCompleted {
+        let cost_start = std::time::Instant::now();
+        if let Some(activity_key) = &event.activity_key {
+            // Get activity definition to check if it's an LLM activity
+            if let Some(activity_def) = definition.activities.iter().find(|a| &a.key == activity_key) {
+                // Check if this is an LLM activity (llm_prompt or embedding)
+                if activity_def.activity_name == "llm_prompt" || activity_def.activity_name == "embedding" {
+                    if let Err(e) = record_llm_activity_cost(
+                        &mut tx,
+                        &event,
+                        &state,
+                        &activity_def,
+                        config,
+                    ).await {
+                        tracing::error!(
+                            workflow_id = %event.workflow_id,
+                            activity_key = %activity_key,
+                            error = %e,
+                            "Failed to record LLM activity cost"
+                        );
+                        // Don't fail the workflow, just log the error
+                    }
+                }
+            }
+        }
+        tracing::trace!(
+            "Cost recording completed in {:?} for workflow {}",
+            cost_start.elapsed(),
+            event.workflow_id
+        );
+    }
+
     // 4. Find ready activities (using updated state)
     let eval_start = std::time::Instant::now();
     let eval_span = profile_span!(
@@ -698,6 +733,139 @@ pub async fn process_workflow_event(
         event_start.elapsed(),
         event.workflow_id,
         event.event_type
+    );
+
+    Ok(())
+}
+
+/// Record LLM activity cost after completion
+async fn record_llm_activity_cost(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    event: &WorkflowEvent,
+    state: &super::workflow_state::WorkflowState,
+    activity_def: &crate::events::ActivityDefinition,
+    config: &OrchestratorConfig,
+) -> Result<()> {
+    let activity_key = event.activity_key.as_ref().ok_or_else(|| {
+        super::OrchestratorError::MissingActivityKey
+    })?;
+
+    // Extract usage information from activity outputs
+    let usage = event.payload
+        .get("outputs")
+        .and_then(|o| o.get("result"))
+        .and_then(|r| r.get("usage"));
+
+    if usage.is_none() {
+        tracing::debug!(
+            "No usage information found for LLM activity {}",
+            activity_key
+        );
+        return Ok(());
+    }
+
+    let usage = usage.unwrap();
+
+    // Extract token counts
+    let prompt_tokens = usage.get("prompt_tokens").and_then(|v| v.as_u64()).map(|v| v as u32);
+    let output_tokens = usage.get("output_tokens").and_then(|v| v.as_u64()).map(|v| v as u32);
+    let cached_tokens = usage.get("cached_tokens").and_then(|v| v.as_u64()).map(|v| v as u32);
+
+    // Extract provider and model
+    let provider = event.payload
+        .get("outputs")
+        .and_then(|o| o.get("result"))
+        .and_then(|r| r.get("provider"))
+        .and_then(|p| p.as_str())
+        .ok_or_else(|| super::OrchestratorError::InvalidEvent(
+            "Missing provider in activity output".to_string()
+        ))?;
+
+    let model = event.payload
+        .get("outputs")
+        .and_then(|o| o.get("result"))
+        .and_then(|r| r.get("model"))
+        .and_then(|m| m.as_str())
+        .ok_or_else(|| super::OrchestratorError::InvalidEvent(
+            "Missing model in activity output".to_string()
+        ))?;
+
+    // Calculate cost using CostCalculator
+    let cost_calculator = CostCalculator::new(config.pool.clone());
+    let cost = cost_calculator
+        .calculate_llm_cost(
+            provider,
+            model,
+            prompt_tokens.unwrap_or(0),
+            output_tokens.unwrap_or(0),
+            cached_tokens,
+        )
+        .await
+        .map_err(|e| super::OrchestratorError::CostTrackingFailed(e.to_string()))?;
+
+    // Get activity attempt number
+    let attempt = state
+        .activities
+        .get(activity_key)
+        .map(|a| a.attempt)
+        .unwrap_or(1);
+
+    // Get budget limits from activity settings and workflow
+    let activity_limit = activity_def
+        .settings
+        .as_ref()
+        .and_then(|s| s.budget.as_ref())
+        .map(|b| b.limit);
+
+    // Get workflow budget limit from database
+    let workflow_limit = sqlx::query_scalar!(
+        "SELECT budget_limit_usd FROM workflows WHERE id = $1",
+        event.workflow_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+
+    // Get budget action from activity settings
+    let budget_action = activity_def
+        .settings
+        .as_ref()
+        .and_then(|s| s.budget.as_ref())
+        .map(|b| match b.action {
+            BudgetAction::Abort => "abort",
+            BudgetAction::Continue => "continue",
+        });
+
+    // Record the cost
+    let cost_tracker = CostTracker::new(config.pool.clone());
+    let record = ActivityCostRecord {
+        workflow_id: event.workflow_id,
+        activity_key: activity_key.clone(),
+        attempt,
+        cost_usd: cost,
+        estimated_cost_usd: None, // We don't have estimated cost at completion time
+        prompt_tokens,
+        output_tokens,
+        total_tokens: Some(prompt_tokens.unwrap_or(0) + output_tokens.unwrap_or(0)),
+        cached_tokens,
+        provider: provider.to_string(),
+        model: model.to_string(),
+        activity_budget_limit_usd: activity_limit,
+        workflow_budget_limit_usd: workflow_limit,
+        budget_exceeded: false, // Always false for completed activities
+        budget_action: budget_action.map(String::from),
+    };
+
+    cost_tracker.record_cost(record).await.map_err(|e| {
+        super::OrchestratorError::CostTrackingFailed(e.to_string())
+    })?;
+
+    tracing::info!(
+        workflow_id = %event.workflow_id,
+        activity_key = %activity_key,
+        cost_usd = %cost,
+        provider = %provider,
+        model = %model,
+        "Recorded LLM activity cost"
     );
 
     Ok(())

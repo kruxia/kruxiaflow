@@ -1,4 +1,9 @@
 use crate::error::{ApiError, ApiErrorResponse, ErrorCode};
+use crate::handlers::cost::{ActivityCostDetail, CostAnalytics, WorkflowCostSummary};
+use crate::handlers::llm_catalog::{
+    ModelResponse, ModelSearchCriterion, ModelSearchRequest, ModelSearchResponse,
+    ProviderResponse,
+};
 use crate::handlers::oauth::{GrantType, TokenRequest, TokenResponse};
 use crate::handlers::workers::{
     ActivityError, ActivityHeartbeatRequest, ActivityHeartbeatResponse, CompleteActivityRequest,
@@ -60,6 +65,15 @@ use utoipa::OpenApi;
         crate::handlers::workers::heartbeat_activity,
         crate::handlers::workers::complete_activity,
         crate::handlers::workers::fail_activity,
+
+        // Cost Tracking APIs
+        crate::handlers::cost::get_workflow_cost,
+        crate::handlers::cost::get_workflow_cost_history,
+        crate::handlers::cost::get_cost_analytics,
+
+        // LLM Catalog APIs
+        crate::handlers::llm_catalog::list_providers,
+        crate::handlers::llm_catalog::search_models,
     ),
     components(
         schemas(
@@ -100,6 +114,18 @@ use utoipa::OpenApi;
             FailActivityResponse,
             ActivityError,
 
+            // Cost Tracking schemas
+            WorkflowCostSummary,
+            ActivityCostDetail,
+            CostAnalytics,
+
+            // LLM Catalog schemas
+            ProviderResponse,
+            ModelResponse,
+            ModelSearchCriterion,
+            ModelSearchRequest,
+            ModelSearchResponse,
+
             // Error response schemas
             ApiErrorResponse,
             ApiError,
@@ -113,6 +139,8 @@ use utoipa::OpenApi;
         (name = "Workflow Definitions", description = "Workflow definition deployment and management"),
         (name = "Workflows", description = "Workflow submission, query, and management"),
         (name = "Workers", description = "Worker activity polling and execution"),
+        (name = "Cost Tracking", description = "LLM and activity cost tracking, budget enforcement, and analytics"),
+        (name = "LLM Catalog", description = "LLM provider and model discovery with pricing information"),
     ),
     modifiers(&SecurityAddon)
 )]

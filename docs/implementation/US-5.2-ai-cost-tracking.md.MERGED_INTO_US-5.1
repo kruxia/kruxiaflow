@@ -660,7 +660,7 @@ impl crate::registry::ActivityImpl for LLMPromptActivity {
         }
 
         // 3. Execute LLM call (existing logic)
-        let request = CompletionRequest {
+        let request = PromptRequest {
             // ... existing request building ...
         };
 
