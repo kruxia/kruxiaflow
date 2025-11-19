@@ -134,7 +134,7 @@ erDiagram
         int attempt
         decimal cost_usd
         int prompt_tokens
-        int completion_tokens
+        int output_tokens
         int total_tokens
         string provider
         string model
@@ -150,6 +150,91 @@ erDiagram
         timestamp updated_at
     }
 ```
+
+---
+
+## Architectural Decision: Where Should Cost Calculation Happen?
+
+### Decision: Orchestrator Calculates Costs (After Activity Execution)
+
+**Approach**: Workers return token counts; orchestrator queries pricing database and calculates costs.
+
+### Rationale
+
+**Primary Benefits**:
+1. **Dynamic pricing updates** - Update prices in database without redeploying workers
+2. **Single source of truth** - All cost calculations use same pricing data from database
+3. **Worker simplicity** - Workers are stateless, just execute tasks and return token counts
+4. **Core business logic** - Pricing and budget enforcement are key orchestrator value propositions
+5. **Future extensibility** - Applies to any usage-based activity (not just LLMs):
+   - Cloud APIs (AWS, GCP pricing)
+   - External services (Twilio, SendGrid)
+   - Database query costs
+   - Compute resource usage
+
+**Additional Benefits**:
+- Per-tenant pricing (different customers pay different rates)
+- Historical pricing tracking (audit trail of price changes)
+- Promotional pricing, volume discounts
+- Consistent pricing across all workers (no cache staleness)
+
+### Alternatives Considered
+
+#### Alternative 1: Workers Calculate Costs
+
+**Rejected because**:
+- Requires workers to access pricing data somehow:
+  - **Hardcoded**: Requires recompiling/redeploying for price updates
+  - **Workers query database**: Breaks stateless worker architecture
+  - **Workers call orchestrator API**: HTTP overhead, doesn't solve the problem
+  - **Workers cache pricing**: Cache invalidation complexity, stale data risk
+- Deployment coupling (price changes require worker updates)
+- Inconsistency risk (different workers might have different pricing)
+- Per-tenant pricing impossible (workers don't know workflow context)
+
+#### Alternative 2: Hybrid (Workers Cache Pricing)
+
+**Deferred to post-MVP**:
+- Only implement if profiling shows pricing lookup is a bottleneck
+- Would add worker caching with 24-hour TTL and fallback to orchestrator
+- Unlikely to be needed (pricing lookups are fast, prices change infrequently)
+
+### Performance Considerations
+
+**Database query cost is negligible**:
+- Orchestrator already queries database for activity execution status
+- Pricing lookup adds one JOIN query: `llm_models JOIN llm_providers`
+- Can batch-fetch pricing for multiple activities: `CostCalculator::batch_get_pricing()`
+- Pricing table is small (~100 models), highly cacheable by PostgreSQL
+
+**Pricing updates are infrequent**:
+- OpenAI/Anthropic change prices every few months
+- Not worth optimizing for real-time updates
+
+### Future Extensions (Post-MVP)
+
+This architecture supports cost tracking for **any usage-based activity**:
+
+```rust
+// Future: Cloud API cost tracking
+pub trait CostCalculator {
+    async fn calculate_cost(
+        &self,
+        activity_type: &str,  // "llm", "aws_api", "twilio_sms", etc.
+        provider: &str,
+        resource: &str,       // model, API endpoint, service type
+        usage_metrics: &HashMap<String, f64>,  // tokens, API calls, SMS count, etc.
+    ) -> Result<Decimal>;
+}
+```
+
+**Example use cases**:
+- AWS API calls (S3 requests, Lambda invocations)
+- Twilio SMS/voice (per-message pricing)
+- Database queries (compute credits)
+- External API quotas (rate limits + costs)
+
+This makes **cost tracking a first-class orchestrator feature**, not just an LLM add-on.
 
 ---
 
@@ -173,7 +258,7 @@ CREATE TABLE activity_costs (
 
     -- Token usage
     prompt_tokens INTEGER,
-    completion_tokens INTEGER,
+    output_tokens INTEGER,
     total_tokens INTEGER,
 
     -- Provider details
@@ -348,7 +433,7 @@ pub struct ActivityCostRecord {
     pub cost_usd: Decimal,
     pub estimated_cost_usd: Option<Decimal>,
     pub prompt_tokens: Option<u32>,
-    pub completion_tokens: Option<u32>,
+    pub output_tokens: Option<u32>,
     pub total_tokens: Option<u32>,
     pub provider: String,
     pub model: String,
@@ -379,7 +464,7 @@ impl CostTracker {
             r#"
             INSERT INTO activity_costs
                 (workflow_id, activity_key, attempt, cost_usd, estimated_cost_usd,
-                 prompt_tokens, completion_tokens, total_tokens,
+                 prompt_tokens, output_tokens, total_tokens,
                  provider, model, activity_budget_limit_usd, workflow_budget_limit_usd,
                  budget_exceeded, budget_action)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
@@ -391,7 +476,7 @@ impl CostTracker {
         .bind(record.cost_usd)
         .bind(record.estimated_cost_usd)
         .bind(record.prompt_tokens.map(|t| t as i32))
-        .bind(record.completion_tokens.map(|t| t as i32))
+        .bind(record.output_tokens.map(|t| t as i32))
         .bind(record.total_tokens.map(|t| t as i32))
         .bind(&record.provider)
         .bind(&record.model)
@@ -481,7 +566,7 @@ impl CostTracker {
         let records = sqlx::query_as::<_, ActivityCostRecordRow>(
             r#"
             SELECT workflow_id, activity_key, attempt, cost_usd, estimated_cost_usd,
-                   prompt_tokens, completion_tokens, total_tokens,
+                   prompt_tokens, output_tokens, total_tokens,
                    provider, model, activity_budget_limit_usd, workflow_budget_limit_usd,
                    budget_exceeded, budget_action
             FROM activity_costs
@@ -595,7 +680,7 @@ impl crate::registry::ActivityImpl for LLMPromptActivity {
             cost_usd: response.cost_usd,
             estimated_cost_usd: Some(estimated_cost),
             prompt_tokens: Some(response.usage.prompt_tokens),
-            completion_tokens: Some(response.usage.completion_tokens),
+            output_tokens: Some(response.usage.output_tokens),
             total_tokens: Some(response.usage.total_tokens),
             provider: self.get_provider_name(&params)?,
             model: response.model.clone(),
@@ -755,7 +840,7 @@ pub struct ActivityCostDetail {
     pub attempt: u32,
     pub cost_usd: Decimal,
     pub prompt_tokens: Option<u32>,
-    pub completion_tokens: Option<u32>,
+    pub output_tokens: Option<u32>,
     pub provider: String,
     pub model: String,
     pub budget_exceeded: bool,
@@ -804,7 +889,7 @@ pub async fn get_workflow_cost_history(
             attempt: record.attempt,
             cost_usd: record.cost_usd,
             prompt_tokens: record.prompt_tokens,
-            completion_tokens: record.completion_tokens,
+            output_tokens: record.output_tokens,
             provider: record.provider,
             model: record.model,
             budget_exceeded: record.budget_exceeded,
