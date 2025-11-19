@@ -442,7 +442,7 @@ fn test_activity_result_success() {
         cost_usd: Some(Decimal::from_str("0.50").unwrap()),
         token_usage: Some(TokenUsage {
             prompt_tokens: 100,
-            completion_tokens: 50,
+            output_tokens: 50,
             total_tokens: 150,
         }),
     };
@@ -514,7 +514,7 @@ fn test_activity_result_clone() {
 fn test_token_usage_serialization() {
     let usage = TokenUsage {
         prompt_tokens: 1000,
-        completion_tokens: 500,
+        output_tokens: 500,
         total_tokens: 1500,
     };
 
@@ -528,13 +528,13 @@ fn test_token_usage_serialization() {
 fn test_token_usage_deserialization() {
     let json = r#"{
         "prompt_tokens": 200,
-        "completion_tokens": 100,
+        "output_tokens": 100,
         "total_tokens": 300
     }"#;
 
     let usage: TokenUsage = serde_json::from_str(json).unwrap();
     assert_eq!(usage.prompt_tokens, 200);
-    assert_eq!(usage.completion_tokens, 100);
+    assert_eq!(usage.output_tokens, 100);
     assert_eq!(usage.total_tokens, 300);
 }
 
@@ -542,13 +542,13 @@ fn test_token_usage_deserialization() {
 fn test_token_usage_clone() {
     let usage1 = TokenUsage {
         prompt_tokens: 50,
-        completion_tokens: 25,
+        output_tokens: 25,
         total_tokens: 75,
     };
 
     let usage2 = usage1.clone();
     assert_eq!(usage1.prompt_tokens, usage2.prompt_tokens);
-    assert_eq!(usage1.completion_tokens, usage2.completion_tokens);
+    assert_eq!(usage1.output_tokens, usage2.output_tokens);
     assert_eq!(usage1.total_tokens, usage2.total_tokens);
 }
 
