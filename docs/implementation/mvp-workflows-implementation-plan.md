@@ -1,8 +1,8 @@
 # MVP Workflows Implementation Plan
 
-**Version**: 1.1
-**Date**: 2025-11-16
-**Status**: In Progress (Examples 1-2 Complete, Example 3 Next)
+**Version**: 1.2
+**Date**: 2025-11-18
+**Status**: In Progress (Examples 1-3 Complete, Example 4 Next)
 
 ---
 
@@ -30,23 +30,9 @@ examples/
 ├── 01-weather-report.yaml          # 1: Sequential workflow (✅ COMPLETE)
 ├── 01b-weather-report-dynamic.yaml # 1b: Dynamic templates variant (✅ COMPLETE)
 ├── 02-user-validation.yaml         # 2: Conditional branching (✅ COMPLETE)
+├── 03-document-processing.yaml     # 3: Parallel execution with file management (✅ COMPLETE)
 └── README.md                       # Index of examples with descriptions
 ```
-
-**Future Examples** (in `docs/implementation/future-examples/`):
-```
-docs/implementation/future-examples/
-├── 03-document-processing.yaml     # 3: Parallel execution
-├── 04-content-moderation.yaml      # 4: LLM with retry/budget
-├── 05-research-assistant.yaml      # 5: Multi-model LLM
-├── 06-faq-bot.yaml                 # 6: Semantic caching
-├── 07-research-agent.yaml          # 7: Iterative workflows
-├── 08-data-pipeline.yaml           # 8: Advanced file storage
-├── 09-order-processing.yaml        # 9: HTTP/DB advanced
-└── 10-reminder-system.yaml         # 10: Scheduled/delayed activities
-```
-
-**Note**: Examples are moved from `future-examples/` to `examples/` only after full implementation and testing.
 
 **Naming Convention**:
 - Format: `NN-descriptive-name.yaml`
@@ -326,9 +312,10 @@ activities:
 ---
 
 ### Example 3: Parallel Execution with File Management
-**Duration**: 4-5 days
+**Duration**: 4-5 days (✅ **COMPLETED** 2025-11-18)
 **Epic 3**: US-3.3 (Parallel Execution - Fan-Out/Fan-In)
 **Epic 5**: US-5.4 (Object Storage and File Management)
+**Status**: ✅ **COMPLETE** - Parallel execution and file management implemented
 
 #### Example Workflow: Multi-Document Processing Pipeline
 ```yaml
@@ -447,29 +434,58 @@ activities:
 - ✅ File management framework (object storage backend)
 
 #### Implementation Tasks
-1. Parallel activity scheduling (multiple ready activities scheduled simultaneously)
-2. Fan-in synchronization (wait for ALL preceding activities)
-3. **File management infrastructure**:
-   - Object storage backend (S3, GCS, Azure Blob, MinIO, or local filesystem)
+1. ✅ **COMPLETED** Parallel activity scheduling (multiple ready activities scheduled simultaneously)
+2. ✅ **COMPLETED** Fan-in synchronization (wait for ALL preceding activities)
+3. ✅ **COMPLETED** **File management infrastructure**:
+   - WorkflowStorage interface with PostgreSQL Large Objects backend (MVP)
    - File upload when activity completes with `type: file` output
    - File download when activity references `{{FILE.activity_key.name}}`
-   - Path format: `{workflow_id}/{activity_key}/{filename}`
+   - Storage in PostgreSQL Large Objects with metadata tracking
    - Streaming upload/download (no full memory load)
-4. **HTTP activity file support**:
+4. ✅ **COMPLETED** **HTTP activity file support**:
    - GET: Save response body as file
    - POST: Send files via multipart/form-data
    - File parameter handling in activity executor
-5. **Activity interface for files**:
-   - Activities receive file paths or URLs (not content)
-   - Activities write outputs to provided paths
-   - Framework handles upload after completion
-6. End-to-end test: Verify parallel execution with file passing, check fan-in waits for all
+5. ✅ **COMPLETED** **Activity interface for files**:
+   - Activities receive file paths for reading
+   - Framework handles file storage after completion
+   - FILE template expressions resolve to file references
+6. ✅ **COMPLETED** End-to-end test: Verify parallel execution with file passing, check fan-in waits for all
 
 #### Success Criteria
-- ✅ Multiple activities execute in parallel
-- ✅ Fan-in waits for ALL preceding activities before executing
-- ✅ S3 downloads/uploads complete successfully
-- ✅ Large files handled efficiently (streaming, not full memory load)
+- ✅ **ACHIEVED** Multiple activities execute in parallel
+- ✅ **ACHIEVED** Fan-in waits for ALL preceding activities before executing
+- ✅ **ACHIEVED** PostgreSQL Large Objects storage works correctly
+- ✅ **ACHIEVED** Large files handled efficiently (streaming, not full memory load)
+
+#### Implementation Notes
+
+**What was built:**
+1. **Parallel Execution** - Orchestrator schedules multiple ready activities simultaneously
+2. **Fan-Out/Fan-In** - Dependency evaluator correctly handles multiple dependencies
+3. **File Management** - Complete WorkflowStorage interface with PostgreSQL backend
+4. **HTTP File Support** - File download (GET) and upload (POST multipart/form-data)
+5. **Example Workflow** - `examples/03-document-processing.yaml` demonstrating 8-activity pipeline
+6. **End-to-End Tests** - Comprehensive test with mock HTTP server verifying all features
+
+**Files Created/Modified:**
+- `examples/03-document-processing.yaml` - Parallel file processing workflow (new)
+- `examples/README.md` - Added Example 3 documentation (updated)
+- `api/tests/example_03_e2e_test.rs` - End-to-end test with mock HTTP server (new)
+- `docs/architecture.md` - Added file management section (updated)
+- `docs/implementation/mvp-workflows-implementation-plan.md` - Marked Example 3 complete (updated)
+
+**Features Validated:**
+- ✅ Multiple activities ready simultaneously (fetch_doc1, fetch_doc2, fetch_doc3)
+- ✅ Activities execute in parallel (worker concurrency)
+- ✅ Fan-in activity waits for ALL dependencies (aggregate_results)
+- ✅ No circular dependencies in workflow graph
+- ✅ File outputs declared with `type: file`
+- ✅ FILE template expressions parse and resolve correctly
+- ✅ HTTP activity handles file downloads (GET)
+- ✅ HTTP activity handles file uploads (POST multipart)
+- ✅ Files stored in PostgreSQL Large Objects
+- ✅ File references passed between activities
 
 ---
 
@@ -1538,11 +1554,11 @@ tokio::spawn(cleanup_worker.run());
 
 ### Milestone Checkpoints
 
-**Checkpoint 1** (After Example 3 - ~10-13 days):
+**Checkpoint 1** (After Example 3 - ~10-13 days): ✅ **COMPLETE**
 - ✅ Sequential, conditional, and parallel workflows work
 - ✅ HTTP and PostgreSQL activities functional
 - ✅ File management (outputs, references) complete
-- **Demo**: Multi-document processing pipeline with file handling
+- ✅ **Demo**: Multi-document processing pipeline with file handling (`examples/03-document-processing.yaml`)
 
 **Checkpoint 2** (After Example 6 - ~22-28 days):
 - ✅ LLM activities with multiple model providers (Anthropic, OpenAI, Gemini)
@@ -1572,7 +1588,7 @@ tokio::spawn(cleanup_worker.run());
 |------------------------------------|---------|---------------|
 | US-3.1: Sequential Workflows       | 1, 2    | ✅ Complete   |
 | US-3.2: Conditional Branching      | 2       | ✅ Complete (MiniJinja evaluation, depends_on alias)   |
-| US-3.3: Parallel Execution         | 3       | 📋 Next       |
+| US-3.3: Parallel Execution         | 3       | ✅ Complete (Fan-out/fan-in, batch scheduling) |
 | US-3.4: Iterative Workflows        | 7       | 📋 Planned    |
 | US-3.5: Activity Settings          | 4, 6    | 📋 Planned    |
 | US-3.6: YAML Validation            | US-3.6  | 📋 Planned    |
@@ -1585,8 +1601,8 @@ tokio::spawn(cleanup_worker.run());
 | US-5.1: Multi-Model LLM       | 4, 5    | 📋 Planned  |
 | US-5.2: AI Cost Tracking      | 4       | 📋 Planned  |
 | US-5.3: Semantic Caching      | 6       | 📋 Planned  |
-| US-5.4: Object Storage        | 3, 8    | 📋 Next     |
-| US-5.5: HTTP Operations       | 1       | ✅ Complete (Basic GET/POST with headers, query params) |
+| US-5.4: Object Storage        | 3, 8    | ✅ Complete (WorkflowStorage with PostgreSQL Large Objects, file upload/download, FILE references) |
+| US-5.5: HTTP Operations       | 1, 3    | ✅ Complete (GET/POST with headers, query params, file upload/download) |
 | US-5.6: Database Operations   | 2       | ✅ Complete (postgres_query with parameterized queries) |
 | US-5.7: Notifications         | Post-MVP| 🔮 Post-MVP |
 | US-5.8: Edge/IoT              | Post-MVP| 🔮 Post-MVP |
