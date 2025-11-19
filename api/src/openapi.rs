@@ -1,8 +1,7 @@
 use crate::error::{ApiError, ApiErrorResponse, ErrorCode};
 use crate::handlers::cost::{ActivityCostDetail, CostAnalytics, WorkflowCostSummary};
 use crate::handlers::llm_catalog::{
-    ModelResponse, ModelSearchCriterion, ModelSearchRequest, ModelSearchResponse,
-    ProviderResponse,
+    ModelResponse, ModelSearchCriterion, ModelSearchRequest, ModelSearchResponse, ProviderResponse,
 };
 use crate::handlers::oauth::{GrantType, TokenRequest, TokenResponse};
 use crate::handlers::workers::{
