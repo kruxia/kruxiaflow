@@ -12,6 +12,6 @@ CREATE TABLE workflow_files (
     UNIQUE(workflow_id, activity_key, filename)
 );
 
--- Index for cleanup queries
+-- Index for cleanup queries (BRIN for time-series efficiency)
 CREATE INDEX idx_workflow_files_created
-    ON workflow_files(created_at);
+    ON workflow_files USING BRIN (created_at);

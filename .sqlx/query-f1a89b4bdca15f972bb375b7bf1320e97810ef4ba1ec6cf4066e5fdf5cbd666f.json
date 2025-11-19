@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO activity_costs\n                (workflow_id, activity_key, attempt, cost_usd, estimated_cost_usd,\n                 prompt_tokens, output_tokens, total_tokens, cached_tokens,\n                 provider, model, activity_budget_limit_usd, workflow_budget_limit_usd,\n                 budget_exceeded, budget_action)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int4",
+        "Numeric",
+        "Numeric",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Text",
+        "Text",
+        "Numeric",
+        "Numeric",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f1a89b4bdca15f972bb375b7bf1320e97810ef4ba1ec6cf4066e5fdf5cbd666f"
+}

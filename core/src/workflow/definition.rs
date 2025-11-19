@@ -348,7 +348,7 @@ impl<'de> Deserialize<'de> for ActivityRelationship {
 }
 
 /// Workflow-level settings
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WorkflowSettings {
     /// Maximum workflow execution time in seconds
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -357,6 +357,10 @@ pub struct WorkflowSettings {
     /// Maximum retry attempts for transient failures
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_retries: Option<u32>,
+
+    /// Workflow-level budget limit
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget: Option<BudgetSettings>,
 }
 
 /// Activity-level settings
