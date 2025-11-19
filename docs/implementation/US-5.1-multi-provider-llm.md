@@ -1,13 +1,13 @@
-# US-5.1: Multi-Provider LLM Activities - Implementation Plan
+# US-5.1: Multi-Provider LLM Activities with Cost Tracking and Budget Enforcement - Implementation Plan
 
 **Epic**: Epic 5 - Built-In Activity Library
-**User Story**: US-5.1
+**User Story**: US-5.1 (merged with US-5.2)
 **Status**: Not Started
 **Priority**: High (Required for Example 4)
-**Estimated Duration**: 4-5 days
+**Estimated Duration**: 5-7 days
 **MVP Providers**: Anthropic, OpenAI, Google Gemini, Ollama (4 providers)
 **Dependencies**:
-- US-3.5 (Activity Settings) - For retry and budget tracking
+- US-3.5 (Activity Settings) ✅ Complete - For retry and budget configuration
 - US-5.4 (Object Storage) ✅ Complete - For storing large prompts/responses
 
 ---
@@ -15,30 +15,47 @@
 ## User Story
 
 **As** an AI startup engineer
-**I want** built-in support for all major LLM providers
-**So that** I can switch providers without code changes and implement automatic fallback
+**I want** built-in support for all major LLM providers with automatic cost tracking and budget enforcement
+**So that** I can switch providers without code changes, implement automatic fallback, and prevent runaway LLM costs
 
 ### Acceptance Criteria
 
-**MVP Scope**:
+**MVP Scope - LLM Providers**:
 - ✅ Built-in model providers: Anthropic (Claude), OpenAI (GPT-4), Google Gemini, Ollama (self-hosted)
 - ✅ `llm_prompt` activity with automatic model fallback
 - ✅ Model fallback chain: Try Anthropic → OpenAI → Gemini → Ollama
 - ✅ Embedding generation: `embedding_generate` activity (OpenAI, Google, Ollama)
-- ✅ Cost tracking for cloud providers (Anthropic, OpenAI, Google)
+- ✅ Database-backed model catalog with pricing information
 - ✅ Self-hosted support via Ollama (free, no API costs)
+
+**MVP Scope - Cost Tracking and Budget Enforcement**:
+- ✅ Per-activity budget limits: `budget.limit: 5.00` (USD)
+- ✅ Per-workflow budget limits
+- ✅ Real-time cost tracking in PostgreSQL
+- ✅ Budget exceeded action: `abort` (fail workflow) or `alert` (continue with warning)
+- ✅ Cost dashboard: SQL-queryable cost history
+- ✅ Token counting and cost calculation
+- ✅ **CRITICAL**: First platform with built-in AI cost controls
 
 **Post-MVP**:
 - 🔮 AWS Bedrock, Azure OpenAI providers
 - 🔮 Token streaming support for real-time responses
-- 🔮 Automatic model selection based on budget
-- 🔮 Ollama authentication for production deployments
+- 🔮 Cost forecasting and predictions
+- 🔮 Cost alerts via email/Slack
+- 🔮 Tiered pricing and volume discounts
 
 ### Example Usage
 
 ```yaml
+workflow:
+  name: ai_research_workflow
+  settings:
+    budget:
+      limit: 10.00  # Total workflow budget
+      action: abort
+
 activities:
-  - key: analyze_data
+  - key: primary_analysis
     worker: ai
     name: llm_prompt
     parameters:
@@ -52,13 +69,25 @@ activities:
         max_attempts: 3
         strategy: exponential
       budget:
-        limit: 2.00
+        limit: 2.00  # Per-activity budget
         action: abort
     outputs:
       - name: analysis
         type: value
 
-  - key: fallback_chain
+  - key: secondary_analysis
+    worker: ai
+    name: llm_prompt
+    parameters:
+      provider: openai
+      model: gpt-4o
+      prompt: "Review: {{primary_analysis.response.content}}"
+    settings:
+      budget:
+        limit: 3.00
+        action: alert  # Continue with warning if exceeded
+
+  - key: fallback_example
     worker: ai
     name: llm_prompt
     parameters:
@@ -66,9 +95,11 @@ activities:
         - provider: anthropic
           model: claude-3-5-sonnet-20241022
         - provider: openai
-          model: gpt-4
+          model: gpt-4o
         - provider: google
-          model: gemini-pro
+          model: gemini-2.5-pro
+        - provider: ollama
+          model: llama3.2:3b
       prompt: "Summarize: {{INPUT.text}}"
     settings:
       budget:
@@ -161,14 +192,14 @@ flowchart TB
 - **Transparent**: Easy to debug and understand API interactions
 
 **Provider HTTP API Support**:
-| Provider        | HTTP API Available | Authentication            | MVP Status  |
-|-----------------|-------------------|---------------------------|-------------|
-| Anthropic       | ✅ Yes            | Custom header (x-api-key) | ✅ MVP      |
-| OpenAI          | ✅ Yes            | Bearer token              | ✅ MVP      |
-| Google Gemini   | ✅ Yes            | API key (query/header)    | ✅ MVP      |
-| Ollama (Local)  | ✅ Yes            | None (local server)       | ✅ MVP      |
-| Azure OpenAI    | ✅ Yes            | API key header            | 🔮 Post-MVP |
-| AWS Bedrock     | ⚠️ Complex        | AWS SigV4 signing         | 🔮 Post-MVP |
+| Provider       | HTTP API Available | Authentication            | MVP Status  |
+|----------------|-------------------|---------------------------|-------------|
+| Anthropic      | ✅ Yes             | Custom header (x-api-key) | ✅ MVP      |
+| OpenAI         | ✅ Yes             | Bearer token              | ✅ MVP      |
+| Google Gemini  | ✅ Yes             | API key (query/header)    | ✅ MVP      |
+| Ollama (Local) | ✅ Yes             | None (local server)       | ✅ MVP      |
+| Azure OpenAI   | ✅ Yes             | API key header            | 🔮 Post-MVP |
+| AWS Bedrock    | ⚠️ Complex         | AWS SigV4 signing         | 🔮 Post-MVP |
 
 **Note on AWS Bedrock**: Requires AWS Signature V4 request signing. Post-MVP implementation may use `aws-sigv4` crate or `aws-sdk-bedrockruntime` for this provider only.
 
@@ -251,6 +282,249 @@ sequenceDiagram
     L-->>W: ActivityResult with cost
 ```
 
+### Budget Enforcement and Cost Tracking Flow
+
+```mermaid
+sequenceDiagram
+    participant O as Orchestrator
+    participant CT as Cost Tracker
+    participant W as Worker
+    participant LLM as LLM Provider
+    participant CC as Cost Calculator
+    participant DB as PostgreSQL
+
+    Note over O,DB: Before Execution - Check Budget
+    O->>CT: Get current budget status
+    CT->>DB: Query activity + workflow costs
+    CT-->>O: Current costs
+    O->>O: Estimate cost for this activity
+
+    alt Estimated Cost Would Exceed Budget
+        alt Activity budget would be exceeded & action: abort
+            O->>O: Don't execute - budget exhausted
+            O->>DB: Record activity as skipped/failed
+        else Workflow budget would be exceeded & action: abort
+            O->>O: Don't execute - stop workflow
+            O->>DB: Mark workflow failed (budget exhausted)
+        else Action: alert
+            O->>O: Log budget warning, proceed anyway
+        end
+    end
+
+    Note over O,W: Execute Activity
+    O->>W: Execute activity
+    W->>LLM: Call LLM API
+    LLM-->>W: Response + token counts
+    W->>W: Extract token usage
+    W-->>O: Activity result + token counts (NO COST)
+
+    Note over O,DB: After Execution - Record Cost and Complete
+    O->>CC: Calculate cost from actual tokens
+    CC->>DB: Query model pricing
+    CC-->>O: Calculated cost (USD)
+
+    O->>CT: Record actual cost
+    CT->>DB: INSERT activity_costs
+    CT->>DB: UPDATE workflows.total_cost_usd (via trigger)
+
+    O->>DB: Mark activity completed successfully
+
+    Note over O: Orchestrator continues workflow scheduling
+    Note over O: Next activity will check budget as normal
+```
+
+### Cost Tracking Data Model
+
+```mermaid
+erDiagram
+    WORKFLOWS ||--o{ ACTIVITY_COSTS : contains
+    LLM_PROVIDERS ||--o{ LLM_MODELS : has
+    ACTIVITY_COSTS }o--|| LLM_MODELS : uses
+
+    WORKFLOWS {
+        uuid id PK
+        jsonb state_data
+        decimal total_cost_usd
+        decimal budget_limit_usd
+    }
+
+    ACTIVITY_COSTS {
+        uuid id PK
+        uuid workflow_id FK
+        string activity_key
+        int attempt
+        decimal cost_usd
+        int prompt_tokens
+        int output_tokens
+        int total_tokens
+        int cached_tokens
+        string provider
+        string model
+        decimal activity_budget_limit_usd
+        decimal workflow_budget_limit_usd
+        boolean budget_exceeded
+        string budget_action
+        timestamp created_at
+    }
+
+    LLM_PROVIDERS {
+        int id PK
+        string name
+        string display_name
+        string api_endpoint
+        boolean supports_completion
+        boolean supports_embeddings
+        timestamp created_at
+    }
+
+    LLM_MODELS {
+        int id PK
+        int provider_id FK
+        string name
+        string display_name
+        decimal input_price_per_million
+        decimal output_price_per_million
+        decimal cached_input_price_per_million
+        int context_window
+        timestamp created_at
+    }
+```
+
+---
+
+## Architectural Decision: Where Should Cost Calculation Happen?
+
+### Decision: Orchestrator Calculates Costs (After Activity Execution)
+
+**Approach**: Workers return token counts; orchestrator queries pricing database and calculates costs.
+
+### Rationale
+
+**Primary Benefits**:
+1. **Dynamic pricing updates** - Update prices in database without redeploying workers
+2. **Single source of truth** - All cost calculations use same pricing data from database
+3. **Worker simplicity** - Workers are stateless, just execute tasks and return token counts
+4. **Core business logic** - Pricing and budget enforcement are key orchestrator value propositions
+5. **Future extensibility** - Applies to any usage-based activity (not just LLMs):
+   - Cloud APIs (AWS, GCP pricing)
+   - External services (Twilio, SendGrid)
+   - Database query costs
+   - Compute resource usage
+
+**Additional Benefits**:
+- Per-tenant pricing (different customers pay different rates)
+- Historical pricing tracking (audit trail of price changes)
+- Promotional pricing, volume discounts
+- Consistent pricing across all workers (no cache staleness)
+
+### Alternatives Considered
+
+#### Alternative 1: Workers Calculate Costs
+
+**Rejected because**:
+- Requires workers to access pricing data somehow:
+  - **Hardcoded**: Requires recompiling/redeploying for price updates
+  - **Workers query database**: Breaks stateless worker architecture
+  - **Workers call orchestrator API**: HTTP overhead, doesn't solve the problem
+  - **Workers cache pricing**: Cache invalidation complexity, stale data risk
+- Deployment coupling (price changes require worker updates)
+- Inconsistency risk (different workers might have different pricing)
+- Per-tenant pricing impossible (workers don't know workflow context)
+
+#### Alternative 2: Hybrid (Workers Cache Pricing)
+
+**Deferred to post-MVP**:
+- Only implement if profiling shows pricing lookup is a bottleneck
+- Would add worker caching with 24-hour TTL and fallback to orchestrator
+- Unlikely to be needed (pricing lookups are fast, prices change infrequently)
+
+### Performance Considerations
+
+**Database query cost is negligible**:
+- Orchestrator already queries database for activity execution status
+- Pricing lookup adds one JOIN query: `llm_models JOIN llm_providers`
+- Can batch-fetch pricing for multiple activities: `CostCalculator::batch_get_pricing()`
+- Pricing table is small (~100 models), highly cacheable by PostgreSQL
+
+**Pricing updates are infrequent**:
+- OpenAI/Anthropic change prices every few months
+- Not worth optimizing for real-time updates
+
+### Future Extensions (Post-MVP)
+
+This architecture supports cost tracking for **any usage-based activity**:
+
+```rust
+// Future: Cloud API cost tracking
+pub trait CostCalculator {
+    async fn calculate_cost(
+        &self,
+        activity_type: &str,  // "llm", "aws_api", "twilio_sms", etc.
+        provider: &str,
+        resource: &str,       // model, API endpoint, service type
+        usage_metrics: &HashMap<String, f64>,  // tokens, API calls, SMS count, etc.
+    ) -> Result<Decimal>;
+}
+```
+
+**Example use cases**:
+- AWS API calls (S3 requests, Lambda invocations)
+- Twilio SMS/voice (per-message pricing)
+- Database queries (compute credits)
+- External API quotas (rate limits + costs)
+
+This makes **cost tracking a first-class orchestrator feature**, not just an LLM add-on.
+
+### Budget Enforcement Strategy
+
+**Key Principle: Don't Waste Completed Work**
+
+Budget enforcement happens at two points:
+
+1. **Before Execution (Preventive)**:
+   - Check if estimated cost would exceed budget
+   - If yes and action is `abort`: Don't execute the activity at all
+   - If yes and action is `alert`: Log warning but proceed
+   - This prevents spending money on work that would violate budgets
+
+2. **After Execution (Record and Complete)**:
+   - **Always accept completed activity results** regardless of actual cost
+   - Calculate actual cost from token usage
+   - Record cost in database
+   - Update workflow total cost (via trigger)
+   - Mark activity as completed successfully
+
+**Budget checking for subsequent activities**:
+   - Orchestrator's normal scheduling logic checks budget before scheduling each activity
+   - Uses current workflow costs (which now include the just-completed activity)
+   - If workflow budget exceeded: stops scheduling new activities
+   - This naturally prevents workflows from continuing when budgets are exhausted
+
+**Rationale**:
+- Once an activity has executed and returned results, that work is done and paid for
+- Rejecting completed work wastes both the compute and the money already spent
+- Budget checks happen naturally as part of the "before execution" check for each activity
+- No special "check after completion" logic needed - just record and continue
+
+**Example**:
+```yaml
+workflow:
+  settings:
+    budget:
+      limit: 10.00
+      action: abort
+
+activities:
+  - key: step1
+    # Estimated: $3, Actual: $4 (budget remaining: $6)
+  - key: step2
+    # Estimated: $3, Actual: $7 (budget remaining: -$1, exceeded!)
+    # ✅ Accept step2 results (work already done)
+    # ❌ Don't schedule step3 (would exceed budget)
+  - key: step3
+    # Never executes - workflow stopped after step2
+```
+
 ---
 
 ## Implementation Tasks
@@ -305,7 +579,148 @@ CREATE TABLE llm_models (
 - ✅ Indexes created correctly
 - ✅ Foreign key constraints work
 
-#### 1.2. Create Seed Data File
+#### 1.2. Create Cost Tracking Migration
+
+**Files**:
+- `migrations/YYYYMMDD_cost_tracking.up.sql`
+- `migrations/YYYYMMDD_cost_tracking.down.sql`
+
+**Purpose**: Track LLM costs per activity execution and enforce budgets
+
+**Schema**:
+
+```sql
+-- Activity cost tracking table
+CREATE TABLE activity_costs (
+    id UUID PRIMARY KEY DEFAULT uuidv7(),
+    workflow_id UUID NOT NULL,
+    activity_key TEXT NOT NULL,
+    attempt INTEGER NOT NULL DEFAULT 1,
+
+    -- Cost details
+    cost_usd DECIMAL(10, 6) NOT NULL,
+    estimated_cost_usd DECIMAL(10, 6),
+
+    -- Token usage
+    prompt_tokens INTEGER,
+    output_tokens INTEGER,
+    total_tokens INTEGER,
+    cached_tokens INTEGER,
+
+    -- Provider details
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+
+    -- Budget tracking
+    activity_budget_limit_usd DECIMAL(10, 6),
+    workflow_budget_limit_usd DECIMAL(10, 6),
+    budget_exceeded BOOLEAN DEFAULT FALSE,
+    budget_action TEXT, -- 'abort' or 'alert'
+
+    -- Metadata
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+);
+
+-- Index for workflow cost queries (hot path)
+CREATE INDEX idx_activity_costs_workflow
+    ON activity_costs(workflow_id);
+
+-- Index for activity cost queries
+CREATE INDEX idx_activity_costs_activity
+    ON activity_costs(workflow_id, activity_key);
+
+-- Index for cost dashboard queries
+CREATE INDEX idx_activity_costs_created
+    ON activity_costs(created_at DESC);
+
+-- Index for provider analytics
+CREATE INDEX idx_activity_costs_provider
+    ON activity_costs(provider, model);
+
+-- Add cost tracking columns to workflows table
+ALTER TABLE workflows
+    ADD COLUMN total_cost_usd DECIMAL(10, 6) DEFAULT 0.0,
+    ADD COLUMN budget_limit_usd DECIMAL(10, 6);
+
+-- Function to get current workflow cost
+CREATE OR REPLACE FUNCTION get_workflow_cost(p_workflow_id UUID)
+RETURNS DECIMAL(10, 6) AS $$
+    SELECT COALESCE(SUM(cost_usd), 0.0)
+    FROM activity_costs
+    WHERE workflow_id = p_workflow_id;
+$$ LANGUAGE SQL STABLE;
+
+-- Function to get current activity cost (across all attempts)
+CREATE OR REPLACE FUNCTION get_activity_cost(p_workflow_id UUID, p_activity_key TEXT)
+RETURNS DECIMAL(10, 6) AS $$
+    SELECT COALESCE(SUM(cost_usd), 0.0)
+    FROM activity_costs
+    WHERE workflow_id = p_workflow_id
+      AND activity_key = p_activity_key;
+$$ LANGUAGE SQL STABLE;
+
+-- Trigger to update workflow total_cost_usd on activity cost insert
+CREATE OR REPLACE FUNCTION update_workflow_cost()
+RETURNS TRIGGER AS $$
+BEGIN
+    UPDATE workflows
+    SET total_cost_usd = get_workflow_cost(NEW.workflow_id)
+    WHERE id = NEW.workflow_id;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_update_workflow_cost
+AFTER INSERT ON activity_costs
+FOR EACH ROW
+EXECUTE FUNCTION update_workflow_cost();
+
+-- Materialized view for cost dashboards
+CREATE MATERIALIZED VIEW workflow_cost_summary AS
+SELECT
+    w.id AS workflow_id,
+    w.name AS workflow_name,
+    w.total_cost_usd,
+    w.budget_limit_usd,
+    w.status,
+    COUNT(ac.id) AS total_activities,
+    SUM(ac.cost_usd) AS actual_total_cost,
+    jsonb_object_agg(ac.activity_key, SUM(ac.cost_usd)) FILTER (WHERE ac.activity_key IS NOT NULL) AS cost_by_activity,
+    jsonb_object_agg(ac.provider, SUM(ac.cost_usd)) FILTER (WHERE ac.provider IS NOT NULL) AS cost_by_provider,
+    MAX(ac.created_at) AS last_cost_update
+FROM workflows w
+LEFT JOIN activity_costs ac ON w.id = ac.workflow_id
+GROUP BY w.id, w.name, w.total_cost_usd, w.budget_limit_usd, w.status;
+
+-- Index for fast dashboard queries
+CREATE INDEX idx_workflow_cost_summary_workflow
+    ON workflow_cost_summary(workflow_id);
+```
+
+**Migration Down**: `migrations/YYYYMMDD_cost_tracking.down.sql`
+
+```sql
+DROP TRIGGER IF EXISTS trigger_update_workflow_cost ON activity_costs;
+DROP FUNCTION IF EXISTS update_workflow_cost();
+DROP FUNCTION IF EXISTS get_activity_cost(UUID, TEXT);
+DROP FUNCTION IF EXISTS get_workflow_cost(UUID);
+DROP MATERIALIZED VIEW IF EXISTS workflow_cost_summary;
+ALTER TABLE workflows DROP COLUMN IF EXISTS budget_limit_usd;
+ALTER TABLE workflows DROP COLUMN IF EXISTS total_cost_usd;
+DROP TABLE IF EXISTS activity_costs;
+```
+
+**Test Cases**:
+- ✅ Migration runs successfully (up)
+- ✅ Migration rolls back successfully (down)
+- ✅ Indexes created correctly
+- ✅ Foreign key constraints work
+- ✅ Trigger updates workflow cost on insert
+- ✅ Functions return correct costs
+
+#### 1.3. Create Seed Data File
 
 **File**: `config/llm_models.yaml`
 
@@ -362,7 +777,7 @@ providers:
 - ✅ All required fields present
 - ✅ Pricing values are valid decimals
 
-#### 1.3. Implement Seed Data Loader
+#### 1.4. Implement Seed Data Loader
 
 **File**: `orchestrator/src/llm_catalog.rs` (new)
 
@@ -495,7 +910,7 @@ pub async fn load_catalog_from_yaml(
 - ✅ Transaction rolls back on error
 - ✅ CLI command works
 
-#### 1.4. Create Model Catalog API Endpoints
+#### 1.5. Create Model Catalog API Endpoints
 
 **File**: `orchestrator/src/routes/llm_catalog.rs` (new)
 
@@ -506,16 +921,16 @@ pub async fn load_catalog_from_yaml(
    - Returns: `{providers: [{id, name, display_name, supports_*, ...}]}`
 
 2. **POST /api/v1/llm/models/search**
-   - Search for models by provider/model name with flexible criteria
+   - Search for models by provider/model name with flexible models
    - Efficient batch lookup - single query for multiple model searches
-   - Request body: `{criteria: [{provider?, model?}]}`
+   - Request body: `{models: [{provider?, model?}]}`
    - Returns: `{models: [{provider, name, input_price_per_million, ...}]}`
 
 **Search Criteria Examples**:
 
 ```json
 {
-  "criteria": [
+  "models": [
     {"provider": "openai", "model": "gpt-4o"},          // Specific model
     {"provider": "anthropic"},                          // All Anthropic models
     {"model": "llama3.2:3b"},                          // Model across providers
@@ -590,7 +1005,7 @@ pub struct ModelSearchCriteria {
 
 #[derive(Debug, Deserialize)]
 pub struct ModelSearchRequest {
-    pub criteria: Vec<ModelSearchCriteria>,
+    pub models: Vec<ModelSearchCriteria>,
 }
 
 #[derive(Debug, Serialize)]
@@ -602,7 +1017,7 @@ pub async fn search_models(
     State(pool): State<PgPool>,
     Json(request): Json<ModelSearchRequest>,
 ) -> Result<Json<ModelSearchResponse>, StatusCode> {
-    if request.criteria.is_empty() {
+    if request.models.is_empty() {
         return Ok(Json(ModelSearchResponse { models: vec![] }));
     }
 
@@ -610,17 +1025,17 @@ pub async fn search_models(
     let mut providers: Vec<Option<String>> = Vec::new();
     let mut models: Vec<Option<String>> = Vec::new();
 
-    for criterion in &request.criteria {
+    for criterion in &request.models {
         providers.push(criterion.provider.clone());
         models.push(criterion.model.clone());
     }
 
-    // Use array comparison to match any of the criteria in a single query
+    // Use array comparison to match any of the models in a single query
     // This works by creating parallel arrays where index N represents criterion N
     let results = sqlx::query_as!(
         ModelResponse,
         r#"
-        WITH criteria AS (
+        WITH models AS (
             SELECT
                 UNNEST($1::text[]) as provider_filter,
                 UNNEST($2::text[]) as model_filter
@@ -634,7 +1049,7 @@ pub async fn search_models(
         FROM llm_models m
         JOIN llm_providers p ON m.provider_id = p.id
         WHERE EXISTS (
-            SELECT 1 FROM criteria c
+            SELECT 1 FROM models c
             WHERE (c.provider_filter IS NULL OR p.name = c.provider_filter)
               AND (c.model_filter IS NULL OR m.name = c.model_filter)
         )
@@ -653,20 +1068,20 @@ pub async fn search_models(
 
 **Rationale**:
 - **Single query**: Batch multiple model lookups efficiently
-- **Flexible criteria**: Search by provider only, model only, or both
+- **Flexible models**: Search by provider only, model only, or both
 - **Orchestrator-friendly**: Cost calculator can query multiple models at once
 - **Reduces round trips**: One HTTP request instead of N requests
 
 **Test Cases**:
 - ✅ GET /api/v1/llm/providers returns all providers
-- ✅ POST /api/v1/llm/models/search with `{criteria: [{provider: "openai", model: "gpt-4o"}]}` returns specific model
-- ✅ POST /api/v1/llm/models/search with `{criteria: [{provider: "openai"}]}` returns all OpenAI models
-- ✅ POST /api/v1/llm/models/search with `{criteria: [{model: "gpt-4o"}]}` returns gpt-4o from all providers
-- ✅ POST /api/v1/llm/models/search with multiple criteria returns all matching models
-- ✅ POST /api/v1/llm/models/search with empty criteria array returns all models
+- ✅ POST /api/v1/llm/models/search with `{models: [{provider: "openai", model: "gpt-4o"}]}` returns specific model
+- ✅ POST /api/v1/llm/models/search with `{models: [{provider: "openai"}]}` returns all OpenAI models
+- ✅ POST /api/v1/llm/models/search with `{models: [{model: "gpt-4o"}]}` returns gpt-4o from all providers
+- ✅ POST /api/v1/llm/models/search with multiple models returns all matching models
+- ✅ POST /api/v1/llm/models/search with empty models array returns all models
 - ✅ POST /api/v1/llm/models/search with non-existent provider/model returns empty results (no error)
 
-#### 1.5. Implement Cost Calculation in Orchestrator
+#### 1.6. Implement Cost Calculation in Orchestrator
 
 **File**: `orchestrator/src/cost_calculator.rs` (new)
 
@@ -848,6 +1263,369 @@ let pricing_map = calculator.batch_get_pricing(&models).await?;
 - ✅ Zero cost for Ollama models
 - ✅ Batch query with empty input returns empty map
 
+#### 1.7. Implement Cost Tracker Service
+
+**File**: `core/src/cost/tracker.rs` (new)
+
+**Purpose**: Track costs and enforce budgets
+
+```rust
+use sqlx::PgPool;
+use uuid::Uuid;
+use rust_decimal::Decimal;
+
+pub struct CostTracker {
+    pool: PgPool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActivityCostRecord {
+    pub workflow_id: Uuid,
+    pub activity_key: String,
+    pub attempt: u32,
+    pub cost_usd: Decimal,
+    pub estimated_cost_usd: Option<Decimal>,
+    pub prompt_tokens: Option<u32>,
+    pub output_tokens: Option<u32>,
+    pub total_tokens: Option<u32>,
+    pub cached_tokens: Option<u32>,
+    pub provider: String,
+    pub model: String,
+    pub activity_budget_limit_usd: Option<Decimal>,
+    pub workflow_budget_limit_usd: Option<Decimal>,
+    pub budget_exceeded: bool,
+    pub budget_action: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BudgetStatus {
+    pub activity_cost: Decimal,
+    pub workflow_cost: Decimal,
+    pub activity_limit: Option<Decimal>,
+    pub workflow_limit: Option<Decimal>,
+    pub activity_budget_ok: bool,
+    pub workflow_budget_ok: bool,
+}
+
+impl CostTracker {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    /// Record activity cost
+    pub async fn record_cost(&self, record: ActivityCostRecord) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO activity_costs
+                (workflow_id, activity_key, attempt, cost_usd, estimated_cost_usd,
+                 prompt_tokens, output_tokens, total_tokens, cached_tokens,
+                 provider, model, activity_budget_limit_usd, workflow_budget_limit_usd,
+                 budget_exceeded, budget_action)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            "#
+        )
+        .bind(record.workflow_id)
+        .bind(&record.activity_key)
+        .bind(record.attempt as i32)
+        .bind(record.cost_usd)
+        .bind(record.estimated_cost_usd)
+        .bind(record.prompt_tokens.map(|t| t as i32))
+        .bind(record.output_tokens.map(|t| t as i32))
+        .bind(record.total_tokens.map(|t| t as i32))
+        .bind(record.cached_tokens.map(|t| t as i32))
+        .bind(&record.provider)
+        .bind(&record.model)
+        .bind(record.activity_budget_limit_usd)
+        .bind(record.workflow_budget_limit_usd)
+        .bind(record.budget_exceeded)
+        .bind(record.budget_action)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get current budget status
+    pub async fn get_budget_status(
+        &self,
+        workflow_id: Uuid,
+        activity_key: &str,
+        activity_limit: Option<Decimal>,
+        workflow_limit: Option<Decimal>,
+    ) -> Result<BudgetStatus> {
+        // Use compile-time verified queries
+        let activity_cost = sqlx::query_scalar!(
+            "SELECT get_activity_cost($1, $2)",
+            workflow_id,
+            activity_key
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        let workflow_cost = sqlx::query_scalar!(
+            "SELECT get_workflow_cost($1)",
+            workflow_id
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        let activity_budget_ok = activity_limit.map_or(true, |limit| activity_cost < limit);
+        let workflow_budget_ok = workflow_limit.map_or(true, |limit| workflow_cost < limit);
+
+        Ok(BudgetStatus {
+            activity_cost,
+            workflow_cost,
+            activity_limit,
+            workflow_limit,
+            activity_budget_ok,
+            workflow_budget_ok,
+        })
+    }
+
+    /// Check if activity can execute within budget
+    pub async fn check_budget_before_execution(
+        &self,
+        workflow_id: Uuid,
+        activity_key: &str,
+        estimated_cost: Decimal,
+        activity_limit: Option<Decimal>,
+        workflow_limit: Option<Decimal>,
+    ) -> Result<BudgetCheckResult> {
+        let status = self.get_budget_status(
+            workflow_id,
+            activity_key,
+            activity_limit,
+            workflow_limit,
+        ).await?;
+
+        let projected_activity_cost = status.activity_cost + estimated_cost;
+        let projected_workflow_cost = status.workflow_cost + estimated_cost;
+
+        let activity_ok = activity_limit.map_or(true, |limit| projected_activity_cost <= limit);
+        let workflow_ok = workflow_limit.map_or(true, |limit| projected_workflow_cost <= limit);
+
+        Ok(BudgetCheckResult {
+            can_execute: activity_ok && workflow_ok,
+            activity_budget_ok: activity_ok,
+            workflow_budget_ok: workflow_ok,
+            projected_activity_cost,
+            projected_workflow_cost,
+            estimated_cost,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BudgetCheckResult {
+    pub can_execute: bool,
+    pub activity_budget_ok: bool,
+    pub workflow_budget_ok: bool,
+    pub projected_activity_cost: Decimal,
+    pub projected_workflow_cost: Decimal,
+    pub estimated_cost: Decimal,
+}
+
+pub type Result<T> = std::result::Result<T, CostError>;
+
+#[derive(Debug, thiserror::Error)]
+pub enum CostError {
+    #[error("Database error: {0}")]
+    DatabaseError(#[from] sqlx::Error),
+
+    #[error("Budget exceeded")]
+    BudgetExceeded,
+}
+```
+
+**Usage Pattern**:
+1. **Before execution**: `check_budget_before_execution()` - Prevent running over-budget activities
+2. **After execution**: `record_cost()` - Always record actual cost, accept completed work
+3. **Before next activity**: Orchestrator repeats step 1 for the next activity (using updated totals)
+
+**Test Cases**:
+- ✅ Record cost correctly
+- ✅ Get budget status
+- ✅ Check budget before execution returns correct can_execute flag
+- ✅ Budget exceeded detection works for preventive check
+- ✅ Completed activities never rejected (record_cost always succeeds)
+- ✅ Database trigger updates workflow cost
+
+#### 1.8. Extend Workflow Definition for Budget Settings
+
+**File**: `core/src/workflow/definition.rs`
+
+**Changes**:
+```rust
+use super::activity_settings::BudgetSettings;
+
+pub struct WorkflowDefinition {
+    pub name: String,
+    pub version: Option<String>,
+    pub activities: Vec<ActivityDefinition>,
+
+    // NEW: Workflow-level settings
+    #[serde(default)]
+    pub settings: WorkflowSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WorkflowSettings {
+    /// Workflow-level budget limit
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget: Option<BudgetSettings>,
+}
+```
+
+**Test Cases**:
+- ✅ YAML parses with workflow budget settings
+- ✅ Budget settings optional
+- ✅ Serialization/deserialization works
+
+#### 1.9. Implement Cost Dashboard API
+
+**File**: `api/src/handlers/cost.rs` (new)
+
+**Purpose**: API endpoints for cost tracking and analytics
+
+```rust
+use axum::{
+    extract::{State, Path, Query},
+    http::StatusCode,
+    Json,
+};
+use uuid::Uuid;
+use serde::{Deserialize, Serialize};
+use rust_decimal::Decimal;
+use streamflow_core::cost::tracker::CostTracker;
+
+#[derive(Debug, Serialize)]
+pub struct WorkflowCostSummary {
+    pub workflow_id: Uuid,
+    pub total_cost_usd: Decimal,
+    pub budget_limit_usd: Option<Decimal>,
+    pub budget_remaining_usd: Option<Decimal>,
+    pub total_activities: usize,
+    pub cost_by_activity: serde_json::Value,
+    pub cost_by_provider: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ActivityCostDetail {
+    pub activity_key: String,
+    pub attempt: u32,
+    pub cost_usd: Decimal,
+    pub prompt_tokens: Option<u32>,
+    pub output_tokens: Option<u32>,
+    pub provider: String,
+    pub model: String,
+    pub budget_exceeded: bool,
+}
+
+/// GET /api/v1/workflows/:workflow_id/cost
+pub async fn get_workflow_cost(
+    State(state): State<AppState>,
+    Path(workflow_id): Path<Uuid>,
+) -> Result<Json<WorkflowCostSummary>> {
+    // Use compile-time verified query
+    let summary = sqlx::query_as!(
+        WorkflowCostSummaryRow,
+        "SELECT * FROM workflow_cost_summary WHERE workflow_id = $1",
+        workflow_id
+    )
+    .fetch_one(&state.pool)
+    .await?;
+
+    let budget_remaining = summary.budget_limit_usd.map(|limit| {
+        (limit - summary.total_cost_usd).max(Decimal::ZERO)
+    });
+
+    Ok(Json(WorkflowCostSummary {
+        workflow_id: summary.workflow_id,
+        total_cost_usd: summary.total_cost_usd,
+        budget_limit_usd: summary.budget_limit_usd,
+        budget_remaining_usd: budget_remaining,
+        total_activities: summary.total_activities as usize,
+        cost_by_activity: summary.cost_by_activity,
+        cost_by_provider: summary.cost_by_provider,
+    }))
+}
+
+/// GET /api/v1/workflows/:workflow_id/cost/history
+pub async fn get_workflow_cost_history(
+    State(state): State<AppState>,
+    Path(workflow_id): Path<Uuid>,
+) -> Result<Json<Vec<ActivityCostDetail>>> {
+    // Use compile-time verified query
+    let history = sqlx::query_as!(
+        ActivityCostRow,
+        r#"
+        SELECT activity_key, attempt, cost_usd, prompt_tokens, output_tokens,
+               provider, model, budget_exceeded
+        FROM activity_costs
+        WHERE workflow_id = $1
+        ORDER BY created_at ASC
+        "#,
+        workflow_id
+    )
+    .fetch_all(&state.pool)
+    .await?;
+
+    Ok(Json(history.into_iter().map(Into::into).collect()))
+}
+
+/// GET /api/v1/cost/analytics
+pub async fn get_cost_analytics(
+    State(state): State<AppState>,
+    Query(params): Query<CostAnalyticsParams>,
+) -> Result<Json<CostAnalytics>> {
+    // Use compile-time verified query
+    let analytics = sqlx::query_as!(
+        CostAnalyticsRow,
+        r#"
+        SELECT
+            COUNT(DISTINCT workflow_id) as total_workflows,
+            SUM(cost_usd) as total_cost,
+            AVG(cost_usd) as avg_cost_per_activity,
+            jsonb_object_agg(provider, SUM(cost_usd)) FILTER (WHERE provider IS NOT NULL) as cost_by_provider,
+            jsonb_object_agg(model, SUM(cost_usd)) FILTER (WHERE model IS NOT NULL) as cost_by_model
+        FROM activity_costs
+        WHERE created_at >= $1 AND created_at <= $2
+        "#,
+        params.start_date,
+        params.end_date
+    )
+    .fetch_one(&state.pool)
+    .await?;
+
+    Ok(Json(analytics.into()))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CostAnalyticsParams {
+    pub start_date: DateTime<Utc>,
+    pub end_date: DateTime<Utc>,
+}
+```
+
+**Routes**:
+```rust
+// api/src/main.rs
+use crate::handlers::cost;
+
+let app = Router::new()
+    // ... existing routes ...
+    .route("/api/v1/workflows/:workflow_id/cost", get(cost::get_workflow_cost))
+    .route("/api/v1/workflows/:workflow_id/cost/history", get(cost::get_workflow_cost_history))
+    .route("/api/v1/cost/analytics", get(cost::get_cost_analytics));
+```
+
+**Test Cases**:
+- ✅ GET /api/v1/workflows/:id/cost returns cost summary
+- ✅ GET /api/v1/workflows/:id/cost/history returns all activity costs
+- ✅ GET /api/v1/cost/analytics returns aggregated analytics
+- ✅ Budget remaining calculated correctly
+- ✅ Empty workflow returns zero cost
+
 ---
 
 ### Phase 2: Simplified Worker Implementation
@@ -873,6 +1651,11 @@ use futures::stream::Stream;
 pub trait LLMProvider: Send + Sync {
     /// Provider name (anthropic, openai, google, etc.)
     fn name(&self) -> &str;
+
+    /// Estimate token count for a text string
+    /// Uses character-based and word-based estimates, returns average
+    /// Async to support future API-based token counting
+    async fn estimate_tokens(&self, text: &str) -> Result<u32>;
 
     /// Generate completion from prompt
     async fn complete(
@@ -981,12 +1764,28 @@ pub enum LLMError {
     #[error("JSON error: {0}")]
     JsonError(#[from] serde_json::Error),
 }
+
+/// Helper function for token estimation
+/// Uses both character-based and word-based estimates, returns average
+pub fn estimate_tokens_from_text(text: &str, chars_per_token: f64, words_per_token: f64) -> u32 {
+    // Character-based estimate
+    let char_estimate = text.len() as f64 / chars_per_token;
+
+    // Word-based estimate (split on whitespace)
+    let word_count = text.split_whitespace().count() as f64;
+    let word_estimate = word_count / words_per_token;
+
+    // Return average of both estimates
+    ((char_estimate + word_estimate) / 2.0).ceil() as u32
+}
 ```
 
 **Test Cases**:
 - ✅ Interface compiles
 - ✅ Error types cover all cases
 - ✅ No cost calculation methods present
+- ✅ Token estimation helper function works correctly
+- ✅ Token estimation averages char-based and word-based estimates
 
 ---
 
@@ -1026,6 +1825,11 @@ impl AnthropicProvider {
 impl LLMProvider for AnthropicProvider {
     fn name(&self) -> &str {
         "anthropic"
+    }
+
+    async fn estimate_tokens(&self, text: &str) -> Result<u32> {
+        // Anthropic Claude models: ~3.5 chars/token, ~0.85 words/token
+        Ok(estimate_tokens_from_text(text, 3.5, 0.85))
     }
 
     async fn complete(&self, request: &CompletionRequest) -> Result<CompletionResponse> {
@@ -1127,6 +1931,8 @@ impl LLMProvider for AnthropicProvider {
 - ✅ API request format is correct
 - ✅ Response parsed correctly
 - ✅ Token usage extracted (prompt_tokens, output_tokens)
+- ✅ Token estimation works (3.5 chars/token, 0.85 words/token)
+- ✅ Token estimation returns reasonable values for sample text
 - ✅ No cost calculation in worker
 - ✅ Error handling for API failures
 - ✅ Returns correct provider name
@@ -1152,11 +1958,11 @@ All providers follow the same simplified pattern:
 
 **Key Differences by Provider**:
 
-| Provider | API Endpoint | Auth Header | Token Fields | Notes |
-|----------|-------------|-------------|--------------|-------|
-| **OpenAI** | `api.openai.com/v1/chat/completions` | `Authorization: Bearer {key}` | `usage.prompt_tokens`, `usage.completion_tokens` | Supports embeddings via `/v1/embeddings` |
-| **Google** | `generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` | `x-goog-api-key: {key}` | `usageMetadata.promptTokenCount`, `usageMetadata.candidatesTokenCount` | Supports embeddings via `:embedContent` |
-| **Ollama** | `{base_url}/api/generate` | None (or optional Bearer) | `prompt_eval_count`, `eval_count` | Self-hosted, zero cost, supports embeddings via `/api/embeddings` |
+| Provider   | API Endpoint                                                                    | Auth Header                   | Token Fields                                                              | Notes                                                        |
+|------------|---------------------------------------------------------------------------------|-------------------------------|---------------------------------------------------------------------------|--------------------------------------------------------------|
+| **OpenAI** | `api.openai.com/v1/chat/completions`                                            | `Authorization: Bearer {key}` | `usage.prompt_tokens`, `usage.completion_tokens`                          | Supports embeddings via `/v1/embeddings`                     |
+| **Google** | `generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`       | `x-goog-api-key: {key}`       | `usageMetadata.promptTokenCount`, `usageMetadata.candidatesTokenCount`    | Supports embeddings via `:embedContent`                      |
+| **Ollama** | `{base_url}/api/generate`                                                       | None (or optional Bearer)     | `prompt_eval_count`, `eval_count`                                         | Self-hosted, zero cost, supports embeddings via `/api/embeddings` |
 
 **Example - OpenAI Provider (Simplified)**:
 
@@ -1170,6 +1976,11 @@ pub struct OpenAIProvider {
 impl LLMProvider for OpenAIProvider {
     fn name(&self) -> &str {
         "openai"
+    }
+
+    async fn estimate_tokens(&self, text: &str) -> Result<u32> {
+        // OpenAI models (GPT-4, GPT-3.5): ~4 chars/token, ~0.75 words/token
+        Ok(estimate_tokens_from_text(text, 4.0, 0.75))
     }
 
     async fn complete(&self, request: &CompletionRequest) -> Result<CompletionResponse> {
@@ -1211,1148 +2022,31 @@ impl LLMProvider for OpenAIProvider {
 }
 ```
 
+**Token Estimation Ratios by Provider**:
+
+All providers implement `estimate_tokens()` using `estimate_tokens_from_text()` helper with provider-specific ratios:
+
+| Provider      | Chars/Token | Words/Token | Implementation                                   |
+|---------------|-------------|-------------|--------------------------------------------------|
+| **OpenAI**    | 4.0         | 0.75        | `estimate_tokens_from_text(text, 4.0, 0.75)`     |
+| **Anthropic** | 3.5         | 0.85        | `estimate_tokens_from_text(text, 3.5, 0.85)`     |
+| **Google**    | 4.0         | 0.75        | `estimate_tokens_from_text(text, 4.0, 0.75)`     |
+| **Ollama**    | 4.0         | 0.75        | `estimate_tokens_from_text(text, 4.0, 0.75)`     |
+
+**Rationale**:
+- **MVP**: Simple character and word-based estimation
+- **Async**: Designed to support future API-based token counting (e.g., OpenAI tokenizer API)
+- **Average**: Takes average of char-based and word-based estimates for better accuracy
+- **Post-MVP**: Can integrate tiktoken-rs or provider-specific tokenizers
+
 **Test Cases (All Providers)**:
 - ✅ API request format correct
 - ✅ Response parsed correctly
 - ✅ Token usage extracted correctly
+- ✅ Token estimation returns reasonable values
 - ✅ No cost calculation logic
 - ✅ Error handling for API failures
 - ✅ Provider name returned correctly
-
----
-
-### OLD IMPLEMENTATION (DO NOT USE)
-
-~~### 3. Implement OpenAI Provider~~
-
-**File**: `worker/src/llm/openai.rs` (new)
-
-**Implementation**: Direct HTTP API calls using `reqwest` (no SDK dependency)
-
-```rust
-use super::provider::*;
-use reqwest::Client;
-use serde_json::json;
-
-pub struct OpenAIProvider {
-    client: Client,
-    api_key: String,
-}
-
-impl OpenAIProvider {
-    pub fn new(api_key: String) -> Self {
-        Self {
-            client: Client::new(),
-            api_key,
-        }
-    }
-
-    fn get_model_pricing(&self, model: &str) -> Option<ModelPricing> {
-        use std::str::FromStr;
-        // Pricing as of January 2025
-        match model {
-            "gpt-4o" | "gpt-4o-2024-11-20" | "gpt-4o-2024-08-06" => Some(ModelPricing {
-                input_per_million: Decimal::from_str("2.50").unwrap(),
-                output_per_million: Decimal::from_str("10.00").unwrap(),
-            }),
-            "gpt-4o-mini" | "gpt-4o-mini-2024-07-18" => Some(ModelPricing {
-                input_per_million: Decimal::from_str("0.15").unwrap(),
-                output_per_million: Decimal::from_str("0.60").unwrap(),
-            }),
-            _ => None,
-        }
-    }
-}
-
-struct ModelPricing {
-    input_per_million: Decimal,
-    output_per_million: Decimal,
-}
-
-#[async_trait]
-impl LLMProvider for OpenAIProvider {
-    fn name(&self) -> &str {
-        "openai"
-    }
-
-    async fn complete(&self, request: &CompletionRequest) -> Result<CompletionResponse> {
-        let mut messages = Vec::new();
-
-        if let Some(system) = &request.system_prompt {
-            messages.push(json!({
-                "role": "system",
-                "content": system,
-            }));
-        }
-
-        messages.push(json!({
-            "role": "user",
-            "content": request.prompt,
-        }));
-
-        let mut body = json!({
-            "model": request.model,
-            "messages": messages,
-        });
-
-        if let Some(max_tokens) = request.max_tokens {
-            body["max_tokens"] = json!(max_tokens);
-        }
-
-        if let Some(temp) = request.temperature {
-            body["temperature"] = json!(temp);
-        }
-
-        if let Some(top_p) = request.top_p {
-            body["top_p"] = json!(top_p);
-        }
-
-        if let Some(stops) = &request.stop_sequences {
-            body["stop"] = json!(stops);
-        }
-
-        let response = self
-            .client
-            .post("https://api.openai.com/v1/chat/completions")
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("content-type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            let error_text = response.text().await?;
-            return Err(LLMError::ProviderError(error_text));
-        }
-
-        let response_json: serde_json::Value = response.json().await?;
-
-        let content = response_json["choices"][0]["message"]["content"]
-            .as_str()
-            .ok_or_else(|| LLMError::ProviderError("No content in response".to_string()))?
-            .to_string();
-
-        let usage = TokenUsage {
-            prompt_tokens: response_json["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32,
-            output_tokens: response_json["usage"]["output_tokens"]
-                .as_u64()
-                .unwrap_or(0) as u32,
-            total_tokens: response_json["usage"]["total_tokens"].as_u64().unwrap_or(0) as u32,
-        };
-
-        let cost_usd = self.calculate_cost(&request.model, &usage)?;
-
-        let finish_reason = match response_json["choices"][0]["finish_reason"].as_str() {
-            Some("stop") => FinishReason::Stop,
-            Some("length") => FinishReason::MaxTokens,
-            Some("content_filter") => FinishReason::ContentFilter,
-            _ => FinishReason::Stop,
-        };
-
-        Ok(CompletionResponse {
-            content,
-            model: request.model.clone(),
-            usage,
-            finish_reason,
-            cost_usd,
-        })
-    }
-
-    async fn complete_stream(
-        &self,
-        request: &CompletionRequest,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionChunk>> + Send>>> {
-        todo!("Implement streaming for OpenAI")
-    }
-
-    async fn embed(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse> {
-        let body = json!({
-            "model": request.model,
-            "input": request.input,
-        });
-
-        let response = self
-            .client
-            .post("https://api.openai.com/v1/embeddings")
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("content-type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            let error_text = response.text().await?;
-            return Err(LLMError::ProviderError(error_text));
-        }
-
-        let response_json: serde_json::Value = response.json().await?;
-
-        let embeddings: Vec<Vec<f64>> = response_json["data"]
-            .as_array()
-            .ok_or_else(|| LLMError::ProviderError("No embeddings in response".to_string()))?
-            .iter()
-            .map(|item| {
-                item["embedding"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|v| v.as_f64().unwrap())
-                    .collect()
-            })
-            .collect();
-
-        let usage = TokenUsage {
-            prompt_tokens: response_json["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32,
-            output_tokens: 0,
-            total_tokens: response_json["usage"]["total_tokens"].as_u64().unwrap_or(0) as u32,
-        };
-
-        // Embedding pricing (text-embedding-3-small: $0.02/1M tokens)
-        let cost_usd = Decimal::from(usage.total_tokens)
-            * Decimal::from_str("0.02").unwrap()
-            / Decimal::from(1_000_000);
-
-        Ok(EmbeddingResponse {
-            embeddings,
-            model: request.model.clone(),
-            usage,
-            cost_usd,
-        })
-    }
-
-    fn count_tokens(&self, text: &str, _model: &str) -> Result<usize> {
-        // Use tiktoken for accurate counting (or approximation)
-        Ok(text.len() / 4)
-    }
-
-    fn calculate_cost(&self, model: &str, usage: &TokenUsage) -> Result<Decimal> {
-        let pricing = self
-            .get_model_pricing(model)
-            .ok_or_else(|| LLMError::InvalidModel(model.to_string()))?;
-
-        let one_million = Decimal::from(1_000_000);
-        let input_cost = Decimal::from(usage.prompt_tokens) * pricing.input_per_million / one_million;
-        let output_cost = Decimal::from(usage.output_tokens) * pricing.output_per_million / one_million;
-
-        Ok(input_cost + output_cost)
-    }
-}
-```
-
-**Test Cases**:
-- ✅ API request format is correct
-- ✅ Response parsed correctly
-- ✅ Token usage extracted
-- ✅ Cost calculated correctly
-- ✅ Embeddings work correctly
-
----
-
-### 4. Implement Google Gemini Provider
-
-**File**: `worker/src/llm/google.rs` (new)
-
-**Implementation**: Direct HTTP API calls using `reqwest` (no SDK dependency)
-
-**API Details**:
-- Endpoint: `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`
-- Authentication: API key via query parameter or `x-goog-api-key` header
-- Models: `gemini-2.0-flash-exp`, `gemini-1.5-pro`, `gemini-1.5-flash`
-
-```rust
-use super::provider::*;
-use reqwest::Client;
-use serde_json::json;
-
-pub struct GoogleProvider {
-    client: Client,
-    api_key: String,
-}
-
-impl GoogleProvider {
-    pub fn new(api_key: String) -> Self {
-        Self {
-            client: Client::new(),
-            api_key,
-        }
-    }
-
-    fn get_model_pricing(&self, model: &str) -> Option<ModelPricing> {
-        use std::str::FromStr;
-        // Pricing as of January 2025
-        // Note: Audio inputs and >200K token inputs may have different pricing
-        match model {
-            // Gemini 3 Pro Preview
-            "gemini-3-pro-preview" => Some(ModelPricing {
-                input_per_million: Decimal::from_str("2.00").unwrap(),
-                output_per_million: Decimal::from_str("12.00").unwrap(),
-            }),
-            // Gemini 2.5 family
-            "gemini-2.5-pro" | "gemini-2.5-pro-latest" => Some(ModelPricing {
-                input_per_million: Decimal::from_str("1.25").unwrap(),
-                output_per_million: Decimal::from_str("10.00").unwrap(),
-            }),
-            "gemini-2.5-flash" | "gemini-2.5-flash-latest" => Some(ModelPricing {
-                input_per_million: Decimal::from_str("0.30").unwrap(),
-                output_per_million: Decimal::from_str("2.50").unwrap(),
-            }),
-            "gemini-2.5-flash-lite" => Some(ModelPricing {
-                input_per_million: Decimal::from_str("0.10").unwrap(),
-                output_per_million: Decimal::from_str("0.40").unwrap(),
-            }),
-            // Gemini 2.0 family
-            "gemini-2.0-flash" | "gemini-2.0-flash-latest" => Some(ModelPricing {
-                input_per_million: Decimal::from_str("0.10").unwrap(),
-                output_per_million: Decimal::from_str("0.40").unwrap(),
-            }),
-            "gemini-2.0-flash-lite" => Some(ModelPricing {
-                input_per_million: Decimal::from_str("0.075").unwrap(),
-                output_per_million: Decimal::from_str("0.30").unwrap(),
-            }),
-            _ => None,
-        }
-    }
-}
-
-struct ModelPricing {
-    input_per_million: Decimal,
-    output_per_million: Decimal,
-}
-
-#[async_trait]
-impl LLMProvider for GoogleProvider {
-    fn name(&self) -> &str {
-        "google"
-    }
-
-    async fn complete(&self, request: &CompletionRequest) -> Result<CompletionResponse> {
-        let mut contents = Vec::new();
-
-        if let Some(system) = &request.system_prompt {
-            contents.push(json!({
-                "role": "user",
-                "parts": [{"text": system}]
-            }));
-        }
-
-        contents.push(json!({
-            "role": "user",
-            "parts": [{"text": request.prompt}]
-        }));
-
-        let mut body = json!({
-            "contents": contents,
-        });
-
-        if let Some(max_tokens) = request.max_tokens {
-            body["generationConfig"] = json!({
-                "maxOutputTokens": max_tokens
-            });
-        }
-
-        if let Some(temp) = request.temperature {
-            body["generationConfig"]["temperature"] = json!(temp);
-        }
-
-        if let Some(top_p) = request.top_p {
-            body["generationConfig"]["topP"] = json!(top_p);
-        }
-
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent",
-            request.model
-        );
-
-        let response = self
-            .client
-            .post(&url)
-            .header("x-goog-api-key", &self.api_key)
-            .header("content-type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            let error_text = response.text().await?;
-            return Err(LLMError::ProviderError(error_text));
-        }
-
-        let response_json: serde_json::Value = response.json().await?;
-
-        let content = response_json["candidates"][0]["content"]["parts"][0]["text"]
-            .as_str()
-            .ok_or_else(|| LLMError::ProviderError("No content in response".to_string()))?
-            .to_string();
-
-        let usage = TokenUsage {
-            prompt_tokens: response_json["usageMetadata"]["promptTokenCount"]
-                .as_u64()
-                .unwrap_or(0) as u32,
-            output_tokens: response_json["usageMetadata"]["candidatesTokenCount"]
-                .as_u64()
-                .unwrap_or(0) as u32,
-            total_tokens: response_json["usageMetadata"]["totalTokenCount"]
-                .as_u64()
-                .unwrap_or(0) as u32,
-        };
-
-        let cost_usd = self.calculate_cost(&request.model, &usage)?;
-
-        let finish_reason = match response_json["candidates"][0]["finishReason"].as_str() {
-            Some("STOP") => FinishReason::Stop,
-            Some("MAX_TOKENS") => FinishReason::MaxTokens,
-            Some("SAFETY") => FinishReason::ContentFilter,
-            _ => FinishReason::Stop,
-        };
-
-        Ok(CompletionResponse {
-            content,
-            model: request.model.clone(),
-            usage,
-            finish_reason,
-            cost_usd,
-        })
-    }
-
-    async fn complete_stream(
-        &self,
-        request: &CompletionRequest,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionChunk>> + Send>>> {
-        todo!("Implement streaming for Google Gemini")
-    }
-
-    async fn embed(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse> {
-        // Gemini embeddings available via embedding-001 model
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:embedContent",
-            request.model
-        );
-
-        let mut embeddings = Vec::new();
-        let mut total_tokens = 0u32;
-
-        for text in &request.input {
-            let body = json!({
-                "content": {
-                    "parts": [{"text": text}]
-                }
-            });
-
-            let response = self
-                .client
-                .post(&url)
-                .header("x-goog-api-key", &self.api_key)
-                .header("content-type", "application/json")
-                .json(&body)
-                .send()
-                .await?;
-
-            if !response.status().is_success() {
-                let error_text = response.text().await?;
-                return Err(LLMError::ProviderError(error_text));
-            }
-
-            let response_json: serde_json::Value = response.json().await?;
-
-            let embedding: Vec<f64> = response_json["embedding"]["values"]
-                .as_array()
-                .ok_or_else(|| LLMError::ProviderError("No embedding in response".to_string()))?
-                .iter()
-                .map(|v| v.as_f64().unwrap_or(0.0))
-                .collect();
-
-            embeddings.push(embedding);
-            total_tokens += text.len() as u32 / 4; // Rough estimate
-        }
-
-        let usage = TokenUsage {
-            prompt_tokens: total_tokens,
-            output_tokens: 0,
-            total_tokens,
-        };
-
-        // Gemini embeddings pricing: ~$0.00001 per 1K tokens
-        let cost_usd = Decimal::from(usage.total_tokens)
-            * Decimal::from_str("0.01").unwrap()
-            / Decimal::from(1_000_000);
-
-        Ok(EmbeddingResponse {
-            embeddings,
-            model: request.model.clone(),
-            usage,
-            cost_usd,
-        })
-    }
-
-    fn count_tokens(&self, text: &str, _model: &str) -> Result<usize> {
-        Ok(text.len() / 4)
-    }
-
-    fn calculate_cost(&self, model: &str, usage: &TokenUsage) -> Result<Decimal> {
-        let pricing = self
-            .get_model_pricing(model)
-            .ok_or_else(|| LLMError::InvalidModel(model.to_string()))?;
-
-        let one_million = Decimal::from(1_000_000);
-        let input_cost = Decimal::from(usage.prompt_tokens) * pricing.input_per_million / one_million;
-        let output_cost = Decimal::from(usage.output_tokens) * pricing.output_per_million / one_million;
-
-        Ok(input_cost + output_cost)
-    }
-}
-```
-
-**Test Cases**:
-- ✅ API request format is correct
-- ✅ Response parsed correctly
-- ✅ Token usage extracted
-- ✅ Cost calculated correctly
-- ✅ Embeddings work correctly (embedding-001 model)
-
----
-
-### 5. Implement Ollama Provider
-
-**File**: `worker/src/llm/ollama.rs` (new)
-
-**Implementation**: Direct HTTP API calls using `reqwest` (no SDK dependency)
-
-**API Details**:
-- Endpoint: `http://localhost:11434/api/generate` (default)
-- Authentication: Optional via `Authorization: Bearer <token>` header (Ollama v0.2.0+)
-- Models: Any model pulled to local Ollama (llama3.2, mistral, qwen2.5, etc.)
-
-```rust
-use super::provider::*;
-use reqwest::Client;
-use serde_json::json;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::sync::RwLock;
-
-pub struct OllamaProvider {
-    client: Client,
-    base_url: String,
-    api_key: Option<String>,
-    // Cache available models (model list, last updated timestamp)
-    available_models: Arc<RwLock<(Vec<String>, Instant)>>,
-}
-
-impl OllamaProvider {
-    pub fn new(base_url: Option<String>, api_key: Option<String>) -> Self {
-        Self {
-            client: Client::new(),
-            base_url: base_url.unwrap_or_else(|| "http://localhost:11434".to_string()),
-            api_key,
-            available_models: Arc::new(RwLock::new((Vec::new(), Instant::now() - Duration::from_secs(301)))),
-        }
-    }
-
-    /// Get list of available models from Ollama API
-    async fn list_models(&self) -> Result<Vec<String>> {
-        let url = format!("{}/api/tags", self.base_url);
-
-        let mut req = self.client.get(&url);
-        if let Some(api_key) = &self.api_key {
-            req = req.header("Authorization", format!("Bearer {}", api_key));
-        }
-
-        let response = req.send().await?;
-
-        if !response.status().is_success() {
-            let error_text = response.text().await?;
-            return Err(LLMError::ProviderError(format!("Failed to list models: {}", error_text)));
-        }
-
-        let json: serde_json::Value = response.json().await?;
-
-        let models = json["models"]
-            .as_array()
-            .ok_or_else(|| LLMError::ProviderError("No models found in response".into()))?
-            .iter()
-            .filter_map(|m| m["name"].as_str().map(String::from))
-            .collect();
-
-        Ok(models)
-    }
-
-    /// Get available models (cached for 5 minutes)
-    async fn get_available_models(&self) -> Result<Vec<String>> {
-        let cache = self.available_models.read().await;
-
-        // Return cached if less than 5 minutes old
-        if cache.1.elapsed() < Duration::from_secs(300) {
-            return Ok(cache.0.clone());
-        }
-
-        drop(cache);
-
-        // Refresh cache
-        let models = self.list_models().await?;
-        let mut cache = self.available_models.write().await;
-        *cache = (models.clone(), Instant::now());
-
-        Ok(models)
-    }
-
-    /// Validate model is available before attempting completion
-    async fn validate_model(&self, model: &str) -> Result<()> {
-        let available = self.get_available_models().await?;
-        if !available.iter().any(|m| m == model) {
-            return Err(LLMError::InvalidModel(
-                format!("Model '{}' not found. Available models: {:?}", model, available)
-            ));
-        }
-        Ok(())
-    }
-}
-
-#[async_trait]
-impl LLMProvider for OllamaProvider {
-    fn name(&self) -> &str {
-        "ollama"
-    }
-
-    async fn complete(&self, request: &CompletionRequest) -> Result<CompletionResponse> {
-        // Validate model is available
-        self.validate_model(&request.model).await?;
-
-        let mut prompt = String::new();
-
-        if let Some(system) = &request.system_prompt {
-            prompt.push_str(system);
-            prompt.push_str("\n\n");
-        }
-
-        prompt.push_str(&request.prompt);
-
-        let mut body = json!({
-            "model": request.model,
-            "prompt": prompt,
-            "stream": false,
-        });
-
-        if let Some(temp) = request.temperature {
-            body["options"] = json!({
-                "temperature": temp
-            });
-        }
-
-        if let Some(top_p) = request.top_p {
-            body["options"]["top_p"] = json!(top_p);
-        }
-
-        if let Some(stops) = &request.stop_sequences {
-            body["options"]["stop"] = json!(stops);
-        }
-
-        let url = format!("{}/api/generate", self.base_url);
-
-        let mut request = self
-            .client
-            .post(&url)
-            .header("content-type", "application/json");
-
-        if let Some(api_key) = &self.api_key {
-            request = request.header("Authorization", format!("Bearer {}", api_key));
-        }
-
-        let response = request
-            .json(&body)
-            .send()
-            .await?;
-
-        if !response.status().is_success() {
-            let error_text = response.text().await?;
-            return Err(LLMError::ProviderError(error_text));
-        }
-
-        let response_json: serde_json::Value = response.json().await?;
-
-        let content = response_json["response"]
-            .as_str()
-            .ok_or_else(|| LLMError::ProviderError("No content in response".to_string()))?
-            .to_string();
-
-        let usage = TokenUsage {
-            prompt_tokens: response_json["prompt_eval_count"].as_u64().unwrap_or(0) as u32,
-            output_tokens: response_json["eval_count"].as_u64().unwrap_or(0) as u32,
-            total_tokens: 0,
-        };
-        let total_tokens = usage.prompt_tokens + usage.output_tokens;
-        let usage = TokenUsage {
-            total_tokens,
-            ..usage
-        };
-
-        // Ollama is free (local), so cost is always 0
-        let cost_usd = Decimal::ZERO;
-
-        let finish_reason = if response_json["done"].as_bool().unwrap_or(false) {
-            FinishReason::Stop
-        } else {
-            FinishReason::Error
-        };
-
-        Ok(CompletionResponse {
-            content,
-            model: request.model.clone(),
-            usage,
-            finish_reason,
-            cost_usd,
-        })
-    }
-
-    async fn complete_stream(
-        &self,
-        request: &CompletionRequest,
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionChunk>> + Send>>> {
-        todo!("Implement streaming for Ollama")
-    }
-
-    async fn embed(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse> {
-        // Validate model is available
-        self.validate_model(&request.model).await?;
-
-        let url = format!("{}/api/embeddings", self.base_url);
-
-        let mut embeddings = Vec::new();
-        let mut total_tokens = 0u32;
-
-        for text in &request.input {
-            let body = json!({
-                "model": request.model,
-                "prompt": text,
-            });
-
-            let mut req = self
-                .client
-                .post(&url)
-                .header("content-type", "application/json");
-
-            if let Some(api_key) = &self.api_key {
-                req = req.header("Authorization", format!("Bearer {}", api_key));
-            }
-
-            let response = req
-                .json(&body)
-                .send()
-                .await?;
-
-            if !response.status().is_success() {
-                let error_text = response.text().await?;
-                return Err(LLMError::ProviderError(error_text));
-            }
-
-            let response_json: serde_json::Value = response.json().await?;
-
-            let embedding: Vec<f64> = response_json["embedding"]
-                .as_array()
-                .ok_or_else(|| LLMError::ProviderError("No embedding in response".to_string()))?
-                .iter()
-                .map(|v| v.as_f64().unwrap_or(0.0))
-                .collect();
-
-            embeddings.push(embedding);
-            total_tokens += text.len() as u32 / 4;
-        }
-
-        let usage = TokenUsage {
-            prompt_tokens: total_tokens,
-            output_tokens: 0,
-            total_tokens,
-        };
-
-        // Ollama is free (local)
-        let cost_usd = Decimal::ZERO;
-
-        Ok(EmbeddingResponse {
-            embeddings,
-            model: request.model.clone(),
-            usage,
-            cost_usd,
-        })
-    }
-
-    fn count_tokens(&self, text: &str, _model: &str) -> Result<usize> {
-        Ok(text.len() / 4)
-    }
-
-    fn calculate_cost(&self, _model: &str, _usage: &TokenUsage) -> Result<Decimal> {
-        // Ollama is free (local)
-        Ok(Decimal::ZERO)
-    }
-}
-```
-
-**Test Cases**:
-- ✅ API request format is correct
-- ✅ Response parsed correctly
-- ✅ Token usage extracted
-- ✅ Cost is always 0.0 (local)
-- ✅ Embeddings work correctly
-- ✅ Handles Ollama not running gracefully
-- ✅ Model discovery via /api/tags endpoint
-- ✅ Model validation before completion
-- ✅ Clear error message for unavailable models
-- ✅ Model cache refreshes after 5 minutes
-- ✅ Concurrent requests use cached model list
-
----
-
-### 6. Implement Fallback Chain Logic
-
-**File**: `worker/src/llm/fallback.rs` (new)
-
-```rust
-use super::provider::*;
-use std::sync::Arc;
-
-pub struct FallbackChain {
-    providers: Vec<(Arc<dyn LLMProvider>, String)>, // (provider, model)
-}
-
-impl FallbackChain {
-    pub fn new() -> Self {
-        Self {
-            providers: Vec::new(),
-        }
-    }
-
-    pub fn add_provider(mut self, provider: Arc<dyn LLMProvider>, model: String) -> Self {
-        self.providers.push((provider, model));
-        self
-    }
-
-    pub async fn complete(&self, mut request: CompletionRequest) -> Result<CompletionResponse> {
-        let mut last_error: Option<LLMError> = None;
-
-        for (provider, model) in &self.providers {
-            tracing::info!(
-                provider = provider.name(),
-                model = %model,
-                "Trying LLM provider"
-            );
-
-            request.model = model.clone();
-
-            match provider.complete(&request).await {
-                Ok(response) => {
-                    tracing::info!(
-                        provider = provider.name(),
-                        model = %model,
-                        cost_usd = response.cost_usd,
-                        "LLM provider succeeded"
-                    );
-                    return Ok(response);
-                }
-                Err(err) => {
-                    tracing::warn!(
-                        provider = provider.name(),
-                        model = %model,
-                        error = %err,
-                        "LLM provider failed, trying next"
-                    );
-                    last_error = Some(err);
-                }
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| {
-            LLMError::ProviderError("No providers in fallback chain".to_string())
-        }))
-    }
-}
-```
-
-**Test Cases**:
-- ✅ Returns first successful provider response
-- ✅ Falls back to second provider on failure
-- ✅ Falls back through entire chain
-- ✅ Returns error if all providers fail
-
----
-
-### 6. Implement LLMPromptActivity
-
-**File**: `worker/src/activities/llm_prompt.rs` (new)
-
-```rust
-use crate::activity_result::ActivityResult;
-use crate::llm::provider::*;
-use crate::llm::fallback::FallbackChain;
-use crate::llm::{anthropic::AnthropicProvider, openai::OpenAIProvider};
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use std::sync::Arc;
-
-pub struct LLMPromptActivity {
-    anthropic: Option<Arc<AnthropicProvider>>,
-    openai: Option<Arc<OpenAIProvider>>,
-    google: Option<Arc<GoogleProvider>>,
-    ollama: Option<Arc<OllamaProvider>>,
-}
-
-impl LLMPromptActivity {
-    pub fn new() -> Self {
-        // Load API keys from environment
-        let anthropic_key = std::env::var("ANTHROPIC_API_KEY").ok();
-        let openai_key = std::env::var("OPENAI_API_KEY").ok();
-        let google_key = std::env::var("GOOGLE_API_KEY").ok();
-        let ollama_url = std::env::var("OLLAMA_BASE_URL").ok();
-        let ollama_key = std::env::var("OLLAMA_API_KEY").ok();
-
-        Self {
-            anthropic: anthropic_key.map(|key| Arc::new(AnthropicProvider::new(key))),
-            openai: openai_key.map(|key| Arc::new(OpenAIProvider::new(key))),
-            google: google_key.map(|key| Arc::new(GoogleProvider::new(key))),
-            ollama: Some(Arc::new(OllamaProvider::new(ollama_url, ollama_key))), // Always available, uses default URL if not set
-        }
-    }
-
-    fn get_provider(&self, provider_name: &str) -> Result<Arc<dyn LLMProvider>> {
-        match provider_name {
-            "anthropic" => self
-                .anthropic
-                .clone()
-                .map(|p| p as Arc<dyn LLMProvider>)
-                .ok_or_else(|| LLMError::ProviderError("Anthropic API key not configured".into())),
-            "openai" => self
-                .openai
-                .clone()
-                .map(|p| p as Arc<dyn LLMProvider>)
-                .ok_or_else(|| LLMError::ProviderError("OpenAI API key not configured".into())),
-            "google" => self
-                .google
-                .clone()
-                .map(|p| p as Arc<dyn LLMProvider>)
-                .ok_or_else(|| LLMError::ProviderError("Google API key not configured".into())),
-            "ollama" => self
-                .ollama
-                .clone()
-                .map(|p| p as Arc<dyn LLMProvider>)
-                .ok_or_else(|| LLMError::ProviderError("Ollama not configured".into())),
-            _ => Err(LLMError::ProviderError(format!(
-                "Unknown provider: {}",
-                provider_name
-            ))),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct LLMPromptParams {
-    prompt: String,
-
-    // Single provider mode
-    provider: Option<String>,
-    model: Option<String>,
-
-    // Fallback chain mode
-    fallback_chain: Option<Vec<ProviderConfig>>,
-
-    // Optional parameters
-    system_prompt: Option<String>,
-    max_tokens: Option<u32>,
-    temperature: Option<f64>,
-    top_p: Option<f64>,
-    stop_sequences: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ProviderConfig {
-    provider: String,
-    model: String,
-}
-
-#[async_trait]
-impl crate::registry::ActivityImpl for LLMPromptActivity {
-    async fn execute(&self, parameters: Value) -> anyhow::Result<ActivityResult> {
-        let params: LLMPromptParams = serde_json::from_value(parameters)?;
-
-        let request = CompletionRequest {
-            model: String::new(), // Will be set by provider or fallback chain
-            prompt: params.prompt,
-            system_prompt: params.system_prompt,
-            max_tokens: params.max_tokens,
-            temperature: params.temperature,
-            top_p: params.top_p,
-            stop_sequences: params.stop_sequences,
-        };
-
-        let response = if let Some(chain_config) = params.fallback_chain {
-            // Fallback chain mode
-            let mut chain = FallbackChain::new();
-
-            for config in chain_config {
-                let provider = self.get_provider(&config.provider)?;
-                chain = chain.add_provider(provider, config.model);
-            }
-
-            chain.complete(request).await?
-        } else {
-            // Single provider mode
-            let provider_name = params.provider.ok_or_else(|| {
-                anyhow::anyhow!("Either 'provider' or 'fallback_chain' must be specified")
-            })?;
-            let model = params.model.ok_or_else(|| {
-                anyhow::anyhow!("'model' must be specified when using single provider")
-            })?;
-
-            let provider = self.get_provider(&provider_name)?;
-
-            let mut request = request;
-            request.model = model;
-
-            provider.complete(&request).await?
-        };
-
-        Ok(ActivityResult::value("response", json!(response)).with_cost(response.cost_usd))
-    }
-
-    fn name(&self) -> &str {
-        "llm_prompt"
-    }
-
-    fn worker(&self) -> &str {
-        "ai"
-    }
-}
-```
-
-**Test Cases**:
-- ✅ Single provider mode works
-- ✅ Fallback chain mode works
-- ✅ Cost tracking works
-- ✅ Error handling
-- ✅ API keys loaded from environment
-
----
-
-### 7. Implement EmbeddingActivity
-
-**File**: `worker/src/activities/embedding.rs` (new)
-
-```rust
-use crate::activity_result::ActivityResult;
-use crate::llm::provider::*;
-use crate::llm::openai::OpenAIProvider;
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use std::sync::Arc;
-
-pub struct EmbeddingActivity {
-    openai: Option<Arc<OpenAIProvider>>,
-    google: Option<Arc<GoogleProvider>>,
-    ollama: Option<Arc<OllamaProvider>>,
-}
-
-impl EmbeddingActivity {
-    pub fn new() -> Self {
-        let openai_key = std::env::var("OPENAI_API_KEY").ok();
-        let google_key = std::env::var("GOOGLE_API_KEY").ok();
-        let ollama_url = std::env::var("OLLAMA_BASE_URL").ok();
-        let ollama_key = std::env::var("OLLAMA_API_KEY").ok();
-
-        Self {
-            openai: openai_key.map(|key| Arc::new(OpenAIProvider::new(key))),
-            google: google_key.map(|key| Arc::new(GoogleProvider::new(key))),
-            ollama: Some(Arc::new(OllamaProvider::new(ollama_url, ollama_key))),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct EmbeddingParams {
-    provider: String,
-    model: String,
-    input: Vec<String>,
-}
-
-#[async_trait]
-impl crate::registry::ActivityImpl for EmbeddingActivity {
-    async fn execute(&self, parameters: Value) -> anyhow::Result<ActivityResult> {
-        let params: EmbeddingParams = serde_json::from_value(parameters)?;
-
-        let provider: Arc<dyn LLMProvider> = match params.provider.as_str() {
-            "openai" => self
-                .openai
-                .clone()
-                .map(|p| p as Arc<dyn LLMProvider>)
-                .ok_or_else(|| anyhow::anyhow!("OpenAI API key not configured"))?,
-            "google" => self
-                .google
-                .clone()
-                .map(|p| p as Arc<dyn LLMProvider>)
-                .ok_or_else(|| anyhow::anyhow!("Google API key not configured"))?,
-            "ollama" => self
-                .ollama
-                .clone()
-                .map(|p| p as Arc<dyn LLMProvider>)
-                .ok_or_else(|| anyhow::anyhow!("Ollama not configured"))?,
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Provider {} does not support embeddings",
-                    params.provider
-                ))
-            }
-        };
-
-        let request = EmbeddingRequest {
-            model: params.model,
-            input: params.input,
-        };
-
-        let response = provider.embed(&request).await?;
-
-        Ok(ActivityResult::value("embeddings", json!(response)).with_cost(response.cost_usd))
-    }
-
-    fn name(&self) -> &str {
-        "embedding_generate"
-    }
-
-    fn worker(&self) -> &str {
-        "ai"
-    }
-}
-```
-
-**Test Cases**:
-- ✅ Generates embeddings
-- ✅ Cost tracking works
-- ✅ Multiple inputs handled
-
----
-
-### 8. Register Activities in Built-in Worker
-
-**File**: `worker/src/registry.rs`
-
-**Changes**:
-```rust
-use crate::activities::llm_prompt::LLMPromptActivity;
-use crate::activities::embedding::EmbeddingActivity;
-
-impl ActivityRegistry {
-    pub fn with_builtin_activities() -> Self {
-        let mut registry = Self::new();
-
-        // Existing activities
-        registry.register(Box::new(EchoActivity));
-        registry.register(Box::new(HttpRequestActivity::new()));
-        registry.register(Box::new(PostgresQueryActivity::new()));
-
-        // NEW: LLM activities
-        registry.register(Box::new(LLMPromptActivity::new()));
-        registry.register(Box::new(EmbeddingActivity::new()));
-
-        registry
-    }
-}
-```
 
 ---
 
@@ -2442,12 +2136,12 @@ spec:
 
 For Docker containers or cloud VMs without GPU acceleration, use quantized small models:
 
-| Model             | Size  | RAM   | CPU Speed | Use Case                          |
-|-------------------|-------|-------|-----------|-----------------------------------|
-| `llama3.2:1b`     | 1B    | ~1GB  | Fast      | Simple classification, extraction |
-| `llama3.2:3b`     | 3B    | ~2GB  | Fast      | General purpose, good quality     |
-| `qwen2.5:1.5b`    | 1.5B  | ~1GB  | Fast      | Multilingual, Chinese support     |
-| `phi3.5:3.8b`     | 3.8B  | ~2.5GB| Fast      | Microsoft, good reasoning         |
+| Model          | Size | RAM    | CPU Speed | Use Case                          |
+|----------------|------|--------|-----------|-----------------------------------|
+| `llama3.2:1b`  | 1B   | ~1GB   | Fast      | Simple classification, extraction |
+| `llama3.2:3b`  | 3B   | ~2GB   | Fast      | General purpose, good quality     |
+| `qwen2.5:1.5b` | 1.5B | ~1GB   | Fast      | Multilingual, Chinese support     |
+| `phi3.5:3.8b`  | 3.8B | ~2.5GB | Fast      | Microsoft, good reasoning         |
 
 **Performance Expectations:**
 - **1-3B models**: ~10-50 tokens/sec on modern CPUs (4+ cores)
@@ -2456,10 +2150,10 @@ For Docker containers or cloud VMs without GPU acceleration, use quantized small
 
 **Medium Models (Slower but Higher Quality):**
 
-| Model             | Size  | RAM   | CPU Speed | Use Case                          |
-|-------------------|-------|-------|-----------|-----------------------------------|
-| `llama3.2:7b-q4`  | 7B    | ~4GB  | Slow      | Better quality, batch processing  |
-| `mistral:7b-q4`   | 7B    | ~4GB  | Slow      | Good for complex tasks            |
+| Model            | Size | RAM  | CPU Speed | Use Case                         |
+|------------------|------|------|-----------|----------------------------------|
+| `llama3.2:7b-q4` | 7B   | ~4GB | Slow      | Better quality, batch processing |
+| `mistral:7b-q4`  | 7B   | ~4GB | Slow      | Good for complex tasks           |
 
 **Performance Expectations:**
 - **7B models (Q4 quantized)**: ~2-10 tokens/sec on CPU
@@ -2494,31 +2188,72 @@ This strategy provides:
 
 ## Files to Create
 
-### New Modules
+### Phase 1: Orchestrator - Database, Model Catalog, and Cost Tracking
 
-**MVP**:
+**Database Migrations**:
+- `migrations/20251118000001_llm_catalog.up.sql` - Create llm_providers and llm_models tables
+- `migrations/20251118000001_llm_catalog.down.sql` - Rollback migration
+- `migrations/YYYYMMDD_cost_tracking.up.sql` - Create activity_costs table and workflow budget columns
+- `migrations/YYYYMMDD_cost_tracking.down.sql` - Rollback cost tracking
+
+**Orchestrator Modules**:
+- `orchestrator/src/llm_catalog.rs` - Model catalog seed loader (YAML → Database)
+- `orchestrator/src/routes/llm_catalog.rs` - API endpoints (GET /llm/providers, POST /llm/models/search)
+- `orchestrator/src/cost_calculator.rs` - Cost calculation from token usage
+- `core/src/cost/mod.rs` - Cost module exports
+- `core/src/cost/tracker.rs` - Cost tracking and budget enforcement service
+- `api/src/handlers/cost.rs` - Cost dashboard API endpoints
+
+**Configuration Files**:
+- `config/llm_models.yaml` - Seed data with OpenAI/Anthropic/Google/Ollama pricing
+
+### Phase 2: Worker - Simplified LLM Providers
+
+**Worker Modules** (NO PRICING LOGIC):
 - `worker/src/llm/mod.rs` - LLM module exports
-- `worker/src/llm/provider.rs` - LLM provider interface
-- `worker/src/llm/anthropic.rs` - Anthropic provider ✅ MVP
-- `worker/src/llm/openai.rs` - OpenAI provider ✅ MVP
-- `worker/src/llm/google.rs` - Google Gemini provider ✅ MVP
-- `worker/src/llm/ollama.rs` - Ollama provider ✅ MVP
+- `worker/src/llm/provider.rs` - LLM provider interface (simplified, no cost calculation)
+- `worker/src/llm/anthropic.rs` - Anthropic provider (returns token counts only)
+- `worker/src/llm/openai.rs` - OpenAI provider (returns token counts only)
+- `worker/src/llm/google.rs` - Google Gemini provider (returns token counts only)
+- `worker/src/llm/ollama.rs` - Ollama provider (returns token counts only)
 - `worker/src/llm/fallback.rs` - Fallback chain logic
 - `worker/src/activities/llm_prompt.rs` - LLM prompt activity
 - `worker/src/activities/embedding.rs` - Embedding activity
 
 **Post-MVP**:
-- `worker/src/llm/bedrock.rs` - AWS Bedrock provider (post-MVP)
-- `worker/src/llm/azure.rs` - Azure OpenAI provider (post-MVP)
+- `worker/src/llm/bedrock.rs` - AWS Bedrock provider
+- `worker/src/llm/azure.rs` - Azure OpenAI provider
 
-### New Tests
-- `worker/tests/llm_provider_tests.rs` - Provider unit tests
+### Tests
+
+**Orchestrator Tests**:
+- `orchestrator/tests/llm_catalog_tests.rs` - Seed loader and API endpoint tests
+- `orchestrator/tests/cost_calculator_tests.rs` - Cost calculation tests
+- `core/tests/cost_tracker_tests.rs` - Cost tracking and budget enforcement tests
+- `orchestrator/tests/budget_enforcement_tests.rs` - Workflow budget enforcement integration tests
+- `api/tests/cost_api_tests.rs` - Cost dashboard API tests
+
+**Worker Tests**:
+- `worker/tests/llm_provider_tests.rs` - Provider unit tests (token extraction, not cost calculation)
 - `worker/tests/llm_fallback_tests.rs` - Fallback chain tests
-- `worker/tests/llm_activity_tests.rs` - Activity integration tests
+- `worker/tests/llm_activity_tests.rs` - Activity integration tests (including budget integration)
 
 ### Modified Files
+
+**Core**:
+- `core/src/lib.rs` - Export cost module
+- `core/src/workflow/definition.rs` - Add WorkflowSettings with budget
+
+**Orchestrator**:
+- `orchestrator/src/main.rs` - Add CLI command for seed-llm-models
+- `orchestrator/src/routes/mod.rs` - Register llm_catalog and cost routes
+- `orchestrator/src/event_handlers.rs` - Add budget enforcement after activity completion
+
+**Worker**:
+- `worker/src/activities/llm_prompt.rs` - Add budget checking (integration with CostTracker via orchestrator)
+- `worker/src/activities/embedding.rs` - Add budget checking
 - `worker/src/registry.rs` - Register LLM activities
-- `worker/Cargo.toml` - Add dependencies (reqwest only - no provider SDKs)
+- `worker/Cargo.toml` - Add dependencies (reqwest only)
 
 ---
 
@@ -2550,19 +2285,78 @@ tiktoken-rs = "0.5"
 
 ---
 
+## Implementation Guidelines
+
+### Database Query Standards
+
+**IMPORTANT: Use sqlx Compile-Time Macros**
+
+All database queries MUST use sqlx compile-time verified macros wherever possible:
+
+- ✅ **Use**: `query!`, `query_as!`, `query_scalar!` (compile-time verified)
+- ❌ **Avoid**: `query`, `query_as`, `query_scalar` (runtime only)
+
+**Benefits**:
+- Compile-time verification of SQL syntax
+- Type checking against actual database schema
+- Prevents SQL injection
+- Better IDE support and error messages
+- Catches schema changes at compile time
+
+**Example**:
+```rust
+// ✅ GOOD: Compile-time verified
+let cost = sqlx::query_scalar!(
+    "SELECT get_workflow_cost($1)",
+    workflow_id
+)
+.fetch_one(&pool)
+.await?;
+
+// ❌ BAD: Runtime only
+let cost: Decimal = sqlx::query_scalar(
+    "SELECT get_workflow_cost($1)"
+)
+.bind(workflow_id)
+.fetch_one(&pool)
+.await?;
+```
+
+**When compile-time macros cannot be used**:
+- Dynamic queries (e.g., variable column names)
+- Generated SQL
+- In these rare cases, use runtime macros with clear comments explaining why
+
+**Setup Requirements**:
+- Set `DATABASE_URL` environment variable during development
+- Run migrations before compiling
+- sqlx will verify all `query!` macros at compile time
+
+---
+
 ## Testing Strategy
 
 ### Unit Tests
 
-**Provider Tests**:
+**Orchestrator Tests**:
+- Database schema migration (up/down) - both llm_catalog and cost_tracking
+- YAML seed data parsing
+- Model catalog API endpoints (GET /llm/providers, POST /llm/models/search)
+- Cost calculation logic (various models, cached tokens)
+- Batch pricing queries
+- Cost tracker service (record_cost, get_budget_status, check_budget_before_execution)
+- Budget enforcement logic
+- Cost dashboard API endpoints
+- **All database queries compile successfully with sqlx macros** (compile-time SQL verification)
+
+**Worker Provider Tests**:
 - Request format validation
 - Response parsing
-- Token counting
-- Cost calculation
-- Error handling
-- Model discovery (Ollama)
+- Token count extraction (prompt_tokens, completion_tokens, cached_tokens)
+- Error handling (API failures, invalid models)
+- Model discovery (Ollama /api/tags endpoint)
 - Model validation with clear error messages (Ollama)
-- Model cache TTL behavior (Ollama)
+- No cost calculation in workers
 
 **Fallback Tests**:
 - Fallback chain logic
@@ -2571,48 +2365,102 @@ tiktoken-rs = "0.5"
 
 ### Integration Tests
 
-**LLM Activity Tests**:
+**Orchestrator Integration**:
+- Seed command loads YAML successfully
+- API endpoints return correct model data
+- Cost calculator integrates with database
+- Batch pricing lookup performance
+- Cost tracker records costs correctly
+- Workflow budget trigger updates total_cost_usd
+- Budget enforcement in orchestrator scheduling logic:
+  - Check budget before scheduling each activity
+  - Accept all completed activity results
+  - Record costs after completion
+  - Use updated totals for next activity's budget check
+
+**Worker LLM Activity Tests**:
 - Single provider execution
 - Fallback chain execution
-- Cost tracking
+- Token usage returned correctly
 - Timeout enforcement
-- Budget limits (with US-5.2)
+- Integration with orchestrator budget checking (workers unaware of budgets)
+- Completed activities always accepted (never rejected after execution)
 
 ### End-to-End Tests
 
-**Example 4 Workflow**:
-- LLM prompt with retry
-- Fallback chain execution
-- Cost tracking and budget enforcement
-- Multiple LLM calls in sequence
+**Example 4 Workflow with Budget Enforcement**:
+- Workers execute LLM calls and return token counts
+- Orchestrator calculates costs from database pricing
+- Budget check before each activity prevents over-budget execution
+- Completed activities always accepted regardless of actual cost
+- Costs recorded and totals updated after each activity
+- Next activity checks budget using updated totals
+- Workflow stops scheduling when budget would be exceeded (abort mode)
+- Workflow logs warnings but continues when budget would be exceeded (alert mode)
+- Cost dashboard API returns correct data
+- Multiple LLM calls accumulate costs correctly
+- Fallback chain triggers correctly
+- No completed work is ever wasted
 
 ---
 
 ## Success Criteria
 
-**Core Infrastructure**:
-- ✅ LLMProvider interface defined
+**Phase 1: Database, Model Catalog, and Cost Tracking (Orchestrator)**:
+- ✅ Database migrations create llm_providers, llm_models, and activity_costs tables
+- ✅ Seed data loader reads YAML and populates database
+- ✅ CLI command: `orchestrator seed-llm-models config/llm_models.yaml` works
+- ✅ GET /api/v1/llm/providers returns all providers
+- ✅ POST /api/v1/llm/models/search searches models efficiently
+- ✅ CostCalculator calculates costs from token usage and database pricing
+- ✅ Batch pricing lookup works for multiple models
+- ✅ CostTracker records costs and enforces budgets
+- ✅ Workflow budget columns added to workflows table
+- ✅ Cost tracking triggers update workflow total_cost_usd
+- ✅ Cost dashboard API endpoints work (summary, history, analytics)
+- ✅ All database queries use sqlx compile-time macros for type safety
+
+**Phase 2: Worker LLM Providers**:
+- ✅ LLMProvider interface defined (simplified, no cost calculation)
 - ✅ All 4 MVP providers implemented (Anthropic, OpenAI, Google, Ollama)
+- ✅ Providers return token counts only (no cost calculation)
 - ✅ Fallback chain logic works with 4-provider chains
 - ✅ LLMPromptActivity works in single provider mode
 - ✅ LLMPromptActivity works in fallback chain mode
 - ✅ EmbeddingActivity works (OpenAI, Google, Ollama)
 - ✅ All tests pass
 
-**Provider-Specific**:
-- ✅ Anthropic: LLM completion, cost tracking
-- ✅ OpenAI: LLM completion, embeddings, cost tracking
-- ✅ Google Gemini: LLM completion, embeddings, cost tracking
-- ✅ Ollama: LLM completion, embeddings, zero cost (self-hosted)
+**Provider-Specific** (Workers return token counts):
+- ✅ Anthropic: LLM completion, token usage extraction
+- ✅ OpenAI: LLM completion, embeddings, token usage extraction
+- ✅ Google Gemini: LLM completion, embeddings, token usage extraction
+- ✅ Ollama: LLM completion, embeddings, token usage extraction
 
 **Configuration**:
-- ✅ API keys loaded from environment (Anthropic, OpenAI, Google)
+- ✅ Worker API keys loaded from environment (Anthropic, OpenAI, Google)
 - ✅ Ollama URL configurable for different deployment scenarios
 - ✅ Ollama works in Docker, Kubernetes, and remote deployments
+- ✅ Model pricing stored in database, not hardcoded in workers
+- ✅ Workflow and activity budget settings configurable via YAML
+
+**Budget Enforcement**:
+- ✅ Budget check before execution prevents over-budget activities from running
+- ✅ Completed activities always accepted (results never rejected after execution)
+- ✅ Costs recorded and totals updated after each activity completion
+- ✅ Per-activity budget limits work (abort prevents execution, alert warns)
+- ✅ Per-workflow budget limits work (checked before each activity)
+- ✅ Budget exceeded action: abort prevents scheduling next activity
+- ✅ Budget exceeded action: alert logs warnings but continues
+- ✅ Cost recorded for every executed LLM call
+- ✅ Budget enforcement integrated in orchestrator scheduling logic
+- ✅ No completed work is wasted due to budget overruns
 
 **Integration**:
 - ✅ Example workflows demonstrate multi-provider fallback
-- ✅ Cost tracking accurate across all cloud providers
+- ✅ Workers return token counts to orchestrator
+- ✅ Orchestrator calculates costs from database pricing
+- ✅ Budget enforcement works end-to-end
+- ✅ Cost dashboard displays workflow costs correctly
 
 ---
 
@@ -2628,6 +2476,16 @@ tiktoken-rs = "0.5"
 - ❌ Vision / multimodal inputs (post-MVP)
 - ❌ Fine-tuned model support (post-MVP)
 
+**Cost Tracking Enhancements**:
+- ❌ Real-time cost streaming
+- ❌ Cost forecasting and predictions
+- ❌ Cost alerts via email/Slack
+- ❌ Cost attribution by user/tenant
+- ❌ Budget rollover across workflows
+- ❌ Tiered pricing support
+- ❌ Volume discounts
+- ❌ Per-tenant pricing variations
+
 **Dependencies**:
 - ❌ Provider-specific SDKs (using reqwest HTTP client instead)
 
@@ -2636,93 +2494,175 @@ tiktoken-rs = "0.5"
 ## Dependencies
 
 **Upstream**:
-- ✅ US-5.4: Object Storage (Complete) - For large prompts/responses
-- 🔲 US-3.5: Activity Settings - For retry and budget
+- ✅ US-3.5: Activity Settings (Complete) - For retry and budget configuration
+- ✅ US-5.4: Object Storage (Complete) - For storing large prompts/responses
 
 **Downstream**:
-- 🔲 US-5.2: AI Cost Tracking and Budget Enforcement (uses cost data)
 - 🔲 US-5.3: Semantic Caching (caches LLM results)
-- 🔲 Example 4: LLM workflows
+- 🔲 Example 4: LLM workflows with budget enforcement
 
-**Parallel Work**:
-- Can be developed in parallel with US-3.5 (activity settings)
-- Should coordinate with US-5.2 for budget tracking integration
+**Notes**:
+- All upstream dependencies are now complete
+- Budget tracking and cost calculation are integrated in this user story
+- Ready to begin implementation
 
 ---
 
 ## Risks and Mitigations
 
-| Risk                              | Impact | Mitigation                                  |
-|-----------------------------------|--------|---------------------------------------------|
-| API rate limits                   | Medium | Implement retry with exponential backoff    |
-| Cost overruns                     | High   | Budget enforcement in US-5.2                |
-| Provider API changes              | Medium | Version pinning, provider abstraction       |
-| Token counting inaccuracy         | Low    | Use official tokenizers (tiktoken)          |
-| Fallback chain complexity         | Medium | Comprehensive testing, clear documentation  |
-| API key security                  | High   | Environment variables only, no hardcoding   |
+| Risk                                  | Impact | Mitigation                                                     |
+|---------------------------------------|--------|----------------------------------------------------------------|
+| API rate limits                       | Medium | Implement retry with exponential backoff                       |
+| Cost overruns                         | High   | **Integrated budget enforcement** with abort/alert actions     |
+| Provider API changes                  | Medium | Version pinning, provider abstraction                          |
+| Token counting inaccuracy             | High   | Use official tokenizers (tiktoken), track actual vs estimated  |
+| Fallback chain complexity             | Medium | Comprehensive testing, clear documentation                     |
+| API key security                      | High   | Environment variables only, no hardcoding                      |
+| Database write latency on cost record | Medium | Async cost recording, batch inserts                            |
+| Race condition on budget check        | High   | Use database transactions, proper locking                      |
+| Cost tracking storage growth          | Medium | Partition by date, archive old data                            |
 
 ---
 
 ## Implementation Phases
 
-### Phase 1: Provider Interface and Core Providers (Day 1-2)
-1. Define LLMProvider trait
-2. Implement AnthropicProvider
-3. Implement OpenAIProvider
-4. Unit tests for Anthropic and OpenAI
-5. Cost calculation for both providers
+### Phase 1: Database Schema and Cost Tracking Infrastructure (Day 1-2)
+1. Create LLM catalog migration (llm_providers, llm_models tables)
+2. Create cost tracking migration (activity_costs table, workflow budget columns)
+3. Create llm_models.yaml with pricing data
+4. Implement seed data loader
+5. Implement CostCalculator service
+6. Implement CostTracker service
+7. Add workflow budget settings to WorkflowDefinition
+8. Unit tests for CostCalculator and CostTracker
 
-### Phase 2: Additional MVP Providers (Day 2-3)
-1. Implement GoogleProvider (Gemini)
-2. Implement OllamaProvider
-3. Unit tests for Google and Ollama
-4. Cost calculation and embeddings support
-5. Ollama deployment documentation
+### Phase 2: Model Catalog and Cost Dashboard APIs (Day 2-3)
+1. Implement GET /api/v1/llm/providers endpoint
+2. Implement POST /api/v1/llm/models/search endpoint
+3. Implement GET /api/v1/workflows/:id/cost endpoint
+4. Implement GET /api/v1/workflows/:id/cost/history endpoint
+5. Implement GET /api/v1/cost/analytics endpoint
+6. API tests
+7. CLI command for seeding model catalog
 
-### Phase 3: Activities and Fallback Chain (Day 3-4)
+### Phase 3: Worker LLM Providers (Day 3-4)
+1. Define LLMProvider trait (simplified, no cost calculation)
+2. Implement AnthropicProvider (returns token counts only)
+3. Implement OpenAIProvider (returns token counts only)
+4. Implement GoogleProvider (returns token counts only)
+5. Implement OllamaProvider (returns token counts only)
+6. Unit tests for all providers
+7. Embedding support for OpenAI, Google, Ollama
+
+### Phase 4: Activities and Fallback Chain (Day 4-5)
 1. Implement FallbackChain logic
 2. Implement LLMPromptActivity (supporting all 4 providers)
 3. Implement EmbeddingActivity (OpenAI, Google, Ollama)
 4. Register activities in worker
 5. Integration tests
 
-### Phase 4: Testing and Examples (Day 4-5)
+### Phase 5: Budget Enforcement and Integration (Day 5-6)
+1. Integrate budget checking in orchestrator event handlers
+2. Add budget enforcement to activity execution flow
+3. Budget enforcement tests (activity and workflow level)
+4. Integration tests for cost tracking end-to-end
+5. Budget exceeded actions (abort and alert)
+
+### Phase 6: Testing, Examples, and Documentation (Day 6-7)
 1. End-to-end tests with all providers
-2. Example workflows demonstrating multi-provider fallback
+2. Example 4 workflow with budget enforcement
 3. Ollama deployment scenarios (Docker, Kubernetes)
-4. Documentation
-5. Code review
+4. Cost dashboard testing
+5. Documentation
+6. Code review
 
 ---
 
 ## Completion Checklist
 
-### Phase 1: Provider Interface and Core Providers ⏳
-- [ ] LLMProvider trait defined
-- [ ] CompletionRequest/Response models created
-- [ ] EmbeddingRequest/Response models created
-- [ ] LLMError enum created
-- [ ] AnthropicProvider implemented
-- [ ] Anthropic cost calculation accurate
-- [ ] OpenAIProvider implemented
-- [ ] OpenAI cost calculation accurate
-- [ ] OpenAI embeddings work
-- [ ] Unit tests pass (Anthropic, OpenAI)
+### Phase 1: Database Schema and Cost Tracking Infrastructure ⏳
 
-### Phase 2: Additional MVP Providers ⏳
-- [ ] GoogleProvider (Gemini) implemented
-- [ ] Google cost calculation accurate
+**Database Migrations**:
+- [ ] LLM catalog migration created (llm_providers, llm_models tables)
+- [ ] Cost tracking migration created (activity_costs table)
+- [ ] Workflow budget columns added (total_cost_usd, budget_limit_usd)
+- [ ] Migrations up/down tested
+- [ ] Indexes and foreign keys verified
+- [ ] Database triggers work (update_workflow_cost)
+- [ ] Database functions work (get_workflow_cost, get_activity_cost)
+
+**Seed Data**:
+- [ ] llm_models.yaml created with all provider pricing
+- [ ] Seed loader (llm_catalog.rs) implemented
+- [ ] CLI command works: `orchestrator seed-llm-models config/llm_models.yaml`
+- [ ] Upsert logic handles duplicates correctly
+
+**Core Services**:
+- [ ] CostCalculator implemented
+- [ ] Single model cost calculation works
+- [ ] Batch pricing lookup works
+- [ ] Cached token pricing handled correctly
+- [ ] CostTracker implemented
+- [ ] Record cost works
+- [ ] Get budget status works
+- [ ] Check budget before execution works
+- [ ] All database queries use sqlx compile-time macros (query!, query_as!, query_scalar!)
+- [ ] Unit tests pass (CostCalculator and CostTracker)
+
+**Workflow Budget Settings**:
+- [ ] WorkflowSettings added to WorkflowDefinition
+- [ ] Budget settings parse from YAML
+- [ ] Serialization/deserialization works
+
+### Phase 2: Model Catalog and Cost Dashboard APIs ⏳
+
+**Model Catalog API**:
+- [ ] GET /api/v1/llm/providers implemented
+- [ ] POST /api/v1/llm/models/search implemented
+- [ ] Batch search with multiple models works
+- [ ] API tests pass
+
+**Cost Dashboard API**:
+- [ ] GET /api/v1/workflows/:id/cost implemented
+- [ ] GET /api/v1/workflows/:id/cost/history implemented
+- [ ] GET /api/v1/cost/analytics implemented
+- [ ] All API endpoints use sqlx compile-time macros
+- [ ] Budget remaining calculated correctly
+- [ ] Materialized view queries work
+- [ ] API tests pass
+
+### Phase 3: Worker LLM Providers ⏳
+
+**Provider Interface**:
+- [ ] LLMProvider trait defined (no cost calculation)
+- [ ] estimate_tokens() method added to trait
+- [ ] estimate_tokens_from_text() helper function implemented
+- [ ] CompletionRequest/Response models created (no cost_usd field)
+- [ ] EmbeddingRequest/Response models created (no cost_usd field)
+- [ ] TokenUsage includes cached_tokens field
+- [ ] LLMError enum created
+
+**Providers** (All return token counts only, no pricing):
+- [ ] AnthropicProvider implemented
+- [ ] Anthropic returns correct token counts
+- [ ] Anthropic estimate_tokens works (3.5 chars/token, 0.85 words/token)
+- [ ] OpenAIProvider implemented
+- [ ] OpenAI returns correct token counts
+- [ ] OpenAI estimate_tokens works (4.0 chars/token, 0.75 words/token)
+- [ ] OpenAI embeddings work
+- [ ] GoogleProvider implemented
+- [ ] Google returns correct token counts
+- [ ] Google estimate_tokens works (4.0 chars/token, 0.75 words/token)
 - [ ] Google embeddings work
 - [ ] OllamaProvider implemented
-- [ ] Ollama model discovery via /api/tags endpoint
-- [ ] Ollama model validation with caching (5 min TTL)
-- [ ] Ollama optional authentication (OLLAMA_API_KEY)
-- [ ] Ollama embeddings work (zero cost)
-- [ ] Ollama connectivity documentation complete
-- [ ] Ollama CPU-friendly model recommendations documented
-- [ ] Unit tests pass (Google, Ollama)
+- [ ] Ollama returns correct token counts
+- [ ] Ollama estimate_tokens works (4.0 chars/token, 0.75 words/token)
+- [ ] Ollama embeddings work
+- [ ] Unit tests pass (all 4 providers)
 
-### Phase 3: Activities and Fallback Chain ⏳
+### Phase 4: Activities and Fallback Chain ⏳
+
+**Activities**:
 - [ ] FallbackChain implemented
 - [ ] LLMPromptActivity implemented (all 4 providers)
 - [ ] EmbeddingActivity implemented (OpenAI, Google, Ollama)
@@ -2731,19 +2671,62 @@ tiktoken-rs = "0.5"
 - [ ] Activities registered in worker
 - [ ] Integration tests pass
 
-### Phase 4: Testing and Documentation ⏳
-- [ ] End-to-end tests pass (all 4 providers)
-- [ ] Example workflows demonstrate multi-provider fallback
+### Phase 5: Budget Enforcement and Integration ⏳
+
+**Budget Enforcement**:
+- [ ] Orchestrator budget checking before activity execution
+- [ ] Budget estimation using provider estimate_tokens()
+- [ ] Activity budget check prevents execution if would exceed (abort mode)
+- [ ] Activity budget check logs warning but proceeds (alert mode)
+- [ ] Completed activities always accepted (never rejected post-execution)
+- [ ] Cost recording after activity completion
+- [ ] Activity marked as completed after cost recorded
+- [ ] Subsequent activities check budget using updated totals
+- [ ] Budget exceeded tests pass (preventive + acceptance behavior)
+- [ ] Integration tests pass (no completed work wasted)
+
+**Orchestrator-Worker Integration**:
+- [ ] Workers return token counts to orchestrator
+- [ ] Orchestrator queries pricing from database
+- [ ] Orchestrator calculates costs correctly
+- [ ] Orchestrator records costs in activity_costs table
+- [ ] Workflow total_cost_usd updates via trigger
+- [ ] End-to-end cost tracking works
+
+### Phase 6: Testing, Examples, and Documentation ⏳
+
+**Testing**:
+- [ ] All unit tests pass
+- [ ] All integration tests pass
+- [ ] Budget enforcement end-to-end tests pass
+- [ ] Cost dashboard tests pass
+- [ ] Example 4 workflow with budget enforcement works
+- [ ] Multi-provider fallback demonstrated
+
+**Documentation**:
 - [ ] Ollama deployment scenarios documented (Docker, K8s)
 - [ ] Configuration documentation complete
-- [ ] Provider feature matrix documented
+- [ ] Budget configuration examples complete
+- [ ] Cost dashboard API documentation complete
 - [ ] Code review complete
 
 ---
 
 ## Notes
 
+### Implementation Plan Merge
+
+**This plan merges US-5.1 (Multi-Provider LLM Activities) and US-5.2 (AI Cost Tracking and Budget Enforcement)**:
+- **Rationale**: These features are inseparable for MVP - we won't ship LLM activities without cost controls
+- **Benefits of merge**:
+  - Single cohesive feature from user perspective
+  - Eliminates coordination complexity between two plans
+  - Clearer implementation dependencies
+  - Unified testing and documentation
+
 ### MVP Scope
+
+**LLM Providers**:
 - **Focus**: 4 LLM providers in MVP
   - ✅ Anthropic (Claude) - Cloud API
   - ✅ OpenAI (GPT-4, embeddings) - Cloud API
@@ -2752,27 +2735,80 @@ tiktoken-rs = "0.5"
 - **Implementation approach**: Direct HTTP APIs using reqwest (no provider SDKs)
 - **Post-MVP providers**: AWS Bedrock, Azure OpenAI
 
+**Cost Tracking and Budget Enforcement**:
+- **Database-backed model catalog**: Pricing stored in PostgreSQL
+- **Real-time cost tracking**: Every LLM call tracked in activity_costs table
+- **Budget enforcement**: Per-activity and per-workflow limits with abort/alert actions
+- **Cost dashboard**: API endpoints for cost analytics
+- **First-class orchestrator feature**: Not just for LLMs - extensible to any usage-based activity
+
 ### Technical Decisions
+
+**Cost Calculation Architecture**:
+- **Orchestrator calculates costs** (not workers)
+- Workers return token counts only: `{prompt_tokens, completion_tokens, cached_tokens?}`
+- Orchestrator queries pricing from database and calculates costs
+- Rationale: See US-5.2 architectural decision for full analysis
+  - Dynamic pricing updates without worker redeployment
+  - Single source of truth in database
+  - Core business logic belongs in orchestrator
+  - Enables per-tenant pricing, volume discounts (future)
+  - Extends to any usage-based activity (AWS APIs, Twilio, etc.)
+
+**Database-Backed Model Catalog**:
+- Model pricing stored in PostgreSQL (`llm_providers`, `llm_models` tables)
+- YAML seed data: `config/llm_models.yaml`
+- CLI command: `orchestrator seed-llm-models` to load/update pricing
+- API endpoints for model discovery: `POST /api/v1/llm/models/search`
+
+**Worker Implementation**:
 - **No provider SDKs**: All providers implemented with reqwest HTTP client
   - Rationale: Minimal dependencies, simple maintenance, transparent API interactions
   - Exception: AWS Bedrock (post-MVP) may require AWS signing library
-- **Ollama connectivity**: Configurable via `OLLAMA_BASE_URL` environment variable
-  - Supports localhost (dev), Docker, Kubernetes, and remote deployments
-  - Optional authentication via `OLLAMA_API_KEY` (MVP feature)
-- **Ollama model discovery**: Dynamic model validation with caching
-  - Queries `/api/tags` endpoint to discover available models
-  - Validates model availability before making completion requests
-  - Caches model list for 5 minutes to reduce API overhead
-  - Provides clear error messages listing available models
-- **Token streaming**: Post-MVP feature (requires SSE parsing)
-- **Budget enforcement**: Handled in US-5.2 (separate story)
-- **Result caching**: Handled in US-5.3 (separate story)
+- **No pricing logic**: Workers don't calculate costs
+- **Stateless**: Workers just execute tasks and return metrics
+
+**Ollama Configuration**:
+- Configurable via `OLLAMA_BASE_URL` environment variable
+- Supports localhost (dev), Docker, Kubernetes, and remote deployments
+- Optional authentication via `OLLAMA_API_KEY` (MVP feature)
+- Dynamic model discovery: Queries `/api/tags` endpoint
+- Model validation with 5-minute cache
+- Clear error messages listing available models
+
+**Token Estimation**:
+- **MVP approach**: Character and word-based estimation
+- Each provider implements `estimate_tokens()` with provider-specific ratios
+- Uses average of character-based (text.len() / chars_per_token) and word-based (word_count / words_per_token) estimates
+- **Async design**: Method is async to support future API-based token counting
+- **Provider-specific ratios**:
+  - OpenAI/Google/Ollama: 4.0 chars/token, 0.75 words/token
+  - Anthropic: 3.5 chars/token, 0.85 words/token
+- **Post-MVP**: Can integrate tiktoken-rs or provider-specific tokenizer APIs for exact counts
+
+**Database Best Practices**:
+- **Compile-time SQL verification**: All queries use `query!`, `query_as!`, `query_scalar!` macros
+- Catches SQL errors and schema mismatches at compile time
+- Prevents SQL injection vulnerabilities
+- Type-safe query results
+- See Implementation Guidelines section for detailed guidance
+
+**Post-MVP Features**:
+- **Token streaming**: Requires SSE parsing
+- **Exact token counting**: Integrate tiktoken-rs or provider tokenizer APIs
+- **Result caching**: Implemented in US-5.3
 
 ### Provider Feature Matrix (MVP)
-| Feature          | Anthropic | OpenAI | Google | Ollama |
-|------------------|-----------|--------|--------|--------|
-| LLM Completion   | ✅        | ✅     | ✅     | ✅     |
-| Embeddings       | ❌        | ✅     | ✅     | ✅     |
-| Cost Tracking    | ✅        | ✅     | ✅     | Free   |
-| Streaming        | 🔮 Post-MVP | 🔮 Post-MVP | 🔮 Post-MVP | 🔮 Post-MVP |
-| Auth Method      | API Key   | API Key | API Key | Optional API Key |
+| Feature             | Anthropic            | OpenAI              | Google              | Ollama              |
+|---------------------|----------------------|---------------------|---------------------|---------------------|
+| LLM Completion      | ✅                   | ✅                  | ✅                  | ✅                  |
+| Embeddings          | ❌                   | ✅                  | ✅                  | ✅                  |
+| Token Usage Return  | ✅                   | ✅                  | ✅                  | ✅                  |
+| Token Estimation    | ✅ 3.5/0.85          | ✅ 4.0/0.75         | ✅ 4.0/0.75         | ✅ 4.0/0.75         |
+| Cost (Orchestrator) | ✅ Database pricing  | ✅ Database pricing | ✅ Database pricing | $0.00               |
+| Streaming           | 🔮 Post-MVP          | 🔮 Post-MVP         | 🔮 Post-MVP         | 🔮 Post-MVP         |
+| Auth Method         | API Key              | API Key             | API Key             | Optional API Key    |
+
+**Notes**:
+- All cost calculation happens in orchestrator using database pricing, not in workers
+- Token estimation ratios shown as chars/token and words/token (e.g., 4.0/0.75 = 4.0 chars/token, 0.75 words/token)
