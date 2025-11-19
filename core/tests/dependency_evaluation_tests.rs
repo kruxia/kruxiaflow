@@ -1,3 +1,4 @@
+use rust_decimal::Decimal;
 use serde_json::json;
 use streamflow_core::events::{
     ActivityDefinition, DependencyEdge, WorkflowDefinition, WorkflowStatus,
@@ -29,7 +30,9 @@ fn create_test_state_with_activities(
                     error: None,
                     started_at: None,
                     completed_at: None,
-                    retry_count: 0,
+                    attempt: 0,
+                    last_error: None,
+                    accumulated_cost_usd: Decimal::ZERO,
                 },
             )
         })

@@ -627,7 +627,7 @@ pub struct ActivityResult {
     pub outputs: Vec<ActivityOutput>,
 
     /// Optional cost tracking
-    pub cost_usd: Option<f64>,
+    pub cost_usd: Option<Decimal>,
     pub token_usage: Option<TokenUsage>,
 }
 
@@ -783,7 +783,7 @@ Currently:
 pub struct CompleteActivityRequest {
     pub worker_id: String,
     pub output: serde_json::Value,  // JSON object
-    pub cost_usd: Option<f64>,
+    pub cost_usd: Option<Decimal>,
 }
 ```
 
@@ -792,7 +792,7 @@ Updated:
 pub struct CompleteActivityRequest {
     pub worker_id: String,
     pub outputs: Vec<ActivityOutput>,  // Structured outputs with types
-    pub cost_usd: Option<f64>,
+    pub cost_usd: Option<Decimal>,
 }
 ```
 
@@ -813,7 +813,7 @@ use serde_json::Value;
 #[derive(Debug, Clone)]
 pub struct ActivityResult {
     pub outputs: Vec<ActivityOutput>,
-    pub cost_usd: Option<f64>,
+    pub cost_usd: Option<Decimal>,
 }
 
 impl ActivityResult {
@@ -834,7 +834,7 @@ impl ActivityResult {
     }
 
     /// Add cost tracking
-    pub fn with_cost(mut self, cost_usd: f64) -> Self {
+    pub fn with_cost(mut self, cost_usd: Decimal) -> Self {
         self.cost_usd = Some(cost_usd);
         self
     }

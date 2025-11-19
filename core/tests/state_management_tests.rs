@@ -1,4 +1,5 @@
 use chrono::Utc;
+use rust_decimal::Decimal;
 use serde_json::json;
 use streamflow_core::events::{WorkflowEvent, WorkflowEventType, WorkflowStatus};
 use streamflow_core::orchestrator::{
@@ -48,7 +49,9 @@ fn test_apply_activity_scheduled_event() {
                 error: None,
                 started_at: None,
                 completed_at: None,
-                retry_count: 0,
+                attempt: 0,
+                last_error: None,
+                accumulated_cost_usd: Decimal::ZERO,
             },
         )]
         .into_iter()
@@ -88,7 +91,9 @@ fn test_apply_activity_completed_event() {
                 error: None,
                 started_at: Some(Utc::now()),
                 completed_at: None,
-                retry_count: 0,
+                attempt: 0,
+                last_error: None,
+                accumulated_cost_usd: Decimal::ZERO,
             },
         )]
         .into_iter()
@@ -136,7 +141,9 @@ fn test_apply_activity_failed_event() {
                 error: None,
                 started_at: Some(Utc::now()),
                 completed_at: None,
-                retry_count: 0,
+                attempt: 0,
+                last_error: None,
+                accumulated_cost_usd: Decimal::ZERO,
             },
         )]
         .into_iter()
@@ -228,7 +235,9 @@ fn test_apply_multiple_events_sequential() {
                     error: None,
                     started_at: None,
                     completed_at: None,
-                    retry_count: 0,
+                    attempt: 0,
+                    last_error: None,
+                    accumulated_cost_usd: Decimal::ZERO,
                 },
             ),
             (
@@ -240,7 +249,9 @@ fn test_apply_multiple_events_sequential() {
                     error: None,
                     started_at: None,
                     completed_at: None,
-                    retry_count: 0,
+                    attempt: 0,
+                    last_error: None,
+                    accumulated_cost_usd: Decimal::ZERO,
                 },
             ),
         ]

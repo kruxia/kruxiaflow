@@ -39,7 +39,7 @@ pub struct ActivityDefinition {
     pub activity_name: String,
     pub parameters: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub settings: Option<crate::queue::ActivitySettings>,
+    pub settings: Option<crate::workflow::ActivitySettings>,
     #[serde(rename = "outputs")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_definitions: Option<Vec<crate::workflow::ActivityOutputDefinition>>,

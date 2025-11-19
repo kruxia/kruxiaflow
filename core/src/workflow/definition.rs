@@ -1,5 +1,6 @@
 use super::outputs::ActivityOutputDefinition;
 use chrono::{DateTime, NaiveDateTime, Utc};
+use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -359,41 +360,152 @@ pub struct WorkflowSettings {
 }
 
 /// Activity-level settings
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ActivitySettings {
-    /// Activity timeout in seconds
+    /// Timeout in seconds for activity execution
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub timeout: Option<u64>,
+    pub timeout_seconds: Option<u64>,
 
-    /// Retry configuration
+    /// Retry policy
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub retry: Option<RetrySettings>,
+    pub retry: Option<RetryPolicy>,
+
+    /// Budget limits
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget: Option<BudgetSettings>,
+
+    /// Enable result caching
+    #[serde(default)]
+    pub cache: bool,
+
+    /// Cache TTL in seconds
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_ttl: Option<u64>,
 }
 
-/// Retry configuration for activities
+impl ActivitySettings {
+    /// Calculate backoff delay for retry attempt
+    pub fn calculate_backoff(&self, attempt: u32) -> Option<u64> {
+        let retry = self.retry.as_ref()?;
+
+        if attempt >= retry.max_attempts {
+            return None; // Max attempts reached
+        }
+
+        let delay = match retry.strategy {
+            BackoffStrategy::Fixed => retry.base_seconds,
+            BackoffStrategy::Exponential => {
+                let exponential = retry.base_seconds as f64 * retry.factor.powi(attempt as i32 - 1);
+                exponential.min(retry.max_seconds as f64) as u64
+            }
+        };
+
+        Some(delay.min(retry.max_seconds))
+    }
+
+    /// Check if activity should be retried
+    pub fn should_retry(&self, attempt: u32) -> bool {
+        if let Some(retry) = &self.retry {
+            attempt < retry.max_attempts
+        } else {
+            false
+        }
+    }
+
+    /// Get timeout duration
+    pub fn timeout_duration(&self) -> Option<std::time::Duration> {
+        self.timeout_seconds.map(std::time::Duration::from_secs)
+    }
+}
+
+/// Retry policy configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RetrySettings {
-    /// Maximum retry attempts
+pub struct RetryPolicy {
+    /// Maximum retry attempts (default: 1 = no retries)
+    #[serde(default = "default_max_attempts")]
     pub max_attempts: u32,
 
-    /// Backoff strategy
-    #[serde(default = "default_backoff")]
-    pub backoff: BackoffStrategy,
+    /// Backoff strategy: exponential or fixed
+    #[serde(default)]
+    pub strategy: BackoffStrategy,
+
+    /// Base delay in seconds between retries
+    #[serde(default = "default_base_seconds")]
+    pub base_seconds: u64,
+
+    /// Exponential multiplier (for exponential strategy)
+    #[serde(default = "default_factor")]
+    pub factor: f64,
+
+    /// Maximum backoff delay cap in seconds
+    #[serde(default = "default_max_seconds")]
+    pub max_seconds: u64,
 }
 
-fn default_backoff() -> BackoffStrategy {
-    BackoffStrategy::Exponential
+fn default_max_attempts() -> u32 {
+    1
+}
+
+fn default_base_seconds() -> u64 {
+    2
+}
+
+fn default_factor() -> f64 {
+    2.0
+}
+
+fn default_max_seconds() -> u64 {
+    300
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_attempts: default_max_attempts(),
+            strategy: BackoffStrategy::default(),
+            base_seconds: default_base_seconds(),
+            factor: default_factor(),
+            max_seconds: default_max_seconds(),
+        }
+    }
 }
 
 /// Backoff strategy for retries
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum BackoffStrategy {
+    /// Exponential backoff (delay doubles each retry)
+    #[default]
+    Exponential,
     /// Fixed delay between retries
     Fixed,
-    /// Exponential backoff (delay doubles each retry)
-    Exponential,
 }
+
+/// Budget configuration for activity
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BudgetSettings {
+    /// Budget limit in USD
+    pub limit: Decimal,
+
+    /// Action when budget exceeded
+    #[serde(default)]
+    pub action: BudgetAction,
+}
+
+/// Action to take when budget is exceeded
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum BudgetAction {
+    /// Abort workflow execution
+    #[default]
+    Abort,
+
+    /// Continue with warning
+    Continue,
+}
+
+// Legacy type aliases for backward compatibility
+pub type RetrySettings = RetryPolicy;
 
 /// Check if string is valid identifier (alphanumeric, hyphens, underscores)
 fn is_valid_identifier(s: &str) -> bool {

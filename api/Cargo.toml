@@ -18,6 +18,7 @@ uuid.workspace = true
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+rust_decimal.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
@@ -28,7 +29,7 @@ jsonwebtoken.workspace = true
 bcrypt.workspace = true
 
 # OpenAPI generation and documentation
-utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
+utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono", "decimal_float"] }
 utoipa-redoc = { version = "5", features = ["axum"] }
 
 [dev-dependencies]

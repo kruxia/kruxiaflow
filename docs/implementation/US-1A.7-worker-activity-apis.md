@@ -321,7 +321,7 @@ pub struct CompleteActivityRequest {
     /// Cost in USD (for AI/LLM activities, optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(example = 0.015)]
-    pub cost_usd: Option<f64>,
+    pub cost_usd: Option<Decimal>,
 }
 
 impl CompleteActivityRequest {
@@ -660,7 +660,7 @@ impl ActivityWorkerService {
         activity_id: Uuid,
         worker_id: String,
         output: Value,
-        cost_usd: Option<f64>,
+        cost_usd: Option<Decimal>,
     ) -> ActivityWorkerResult<()> {
         let mut tx = self.pool.begin().await?;
 

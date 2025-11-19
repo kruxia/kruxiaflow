@@ -20,8 +20,7 @@ impl PostgresQueue {
     fn extract_timeout(&self, settings: &Option<ActivitySettings>) -> u64 {
         settings
             .as_ref()
-            .and_then(|s| s.timeout.as_ref())
-            .map(|tc| tc.timeout)
+            .and_then(|s| s.timeout_seconds)
             .unwrap_or(self.config.default_timeout.as_secs())
     }
 

@@ -167,6 +167,157 @@ fn build_template_context(
     context
 }
 
+/// Handle ActivityFailed event with retry logic.
+/// Returns true if activity will be retried, false if it should fail permanently
+async fn handle_activity_failed(
+    state: &mut super::workflow_state::WorkflowState,
+    definition: &crate::events::WorkflowDefinition,
+    event: &WorkflowEvent,
+    event_source: &Arc<dyn EventSource>,
+    activity_queue: &Arc<dyn ActivityQueue>,
+) -> Result<bool> {
+    let activity_key = event
+        .activity_key
+        .as_ref()
+        .ok_or_else(|| super::OrchestratorError::MissingActivityKey)?;
+
+    // Get activity definition
+    let activity_def = definition
+        .activities
+        .iter()
+        .find(|a| &a.key == activity_key)
+        .ok_or_else(|| {
+            super::OrchestratorError::ActivityNotFound(format!(
+                "Activity definition not found: {}",
+                activity_key
+            ))
+        })?;
+
+    // Get error message from event payload
+    let error_message = event
+        .payload
+        .get("error")
+        .and_then(|e| e.as_str())
+        .unwrap_or("Unknown error");
+
+    // Get activity settings (use default if not specified)
+    let settings = activity_def.settings.as_ref();
+
+    // Get current attempt number (before mutable borrow)
+    let current_attempt = state
+        .activities
+        .get(activity_key)
+        .map(|a| a.attempt)
+        .unwrap_or(1);
+
+    // Check if should retry
+    let should_retry = if let Some(settings) = settings {
+        settings.should_retry(current_attempt)
+    } else {
+        false
+    };
+
+    if !should_retry {
+        tracing::error!(
+            workflow_id = %state.workflow_id,
+            activity_key = %activity_key,
+            attempt = current_attempt,
+            error = %error_message,
+            "Activity failed permanently (no retry configured or max attempts reached)"
+        );
+        return Ok(false); // Don't retry - let it fail permanently
+    }
+
+    // Calculate backoff delay
+    let backoff_seconds = settings
+        .unwrap()
+        .calculate_backoff(current_attempt)
+        .unwrap_or(0);
+
+    tracing::info!(
+        workflow_id = %state.workflow_id,
+        activity_key = %activity_key,
+        attempt = current_attempt,
+        backoff_seconds = backoff_seconds,
+        max_attempts = settings.and_then(|s| s.retry.as_ref().map(|r| r.max_attempts)),
+        "Retrying activity after failure"
+    );
+
+    // Build template context for resolving parameters (before mutating state)
+    let template_context = build_template_context(state, state.workflow_id);
+
+    // Now update activity state (mutable borrow)
+    let activity_state = state.activities.get_mut(activity_key).ok_or_else(|| {
+        super::OrchestratorError::ActivityNotFound(format!(
+            "Activity state not found: {}",
+            activity_key
+        ))
+    })?;
+
+    // Update error state
+    activity_state.set_error(error_message.to_string());
+
+    // Increment attempt count
+    activity_state.increment_attempt();
+
+    // Reset status to Pending for retry
+    activity_state.status = WorkflowActivityStatus::Pending;
+
+    // Resolve template expressions in parameters
+    let resolved_params = match resolve_template_value(&activity_def.parameters, &template_context)
+    {
+        Ok(resolved) => resolved,
+        Err(e) => {
+            tracing::error!(
+                "Template resolution failed for activity retry {}: {}",
+                activity_key,
+                e
+            );
+            return Err(super::OrchestratorError::TemplateFailed(format!(
+                "Failed to resolve templates in activity {}: {}",
+                activity_key, e
+            )));
+        }
+    };
+
+    // Schedule retry with delay
+    let scheduled_for = if backoff_seconds > 0 {
+        Some(chrono::Utc::now() + chrono::Duration::seconds(backoff_seconds as i64))
+    } else {
+        None
+    };
+
+    let activity_to_schedule = Activity {
+        key: activity_key.clone(),
+        worker: activity_def.worker.clone(),
+        activity_name: activity_def.activity_name.clone(),
+        parameters: resolved_params,
+        settings: activity_def.settings.clone(),
+        scheduled_for,
+        output_definitions: activity_def.output_definitions.clone(),
+    };
+
+    activity_queue
+        .schedule(state.workflow_id, vec![activity_to_schedule])
+        .await?;
+
+    // Publish ActivityScheduled event for observability
+    let scheduled_event = NewWorkflowEvent {
+        workflow_id: state.workflow_id,
+        event_type: WorkflowEventType::ActivityScheduled,
+        activity_key: Some(activity_key.clone()),
+        payload: json!({
+            "worker": activity_def.worker,
+            "activity_name": activity_def.activity_name,
+            "attempt": activity_state.attempt,
+            "scheduled_for": scheduled_for,
+        }),
+    };
+    event_source.publish(scheduled_event).await?;
+
+    Ok(true) // Retry scheduled
+}
+
 /// Process a single workflow event
 #[tracing::instrument(
     skip(event, event_source, activity_queue, config),
@@ -265,6 +416,28 @@ pub async fn process_workflow_event(
         state_start.elapsed(),
         event.workflow_id
     );
+
+    // 3. Handle ActivityFailed event with retry logic BEFORE applying to state
+    if event.event_type == WorkflowEventType::ActivityFailed {
+        let retry_start = std::time::Instant::now();
+        let retry_handled =
+            handle_activity_failed(&mut state, &definition, event, event_source, activity_queue)
+                .await?;
+
+        if retry_handled {
+            // Activity will be retried - save state and exit early
+            tracing::trace!(
+                "Activity retry scheduled in {:?} for workflow {}",
+                retry_start.elapsed(),
+                event.workflow_id
+            );
+
+            save_materialized_state(&mut tx, event.workflow_id, &state).await?;
+            tx.commit().await?;
+            return Ok(());
+        }
+        // Otherwise, fall through to mark as permanently failed
+    }
 
     // 3. Apply THIS event to update state incrementally (just 1 event, not n events)
     let apply_start = std::time::Instant::now();

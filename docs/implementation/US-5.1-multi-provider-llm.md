@@ -245,7 +245,7 @@ pub struct CompletionResponse {
     pub model: String,
     pub usage: TokenUsage,
     pub finish_reason: FinishReason,
-    pub cost_usd: f64,
+    pub cost_usd: Decimal,
 }
 
 /// Token usage statistics
@@ -285,7 +285,7 @@ pub struct EmbeddingResponse {
     pub embeddings: Vec<Vec<f64>>,
     pub model: String,
     pub usage: TokenUsage,
-    pub cost_usd: f64,
+    pub cost_usd: Decimal,
 }
 
 pub type Result<T> = std::result::Result<T, LLMError>;

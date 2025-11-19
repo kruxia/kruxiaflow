@@ -2,7 +2,9 @@
 //! Unit tests for queue models (serialization, deserialization, Display impls)
 
 use chrono::Utc;
+use rust_decimal::Decimal;
 use serde_json::json;
+use std::str::FromStr;
 use streamflow_core::queue::models::*;
 use uuid::Uuid;
 
@@ -88,14 +90,17 @@ fn test_activity_serialization() {
 #[test]
 fn test_activity_with_settings() {
     let settings = ActivitySettings {
-        retry: Some(RetryConfig {
+        retry: Some(streamflow_core::workflow::RetryPolicy {
             max_attempts: 3,
-            backoff: Some(1000),
+            strategy: streamflow_core::workflow::BackoffStrategy::Fixed,
+            base_seconds: 2,
+            factor: 2.0,
+            max_seconds: 300,
         }),
-        timeout: None,
+        timeout_seconds: None,
         budget: None,
-        cache: None,
-        deterministic: true,
+        cache: false,
+        cache_ttl: None,
     };
 
     let activity = Activity {
@@ -153,76 +158,84 @@ fn test_activity_clone() {
 // ============================================================================
 
 #[test]
-fn test_activity_settings_default_deterministic() {
+fn test_activity_settings_default_values() {
     let settings = ActivitySettings {
         retry: None,
-        timeout: None,
+        timeout_seconds: None,
         budget: None,
-        cache: None,
-        deterministic: true,
+        cache: false,
+        cache_ttl: None,
     };
 
     let json = serde_json::to_string(&settings).unwrap();
     let deserialized: ActivitySettings = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized.deterministic, true);
+    assert_eq!(deserialized.cache, false);
+    assert_eq!(deserialized.cache_ttl, None);
 }
 
 #[test]
 fn test_activity_settings_with_all_options() {
     let settings = ActivitySettings {
-        retry: Some(RetryConfig {
+        retry: Some(streamflow_core::workflow::RetryPolicy {
             max_attempts: 5,
-            backoff: Some(2000),
+            strategy: streamflow_core::workflow::BackoffStrategy::Exponential,
+            base_seconds: 2,
+            factor: 2.0,
+            max_seconds: 300,
         }),
-        timeout: Some(TimeoutConfig {
-            timeout: 30000,
-            heartbeat: Some(5000),
+        timeout_seconds: Some(30),
+        budget: Some(streamflow_core::workflow::BudgetSettings {
+            limit: Decimal::from_str("10.0").unwrap(),
+            action: streamflow_core::workflow::BudgetAction::Abort,
         }),
-        budget: Some(BudgetConfig { max_cost_usd: 10.0 }),
-        cache: Some(CacheConfig { ttl: 3600 }),
-        deterministic: false,
+        cache: true,
+        cache_ttl: Some(3600),
     };
 
     let json = serde_json::to_string(&settings).unwrap();
     assert!(json.contains("max_attempts"));
-    assert!(json.contains("timeout"));
-    assert!(json.contains("max_cost_usd"));
-    assert!(json.contains("ttl"));
-    assert!(json.contains("deterministic"));
+    assert!(json.contains("timeout_seconds"));
+    assert!(json.contains("limit"));
+    assert!(json.contains("cache_ttl"));
 }
 
 #[test]
 fn test_activity_settings_serialization_skips_none() {
     let settings = ActivitySettings {
         retry: None,
-        timeout: None,
+        timeout_seconds: None,
         budget: None,
-        cache: None,
-        deterministic: true,
+        cache: false,
+        cache_ttl: None,
     };
 
     let json = serde_json::to_string(&settings).unwrap();
     assert!(!json.contains("retry"));
-    assert!(!json.contains("timeout"));
+    assert!(!json.contains("timeout_seconds"));
     assert!(!json.contains("budget"));
-    assert!(!json.contains("cache"));
+    assert!(!json.contains("cache_ttl"));
+    // Note: cache is a bool with #[serde(default)], so it will be serialized even when false
+    assert!(json.contains("\"cache\":false"));
 }
 
 #[test]
 fn test_activity_settings_clone() {
     let settings1 = ActivitySettings {
-        retry: Some(RetryConfig {
+        retry: Some(streamflow_core::workflow::RetryPolicy {
             max_attempts: 3,
-            backoff: Some(1000),
+            strategy: streamflow_core::workflow::BackoffStrategy::Fixed,
+            base_seconds: 2,
+            factor: 2.0,
+            max_seconds: 300,
         }),
-        timeout: None,
+        timeout_seconds: None,
         budget: None,
-        cache: None,
-        deterministic: true,
+        cache: false,
+        cache_ttl: None,
     };
 
     let settings2 = settings1.clone();
-    assert_eq!(settings1.deterministic, settings2.deterministic);
+    assert_eq!(settings1.cache, settings2.cache);
     assert_eq!(
         settings1.retry.as_ref().unwrap().max_attempts,
         settings2.retry.as_ref().unwrap().max_attempts
@@ -230,140 +243,97 @@ fn test_activity_settings_clone() {
 }
 
 // ============================================================================
-// RetryConfig Tests
+// RetryPolicy Tests
 // ============================================================================
 
 #[test]
-fn test_retry_config_with_backoff() {
-    let config = RetryConfig {
+fn test_retry_policy_with_exponential_backoff() {
+    let policy = streamflow_core::workflow::RetryPolicy {
         max_attempts: 5,
-        backoff: Some(1000),
+        strategy: streamflow_core::workflow::BackoffStrategy::Exponential,
+        base_seconds: 2,
+        factor: 2.0,
+        max_seconds: 300,
     };
 
-    let json = serde_json::to_string(&config).unwrap();
+    let json = serde_json::to_string(&policy).unwrap();
     assert!(json.contains("5"));
-    assert!(json.contains("1000"));
+    assert!(json.contains("exponential"));
 }
 
 #[test]
-fn test_retry_config_without_backoff() {
-    let config = RetryConfig {
+fn test_retry_policy_with_fixed_backoff() {
+    let policy = streamflow_core::workflow::RetryPolicy {
         max_attempts: 3,
-        backoff: None,
+        strategy: streamflow_core::workflow::BackoffStrategy::Fixed,
+        base_seconds: 2,
+        factor: 2.0,
+        max_seconds: 300,
     };
 
-    let json = serde_json::to_string(&config).unwrap();
+    let json = serde_json::to_string(&policy).unwrap();
     assert!(json.contains("3"));
-    assert!(!json.contains("backoff"));
+    assert!(json.contains("fixed"));
 }
 
 #[test]
-fn test_retry_config_clone() {
-    let config1 = RetryConfig {
+fn test_retry_policy_clone() {
+    let policy1 = streamflow_core::workflow::RetryPolicy {
         max_attempts: 3,
-        backoff: Some(500),
+        strategy: streamflow_core::workflow::BackoffStrategy::Fixed,
+        base_seconds: 2,
+        factor: 2.0,
+        max_seconds: 300,
     };
 
-    let config2 = config1.clone();
-    assert_eq!(config1.max_attempts, config2.max_attempts);
-    assert_eq!(config1.backoff, config2.backoff);
+    let policy2 = policy1.clone();
+    assert_eq!(policy1.max_attempts, policy2.max_attempts);
+    assert_eq!(policy1.base_seconds, policy2.base_seconds);
 }
 
 // ============================================================================
-// TimeoutConfig Tests
+// Timeout Tests (removed TimeoutConfig, now using timeout_seconds directly)
+// ============================================================================
+
+// Timeout config tests removed - timeout is now a simple u64 field (timeout_seconds)
+// in ActivitySettings and is tested there.
+
+// ============================================================================
+// BudgetSettings Tests
 // ============================================================================
 
 #[test]
-fn test_timeout_config_with_heartbeat() {
-    let config = TimeoutConfig {
-        timeout: 30000,
-        heartbeat: Some(5000),
+fn test_budget_settings_serialization() {
+    let settings = streamflow_core::workflow::BudgetSettings {
+        limit: Decimal::from_str("25.50").unwrap(),
+        action: streamflow_core::workflow::BudgetAction::Abort,
     };
 
-    let json = serde_json::to_string(&config).unwrap();
-    assert!(json.contains("30000"));
-    assert!(json.contains("5000"));
-}
-
-#[test]
-fn test_timeout_config_without_heartbeat() {
-    let config = TimeoutConfig {
-        timeout: 10000,
-        heartbeat: None,
-    };
-
-    let json = serde_json::to_string(&config).unwrap();
-    assert!(json.contains("10000"));
-    assert!(!json.contains("heartbeat"));
-}
-
-#[test]
-fn test_timeout_config_clone() {
-    let config1 = TimeoutConfig {
-        timeout: 15000,
-        heartbeat: Some(3000),
-    };
-
-    let config2 = config1.clone();
-    assert_eq!(config1.timeout, config2.timeout);
-    assert_eq!(config1.heartbeat, config2.heartbeat);
-}
-
-// ============================================================================
-// BudgetConfig Tests
-// ============================================================================
-
-#[test]
-fn test_budget_config_serialization() {
-    let config = BudgetConfig {
-        max_cost_usd: 25.50,
-    };
-
-    let json = serde_json::to_string(&config).unwrap();
+    let json = serde_json::to_string(&settings).unwrap();
     assert!(json.contains("25.5"));
+    assert!(json.contains("abort"));
 }
 
 #[test]
-fn test_budget_config_deserialization() {
-    let json = r#"{"max_cost_usd": 10.0}"#;
-    let config: BudgetConfig = serde_json::from_str(json).unwrap();
-    assert_eq!(config.max_cost_usd, 10.0);
+fn test_budget_settings_deserialization() {
+    let json = r#"{"limit": 10.0, "action": "abort"}"#;
+    let settings: streamflow_core::workflow::BudgetSettings = serde_json::from_str(json).unwrap();
+    assert_eq!(settings.limit, Decimal::from_str("10.0").unwrap());
 }
 
 #[test]
-fn test_budget_config_clone() {
-    let config1 = BudgetConfig { max_cost_usd: 15.0 };
+fn test_budget_settings_clone() {
+    let settings1 = streamflow_core::workflow::BudgetSettings {
+        limit: Decimal::from_str("15.0").unwrap(),
+        action: streamflow_core::workflow::BudgetAction::Continue,
+    };
 
-    let config2 = config1.clone();
-    assert_eq!(config1.max_cost_usd, config2.max_cost_usd);
+    let settings2 = settings1.clone();
+    assert_eq!(settings1.limit, settings2.limit);
 }
 
-// ============================================================================
-// CacheConfig Tests
-// ============================================================================
-
-#[test]
-fn test_cache_config_serialization() {
-    let config = CacheConfig { ttl: 7200 };
-
-    let json = serde_json::to_string(&config).unwrap();
-    assert!(json.contains("7200"));
-}
-
-#[test]
-fn test_cache_config_deserialization() {
-    let json = r#"{"ttl": 3600}"#;
-    let config: CacheConfig = serde_json::from_str(json).unwrap();
-    assert_eq!(config.ttl, 3600);
-}
-
-#[test]
-fn test_cache_config_clone() {
-    let config1 = CacheConfig { ttl: 1800 };
-
-    let config2 = config1.clone();
-    assert_eq!(config1.ttl, config2.ttl);
-}
+// Cache config tests removed - caching is now handled directly in ActivitySettings
+// with cache: bool and cache_ttl: Option<u64> fields.
 
 // ============================================================================
 // QueuedActivity Tests
@@ -401,14 +371,17 @@ fn test_queued_activity_with_settings() {
     let workflow_id = test_uuid();
 
     let settings = ActivitySettings {
-        retry: Some(RetryConfig {
+        retry: Some(streamflow_core::workflow::RetryPolicy {
             max_attempts: 3,
-            backoff: None,
+            strategy: streamflow_core::workflow::BackoffStrategy::Fixed,
+            base_seconds: 2,
+            factor: 2.0,
+            max_seconds: 300,
         }),
-        timeout: None,
+        timeout_seconds: None,
         budget: None,
-        cache: None,
-        deterministic: true,
+        cache: false,
+        cache_ttl: None,
     };
 
     let activity = QueuedActivity {
@@ -466,7 +439,7 @@ fn test_activity_result_success() {
             value: json!("ok"),
         }]),
         error: None,
-        cost_usd: Some(0.50),
+        cost_usd: Some(Decimal::from_str("0.50").unwrap()),
         token_usage: Some(TokenUsage {
             prompt_tokens: 100,
             completion_tokens: 50,
@@ -524,7 +497,7 @@ fn test_activity_result_clone() {
             value: json!("value"),
         }]),
         error: None,
-        cost_usd: Some(1.25),
+        cost_usd: Some(Decimal::from_str("1.25").unwrap()),
         token_usage: None,
     };
 
@@ -585,8 +558,9 @@ fn test_token_usage_clone() {
 
 #[test]
 fn test_activity_settings_deserialization_defaults() {
-    // When deserializing without deterministic field, should default to true
-    let json = r#"{"retry": null, "timeout": null, "budget": null, "cache": null}"#;
+    // When deserializing without cache field, should default to false
+    let json = r#"{"retry": null, "timeout_seconds": null, "budget": null}"#;
     let settings: ActivitySettings = serde_json::from_str(json).unwrap();
-    assert_eq!(settings.deterministic, true);
+    assert_eq!(settings.cache, false);
+    assert_eq!(settings.cache_ttl, None);
 }

@@ -349,7 +349,7 @@ pub struct ActivityState {
     pub outputs: Vec<ActivityOutput>,
     pub started_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
-    pub cost_usd: Option<f64>,
+    pub cost_usd: Option<Decimal>,
 
     // NEW: Retry tracking
     #[serde(default)]
@@ -621,7 +621,7 @@ pub struct ActivityState {
 
     /// Accumulated cost in USD
     #[serde(default)]
-    pub accumulated_cost_usd: f64,
+    pub accumulated_cost_usd: Decimal,
 }
 
 impl ActivityState {

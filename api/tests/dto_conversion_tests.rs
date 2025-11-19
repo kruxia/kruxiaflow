@@ -24,11 +24,17 @@ fn test_workflow_definition_from_core_to_dto() {
                     conditions: Some(vec!["condition1".to_string()]),
                 }]),
                 settings: Some(workflow::ActivitySettings {
-                    timeout: Some(300),
-                    retry: Some(workflow::RetrySettings {
+                    timeout_seconds: Some(300),
+                    retry: Some(workflow::RetryPolicy {
                         max_attempts: 3,
-                        backoff: workflow::BackoffStrategy::Exponential,
+                        strategy: workflow::BackoffStrategy::Exponential,
+                        base_seconds: 2,
+                        factor: 2.0,
+                        max_seconds: 300,
                     }),
+                    budget: None,
+                    cache: false,
+                    cache_ttl: None,
                 }),
                 output_definitions: None,
             },
@@ -74,11 +80,11 @@ fn test_workflow_definition_from_core_to_dto() {
 
     // Check settings conversion
     let settings = activity1.settings.as_ref().unwrap();
-    assert_eq!(settings.timeout, Some(300));
+    assert_eq!(settings.timeout_seconds, Some(300));
 
     let retry = settings.retry.as_ref().unwrap();
     assert_eq!(retry.max_attempts, 3);
-    assert!(matches!(retry.backoff, dto::BackoffStrategy::Exponential));
+    assert!(matches!(retry.strategy, dto::BackoffStrategy::Exponential));
 
     // Check second activity
     let activity2 = &dto_def.activities[1];
@@ -110,11 +116,17 @@ fn test_workflow_definition_from_dto_to_core() {
                 conditions: None,
             }]),
             settings: Some(dto::ActivitySettings {
-                timeout: Some(300),
+                timeout_seconds: Some(300),
                 retry: Some(dto::RetrySettings {
                     max_attempts: 5,
-                    backoff: dto::BackoffStrategy::Fixed,
+                    strategy: dto::BackoffStrategy::Fixed,
+                    base_seconds: 2,
+                    factor: 2.0,
+                    max_seconds: 300,
                 }),
+                budget: None,
+                cache: false,
+                cache_ttl: None,
             }),
             output_definitions: None,
         }],
@@ -136,11 +148,11 @@ fn test_workflow_definition_from_dto_to_core() {
 
     // Check settings conversion
     let settings = activity.settings.as_ref().unwrap();
-    assert_eq!(settings.timeout, Some(300));
+    assert_eq!(settings.timeout_seconds, Some(300));
 
     let retry = settings.retry.as_ref().unwrap();
     assert_eq!(retry.max_attempts, 5);
-    assert!(matches!(retry.backoff, workflow::BackoffStrategy::Fixed));
+    assert!(matches!(retry.strategy, workflow::BackoffStrategy::Fixed));
 }
 
 #[test]
@@ -170,83 +182,107 @@ fn test_activity_relationship_conversions() {
 fn test_activity_settings_conversions() {
     // Test core to DTO with all fields
     let core_settings = workflow::ActivitySettings {
-        timeout: Some(600),
-        retry: Some(workflow::RetrySettings {
+        timeout_seconds: Some(600),
+        retry: Some(workflow::RetryPolicy {
             max_attempts: 10,
-            backoff: workflow::BackoffStrategy::Exponential,
+            strategy: workflow::BackoffStrategy::Exponential,
+            base_seconds: 2,
+            factor: 2.0,
+            max_seconds: 300,
         }),
+        budget: None,
+        cache: false,
+        cache_ttl: None,
     };
 
     let dto_settings: dto::ActivitySettings = core_settings.clone().into();
-    assert_eq!(dto_settings.timeout, Some(600));
+    assert_eq!(dto_settings.timeout_seconds, Some(600));
     let retry = dto_settings.retry.as_ref().unwrap();
     assert_eq!(retry.max_attempts, 10);
-    assert!(matches!(retry.backoff, dto::BackoffStrategy::Exponential));
+    assert!(matches!(retry.strategy, dto::BackoffStrategy::Exponential));
 
     // Test DTO to core with all fields
     let dto_settings2 = dto::ActivitySettings {
-        timeout: Some(1200),
+        timeout_seconds: Some(1200),
         retry: Some(dto::RetrySettings {
             max_attempts: 7,
-            backoff: dto::BackoffStrategy::Fixed,
+            strategy: dto::BackoffStrategy::Fixed,
+            base_seconds: 2,
+            factor: 2.0,
+            max_seconds: 300,
         }),
+        budget: None,
+        cache: false,
+        cache_ttl: None,
     };
 
     let core_settings2: workflow::ActivitySettings = dto_settings2.clone().into();
-    assert_eq!(core_settings2.timeout, Some(1200));
+    assert_eq!(core_settings2.timeout_seconds, Some(1200));
     let retry2 = core_settings2.retry.as_ref().unwrap();
     assert_eq!(retry2.max_attempts, 7);
-    assert!(matches!(retry2.backoff, workflow::BackoffStrategy::Fixed));
+    assert!(matches!(retry2.strategy, workflow::BackoffStrategy::Fixed));
 }
 
 #[test]
 fn test_retry_settings_conversions() {
     // Test core to DTO - Exponential
-    let core_retry = workflow::RetrySettings {
+    let core_retry = workflow::RetryPolicy {
         max_attempts: 3,
-        backoff: workflow::BackoffStrategy::Exponential,
+        strategy: workflow::BackoffStrategy::Exponential,
+        base_seconds: 2,
+        factor: 2.0,
+        max_seconds: 300,
     };
 
     let dto_retry: dto::RetrySettings = core_retry.clone().into();
     assert_eq!(dto_retry.max_attempts, 3);
     assert!(matches!(
-        dto_retry.backoff,
+        dto_retry.strategy,
         dto::BackoffStrategy::Exponential
     ));
 
     // Test core to DTO - Fixed
-    let core_retry2 = workflow::RetrySettings {
+    let core_retry2 = workflow::RetryPolicy {
         max_attempts: 5,
-        backoff: workflow::BackoffStrategy::Fixed,
+        strategy: workflow::BackoffStrategy::Fixed,
+        base_seconds: 2,
+        factor: 2.0,
+        max_seconds: 300,
     };
 
     let dto_retry2: dto::RetrySettings = core_retry2.clone().into();
     assert_eq!(dto_retry2.max_attempts, 5);
-    assert!(matches!(dto_retry2.backoff, dto::BackoffStrategy::Fixed));
+    assert!(matches!(dto_retry2.strategy, dto::BackoffStrategy::Fixed));
 
     // Test DTO to core - Exponential
     let dto_retry3 = dto::RetrySettings {
         max_attempts: 8,
-        backoff: dto::BackoffStrategy::Exponential,
+        strategy: dto::BackoffStrategy::Exponential,
+        base_seconds: 2,
+        factor: 2.0,
+        max_seconds: 300,
     };
 
-    let core_retry3: workflow::RetrySettings = dto_retry3.clone().into();
+    let core_retry3: workflow::RetryPolicy = dto_retry3.clone().into();
     assert_eq!(core_retry3.max_attempts, 8);
     assert!(matches!(
-        core_retry3.backoff,
+        core_retry3.strategy,
         workflow::BackoffStrategy::Exponential
     ));
 
     // Test DTO to core - Fixed
     let dto_retry4 = dto::RetrySettings {
         max_attempts: 12,
-        backoff: dto::BackoffStrategy::Fixed,
+        strategy: dto::BackoffStrategy::Fixed,
+        base_seconds: 2,
+        factor: 2.0,
+        max_seconds: 300,
     };
 
-    let core_retry4: workflow::RetrySettings = dto_retry4.clone().into();
+    let core_retry4: workflow::RetryPolicy = dto_retry4.clone().into();
     assert_eq!(core_retry4.max_attempts, 12);
     assert!(matches!(
-        core_retry4.backoff,
+        core_retry4.strategy,
         workflow::BackoffStrategy::Fixed
     ));
 }
@@ -362,8 +398,11 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                     conditions: None,
                 }]),
                 settings: Some(workflow::ActivitySettings {
-                    timeout: Some(100),
+                    timeout_seconds: Some(100),
                     retry: None,
+                    budget: None,
+                    cache: false,
+                    cache_ttl: None,
                 }),
                 output_definitions: None,
             },
@@ -384,11 +423,17 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                     conditions: None,
                 }]),
                 settings: Some(workflow::ActivitySettings {
-                    timeout: Some(500),
-                    retry: Some(workflow::RetrySettings {
+                    timeout_seconds: Some(500),
+                    retry: Some(workflow::RetryPolicy {
                         max_attempts: 2,
-                        backoff: workflow::BackoffStrategy::Fixed,
+                        strategy: workflow::BackoffStrategy::Fixed,
+                        base_seconds: 2,
+                        factor: 2.0,
+                        max_seconds: 300,
                     }),
+                    budget: None,
+                    cache: false,
+                    cache_ttl: None,
                 }),
                 output_definitions: None,
             },

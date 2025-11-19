@@ -345,15 +345,15 @@ pub struct ActivityCostRecord {
     pub workflow_id: Uuid,
     pub activity_key: String,
     pub attempt: u32,
-    pub cost_usd: f64,
-    pub estimated_cost_usd: Option<f64>,
+    pub cost_usd: Decimal,
+    pub estimated_cost_usd: Option<Decimal>,
     pub prompt_tokens: Option<u32>,
     pub completion_tokens: Option<u32>,
     pub total_tokens: Option<u32>,
     pub provider: String,
     pub model: String,
-    pub activity_budget_limit_usd: Option<f64>,
-    pub workflow_budget_limit_usd: Option<f64>,
+    pub activity_budget_limit_usd: Option<Decimal>,
+    pub workflow_budget_limit_usd: Option<Decimal>,
     pub budget_exceeded: bool,
     pub budget_action: Option<String>,
 }
@@ -671,7 +671,7 @@ async fn handle_activity_completed(
     workflow_id: Uuid,
     activity_key: &str,
     outputs: Vec<ActivityOutput>,
-    cost_usd: Option<f64>,
+    cost_usd: Option<Decimal>,
 ) -> Result<()> {
     // ... existing completion logic ...
 
@@ -741,9 +741,9 @@ use streamflow_core::cost::tracker::CostTracker;
 #[derive(Debug, Serialize)]
 pub struct WorkflowCostSummary {
     pub workflow_id: Uuid,
-    pub total_cost_usd: f64,
-    pub budget_limit_usd: Option<f64>,
-    pub budget_remaining_usd: Option<f64>,
+    pub total_cost_usd: Decimal,
+    pub budget_limit_usd: Option<Decimal>,
+    pub budget_remaining_usd: Option<Decimal>,
     pub total_activities: usize,
     pub cost_by_activity: serde_json::Value,
     pub cost_by_provider: serde_json::Value,
@@ -753,7 +753,7 @@ pub struct WorkflowCostSummary {
 pub struct ActivityCostDetail {
     pub activity_key: String,
     pub attempt: u32,
-    pub cost_usd: f64,
+    pub cost_usd: Decimal,
     pub prompt_tokens: Option<u32>,
     pub completion_tokens: Option<u32>,
     pub provider: String,
