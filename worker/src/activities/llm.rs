@@ -918,8 +918,8 @@ mod tests {
             content: "Test response".to_string(),
             model: "claude-3-5-sonnet-20241022".to_string(),
             usage: crate::llm::TokenUsage {
-                prompt_tokens: 100,   // 100 input tokens
-                output_tokens: 1000,  // 1000 output tokens
+                prompt_tokens: 100,  // 100 input tokens
+                output_tokens: 1000, // 1000 output tokens
                 total_tokens: 1100,
                 cached_tokens: None,
             },
@@ -930,8 +930,8 @@ mod tests {
         let sonnet_pricing = pricing.get("anthropic/claude-3-5-sonnet-20241022").unwrap();
         let expected_input_cost =
             Decimal::from(100) * sonnet_pricing.input_price_per_million / Decimal::from(1_000_000);
-        let expected_output_cost =
-            Decimal::from(1000) * sonnet_pricing.output_price_per_million / Decimal::from(1_000_000);
+        let expected_output_cost = Decimal::from(1000) * sonnet_pricing.output_price_per_million
+            / Decimal::from(1_000_000);
         let expected_total_cost = expected_input_cost + expected_output_cost;
 
         // Expected: 100 * $3.00 / 1M = $0.0003
