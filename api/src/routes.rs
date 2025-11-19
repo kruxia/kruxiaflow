@@ -48,6 +48,11 @@ pub fn public_routes() -> Router<AppState> {
 /// - POST /api/v1/activities/{activity_id}/heartbeat - Send heartbeat
 /// - POST /api/v1/activities/{activity_id}/complete - Complete activity
 /// - POST /api/v1/activities/{activity_id}/fail - Fail activity
+/// - GET /api/v1/llm/providers - List all LLM providers
+/// - POST /api/v1/llm/models/search - Search for LLM models
+/// - GET /api/v1/workflows/{workflow_id}/cost - Get workflow cost summary
+/// - GET /api/v1/workflows/{workflow_id}/cost/history - Get workflow cost history
+/// - GET /api/v1/cost/analytics - Get cost analytics
 ///
 /// All routes in this group require valid JWT Bearer token.
 /// Authentication middleware is applied in app_router() after with_state().
@@ -71,6 +76,19 @@ pub fn protected_routes() -> Router<AppState> {
             "/api/v1/workflows/:workflow_id",
             get(handlers::get_workflow),
         )
+        // Workflow Cost Tracking
+        .route(
+            "/api/v1/workflows/:workflow_id/cost",
+            get(handlers::get_workflow_cost),
+        )
+        .route(
+            "/api/v1/workflows/:workflow_id/cost/history",
+            get(handlers::get_workflow_cost_history),
+        )
+        .route("/api/v1/cost/analytics", get(handlers::get_cost_analytics))
+        // LLM Provider Catalog
+        .route("/api/v1/llm/providers", get(handlers::list_providers))
+        .route("/api/v1/llm/models/search", post(handlers::search_models))
         // Worker Activity APIs
         .route("/api/v1/workers/poll", post(handlers::poll_activities))
         .route(
@@ -160,7 +178,7 @@ mod tests {
     /// Helper to create test database pool
     async fn setup_test_pool() -> PgPool {
         let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+            "postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamflow".to_string()
         });
 
         PgPool::connect(&database_url)

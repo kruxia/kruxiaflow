@@ -34,6 +34,12 @@ pub enum OrchestratorError {
 
     #[error("Template resolution failed: {0}")]
     TemplateFailed(String),
+
+    #[error("Invalid event: {0}")]
+    InvalidEvent(String),
+
+    #[error("Cost tracking failed: {0}")]
+    CostTrackingFailed(String),
 }
 
 pub type Result<T> = std::result::Result<T, OrchestratorError>;

@@ -152,7 +152,7 @@ impl AppState {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use async_trait::async_trait;
     use futures::stream::{self, Stream};
@@ -166,13 +166,13 @@ mod tests {
     use uuid::Uuid;
 
     // Mock authentication service for testing
-    struct MockAuthService;
+    pub struct MockAuthService;
 
     // Mock activity queue for testing
-    struct MockActivityQueue;
+    pub struct MockActivityQueue;
 
     // Mock workflow storage for testing
-    struct MockWorkflowStorage;
+    pub struct MockWorkflowStorage;
 
     #[async_trait]
     impl ActivityQueue for MockActivityQueue {
@@ -232,7 +232,7 @@ mod tests {
     }
 
     // Mock event source for testing
-    struct MockEventSource;
+    pub struct MockEventSource;
 
     #[async_trait]
     impl EventSource for MockEventSource {
@@ -389,7 +389,7 @@ mod tests {
 
     async fn mock_pool() -> PgPool {
         let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+            "postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamflow".to_string()
         });
         PgPool::connect(&database_url)
             .await

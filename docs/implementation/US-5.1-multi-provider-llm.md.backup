@@ -583,14 +583,14 @@ pub async fn list_providers(
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ModelSearchCriteria {
+pub struct ModelSearchCriterion {
     pub provider: Option<String>,
     pub model: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ModelSearchRequest {
-    pub criteria: Vec<ModelSearchCriteria>,
+    pub criteria: Vec<ModelSearchCriterion>,
 }
 
 #[derive(Debug, Serialize)]
@@ -877,13 +877,13 @@ pub trait LLMProvider: Send + Sync {
     /// Generate completion from prompt
     async fn complete(
         &self,
-        request: &CompletionRequest,
-    ) -> Result<CompletionResponse>;
+        request: &PromptRequest,
+    ) -> Result<PromptResponse>;
 
     /// Generate streaming completion (post-MVP)
     async fn complete_stream(
         &self,
-        request: &CompletionRequest,
+        request: &PromptRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionChunk>> + Send>>>;
 
     /// Generate embeddings
@@ -895,7 +895,7 @@ pub trait LLMProvider: Send + Sync {
 
 /// Completion request
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompletionRequest {
+pub struct PromptRequest {
     pub model: String,
     pub prompt: String,
     pub system_prompt: Option<String>,
@@ -907,7 +907,7 @@ pub struct CompletionRequest {
 
 /// Completion response - NO COST CALCULATION
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompletionResponse {
+pub struct PromptResponse {
     pub content: String,
     pub model: String,
     pub usage: TokenUsage,
@@ -1028,7 +1028,7 @@ impl LLMProvider for AnthropicProvider {
         "anthropic"
     }
 
-    async fn complete(&self, request: &CompletionRequest) -> Result<CompletionResponse> {
+    async fn complete(&self, request: &PromptRequest) -> Result<PromptResponse> {
         let mut messages = vec![json!({
             "role": "user",
             "content": request.prompt,
@@ -1097,7 +1097,7 @@ impl LLMProvider for AnthropicProvider {
             _ => FinishReason::Stop,
         };
 
-        Ok(CompletionResponse {
+        Ok(PromptResponse {
             content,
             model: request.model.clone(),
             usage,
@@ -1108,7 +1108,7 @@ impl LLMProvider for AnthropicProvider {
 
     async fn complete_stream(
         &self,
-        request: &CompletionRequest,
+        request: &PromptRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionChunk>> + Send>>> {
         // Post-MVP: Implement streaming using Server-Sent Events (SSE)
         todo!("Streaming support is post-MVP")
@@ -1145,7 +1145,7 @@ impl LLMProvider for AnthropicProvider {
 All providers follow the same simplified pattern:
 - ✅ Make HTTP API call to provider
 - ✅ Parse response and extract token counts
-- ✅ Return `CompletionResponse` with `usage: TokenUsage`
+- ✅ Return `PromptResponse` with `usage: TokenUsage`
 - ❌ No `get_model_pricing()` method
 - ❌ No `calculate_cost()` method
 - ❌ No `cost_usd` in response
@@ -1172,7 +1172,7 @@ impl LLMProvider for OpenAIProvider {
         "openai"
     }
 
-    async fn complete(&self, request: &CompletionRequest) -> Result<CompletionResponse> {
+    async fn complete(&self, request: &PromptRequest) -> Result<PromptResponse> {
         // Build request body
         let body = json!({
             "model": request.model,
@@ -1198,7 +1198,7 @@ impl LLMProvider for OpenAIProvider {
             cached_tokens: None,
         };
 
-        Ok(CompletionResponse {
+        Ok(PromptResponse {
             content: /* extract from response */,
             model: request.model.clone(),
             usage,
@@ -1275,7 +1275,7 @@ impl LLMProvider for OpenAIProvider {
         "openai"
     }
 
-    async fn complete(&self, request: &CompletionRequest) -> Result<CompletionResponse> {
+    async fn complete(&self, request: &PromptRequest) -> Result<PromptResponse> {
         let mut messages = Vec::new();
 
         if let Some(system) = &request.system_prompt {
@@ -1349,7 +1349,7 @@ impl LLMProvider for OpenAIProvider {
             _ => FinishReason::Stop,
         };
 
-        Ok(CompletionResponse {
+        Ok(PromptResponse {
             content,
             model: request.model.clone(),
             usage,
@@ -1360,7 +1360,7 @@ impl LLMProvider for OpenAIProvider {
 
     async fn complete_stream(
         &self,
-        request: &CompletionRequest,
+        request: &PromptRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionChunk>> + Send>>> {
         todo!("Implement streaming for OpenAI")
     }
@@ -1525,7 +1525,7 @@ impl LLMProvider for GoogleProvider {
         "google"
     }
 
-    async fn complete(&self, request: &CompletionRequest) -> Result<CompletionResponse> {
+    async fn complete(&self, request: &PromptRequest) -> Result<PromptResponse> {
         let mut contents = Vec::new();
 
         if let Some(system) = &request.system_prompt {
@@ -1605,7 +1605,7 @@ impl LLMProvider for GoogleProvider {
             _ => FinishReason::Stop,
         };
 
-        Ok(CompletionResponse {
+        Ok(PromptResponse {
             content,
             model: request.model.clone(),
             usage,
@@ -1616,7 +1616,7 @@ impl LLMProvider for GoogleProvider {
 
     async fn complete_stream(
         &self,
-        request: &CompletionRequest,
+        request: &PromptRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionChunk>> + Send>>> {
         todo!("Implement streaming for Google Gemini")
     }
@@ -1813,7 +1813,7 @@ impl LLMProvider for OllamaProvider {
         "ollama"
     }
 
-    async fn complete(&self, request: &CompletionRequest) -> Result<CompletionResponse> {
+    async fn complete(&self, request: &PromptRequest) -> Result<PromptResponse> {
         // Validate model is available
         self.validate_model(&request.model).await?;
 
@@ -1894,7 +1894,7 @@ impl LLMProvider for OllamaProvider {
             FinishReason::Error
         };
 
-        Ok(CompletionResponse {
+        Ok(PromptResponse {
             content,
             model: request.model.clone(),
             usage,
@@ -1905,7 +1905,7 @@ impl LLMProvider for OllamaProvider {
 
     async fn complete_stream(
         &self,
-        request: &CompletionRequest,
+        request: &PromptRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionChunk>> + Send>>> {
         todo!("Implement streaming for Ollama")
     }
@@ -2024,7 +2024,7 @@ impl FallbackChain {
         self
     }
 
-    pub async fn complete(&self, mut request: CompletionRequest) -> Result<CompletionResponse> {
+    pub async fn complete(&self, mut request: PromptRequest) -> Result<PromptResponse> {
         let mut last_error: Option<LLMError> = None;
 
         for (provider, model) in &self.providers {
@@ -2171,7 +2171,7 @@ impl crate::registry::ActivityImpl for LLMPromptActivity {
     async fn execute(&self, parameters: Value) -> anyhow::Result<ActivityResult> {
         let params: LLMPromptParams = serde_json::from_value(parameters)?;
 
-        let request = CompletionRequest {
+        let request = PromptRequest {
             model: String::new(), // Will be set by provider or fallback chain
             prompt: params.prompt,
             system_prompt: params.system_prompt,
@@ -2699,7 +2699,7 @@ tiktoken-rs = "0.5"
 
 ### Phase 1: Provider Interface and Core Providers ⏳
 - [ ] LLMProvider trait defined
-- [ ] CompletionRequest/Response models created
+- [ ] PromptRequest/Response models created
 - [ ] EmbeddingRequest/Response models created
 - [ ] LLMError enum created
 - [ ] AnthropicProvider implemented

@@ -49,6 +49,7 @@ streamflow-api = { path = "../api" }
 streamflow-core = { path = "../core" }
 streamflow-oauth = { path = "../oauth" }
 bcrypt = { workspace = true }
+wiremock = "0.6"
 
 [features]
 # Enable profiling feature for profiling builds

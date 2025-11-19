@@ -7,6 +7,7 @@ use tikv_jemallocator::Jemalloc;
 
 mod commands;
 mod config;
+mod llm_catalog;
 mod logging;
 mod signals;
 
@@ -131,6 +132,18 @@ EXAMPLES:\n  \
   streamflow version --format json"
     )]
     Version(commands::version::VersionCommand),
+
+    /// Seed LLM model catalog from YAML
+    #[command(
+        about = "Load LLM model catalog and pricing from YAML file",
+        long_about = "Load LLM model catalog and pricing from YAML file\n\n\
+Loads provider and model information into the database from a YAML configuration file.\n\
+Supports upsert - updates existing providers/models with new pricing.\n\n\
+EXAMPLES:\n  \
+  streamflow seed-llm config/llm_models.yaml\n  \
+  streamflow seed-llm /path/to/custom_models.yaml"
+    )]
+    SeedLlm(commands::seed_llm::SeedLlmCommand),
     // Future commands (Epic 1C):
     // Orchestrator(commands::orchestrator::OrchestratorCommand),
     // Worker(commands::worker::WorkerCommand),
@@ -167,5 +180,6 @@ async fn main() -> Result<()> {
         Commands::Api(cmd) => commands::api::execute(cmd, database_url.clone()).await,
         Commands::Serve(cmd) => commands::serve::execute(cmd, database_url.unwrap()).await,
         Commands::Version(cmd) => commands::version::execute(cmd),
+        Commands::SeedLlm(cmd) => commands::seed_llm::execute(cmd, database_url.unwrap()).await,
     }
 }

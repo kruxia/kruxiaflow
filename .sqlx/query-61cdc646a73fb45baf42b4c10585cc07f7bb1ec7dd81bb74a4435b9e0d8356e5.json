@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO llm_models (\n                    provider, name, display_name,\n                    input_price_per_million, output_price_per_million,\n                    cached_input_price_per_million,\n                    supports_completion, supports_embeddings,\n                    context_window, max_output_tokens\n                )\n                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n                ON CONFLICT (provider, name) DO UPDATE SET\n                    display_name = EXCLUDED.display_name,\n                    input_price_per_million = EXCLUDED.input_price_per_million,\n                    output_price_per_million = EXCLUDED.output_price_per_million,\n                    cached_input_price_per_million = EXCLUDED.cached_input_price_per_million,\n                    supports_completion = EXCLUDED.supports_completion,\n                    supports_embeddings = EXCLUDED.supports_embeddings,\n                    context_window = EXCLUDED.context_window,\n                    max_output_tokens = EXCLUDED.max_output_tokens,\n                    updated_at = NOW()\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Numeric",
+        "Numeric",
+        "Numeric",
+        "Bool",
+        "Bool",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "61cdc646a73fb45baf42b4c10585cc07f7bb1ec7dd81bb74a4435b9e0d8356e5"
+}

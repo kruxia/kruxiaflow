@@ -4,11 +4,14 @@ pub mod builtin;
 pub mod client;
 pub mod config;
 pub mod file_executor;
+pub mod llm;
 pub mod manager;
 pub mod poller;
 pub mod registry;
 
-pub use activities::{EchoActivity, HttpRequestActivity, PostgresQueryActivity};
+pub use activities::{
+    EchoActivity, EmbeddingActivity, HttpRequestActivity, LLMPromptActivity, PostgresQueryActivity,
+};
 pub use activity_result::ActivityResult;
 pub use builtin::register_builtin_activities;
 pub use client::WorkerApiClient;
