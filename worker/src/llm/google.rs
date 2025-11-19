@@ -13,7 +13,10 @@ pub struct GoogleProvider {
 
 impl GoogleProvider {
     pub fn new(api_key: String) -> Self {
-        Self::with_base_url(api_key, "https://generativelanguage.googleapis.com".to_string())
+        Self::with_base_url(
+            api_key,
+            "https://generativelanguage.googleapis.com".to_string(),
+        )
     }
 
     pub fn with_base_url(api_key: String, base_url: String) -> Self {

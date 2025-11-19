@@ -177,16 +177,31 @@ mod tests {
     }
 
     async fn create_test_workflow(pool: &PgPool) -> Uuid {
-        let workflow_id = Uuid::new_v4();
+        let workflow_id = Uuid::now_v7();
+
+        // Create workflow definition first
+        sqlx::query!(
+            r#"INSERT INTO workflow_definitions (name, activities)
+               VALUES ('test_workflow', '[]'::jsonb)"#
+        )
+        .execute(pool)
+        .await
+        .expect("Failed to insert workflow definition");
+
+        let definition_id =
+            sqlx::query_scalar!("SELECT id FROM workflow_definitions WHERE name = 'test_workflow'")
+                .fetch_one(pool)
+                .await
+                .expect("Failed to get definition ID");
 
         // Create workflow record
         sqlx::query!(
             r#"
-            INSERT INTO workflows (id, name, status)
-            VALUES ($1, $2, 'running')
+            INSERT INTO workflows (id, definition_name, workflow_definition_id, input, status, activities, state_data)
+            VALUES ($1, 'test_workflow', $2, '{}'::jsonb, 'running', '{}'::jsonb, '{}'::jsonb)
             "#,
             workflow_id,
-            "test_workflow"
+            definition_id
         )
         .execute(pool)
         .await
@@ -312,12 +327,7 @@ mod tests {
         tracker.record_cost(record2).await.unwrap();
 
         let status = tracker
-            .get_budget_status(
-                workflow_id,
-                "activity1",
-                Some(dec!(0.50)),
-                Some(dec!(1.00)),
-            )
+            .get_budget_status(workflow_id, "activity1", Some(dec!(0.50)), Some(dec!(1.00)))
             .await
             .unwrap();
 

@@ -13,8 +13,9 @@ use crate::events::{
     EventSource, NewWorkflowEvent, WorkflowEvent, WorkflowEventType, WorkflowStatus,
 };
 use crate::queue::{Activity, ActivityQueue};
-use crate::workflow::template::{TemplateContext, resolve_template_value};
 use crate::workflow::BudgetAction;
+use crate::workflow::template::{TemplateContext, resolve_template_value};
+use rust_decimal::Decimal;
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -177,6 +178,7 @@ async fn handle_activity_failed(
     event: &WorkflowEvent,
     event_source: &Arc<dyn EventSource>,
     activity_queue: &Arc<dyn ActivityQueue>,
+    pool: &sqlx::PgPool,
 ) -> Result<bool> {
     let activity_key = event
         .activity_key
@@ -282,6 +284,27 @@ async fn handle_activity_failed(
         }
     };
 
+    // Enrich LLM activity parameters with budget information
+    let (params_w_budget, should_schedule) = enrich_llm_activity_params_w_budget(
+        &activity_def.activity_name,
+        resolved_params,
+        activity_def,
+        definition,
+        activity_key,
+        state.workflow_id,
+        pool,
+    )
+    .await?;
+
+    // Don't retry if budget check failed
+    if !should_schedule {
+        tracing::warn!(
+            "Skipping LLM activity retry {} due to budget constraint",
+            activity_key
+        );
+        return Ok(false); // Don't retry, let it fail permanently
+    }
+
     // Schedule retry with delay
     let scheduled_for = if backoff_seconds > 0 {
         Some(chrono::Utc::now() + chrono::Duration::seconds(backoff_seconds as i64))
@@ -293,7 +316,7 @@ async fn handle_activity_failed(
         key: activity_key.clone(),
         worker: activity_def.worker.clone(),
         activity_name: activity_def.activity_name.clone(),
-        parameters: resolved_params,
+        parameters: params_w_budget,
         settings: activity_def.settings.clone(),
         scheduled_for,
         output_definitions: activity_def.output_definitions.clone(),
@@ -422,9 +445,15 @@ pub async fn process_workflow_event(
     // 3. Handle ActivityFailed event with retry logic BEFORE applying to state
     if event.event_type == WorkflowEventType::ActivityFailed {
         let retry_start = std::time::Instant::now();
-        let retry_handled =
-            handle_activity_failed(&mut state, &definition, event, event_source, activity_queue)
-                .await?;
+        let retry_handled = handle_activity_failed(
+            &mut state,
+            &definition,
+            event,
+            event_source,
+            activity_queue,
+            &config.pool,
+        )
+        .await?;
 
         if retry_handled {
             // Activity will be retried - save state and exit early
@@ -459,16 +488,19 @@ pub async fn process_workflow_event(
         let cost_start = std::time::Instant::now();
         if let Some(activity_key) = &event.activity_key {
             // Get activity definition to check if it's an LLM activity
-            if let Some(activity_def) = definition.activities.iter().find(|a| &a.key == activity_key) {
+            if let Some(activity_def) = definition
+                .activities
+                .iter()
+                .find(|a| &a.key == activity_key)
+            {
                 // Check if this is an LLM activity (llm_prompt or embedding)
-                if activity_def.activity_name == "llm_prompt" || activity_def.activity_name == "embedding" {
-                    if let Err(e) = record_llm_activity_cost(
-                        &mut tx,
-                        &event,
-                        &state,
-                        &activity_def,
-                        config,
-                    ).await {
+                if activity_def.activity_name == "llm_prompt"
+                    || activity_def.activity_name == "embedding"
+                {
+                    if let Err(e) =
+                        record_llm_activity_cost(&mut tx, &event, &state, &activity_def, config)
+                            .await
+                    {
                         tracing::error!(
                             workflow_id = %event.workflow_id,
                             activity_key = %activity_key,
@@ -573,11 +605,34 @@ pub async fn process_workflow_event(
                     }
                 };
 
+                // Enrich LLM activity parameters with budget information
+                let (params_w_budget, should_schedule) = enrich_llm_activity_params_w_budget(
+                    &a.activity_name,
+                    resolved_params,
+                    a,
+                    &definition,
+                    &a.key,
+                    event.workflow_id,
+                    &config.pool,
+                )
+                .await?;
+
+                // Only schedule if budget check passed
+                if !should_schedule {
+                    tracing::warn!("Skipping LLM activity {} due to budget constraint", a.key);
+                    // Mark activity as failed due to budget
+                    if let Some(activity_state) = state.activities.get_mut(&a.key) {
+                        activity_state.status = WorkflowActivityStatus::Failed;
+                        activity_state.set_error("Budget exceeded before execution".to_string());
+                    }
+                    continue;
+                }
+
                 activities_to_schedule.push(Activity {
                     key: a.key.clone(),
                     worker: a.worker.clone(),
                     activity_name: a.activity_name.clone(),
-                    parameters: resolved_params,
+                    parameters: params_w_budget,
                     settings: a.settings.clone(),
                     scheduled_for: None, // Schedule immediately (delayed scheduling deferred post-MVP)
                     output_definitions: a.output_definitions.clone(),
@@ -738,6 +793,188 @@ pub async fn process_workflow_event(
     Ok(())
 }
 
+/// Enrich LLM activity parameters with budget information before scheduling
+/// Returns enriched parameters and whether to proceed with scheduling
+async fn enrich_llm_activity_params_w_budget(
+    activity_name: &str,
+    mut params: serde_json::Value,
+    activity_def: &crate::events::ActivityDefinition,
+    _workflow_def: &crate::events::WorkflowDefinition,
+    activity_key: &str,
+    workflow_id: uuid::Uuid,
+    pool: &sqlx::PgPool,
+) -> Result<(serde_json::Value, bool)> {
+    // Only process LLM activities
+    if activity_name != "llm_prompt" && activity_name != "embedding" {
+        return Ok((params, true)); // Not an LLM activity, proceed without enrichment
+    }
+
+    // Extract model list from parameters and parse into (provider, model) tuples
+    let model_strings: Vec<String> = match params.get("model") {
+        Some(serde_json::Value::String(single_model)) => vec![single_model.clone()],
+        Some(serde_json::Value::Array(model_array)) => model_array
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect(),
+        _ => {
+            // No model specified, cannot enrich
+            return Ok((params, true));
+        }
+    };
+
+    if model_strings.is_empty() {
+        return Ok((params, true));
+    }
+
+    // Parse model strings into (provider, model) tuples
+    let model_list: Vec<(String, String)> = model_strings
+        .iter()
+        .filter_map(|model_str| {
+            let parts: Vec<&str> = model_str.split('/').collect();
+            if parts.len() == 2 {
+                Some((parts[0].to_string(), parts[1].to_string()))
+            } else {
+                tracing::warn!("Invalid model format: {}", model_str);
+                None
+            }
+        })
+        .collect();
+
+    if model_list.is_empty() {
+        return Ok((params, true));
+    }
+
+    tracing::debug!(
+        "Enriching LLM activity {} with budget info for models: {:?}",
+        activity_key,
+        model_strings
+    );
+
+    // Extract budget limits from activity settings
+    // Note: Workflow-level budget settings not yet implemented (WorkflowDefinition has no settings field)
+    let activity_budget_limit = activity_def
+        .settings
+        .as_ref()
+        .and_then(|s| s.budget.as_ref())
+        .map(|b| b.limit);
+
+    let workflow_budget_limit: Option<Decimal> = None; // TODO: Add workflow-level budget support
+
+    // Query pricing for all models in batch
+    let cost_calculator = CostCalculator::new(pool.clone());
+    let model_pricing = cost_calculator
+        .batch_get_pricing(&model_list)
+        .await
+        .map_err(|e| {
+            super::OrchestratorError::CostTrackingFailed(format!("Failed to get pricing: {}", e))
+        })?;
+
+    // Get cumulative cost for this activity (across retry attempts)
+    let cost_tracker = CostTracker::new(pool.clone());
+    let budget_status = cost_tracker
+        .get_budget_status(
+            workflow_id,
+            activity_key,
+            activity_budget_limit,
+            workflow_budget_limit,
+        )
+        .await
+        .map_err(|e| {
+            super::OrchestratorError::CostTrackingFailed(format!(
+                "Failed to get budget status: {}",
+                e
+            ))
+        })?;
+    let cumulative_cost = budget_status.activity_cost;
+
+    // Pre-execution abort check (only if budget enforcement action is Abort)
+    let budget_action = activity_def
+        .settings
+        .as_ref()
+        .and_then(|s| s.budget.as_ref())
+        .map(|b| b.action.clone());
+
+    if budget_action == Some(BudgetAction::Abort) {
+        // Check if we should abort before scheduling
+        // Find the cheapest model in the chain
+        let mut cheapest_estimate = None;
+        for model_key in &model_list {
+            if let Some(pricing) = model_pricing.get(model_key) {
+                // Conservative estimate: assume 1000 input tokens and max_tokens output
+                let estimated_input_tokens = 1000;
+                let estimated_output_tokens = params
+                    .get("max_tokens")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(4096);
+
+                let input_cost = Decimal::from(estimated_input_tokens)
+                    * pricing.input_price_per_million
+                    / Decimal::from(1_000_000);
+                let output_cost = Decimal::from(estimated_output_tokens)
+                    * pricing.output_price_per_million
+                    / Decimal::from(1_000_000);
+                let estimate = input_cost + output_cost;
+
+                if cheapest_estimate.is_none() || estimate < cheapest_estimate.unwrap() {
+                    cheapest_estimate = Some(estimate);
+                }
+            }
+        }
+
+        // Check against budget limits
+        if let Some(estimate) = cheapest_estimate {
+            let effective_limit = match (activity_budget_limit, workflow_budget_limit) {
+                (Some(a), Some(w)) => Some(if a < w { a } else { w }),
+                (Some(a), None) => Some(a),
+                (None, Some(w)) => Some(w),
+                (None, None) => None,
+            };
+
+            if let Some(limit) = effective_limit {
+                if cumulative_cost + estimate > limit {
+                    tracing::warn!(
+                        "Aborting LLM activity {}: cheapest model estimate ${:.6} + cumulative ${:.6} exceeds budget ${:.6}",
+                        activity_key,
+                        estimate,
+                        cumulative_cost,
+                        limit
+                    );
+                    return Ok((params, false)); // Don't schedule
+                }
+            }
+        }
+    }
+
+    // Enrich parameters with budget information
+    if let Some(obj) = params.as_object_mut() {
+        obj.insert(
+            "model_pricing".to_string(),
+            serde_json::to_value(&model_pricing)?,
+        );
+
+        if let Some(limit) = activity_budget_limit {
+            obj.insert(
+                "activity_budget_limit_usd".to_string(),
+                serde_json::to_value(limit)?,
+            );
+        }
+
+        if let Some(limit) = workflow_budget_limit {
+            obj.insert(
+                "workflow_budget_limit_usd".to_string(),
+                serde_json::to_value(limit)?,
+            );
+        }
+
+        obj.insert(
+            "cumulative_activity_cost_usd".to_string(),
+            serde_json::to_value(cumulative_cost)?,
+        );
+    }
+
+    Ok((params, true))
+}
+
 /// Record LLM activity cost after completion
 async fn record_llm_activity_cost(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -746,12 +983,14 @@ async fn record_llm_activity_cost(
     activity_def: &crate::events::ActivityDefinition,
     config: &OrchestratorConfig,
 ) -> Result<()> {
-    let activity_key = event.activity_key.as_ref().ok_or_else(|| {
-        super::OrchestratorError::MissingActivityKey
-    })?;
+    let activity_key = event
+        .activity_key
+        .as_ref()
+        .ok_or_else(|| super::OrchestratorError::MissingActivityKey)?;
 
     // Extract usage information from activity outputs
-    let usage = event.payload
+    let usage = event
+        .payload
         .get("outputs")
         .and_then(|o| o.get("result"))
         .and_then(|r| r.get("usage"));
@@ -767,28 +1006,41 @@ async fn record_llm_activity_cost(
     let usage = usage.unwrap();
 
     // Extract token counts
-    let prompt_tokens = usage.get("prompt_tokens").and_then(|v| v.as_u64()).map(|v| v as u32);
-    let output_tokens = usage.get("output_tokens").and_then(|v| v.as_u64()).map(|v| v as u32);
-    let cached_tokens = usage.get("cached_tokens").and_then(|v| v.as_u64()).map(|v| v as u32);
+    let prompt_tokens = usage
+        .get("prompt_tokens")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    let output_tokens = usage
+        .get("output_tokens")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    let cached_tokens = usage
+        .get("cached_tokens")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
 
     // Extract provider and model
-    let provider = event.payload
+    let provider = event
+        .payload
         .get("outputs")
         .and_then(|o| o.get("result"))
         .and_then(|r| r.get("provider"))
         .and_then(|p| p.as_str())
-        .ok_or_else(|| super::OrchestratorError::InvalidEvent(
-            "Missing provider in activity output".to_string()
-        ))?;
+        .ok_or_else(|| {
+            super::OrchestratorError::InvalidEvent(
+                "Missing provider in activity output".to_string(),
+            )
+        })?;
 
-    let model = event.payload
+    let model = event
+        .payload
         .get("outputs")
         .and_then(|o| o.get("result"))
         .and_then(|r| r.get("model"))
         .and_then(|m| m.as_str())
-        .ok_or_else(|| super::OrchestratorError::InvalidEvent(
-            "Missing model in activity output".to_string()
-        ))?;
+        .ok_or_else(|| {
+            super::OrchestratorError::InvalidEvent("Missing model in activity output".to_string())
+        })?;
 
     // Calculate cost using CostCalculator
     let cost_calculator = CostCalculator::new(config.pool.clone());
@@ -855,9 +1107,10 @@ async fn record_llm_activity_cost(
         budget_action: budget_action.map(String::from),
     };
 
-    cost_tracker.record_cost(record).await.map_err(|e| {
-        super::OrchestratorError::CostTrackingFailed(e.to_string())
-    })?;
+    cost_tracker
+        .record_cost(record)
+        .await
+        .map_err(|e| super::OrchestratorError::CostTrackingFailed(e.to_string()))?;
 
     tracing::info!(
         workflow_id = %event.workflow_id,
