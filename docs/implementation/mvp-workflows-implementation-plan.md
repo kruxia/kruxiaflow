@@ -554,38 +554,70 @@ activities:
 - ✅ Retry logic with exponential backoff
 
 #### Implementation Tasks
-1. Activity settings parser (retry, timeout, budget)
-2. **Orchestrator retry logic** (NOT in queue or workers):
-   - Add `handle_activity_failed_event()` in orchestrator
-   - Check retry settings from workflow definition
-   - Calculate backoff delay: `base_seconds * factor^(attempt-1)` capped at `max_seconds`
-   - Track attempt count in `workflows.state_data` JSONB
-   - Publish `ActivityScheduled` event with `scheduled_for` = NOW() + backoff
-   - Record attempt history in `workflow_events` (immutable event log)
-3. Timeout enforcement (tokio timeout)
-4. Budget tracking service
-   - Pre-execution budget check
-   - Post-execution cost recording
-   - Budget exceeded handling
-5. Anthropic activity executor
-   - API integration (openai crate or reqwest)
-   - Token counting
-   - Cost calculation (tokens × price per model)
-6. Cost storage in PostgreSQL
-7. End-to-end test: Verify retry on failure, budget enforcement
-   - Test: Activity fails, orchestrator schedules retry with backoff
-   - Test: Max attempts reached, activity fails permanently
-   - Test: Exponential backoff delay increases correctly
-   - Test: Fixed backoff delay remains constant
+1. ✅ **COMPLETED** Activity settings parser (retry, timeout, budget)
+2. ✅ **COMPLETED** **Orchestrator retry logic** (NOT in queue or workers):
+   - ✅ Add `handle_activity_failed_event()` in orchestrator
+   - ✅ Check retry settings from workflow definition
+   - ✅ Calculate backoff delay: `base_seconds * factor^(attempt-1)` capped at `max_seconds`
+   - ✅ Track attempt count in `workflows.state_data` JSONB
+   - ✅ Publish `ActivityScheduled` event with `scheduled_for` = NOW() + backoff
+   - ✅ Record attempt history in `workflow_events` (immutable event log)
+3. ⏳ Timeout enforcement (tokio timeout) - Deferred to future implementation
+4. ✅ **COMPLETED** Budget tracking service
+   - ✅ Pre-execution budget check
+   - ✅ Post-execution cost recording
+   - ✅ Budget exceeded handling
+5. ✅ **COMPLETED** Anthropic activity executor
+   - ✅ API integration (Anthropic SDK)
+   - ✅ Token counting
+   - ✅ Cost calculation (tokens × price per model)
+6. ✅ **COMPLETED** Cost storage in PostgreSQL
+7. ✅ **COMPLETED** End-to-end test: Verify retry on failure, budget enforcement
+   - ✅ Test: Activity fails, orchestrator schedules retry with backoff
+   - ✅ Test: Max attempts reached, activity fails permanently
+   - ✅ Test: Exponential backoff delay increases correctly
+   - ✅ Test: Fixed backoff delay remains constant
 
 **Design Note**: Retry logic implemented in orchestrator event handlers (NOT database stored procedures or workers) for clean separation of concerns and horizontal scalability. See absurd analysis Section 3.
 
 #### Success Criteria
-- ✅ LLM activity completes successfully with Anthropic
-- ✅ Retries occur on transient failures (rate limits, network errors)
-- ✅ Activity aborts when budget exceeded
-- ✅ Cost tracked accurately in USD
-- ✅ Timeout enforced correctly
+- ✅ **ACHIEVED** LLM activity completes successfully with Anthropic
+- ✅ **ACHIEVED** Retries occur on transient failures (rate limits, network errors)
+- ✅ **ACHIEVED** Activity aborts when budget exceeded
+- ✅ **ACHIEVED** Cost tracked accurately in USD
+- ⏳ Timeout enforced correctly - Deferred to future implementation
+
+#### Implementation Notes
+
+**What was built:**
+1. **Activity Settings Model** - Complete implementation of retry, timeout, and budget settings
+2. **Retry Logic** - Orchestrator handles ActivityFailed events with exponential backoff
+3. **Budget Tracking** - Pre-execution budget checks and post-execution cost recording
+4. **LLM Activity** - Anthropic Claude integration with cost calculation
+5. **Multi-Provider Support** - Anthropic, OpenAI, Google, and Ollama providers
+6. **Fallback Chains** - Automatic fallback to cheaper/alternative models on budget constraints
+7. **Example Workflow** - `examples/04-moderate-content.yaml` demonstrating all features
+8. **Comprehensive Tests** - Budget tracking and retry integration tests
+
+**Files Created/Modified:**
+- `examples/04-moderate-content.yaml` - Content moderation workflow with retry and budget (new)
+- `examples/README.md` - Added Example 4 documentation (updated)
+- `worker/src/activities/llm.rs` - LLM activity with budget-aware fallback chains (already implemented)
+- `core/src/orchestrator/orchestrator.rs` - Retry logic and budget enrichment (already implemented)
+- `core/tests/llm_budget_integration_tests.rs` - Comprehensive budget tests (already implemented)
+- `core/tests/retry_integration_tests.rs` - Retry logic tests (already implemented)
+- `docs/implementation/mvp-workflows-implementation-plan.md` - Marked Example 4 complete (updated)
+
+**Features Validated:**
+- ✅ ActivitySettings parsed from YAML (retry, timeout, budget)
+- ✅ Retry logic with exponential backoff (2s, 4s, 8s, etc.)
+- ✅ Budget limits enforced before LLM execution
+- ✅ Cost tracking per activity attempt
+- ✅ Budget exceeded action (abort workflow)
+- ✅ Multi-provider LLM support (Anthropic, OpenAI, Google, Ollama)
+- ✅ Fallback chains skip expensive models when budget constrained
+- ✅ Token usage and USD cost captured in activity results
+- ✅ Comprehensive test coverage for all features
 
 ---
 
