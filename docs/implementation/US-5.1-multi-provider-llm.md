@@ -79,9 +79,80 @@ activities:
 
 ## Architecture Overview
 
+### Database-Backed Model Catalog
+
+**Implementation Strategy**: Model pricing and metadata stored in PostgreSQL database, accessed by orchestrator for cost calculation. Workers only return token usage metrics.
+
+**Rationale**:
+- **Centralized source of truth**: Orchestrator manages all model metadata
+- **Dynamic updates**: Update pricing without redeploying workers
+- **No worker complexity**: Workers don't need pricing data or cost calculation logic
+- **API-driven discovery**: Clients can query available models and pricing via API
+- **Consistent costs**: All workflows use same pricing data from database
+- **Audit trail**: Track pricing changes over time with updated_at timestamps
+- **Future-proof**: Enables per-tenant pricing, volume discounts, admin UI
+
+**Separation of Concerns**:
+
+```mermaid
+flowchart TB
+    subgraph Database["PostgreSQL Database"]
+        Providers[llm_providers<br/>• name, api_endpoint<br/>• supports_*]
+        Models[llm_models<br/>• provider, model name<br/>• pricing per million tokens]
+    end
+
+    subgraph Orchestrator["Orchestrator"]
+        API[API Server<br/>GET /api/v1/llm/models]
+        CostCalc[Cost Calculator<br/>tokens × price / 1M]
+        Seed[Seed Loader<br/>YAML → DB]
+    end
+
+    subgraph Worker["Worker"]
+        LLMActivity[LLM Activity<br/>Returns: tokens only]
+        HTTPClient[HTTP Client<br/>reqwest]
+    end
+
+    subgraph External["LLM Provider APIs"]
+        OpenAI[OpenAI API]
+        Anthropic[Anthropic API]
+        Google[Google API]
+        Ollama[Ollama Local]
+    end
+
+    Seed -.->|load pricing| Models
+    Models -->|pricing data| CostCalc
+    API -->|query catalog| Models
+    LLMActivity -->|API call| HTTPClient
+    HTTPClient -->|HTTP request| OpenAI
+    HTTPClient -->|HTTP request| Anthropic
+    HTTPClient -->|HTTP request| Google
+    HTTPClient -->|HTTP request| Ollama
+    OpenAI -->|response + token counts| LLMActivity
+    LLMActivity -->|activity result<br/>provider, model, tokens| CostCalc
+    CostCalc -->|calculated cost| Database
+
+    style Database fill:#e1f5ff
+    style Orchestrator fill:#f0f0f0
+    style Worker fill:#ffe1f5
+```
+
+**Worker Responsibilities** (Simplified):
+- Call provider HTTP APIs with specified model
+- Return token usage metrics: `{prompt_tokens, output_tokens}`
+- Return response content and metadata: `{content, provider, model, finish_reason}`
+- **No pricing data**
+- **No cost calculation**
+
+**Orchestrator Responsibilities**:
+- Store model catalog in database (providers, models, pricing)
+- Expose model discovery API: `GET /api/v1/llm/providers`, `GET /api/v1/llm/models`
+- Calculate costs after activity execution: `cost = (prompt_tokens × input_price + output_tokens × output_price) / 1,000,000`
+- Enforce budget limits per workflow
+- Track costs in `activity_executions` table
+
 ### HTTP API Approach
 
-**Implementation Strategy**: All LLM providers will be implemented using **reqwest** with direct HTTP API calls, avoiding provider-specific SDKs.
+**Worker Implementation**: All LLM providers implemented using **reqwest** with direct HTTP API calls, avoiding provider-specific SDKs.
 
 **Rationale**:
 - **Minimal dependencies**: No heavy provider SDKs (OpenAI SDK, Anthropic SDK, etc.)
@@ -90,14 +161,14 @@ activities:
 - **Transparent**: Easy to debug and understand API interactions
 
 **Provider HTTP API Support**:
-| Provider        | HTTP API Available | Authentication          | MVP Status      |
-|-----------------|-------------------|-------------------------|-----------------|
-| Anthropic       | ✅ Yes            | Custom header (x-api-key) | ✅ MVP          |
-| OpenAI          | ✅ Yes            | Bearer token            | ✅ MVP          |
-| Google Gemini   | ✅ Yes            | API key (query/header)  | ✅ MVP          |
-| Ollama (Local)  | ✅ Yes            | None (local server)     | ✅ MVP          |
-| Azure OpenAI    | ✅ Yes            | API key header          | 🔮 Post-MVP     |
-| AWS Bedrock     | ⚠️ Complex        | AWS SigV4 signing       | 🔮 Post-MVP     |
+| Provider        | HTTP API Available | Authentication            | MVP Status  |
+|-----------------|-------------------|---------------------------|-------------|
+| Anthropic       | ✅ Yes            | Custom header (x-api-key) | ✅ MVP      |
+| OpenAI          | ✅ Yes            | Bearer token              | ✅ MVP      |
+| Google Gemini   | ✅ Yes            | API key (query/header)    | ✅ MVP      |
+| Ollama (Local)  | ✅ Yes            | None (local server)       | ✅ MVP      |
+| Azure OpenAI    | ✅ Yes            | API key header            | 🔮 Post-MVP |
+| AWS Bedrock     | ⚠️ Complex        | AWS SigV4 signing         | 🔮 Post-MVP |
 
 **Note on AWS Bedrock**: Requires AWS Signature V4 request signing. Post-MVP implementation may use `aws-sigv4` crate or `aws-sdk-bedrockruntime` for this provider only.
 
@@ -184,11 +255,613 @@ sequenceDiagram
 
 ## Implementation Tasks
 
-### 1. Define LLM Provider Interface
+### Phase 1: Database Schema and Model Catalog
+
+#### 1.1. Create Database Migration
+
+**Files**:
+- `migrations/20251118000001_llm_catalog.up.sql`
+- `migrations/20251118000001_llm_catalog.down.sql`
+
+**Schema**:
+
+```sql
+-- LLM Providers (OpenAI, Anthropic, Google, Ollama, etc.)
+CREATE TABLE llm_providers (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    api_endpoint TEXT,
+    supports_completion BOOLEAN NOT NULL DEFAULT true,
+    supports_embeddings BOOLEAN NOT NULL DEFAULT false,
+    supports_streaming BOOLEAN NOT NULL DEFAULT false,
+    requires_api_key BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- LLM Models with pricing information
+CREATE TABLE llm_models (
+    id SERIAL PRIMARY KEY,
+    provider_id INTEGER NOT NULL REFERENCES llm_providers(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    input_price_per_million NUMERIC(10, 6) NOT NULL DEFAULT 0,
+    output_price_per_million NUMERIC(10, 6) NOT NULL DEFAULT 0,
+    cached_input_price_per_million NUMERIC(10, 6),
+    supports_completion BOOLEAN NOT NULL DEFAULT true,
+    supports_embeddings BOOLEAN NOT NULL DEFAULT false,
+    context_window INTEGER,
+    max_output_tokens INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(provider_id, name)
+);
+```
+
+**Test Cases**:
+- ✅ Migration runs successfully (up)
+- ✅ Migration rolls back successfully (down)
+- ✅ Indexes created correctly
+- ✅ Foreign key constraints work
+
+#### 1.2. Create Seed Data File
+
+**File**: `config/llm_models.yaml`
+
+**Structure**:
+
+```yaml
+providers:
+  - name: openai
+    display_name: OpenAI
+    api_endpoint: https://api.openai.com/v1
+    supports_completion: true
+    supports_embeddings: true
+    supports_streaming: true
+    requires_api_key: true
+    models:
+      - name: gpt-5.1
+        display_name: GPT-5.1
+        input_price_per_million: 1.25
+        output_price_per_million: 10.00
+        cached_input_price_per_million: 0.125
+        supports_completion: true
+        context_window: 128000
+        max_output_tokens: 16384
+      # ... more models
+
+  - name: anthropic
+    display_name: Anthropic
+    # ... models
+
+  - name: google
+    display_name: Google
+    # ... models
+
+  - name: ollama
+    display_name: Ollama (Self-Hosted)
+    api_endpoint: http://localhost:11434
+    requires_api_key: false
+    models:
+      - name: llama3.2:3b
+        display_name: Llama 3.2 3B
+        input_price_per_million: 0.00
+        output_price_per_million: 0.00
+        # ... Ollama models are free
+```
+
+**Pricing Sources**:
+- OpenAI: https://openai.com/api/pricing/ (January 2025)
+- Anthropic: https://www.anthropic.com/pricing (January 2025)
+- Google: https://ai.google.dev/pricing (January 2025)
+- Ollama: $0.00 (self-hosted)
+
+**Test Cases**:
+- ✅ YAML parses correctly
+- ✅ All required fields present
+- ✅ Pricing values are valid decimals
+
+#### 1.3. Implement Seed Data Loader
+
+**File**: `orchestrator/src/llm_catalog.rs` (new)
+
+**Purpose**: Load model catalog from YAML into database
+
+```rust
+use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
+use std::path::Path;
+
+#[derive(Debug, Deserialize)]
+pub struct ProviderCatalog {
+    pub providers: Vec<ProviderDefinition>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProviderDefinition {
+    pub name: String,
+    pub display_name: String,
+    pub api_endpoint: Option<String>,
+    pub supports_completion: bool,
+    pub supports_embeddings: bool,
+    pub supports_streaming: bool,
+    pub requires_api_key: bool,
+    pub models: Vec<ModelDefinition>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ModelDefinition {
+    pub name: String,
+    pub display_name: String,
+    pub input_price_per_million: rust_decimal::Decimal,
+    pub output_price_per_million: rust_decimal::Decimal,
+    pub cached_input_price_per_million: Option<rust_decimal::Decimal>,
+    pub supports_completion: Option<bool>,
+    pub supports_embeddings: Option<bool>,
+    pub context_window: Option<i32>,
+    pub max_output_tokens: Option<i32>,
+}
+
+pub async fn load_catalog_from_yaml(
+    pool: &PgPool,
+    yaml_path: &Path,
+) -> anyhow::Result<()> {
+    let yaml_content = tokio::fs::read_to_string(yaml_path).await?;
+    let catalog: ProviderCatalog = serde_yaml::from_str(&yaml_content)?;
+
+    // Start transaction
+    let mut tx = pool.begin().await?;
+
+    for provider in catalog.providers {
+        // Insert provider
+        let provider_id = sqlx::query_scalar!(
+            r#"
+            INSERT INTO llm_providers (
+                name, display_name, api_endpoint,
+                supports_completion, supports_embeddings, supports_streaming,
+                requires_api_key
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (name) DO UPDATE SET
+                display_name = EXCLUDED.display_name,
+                api_endpoint = EXCLUDED.api_endpoint,
+                supports_completion = EXCLUDED.supports_completion,
+                supports_embeddings = EXCLUDED.supports_embeddings,
+                supports_streaming = EXCLUDED.supports_streaming,
+                requires_api_key = EXCLUDED.requires_api_key
+            RETURNING id
+            "#,
+            provider.name,
+            provider.display_name,
+            provider.api_endpoint,
+            provider.supports_completion,
+            provider.supports_embeddings,
+            provider.supports_streaming,
+            provider.requires_api_key
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+
+        // Insert models for this provider
+        for model in provider.models {
+            sqlx::query!(
+                r#"
+                INSERT INTO llm_models (
+                    provider_id, name, display_name,
+                    input_price_per_million, output_price_per_million,
+                    cached_input_price_per_million,
+                    supports_completion, supports_embeddings,
+                    context_window, max_output_tokens
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                ON CONFLICT (provider_id, name) DO UPDATE SET
+                    display_name = EXCLUDED.display_name,
+                    input_price_per_million = EXCLUDED.input_price_per_million,
+                    output_price_per_million = EXCLUDED.output_price_per_million,
+                    cached_input_price_per_million = EXCLUDED.cached_input_price_per_million,
+                    supports_completion = EXCLUDED.supports_completion,
+                    supports_embeddings = EXCLUDED.supports_embeddings,
+                    context_window = EXCLUDED.context_window,
+                    max_output_tokens = EXCLUDED.max_output_tokens
+                "#,
+                provider_id,
+                model.name,
+                model.display_name,
+                model.input_price_per_million,
+                model.output_price_per_million,
+                model.cached_input_price_per_million,
+                model.supports_completion.unwrap_or(true),
+                model.supports_embeddings.unwrap_or(false),
+                model.context_window,
+                model.max_output_tokens
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+
+    tx.commit().await?;
+    Ok(())
+}
+```
+
+**CLI Command**: `orchestrator seed-llm-models <yaml_file>`
+
+**Test Cases**:
+- ✅ Loads YAML successfully
+- ✅ Inserts providers and models
+- ✅ Handles duplicates (upsert)
+- ✅ Transaction rolls back on error
+- ✅ CLI command works
+
+#### 1.4. Create Model Catalog API Endpoints
+
+**File**: `orchestrator/src/routes/llm_catalog.rs` (new)
+
+**Endpoints**:
+
+1. **GET /api/v1/llm/providers**
+   - List all LLM providers
+   - Returns: `{providers: [{id, name, display_name, supports_*, ...}]}`
+
+2. **POST /api/v1/llm/models/search**
+   - Search for models by provider/model name with flexible criteria
+   - Efficient batch lookup - single query for multiple model searches
+   - Request body: `{criteria: [{provider?, model?}]}`
+   - Returns: `{models: [{provider, name, input_price_per_million, ...}]}`
+
+**Search Criteria Examples**:
+
+```json
+{
+  "criteria": [
+    {"provider": "openai", "model": "gpt-4o"},          // Specific model
+    {"provider": "anthropic"},                          // All Anthropic models
+    {"model": "llama3.2:3b"},                          // Model across providers
+    {"provider": "google", "model": "gemini-2.5-pro"}  // Another specific model
+  ]
+}
+```
+
+**Implementation**:
+
+```rust
+use axum::{
+    extract::State,
+    http::StatusCode,
+    Json,
+};
+use serde::{Deserialize, Serialize};
+use sqlx::PgPool;
+
+#[derive(Debug, Serialize)]
+pub struct ProviderResponse {
+    pub id: i32,
+    pub name: String,
+    pub display_name: String,
+    pub api_endpoint: Option<String>,
+    pub supports_completion: bool,
+    pub supports_embeddings: bool,
+    pub supports_streaming: bool,
+    pub requires_api_key: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ModelResponse {
+    pub id: i32,
+    pub provider: String,
+    pub name: String,
+    pub display_name: String,
+    pub input_price_per_million: rust_decimal::Decimal,
+    pub output_price_per_million: rust_decimal::Decimal,
+    pub cached_input_price_per_million: Option<rust_decimal::Decimal>,
+    pub supports_completion: bool,
+    pub supports_embeddings: bool,
+    pub context_window: Option<i32>,
+    pub max_output_tokens: Option<i32>,
+}
+
+pub async fn list_providers(
+    State(pool): State<PgPool>,
+) -> Result<Json<Vec<ProviderResponse>>, StatusCode> {
+    let providers = sqlx::query_as!(
+        ProviderResponse,
+        r#"
+        SELECT id, name, display_name, api_endpoint,
+               supports_completion, supports_embeddings, supports_streaming,
+               requires_api_key
+        FROM llm_providers
+        ORDER BY name
+        "#
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(providers))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ModelSearchCriteria {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ModelSearchRequest {
+    pub criteria: Vec<ModelSearchCriteria>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ModelSearchResponse {
+    pub models: Vec<ModelResponse>,
+}
+
+pub async fn search_models(
+    State(pool): State<PgPool>,
+    Json(request): Json<ModelSearchRequest>,
+) -> Result<Json<ModelSearchResponse>, StatusCode> {
+    if request.criteria.is_empty() {
+        return Ok(Json(ModelSearchResponse { models: vec![] }));
+    }
+
+    // Build arrays for ANY query
+    let mut providers: Vec<Option<String>> = Vec::new();
+    let mut models: Vec<Option<String>> = Vec::new();
+
+    for criterion in &request.criteria {
+        providers.push(criterion.provider.clone());
+        models.push(criterion.model.clone());
+    }
+
+    // Use array comparison to match any of the criteria in a single query
+    // This works by creating parallel arrays where index N represents criterion N
+    let results = sqlx::query_as!(
+        ModelResponse,
+        r#"
+        WITH criteria AS (
+            SELECT
+                UNNEST($1::text[]) as provider_filter,
+                UNNEST($2::text[]) as model_filter
+        )
+        SELECT DISTINCT
+            m.id, p.name as provider, m.name, m.display_name,
+            m.input_price_per_million, m.output_price_per_million,
+            m.cached_input_price_per_million,
+            m.supports_completion, m.supports_embeddings,
+            m.context_window, m.max_output_tokens
+        FROM llm_models m
+        JOIN llm_providers p ON m.provider_id = p.id
+        WHERE EXISTS (
+            SELECT 1 FROM criteria c
+            WHERE (c.provider_filter IS NULL OR p.name = c.provider_filter)
+              AND (c.model_filter IS NULL OR m.name = c.model_filter)
+        )
+        ORDER BY p.name, m.name
+        "#,
+        &providers as &[Option<String>],
+        &models as &[Option<String>]
+    )
+    .fetch_all(&pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Json(ModelSearchResponse { models: results }))
+}
+```
+
+**Rationale**:
+- **Single query**: Batch multiple model lookups efficiently
+- **Flexible criteria**: Search by provider only, model only, or both
+- **Orchestrator-friendly**: Cost calculator can query multiple models at once
+- **Reduces round trips**: One HTTP request instead of N requests
+
+**Test Cases**:
+- ✅ GET /api/v1/llm/providers returns all providers
+- ✅ POST /api/v1/llm/models/search with `{criteria: [{provider: "openai", model: "gpt-4o"}]}` returns specific model
+- ✅ POST /api/v1/llm/models/search with `{criteria: [{provider: "openai"}]}` returns all OpenAI models
+- ✅ POST /api/v1/llm/models/search with `{criteria: [{model: "gpt-4o"}]}` returns gpt-4o from all providers
+- ✅ POST /api/v1/llm/models/search with multiple criteria returns all matching models
+- ✅ POST /api/v1/llm/models/search with empty criteria array returns all models
+- ✅ POST /api/v1/llm/models/search with non-existent provider/model returns empty results (no error)
+
+#### 1.5. Implement Cost Calculation in Orchestrator
+
+**File**: `orchestrator/src/cost_calculator.rs` (new)
+
+**Purpose**: Calculate LLM costs from token usage after activity execution
+
+**Design Decision**: Uses direct database query (not API endpoint) for efficiency
+- **No HTTP overhead**: Internal component, no need for HTTP call
+- **Minimal fields**: Queries only pricing fields (not display names, context windows, etc.)
+- **Batch support**: Can calculate costs for multiple models in one query
+
+```rust
+use rust_decimal::Decimal;
+use sqlx::PgPool;
+use std::collections::HashMap;
+
+pub struct CostCalculator {
+    pool: PgPool,
+}
+
+#[derive(Debug)]
+pub struct ModelPricing {
+    pub input_price_per_million: Decimal,
+    pub output_price_per_million: Decimal,
+    pub cached_input_price_per_million: Option<Decimal>,
+}
+
+impl CostCalculator {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    /// Calculate cost for single LLM usage
+    /// Returns cost in USD
+    pub async fn calculate_llm_cost(
+        &self,
+        provider: &str,
+        model: &str,
+        prompt_tokens: u32,
+        completion_tokens: u32,
+        cached_tokens: Option<u32>,
+    ) -> anyhow::Result<Decimal> {
+        // Fetch pricing from database - only pricing fields
+        let pricing = sqlx::query_as!(
+            ModelPricing,
+            r#"
+            SELECT
+                input_price_per_million,
+                output_price_per_million,
+                cached_input_price_per_million
+            FROM llm_models m
+            JOIN llm_providers p ON m.provider_id = p.id
+            WHERE p.name = $1 AND m.name = $2
+            "#,
+            provider,
+            model
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Model not found: {}/{}", provider, model))?;
+
+        Ok(Self::calculate_cost_from_pricing(
+            &pricing,
+            prompt_tokens,
+            completion_tokens,
+            cached_tokens,
+        ))
+    }
+
+    /// Batch calculate costs for multiple models
+    /// Efficient for calculating costs across many activities at once
+    pub async fn batch_get_pricing(
+        &self,
+        models: &[(String, String)], // Vec of (provider, model)
+    ) -> anyhow::Result<HashMap<(String, String), ModelPricing>> {
+        if models.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let providers: Vec<String> = models.iter().map(|(p, _)| p.clone()).collect();
+        let model_names: Vec<String> = models.iter().map(|(_, m)| m.clone()).collect();
+
+        // Batch query using array patterns (similar to search endpoint)
+        let results = sqlx::query!(
+            r#"
+            SELECT
+                p.name as provider,
+                m.name as model,
+                m.input_price_per_million,
+                m.output_price_per_million,
+                m.cached_input_price_per_million
+            FROM llm_models m
+            JOIN llm_providers p ON m.provider_id = p.id
+            WHERE (p.name, m.name) IN (
+                SELECT UNNEST($1::text[]), UNNEST($2::text[])
+            )
+            "#,
+            &providers,
+            &model_names
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut pricing_map = HashMap::new();
+        for row in results {
+            let key = (row.provider, row.model);
+            pricing_map.insert(
+                key,
+                ModelPricing {
+                    input_price_per_million: row.input_price_per_million,
+                    output_price_per_million: row.output_price_per_million,
+                    cached_input_price_per_million: row.cached_input_price_per_million,
+                },
+            );
+        }
+
+        Ok(pricing_map)
+    }
+
+    /// Calculate cost from pricing data
+    fn calculate_cost_from_pricing(
+        pricing: &ModelPricing,
+        prompt_tokens: u32,
+        completion_tokens: u32,
+        cached_tokens: Option<u32>,
+    ) -> Decimal {
+        let one_million = Decimal::from(1_000_000);
+
+        // Calculate input cost
+        let input_cost = if let (Some(cached_price), Some(cached)) =
+            (pricing.cached_input_price_per_million, cached_tokens)
+        {
+            // Use cached price for cached tokens, regular price for remaining
+            let regular_tokens = prompt_tokens.saturating_sub(cached);
+            (Decimal::from(regular_tokens) * pricing.input_price_per_million / one_million)
+                + (Decimal::from(cached) * cached_price / one_million)
+        } else {
+            Decimal::from(prompt_tokens) * pricing.input_price_per_million / one_million
+        };
+
+        // Calculate output cost
+        let output_cost = Decimal::from(completion_tokens)
+            * pricing.output_price_per_million
+            / one_million;
+
+        input_cost + output_cost
+    }
+}
+```
+
+**Usage Example**:
+
+```rust
+// Single cost calculation
+let cost = calculator.calculate_llm_cost(
+    "openai",
+    "gpt-4o",
+    1000,  // prompt tokens
+    500,   // completion tokens
+    None,  // no cached tokens
+).await?;
+
+// Batch pricing lookup (efficient for multiple activities)
+let models = vec![
+    ("openai".to_string(), "gpt-4o".to_string()),
+    ("anthropic".to_string(), "claude-sonnet-4".to_string()),
+    ("google".to_string(), "gemini-2.5-pro".to_string()),
+];
+let pricing_map = calculator.batch_get_pricing(&models).await?;
+// Single query fetches all pricing data
+```
+
+**Integration**: Called by orchestrator after activity execution completes
+
+**Test Cases**:
+- ✅ Single cost calculation works correctly
+- ✅ Batch pricing lookup returns all models in one query
+- ✅ Handles cached tokens when supported
+- ✅ Returns error for unknown models
+- ✅ Zero cost for Ollama models
+- ✅ Batch query with empty input returns empty map
+
+---
+
+### Phase 2: Simplified Worker Implementation
+
+#### 2.1. Define LLM Provider Interface (Simplified)
 
 **File**: `worker/src/llm/provider.rs` (new)
 
-**Purpose**: Abstract interface for all LLM providers
+**Purpose**: Abstract interface for all LLM providers - **no cost calculation**
+
+**Key Changes from Original Design**:
+- ❌ Removed `calculate_cost()` method - done in orchestrator
+- ❌ Removed `cost_usd` field from responses - calculated by orchestrator
+- ✅ Workers only return token counts
 
 ```rust
 use async_trait::async_trait;
@@ -207,7 +880,7 @@ pub trait LLMProvider: Send + Sync {
         request: &CompletionRequest,
     ) -> Result<CompletionResponse>;
 
-    /// Generate streaming completion
+    /// Generate streaming completion (post-MVP)
     async fn complete_stream(
         &self,
         request: &CompletionRequest,
@@ -218,12 +891,6 @@ pub trait LLMProvider: Send + Sync {
         &self,
         request: &EmbeddingRequest,
     ) -> Result<EmbeddingResponse>;
-
-    /// Count tokens in text (estimate if not supported)
-    fn count_tokens(&self, text: &str, model: &str) -> Result<usize>;
-
-    /// Calculate cost for completion
-    fn calculate_cost(&self, model: &str, usage: &TokenUsage) -> Result<f64>;
 }
 
 /// Completion request
@@ -238,22 +905,23 @@ pub struct CompletionRequest {
     pub stop_sequences: Option<Vec<String>>,
 }
 
-/// Completion response
+/// Completion response - NO COST CALCULATION
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionResponse {
     pub content: String,
     pub model: String,
     pub usage: TokenUsage,
     pub finish_reason: FinishReason,
-    pub cost_usd: Decimal,
+    // NOTE: No cost_usd field - orchestrator calculates cost
 }
 
 /// Token usage statistics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenUsage {
     pub prompt_tokens: u32,
-    pub completion_tokens: u32,
+    pub output_tokens: u32,
     pub total_tokens: u32,
+    pub cached_tokens: Option<u32>, // For providers with prompt caching
 }
 
 /// Completion finish reason
@@ -265,7 +933,7 @@ pub enum FinishReason {
     Error,
 }
 
-/// Streaming chunk
+/// Streaming chunk (post-MVP)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompletionChunk {
     pub content: String,
@@ -279,13 +947,13 @@ pub struct EmbeddingRequest {
     pub input: Vec<String>,
 }
 
-/// Embedding response
+/// Embedding response - NO COST CALCULATION
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmbeddingResponse {
     pub embeddings: Vec<Vec<f64>>,
     pub model: String,
     pub usage: TokenUsage,
-    pub cost_usd: Decimal,
+    // NOTE: No cost_usd field - orchestrator calculates cost
 }
 
 pub type Result<T> = std::result::Result<T, LLMError>;
@@ -318,14 +986,22 @@ pub enum LLMError {
 **Test Cases**:
 - ✅ Interface compiles
 - ✅ Error types cover all cases
+- ✅ No cost calculation methods present
 
 ---
 
-### 2. Implement Anthropic Provider
+#### 2.2. Implement Anthropic Provider (Simplified)
 
 **File**: `worker/src/llm/anthropic.rs` (new)
 
-**Implementation**: Direct HTTP API calls using `reqwest` (no SDK dependency)
+**Implementation**: Direct HTTP API calls using `reqwest` - **NO PRICING LOGIC**
+
+**Key Changes**:
+- ❌ No `get_model_pricing()` method
+- ❌ No `calculate_cost()` method
+- ❌ No `ModelPricing` struct
+- ❌ No `cost_usd` in response
+- ✅ Only returns token counts
 
 ```rust
 use super::provider::*;
@@ -344,30 +1020,6 @@ impl AnthropicProvider {
             api_key,
         }
     }
-
-    fn get_model_pricing(&self, model: &str) -> Option<ModelPricing> {
-        // Pricing as of Nov 2024
-        match model {
-            "claude-3-5-sonnet-20241022" => Some(ModelPricing {
-                input_per_million: 3.00,
-                output_per_million: 15.00,
-            }),
-            "claude-3-5-haiku-20241022" => Some(ModelPricing {
-                input_per_million: 0.80,
-                output_per_million: 4.00,
-            }),
-            "claude-3-opus-20240229" => Some(ModelPricing {
-                input_per_million: 15.00,
-                output_per_million: 75.00,
-            }),
-            _ => None,
-        }
-    }
-}
-
-struct ModelPricing {
-    input_per_million: f64,
-    output_per_million: f64,
 }
 
 #[async_trait]
@@ -426,19 +1078,17 @@ impl LLMProvider for AnthropicProvider {
             .ok_or_else(|| LLMError::ProviderError("No content in response".to_string()))?
             .to_string();
 
-        let usage = TokenUsage {
-            prompt_tokens: response_json["usage"]["input_tokens"].as_u64().unwrap_or(0) as u32,
-            completion_tokens: response_json["usage"]["output_tokens"].as_u64().unwrap_or(0)
-                as u32,
-            total_tokens: 0,
-        };
-        let total_tokens = usage.prompt_tokens + usage.completion_tokens;
-        let usage = TokenUsage {
-            total_tokens,
-            ..usage
-        };
+        // Extract token usage - orchestrator will calculate cost
+        let prompt_tokens = response_json["usage"]["input_tokens"].as_u64().unwrap_or(0) as u32;
+        let output_tokens = response_json["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32;
+        let total_tokens = prompt_tokens + output_tokens;
 
-        let cost_usd = self.calculate_cost(&request.model, &usage)?;
+        let usage = TokenUsage {
+            prompt_tokens,
+            output_tokens,
+            total_tokens,
+            cached_tokens: None, // Anthropic doesn't report cached tokens separately yet
+        };
 
         let finish_reason = match response_json["stop_reason"].as_str() {
             Some("end_turn") => FinishReason::Stop,
@@ -452,7 +1102,7 @@ impl LLMProvider for AnthropicProvider {
             model: request.model.clone(),
             usage,
             finish_reason,
-            cost_usd,
+            // NO cost_usd field - orchestrator calculates cost
         })
     }
 
@@ -460,34 +1110,15 @@ impl LLMProvider for AnthropicProvider {
         &self,
         request: &CompletionRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<CompletionChunk>> + Send>>> {
-        // Implement streaming using Server-Sent Events (SSE)
-        // Similar to complete() but with stream: true and parse SSE events
-        todo!("Implement streaming for Anthropic")
+        // Post-MVP: Implement streaming using Server-Sent Events (SSE)
+        todo!("Streaming support is post-MVP")
     }
 
     async fn embed(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse> {
-        // Anthropic doesn't have embeddings API yet
+        // Anthropic doesn't have embeddings API
         Err(LLMError::ProviderError(
             "Anthropic does not support embeddings".to_string(),
         ))
-    }
-
-    fn count_tokens(&self, text: &str, _model: &str) -> Result<usize> {
-        // Rough approximation: 1 token ≈ 4 characters
-        // For production, use tiktoken or Claude's tokenizer
-        Ok(text.len() / 4)
-    }
-
-    fn calculate_cost(&self, model: &str, usage: &TokenUsage) -> Result<f64> {
-        let pricing = self
-            .get_model_pricing(model)
-            .ok_or_else(|| LLMError::InvalidModel(model.to_string()))?;
-
-        let input_cost = (usage.prompt_tokens as f64 / 1_000_000.0) * pricing.input_per_million;
-        let output_cost =
-            (usage.completion_tokens as f64 / 1_000_000.0) * pricing.output_per_million;
-
-        Ok(input_cost + output_cost)
     }
 }
 ```
@@ -495,14 +1126,104 @@ impl LLMProvider for AnthropicProvider {
 **Test Cases**:
 - ✅ API request format is correct
 - ✅ Response parsed correctly
-- ✅ Token usage extracted
-- ✅ Cost calculated correctly
+- ✅ Token usage extracted (prompt_tokens, output_tokens)
+- ✅ No cost calculation in worker
 - ✅ Error handling for API failures
-- ⏳ Integration test with real API (optional, use mock)
+- ✅ Returns correct provider name
 
 ---
 
-### 3. Implement OpenAI Provider
+#### 2.3. Implement OpenAI, Google, Ollama Providers (Simplified)
+
+**Files**:
+- `worker/src/llm/openai.rs`
+- `worker/src/llm/google.rs`
+- `worker/src/llm/ollama.rs`
+
+**Implementation Pattern**: Same as Anthropic - **NO PRICING LOGIC**
+
+All providers follow the same simplified pattern:
+- ✅ Make HTTP API call to provider
+- ✅ Parse response and extract token counts
+- ✅ Return `CompletionResponse` with `usage: TokenUsage`
+- ❌ No `get_model_pricing()` method
+- ❌ No `calculate_cost()` method
+- ❌ No `cost_usd` in response
+
+**Key Differences by Provider**:
+
+| Provider | API Endpoint | Auth Header | Token Fields | Notes |
+|----------|-------------|-------------|--------------|-------|
+| **OpenAI** | `api.openai.com/v1/chat/completions` | `Authorization: Bearer {key}` | `usage.prompt_tokens`, `usage.completion_tokens` | Supports embeddings via `/v1/embeddings` |
+| **Google** | `generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` | `x-goog-api-key: {key}` | `usageMetadata.promptTokenCount`, `usageMetadata.candidatesTokenCount` | Supports embeddings via `:embedContent` |
+| **Ollama** | `{base_url}/api/generate` | None (or optional Bearer) | `prompt_eval_count`, `eval_count` | Self-hosted, zero cost, supports embeddings via `/api/embeddings` |
+
+**Example - OpenAI Provider (Simplified)**:
+
+```rust
+pub struct OpenAIProvider {
+    client: Client,
+    api_key: String,
+}
+
+#[async_trait]
+impl LLMProvider for OpenAIProvider {
+    fn name(&self) -> &str {
+        "openai"
+    }
+
+    async fn complete(&self, request: &CompletionRequest) -> Result<CompletionResponse> {
+        // Build request body
+        let body = json!({
+            "model": request.model,
+            "messages": [{"role": "user", "content": request.prompt}],
+            // ... other parameters
+        });
+
+        // Make HTTP request
+        let response = self.client
+            .post("https://api.openai.com/v1/chat/completions")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&body)
+            .send()
+            .await?;
+
+        let response_json: serde_json::Value = response.json().await?;
+
+        // Extract token counts - NO cost calculation
+        let usage = TokenUsage {
+            prompt_tokens: response_json["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32,
+            output_tokens: response_json["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32,
+            total_tokens: response_json["usage"]["total_tokens"].as_u64().unwrap_or(0) as u32,
+            cached_tokens: None,
+        };
+
+        Ok(CompletionResponse {
+            content: /* extract from response */,
+            model: request.model.clone(),
+            usage,
+            finish_reason: /* parse finish_reason */,
+            // NO cost_usd - orchestrator calculates
+        })
+    }
+
+    // ... embed() implementation for OpenAI
+}
+```
+
+**Test Cases (All Providers)**:
+- ✅ API request format correct
+- ✅ Response parsed correctly
+- ✅ Token usage extracted correctly
+- ✅ No cost calculation logic
+- ✅ Error handling for API failures
+- ✅ Provider name returned correctly
+
+---
+
+### OLD IMPLEMENTATION (DO NOT USE)
+
+~~### 3. Implement OpenAI Provider~~
 
 **File**: `worker/src/llm/openai.rs` (new)
 
@@ -527,23 +1248,16 @@ impl OpenAIProvider {
     }
 
     fn get_model_pricing(&self, model: &str) -> Option<ModelPricing> {
-        // Pricing as of Nov 2024
+        use std::str::FromStr;
+        // Pricing as of January 2025
         match model {
-            "gpt-4-turbo" | "gpt-4-turbo-2024-04-09" => Some(ModelPricing {
-                input_per_million: 10.00,
-                output_per_million: 30.00,
-            }),
-            "gpt-4o" | "gpt-4o-2024-11-20" => Some(ModelPricing {
-                input_per_million: 2.50,
-                output_per_million: 10.00,
+            "gpt-4o" | "gpt-4o-2024-11-20" | "gpt-4o-2024-08-06" => Some(ModelPricing {
+                input_per_million: Decimal::from_str("2.50").unwrap(),
+                output_per_million: Decimal::from_str("10.00").unwrap(),
             }),
             "gpt-4o-mini" | "gpt-4o-mini-2024-07-18" => Some(ModelPricing {
-                input_per_million: 0.15,
-                output_per_million: 0.60,
-            }),
-            "gpt-3.5-turbo" => Some(ModelPricing {
-                input_per_million: 0.50,
-                output_per_million: 1.50,
+                input_per_million: Decimal::from_str("0.15").unwrap(),
+                output_per_million: Decimal::from_str("0.60").unwrap(),
             }),
             _ => None,
         }
@@ -551,8 +1265,8 @@ impl OpenAIProvider {
 }
 
 struct ModelPricing {
-    input_per_million: f64,
-    output_per_million: f64,
+    input_per_million: Decimal,
+    output_per_million: Decimal,
 }
 
 #[async_trait]
@@ -620,7 +1334,7 @@ impl LLMProvider for OpenAIProvider {
 
         let usage = TokenUsage {
             prompt_tokens: response_json["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32,
-            completion_tokens: response_json["usage"]["completion_tokens"]
+            output_tokens: response_json["usage"]["output_tokens"]
                 .as_u64()
                 .unwrap_or(0) as u32,
             total_tokens: response_json["usage"]["total_tokens"].as_u64().unwrap_or(0) as u32,
@@ -689,12 +1403,14 @@ impl LLMProvider for OpenAIProvider {
 
         let usage = TokenUsage {
             prompt_tokens: response_json["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32,
-            completion_tokens: 0,
+            output_tokens: 0,
             total_tokens: response_json["usage"]["total_tokens"].as_u64().unwrap_or(0) as u32,
         };
 
         // Embedding pricing (text-embedding-3-small: $0.02/1M tokens)
-        let cost_usd = (usage.total_tokens as f64 / 1_000_000.0) * 0.02;
+        let cost_usd = Decimal::from(usage.total_tokens)
+            * Decimal::from_str("0.02").unwrap()
+            / Decimal::from(1_000_000);
 
         Ok(EmbeddingResponse {
             embeddings,
@@ -709,14 +1425,14 @@ impl LLMProvider for OpenAIProvider {
         Ok(text.len() / 4)
     }
 
-    fn calculate_cost(&self, model: &str, usage: &TokenUsage) -> Result<f64> {
+    fn calculate_cost(&self, model: &str, usage: &TokenUsage) -> Result<Decimal> {
         let pricing = self
             .get_model_pricing(model)
             .ok_or_else(|| LLMError::InvalidModel(model.to_string()))?;
 
-        let input_cost = (usage.prompt_tokens as f64 / 1_000_000.0) * pricing.input_per_million;
-        let output_cost =
-            (usage.completion_tokens as f64 / 1_000_000.0) * pricing.output_per_million;
+        let one_million = Decimal::from(1_000_000);
+        let input_cost = Decimal::from(usage.prompt_tokens) * pricing.input_per_million / one_million;
+        let output_cost = Decimal::from(usage.output_tokens) * pricing.output_per_million / one_million;
 
         Ok(input_cost + output_cost)
     }
@@ -762,19 +1478,36 @@ impl GoogleProvider {
     }
 
     fn get_model_pricing(&self, model: &str) -> Option<ModelPricing> {
-        // Pricing as of Nov 2024
+        use std::str::FromStr;
+        // Pricing as of January 2025
+        // Note: Audio inputs and >200K token inputs may have different pricing
         match model {
-            "gemini-2.0-flash-exp" => Some(ModelPricing {
-                input_per_million: 0.00,  // Free during experimental
-                output_per_million: 0.00,
+            // Gemini 3 Pro Preview
+            "gemini-3-pro-preview" => Some(ModelPricing {
+                input_per_million: Decimal::from_str("2.00").unwrap(),
+                output_per_million: Decimal::from_str("12.00").unwrap(),
             }),
-            "gemini-1.5-pro" => Some(ModelPricing {
-                input_per_million: 1.25,
-                output_per_million: 5.00,
+            // Gemini 2.5 family
+            "gemini-2.5-pro" | "gemini-2.5-pro-latest" => Some(ModelPricing {
+                input_per_million: Decimal::from_str("1.25").unwrap(),
+                output_per_million: Decimal::from_str("10.00").unwrap(),
             }),
-            "gemini-1.5-flash" => Some(ModelPricing {
-                input_per_million: 0.075,
-                output_per_million: 0.30,
+            "gemini-2.5-flash" | "gemini-2.5-flash-latest" => Some(ModelPricing {
+                input_per_million: Decimal::from_str("0.30").unwrap(),
+                output_per_million: Decimal::from_str("2.50").unwrap(),
+            }),
+            "gemini-2.5-flash-lite" => Some(ModelPricing {
+                input_per_million: Decimal::from_str("0.10").unwrap(),
+                output_per_million: Decimal::from_str("0.40").unwrap(),
+            }),
+            // Gemini 2.0 family
+            "gemini-2.0-flash" | "gemini-2.0-flash-latest" => Some(ModelPricing {
+                input_per_million: Decimal::from_str("0.10").unwrap(),
+                output_per_million: Decimal::from_str("0.40").unwrap(),
+            }),
+            "gemini-2.0-flash-lite" => Some(ModelPricing {
+                input_per_million: Decimal::from_str("0.075").unwrap(),
+                output_per_million: Decimal::from_str("0.30").unwrap(),
             }),
             _ => None,
         }
@@ -782,8 +1515,8 @@ impl GoogleProvider {
 }
 
 struct ModelPricing {
-    input_per_million: f64,
-    output_per_million: f64,
+    input_per_million: Decimal,
+    output_per_million: Decimal,
 }
 
 #[async_trait]
@@ -855,7 +1588,7 @@ impl LLMProvider for GoogleProvider {
             prompt_tokens: response_json["usageMetadata"]["promptTokenCount"]
                 .as_u64()
                 .unwrap_or(0) as u32,
-            completion_tokens: response_json["usageMetadata"]["candidatesTokenCount"]
+            output_tokens: response_json["usageMetadata"]["candidatesTokenCount"]
                 .as_u64()
                 .unwrap_or(0) as u32,
             total_tokens: response_json["usageMetadata"]["totalTokenCount"]
@@ -934,12 +1667,14 @@ impl LLMProvider for GoogleProvider {
 
         let usage = TokenUsage {
             prompt_tokens: total_tokens,
-            completion_tokens: 0,
+            output_tokens: 0,
             total_tokens,
         };
 
         // Gemini embeddings pricing: ~$0.00001 per 1K tokens
-        let cost_usd = (usage.total_tokens as f64 / 1_000_000.0) * 0.01;
+        let cost_usd = Decimal::from(usage.total_tokens)
+            * Decimal::from_str("0.01").unwrap()
+            / Decimal::from(1_000_000);
 
         Ok(EmbeddingResponse {
             embeddings,
@@ -953,14 +1688,14 @@ impl LLMProvider for GoogleProvider {
         Ok(text.len() / 4)
     }
 
-    fn calculate_cost(&self, model: &str, usage: &TokenUsage) -> Result<f64> {
+    fn calculate_cost(&self, model: &str, usage: &TokenUsage) -> Result<Decimal> {
         let pricing = self
             .get_model_pricing(model)
             .ok_or_else(|| LLMError::InvalidModel(model.to_string()))?;
 
-        let input_cost = (usage.prompt_tokens as f64 / 1_000_000.0) * pricing.input_per_million;
-        let output_cost =
-            (usage.completion_tokens as f64 / 1_000_000.0) * pricing.output_per_million;
+        let one_million = Decimal::from(1_000_000);
+        let input_cost = Decimal::from(usage.prompt_tokens) * pricing.input_per_million / one_million;
+        let output_cost = Decimal::from(usage.output_tokens) * pricing.output_per_million / one_million;
 
         Ok(input_cost + output_cost)
     }
@@ -984,25 +1719,91 @@ impl LLMProvider for GoogleProvider {
 
 **API Details**:
 - Endpoint: `http://localhost:11434/api/generate` (default)
-- Authentication: None (local server)
+- Authentication: Optional via `Authorization: Bearer <token>` header (Ollama v0.2.0+)
 - Models: Any model pulled to local Ollama (llama3.2, mistral, qwen2.5, etc.)
 
 ```rust
 use super::provider::*;
 use reqwest::Client;
 use serde_json::json;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
 
 pub struct OllamaProvider {
     client: Client,
     base_url: String,
+    api_key: Option<String>,
+    // Cache available models (model list, last updated timestamp)
+    available_models: Arc<RwLock<(Vec<String>, Instant)>>,
 }
 
 impl OllamaProvider {
-    pub fn new(base_url: Option<String>) -> Self {
+    pub fn new(base_url: Option<String>, api_key: Option<String>) -> Self {
         Self {
             client: Client::new(),
             base_url: base_url.unwrap_or_else(|| "http://localhost:11434".to_string()),
+            api_key,
+            available_models: Arc::new(RwLock::new((Vec::new(), Instant::now() - Duration::from_secs(301)))),
         }
+    }
+
+    /// Get list of available models from Ollama API
+    async fn list_models(&self) -> Result<Vec<String>> {
+        let url = format!("{}/api/tags", self.base_url);
+
+        let mut req = self.client.get(&url);
+        if let Some(api_key) = &self.api_key {
+            req = req.header("Authorization", format!("Bearer {}", api_key));
+        }
+
+        let response = req.send().await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(LLMError::ProviderError(format!("Failed to list models: {}", error_text)));
+        }
+
+        let json: serde_json::Value = response.json().await?;
+
+        let models = json["models"]
+            .as_array()
+            .ok_or_else(|| LLMError::ProviderError("No models found in response".into()))?
+            .iter()
+            .filter_map(|m| m["name"].as_str().map(String::from))
+            .collect();
+
+        Ok(models)
+    }
+
+    /// Get available models (cached for 5 minutes)
+    async fn get_available_models(&self) -> Result<Vec<String>> {
+        let cache = self.available_models.read().await;
+
+        // Return cached if less than 5 minutes old
+        if cache.1.elapsed() < Duration::from_secs(300) {
+            return Ok(cache.0.clone());
+        }
+
+        drop(cache);
+
+        // Refresh cache
+        let models = self.list_models().await?;
+        let mut cache = self.available_models.write().await;
+        *cache = (models.clone(), Instant::now());
+
+        Ok(models)
+    }
+
+    /// Validate model is available before attempting completion
+    async fn validate_model(&self, model: &str) -> Result<()> {
+        let available = self.get_available_models().await?;
+        if !available.iter().any(|m| m == model) {
+            return Err(LLMError::InvalidModel(
+                format!("Model '{}' not found. Available models: {:?}", model, available)
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -1013,6 +1814,9 @@ impl LLMProvider for OllamaProvider {
     }
 
     async fn complete(&self, request: &CompletionRequest) -> Result<CompletionResponse> {
+        // Validate model is available
+        self.validate_model(&request.model).await?;
+
         let mut prompt = String::new();
 
         if let Some(system) = &request.system_prompt {
@@ -1044,10 +1848,16 @@ impl LLMProvider for OllamaProvider {
 
         let url = format!("{}/api/generate", self.base_url);
 
-        let response = self
+        let mut request = self
             .client
             .post(&url)
-            .header("content-type", "application/json")
+            .header("content-type", "application/json");
+
+        if let Some(api_key) = &self.api_key {
+            request = request.header("Authorization", format!("Bearer {}", api_key));
+        }
+
+        let response = request
             .json(&body)
             .send()
             .await?;
@@ -1066,17 +1876,17 @@ impl LLMProvider for OllamaProvider {
 
         let usage = TokenUsage {
             prompt_tokens: response_json["prompt_eval_count"].as_u64().unwrap_or(0) as u32,
-            completion_tokens: response_json["eval_count"].as_u64().unwrap_or(0) as u32,
+            output_tokens: response_json["eval_count"].as_u64().unwrap_or(0) as u32,
             total_tokens: 0,
         };
-        let total_tokens = usage.prompt_tokens + usage.completion_tokens;
+        let total_tokens = usage.prompt_tokens + usage.output_tokens;
         let usage = TokenUsage {
             total_tokens,
             ..usage
         };
 
         // Ollama is free (local), so cost is always 0
-        let cost_usd = 0.0;
+        let cost_usd = Decimal::ZERO;
 
         let finish_reason = if response_json["done"].as_bool().unwrap_or(false) {
             FinishReason::Stop
@@ -1101,6 +1911,9 @@ impl LLMProvider for OllamaProvider {
     }
 
     async fn embed(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse> {
+        // Validate model is available
+        self.validate_model(&request.model).await?;
+
         let url = format!("{}/api/embeddings", self.base_url);
 
         let mut embeddings = Vec::new();
@@ -1112,10 +1925,16 @@ impl LLMProvider for OllamaProvider {
                 "prompt": text,
             });
 
-            let response = self
+            let mut req = self
                 .client
                 .post(&url)
-                .header("content-type", "application/json")
+                .header("content-type", "application/json");
+
+            if let Some(api_key) = &self.api_key {
+                req = req.header("Authorization", format!("Bearer {}", api_key));
+            }
+
+            let response = req
                 .json(&body)
                 .send()
                 .await?;
@@ -1140,12 +1959,12 @@ impl LLMProvider for OllamaProvider {
 
         let usage = TokenUsage {
             prompt_tokens: total_tokens,
-            completion_tokens: 0,
+            output_tokens: 0,
             total_tokens,
         };
 
         // Ollama is free (local)
-        let cost_usd = 0.0;
+        let cost_usd = Decimal::ZERO;
 
         Ok(EmbeddingResponse {
             embeddings,
@@ -1159,9 +1978,9 @@ impl LLMProvider for OllamaProvider {
         Ok(text.len() / 4)
     }
 
-    fn calculate_cost(&self, _model: &str, _usage: &TokenUsage) -> Result<f64> {
+    fn calculate_cost(&self, _model: &str, _usage: &TokenUsage) -> Result<Decimal> {
         // Ollama is free (local)
-        Ok(0.0)
+        Ok(Decimal::ZERO)
     }
 }
 ```
@@ -1173,6 +1992,11 @@ impl LLMProvider for OllamaProvider {
 - ✅ Cost is always 0.0 (local)
 - ✅ Embeddings work correctly
 - ✅ Handles Ollama not running gracefully
+- ✅ Model discovery via /api/tags endpoint
+- ✅ Model validation before completion
+- ✅ Clear error message for unavailable models
+- ✅ Model cache refreshes after 5 minutes
+- ✅ Concurrent requests use cached model list
 
 ---
 
@@ -1277,12 +2101,13 @@ impl LLMPromptActivity {
         let openai_key = std::env::var("OPENAI_API_KEY").ok();
         let google_key = std::env::var("GOOGLE_API_KEY").ok();
         let ollama_url = std::env::var("OLLAMA_BASE_URL").ok();
+        let ollama_key = std::env::var("OLLAMA_API_KEY").ok();
 
         Self {
             anthropic: anthropic_key.map(|key| Arc::new(AnthropicProvider::new(key))),
             openai: openai_key.map(|key| Arc::new(OpenAIProvider::new(key))),
             google: google_key.map(|key| Arc::new(GoogleProvider::new(key))),
-            ollama: Some(Arc::new(OllamaProvider::new(ollama_url))), // Always available, uses default if not set
+            ollama: Some(Arc::new(OllamaProvider::new(ollama_url, ollama_key))), // Always available, uses default URL if not set
         }
     }
 
@@ -1429,11 +2254,12 @@ impl EmbeddingActivity {
         let openai_key = std::env::var("OPENAI_API_KEY").ok();
         let google_key = std::env::var("GOOGLE_API_KEY").ok();
         let ollama_url = std::env::var("OLLAMA_BASE_URL").ok();
+        let ollama_key = std::env::var("OLLAMA_API_KEY").ok();
 
         Self {
             openai: openai_key.map(|key| Arc::new(OpenAIProvider::new(key))),
             google: google_key.map(|key| Arc::new(GoogleProvider::new(key))),
-            ollama: Some(Arc::new(OllamaProvider::new(ollama_url))),
+            ollama: Some(Arc::new(OllamaProvider::new(ollama_url, ollama_key))),
         }
     }
 }
@@ -1548,6 +2374,7 @@ GOOGLE_API_KEY=...
 
 # Ollama (self-hosted)
 OLLAMA_BASE_URL=http://localhost:11434  # Default
+OLLAMA_API_KEY=your-secret-key  # Optional, for authenticated Ollama instances
 # For cluster deployments:
 # - Docker: http://host.docker.internal:11434
 # - Kubernetes: http://ollama.default.svc.cluster.local:11434
@@ -1604,9 +2431,64 @@ spec:
 **Remote Self-Hosted**:
 - Ollama running on dedicated server
 - Set `OLLAMA_BASE_URL=http://ollama-server.example.com:11434`
-- **Note**: Ollama supports optional authentication via environment variable `OLLAMA_API_KEY` (v0.2.0+)
+- **Optional Authentication**: Ollama supports authentication via `OLLAMA_API_KEY` (v0.2.0+)
   - Set on Ollama server: `OLLAMA_API_KEY=your-secret-key`
-  - Not yet implemented in StreamFlow MVP (connections assumed trusted network)
+  - Set in StreamFlow worker: `OLLAMA_API_KEY=your-secret-key`
+  - If not set, assumes trusted network (local/internal deployments)
+
+### Recommended Ollama Models for CPU-Only Deployments
+
+**Production-Ready (CPU without GPU):**
+
+For Docker containers or cloud VMs without GPU acceleration, use quantized small models:
+
+| Model             | Size  | RAM   | CPU Speed | Use Case                          |
+|-------------------|-------|-------|-----------|-----------------------------------|
+| `llama3.2:1b`     | 1B    | ~1GB  | Fast      | Simple classification, extraction |
+| `llama3.2:3b`     | 3B    | ~2GB  | Fast      | General purpose, good quality     |
+| `qwen2.5:1.5b`    | 1.5B  | ~1GB  | Fast      | Multilingual, Chinese support     |
+| `phi3.5:3.8b`     | 3.8B  | ~2.5GB| Fast      | Microsoft, good reasoning         |
+
+**Performance Expectations:**
+- **1-3B models**: ~10-50 tokens/sec on modern CPUs (4+ cores)
+- **Memory**: 2-4GB RAM recommended
+- **Latency**: Acceptable for workflow orchestration (1-5 seconds)
+
+**Medium Models (Slower but Higher Quality):**
+
+| Model             | Size  | RAM   | CPU Speed | Use Case                          |
+|-------------------|-------|-------|-----------|-----------------------------------|
+| `llama3.2:7b-q4`  | 7B    | ~4GB  | Slow      | Better quality, batch processing  |
+| `mistral:7b-q4`   | 7B    | ~4GB  | Slow      | Good for complex tasks            |
+
+**Performance Expectations:**
+- **7B models (Q4 quantized)**: ~2-10 tokens/sec on CPU
+- **Memory**: 8-16GB RAM recommended
+- **Latency**: 10-30 seconds for responses
+- **Use case**: Non-time-critical workflows, batch operations
+
+**Not Recommended for CPU:**
+- ❌ 13B+ parameter models (too slow)
+- ❌ Non-quantized models (too much RAM)
+- ❌ Models without Q4/Q5 quantization
+
+**Recommended Fallback Strategy:**
+
+```yaml
+# Prioritize cloud providers, fall back to CPU-friendly Ollama
+fallback_chain:
+  - provider: anthropic
+    model: claude-haiku-3.5  # Fast, cheap ($0.80/$4 per M tokens)
+  - provider: openai
+    model: gpt-4o-mini  # Fast, cheap ($0.15/$0.60 per M tokens)
+  - provider: ollama
+    model: llama3.2:3b  # CPU-friendly local fallback (free)
+```
+
+This strategy provides:
+- **Primary**: Fast cloud providers with low cost
+- **Fallback**: CPU-friendly local model when cloud unavailable
+- **Cost control**: Ollama catches quota overruns (free)
 
 ---
 
@@ -1678,6 +2560,9 @@ tiktoken-rs = "0.5"
 - Token counting
 - Cost calculation
 - Error handling
+- Model discovery (Ollama)
+- Model validation with clear error messages (Ollama)
+- Model cache TTL behavior (Ollama)
 
 **Fallback Tests**:
 - Fallback chain logic
@@ -1742,7 +2627,6 @@ tiktoken-rs = "0.5"
 - ❌ Function calling / tool use (post-MVP)
 - ❌ Vision / multimodal inputs (post-MVP)
 - ❌ Fine-tuned model support (post-MVP)
-- ❌ Ollama authentication (post-MVP - assumes trusted network)
 
 **Dependencies**:
 - ❌ Provider-specific SDKs (using reqwest HTTP client instead)
@@ -1830,8 +2714,12 @@ tiktoken-rs = "0.5"
 - [ ] Google cost calculation accurate
 - [ ] Google embeddings work
 - [ ] OllamaProvider implemented
+- [ ] Ollama model discovery via /api/tags endpoint
+- [ ] Ollama model validation with caching (5 min TTL)
+- [ ] Ollama optional authentication (OLLAMA_API_KEY)
 - [ ] Ollama embeddings work (zero cost)
 - [ ] Ollama connectivity documentation complete
+- [ ] Ollama CPU-friendly model recommendations documented
 - [ ] Unit tests pass (Google, Ollama)
 
 ### Phase 3: Activities and Fallback Chain ⏳
@@ -1870,7 +2758,12 @@ tiktoken-rs = "0.5"
   - Exception: AWS Bedrock (post-MVP) may require AWS signing library
 - **Ollama connectivity**: Configurable via `OLLAMA_BASE_URL` environment variable
   - Supports localhost (dev), Docker, Kubernetes, and remote deployments
-  - Authentication assumed trusted network for MVP (optional auth post-MVP)
+  - Optional authentication via `OLLAMA_API_KEY` (MVP feature)
+- **Ollama model discovery**: Dynamic model validation with caching
+  - Queries `/api/tags` endpoint to discover available models
+  - Validates model availability before making completion requests
+  - Caches model list for 5 minutes to reduce API overhead
+  - Provides clear error messages listing available models
 - **Token streaming**: Post-MVP feature (requires SSE parsing)
 - **Budget enforcement**: Handled in US-5.2 (separate story)
 - **Result caching**: Handled in US-5.3 (separate story)
@@ -1882,4 +2775,4 @@ tiktoken-rs = "0.5"
 | Embeddings       | ❌        | ✅     | ✅     | ✅     |
 | Cost Tracking    | ✅        | ✅     | ✅     | Free   |
 | Streaming        | 🔮 Post-MVP | 🔮 Post-MVP | 🔮 Post-MVP | 🔮 Post-MVP |
-| Auth Method      | API Key   | API Key | API Key | None (trusted network) |
+| Auth Method      | API Key   | API Key | API Key | Optional API Key |
