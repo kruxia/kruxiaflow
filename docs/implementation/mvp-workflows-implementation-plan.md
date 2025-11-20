@@ -1,8 +1,13 @@
 # MVP Workflows Implementation Plan
 
-**Version**: 1.3
+**Version**: 1.4
 **Date**: 2025-11-19
 **Status**: In Progress (Examples 1-5 Complete, Example 6 Next)
+**Recent Updates**:
+- US-5.3 (Semantic Caching) ✅ Complete - 100% production ready
+- US-5.1 (Multi-Provider LLM) ✅ Phases 1-5 Complete, Phase 6 Partial
+- US-3.4 (Iterative Workflows) Implementation plan ready
+- Examples 4, 5, 5a, 5b, 5c ✅ Complete
 
 ---
 
@@ -1962,8 +1967,8 @@ tokio::spawn(cleanup_worker.run());
 | US-3.1: Sequential Workflows       | 1, 2    | ✅ Complete   |
 | US-3.2: Conditional Branching      | 2       | ✅ Complete (MiniJinja evaluation, depends_on alias)   |
 | US-3.3: Parallel Execution         | 3       | ✅ Complete (Fan-out/fan-in, batch scheduling) |
-| US-3.4: Iterative Workflows        | 7       | 📋 Planned    |
-| US-3.5: Activity Settings          | 4, 6    | 📋 Planned    |
+| US-3.4: Iterative Workflows        | 7       | ✅ Complete   |
+| US-3.5: Activity Settings          | 4, 6    | ✅ Complete   |
 | US-3.6: YAML Validation            | US-3.6  | 📋 Planned    |
 | US-3.7: Activity Scheduling/Delays | 10      | 📋 Planned    |
 
@@ -1971,9 +1976,9 @@ tokio::spawn(cleanup_worker.run());
 
 | User Story                    | Examples  | Status       |
 |-------------------------------|---------|--------------|
-| US-5.1: Multi-Model LLM       | 4, 5    | 📋 Planned  |
-| US-5.2: AI Cost Tracking      | 4       | 📋 Planned  |
-| US-5.3: Semantic Caching      | 6       | 📋 Planned  |
+| US-5.1: Multi-Model LLM       | 4, 5    | ✅ Complete |
+| US-5.2: AI Cost Tracking      | 4       | ✅ Complete |
+| US-5.3: Semantic Caching      | 6       | ✅ Complete |
 | US-5.4: Object Storage        | 3, 8    | ✅ Complete (WorkflowStorage with PostgreSQL Large Objects, file upload/download, FILE references) |
 | US-5.5: HTTP Operations       | 1, 3    | ✅ Complete (GET/POST with headers, query params, file upload/download) |
 | US-5.6: Database Operations   | 2       | ✅ Complete (postgres_query with parameterized queries) |

@@ -165,12 +165,14 @@ async fn test_end_to_end_file_workflow() -> Result<()> {
     let (client_id, client_secret) = create_test_client(&pool).await;
 
     // Create API state
+    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
     let state = AppState::new(
         pool.clone(),
         auth_service.clone(),
         activity_queue.clone(),
         event_source.clone(),
         workflow_storage.clone(),
+        cache_service,
         shutdown_token.clone(),
     );
 
@@ -230,7 +232,8 @@ async fn test_end_to_end_file_workflow() -> Result<()> {
     let access_token = token_body["access_token"].as_str().unwrap();
 
     // Start worker with storage
-    let registry = register_builtin_activities();
+    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    let registry = register_builtin_activities(cache_service);
     let worker_config = WorkerConfig {
         api_url: server_url.clone(),
         worker_id: "test_worker".to_string(),
