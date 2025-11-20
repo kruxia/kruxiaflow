@@ -7,7 +7,6 @@ use anyhow::Result;
 use async_trait::async_trait;
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
-use serial_test::serial;
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(feature = "redis-cache")]
