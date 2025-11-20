@@ -14,9 +14,21 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 ## Status
 
 **Current Version**: 0.2.0 MVP (In Development)
-**Implementation Phase**: Epic 3 YAML Workflows (Examples 1-4 Complete)
-**Next Milestone**: Example 5 - Multi-Model LLM with Automatic Fallback
-**Progress**: Epic 1 Complete ✅ | Epic 3 Examples 1-4 Complete ✅
+**Last Updated**: November 19, 2025
+**Branch**: `epic-3-mvp-activities-examples`
+
+**Implementation Phase**: Epic 3 & 5 (YAML Workflows + Built-In Activities)
+- **Epic 1**: ✅ Complete (Event-Driven Orchestration)
+- **Epic 1A**: ✅ Complete (API Server - all 7 stories)
+- **Epic 1B**: ✅ Complete (Built-in Worker)
+- **Epic 1C**: ⏳ Partial (3/7 stories - serve command, graceful shutdown)
+- **Epic 2**: ✅ Complete (Performance Benchmarking - 1.6x faster than Temporal)
+- **Epic 3**: ⏳ 60% (YAML Workflows - Examples 1-5 complete, US-3.4 plan ready)
+- **Epic 5**: ⏳ 38% (Built-In Activities - US-5.1, US-5.3, US-5.4 complete)
+
+**Next Milestone**: US-3.4 Iterative Workflows (for agentic research patterns)
+
+📊 **Detailed Status**: See [PROJECT-STATUS.md](docs/PROJECT-STATUS.md) for comprehensive progress tracking
 
 ### Completed Features ✅
 
@@ -45,7 +57,14 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 - ✅ **[US-1C.2: All-in-One Service Launcher](docs/implementation/US-1C.2-all-in-one-launcher.md)** - `streamflow serve` command with graceful shutdown
 - ✅ **[US-1C.7: Graceful Shutdown and Signal Handling](docs/implementation/US-1C.7-graceful-shutdown.md)** - SIGTERM/SIGINT handling with CancellationToken
 
-**Epic 3: YAML Workflow Definition Language** (In Progress - Examples 1-4 Complete)
+**Epic 2: Performance Benchmarking** (Complete)
+- ✅ **[US-2.1: Automated Performance Test Suite](docs/implementation/US-2.1-automated-performance-test-suite.md)** - Continuous benchmarking with regression detection
+- ✅ **[US-2.2: Competitor Comparison Benchmarks](docs/implementation/US-2.2-competitor-comparison-benchmarks.md)** - Reproducible benchmarks vs Temporal/Airflow
+  - **Results**: StreamFlow 56 wf/sec avg | Temporal 35 wf/sec | Airflow 1.3 wf/sec
+  - **Speedup**: 1.6x faster than Temporal, 44x faster than Airflow
+
+**Epic 3: YAML Workflow Definition Language** (In Progress - 60%)
+- ✅ **[US-3.5: Activity Settings](docs/implementation/US-3.5-activity-settings.md)** - Retry policies, timeout, budget tracking
 - ✅ **Example 1: Sequential Workflow** - HTTP activity, template expressions, YAML parser
   - Sequential workflows with `depends_on`
   - Template expressions: `{{INPUT.*}}`, `{{activity.output}}`, `{{SECRET.*}}`
@@ -70,18 +89,51 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
   - Budget-aware fallback chains
   - Semantic caching for activity results (50-80% cost savings)
   - Example workflow: `04-moderate-content.yaml`
-- 📋 **Example 5**: Multi-model LLM with automatic fallback (Next)
+- ✅ **Example 5: Multi-Model LLM Fallback** - Budget-aware provider selection
+  - Multi-provider LLM with automatic fallback chains
+  - Budget-aware model selection (skip expensive models when constrained)
+  - Cost optimization across providers
+  - Provider-specific examples: `05-research-assistant.yaml`, `05a-anthropic.yaml`, `05b-openai.yaml`, `05c-google.yaml`
+- 📋 **Example 6**: Agentic Research with Iterative Workflows (Next - requires US-3.4)
+
+**Epic 5: Built-In Activity Library** (In Progress - 38%)
+- ✅ **[US-5.1: Multi-Provider LLM Activities](docs/implementation/US-5.1-multi-provider-llm.md)** - Phases 1-5 complete
+  - Anthropic (Claude 3.5 Sonnet, Haiku)
+  - OpenAI (GPT-4, GPT-3.5)
+  - Google (Gemini Pro, Gemini Flash)
+  - Ollama (self-hosted models)
+  - Database-backed model catalog with pricing
+  - Budget enforcement at workflow and activity level
+  - Automatic fallback chains with cost optimization
+- ✅ **[US-5.2: AI Cost Tracking and Budget Enforcement](docs/implementation/US-5.1-multi-provider-llm.md)** - Merged into US-5.1
+  - Per-activity and per-workflow budget limits
+  - Real-time cost tracking in PostgreSQL
+  - Token counting and cost calculation
+  - Budget exceeded actions (abort/alert)
+- ✅ **[US-5.3: Semantic Caching](docs/implementation/US-5.3-semantic-caching.md)** - 100% production ready
+  - Redis-based caching with TTL
+  - Universal caching for all activity types
+  - SHA256-based deterministic cache keys
+  - Cache invalidation API
+  - 50-80% cost savings for repeated queries
+- ✅ **[US-5.4: Object Storage and File Management](docs/implementation/US-5.4-object-storage.md)** - MVP complete
+  - PostgreSQL Large Objects backend
+  - File production/consumption via {{FILE.activity.filename}}
+  - Automatic lifecycle management
+  - Cross-cutting capability for all activities
+- ⏳ **US-5.5**: HTTP/REST Operations (http_request complete, webhook/GraphQL pending)
+- ⏳ **US-5.6**: Database Operations (postgres_query complete, SQLite/Redis pending)
 
 ### Current Focus 🎯
 
-**Epic 3: YAML Workflows - Example-Driven Implementation**
+**Epic 3 & 5: YAML Workflows + Built-In Activities**
 - Implementing Epic 3 (YAML DSL) and Epic 5 (Built-in Activities) together through realistic workflow examples
-- Example 5 (Next): Multi-model LLM with automatic fallback chains
+- **Next**: US-3.4 Iterative Workflows (for Example 6: Agentic Research)
 - See [MVP Workflows Implementation Plan](docs/implementation/mvp-workflows-implementation-plan.md) for full roadmap
 
 ### Recent Completions ✅
 
-**Week of Nov 18-19, 2025** - Epic 3 Examples 3-4 Complete ✅
+**Week of Nov 18-19, 2025** - Epic 3 Examples 3-5 + Epic 5 Stories Complete ✅
 - ✅ **Example 3**: Parallel Execution with File Management
   - Parallel activity execution (fan-out pattern)
   - Fan-in synchronization (wait for all dependencies before proceeding)
@@ -94,12 +146,36 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
   - Retry logic with exponential backoff in orchestrator
   - Budget tracking service with pre-execution checks
   - LLM activity with Anthropic Claude integration
+  - Example workflow: `04-moderate-content.yaml`
+- ✅ **Example 5**: Multi-Model LLM with Automatic Fallback (5 variants)
   - Multi-provider support (Anthropic, OpenAI, Google, Ollama)
   - Budget-aware fallback chains (skip expensive models when budget constrained)
-  - Semantic caching for activity results (Redis-backed, universal for all activity types)
+  - Provider-specific variants for testing each provider
+  - Example workflows: `05-research-assistant.yaml`, `05a-anthropic.yaml`, `05b-openai.yaml`, `05c-google.yaml`
+- ✅ **US-5.1**: Multi-Provider LLM Activities (Phases 1-5)
+  - Database schema with LLM catalog and cost tracking
+  - Seed data loader (`streamflow seed-llm`)
+  - Core services (CostCalculator, CostTracker)
+  - All 4 LLM provider implementations
+  - Budget-aware orchestrator parameter enrichment
+  - Worker-side budget enforcement in fallback chain
+- ✅ **US-5.3**: Semantic Caching (100% production ready)
+  - Redis-backed caching with TTL and graceful NoOpCache fallback
+  - Universal caching for all activity types (not just LLM)
+  - SHA256-based deterministic cache keys
   - Cache invalidation API endpoints with pattern matching
-  - Example workflow: `04-moderate-content.yaml`
-  - Comprehensive integration tests for retry, budget tracking, and caching
+  - Complete integration and API handler tests (13 tests)
+  - 50-80% cost savings for repeated queries
+- ✅ **US-5.4**: Object Storage and File Management
+  - PostgreSQL Large Objects implementation
+  - File production and consumption via template expressions
+  - Automatic lifecycle management
+- ✅ **US-1C.2**: All-in-One Service Launcher
+  - `streamflow serve` command launches orchestrator + API + workers
+  - Graceful shutdown with configurable timeout
+- ✅ **US-1C.7**: Graceful Shutdown and Signal Handling
+  - SIGTERM/SIGINT handling with CancellationToken
+  - Clean shutdown sequences for all services
 
 **Week of Nov 11-16, 2025** - Epic 3 Examples 1-2 Complete ✅
 - ✅ **Example 1**: Sequential Workflow

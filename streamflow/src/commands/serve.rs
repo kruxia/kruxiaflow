@@ -526,6 +526,7 @@ mod tests {
             oauth_public_key: None,
             shutdown_timeout: 30,
             poll_max_activities: 10,
+            redis_url: "redis://127.0.0.1:6379".to_string(),
         };
 
         assert!(cmd.validate().is_ok());
@@ -544,6 +545,7 @@ mod tests {
             oauth_public_key: None,
             shutdown_timeout: 30,
             poll_max_activities: 10,
+            redis_url: "redis://127.0.0.1:6379".to_string(),
         };
 
         assert!(cmd.validate().is_err());
@@ -562,6 +564,7 @@ mod tests {
             oauth_private_key: Some("key".to_string()),
             oauth_public_key: None,
             shutdown_timeout: 30,
+            redis_url: "redis://127.0.0.1:6379".to_string(),
         };
 
         assert!(cmd.validate().is_err());

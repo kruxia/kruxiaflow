@@ -63,6 +63,7 @@ async fn create_real_server() -> (String, PgPool, tokio::task::JoinHandle<()>) {
     let activity_queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
     let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
+    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
     let shutdown_token = CancellationToken::new();
 
     let state = AppState::new(
@@ -71,6 +72,7 @@ async fn create_real_server() -> (String, PgPool, tokio::task::JoinHandle<()>) {
         activity_queue,
         event_source,
         workflow_storage.clone(),
+        cache_service,
         shutdown_token,
     );
     let app = app_router(state);
@@ -150,7 +152,8 @@ async fn test_worker_poll_and_execute_echo() {
     };
 
     // Create worker with EchoActivity
-    let mut registry = ActivityRegistry::new();
+    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    let mut registry = ActivityRegistry::new(cache_service);
     registry.register(Arc::new(EchoActivity));
     let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
     let manager = WorkerManager::new(config, registry, workflow_storage);
@@ -218,7 +221,8 @@ async fn test_worker_concurrency() {
     };
 
     // Create worker with EchoActivity
-    let mut registry = ActivityRegistry::new();
+    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    let mut registry = ActivityRegistry::new(cache_service);
     registry.register(Arc::new(EchoActivity));
     let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
     let manager = WorkerManager::new(config, registry, workflow_storage);
@@ -271,7 +275,8 @@ async fn test_worker_authentication_failure() {
     };
 
     // Create worker with EchoActivity
-    let mut registry = ActivityRegistry::new();
+    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    let mut registry = ActivityRegistry::new(cache_service);
     registry.register(Arc::new(EchoActivity));
     let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
     let manager = WorkerManager::new(config, registry, workflow_storage);

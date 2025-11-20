@@ -1,8 +1,15 @@
 # StreamFlow v0.2 Product Requirements Document
 
-**Version**: 0.9.4
+**Version**: 0.2.0
 **Date**: November 19, 2025
-**Status**: In Development (Epics 1, 1A (partial), 1B, 1C Complete - Epic 2 Complete - Epic 3 Examples 1-5 Complete - Epic 5 US-5.1, US-5.3, US-5.4 Complete)
+**Status**: In Development
+- **Epic 1**: ✅ Complete (Event-Driven Orchestration)
+- **Epic 1A**: ✅ Complete (API Server - all 7 stories)
+- **Epic 1B**: ✅ Complete (Built-in Worker)
+- **Epic 1C**: ⏳ Partial (StreamFlow Binary - US-1C.1, US-1C.2, US-1C.7 complete)
+- **Epic 2**: ✅ Complete (Performance Benchmarking - US-2.1, US-2.2 complete)
+- **Epic 3**: ⏳ In Progress (YAML Workflows - Examples 1-5 complete, US-3.4 plan ready)
+- **Epic 5**: ⏳ In Progress (Built-In Activities - US-5.1, US-5.3, US-5.4 complete)
 **Target Release**: Q1 2026
 
 ---

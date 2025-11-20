@@ -160,7 +160,7 @@ async fn test_example_03_parallel_document_processing() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Start worker with HTTP activity
-    let mut registry = ActivityRegistry::new();
+    let mut registry = ActivityRegistry::new(Arc::new(streamflow_core::NoOpCache::new()));
     registry.register(Arc::new(HttpRequestActivity::new()));
 
     let worker_config = WorkerConfig {

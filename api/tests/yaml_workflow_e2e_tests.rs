@@ -159,7 +159,7 @@ async fn test_yaml_workflow_end_to_end_with_healthcheck() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Start worker with HTTP activity
-    let mut registry = ActivityRegistry::new();
+    let mut registry = ActivityRegistry::new(Arc::new(streamflow_core::NoOpCache::new()));
     registry.register(Arc::new(HttpRequestActivity::new()));
 
     let worker_config = WorkerConfig {
@@ -484,7 +484,7 @@ async fn test_conditional_branching_workflow() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Start worker with HTTP and PostgreSQL activities
-    let mut registry = ActivityRegistry::new();
+    let mut registry = ActivityRegistry::new(Arc::new(streamflow_core::NoOpCache::new()));
     registry.register(Arc::new(HttpRequestActivity::new()));
     registry.register(Arc::new(PostgresQueryActivity::new()));
 
