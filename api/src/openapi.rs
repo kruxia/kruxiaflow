@@ -1,4 +1,5 @@
 use crate::error::{ApiError, ApiErrorResponse, ErrorCode};
+use crate::handlers::cache::{InvalidatePatternRequest, InvalidateResponse};
 use crate::handlers::cost::{ActivityCostDetail, CostAnalytics, WorkflowCostSummary};
 use crate::handlers::llm_catalog::{
     ModelResponse, ModelSearchCriterion, ModelSearchRequest, ModelSearchResponse, ProviderResponse,
@@ -73,6 +74,10 @@ use utoipa::OpenApi;
         // LLM Catalog APIs
         crate::handlers::llm_catalog::list_providers,
         crate::handlers::llm_catalog::search_models,
+
+        // Cache Invalidation APIs
+        crate::handlers::cache::invalidate_cache_key,
+        crate::handlers::cache::invalidate_cache_pattern,
     ),
     components(
         schemas(
@@ -125,6 +130,10 @@ use utoipa::OpenApi;
             ModelSearchRequest,
             ModelSearchResponse,
 
+            // Cache Invalidation schemas
+            InvalidatePatternRequest,
+            InvalidateResponse,
+
             // Error response schemas
             ApiErrorResponse,
             ApiError,
@@ -140,6 +149,7 @@ use utoipa::OpenApi;
         (name = "Workers", description = "Worker activity polling and execution"),
         (name = "Cost Tracking", description = "LLM and activity cost tracking, budget enforcement, and analytics"),
         (name = "LLM Catalog", description = "LLM provider and model discovery with pricing information"),
+        (name = "Cache", description = "Cache invalidation and management"),
     ),
     modifiers(&SecurityAddon)
 )]

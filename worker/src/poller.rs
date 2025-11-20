@@ -180,7 +180,13 @@ impl WorkerPoller {
             }
         }
 
-        // Execute activity
+        // Parse activity settings
+        let settings = activity
+            .settings
+            .as_ref()
+            .and_then(|s| serde_json::from_value(s.clone()).ok());
+
+        // Execute activity with settings for caching support
         let exec_span = tracing::debug_span!("activity_handler");
         let result = {
             let _enter = exec_span.enter();
@@ -189,6 +195,7 @@ impl WorkerPoller {
                     &activity.worker,
                     &activity.activity_name,
                     parameters,
+                    settings,
                     timeout,
                 )
                 .await
@@ -490,7 +497,9 @@ mod tests {
             "test_client".to_string(),
             "test_secret".to_string(),
         );
-        let registry = Arc::new(ActivityRegistry::new());
+        let registry = Arc::new(ActivityRegistry::new(Arc::new(
+            streamflow_core::cache::NoOpCache::new(),
+        )));
         let storage = Arc::new(MockStorage);
 
         let poller = WorkerPoller::new(config.clone(), client, registry.clone(), storage);
@@ -538,7 +547,8 @@ mod tests {
             "test_client".to_string(),
             "test_secret".to_string(),
         );
-        let mut registry = ActivityRegistry::new();
+        let mut registry =
+            ActivityRegistry::new(Arc::new(streamflow_core::cache::NoOpCache::new()));
         registry.register(Arc::new(SuccessActivity));
         let storage = Arc::new(MockStorage);
 
@@ -578,7 +588,8 @@ mod tests {
             "test_client".to_string(),
             "test_secret".to_string(),
         );
-        let mut registry = ActivityRegistry::new();
+        let mut registry =
+            ActivityRegistry::new(Arc::new(streamflow_core::cache::NoOpCache::new()));
         registry.register(Arc::new(SuccessActivity));
         let storage = Arc::new(MockStorage);
 
@@ -614,7 +625,9 @@ mod tests {
             "test_client".to_string(),
             "test_secret".to_string(),
         );
-        let registry = Arc::new(ActivityRegistry::new());
+        let registry = Arc::new(ActivityRegistry::new(Arc::new(
+            streamflow_core::cache::NoOpCache::new(),
+        )));
         let storage = Arc::new(MockStorage);
 
         let _poller = WorkerPoller::new(config, client, registry, storage);
@@ -660,7 +673,9 @@ mod tests {
             "test_client".to_string(),
             "test_secret".to_string(),
         );
-        let registry = Arc::new(ActivityRegistry::new());
+        let registry = Arc::new(ActivityRegistry::new(Arc::new(
+            streamflow_core::cache::NoOpCache::new(),
+        )));
         let storage = Arc::new(MockStorage);
 
         let poller = WorkerPoller::new(config.clone(), client, registry, storage);
@@ -676,7 +691,8 @@ mod tests {
 
     #[test]
     fn test_activity_registry_arc_cloning() {
-        let mut registry = ActivityRegistry::new();
+        let mut registry =
+            ActivityRegistry::new(Arc::new(streamflow_core::cache::NoOpCache::new()));
         registry.register(Arc::new(SuccessActivity));
         let registry_arc = Arc::new(registry);
 

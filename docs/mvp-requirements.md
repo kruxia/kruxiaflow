@@ -1,8 +1,8 @@
 # StreamFlow v0.2 Product Requirements Document
 
-**Version**: 0.9.3
+**Version**: 0.9.4
 **Date**: November 19, 2025
-**Status**: In Development (Epics 1, 1A, 1B, 1C Complete - Epic 3 Examples 1-4 Complete)
+**Status**: In Development (Epics 1, 1A (partial), 1B, 1C Complete - Epic 2 Complete - Epic 3 Examples 1-5 Complete - Epic 5 US-5.1, US-5.3, US-5.4 Complete)
 **Target Release**: Q1 2026
 
 ---
@@ -126,7 +126,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 - **Scope**: Minimal implementation from Epic 1C focused only on API server launcher
 - **Implementation**: See `docs/implementation/US-1A.1.5-api-server-launcher.md`
 
-**US-1A.2: Error Handling and API Contracts**
+**US-1A.2: Error Handling and API Contracts** ✅ Complete
 - **As** an AI startup engineer
 - **I want** consistent error responses and API documentation
 - **So that** I can handle errors gracefully and integrate easily
@@ -139,7 +139,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Request ID in response headers for tracing: `X-Request-ID`
   - CORS support for browser-based clients
 
-**US-1A.3: Authentication**
+**US-1A.3: Authentication** ✅ Complete
 - **As** a platform engineering lead
 - **I want** API authentication
 - **So that** only authenticated clients can submit and query workflows
@@ -607,30 +607,31 @@ streamflow/
 - **Example**: Research agent searches → evaluates if sufficient → loops back with context of all previous searches → compiles report from all iterations
 - **Storage**: Framework stores iteration-scoped results as arrays, making all iterations accessible to downstream activities
 
-**US-3.5: Activity Settings (Retry, Timeout, Budget)**
+**US-3.5: Activity Settings (Retry, Timeout, Budget)** ✅ Complete
 - **As** a platform engineering lead
 - **I want** declarative control over activity behavior
 - **So that** I don't need custom code for common patterns
 - **Acceptance Criteria**:
-  - **Timeout configuration**: `timeout_seconds: 300` sets activity execution timeout
-  - **Retry policy**: Automatic retry with exponential backoff
-    - `max_attempts: 5` - Maximum retry attempts (default: 1, no retries)
-    - `strategy: exponential` or `fixed` - Backoff strategy
-    - `base_seconds: 2` - Base delay between retries
-    - `factor: 2` - Exponential multiplier (for exponential strategy)
-    - `max_seconds: 300` - Maximum backoff delay cap
-  - **Retry logic location**: Orchestrator event handlers (NOT database or workers)
-    - Orchestrator consumes `ActivityFailed` events
-    - Orchestrator checks retry settings from workflow definition
-    - Orchestrator calculates backoff delay: `base_seconds * factor^(attempt-1)` capped at `max_seconds`
-    - Orchestrator decides: retry (schedule with delay) or fail permanently
-    - Orchestrator publishes new `ActivityScheduled` event with `scheduled_for` = NOW() + backoff
-  - **Retry state tracking**:
-    - Current attempt count stored in `workflows.state_data` JSONB
-    - Attempt history captured in `workflow_events` table (immutable event log)
-  - Budget limits per activity: `budget.limit: 2.00` (USD)
-  - Budget action on exceeded: `abort` or `continue`
-  - Result caching: `cache: true`, `cache_ttl: 3600`
+  - ✅ **Timeout configuration**: `timeout_seconds: 300` sets activity execution timeout
+  - ✅ **Retry policy**: Automatic retry with exponential backoff
+    - ✅ `max_attempts: 5` - Maximum retry attempts (default: 1, no retries)
+    - ✅ `strategy: exponential` or `fixed` - Backoff strategy
+    - ✅ `base_seconds: 2` - Base delay between retries
+    - ✅ `factor: 2` - Exponential multiplier (for exponential strategy)
+    - ✅ `max_seconds: 300` - Maximum backoff delay cap
+  - ✅ **Retry logic location**: Orchestrator event handlers (NOT database or workers)
+    - ✅ Orchestrator consumes `ActivityFailed` events
+    - ✅ Orchestrator checks retry settings from workflow definition
+    - ✅ Orchestrator calculates backoff delay: `base_seconds * factor^(attempt-1)` capped at `max_seconds`
+    - ✅ Orchestrator decides: retry (schedule with delay) or fail permanently
+    - ✅ Orchestrator publishes new `ActivityScheduled` event with `scheduled_for` = NOW() + backoff
+  - ✅ **Retry state tracking**:
+    - ✅ Current attempt count stored in `workflows.state_data` JSONB
+    - ✅ Attempt history captured in `workflow_events` table (immutable event log)
+  - ✅ Budget limits per activity: `budget.limit: 2.00` (USD)
+  - ✅ Budget action on exceeded: `abort` or `continue`
+  - ✅ Result caching: `cache: true`, `cache_ttl: 3600`
+- **Implementation**: See `docs/implementation/US-3.5-activity-settings.md`
 - **Example**:
   ```yaml
   activities:
@@ -822,74 +823,86 @@ streamflow/
 
 ### User Stories
 
-**US-5.1: Multi-Provider LLM Activities**
+**US-5.1: Multi-Provider LLM Activities** ✅ Complete (MVP)
 - **As** an AI startup engineer
-- **I want** built-in support for all major LLM providers
-- **So that** I can switch providers without code changes and implement automatic fallback
+- **I want** built-in support for all major LLM providers with cost tracking and budget enforcement
+- **So that** I can switch providers without code changes, implement automatic fallback, and prevent runaway LLM costs
 - **Acceptance Criteria**:
-  - Built-in model providers: OpenAI (GPT-4, GPT-3.5), Anthropic (Claude), Google (Gemini), AWS Bedrock, Azure OpenAI, Ollama (local)
-  - `llm_prompt` activity with automatic model fallback
-  - Model fallback chain: Try Anthropic → OpenAI → Gemini
-  - Automatic model selection based on budget
-  - Token streaming support for real-time responses
-  - Embedding generation: `embedding_generate` activity
+  - ✅ Built-in model providers: Anthropic (Claude), OpenAI (GPT-4), Google (Gemini), Ollama (local)
+  - ✅ `llm_prompt` activity with automatic model fallback
+  - ✅ Model fallback chain: Try Anthropic → OpenAI → Gemini → Ollama
+  - ✅ Database-backed model catalog with pricing information
+  - ✅ Per-activity and per-workflow budget limits with enforcement
+  - ✅ Real-time cost tracking in PostgreSQL
+  - ✅ Budget exceeded action: `abort` or `alert`
+  - ✅ Token counting and cost calculation
+  - ✅ Embedding generation: `embedding_generate` activity (OpenAI, Google, Ollama)
+  - 🔮 Post-MVP: AWS Bedrock, Azure OpenAI, token streaming
+- **Implementation**: See `docs/implementation/US-5.1-multi-provider-llm.md` (Phases 1-5 Complete)
+- **Note**: Merged with US-5.2 (AI Cost Tracking) for integrated implementation
 
-**US-5.2: AI Cost Tracking and Budget Enforcement**
+**US-5.2: AI Cost Tracking and Budget Enforcement** ✅ Complete (Merged into US-5.1)
 - **As** an AI startup engineer
 - **I want** automatic token counting and budget enforcement
 - **So that** I prevent runaway LLM costs (like AutoGPT's $14.40/task)
-- **Acceptance Criteria**:
-  - Per-activity budget limits: `budget.limit: 5.00` (USD)
-  - Per-workflow budget limits
-  - Real-time cost tracking in PostgreSQL
-  - Budget exceeded action: `abort` (fail workflow) or `alert` (continue with warning)
-  - Cost dashboard: SQL-queryable cost history
-  - Token counting before execution for estimation
-  - **CRITICAL**: First platform with built-in AI cost controls
+- **Acceptance Criteria**: All criteria implemented in US-5.1
+  - ✅ Per-activity budget limits: `budget.limit: 5.00` (USD)
+  - ✅ Per-workflow budget limits
+  - ✅ Real-time cost tracking in PostgreSQL
+  - ✅ Budget exceeded action: `abort` (fail workflow) or `alert` (continue with warning)
+  - ✅ Cost dashboard: SQL-queryable cost history via `activity_costs` table
+  - ✅ Token counting and cost calculation
+  - ✅ **CRITICAL**: First platform with built-in AI cost controls
+- **Note**: Merged into US-5.1 for integrated LLM + cost tracking implementation
 
-**US-5.3: Semantic Caching for Cost Savings**
+**US-5.3: Semantic Caching for Cost Savings** ✅ Complete
 - **As** an AI startup engineer
 - **I want** automatic result caching for LLM calls
 - **So that** I save 50-80% on LLM costs for repeated queries
 - **Acceptance Criteria**:
-  - Activity setting: `cache: true`
-  - Cache key based on hash of parameters
-  - Redis-backed cache storage when Redis is available (purpose-built for TTL caching)
-  - Redis is an **optional dependency**: Caching enabled when Redis is installed, gracefully disabled when not
-  - Configurable TTL: `cache_ttl: 3600` (seconds)
-  - Automatic TTL expiration handled by Redis
-  - Cache hit returns result with `cost_usd: 0.0`
-  - Cache invalidation on demand
-  - Graceful degradation: Workflows run without caching if Redis is unavailable
-  - Optional: Semantic similarity matching using embeddings (advanced feature)
+  - ✅ Activity setting: `cache: true`
+  - ✅ Cache key based on SHA256 hash of parameters
+  - ✅ Redis-backed cache storage when Redis is available (purpose-built for TTL caching)
+  - ✅ Redis is an **optional dependency**: Caching enabled when Redis is installed, gracefully disabled when not
+  - ✅ Configurable TTL: `cache_ttl: 3600` (seconds)
+  - ✅ Automatic TTL expiration handled by Redis
+  - ✅ Cache hit returns result with `cost_usd: 0.0`
+  - ✅ Cache invalidation API endpoints: `DELETE /api/v1/cache/:key`, `POST /api/v1/cache/invalidate`
+  - ✅ Graceful degradation: Workflows run without caching if Redis is unavailable (NoOpCache fallback)
+  - ✅ Universal caching: Works for ALL activity types (LLM, HTTP, PostgreSQL, custom)
+  - ✅ Environment variable configuration: `STREAMFLOW_CACHE_PROVIDER`, `STREAMFLOW_REDIS_URL`, `STREAMFLOW_REDIS_KEY_PREFIX`
+  - 🔮 Post-MVP: Semantic similarity matching using embeddings (advanced feature)
+- **Implementation**: See `docs/implementation/US-5.3-semantic-caching.md` (100% Complete)
 
-**US-5.4: Object Storage and File Management**
+**US-5.4: Object Storage and File Management** ✅ Complete (MVP)
 - **As** a data engineer
 - **I want** any activity to produce and consume files via object storage
 - **So that** I don't store large data in workflow state (JSON) and can pass files between activities
 - **Acceptance Criteria**:
-  - **Backend storage**: Multi-provider support (AWS S3, Google Cloud Storage, Azure Blob, MinIO, local filesystem)
-  - **File production**: Activities declare `outputs` with `type: file` or `type: folder`
+  - ✅ **Backend storage**: PostgreSQL Large Objects (MVP), multi-provider interface for post-MVP
+  - ✅ **File production**: Activities declare `outputs` with `type: file` or `type: folder`
     - Example: `outputs: [{name: "processed_data", type: file}]`
     - Files stored with path: `{workflow_id}/{activity_key}/{filename}`
     - Activity specifies filename(s) when reporting completion
-  - **File consumption**: Activities reference files from previous activities via template expressions
+  - ✅ **File consumption**: Activities reference files from previous activities via template expressions
     - `{{FILE.previous_activity.filename}}` - Returns file reference/path for activity to download
     - `{{FOLDER.previous_activity.folder_name}}` - Returns folder reference/path
     - Framework automatically downloads file before activity execution (or provides path/URL to activity)
-  - **Lifecycle management**:
+  - ✅ **Lifecycle management**:
     - Files scoped to workflow_id and activity_key
     - Automatic cleanup based on workflow retention policy (e.g., delete after 30 days)
     - Files persisted until workflow retention expires
-  - **Implementation details**:
+  - ✅ **Implementation details**:
     - Stream large files (no full memory load)
     - Support for multiple files per activity
     - Metadata: workflow_id, activity_key, filename, size, content_type
-  - **Activity interface**:
+  - ✅ **Activity interface**:
     - Activities receive file paths or URLs (not inline content)
     - Activities write to provided output paths
     - Framework handles upload/download transparently
-  - **CRITICAL**: No special "storage activities" - file handling is a cross-cutting capability available to ALL activities
+  - ✅ **CRITICAL**: No special "storage activities" - file handling is a cross-cutting capability available to ALL activities
+  - 🔮 Post-MVP: AWS S3, Google Cloud Storage, Azure Blob, MinIO, local filesystem backends
+- **Implementation**: See `docs/implementation/US-5.4-object-storage.md` (MVP Complete)
 - **Example Use Cases**:
   - ETL pipeline: `extract` activity outputs CSV file → `transform` activity consumes CSV, outputs Parquet → `load` activity consumes Parquet
   - AI workflow: `fetch_doc` outputs PDF → `extract_text` consumes PDF, outputs TXT → `generate_embeddings` consumes TXT
@@ -901,7 +914,11 @@ streamflow/
 - **I want** built-in HTTP activities without external dependencies
 - **So that** I can call APIs in workflows without custom code
 - **Acceptance Criteria**:
-  - Activities: `http_request`, `webhook_send`, `graphql_query`, `rest_api_call`
+  - Activities: 
+    - ✅ `http_request`
+    - [ ] `webhook_send`
+    - [ ] `graphql_query`
+    - [ ] `rest_api_call`
   - Built-in retry with exponential backoff
   - Authentication: Bearer token, API key, OAuth
   - Timeout configuration
@@ -912,7 +929,10 @@ streamflow/
 - **I want** built-in database connectors
 - **So that** workflows can query and update databases directly
 - **Acceptance Criteria**:
-  - Activities: `postgres_query`, `sqlite_query`, `redis_get/set`
+  - Activities: 
+    - ✅ `postgres_query`
+    - [ ] `sqlite_query`
+    - [ ] `redis_get/set`
   - PostgreSQL native: Direct queries to same database
   - SQL transactions: `sql_transaction` for multi-statement atomicity
   - Connection pooling built-in

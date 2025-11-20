@@ -1,9 +1,13 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use serde_json::Value;
+use chrono::Utc;
+use rust_decimal::Decimal;
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use streamflow_core::cache::{CacheService, CachedResult, key_generator};
+use streamflow_core::workflow::{ActivityOutput, ActivitySettings};
 
 use crate::activity_result::ActivityResult;
 
@@ -32,14 +36,18 @@ pub trait ActivityImpl: Send + Sync {
 /// Activity registry
 ///
 /// Manages activity implementations and executes them.
+/// Includes caching support for all activity types.
 pub struct ActivityRegistry {
     implementations: HashMap<String, Arc<dyn ActivityImpl>>,
+    cache_service: Arc<dyn CacheService>,
 }
 
 impl ActivityRegistry {
-    pub fn new() -> Self {
+    /// Create a new ActivityRegistry with a cache service
+    pub fn new(cache_service: Arc<dyn CacheService>) -> Self {
         Self {
             implementations: HashMap::new(),
+            cache_service,
         }
     }
 
@@ -55,7 +63,12 @@ impl ActivityRegistry {
         self.implementations.keys().cloned().collect()
     }
 
-    /// Execute an activity
+    /// Execute an activity with caching support
+    ///
+    /// This method transparently handles caching for all activity types:
+    /// - Checks cache before execution if caching is enabled
+    /// - Returns cached result with cost_usd = 0.0 on cache hit
+    /// - Stores result in cache after successful execution
     ///
     /// Returns activity result or error.
     pub async fn execute(
@@ -63,34 +76,138 @@ impl ActivityRegistry {
         worker: &str,
         activity_name: &str,
         parameters: Value,
+        settings: Option<ActivitySettings>,
         timeout: Duration,
     ) -> Result<ActivityResult> {
         let key = format!("{}.{}", worker, activity_name);
 
+        // Check if caching is enabled for this activity
+        let cache_enabled = settings
+            .as_ref()
+            .and_then(|s| s.cache.then_some(true))
+            .unwrap_or(false);
+
+        // --- CACHE CHECK ---
+        if cache_enabled && self.cache_service.is_available() {
+            // Generate deterministic cache key from activity name + parameters
+            let cache_key = key_generator::generate_cache_key(&key, &parameters)?;
+
+            // Check cache for existing result
+            if let Ok(Some(cached)) = self.cache_service.get(&cache_key).await {
+                tracing::info!(
+                    activity = %key,
+                    cache_key = %cache_key,
+                    "Cache hit - returning cached result"
+                );
+
+                // Convert cached JSON value to Vec<ActivityOutput>
+                let outputs = if let Value::Object(map) = cached.output {
+                    map.into_iter()
+                        .map(|(k, v)| ActivityOutput::value(k, v))
+                        .collect()
+                } else {
+                    vec![ActivityOutput::value("result", cached.output)]
+                };
+
+                // Return cached result with cost_usd = 0.0
+                return Ok(ActivityResult {
+                    outputs,
+                    cost_usd: Some(Decimal::ZERO), // Cache hit = zero cost
+                    metadata: Some(json!({
+                        "cached": true,
+                        "cache_key": cache_key,
+                        "cached_at": cached.cached_at,
+                        "original_cost_usd": cached.original_cost_usd,
+                    })),
+                });
+            }
+
+            tracing::debug!(
+                activity = %key,
+                cache_key = %cache_key,
+                "Cache miss - executing activity"
+            );
+        }
+
+        // --- EXECUTE ACTIVITY ---
         let implementation = self
             .implementations
             .get(&key)
             .ok_or_else(|| anyhow::anyhow!("Activity implementation not found: {}", key))?;
 
         // Execute with timeout
-        let result = tokio::time::timeout(timeout, implementation.execute(parameters)).await;
+        let result =
+            tokio::time::timeout(timeout, implementation.execute(parameters.clone())).await;
 
-        match result {
-            Ok(Ok(output)) => Ok(output),
-            Ok(Err(err)) => Err(err),
-            Err(_) => Err(anyhow::anyhow!(
-                "Activity execution timed out after {:?}",
-                timeout
-            )),
+        let mut activity_result = match result {
+            Ok(Ok(output)) => output,
+            Ok(Err(err)) => return Err(err),
+            Err(_) => {
+                return Err(anyhow::anyhow!(
+                    "Activity execution timed out after {:?}",
+                    timeout
+                ));
+            }
+        };
+
+        // --- CACHE STORAGE ---
+        if cache_enabled && self.cache_service.is_available() {
+            let cache_key = key_generator::generate_cache_key(&key, &parameters)?;
+            let cache_ttl = settings.as_ref().and_then(|s| s.cache_ttl).unwrap_or(3600); // Default 1 hour
+
+            // Convert outputs to JSON value for caching
+            let output_value = activity_result.to_json_value();
+
+            let cached_result = CachedResult {
+                output: output_value,
+                cached_at: Utc::now(),
+                original_cost_usd: activity_result.cost_usd,
+            };
+
+            match self
+                .cache_service
+                .set(&cache_key, &cached_result, Duration::from_secs(cache_ttl))
+                .await
+            {
+                Ok(_) => {
+                    tracing::info!(
+                        activity = %key,
+                        cache_key = %cache_key,
+                        ttl_seconds = cache_ttl,
+                        "Stored result in cache"
+                    );
+
+                    // Add cache_key to result metadata
+                    let cache_metadata = json!({
+                        "cache_key": cache_key,
+                        "cached": false,
+                    });
+
+                    activity_result.metadata = match activity_result.metadata {
+                        Some(Value::Object(mut map)) => {
+                            map.insert("cache_key".to_string(), json!(cache_key));
+                            map.insert("cached".to_string(), json!(false));
+                            Some(Value::Object(map))
+                        }
+                        _ => Some(cache_metadata),
+                    };
+                }
+                Err(err) => {
+                    // Log cache storage error but don't fail the activity
+                    tracing::warn!(
+                        activity = %key,
+                        error = %err,
+                        "Failed to store result in cache"
+                    );
+                }
+            }
         }
+
+        Ok(activity_result)
     }
 }
 
-impl Default for ActivityRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Note: Default implementation removed - ActivityRegistry requires explicit cache service injection
 
 #[cfg(test)]
 #[path = "registry_test.rs"]

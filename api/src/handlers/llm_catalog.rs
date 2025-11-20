@@ -201,11 +201,14 @@ mod tests {
     }
 
     async fn setup_test_state() -> AppState {
+        use streamflow_core::cache::NoOpCache;
+
         let pool = setup_test_pool().await;
         let auth_service = Arc::new(crate::state::tests::MockAuthService);
         let activity_queue = Arc::new(crate::state::tests::MockActivityQueue);
         let event_source = Arc::new(crate::state::tests::MockEventSource);
         let workflow_storage = Arc::new(crate::state::tests::MockWorkflowStorage);
+        let cache_service = Arc::new(NoOpCache::new());
         let shutdown_token = CancellationToken::new();
 
         AppState::new(
@@ -214,6 +217,7 @@ mod tests {
             activity_queue,
             event_source,
             workflow_storage,
+            cache_service,
             shutdown_token,
         )
     }

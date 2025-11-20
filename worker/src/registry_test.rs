@@ -7,6 +7,7 @@ mod tests {
     use serde_json::{Value, json};
     use std::sync::Arc;
     use std::time::Duration;
+    use streamflow_core::cache::NoOpCache;
 
     struct TestActivity {
         name: String,
@@ -76,7 +77,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_activity() {
-        let mut registry = ActivityRegistry::new();
+        let cache = Arc::new(NoOpCache::new());
+        let mut registry = ActivityRegistry::new(cache);
 
         let activity = Arc::new(TestActivity::new("test", "echo"));
         registry.register(activity);
@@ -88,7 +90,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_register_multiple_activities() {
-        let mut registry = ActivityRegistry::new();
+        let cache = Arc::new(NoOpCache::new());
+        let mut registry = ActivityRegistry::new(cache);
 
         registry.register(Arc::new(TestActivity::new("payments", "authorize")));
         registry.register(Arc::new(TestActivity::new("payments", "capture")));
@@ -103,12 +106,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_activity() {
-        let mut registry = ActivityRegistry::new();
+        let cache = Arc::new(NoOpCache::new());
+        let mut registry = ActivityRegistry::new(cache);
         registry.register(Arc::new(TestActivity::new("test", "echo")));
 
         let input = json!({"message": "hello", "count": 42});
         let result = registry
-            .execute("test", "echo", input.clone(), Duration::from_secs(5))
+            .execute("test", "echo", input.clone(), None, Duration::from_secs(5))
             .await;
 
         assert!(result.is_ok());
@@ -118,10 +122,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_execute_nonexistent_activity() {
-        let registry = ActivityRegistry::new();
+        let cache = Arc::new(NoOpCache::new());
+        let registry = ActivityRegistry::new(cache);
 
         let result = registry
-            .execute("test", "nonexistent", json!({}), Duration::from_secs(5))
+            .execute(
+                "test",
+                "nonexistent",
+                json!({}),
+                None,
+                Duration::from_secs(5),
+            )
             .await;
 
         assert!(result.is_err());
@@ -134,12 +145,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_activity_timeout() {
-        let mut registry = ActivityRegistry::new();
+        let cache = Arc::new(NoOpCache::new());
+        let mut registry = ActivityRegistry::new(cache);
         registry.register(Arc::new(SlowActivity));
 
         // Execute with 500ms timeout (activity takes 2 seconds)
         let result = registry
-            .execute("test", "slow", json!({}), Duration::from_millis(500))
+            .execute("test", "slow", json!({}), None, Duration::from_millis(500))
             .await;
 
         assert!(result.is_err());
@@ -149,12 +161,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_activity_execution_with_sufficient_timeout() {
-        let mut registry = ActivityRegistry::new();
+        let cache = Arc::new(NoOpCache::new());
+        let mut registry = ActivityRegistry::new(cache);
         registry.register(Arc::new(SlowActivity));
 
         // Execute with 5 second timeout (activity takes 2 seconds)
         let result = registry
-            .execute("test", "slow", json!({}), Duration::from_secs(5))
+            .execute("test", "slow", json!({}), None, Duration::from_secs(5))
             .await;
 
         assert!(result.is_ok());
@@ -162,11 +175,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_activity_execution_failure() {
-        let mut registry = ActivityRegistry::new();
+        let cache = Arc::new(NoOpCache::new());
+        let mut registry = ActivityRegistry::new(cache);
         registry.register(Arc::new(FailingActivity));
 
         let result = registry
-            .execute("test", "failing", json!({}), Duration::from_secs(5))
+            .execute("test", "failing", json!({}), None, Duration::from_secs(5))
             .await;
 
         assert!(result.is_err());
@@ -176,7 +190,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_activity_types() {
-        let mut registry = ActivityRegistry::new();
+        let cache = Arc::new(NoOpCache::new());
+        let mut registry = ActivityRegistry::new(cache);
 
         assert_eq!(registry.activity_types().len(), 0);
 
