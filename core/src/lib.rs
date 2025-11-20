@@ -1,4 +1,5 @@
 pub mod activity;
+pub mod cache;
 pub mod cost;
 pub mod events;
 pub mod orchestrator;
@@ -10,6 +11,11 @@ pub mod workflow;
 pub use activity::{
     ActivityWorkerError, ActivityWorkerResult, ActivityWorkerService, PendingActivityRecord,
 };
+
+pub use cache::{CacheService, CachedResult, NoOpCache, key_generator};
+
+#[cfg(feature = "redis-cache")]
+pub use cache::RedisCache;
 
 pub use cost::{
     ActivityCostRecord, BudgetCheckResult, BudgetStatus, CostCalculator, CostError, CostTracker,

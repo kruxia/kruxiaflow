@@ -112,12 +112,14 @@ async fn test_example_03_parallel_document_processing() {
     // This avoids issues with separate mock servers and focuses on testing parallel execution
 
     // Start StreamFlow API server
+    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
     let state = AppState::new(
         pool.clone(),
         Arc::new(auth_service),
         activity_queue.clone(),
         event_source.clone(),
         workflow_storage.clone(),
+        cache_service,
         shutdown_token.clone(),
     );
     let app = app_router(state);

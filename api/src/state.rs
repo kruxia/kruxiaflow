@@ -1,5 +1,6 @@
 use sqlx::PgPool;
 use std::sync::Arc;
+use streamflow_core::cache::CacheService;
 use streamflow_core::events::EventSource;
 use streamflow_core::queue::ActivityQueue;
 use streamflow_core::storage::WorkflowStorage;
@@ -45,6 +46,10 @@ pub struct AppState {
     /// Swappable: PostgresStorage → S3, Filesystem (post-MVP)
     pub workflow_storage: Arc<dyn WorkflowStorage>,
 
+    /// Cache service for activity result caching
+    /// Swappable: RedisCache → NoOpCache (when Redis unavailable)
+    pub cache_service: Arc<dyn CacheService>,
+
     /// Shutdown coordination token for graceful shutdown
     pub shutdown_token: CancellationToken,
 
@@ -67,6 +72,7 @@ impl AppState {
     /// * `activity_queue` - Activity queue implementation (e.g., PostgresQueue, SqsQueue)
     /// * `event_source` - Event source implementation (e.g., PostgresEventSource, KafkaEventSource)
     /// * `workflow_storage` - Workflow storage implementation (e.g., PostgresStorage, S3Storage)
+    /// * `cache_service` - Cache service implementation (e.g., RedisCache, NoOpCache)
     /// * `shutdown_token` - Cancellation token for coordinated shutdown
     ///
     /// # Build Metadata
@@ -80,6 +86,7 @@ impl AppState {
         activity_queue: Arc<dyn ActivityQueue>,
         event_source: Arc<dyn EventSource>,
         workflow_storage: Arc<dyn WorkflowStorage>,
+        cache_service: Arc<dyn CacheService>,
         shutdown_token: CancellationToken,
     ) -> Self {
         Self {
@@ -88,6 +95,7 @@ impl AppState {
             activity_queue,
             event_source,
             workflow_storage,
+            cache_service,
             shutdown_token,
             version: env!("CARGO_PKG_VERSION").to_string(),
             build: AppStateBuild {
@@ -115,6 +123,7 @@ impl AppState {
     /// * `activity_queue` - Activity queue implementation
     /// * `event_source` - Event source implementation
     /// * `workflow_storage` - Workflow storage implementation
+    /// * `cache_service` - Cache service implementation
     /// * `shutdown_token` - Cancellation token for coordinated shutdown
     /// * `version` - Service version string
     /// * `build` - Build metadata (timestamp and git hash)
@@ -127,6 +136,7 @@ impl AppState {
         activity_queue: Arc<dyn ActivityQueue>,
         event_source: Arc<dyn EventSource>,
         workflow_storage: Arc<dyn WorkflowStorage>,
+        cache_service: Arc<dyn CacheService>,
         shutdown_token: CancellationToken,
         version: String,
         build: AppStateBuild,
@@ -138,6 +148,7 @@ impl AppState {
             activity_queue,
             event_source,
             workflow_storage,
+            cache_service,
             shutdown_token,
             version,
             build,
@@ -158,6 +169,7 @@ pub mod tests {
     use futures::stream::{self, Stream};
     use sqlx::PgPool;
     use std::pin::Pin;
+    use streamflow_core::cache::{CacheService, CachedResult};
     use streamflow_core::events::{EventError, NewWorkflowEvent, WorkflowEvent};
     use streamflow_core::queue::{Activity, ActivityResult, QueuedActivity};
     use streamflow_core::storage::{FileMetadata, StorageError};
@@ -173,6 +185,9 @@ pub mod tests {
 
     // Mock workflow storage for testing
     pub struct MockWorkflowStorage;
+
+    // Mock cache service for testing
+    pub struct MockCacheService;
 
     #[async_trait]
     impl ActivityQueue for MockActivityQueue {
@@ -335,6 +350,34 @@ pub mod tests {
     }
 
     #[async_trait]
+    impl CacheService for MockCacheService {
+        async fn get(&self, _key: &str) -> anyhow::Result<Option<CachedResult>> {
+            Ok(None)
+        }
+
+        async fn set(
+            &self,
+            _key: &str,
+            _result: &CachedResult,
+            _ttl: std::time::Duration,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn invalidate(&self, _key: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn invalidate_pattern(&self, _pattern: &str) -> anyhow::Result<usize> {
+            Ok(0)
+        }
+
+        fn is_available(&self) -> bool {
+            false
+        }
+    }
+
+    #[async_trait]
     impl AuthenticationService for MockAuthService {
         async fn authenticate_client(
             &self,
@@ -403,6 +446,7 @@ pub mod tests {
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
         let workflow_storage = Arc::new(MockWorkflowStorage);
+        let cache_service = Arc::new(MockCacheService);
         let shutdown_token = CancellationToken::new();
 
         let state = AppState::new(
@@ -411,6 +455,7 @@ pub mod tests {
             activity_queue,
             event_source,
             workflow_storage,
+            cache_service,
             shutdown_token,
         );
 
@@ -429,6 +474,7 @@ pub mod tests {
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
         let workflow_storage = Arc::new(MockWorkflowStorage);
+        let cache_service = Arc::new(MockCacheService);
         let shutdown_token = CancellationToken::new();
 
         let build = AppStateBuild {
@@ -444,6 +490,7 @@ pub mod tests {
             activity_queue,
             event_source,
             workflow_storage,
+            cache_service,
             shutdown_token,
             "1.2.3".to_string(),
             build.clone(),
@@ -463,6 +510,7 @@ pub mod tests {
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
         let workflow_storage = Arc::new(MockWorkflowStorage);
+        let cache_service = Arc::new(MockCacheService);
         let shutdown_token = CancellationToken::new();
 
         let state1 = AppState::new(
@@ -471,6 +519,7 @@ pub mod tests {
             activity_queue,
             event_source,
             workflow_storage,
+            cache_service,
             shutdown_token,
         );
         let state2 = state1.clone();
@@ -501,6 +550,7 @@ pub mod tests {
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
         let workflow_storage = Arc::new(MockWorkflowStorage);
+        let cache_service = Arc::new(MockCacheService);
         let shutdown_token = CancellationToken::new();
 
         let state = AppState::new(
@@ -509,6 +559,7 @@ pub mod tests {
             activity_queue,
             event_source,
             workflow_storage,
+            cache_service,
             shutdown_token,
         );
 
@@ -524,6 +575,7 @@ pub mod tests {
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
         let workflow_storage = Arc::new(MockWorkflowStorage);
+        let cache_service = Arc::new(MockCacheService);
         let shutdown_token = CancellationToken::new();
 
         let build = AppStateBuild {
@@ -537,6 +589,7 @@ pub mod tests {
             activity_queue,
             event_source,
             workflow_storage,
+            cache_service,
             shutdown_token,
             "1.0.0".to_string(),
             build,
@@ -553,6 +606,7 @@ pub mod tests {
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
         let workflow_storage = Arc::new(MockWorkflowStorage);
+        let cache_service = Arc::new(MockCacheService);
         let shutdown_token = CancellationToken::new();
 
         let state = AppState::new(
@@ -561,6 +615,7 @@ pub mod tests {
             activity_queue,
             event_source,
             workflow_storage,
+            cache_service,
             shutdown_token,
         );
 

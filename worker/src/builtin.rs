@@ -7,6 +7,7 @@ use crate::activities::{
 };
 use crate::registry::ActivityRegistry;
 use std::sync::Arc;
+use streamflow_core::cache::CacheService;
 
 /// Register all built-in activities
 ///
@@ -17,16 +18,23 @@ use std::sync::Arc;
 /// - `builtin.llm_prompt` - LLM prompt completion activity
 /// - `builtin.embedding` - LLM embedding generation activity
 ///
+/// # Arguments
+///
+/// * `cache_service` - Cache service for activity result caching
+///
 /// # Example
 ///
 /// ```rust,no_run
 /// use streamflow_worker::register_builtin_activities;
+/// use streamflow_core::cache::NoOpCache;
+/// use std::sync::Arc;
 ///
-/// let registry = register_builtin_activities();
+/// let cache_service = Arc::new(NoOpCache::new());
+/// let registry = register_builtin_activities(cache_service);
 /// // Registry is ready to use with worker manager
 /// ```
-pub fn register_builtin_activities() -> ActivityRegistry {
-    let mut registry = ActivityRegistry::new();
+pub fn register_builtin_activities(cache_service: Arc<dyn CacheService>) -> ActivityRegistry {
+    let mut registry = ActivityRegistry::new(cache_service);
 
     // Register echo activity (for testing)
     registry.register(Arc::new(EchoActivity));
@@ -50,10 +58,12 @@ pub fn register_builtin_activities() -> ActivityRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use streamflow_core::cache::NoOpCache;
 
     #[test]
     fn test_register_builtin_activities() {
-        let registry = register_builtin_activities();
+        let cache_service = Arc::new(NoOpCache::new());
+        let registry = register_builtin_activities(cache_service);
         let activity_types = registry.activity_types();
 
         // Verify all built-in activities are registered
