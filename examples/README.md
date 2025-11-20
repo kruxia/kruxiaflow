@@ -4,13 +4,17 @@ This directory contains example workflows that demonstrate StreamFlow features p
 
 ## Available Examples
 
-| Example                           | Features Demonstrated                                                           | Prerequisites     |
-|-----------------------------------|---------------------------------------------------------------------------------|-------------------|
-| `01-weather-report.yaml`          | Sequential workflow, HTTP request (GET/POST), headers, template expressions     | Webhook URL       |
-| `01b-weather-report-dynamic.yaml` | Dynamic templates, workflow input                                               | Webhook URL       |
-| `02-user-validation.yaml`         | Conditional branching, PostgreSQL query, depends_on conditions                  | Database, Webhook |
-| `03-document-processing.yaml`     | Parallel execution, fan-out/fan-in, multiple dependencies                       | HTTP endpoints    |
-| `04-moderate-content.yaml`        | LLM activity, cost tracking, budget limits, retry with exponential backoff      | Anthropic API key, Database |
+| Example                           | Features Demonstrated                                                        | Prerequisites     |
+|-----------------------------------|------------------------------------------------------------------------------|-------------------|
+| `01-weather-report.yaml`          | Sequential workflow, HTTP request (GET/POST), headers, template expressions  | Webhook URL       |
+| `01b-weather-report-dynamic.yaml` | Dynamic templates, workflow input                                            | Webhook URL       |
+| `02-user-validation.yaml`         | Conditional branching, PostgreSQL query, depends_on conditions               | Database, Webhook |
+| `03-document-processing.yaml`     | Parallel execution, fan-out/fan-in, multiple dependencies                    | HTTP endpoints    |
+| `04-moderate-content.yaml`        | LLM activity, cost tracking, budget limits, retry with exponential backoff   | Anthropic API key, Database |
+| `05-research-assistant.yaml`      | Multi-model LLM fallback, budget-aware provider selection, cost optimization | Any LLM provider API key, Database |
+| `05a-research-assistant-anthropic.yaml` | Budget-aware fallback with Anthropic models only                       | Anthropic API key, Database |
+| `05b-research-assistant-openai.yaml` | Budget-aware fallback with OpenAI models only                             | OpenAI API key, Database |
+| `05c-research-assistant-google.yaml` | Budget-aware fallback with Google models only                             | Google API key, Database |
 
 ## Running Examples
 
@@ -192,10 +196,124 @@ streamflow run examples/04-moderate-content.yaml \
 - ✅ Cost tracking (tokens and USD)
 - ✅ Sequential dependencies with LLM output passing to database
 
+### Example 5: Multi-Model LLM with Automatic Fallback and Budget-Aware Selection
+
+This workflow demonstrates a research assistant with automatic model fallback and budget-aware provider selection:
+1. Tries multiple LLM providers in order with different price points
+2. **Budget-aware**: Automatically skips expensive models that exceed the budget
+3. Falls back to cheaper models when budget is constrained
+4. Tracks which provider/model was actually used in the response
+5. Stores the result with provider metadata in PostgreSQL
+
+**Prerequisites:**
+- At least one LLM provider API key configured:
+  - `ANTHROPIC_API_KEY` for Anthropic Claude models
+  - `OPENAI_API_KEY` for OpenAI GPT models
+  - `GOOGLE_API_KEY` for Google Gemini models
+- PostgreSQL database with `research_log` table
+
+**Database Setup:**
+```sql
+CREATE TABLE research_log (
+    id SERIAL PRIMARY KEY,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    cost DECIMAL(10, 6),
+    prompt_tokens INTEGER,
+    output_tokens INTEGER,
+    total_tokens INTEGER,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+**Run with StreamFlow CLI:**
+```bash
+# Configure at least one provider (or all for full fallback chain)
+export OPENAI_API_KEY=your-openai-key       # Optional: o1-pro (will be skipped due to budget)
+export ANTHROPIC_API_KEY=your-anthropic-key # Optional: Claude Sonnet (may be skipped)
+export GOOGLE_API_KEY=your-google-key       # Recommended: Gemini Flash Lite (will fit budget)
+
+streamflow run examples/05-research-assistant.yaml \
+  --input question="What are the key differences between Rust and Go for systems programming?" \
+  --secret db_url=postgres://user:pass@localhost:5432/dbname
+```
+
+**Expected behavior (with $0.01 budget):**
+1. **OpenAI o1-pro** ($150/$600 per M tokens): SKIPPED - Estimated cost ~$0.615 exceeds budget
+2. **Anthropic Claude Sonnet 4.5** ($3/$15 per M tokens): SKIPPED - Estimated cost ~$0.015 exceeds budget
+3. **Google Gemini Flash Lite** ($0.075/$0.30 per M tokens): USED - Estimated cost ~$0.0003 fits budget
+4. The response includes which provider/model was actually used (`google` / `gemini-2.0-flash-lite`)
+5. **Actual cost is calculated** from token usage and stored in `cost_usd` field
+6. The result is stored in PostgreSQL with full provider metadata and actual cost
+7. Logs show warnings for skipped expensive models with budget reasons
+
+**Features demonstrated:**
+- ✅ Multi-model LLM fallback chain with different price points
+- ✅ **Budget-aware provider selection** (skips expensive models automatically)
+- ✅ Cost estimation before execution (prevents expensive API calls)
+- ✅ **Actual cost tracking** - calculated from token usage and available via `{{activity.result.cost_usd}}`
+- ✅ Automatic provider switching on failure or budget constraints
+- ✅ Provider/model tracking in outputs
+- ✅ High availability through redundancy
+- ✅ Budget enforcement across providers
+- ✅ Cost tracking per provider
+- ✅ Support for Anthropic, OpenAI, Google, and Ollama
+- ✅ Demonstrates real-world pricing from config/llm_models.yaml
+
+### Example 5a/b/c: Single-Provider Budget-Aware Fallback
+
+For users who only have **one API key**, we provide single-provider variants that demonstrate the same budget-aware fallback pattern:
+
+#### Example 5a: Anthropic Only (`05a-research-assistant-anthropic.yaml`)
+
+**Fallback chain** (with $0.01 budget):
+1. **Claude Opus 4.1** ($15/$75 per M) → SKIPPED (~$0.076)
+2. **Claude Sonnet 4.5** ($3/$15 per M) → SKIPPED (~$0.0153)
+3. **Claude Haiku 3.5** ($0.80/$4 per M) → USED (~$0.0041)
+
+```bash
+export ANTHROPIC_API_KEY=your-key
+streamflow run examples/05a-research-assistant-anthropic.yaml \
+  --input question="What are the key differences between Rust and Go?" \
+  --secret db_url=postgres://user:pass@localhost:5432/dbname
+```
+
+#### Example 5b: OpenAI Only (`05b-research-assistant-openai.yaml`)
+
+**Fallback chain** (with $0.01 budget):
+1. **o1** ($15/$60 per M) → SKIPPED (~$0.0615)
+2. **GPT-5 Mini** ($0.25/$2 per M) → USED (~$0.00205)
+3. **GPT-5 Nano** ($0.05/$0.40 per M) → Backup (~$0.00041)
+
+```bash
+export OPENAI_API_KEY=your-key
+streamflow run examples/05b-research-assistant-openai.yaml \
+  --input question="What are the key differences between Rust and Go?" \
+  --secret db_url=postgres://user:pass@localhost:5432/dbname
+```
+
+#### Example 5c: Google Only (`05c-research-assistant-google.yaml`)
+
+**Fallback chain** (with $0.01 budget):
+1. **Gemini 3 Pro Preview** ($2/$12 per M) → SKIPPED (~$0.0122)
+2. **Gemini 2.5 Flash** ($0.30/$2.50 per M) → USED (~$0.00253)
+3. **Gemini 2.0 Flash Lite** ($0.075/$0.30 per M) → Backup (~$0.0003075)
+
+```bash
+export GOOGLE_API_KEY=your-key
+streamflow run examples/05c-research-assistant-google.yaml \
+  --input question="What are the key differences between Rust and Go?" \
+  --secret db_url=postgres://user:pass@localhost:5432/dbname
+```
+
+**Note**: All three providers have models spanning different price points, so each variant demonstrates budget-aware fallback effectively!
+
 ## Next Steps
 
-- Example 5 will show multi-model LLM fallback patterns
-- Example 6 will demonstrate semantic caching with embeddings
+- Example 6 will demonstrate semantic caching with embeddings and RAG patterns
 - Example 7 will introduce iterative workflows with loops
+- Example 8 will show advanced file management with external storage
 
 See [docs/implementation/mvp-workflows-implementation-plan.md](../docs/implementation/mvp-workflows-implementation-plan.md) for the complete implementation roadmap.
