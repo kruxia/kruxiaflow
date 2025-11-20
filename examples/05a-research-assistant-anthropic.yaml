@@ -1,0 +1,86 @@
+name: research_assistant_anthropic
+description: Ask LLM question with Anthropic-only fallback chain (budget-aware)
+
+# This workflow demonstrates:
+# - Multi-model fallback using ONLY Anthropic models
+# - Budget-aware model selection within a single provider
+# - Automatic fallback from expensive to cheap models
+# - Cost tracking with Anthropic pricing
+
+# Prerequisites:
+# - ANTHROPIC_API_KEY environment variable
+# - PostgreSQL database with research_log table
+
+# Database Setup:
+# CREATE TABLE research_log (
+#     id SERIAL PRIMARY KEY,
+#     question TEXT NOT NULL,
+#     answer TEXT NOT NULL,
+#     provider TEXT NOT NULL,
+#     model TEXT NOT NULL,
+#     cost DECIMAL(10, 6),
+#     prompt_tokens INTEGER,
+#     output_tokens INTEGER,
+#     total_tokens INTEGER,
+#     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+# );
+
+# Budget-Aware Fallback Behavior (with $0.01 budget):
+# For typical prompt (100 input tokens + 1000 output tokens):
+#
+# 1. anthropic/claude-opus-4-1-20250514 ($15/$75 per M tokens):
+#    Estimated cost: ~$0.076 → SKIPPED (exceeds budget)
+#
+# 2. anthropic/claude-sonnet-4-5-20250929 ($3/$15 per M tokens):
+#    Estimated cost: ~$0.0153 → SKIPPED (exceeds $0.01 budget)
+#
+# 3. anthropic/claude-3-5-haiku-20241022 ($0.80/$4 per M tokens):
+#    Estimated cost: ~$0.0041 → USED (fits within budget)
+
+activities:
+  - key: ask_question
+    worker: builtin
+    activity_name: llm_prompt
+    parameters:
+      # Anthropic-only fallback chain (expensive → moderate → cheap)
+      model:
+        - anthropic/claude-opus-4-1-20250514      # Expensive: $15/$75 per M tokens (will be skipped)
+        - anthropic/claude-sonnet-4-5-20250929    # Moderate: $3/$15 per M tokens (will be skipped)
+        - anthropic/claude-3-5-haiku-20241022     # Cheap: $0.80/$4 per M tokens (will be used)
+      prompt: "{{INPUT.question}}"
+      max_tokens: 1000
+    outputs:
+      - result
+    settings:
+      retry:
+        max_attempts: 3
+        strategy: exponential
+        base_seconds: 2
+        factor: 2
+        max_seconds: 60
+      budget:
+        limit_usd: 0.01  # Tight budget to demonstrate budget-aware fallback
+        action: abort
+
+  - key: store_response
+    worker: builtin
+    activity_name: postgres_query
+    parameters:
+      query: |
+        INSERT INTO research_log
+        (question, answer, provider, model, cost, prompt_tokens, output_tokens, total_tokens, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+        RETURNING id
+      params:
+        - "{{INPUT.question}}"
+        - "{{ask_question.result.content}}"
+        - "{{ask_question.result.provider}}"
+        - "{{ask_question.result.model}}"
+        - "{{ask_question.result.cost_usd}}"
+        - "{{ask_question.result.usage.prompt_tokens}}"
+        - "{{ask_question.result.usage.output_tokens}}"
+        - "{{ask_question.result.usage.total_tokens}}"
+    outputs:
+      - result
+    depends_on:
+      - ask_question
