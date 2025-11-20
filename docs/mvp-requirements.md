@@ -1,8 +1,8 @@
 # StreamFlow v0.2 Product Requirements Document
 
-**Version**: 0.9.2
-**Date**: November 16, 2025
-**Status**: In Development (Epics 1, 1A, 1B, 1C Complete - Epic 3 Examples 1-2 Complete)
+**Version**: 0.9.3
+**Date**: November 19, 2025
+**Status**: In Development (Epics 1, 1A, 1B, 1C Complete - Epic 3 Examples 1-4 Complete)
 **Target Release**: Q1 2026
 
 ---

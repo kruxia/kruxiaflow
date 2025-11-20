@@ -10,6 +10,7 @@ This directory contains example workflows that demonstrate StreamFlow features p
 | `01b-weather-report-dynamic.yaml` | Dynamic templates, workflow input                                               | Webhook URL       |
 | `02-user-validation.yaml`         | Conditional branching, PostgreSQL query, depends_on conditions                  | Database, Webhook |
 | `03-document-processing.yaml`     | Parallel execution, fan-out/fan-in, multiple dependencies                       | HTTP endpoints    |
+| `04-moderate-content.yaml`        | LLM activity, cost tracking, budget limits, retry with exponential backoff      | Anthropic API key, Database |
 
 ## Running Examples
 
@@ -143,10 +144,58 @@ You can test examples using a webhook service:
 3. **httpbin.org** - Free HTTP testing service for file uploads/downloads
 4. **Local webhook** - Run a local server: `python -m http.server 8080`
 
+### Example 4: LLM Activity with Cost Tracking and Retry
+
+This workflow demonstrates AI-powered content moderation using an LLM with cost control and retry logic:
+1. Uses Anthropic Claude to analyze user content for policy violations
+2. Automatically retries on failures with exponential backoff
+3. Enforces budget limits to control costs
+4. Stores the moderation result in PostgreSQL
+
+**Prerequisites:**
+- Anthropic API key (set as `ANTHROPIC_API_KEY` environment variable)
+- PostgreSQL database with `moderation_log` table
+
+**Database Setup:**
+```sql
+CREATE TABLE moderation_log (
+    id SERIAL PRIMARY KEY,
+    content_id TEXT NOT NULL,
+    decision TEXT NOT NULL,
+    cost DECIMAL(10, 6),
+    tokens INTEGER,
+    moderated_at TIMESTAMPTZ NOT NULL
+);
+```
+
+**Run with StreamFlow CLI:**
+```bash
+export ANTHROPIC_API_KEY=your-api-key-here
+streamflow run examples/04-moderate-content.yaml \
+  --input user_content="Check out this amazing product!" \
+  --input content_id=content_12345 \
+  --secret db_url=postgres://user:pass@localhost:5432/dbname
+```
+
+**Expected behavior:**
+1. LLM activity analyzes the content and returns a moderation decision
+2. If the API call fails, it automatically retries up to 3 times with exponential backoff (2s, 4s, 8s)
+3. If the budget limit ($0.50) is reached, the workflow aborts
+4. The moderation result is stored in PostgreSQL for audit trail
+5. Token usage and cost information are captured in the database
+
+**Features demonstrated:**
+- ✅ LLM activity with Anthropic Claude
+- ✅ Activity settings configuration (`timeout_seconds`, `retry`, `budget`)
+- ✅ Exponential backoff retry strategy
+- ✅ Budget enforcement with abort action
+- ✅ Cost tracking (tokens and USD)
+- ✅ Sequential dependencies with LLM output passing to database
+
 ## Next Steps
 
-- Example 4 will introduce LLM activities with cost tracking and retry budgets
 - Example 5 will show multi-model LLM fallback patterns
 - Example 6 will demonstrate semantic caching with embeddings
+- Example 7 will introduce iterative workflows with loops
 
 See [docs/implementation/mvp-workflows-implementation-plan.md](../docs/implementation/mvp-workflows-implementation-plan.md) for the complete implementation roadmap.

@@ -14,9 +14,9 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 ## Status
 
 **Current Version**: 0.2.0 MVP (In Development)
-**Implementation Phase**: Epic 3 YAML Workflows (Examples 1-2 Complete)
-**Next Milestone**: Example 3 - Parallel Execution with File Management
-**Progress**: Epic 1 Complete ✅ | Epic 3 Examples 1-2 Complete ✅
+**Implementation Phase**: Epic 3 YAML Workflows (Examples 1-4 Complete)
+**Next Milestone**: Example 5 - Multi-Model LLM with Automatic Fallback
+**Progress**: Epic 1 Complete ✅ | Epic 3 Examples 1-4 Complete ✅
 
 ### Completed Features ✅
 
@@ -45,7 +45,7 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 - ✅ **[US-1C.2: All-in-One Service Launcher](docs/implementation/US-1C.2-all-in-one-launcher.md)** - `streamflow serve` command with graceful shutdown
 - ✅ **[US-1C.7: Graceful Shutdown and Signal Handling](docs/implementation/US-1C.7-graceful-shutdown.md)** - SIGTERM/SIGINT handling with CancellationToken
 
-**Epic 3: YAML Workflow Definition Language** (In Progress - Examples 1-2 Complete)
+**Epic 3: YAML Workflow Definition Language** (In Progress - Examples 1-4 Complete)
 - ✅ **Example 1: Sequential Workflow** - HTTP activity, template expressions, YAML parser
   - Sequential workflows with `depends_on`
   - Template expressions: `{{INPUT.*}}`, `{{activity.output}}`, `{{SECRET.*}}`
@@ -56,16 +56,47 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
   - PostgreSQL activity with parameterized queries
   - Flexible condition syntax (single or array)
   - Example workflow: `02-user-validation.yaml`
-- 📋 **Example 3**: Parallel execution with file management (Next)
+- ✅ **Example 3: Parallel Execution with File Management** - Fan-out/fan-in, file storage
+  - Parallel activity execution (multiple activities ready simultaneously)
+  - Fan-in synchronization (wait for all dependencies)
+  - PostgreSQL Large Objects for file storage
+  - HTTP file download (GET) and upload (POST multipart/form-data)
+  - Example workflow: `03-document-processing.yaml`
+- ✅ **Example 4: LLM Activity with Cost Tracking and Retry** - AI-native workflow features
+  - LLM activity with Anthropic Claude integration
+  - Budget enforcement with cost tracking (tokens and USD)
+  - Retry logic with exponential backoff
+  - Multi-provider support (Anthropic, OpenAI, Google, Ollama)
+  - Budget-aware fallback chains
+  - Example workflow: `04-moderate-content.yaml`
+- 📋 **Example 5**: Multi-model LLM with automatic fallback (Next)
 
 ### Current Focus 🎯
 
 **Epic 3: YAML Workflows - Example-Driven Implementation**
 - Implementing Epic 3 (YAML DSL) and Epic 5 (Built-in Activities) together through realistic workflow examples
-- Example 3 (Next): Parallel execution (fan-out/fan-in) with file storage
+- Example 5 (Next): Multi-model LLM with automatic fallback chains
 - See [MVP Workflows Implementation Plan](docs/implementation/mvp-workflows-implementation-plan.md) for full roadmap
 
 ### Recent Completions ✅
+
+**Week of Nov 18-19, 2025** - Epic 3 Examples 3-4 Complete ✅
+- ✅ **Example 3**: Parallel Execution with File Management
+  - Parallel activity execution (fan-out pattern)
+  - Fan-in synchronization (wait for all dependencies before proceeding)
+  - PostgreSQL Large Objects for file storage (WorkflowStorage interface)
+  - HTTP file download (GET) and upload (POST multipart/form-data)
+  - Example workflow: `03-document-processing.yaml` (8-activity pipeline)
+  - End-to-end tests with mock HTTP server
+- ✅ **Example 4**: LLM Activity with Cost Tracking and Retry
+  - Activity settings model (retry, timeout, budget) fully implemented
+  - Retry logic with exponential backoff in orchestrator
+  - Budget tracking service with pre-execution checks
+  - LLM activity with Anthropic Claude integration
+  - Multi-provider support (Anthropic, OpenAI, Google, Ollama)
+  - Budget-aware fallback chains (skip expensive models when budget constrained)
+  - Example workflow: `04-moderate-content.yaml`
+  - Comprehensive integration tests for retry and budget tracking
 
 **Week of Nov 11-16, 2025** - Epic 3 Examples 1-2 Complete ✅
 - ✅ **Example 1**: Sequential Workflow
