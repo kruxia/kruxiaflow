@@ -5,6 +5,7 @@ use clap::Args;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 use std::time::Duration;
+use streamflow_core::cache::{CacheService, RedisCache};
 use streamflow_core::events::PostgresEventSource;
 use streamflow_core::queue::{PostgresQueue, QueueConfig};
 use streamflow_oauth::{AuthConfig, PostgresAuthService};
@@ -108,6 +109,13 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
     let workflow_storage = Arc::new(streamflow_core::PostgresStorage::new(db_pool.clone()));
     tracing::info!("Workflow storage initialized (PostgreSQL Large Objects)");
 
+    // Initialize cache service (Redis for MVP)
+    let redis_url = std::env::var("STREAMFLOW_REDIS_URL")
+        .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+    let cache_service: Arc<dyn CacheService> =
+        Arc::new(RedisCache::new(&redis_url, None).context("Failed to connect to Redis")?);
+    tracing::info!("Cache service initialized (Redis)");
+
     // Create application state with configured infrastructure services
     let shutdown_token = tokio_util::sync::CancellationToken::new();
     let app_state = streamflow_api::AppState::new(
@@ -116,6 +124,7 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
         activity_queue,
         event_source,
         workflow_storage,
+        cache_service,
         shutdown_token,
     );
 

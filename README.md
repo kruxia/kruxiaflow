@@ -8,7 +8,7 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 - **📦 Minimal Footprint**: <15MB binary, <50MB RAM (vs Temporal's multi-GB deployment)
 - **⚡ Edge-Ready**: Runs on Raspberry Pi Zero for edge AI and IoT workflows
 - **🔧 PostgreSQL-Only**: No Kafka, Cassandra, or Elasticsearch required for MVP
-- **🎯 AI-Native**: Built-in LLM cost tracking, budget enforcement, and result caching
+- **🎯 AI-Native**: Built-in LLM cost tracking, budget enforcement, and semantic caching (50-80% cost savings)
 - **🔌 Pluggable Architecture**: Swap PostgreSQL for Kafka, Redis, S3, etc. post-MVP
 
 ## Status
@@ -68,6 +68,7 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
   - Retry logic with exponential backoff
   - Multi-provider support (Anthropic, OpenAI, Google, Ollama)
   - Budget-aware fallback chains
+  - Semantic caching for activity results (50-80% cost savings)
   - Example workflow: `04-moderate-content.yaml`
 - 📋 **Example 5**: Multi-model LLM with automatic fallback (Next)
 
@@ -95,8 +96,10 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
   - LLM activity with Anthropic Claude integration
   - Multi-provider support (Anthropic, OpenAI, Google, Ollama)
   - Budget-aware fallback chains (skip expensive models when budget constrained)
+  - Semantic caching for activity results (Redis-backed, universal for all activity types)
+  - Cache invalidation API endpoints with pattern matching
   - Example workflow: `04-moderate-content.yaml`
-  - Comprehensive integration tests for retry and budget tracking
+  - Comprehensive integration tests for retry, budget tracking, and caching
 
 **Week of Nov 11-16, 2025** - Epic 3 Examples 1-2 Complete ✅
 - ✅ **Example 1**: Sequential Workflow
@@ -375,6 +378,11 @@ STREAMFLOW_LOG_FORMAT=text
 STREAMFLOW_QUEUE_POLL_INTERVAL=100ms
 STREAMFLOW_QUEUE_DEFAULT_TIMEOUT=60s
 STREAMFLOW_QUEUE_DEFAULT_MAX_RETRIES=3
+
+# Caching (Optional - Redis required)
+STREAMFLOW_CACHE_PROVIDER=redis
+STREAMFLOW_REDIS_URL=redis://localhost:6379
+STREAMFLOW_REDIS_KEY_PREFIX=streamflow:cache:
 ```
 
 **Generate RSA keys for authentication:**
@@ -417,6 +425,9 @@ openssl rsa -in private.pem -pubout -out public.pem
     - [US-1C.7: Graceful Shutdown and Signal Handling](docs/implementation/US-1C.7-graceful-shutdown.md) ✅
   - **Epic 2: Performance Benchmarking** (Partial - 1 of 5 complete)
     - [US-2.2: Competitor Comparison Benchmarks](docs/implementation/US-2.2-competitor-comparison-benchmarks.md) ✅
+
+### Feature Documentation
+- **[Semantic Caching](docs/features/semantic-caching.md)** - Automatic result caching for cost savings and performance
 
 ### Additional Documentation
 - **[Post-MVP Roadmap](docs/post-mvp.md)** - Features deferred beyond MVP

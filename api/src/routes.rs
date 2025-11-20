@@ -4,7 +4,7 @@ use crate::{handlers, middleware, openapi};
 use axum::{
     Json, Router, middleware as axum_middleware,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use utoipa::OpenApi;
 use utoipa_redoc::{Redoc, Servable};
@@ -53,6 +53,8 @@ pub fn public_routes() -> Router<AppState> {
 /// - GET /api/v1/workflows/{workflow_id}/cost - Get workflow cost summary
 /// - GET /api/v1/workflows/{workflow_id}/cost/history - Get workflow cost history
 /// - GET /api/v1/cost/analytics - Get cost analytics
+/// - DELETE /api/v1/cache/{key} - Invalidate specific cache entry
+/// - POST /api/v1/cache/invalidate - Invalidate cache entries by pattern
 ///
 /// All routes in this group require valid JWT Bearer token.
 /// Authentication middleware is applied in app_router() after with_state().
@@ -89,6 +91,12 @@ pub fn protected_routes() -> Router<AppState> {
         // LLM Provider Catalog
         .route("/api/v1/llm/providers", get(handlers::list_providers))
         .route("/api/v1/llm/models/search", post(handlers::search_models))
+        // Cache Invalidation
+        .route("/api/v1/cache/:key", delete(handlers::invalidate_cache_key))
+        .route(
+            "/api/v1/cache/invalidate",
+            post(handlers::invalidate_cache_pattern),
+        )
         // Worker Activity APIs
         .route("/api/v1/workers/poll", post(handlers::poll_activities))
         .route(
@@ -235,6 +243,7 @@ mod tests {
         let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
         let workflow_storage =
             Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
+        let cache_service = Arc::new(streamflow_core::NoOpCache::new());
         let shutdown_token = CancellationToken::new();
 
         let state = AppState::new(
@@ -243,6 +252,7 @@ mod tests {
             activity_queue,
             event_source,
             workflow_storage,
+            cache_service,
             shutdown_token,
         );
         let router = app_router(state);
@@ -285,6 +295,7 @@ mod tests {
         let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
         let workflow_storage =
             Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
+        let cache_service = Arc::new(streamflow_core::NoOpCache::new());
         let shutdown_token = CancellationToken::new();
 
         let state = AppState::new(
@@ -293,6 +304,7 @@ mod tests {
             activity_queue,
             event_source,
             workflow_storage,
+            cache_service,
             shutdown_token,
         );
         let app = app_router(state);
@@ -323,6 +335,7 @@ mod tests {
         let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
         let workflow_storage =
             Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
+        let cache_service = Arc::new(streamflow_core::NoOpCache::new());
         let shutdown_token = CancellationToken::new();
 
         let state = AppState::new(
@@ -331,6 +344,7 @@ mod tests {
             activity_queue,
             event_source,
             workflow_storage,
+            cache_service,
             shutdown_token,
         );
         let app = app_router(state);

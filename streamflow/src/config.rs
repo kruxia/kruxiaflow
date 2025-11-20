@@ -1,4 +1,128 @@
 use anyhow::{Context, Result};
+use std::sync::Arc;
+use streamflow_core::cache::CacheService;
+
+/// Cache configuration
+#[derive(Debug, Clone)]
+pub struct CacheConfig {
+    /// Cache provider: "redis" or "noop"
+    pub provider: String,
+
+    /// Redis connection URL (used when provider=redis)
+    pub redis_url: Option<String>,
+
+    /// Redis key prefix for namespace isolation
+    pub redis_key_prefix: Option<String>,
+}
+
+impl CacheConfig {
+    /// Create CacheConfig with precedence: Environment variables > Defaults
+    pub fn new() -> Self {
+        let provider = std::env::var("STREAMFLOW_CACHE_PROVIDER")
+            .unwrap_or_else(|_| "noop".to_string())
+            .to_lowercase();
+
+        let redis_url = std::env::var("STREAMFLOW_REDIS_URL").ok();
+
+        let redis_key_prefix = std::env::var("STREAMFLOW_REDIS_KEY_PREFIX").ok();
+
+        Self {
+            provider,
+            redis_url,
+            redis_key_prefix,
+        }
+    }
+
+    /// Create cache service based on configuration
+    pub fn create_cache_service(&self) -> Arc<dyn CacheService> {
+        match self.provider.as_str() {
+            "redis" => self.create_redis_cache(),
+            _ => {
+                tracing::info!("Cache disabled (using NoOpCache)");
+                Arc::new(streamflow_core::NoOpCache::new())
+            }
+        }
+    }
+
+    #[cfg(feature = "redis-cache")]
+    fn create_redis_cache(&self) -> Arc<dyn CacheService> {
+        let redis_url = self
+            .redis_url
+            .as_deref()
+            .unwrap_or("redis://localhost:6379");
+
+        match streamflow_core::RedisCache::new(redis_url, self.redis_key_prefix.clone()) {
+            Ok(cache) => {
+                // Test connectivity
+                match tokio::runtime::Runtime::new()
+                    .unwrap()
+                    .block_on(cache.ping())
+                {
+                    Ok(_) => {
+                        tracing::info!(
+                            redis_url = %self.redact_redis_url(redis_url),
+                            "Redis cache initialized successfully"
+                        );
+                        Arc::new(cache)
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "Redis ping failed, falling back to NoOpCache"
+                        );
+                        Arc::new(streamflow_core::NoOpCache::new())
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "Failed to create Redis cache, falling back to NoOpCache"
+                );
+                Arc::new(streamflow_core::NoOpCache::new())
+            }
+        }
+    }
+
+    #[cfg(not(feature = "redis-cache"))]
+    fn create_redis_cache(&self) -> Arc<dyn CacheService> {
+        tracing::warn!(
+            "Redis caching requested but redis-cache feature not enabled, falling back to NoOpCache"
+        );
+        Arc::new(streamflow_core::NoOpCache::new())
+    }
+
+    /// Redact password from Redis URL for logging
+    fn redact_redis_url(&self, url: &str) -> String {
+        // Format: redis://[:password@]host:port[/db]
+        if let Some(at_pos) = url.find('@') {
+            if let Some(colon_pos) = url[..at_pos].rfind(':') {
+                let mut redacted = url.to_string();
+                redacted.replace_range(colon_pos + 1..at_pos, "***");
+                return redacted;
+            }
+        }
+        url.to_string()
+    }
+
+    /// Log configuration
+    pub fn log_config(&self) {
+        tracing::info!("Cache Configuration:");
+        tracing::info!("  Provider: {}", self.provider);
+        if let Some(url) = &self.redis_url {
+            tracing::info!("  Redis URL: {}", self.redact_redis_url(url));
+        }
+        if let Some(prefix) = &self.redis_key_prefix {
+            tracing::info!("  Key prefix: {}", prefix);
+        }
+    }
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// API Server configuration
 #[derive(Debug, Clone)]

@@ -1,3 +1,4 @@
+pub mod cache;
 pub mod cost;
 pub mod health;
 pub mod llm_catalog;
@@ -6,6 +7,7 @@ pub mod workers;
 pub mod workflow_definitions;
 pub mod workflows;
 
+pub use cache::{invalidate_cache_key, invalidate_cache_pattern};
 pub use cost::{get_cost_analytics, get_workflow_cost, get_workflow_cost_history};
 pub use health::{liveness_handler, readiness_handler, service_info_handler};
 pub use llm_catalog::{list_providers, search_models};

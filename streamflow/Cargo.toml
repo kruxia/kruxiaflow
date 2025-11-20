@@ -62,3 +62,4 @@ tikv-jemallocator = { version = "0.6", optional=true, features=["profiling"] }
 
 [features]
 profiling = ["tikv-jemallocator", "streamflow-core/profiling", "streamflow-worker/profiling"]
+redis-cache = ["streamflow-core/redis-cache"]

@@ -6,8 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use streamflow_api::{AppState, app_router};
 use streamflow_core::{
-    ActivityQueue, EventSource, OrchestratorConfig, PostgresEventSource, PostgresQueue,
-    QueueConfig, orchestrator::OrchestratorError, run_orchestrator,
+    ActivityQueue, CacheService, EventSource, OrchestratorConfig, PostgresEventSource,
+    PostgresQueue, QueueConfig, RedisCache, orchestrator::OrchestratorError, run_orchestrator,
 };
 use streamflow_oauth::{AuthConfig, PostgresAuthService};
 use streamflow_worker::{WorkerConfig, WorkerManager};
@@ -129,6 +129,18 @@ Note: Lower values (1-5) improve work distribution across workers\n\
 Example: --poll-max-activities 10"
     )]
     pub poll_max_activities: usize,
+
+    /// Redis connection URL for caching
+    #[arg(
+        long,
+        env = "STREAMFLOW_REDIS_URL",
+        default_value = "redis://127.0.0.1:6379",
+        help = "Redis connection URL for caching",
+        long_help = "Redis connection URL for activity result caching\n\n\
+Default: redis://127.0.0.1:6379\n\
+Example: --redis-url redis://localhost:6379/0"
+    )]
+    pub redis_url: String,
 }
 
 impl ServeCommand {
@@ -264,8 +276,13 @@ async fn spawn_workers(
         "Starting workers"
     );
 
+    // Create cache service based on environment configuration
+    let cache_config = crate::config::CacheConfig::new();
+    cache_config.log_config();
+    let cache_service = cache_config.create_cache_service();
+
     // Create activity registry with all built-in activities pre-registered
-    let registry = streamflow_worker::register_builtin_activities();
+    let registry = streamflow_worker::register_builtin_activities(cache_service);
 
     let config = WorkerConfig {
         api_url: api_url.clone(),
@@ -351,6 +368,12 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
     let workflow_storage: Arc<dyn streamflow_core::WorkflowStorage> =
         Arc::new(streamflow_core::PostgresStorage::new(pool.clone()));
 
+    // Create cache service
+    let cache_service: Arc<dyn CacheService> = Arc::new(
+        RedisCache::new(&cmd.redis_url, None)
+            .map_err(|e| anyhow::anyhow!("Failed to connect to Redis: {}", e))?,
+    );
+
     // Create API state with shutdown token
     let state = AppState::new(
         pool.clone(),
@@ -358,6 +381,7 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
         activity_queue.clone(),
         event_source.clone(),
         workflow_storage.clone(),
+        cache_service.clone(),
         shutdown_token.clone(),
     );
 

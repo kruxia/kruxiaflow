@@ -109,12 +109,14 @@ async fn test_yaml_workflow_end_to_end_with_healthcheck() {
     let shutdown_token = CancellationToken::new();
 
     // Start API server
+    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
     let state = AppState::new(
         pool.clone(),
         Arc::new(auth_service),
         activity_queue.clone(),
         event_source.clone(),
         workflow_storage.clone(),
+        cache_service,
         shutdown_token.clone(),
     );
     let app = app_router(state);
@@ -432,12 +434,14 @@ async fn test_conditional_branching_workflow() {
     let shutdown_token = CancellationToken::new();
 
     // Start API server
+    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
     let state = AppState::new(
         pool.clone(),
         Arc::new(auth_service),
         activity_queue.clone(),
         event_source.clone(),
         workflow_storage.clone(),
+        cache_service,
         shutdown_token.clone(),
     );
     let app = app_router(state);

@@ -27,6 +27,10 @@ tracing.workspace = true
 # Additional dependencies
 regex = "1"
 minijinja = "2.6"
+sha2 = "0.10"
+
+# Optional dependencies
+redis = { version = "0.25", features = ["tokio-comp", "connection-manager"], optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
@@ -38,3 +42,6 @@ rust_decimal_macros = "1.36"
 # Enable profiling feature for detailed instrumentation
 # This feature gates expensive tracing spans in hot paths
 profiling = []
+
+# Enable Redis-backed caching
+redis-cache = ["redis"]

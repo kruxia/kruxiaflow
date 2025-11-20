@@ -5,7 +5,7 @@ use streamflow_core::workflow::{ActivityOutput, OutputType};
 /// Activity execution result
 ///
 /// This struct wraps the outputs of an activity execution along with
-/// optional cost tracking information.
+/// optional cost tracking information and metadata.
 #[derive(Debug, Clone)]
 pub struct ActivityResult {
     /// Structured outputs with type information
@@ -13,6 +13,9 @@ pub struct ActivityResult {
 
     /// Optional cost tracking in USD
     pub cost_usd: Option<Decimal>,
+
+    /// Optional metadata (e.g., cache information, execution context)
+    pub metadata: Option<Value>,
 }
 
 impl ActivityResult {
@@ -31,6 +34,7 @@ impl ActivityResult {
         Self {
             outputs: vec![ActivityOutput::value(name, value)],
             cost_usd: None,
+            metadata: None,
         }
     }
 
@@ -53,6 +57,7 @@ impl ActivityResult {
         Self {
             outputs,
             cost_usd: None,
+            metadata: None,
         }
     }
 
@@ -149,6 +154,21 @@ impl ActivityResult {
             .filter(|o| o.output_type == OutputType::Folder)
             .collect()
     }
+
+    /// Add metadata to this result
+    ///
+    /// # Example
+    /// ```
+    /// use serde_json::json;
+    /// use streamflow_worker::ActivityResult;
+    ///
+    /// let result = ActivityResult::value("result", json!({"data": "..."}))
+    ///     .with_metadata(json!({"cached": true, "cache_key": "abc123"}));
+    /// ```
+    pub fn with_metadata(mut self, metadata: Value) -> Self {
+        self.metadata = Some(metadata);
+        self
+    }
 }
 
 impl Default for ActivityResult {
@@ -156,6 +176,7 @@ impl Default for ActivityResult {
         Self {
             outputs: Vec::new(),
             cost_usd: None,
+            metadata: None,
         }
     }
 }

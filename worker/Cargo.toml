@@ -22,6 +22,7 @@ sqlx = { workspace = true }
 
 # UUID and time
 uuid = { workspace = true }
+chrono = { workspace = true }
 
 # Serialization
 serde = { workspace = true }
@@ -36,7 +37,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 # Internal dependencies
-streamflow-core = { path = "../core" }
+streamflow-core = { path = "../core", features = ["redis-cache"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
@@ -56,3 +57,5 @@ rust_decimal_macros = "1.36"
 # Enable profiling feature for profiling builds
 # This feature gates expensive tracing instrumentation
 profiling = []
+# Enable Redis caching support (for tests and production)
+redis-cache = ["streamflow-core/redis-cache"]

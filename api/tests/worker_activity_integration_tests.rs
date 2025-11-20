@@ -63,6 +63,7 @@ async fn create_test_server() -> (TestServer, PgPool) {
     let activity_queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
     let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
+    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
     let shutdown_token = CancellationToken::new();
 
     let state = AppState::new(
@@ -71,6 +72,7 @@ async fn create_test_server() -> (TestServer, PgPool) {
         activity_queue,
         event_source,
         workflow_storage,
+        cache_service,
         shutdown_token,
     );
     let app = app_router(state);

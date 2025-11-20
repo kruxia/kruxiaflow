@@ -24,6 +24,20 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: streamflow-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   # streamflow serve in deploy mode
   streamflow:
     build:
@@ -32,6 +46,8 @@ services:
       target: develop
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     ports:
       - "8080:8080"
@@ -49,6 +65,9 @@ services:
       STREAMFLOW_OAUTH_TOKEN_AUDIENCE: streamflow-dev-audience
       STREAMFLOW_WORKER_COUNT: "20"
       STREAMFLOW_POLL_MAX_ACTIVITIES: "1"
+      # Cache configuration
+      STREAMFLOW_CACHE_PROVIDER: ${STREAMFLOW_CACHE_PROVIDER:-redis}
+      STREAMFLOW_REDIS_URL: redis://redis:6379
       # Logging configuration (can be overridden from host environment)
       STREAMFLOW_LOG_LEVEL: ${STREAMFLOW_LOG_LEVEL:-info}
     volumes:
@@ -68,6 +87,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     ports:
       - "8080:8080"
     profiles:
@@ -85,6 +106,9 @@ services:
       STREAMFLOW_OAUTH_TOKEN_AUDIENCE: streamflow-dev-audience
       STREAMFLOW_WORKER_COUNT: "1"
       STREAMFLOW_POLL_MAX_ACTIVITIES: "1"
+      # Cache configuration
+      STREAMFLOW_CACHE_PROVIDER: ${STREAMFLOW_CACHE_PROVIDER:-redis}
+      STREAMFLOW_REDIS_URL: redis://redis:6379
       # Logging configuration (can be overridden from host environment)
       STREAMFLOW_LOG_LEVEL: ${STREAMFLOW_LOG_LEVEL:-info}
     volumes:
@@ -97,6 +121,7 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
   cargo_cache:
   cargo_git_cache:
   cargo_target_cache:
