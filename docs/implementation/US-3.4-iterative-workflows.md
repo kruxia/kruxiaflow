@@ -120,7 +120,8 @@ As part of implementing iterative workflows, we're addressing orchestrator hot-p
 - **Validate once** at workflow registration (`POST /api/v1/workflow_definitions`)
 - **Cache all computed metadata** in database alongside activities JSON
 - **No re-validation** when loading definitions during orchestration
-- **Result**: Orchestrator works with pre-analyzed, optimized definitions
+- **Workflow definitions are immutable** - changes create new definitions (no migration needed)
+- **Result**: Orchestrator works with pre-analyzed, optimized, immutable definitions
 
 ### Precomputed Metadata (No Runtime Cost)
 1. **Loop detection** (`is_loop_activity` per activity)
@@ -137,7 +138,9 @@ As part of implementing iterative workflows, we're addressing orchestrator hot-p
 ### Database Storage
 - Computed metadata stored in `activities` JSON column
 - Uses `#[serde(default, skip_serializing_if = "is_false")]` pattern
-- Backward compatible with existing workflows (fields default to false)
+- Backward compatible when deserializing (missing fields default to false)
+  - New fields won't break deserialization of old definitions (if any existed before immutability)
+  - Workflow instances (ActivityState) can have missing fields from earlier code versions
 - Clean YAML/JSON (metadata only appears when true)
 
 ---
@@ -214,7 +217,7 @@ impl ActivityState {
 }
 ```
 
-**Migration Consideration**: Existing workflows won't have `iteration` or `iteration_outputs` fields. The `#[serde(default)]` and `#[serde(skip_serializing_if)]` attributes ensure backward compatibility.
+**Runtime State Compatibility**: Running workflow instances (ActivityState in database) created before this feature won't have `iteration` or `iteration_outputs` fields. The `#[serde(default)]` attribute ensures these deserialize as `0` and `None` respectively, allowing existing workflow instances to continue running after code deployment.
 
 ---
 
@@ -418,7 +421,38 @@ activities:
 - ✅ **Once** when workflow definition is registered via `POST /api/v1/workflow_definitions`
 - ✅ Computed metadata (`is_loop_activity`, `is_back_edge`) stored in database
 - ❌ **NOT** re-validated when loading definition from database during orchestration
-- ⚠️ If definition schema changes, existing workflows in DB may need migration
+- 📌 **Workflow definitions are immutable** - changes create new definitions with new IDs
+  - No migration needed for existing workflows
+  - Each workflow instance references a specific immutable definition
+  - Validation guarantees remain valid for the lifetime of the definition
+
+**Code Path for Validation** (for reference):
+```rust
+// API Handler (api/src/handlers/workflow_definitions.rs)
+async fn create_workflow_definition(
+    request: CreateWorkflowDefinitionRequest,
+) -> Result<WorkflowDefinitionResponse> {
+    let mut definition = parse_yaml(&request.yaml)?;
+
+    // VALIDATION HAPPENS HERE (once, at registration)
+    definition.validate()?;  // ← Computes and caches all metadata
+
+    // Store in database with computed metadata
+    let stored = repository.store(definition).await?;  // ← is_loop_activity, is_back_edge saved to DB
+
+    Ok(stored)
+}
+
+// Orchestrator (core/src/orchestrator/orchestrator.rs)
+async fn handle_activity_completed(...) -> Result<()> {
+    // NO VALIDATION HERE - just loads pre-validated definition
+    let definition = load_workflow_definition(tx, workflow_id).await?;  // ← Metadata already cached
+
+    // Use cached metadata (O(1) lookups)
+    if activity_def.is_loop_activity { ... }
+    if dep.is_back_edge { ... }
+}
+```
 
 **Changes Needed**:
 
@@ -849,6 +883,11 @@ impl Orchestrator {
         cost_usd: Decimal,
     ) -> Result<()> {
         let mut state = load_materialized_state(tx, event.workflow_id).await?;
+
+        // Load pre-validated workflow definition from database
+        // NOTE: Definition was validated once at registration (POST /api/v1/workflow_definitions)
+        // All computed metadata (is_loop_activity, is_back_edge) already cached in DB
+        // NO validation happens here - orchestrator uses pre-analyzed definition
         let definition = load_workflow_definition(tx, event.workflow_id).await?;
 
         let activity_def = definition.get_activity(activity_key)?;
@@ -1406,36 +1445,134 @@ activities:
 ## Implementation Phases
 
 ### Phase 1: Data Model & Validation (Day 1-2)
-1. Extend `ActivityState` with iteration tracking
-2. Extend `ActivityDefinition` with loop configuration
-3. Implement loop detection in validation
-4. Unit tests for data structures and validation
+
+**Focus**: Extend data structures and implement "validate once, cache forever" pattern
+
+1. **Extend `ActivityState`** (workflow_state.rs):
+   - Add `iteration: u32` field (tracked for ALL loop activities)
+   - Add `iteration_outputs: Option<HashMap<String, Vec<Value>>>` (only for iteration_scoped)
+   - Separate `increment_iteration()` from `archive_iteration_outputs()` methods
+   - Unit tests for iteration state management
+
+2. **Extend `ActivityDefinition`** (definition.rs):
+   - Add `iteration_scoped: bool` field (user-specified)
+   - Add `iteration_limit: Option<u32>` field (user-specified)
+   - Add `is_loop_activity: bool` field (computed, cached)
+   - Use `#[serde(default, skip_serializing_if = "is_false")]` pattern
+
+3. **Add `DependencyRelationship` struct** (definition.rs):
+   - Define struct with `activity_key`, `conditions`, `is_back_edge` fields
+   - Add `is_back_edge: bool` field (computed, cached)
+   - Use `#[serde(default, skip_serializing_if = "is_false")]` pattern
+
+4. **Implement loop detection in validation** (definition.rs):
+   - Detect back-edges via topological sort
+   - Mark `is_loop_activity = true` on participating activities
+   - Mark `is_back_edge = true` on back-edge dependencies
+   - **Validate loop safety**: require (condition) OR (iteration_limit) OR (both)
+   - Store all computed metadata in database (no re-validation)
+
+5. **Unit tests for validation**:
+   - `test_loop_requires_exit_mechanism` - neither → fail
+   - `test_loop_with_iteration_limit_only` - Pattern 1 → pass
+   - `test_loop_with_condition_only` - Pattern 2 → pass
+   - `test_loop_with_both` - Pattern 3 → pass
+   - `test_metadata_cached_in_database` - metadata persisted
 
 ### Phase 2: Orchestration Logic (Day 2-3)
-1. Update `DependencyEvaluator` for back-edge handling
-2. Update `Orchestrator` for iteration management
-3. Implement iteration limit enforcement
-4. Integration tests for loop scheduling
+
+**Focus**: Use cached metadata in hot path (no graph traversal)
+
+1. **Update `DependencyEvaluator`** (dependency_evaluator.rs):
+   - Use `dep.is_back_edge` flag instead of computing (O(1) vs O(V+E))
+   - Remove `is_back_edge()` method (no longer needed)
+   - Keep iteration limit enforcement logic
+   - Integration tests for back-edge detection performance
+
+2. **Update `Orchestrator`** (orchestrator.rs):
+   - Check `activity_def.is_loop_activity` instead of computing (O(1) vs O(V+E))
+   - Increment iteration counter for ALL loop activities (not just iteration_scoped)
+   - Archive outputs only for iteration_scoped activities
+   - Remove graph traversal helper methods
+   - Integration tests for loop iteration management
+
+3. **Iteration limit enforcement**:
+   - DEFAULT_MAX_ITERATIONS = 100 (safety bound for Pattern 2)
+   - Check activity-level, settings-level, then default
+   - Integration tests for limit enforcement
+
+4. **Integration tests for loop scheduling**:
+   - Test all three patterns (iteration_limit only, condition only, both)
+   - Test iteration counter increments for non-iteration_scoped loops
+   - Test metadata is loaded from database (not recomputed)
 
 ### Phase 3: Template Resolution (Day 3-4)
-1. Extend `TemplateResolver` for iteration array access
-2. Add `ACTIVITY` context variables (iteration, budget)
-3. Unit tests for template resolution
 
-### Phase 4: End-to-End Testing (Day 4-5)
-1. Create Example 6 (Research Agent) workflow
-2. End-to-end testing with mock HTTP services
-3. Performance testing (loops don't degrade performance)
-4. Documentation updates
+**Focus**: Support iteration arrays and ACTIVITY context
+
+1. **Extend `TemplateResolver`** (template_resolver.rs):
+   - Serialize iteration-scoped outputs as arrays grouped by name
+   - Serialize non-iteration-scoped outputs as single values
+   - No transformation needed (data stored ready for templates)
+   - Unit tests for array vs single-value serialization
+
+2. **Add `ACTIVITY` context variables**:
+   - `{{ACTIVITY.iteration}}` - current iteration number
+   - `{{ACTIVITY.accumulated_cost_usd}}` - total cost across iterations
+   - `{{ACTIVITY.remaining_budget_usd}}` - budget remaining
+   - Unit tests for context variable resolution
+
+3. **Template syntax support**:
+   - Test MiniJinja filters on arrays (`| last`, `| first`, `| length`)
+   - Test accessing all iterations: `{{activity.output}}`
+   - Test accessing latest: `{{activity.output | last}}`
+   - Unit tests for template edge cases
+
+### Phase 4: End-to-End Testing & Performance Validation (Day 4-5)
+
+**Focus**: Validate feature completeness and performance improvements
+
+1. **Create Example 6** (Research Agent workflow):
+   - Implement agentic research loop pattern
+   - Demonstrate all three loop patterns
+   - Test with mock LLM services
+   - End-to-end workflow execution tests
+
+2. **Performance testing**:
+   - **Validation overhead**: Confirm validation happens once (not on every load)
+   - **Loop detection overhead**: Measure O(1) metadata lookup vs O(V+E) traversal
+   - **Back-edge detection overhead**: Measure O(1) flag check vs runtime analysis
+   - **Benchmark**: 50+ iteration loop should not degrade orchestrator performance
+   - **Compare**: Before/after metrics for hot path performance
+
+3. **Integration testing**:
+   - Test loop with budget accumulation across iterations
+   - Test loop with max iterations enforced
+   - Test loop with condition-only exit (Pattern 2)
+   - Test loop with iteration_limit-only exit (Pattern 1)
+   - Test non-iteration_scoped loop (counter tracked, no arrays)
+
+4. **Documentation updates**:
+   - Update architecture.md with loop patterns and performance optimizations
+   - Update YAML syntax documentation with all three patterns
+   - Document metadata caching strategy for future features
+   - Add loops-guide.md with common patterns and pitfalls
 
 ---
 
 ## Success Criteria
 
+### Core Loop Functionality
+
 | Criterion                                                              | Status          | Evidence                                                 |
 |------------------------------------------------------------------------|-----------------|----------------------------------------------------------|
 | Loop detection distinguishes valid loops from circular dependencies   | 🔲 Not Started  | Unit test: `test_detect_simple_loop`                     |
+| Pattern 1 (iteration_limit only) passes validation                    | 🔲 Not Started  | Unit test: `test_loop_with_iteration_limit_only`         |
+| Pattern 2 (condition only) passes validation                          | 🔲 Not Started  | Unit test: `test_loop_with_condition_only`               |
+| Pattern 3 (both) passes validation                                    | 🔲 Not Started  | Unit test: `test_loop_with_both`                         |
+| Loop with neither condition nor limit fails validation                | 🔲 Not Started  | Unit test: `test_loop_requires_exit_mechanism`           |
 | Iteration-scoped activities store outputs grouped by name as arrays   | 🔲 Not Started  | Unit test: `test_increment_iteration`                    |
+| Non-iteration-scoped loops track iteration counter                    | 🔲 Not Started  | Unit test: `test_iteration_counter_without_scoping`      |
 | Template resolution returns arrays for iteration-scoped activities    | 🔲 Not Started  | Unit test: `test_resolve_iteration_scoped_as_array`      |
 | MiniJinja filters work on iteration arrays (`\| last`, `\| length`)   | 🔲 Not Started  | Unit test: `test_resolve_latest_with_filter`             |
 | Iteration counter accessible via `{{ACTIVITY.iteration}}`             | 🔲 Not Started  | Unit test: `test_resolve_iteration_counter`              |
@@ -1444,7 +1581,18 @@ activities:
 | Loop exit conditions evaluated correctly                              | 🔲 Not Started  | Integration test: `test_simple_loop_workflow`            |
 | Example 6 (Research Agent) executes end-to-end                        | 🔲 Not Started  | E2E test with Example 6 workflow                         |
 
-**Overall US-3.4 Status**: 🔲 **Not Started** - Ready to begin implementation
+### Performance & Tech Debt Improvements
+
+| Criterion                                                              | Status          | Evidence                                                 |
+|------------------------------------------------------------------------|-----------------|----------------------------------------------------------|
+| Validation happens once at registration (not on every load)           | 🔲 Not Started  | Performance test: measure validation call count          |
+| Loop metadata (`is_loop_activity`) cached in database                 | 🔲 Not Started  | Unit test: `test_metadata_cached_in_database`            |
+| Back-edge metadata (`is_back_edge`) cached in database                | 🔲 Not Started  | Integration test: verify no graph traversal in hot path  |
+| Orchestrator uses O(1) metadata lookups (not O(V+E) traversal)        | 🔲 Not Started  | Benchmark: compare before/after hot path performance     |
+| 50+ iteration loop has no performance degradation                     | 🔲 Not Started  | Performance test: measure orchestration latency          |
+| Metadata survives database round-trip (serialization/deserialization) | 🔲 Not Started  | Integration test: load workflow, verify metadata present |
+
+**Overall US-3.4 Status**: 🔲 **Not Started** - Ready for implementation with comprehensive performance improvements
 
 ---
 
@@ -1453,9 +1601,11 @@ activities:
 - ❌ Nested loops (loop within a loop)
 - ❌ Dynamic loop targets (loop back to different activities based on runtime conditions)
 - ❌ Parallel iterations (multiple iterations executing simultaneously)
-- ❌ Loop performance optimizations (compiled loop detection)
 - ❌ Visual loop representation in dashboard
-- ❌ Loop replay/debugging features
+- ❌ Loop replay/debugging features (step through iterations)
+- ❌ Dynamic parallelism (`parallel_count` - see Epic 6.3)
+- ❌ Conditional loop entry (skip loop entirely based on condition)
+- ❌ Loop state snapshots (checkpoint/restore iteration state)
 
 ---
 
@@ -1661,26 +1811,53 @@ outputs:
 
 ## Completion Checklist
 
+### Phase 1: Data Model & Validation
 - [ ] `ActivityState` extended with `iteration` and `iteration_outputs` fields
-- [ ] `ActivityDefinition` extended with `iteration_scoped` and `iteration_limit` fields
-- [ ] Loop detection implemented in `WorkflowDefinition.validate()`
-- [ ] Loop validation ensures proper configuration (conditions, limits)
-- [ ] `DependencyEvaluator` handles back-edges and iteration limits
-- [ ] `Orchestrator` manages iteration state on completion
-- [ ] `TemplateResolver` returns arrays for iteration-scoped activities
-- [ ] `TemplateResolver` supports `{{ACTIVITY.iteration}}` and `{{ACTIVITY.remaining_budget_usd}}`
-- [ ] Unit tests pass for loop detection and validation
+- [ ] `increment_iteration()` and `archive_iteration_outputs()` methods separated
+- [ ] `ActivityDefinition` extended with `iteration_scoped`, `iteration_limit`, `is_loop_activity` fields
+- [ ] `DependencyRelationship` struct defined with `is_back_edge` field
+- [ ] Serialization uses `#[serde(default, skip_serializing_if = "is_false")]` pattern
+- [ ] Loop detection implemented in `WorkflowDefinition.validate()` via topological sort
+- [ ] Validation marks `is_loop_activity` and `is_back_edge` metadata
+- [ ] Loop validation accepts Pattern 1 (iteration_limit only)
+- [ ] Loop validation accepts Pattern 2 (condition only)
+- [ ] Loop validation accepts Pattern 3 (both)
+- [ ] Loop validation rejects loops with neither condition nor iteration_limit
+- [ ] Metadata cached in database (survives serialization round-trip)
+
+### Phase 2: Orchestration Logic
+- [ ] `DependencyEvaluator` uses `dep.is_back_edge` flag (O(1) lookup)
+- [ ] Removed `is_back_edge()` method (no graph traversal in hot path)
+- [ ] `Orchestrator` uses `activity_def.is_loop_activity` flag (O(1) lookup)
+- [ ] Iteration counter incremented for ALL loop activities (not just iteration_scoped)
+- [ ] Outputs archived only for iteration_scoped activities
+- [ ] Iteration limit enforcement with DEFAULT_MAX_ITERATIONS = 100
+- [ ] Non-iteration_scoped loops work correctly (counter tracked, no arrays)
+
+### Phase 3: Template Resolution
+- [ ] `TemplateResolver` serializes iteration-scoped outputs as arrays grouped by name
+- [ ] `TemplateResolver` serializes non-iteration-scoped outputs as single values
+- [ ] `{{ACTIVITY.iteration}}` context variable works
+- [ ] `{{ACTIVITY.accumulated_cost_usd}}` context variable works
+- [ ] `{{ACTIVITY.remaining_budget_usd}}` context variable works
+- [ ] MiniJinja filters (`| last`, `| first`, `| length`) work on iteration arrays
+
+### Phase 4: Testing & Documentation
+- [ ] Unit tests pass for all three loop patterns
 - [ ] Unit tests pass for iteration state management
 - [ ] Unit tests pass for template array resolution
 - [ ] Integration tests pass for simple loop workflow
 - [ ] Integration tests pass for iteration_limit enforcement
 - [ ] Integration tests pass for budget accumulation across iterations
+- [ ] Performance test confirms validation happens once (not on every load)
+- [ ] Performance test confirms O(1) metadata lookups (no graph traversal)
+- [ ] Benchmark shows 50+ iteration loop has no performance degradation
 - [ ] Example 6 (Research Agent) workflow created and tested
-- [ ] Documentation updated (architecture, YAML syntax, examples)
+- [ ] Documentation updated (architecture.md, YAML syntax, loops-guide.md)
 - [ ] Code review complete
 - [ ] Ready for production use
 
-**US-3.4 Implementation Status**: 🔲 **Not Started** (0/18 items done)
+**US-3.4 Implementation Status**: 🔲 **Not Started** (0/38 items done)
 
 ---
 
@@ -1851,6 +2028,8 @@ As part of implementing US-3.4, we're addressing significant architectural tech 
    - Validation happens ONLY at workflow registration (`POST /api/v1/workflow_definitions`)
    - All computed metadata stored in database alongside activities JSON
    - Orchestrator loads pre-analyzed definitions (no validation in hot path)
+   - **Workflow definitions are immutable** - changes create new definitions with new IDs
+   - No migration complexity (each workflow instance references immutable definition)
 
 2. **Precomputed loop metadata** (O(1) lookups):
    - `is_loop_activity: bool` on `ActivityDefinition`
@@ -1862,7 +2041,7 @@ As part of implementing US-3.4, we're addressing significant architectural tech 
    - Allows reading YAML without computed fields (defaults to false)
    - Ignores user-provided values (metadata is always computed)
    - Clean output (metadata only shown when true)
-   - Backward compatible with existing workflows
+   - Backward compatible when deserializing (missing fields default to false)
 
 ### Performance Impact
 | Operation          | Before                                  | After                     | Improvement                        |
