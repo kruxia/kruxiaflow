@@ -1,16 +1,17 @@
 # StreamFlow v0.2 Product Requirements Document
 
 **Version**: 0.2.0
-**Date**: November 19, 2025
-**Status**: In Development
+**Date**: November 21, 2025
+**Status**: In Development - Core Complete, Token Streaming Next
 - **Epic 1**: ✅ Complete (Event-Driven Orchestration)
-- **Epic 1A**: ✅ Complete (API Server - all 7 stories)
+- **Epic 1A**: ⏳ In Progress (API Server - 7/9 stories complete, US-1A.9a token streaming pending)
 - **Epic 1B**: ✅ Complete (Built-in Worker)
 - **Epic 1C**: ⏳ Partial (StreamFlow Binary - US-1C.1, US-1C.2, US-1C.7 complete)
 - **Epic 2**: ✅ Complete (Performance Benchmarking - US-2.1, US-2.2 complete)
-- **Epic 3**: ⏳ In Progress (YAML Workflows - Examples 1-5 complete, US-3.4 plan ready)
+- **Epic 3**: ⏳ In Progress (YAML Workflows - Examples 1-6 complete, US-3.4 implemented)
 - **Epic 5**: ⏳ In Progress (Built-In Activities - US-5.1, US-5.3, US-5.4 complete)
-**Target Release**: Q1 2026
+- **Epic 7**: 📋 Next Priority (US-7.1 Token Streaming - depends on US-1A.9a)
+**Target Release**: Q1 2026 with full AI-native feature set including token streaming
 
 ---
 
@@ -259,7 +260,24 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
     - Output format: JSON with activity outputs accessible by key
 - **Deferral Rationale**: US-1A.6 status query includes outputs in `state_data`. Dedicated output retrieval endpoints can be added after Epic 2 performance validation.
 
-**US-1A.9: WebSocket Streaming for Real-Time Updates** 📋 **Post-Epic 2 (Deferred)**
+**US-1A.9a: WebSocket Infrastructure for Token Streaming** 🎯 **MVP Priority (Pre-Launch)**
+- **As** an AI startup engineer
+- **I want** WebSocket infrastructure to support token-by-token streaming from LLM activities
+- **So that** users see real-time responses (ChatGPT-style UX) in AI workflows
+- **Acceptance Criteria**:
+  - WebSocket endpoint: `WS /api/v1/activities/{id}/stream`
+  - Authentication: Bearer token in query parameter or initial message
+  - Connection management: Handle 1,000+ concurrent connections
+  - Message format: `{type: "token", text: "hello", index: 0}` or `{type: "complete", ...}`
+  - Backpressure handling to prevent buffer overflow
+  - Graceful connection close on activity completion
+  - Error handling: Stream errors as messages before closing
+- **Duration**: ~15 hours (2 days)
+- **Dependencies**: None (builds on existing Axum HTTP server)
+- **Strategic Rationale**: Token streaming is a core differentiator and requirement for AI-native positioning. Required for production AI workflows with user-facing UX. Delivers on Executive Summary promise of "token streaming" as AI-native feature.
+- **Implementation Plan**: See `docs/implementation/US-1A.9a-websocket-infrastructure.md`
+
+**US-1A.9b: WebSocket Streaming for Workflow Events** 📋 **Post-MVP (Deferred)**
 - **As** an AI startup engineer
 - **I want** real-time workflow execution updates via WebSocket
 - **So that** my UI can show live progress without polling
@@ -273,7 +291,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Authentication: Bearer token in query parameter or initial message
   - Automatic reconnection support with last event ID for replay (`?event_id=...`)
 - **Serialization Format**: All event types use **PascalCase** (matches PostgreSQL enum and Rust enum variants)
-- **Deferral Rationale**: Polling via US-1A.6 is sufficient for Epic 2 benchmarking. WebSocket streaming can be added after performance validation.
+- **Deferral Rationale**: US-1A.9a (token streaming) takes priority for MVP as a core differentiator. General workflow event streaming (US-1A.9b) can be added post-MVP. Polling via US-1A.6 is sufficient for basic workflow monitoring.
 
 ---
 
@@ -1039,19 +1057,28 @@ streamflow/
 
 **Business Objective**: Solve production AI challenges that no competitor addresses (cost control, non-determinism, streaming)
 
+**MVP Strategy**: US-7.1 (Token Streaming) is prioritized for pre-launch delivery (Option 1). Token streaming is a core differentiator explicitly called out in the Executive Summary and required for production AI workflows with user-facing UX. The remaining 1-1.5 weeks to deliver this feature is justified by its strategic importance to the AI-native positioning.
+
 ### User Stories
 
-**US-7.1: Token Streaming for Real-Time UX**
+**US-7.1: Token Streaming for Real-Time UX** 🎯 **MVP Priority (Pre-Launch)**
 - **As** an AI startup engineer
 - **I want** token-by-token streaming from LLM activities
 - **So that** users see responses in real-time (ChatGPT-style)
 - **Acceptance Criteria**:
-  - WebSocket endpoint for activity streaming
-  - Token-by-token delivery: `{text: "hello", index: 0}`
-  - <10ms P95 token latency
+  - Server-Sent Events (SSE) or WebSocket streaming from LLM providers (Anthropic, OpenAI, Google all support streaming)
+  - Activity-level streaming events published to WebSocket subscribers
+  - Token-by-token delivery: `{type: "token", text: "hello", index: 0}`
+  - <10ms P95 token latency (achievable with async streaming)
   - Backpressure handling to prevent buffer overflow
-  - Support 1,000 concurrent streaming connections
-  - Client library for JavaScript/Python
+  - Support 1,000 concurrent streaming connections (Axum handles this natively)
+  - Graceful fallback: Non-streaming activities complete normally
+  - Integration with Example 6 (agentic research) for demonstration
+  - Client library examples for JavaScript/Python
+- **Duration**: ~20-30 hours (3-4 days)
+- **Dependencies**: US-1A.9a (WebSocket Infrastructure) must be complete first
+- **Strategic Rationale**: Delivers on core value proposition. Required for production AI applications. Unique differentiator vs. competitors (Temporal, Airflow have no streaming support). Validates "AI-native" positioning.
+- **Implementation Plan**: See `docs/implementation/US-7.1-token-streaming.md`
 
 **US-7.2: Non-Deterministic Activity Handling**
 - **As** an AI researcher
