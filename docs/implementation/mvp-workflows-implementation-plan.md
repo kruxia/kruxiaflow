@@ -1,13 +1,15 @@
 # MVP Workflows Implementation Plan
 
-**Version**: 1.4
-**Date**: 2025-11-19
-**Status**: In Progress (Examples 1-5 Complete, Example 6 Next)
+**Version**: 1.5
+**Date**: 2025-11-21
+**Status**: Core Complete - Token Streaming Next (Examples 1-6 Complete, US-1A.9a + US-7.1 Priority)
 **Recent Updates**:
+- Example 6 (Agentic Research / Iterative Workflows) ✅ Complete
+- US-3.4 (Iterative Workflows) ✅ Complete - Example 6 demonstrates loops
+- **Next Priority**: US-1A.9a (WebSocket Infrastructure) + US-7.1 (Token Streaming) before Examples 7-10
+- **Strategic Decision**: Deliver token streaming pre-launch (Option 1) as core AI-native differentiator
 - US-5.3 (Semantic Caching) ✅ Complete - 100% production ready
-- US-5.1 (Multi-Provider LLM) ✅ Phases 1-5 Complete, Phase 6 Partial
-- US-3.4 (Iterative Workflows) Implementation plan ready
-- Examples 4, 5, 5a, 5b, 5c ✅ Complete
+- US-5.1 (Multi-Provider LLM) ✅ Phases 1-5 Complete
 
 ---
 
@@ -1124,6 +1126,127 @@ activities:
 
 ---
 
+## 🎯 PRIORITY: Token Streaming Implementation (Pre-Launch)
+
+**Strategic Decision**: Before continuing with Examples 7-10, implement US-1A.9a (WebSocket Infrastructure) + US-7.1 (Token Streaming) to deliver on core AI-native value proposition.
+
+**Rationale**: Token streaming is explicitly promised in the Executive Summary as a key differentiator. Delivering this before public launch (Option 1) is strategically justified because:
+1. **Core Value Proposition**: Required for production AI workflows with user-facing UX
+2. **Unique Differentiator**: No competitor (Temporal, Airflow, Conductor) offers this
+3. **AI-Native Positioning**: Validates the "AI-native" claim with concrete capability
+4. **User Expectation**: AI startup engineers (primary persona) expect streaming for ChatGPT-style UX
+5. **Contained Scope**: 1-1.5 weeks implementation time (US-1A.9a ~15h + US-7.1 ~20-30h)
+
+**Total Duration**: ~35-45 hours (5-7 days)
+
+### US-1A.9a: WebSocket Infrastructure for Token Streaming
+**Duration**: ~15 hours (2 days)
+**Epic**: Epic 1A (API Server)
+**Status**: 📋 Next Priority
+
+#### Overview
+Build WebSocket infrastructure to support real-time token streaming from LLM activities. This provides the foundation for US-7.1 token streaming.
+
+#### Acceptance Criteria
+- ✅ WebSocket endpoint: `WS /api/v1/activities/{id}/stream`
+- ✅ Authentication: Bearer token in query parameter or initial message
+- ✅ Connection management: Handle 1,000+ concurrent connections
+- ✅ Message format: JSON messages over WebSocket (`{type: "token", ...}`)
+- ✅ Backpressure handling to prevent buffer overflow
+- ✅ Graceful connection close on activity completion
+- ✅ Error handling: Stream errors as messages before closing
+
+#### Implementation Tasks
+1. **WebSocket Handler** (4-5 hours)
+   - Axum WebSocket route handler
+   - Connection upgrade from HTTP
+   - Authentication via Bearer token
+   - Connection state management
+
+2. **Connection Manager** (3-4 hours)
+   - Maintain map of active connections per activity_id
+   - Handle concurrent connections to same activity
+   - Graceful connection close
+   - Cleanup on activity completion
+
+3. **Message Protocol** (2-3 hours)
+   - Define message types: `token`, `complete`, `error`
+   - JSON serialization/deserialization
+   - Message ordering guarantees
+
+4. **Integration with Activity Execution** (3-4 hours)
+   - Hook into activity execution flow
+   - Publish streaming events to connected WebSocket clients
+   - Handle non-streaming activities (graceful fallback)
+
+5. **Testing** (3-4 hours)
+   - Unit tests for WebSocket handler
+   - Integration tests with mock streaming activity
+   - Load test: 1,000 concurrent connections
+
+#### Implementation Plan
+See `docs/implementation/US-1A.9a-websocket-infrastructure.md` for detailed implementation plan.
+
+---
+
+### US-7.1: Token Streaming for Real-Time UX
+**Duration**: ~20-30 hours (3-4 days)
+**Epic**: Epic 7 (AI-Native Features)
+**Status**: 📋 Depends on US-1A.9a
+**Dependencies**: US-1A.9a must be complete first
+
+#### Overview
+Implement token-by-token streaming from LLM activities (Anthropic, OpenAI, Google) to WebSocket clients, enabling ChatGPT-style real-time UX in workflows.
+
+#### Acceptance Criteria
+- ✅ LLM providers support streaming (Anthropic SSE, OpenAI SSE, Google SSE)
+- ✅ Activity-level streaming events published to WebSocket subscribers
+- ✅ Token-by-token delivery: `{type: "token", text: "hello", index: 0}`
+- ✅ <10ms P95 token latency (achievable with async streaming)
+- ✅ Support 1,000 concurrent streaming connections
+- ✅ Graceful fallback: Non-streaming activities complete normally
+- ✅ Integration with Example 6 (agentic research) for demonstration
+- ✅ Client library examples for JavaScript/Python
+
+#### Implementation Tasks
+1. **LLM Provider Streaming Integration** (8-10 hours)
+   - Anthropic streaming API integration (SSE)
+   - OpenAI streaming API integration (SSE)
+   - Google streaming API integration (SSE)
+   - Handle streaming responses asynchronously
+
+2. **Activity Streaming Layer** (6-8 hours)
+   - Hook LLM streaming into activity execution
+   - Publish tokens to WebSocket connections via US-1A.9a infrastructure
+   - Handle streaming errors and reconnection
+   - Accumulate full response for activity output
+
+3. **Non-Streaming Fallback** (2-3 hours)
+   - Detect non-streaming activities
+   - Complete normally without WebSocket streaming
+   - Log when streaming not available
+
+4. **Example Integration** (3-4 hours)
+   - Update Example 6 (agentic research) to demonstrate streaming
+   - Add streaming example to `examples/` directory
+   - Document streaming usage in examples/README.md
+
+5. **Client Libraries** (4-6 hours)
+   - JavaScript WebSocket client example
+   - Python WebSocket client example
+   - Documentation for client integration
+
+6. **Testing** (5-6 hours)
+   - Unit tests for streaming integration
+   - Integration test: End-to-end workflow with streaming
+   - Load test: 1,000 concurrent streaming connections
+   - Test with all three LLM providers
+
+#### Implementation Plan
+See `docs/implementation/US-7.1-token-streaming.md` for detailed implementation plan.
+
+---
+
 ### Example 7: Iterative Workflows with Budget-Aware Loops
 **Duration**: 5-6 days
 **Epic 3**: US-3.4 (Iterative Workflows / Loops)
@@ -1907,28 +2030,38 @@ tokio::spawn(cleanup_worker.run());
 
 ## Implementation Schedule
 
-### Phase Overview
-- **Total Duration**: 37-50 days (7.5-10 weeks)
-- **Examples 1-7**: Core MVP workflow features (27-34 days)
-- **Examples 8-10**: Advanced features (8-11 days)
-- **US-3.6**: CLI Tooling (4-5 days, can run in parallel with Examples 8-10)
-- **Total MVP**: 39-52 days
+### Phase Overview - UPDATED for Option 1 (Token Streaming Pre-Launch)
+- **Examples 1-6**: ✅ **COMPLETE** (~22-28 days) - Core workflow features + LLM + loops
+- **🎯 Token Streaming**: 📋 **NEXT PRIORITY** (5-6 days) - US-1A.9a + US-7.1 before launch
+  - US-1A.9a: WebSocket Infrastructure (2 days)
+  - US-7.1: LLM Token Streaming (3-4 days)
+- **Examples 7-10**: Advanced features (8-11 days)
+- **US-3.6**: CLI Tooling (4-5 days, can run in parallel)
+- **Total MVP with Token Streaming**: 35-45 days (7-9 weeks)
 
-### Detailed Schedule
+### Detailed Schedule - REVISED
 
-| Example      | Duration | Epic 3 Features                                       | Epic 5 Features                            | Cumulative Days |
-|------------|----------|-------------------------------------------------------|--------------------------------------------|-----------------|
-| 1          | 3-4 days | Sequential workflows, basic templates                 | HTTP GET/POST                              | 3-4             |
-| 2          | 3-4 days | Conditional branching, secrets                        | PostgreSQL execute/query                   | 6-8             |
-| 3          | 4-5 days | Parallel execution (fan-out/fan-in), file management  | File outputs & references                  | 10-13           |
-| 4          | 5-6 days | Activity settings (retry, timeout, budget)            | LLM (Anthropic), cost tracking             | 15-19           |
-| 5          | 4-5 days | Model fallback                                        | LLM (OpenAI, Gemini)                       | 19-24           |
-| 6          | 3-4 days | Caching settings                                      | Semantic caching (Redis)                   | 22-28           |
-| 7          | 5-6 days | Iterative workflows, loops, iteration-scoped outputs  | (Combined existing)                        | 27-34           |
-| 8          | 3-4 days | (Enhancements)                                        | Advanced file management, external storage | 30-38           |
-| 9          | 3-4 days | (Enhancements)                                        | HTTP/DB advanced features                  | 33-42           |
-| 10         | 2-3 days | **Activity scheduling** (delay_seconds, scheduled_at) | (Exposes existing infrastructure)          | 35-45           |
-| **US-3.6** | 4-5 days | **CLI Tooling** (validate, test, visualize)          | (Cross-cutting tooling)                    | **39-52**       |
+| Milestone              | Duration   | Features                                                        | Epic                        | Cumulative Days |
+|-----------------------|------------|------------------------------------------------------------------|----------------------------|-----------------|
+| 1                     | 3-4 days   | Sequential workflows, basic templates, HTTP GET/POST            | Epic 3, Epic 5             | 3-4             |
+| 2                     | 3-4 days   | Conditional branching, secrets, PostgreSQL                      | Epic 3, Epic 5             | 6-8             |
+| 3                     | 4-5 days   | Parallel execution, file management                             | Epic 3, Epic 5             | 10-13           |
+| 4                     | 5-6 days   | Activity settings, LLM (Anthropic), cost tracking               | Epic 3, Epic 5             | 15-19           |
+| 5                     | 4-5 days   | Model fallback, LLM (OpenAI, Gemini)                           | Epic 5                     | 19-24           |
+| 6                     | 3-4 days   | Iterative workflows (loops), semantic caching                   | Epic 3 (US-3.4), Epic 5    | 22-28 ✅        |
+| **🎯 US-1A.9a**       | **2 days** | **WebSocket Infrastructure for token streaming**                | **Epic 1A**                | **24-30**       |
+| **🎯 US-7.1**         | **3-4 days** | **LLM Token Streaming (Anthropic, OpenAI, Google)**           | **Epic 7**                 | **27-34** 🎯    |
+| 7                     | 5-6 days   | (Example 7 content if needed, or skip - US-3.4 done in Ex. 6)  | Epic 3                     | 32-40           |
+| 8                     | 3-4 days   | Advanced file management, external storage                      | Epic 5                     | 35-44           |
+| 9                     | 3-4 days   | HTTP/DB advanced features                                       | Epic 5                     | 38-48           |
+| 10                    | 2-3 days   | Activity scheduling (delay_seconds, scheduled_at)               | Epic 3                     | 40-51           |
+| **US-3.6**            | 4-5 days   | **CLI Tooling** (validate, test, visualize)                    | **Epic 3**                 | **44-56**       |
+
+**Notes**:
+- Example 6 already implements US-3.4 (Iterative Workflows) with `examples/06-agentic-research.yaml`
+- Example 7 in original plan may be redundant - US-3.4 complete
+- Token streaming (US-1A.9a + US-7.1) inserted as priority after Example 6
+- Total with token streaming: ~44-56 days vs. original 39-52 days (+5-7 days for streaming)
 
 ### Milestone Checkpoints
 
@@ -1938,39 +2071,42 @@ tokio::spawn(cleanup_worker.run());
 - ✅ File management (outputs, references) complete
 - ✅ **Demo**: Multi-document processing pipeline with file handling (`examples/03-document-processing.yaml`)
 
-**Checkpoint 2** (After Example 6 - ~22-28 days):
+**Checkpoint 2** (After Example 6 - ~22-28 days): ✅ **COMPLETE**
 - ✅ LLM activities with multiple model providers (Anthropic, OpenAI, Gemini)
 - ✅ Cost tracking and budget enforcement
 - ✅ Caching for cost savings
 - ✅ Retry and timeout mechanisms
-- **Demo**: AI research assistant with cost control
+- ✅ **Iterative workflows (US-3.4) with loops and iteration-scoped outputs**
+- **Demo**: Agentic research workflow with loops (`examples/06-agentic-research.yaml`)
 
-**Checkpoint 3** (After Example 7 - ~27-34 days):
-- ✅ Iterative workflows with loops and iteration-scoped outputs
-- ✅ YAML validation and CLI tooling
-- ✅ Complete Epic 3 and core Epic 5
-- **Demo**: Agentic research workflow + CLI tools
+**Checkpoint 3** (After US-7.1 Token Streaming - ~27-34 days): 🎯 **NEXT MILESTONE**
+- 📋 WebSocket infrastructure complete (US-1A.9a)
+- 📋 Token-by-token streaming from LLM activities (US-7.1)
+- 📋 ChatGPT-style real-time UX for AI workflows
+- 📋 Streaming integration with Example 6 (agentic research)
+- 📋 Core AI-native differentiator delivered
+- **Demo**: Live token streaming from agentic research workflow
 
-**Final MVP** (After Example 10 - ~39-52 days):
-- ✅ All Epic 3 requirements complete (including scheduling)
+**Final MVP** (After Examples 7-10 + CLI - ~44-56 days):
+- ✅ All Epic 3 requirements complete (including scheduling, validation, CLI)
 - ✅ All critical Epic 5 requirements complete
-- ✅ Production-ready workflow capabilities
-- ✅ Activity scheduling for delayed and scheduled execution
-- **Demo**: Complete system with scheduled workflows, transactions, and advanced features
+- ✅ **Token streaming delivered pre-launch** (Epic 7 - US-7.1)
+- ✅ Production-ready workflow capabilities with AI-native features
+- **Demo**: Complete system with token streaming, scheduled workflows, transactions, and advanced features
 
 ---
 
 ## Epic 3 Coverage Matrix
 
-| User Story                         | Examples  | Status        |
-|------------------------------------|---------|---------------|
-| US-3.1: Sequential Workflows       | 1, 2    | ✅ Complete   |
-| US-3.2: Conditional Branching      | 2       | ✅ Complete (MiniJinja evaluation, depends_on alias)   |
-| US-3.3: Parallel Execution         | 3       | ✅ Complete (Fan-out/fan-in, batch scheduling) |
-| US-3.4: Iterative Workflows        | 7       | ✅ Complete   |
-| US-3.5: Activity Settings          | 4, 6    | ✅ Complete   |
-| US-3.6: YAML Validation            | US-3.6  | 📋 Planned    |
-| US-3.7: Activity Scheduling/Delays | 10      | 📋 Planned    |
+| User Story                         | Examples   | Status                                                  |
+|------------------------------------|-----------|--------------------------------------------------------|
+| US-3.1: Sequential Workflows       | 1, 2      | ✅ Complete                                            |
+| US-3.2: Conditional Branching      | 2         | ✅ Complete (MiniJinja evaluation, depends_on alias)   |
+| US-3.3: Parallel Execution         | 3         | ✅ Complete (Fan-out/fan-in, batch scheduling)         |
+| US-3.4: Iterative Workflows        | **6**     | ✅ Complete (`examples/06-agentic-research.yaml`)      |
+| US-3.5: Activity Settings          | 4, 5, 6   | ✅ Complete (retry, timeout, budget, caching)          |
+| US-3.6: YAML Validation            | US-3.6    | 📋 Planned (Post-Token Streaming)                     |
+| US-3.7: Activity Scheduling/Delays | 10        | 📋 Planned (Post-Token Streaming)                     |
 
 ## Epic 5 Coverage Matrix
 
