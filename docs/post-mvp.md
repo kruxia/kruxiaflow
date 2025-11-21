@@ -2749,7 +2749,7 @@ activities:
 
 ### Story 6.9: Delayed Activity Scheduling
 
-**Priority**: P2 (Medium - Rate limiting and time-based workflows)
+**Priority**: P1 (High - Table stakes for workflow orchestrators)
 
 **As** a workflow developer
 **I want** to schedule activities to execute at a specific future time
