@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO activity_queue (\n                    workflow_id, activity_key, worker, name,\n                    parameters, settings, scheduled_for, timeout_duration, \n                    max_retries, output_definitions, iteration\n                ) VALUES ($1, $2, $3, $4, \n                          $5, $6, COALESCE($7, NOW()), make_interval(secs => $8), \n                          $9, $10, $11)\n                ON CONFLICT (workflow_id, activity_key, iteration) DO NOTHING\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Jsonb",
+        "Timestamptz",
+        "Float8",
+        "Int4",
+        "Jsonb",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "72e3605bcc13aa1cc8d8e327b86ee8c139114bd98ceb667160ae9391f4fbd24c"
+}

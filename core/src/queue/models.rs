@@ -19,6 +19,9 @@ pub struct Activity {
     /// Output definitions from workflow definition (for file handling)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_definitions: Option<Vec<ActivityOutputDefinition>>,
+    /// Iteration number for looping activities (0-based)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iteration: Option<i32>,
 }
 
 /// Queued activity returned to worker
@@ -36,6 +39,9 @@ pub struct QueuedActivity {
     /// Output definitions from workflow definition (for file handling)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_definitions: Option<Vec<ActivityOutputDefinition>>,
+    /// Iteration number for looping activities (0-based)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iteration: Option<i32>,
 }
 
 /// Activity result from worker

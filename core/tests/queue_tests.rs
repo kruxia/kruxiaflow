@@ -63,6 +63,7 @@ async fn test_idempotent_scheduling() {
         settings: None,
         scheduled_for: None,
         output_definitions: None,
+        iteration: None,
     };
 
     // Schedule activity first time
@@ -109,6 +110,7 @@ async fn test_concurrent_claiming() {
             settings: None,
             scheduled_for: None,
             output_definitions: None,
+            iteration: None,
         })
         .collect();
 
@@ -190,9 +192,11 @@ async fn test_stale_activity_recovery() {
             budget: None,
             cache: false,
             cache_ttl: None,
+            iteration_limit: None,
         }),
         scheduled_for: None,
         output_definitions: None,
+        iteration: None,
     };
 
     queue
@@ -261,9 +265,11 @@ async fn test_heartbeat_conflict_detection() {
             budget: None,
             cache: false,
             cache_ttl: None,
+            iteration_limit: None,
         }),
         scheduled_for: None,
         output_definitions: None,
+        iteration: None,
     };
 
     queue
@@ -338,9 +344,11 @@ async fn test_max_retries_exhaustion() {
             budget: None,
             cache: false,
             cache_ttl: None,
+            iteration_limit: None,
         }),
         scheduled_for: None,
         output_definitions: None,
+        iteration: None,
     };
 
     queue
@@ -441,6 +449,7 @@ async fn test_completion_idempotency() {
         settings: None,
         scheduled_for: None,
         output_definitions: None,
+        iteration: None,
     };
 
     queue
@@ -517,6 +526,7 @@ async fn test_sequential_ordering() {
         settings: None,
         scheduled_for: None,
         output_definitions: None,
+        iteration: None,
     };
 
     queue
@@ -557,6 +567,7 @@ async fn test_sequential_ordering() {
         settings: None,
         scheduled_for: None,
         output_definitions: None,
+        iteration: None,
     };
 
     queue
@@ -594,6 +605,7 @@ async fn test_parallel_execution() {
             settings: None,
             scheduled_for: None,
             output_definitions: None,
+            iteration: None,
         })
         .collect();
 

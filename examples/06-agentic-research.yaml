@@ -1,0 +1,218 @@
+# This workflow demonstrates US-3.4: Iterative Workflows (Loops)
+# - Loop execution via back-edge (depends_on from later to earlier activity)
+# - Iteration-scoped output storage (arrays of results from each iteration)
+# - Conditional loop exit ({{evaluate.decision | last}} == "SUFFICIENT")
+# - Iteration limits to prevent infinite loops
+# - Budget accumulation across all iterations
+# - Accessing all iteration results ({{perform_search.findings}})
+# - Accessing latest iteration result ({{evaluate.decision | last}})
+# - Current iteration counter ({{ACTIVITY.iteration}})
+# 
+# Prerequisites:
+# - ANTHROPIC_API_KEY configured for Claude models
+# 
+# Workflow Pattern:
+# initialize → perform_search → evaluate → [loop back if not sufficient] → compile_report
+#                    ↑____________________________|
+# 
+# Budget-Aware Loop Behavior:
+# - Each iteration of perform_search costs ~$0.005 (Sonnet 4.5)
+# - Each iteration of evaluate costs ~$0.001 (Haiku 4)
+# - With $0.05 budget and 5 iteration limit:
+#   - Max theoretical iterations: ~8 (budget-limited)
+#   - Max enforced iterations: 5 (iteration_limit)
+#   - Loop will stop at whichever limit is reached first
+# - Budget accumulates across ALL iterations (not per-iteration)
+# - If budget exceeded, activity fails and loop terminates
+# 
+# Expected Execution Flow (Example):
+#
+# 1. initialize: Creates research plan with strategy, questions, and success criteria
+#    - Cost: ~$0.001
+#
+# 2. perform_search (iteration 0): First research pass
+#    - Cost: ~$0.005, Total: $0.006
+#    - Outputs: {{perform_search.findings}} = [finding_0]
+#
+# 3. evaluate (iteration 0): Not sufficient yet → "CONTINUE"
+#    - Cost: ~$0.001, Total: $0.007
+#    - Loop back condition met → schedule perform_search again
+#
+# 4. perform_search (iteration 1): Second research pass, builds on iteration 0
+#    - Cost: ~$0.005, Total: $0.012
+#    - Outputs: {{perform_search.findings}} = [finding_0, finding_1]
+#
+# 5. evaluate (iteration 1): Still not sufficient → "CONTINUE"
+#    - Cost: ~$0.001, Total: $0.013
+#    - Loop back condition met → schedule perform_search again
+#
+# 6. perform_search (iteration 2): Third research pass, synthesizes all prior findings
+#    - Cost: ~$0.005, Total: $0.018
+#    - Outputs: {{perform_search.findings}} = [finding_0, finding_1, finding_2]
+#
+# 7. evaluate (iteration 2): Now sufficient → "SUFFICIENT"
+#    - Cost: ~$0.001, Total: $0.019
+#    - Loop back condition NOT met (evaluate != "CONTINUE")
+#    - compile_report condition IS met (evaluate == "SUFFICIENT")
+#
+# 8. compile_report: Final synthesis of all 3 iterations
+#    - Cost: ~$0.020, Total: $0.039
+#    - Final report references findings from all iterations
+#
+# Total iterations: 3 (stopped by evaluate decision, not by limits)
+# Total cost: ~$0.039 (under $0.11 total budget across all activities)
+# 
+# Key Features Demonstrated:
+# ✓ Iteration-scoped storage (perform_search, evaluate)
+# ✓ Array access to all iterations ({{perform_search.findings}})
+# ✓ Latest iteration access ({{evaluate.result.content | contains('SUFFICIENT')}})
+# ✓ Iteration counter ({{ACTIVITY.iteration}})
+# ✓ Budget accumulation across iterations
+# ✓ Remaining budget tracking ({{ACTIVITY.remaining_budget_usd}})
+# ✓ Conditional loop back (checking for "CONTINUE")
+# ✓ Conditional loop exit (checking for "SUFFICIENT")
+# ✓ Maximum iterations limit (iteration_limit: 5)
+# ✓ Back-edge in dependency graph (evaluate → perform_search)
+# 
+# Loop Exit Scenarios:
+# 1. Normal exit: evaluate returns "SUFFICIENT" (condition-based)
+# 2. Iteration limit: reaches 5 iterations (iteration_limit-based)
+# 3. Budget exceeded: total cost exceeds $0.05 for perform_search (budget-based)
+# 4. Activity failure: any activity fails (error-based)
+# 
+# Note: This example uses simple string matching (contains('CONTINUE'))
+# to check loop conditions. For production workflows, consider:
+# 1. Having LLMs return simple control strings for flow decisions
+# 2. Or use US-3.4+ Output Field Extraction feature (see implementation plan)
+
+name: agentic_research
+description: Iterative research workflow that loops until sufficient information is gathered
+activities:
+  # Step 1: Create research plan (runs once)
+  - key: initialize
+    activity_name: llm_prompt
+    parameters:
+      model: anthropic/claude-haiku-4-20250415
+      prompt: |
+        Create a focused research plan for the topic: {{INPUT.topic}}
+
+        Generate:
+        1. A specific research strategy (what to look for)
+        2. 3-5 key questions to answer
+        3. Success criteria (what makes research "sufficient")
+
+        Return ONLY valid JSON (no markdown):
+        {
+          "strategy": "detailed research strategy here",
+          "questions": ["question 1", "question 2", "question 3"],
+          "criteria": "detailed success criteria here"
+        }
+      max_tokens: 500
+    outputs:
+      - result
+    settings:
+      budget:
+        limit_usd: 0.01
+        action: abort
+
+  # Step 2: Perform iterative research (loops until sufficient)
+  - key: perform_search
+    activity_name: llm_prompt
+    iteration_scoped: true       # Store results from each iteration as array
+    iteration_limit: 5           # Safety bound: max 5 iterations
+    parameters:
+      model: anthropic/claude-sonnet-4-5-20250929
+      prompt: |
+        Research topic: {{INPUT.topic}}
+        Research plan: {{initialize.result.content}}
+
+        Previous findings from iterations {{perform_search.findings | length}}:
+        {{perform_search.findings | json}}
+
+        Current iteration: {{ACTIVITY.iteration}}
+        Accumulated cost so far: ${{ACTIVITY.accumulated_cost_usd}}
+
+        Conduct research building on previous findings. Return ONLY valid JSON (no markdown):
+        {
+          "findings": "new research findings here",
+          "sources_consulted": ["source 1", "source 2"],
+          "confidence": 0.0-1.0
+        }
+      max_tokens: 1000
+    outputs:
+      - result
+    settings:
+      budget:
+        limit_usd: 0.05          # $0.05 total across all iterations
+        action: abort
+    depends_on:
+      - initialize
+      - activity_key: evaluate
+        conditions:
+          # Loop back if evaluate said "CONTINUE" (not sufficient yet)
+          # Access latest iteration result with | last filter
+          - "{{evaluate.result.content | contains(substring='CONTINUE')}}"
+
+  # Step 3: Evaluate if we have enough information (after each search)
+  - key: evaluate
+    activity_name: llm_prompt
+    iteration_scoped: true       # Track evaluation decision per iteration
+    parameters:
+      model: anthropic/claude-haiku-4-20250415
+      prompt: |
+        Topic: {{INPUT.topic}}
+        Success criteria from plan: {{initialize.result.content}}
+
+        All findings so far ({{perform_search.findings | length}} iterations):
+        {{perform_search.findings | json}}
+
+        Current iteration: {{ACTIVITY.iteration}}
+        Remaining budget: ${{ACTIVITY.remaining_budget_usd}}
+
+        Evaluate if we have sufficient information to write a comprehensive report
+        based on the success criteria.
+
+        Respond with ONLY one word (no markdown, no explanation):
+        - CONTINUE (if more research needed)
+        - SUFFICIENT (if ready to compile report)
+      max_tokens: 10
+    outputs:
+      - result
+    settings:
+      budget:
+        limit_usd: 0.01          # $0.01 total across all iterations
+        action: abort
+    depends_on:
+      - perform_search
+
+  # Step 4: Compile final report (runs once, after loop exits)
+  - key: compile_report
+    activity_name: llm_prompt
+    parameters:
+      model: anthropic/claude-sonnet-4-5-20250929
+      prompt: |
+        Topic: {{INPUT.topic}}
+        Research plan: {{initialize.result.content}}
+
+        All research findings from {{perform_search.findings | length}} iterations:
+        {{perform_search.findings | json}}
+
+        All evaluation decisions:
+        {{evaluate.result | json}}
+
+        Compile a comprehensive research report synthesizing all findings.
+        Address all questions from the research plan.
+        Cite sources consulted across all iterations.
+      max_tokens: 4000
+    outputs:
+      - result
+    settings:
+      budget:
+        limit_usd: 0.05
+        action: abort
+    depends_on:
+      - activity_key: evaluate
+        conditions:
+          # Only run when evaluate said "SUFFICIENT"
+          # Access latest iteration result with | last filter
+          - "{{evaluate.result.content | contains(substring='SUFFICIENT')}}"

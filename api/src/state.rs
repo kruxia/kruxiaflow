@@ -215,6 +215,7 @@ pub mod tests {
             Ok(streamflow_core::queue::ActivitySummary {
                 workflow_id: Uuid::now_v7(),
                 activity_key: "mock_activity".to_string(),
+                iteration: None,
             })
         }
 

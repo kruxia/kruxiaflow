@@ -1,13 +1,14 @@
 use rust_decimal::Decimal;
 use serde_json::json;
-use streamflow_core::events::{
-    ActivityDefinition, DependencyEdge, WorkflowDefinition, WorkflowStatus,
-};
+use std::collections::HashMap;
+use streamflow_core::events::WorkflowStatus;
 use streamflow_core::orchestrator::{
     ActivityState, WorkflowActivityStatus, WorkflowState, build_condition_context,
     evaluate_condition, find_ready_activities, is_workflow_complete, is_workflow_failed,
 };
-use streamflow_core::workflow::{ActivityOutput, OutputType};
+use streamflow_core::workflow::{
+    ActivityDefinition, ActivityOutput, ActivityRelationship, OutputType, WorkflowDefinition,
+};
 use uuid::Uuid;
 
 fn create_test_state_with_activities(
@@ -33,6 +34,8 @@ fn create_test_state_with_activities(
                     attempt: 0,
                     last_error: None,
                     accumulated_cost_usd: Decimal::ZERO,
+                    iteration: 0,
+                    iteration_outputs: None,
                 },
             )
         })
@@ -50,29 +53,33 @@ fn create_test_state_with_activities(
 #[test]
 fn test_find_ready_root_activities() {
     let definition = WorkflowDefinition {
-        id: Uuid::now_v7(),
         name: "test_workflow".to_string(),
-        version: "1.0".to_string(),
         activities: vec![
             ActivityDefinition {
                 key: "root1".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             ActivityDefinition {
                 key: "root2".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
         ],
     };
@@ -93,45 +100,54 @@ fn test_find_ready_root_activities() {
 #[test]
 fn test_find_ready_sequential_workflow() {
     let definition = WorkflowDefinition {
-        id: Uuid::now_v7(),
         name: "test_workflow".to_string(),
-        version: "1.0".to_string(),
         activities: vec![
             ActivityDefinition {
                 key: "activity1".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             ActivityDefinition {
                 key: "activity2".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
-                depends_on: Some(vec![DependencyEdge {
+                depends_on: Some(vec![ActivityRelationship {
                     activity_key: "activity1".to_string(),
                     conditions: None,
+                    is_back_edge: false,
                 }]),
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             ActivityDefinition {
                 key: "activity3".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
-                depends_on: Some(vec![DependencyEdge {
+                depends_on: Some(vec![ActivityRelationship {
                     activity_key: "activity2".to_string(),
                     conditions: None,
+                    is_back_edge: false,
                 }]),
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
         ],
     };
@@ -200,62 +216,75 @@ fn test_find_ready_sequential_workflow() {
 #[test]
 fn test_find_ready_parallel_fanout() {
     let definition = WorkflowDefinition {
-        id: Uuid::now_v7(),
         name: "test_workflow".to_string(),
-        version: "1.0".to_string(),
         activities: vec![
             ActivityDefinition {
                 key: "root".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
                 depends_on: None,
                 dependency_of: Some(vec![
-                    DependencyEdge {
+                    ActivityRelationship {
                         activity_key: "parallel1".to_string(),
                         conditions: None,
+                        is_back_edge: false,
                     },
-                    DependencyEdge {
+                    ActivityRelationship {
                         activity_key: "parallel2".to_string(),
                         conditions: None,
+                        is_back_edge: false,
                     },
-                    DependencyEdge {
+                    ActivityRelationship {
                         activity_key: "parallel3".to_string(),
                         conditions: None,
+                        is_back_edge: false,
                     },
                 ]),
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             ActivityDefinition {
                 key: "parallel1".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             ActivityDefinition {
                 key: "parallel2".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             ActivityDefinition {
                 key: "parallel3".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
         ],
     };
@@ -287,48 +316,57 @@ fn test_find_ready_parallel_fanout() {
 #[test]
 fn test_find_ready_parallel_fanin() {
     let definition = WorkflowDefinition {
-        id: Uuid::now_v7(),
         name: "test_workflow".to_string(),
-        version: "1.0".to_string(),
         activities: vec![
             ActivityDefinition {
                 key: "parallel1".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             ActivityDefinition {
                 key: "parallel2".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             ActivityDefinition {
                 key: "join".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
                 depends_on: Some(vec![
-                    DependencyEdge {
+                    ActivityRelationship {
                         activity_key: "parallel1".to_string(),
                         conditions: None,
+                        is_back_edge: false,
                     },
-                    DependencyEdge {
+                    ActivityRelationship {
                         activity_key: "parallel2".to_string(),
                         conditions: None,
+                        is_back_edge: false,
                     },
                 ]),
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
         ],
     };
@@ -482,45 +520,54 @@ fn test_evaluate_condition_nested_boolean() {
 #[test]
 fn test_conditional_branching() {
     let definition = WorkflowDefinition {
-        id: Uuid::now_v7(),
         name: "test_workflow".to_string(),
-        version: "1.0".to_string(),
         activities: vec![
             ActivityDefinition {
                 key: "validate".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             ActivityDefinition {
                 key: "approve".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
-                depends_on: Some(vec![DependencyEdge {
+                depends_on: Some(vec![ActivityRelationship {
                     activity_key: "validate".to_string(),
                     conditions: Some(vec!["{{validate.valid == true}}".to_string()]),
+                    is_back_edge: false,
                 }]),
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             ActivityDefinition {
                 key: "reject".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
-                depends_on: Some(vec![DependencyEdge {
+                depends_on: Some(vec![ActivityRelationship {
                     activity_key: "validate".to_string(),
                     conditions: Some(vec!["{{validate.valid == false}}".to_string()]),
+                    is_back_edge: false,
                 }]),
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
         ],
     };
@@ -653,18 +700,19 @@ fn test_is_workflow_failed() {
 #[test]
 fn test_skip_already_scheduled_activities() {
     let definition = WorkflowDefinition {
-        id: Uuid::now_v7(),
         name: "test_workflow".to_string(),
-        version: "1.0".to_string(),
         activities: vec![ActivityDefinition {
             key: "activity1".to_string(),
             worker: "test".to_string(),
-            activity_name: "activity".to_string(),
-            parameters: json!({}),
+            activity_name: Some("activity".to_string()),
+            parameters: Some(HashMap::new()),
             settings: None,
             depends_on: None,
             dependency_of: None,
             output_definitions: None,
+            iteration_scoped: false,
+            iteration_limit: None,
+            is_loop_activity: false,
         }],
     };
 
@@ -700,32 +748,37 @@ fn test_failed_activity_without_conditions_blocks_following() {
     // Test that when a preceding activity fails with NO conditions,
     // the following activity should NOT be ready (default = success path only)
     let definition = WorkflowDefinition {
-        id: Uuid::now_v7(),
         name: "test_workflow".to_string(),
-        version: "1.0".to_string(),
         activities: vec![
             ActivityDefinition {
                 key: "step1".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             ActivityDefinition {
                 key: "step2".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
-                depends_on: Some(vec![DependencyEdge {
+                depends_on: Some(vec![ActivityRelationship {
                     activity_key: "step1".to_string(),
                     conditions: None, // No conditions = success path only
+                    is_back_edge: false,
                 }]),
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
         ],
     };
@@ -751,46 +804,55 @@ fn test_failed_activity_with_explicit_condition_allows_following() {
     // Test that when a preceding activity fails WITH explicit conditions,
     // the following activity CAN be ready if conditions are satisfied
     let definition = WorkflowDefinition {
-        id: Uuid::now_v7(),
         name: "test_workflow".to_string(),
-        version: "1.0".to_string(),
         activities: vec![
             ActivityDefinition {
                 key: "process".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
                 depends_on: None,
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             ActivityDefinition {
                 key: "handle_success".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
-                depends_on: Some(vec![DependencyEdge {
+                depends_on: Some(vec![ActivityRelationship {
                     activity_key: "process".to_string(),
                     conditions: Some(vec!["{{process.success == true}}".to_string()]),
+                    is_back_edge: false,
                 }]),
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             ActivityDefinition {
                 key: "handle_failure".to_string(),
                 worker: "test".to_string(),
-                activity_name: "activity".to_string(),
-                parameters: json!({}),
+                activity_name: Some("activity".to_string()),
+                parameters: Some(HashMap::new()),
                 settings: None,
-                depends_on: Some(vec![DependencyEdge {
+                depends_on: Some(vec![ActivityRelationship {
                     activity_key: "process".to_string(),
                     // Explicit condition checking for failure
                     conditions: Some(vec!["{{process.error != null}}".to_string()]),
+                    is_back_edge: false,
                 }]),
                 dependency_of: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
         ],
     };

@@ -109,6 +109,7 @@ async fn schedule_test_activities(pool: &PgPool, workflow_id: Uuid, count: usize
             settings: None,
             scheduled_for: None,
             output_definitions: None,
+            iteration: None,
         })
         .collect();
 

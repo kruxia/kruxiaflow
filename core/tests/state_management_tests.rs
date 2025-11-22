@@ -26,6 +26,7 @@ fn test_apply_workflow_created_event() {
         activity_key: None,
         payload: json!({"state_data": {"custom": "value"}}),
         timestamp: Utc::now(),
+        iteration: None,
     };
 
     apply_event_to_state(&mut state, &event).expect("Failed to apply event");
@@ -52,6 +53,8 @@ fn test_apply_activity_scheduled_event() {
                 attempt: 0,
                 last_error: None,
                 accumulated_cost_usd: Decimal::ZERO,
+                iteration: 0,
+                iteration_outputs: None,
             },
         )]
         .into_iter()
@@ -66,6 +69,7 @@ fn test_apply_activity_scheduled_event() {
         activity_key: Some("activity1".to_string()),
         payload: json!({}),
         timestamp: Utc::now(),
+        iteration: None,
     };
 
     apply_event_to_state(&mut state, &event).expect("Failed to apply event");
@@ -94,6 +98,8 @@ fn test_apply_activity_completed_event() {
                 attempt: 0,
                 last_error: None,
                 accumulated_cost_usd: Decimal::ZERO,
+                iteration: 0,
+                iteration_outputs: None,
             },
         )]
         .into_iter()
@@ -108,6 +114,7 @@ fn test_apply_activity_completed_event() {
         activity_key: Some("activity1".to_string()),
         payload: json!({"outputs": {"result": "success"}}),
         timestamp: Utc::now(),
+        iteration: None,
     };
 
     apply_event_to_state(&mut state, &event).expect("Failed to apply event");
@@ -144,6 +151,8 @@ fn test_apply_activity_failed_event() {
                 attempt: 0,
                 last_error: None,
                 accumulated_cost_usd: Decimal::ZERO,
+                iteration: 0,
+                iteration_outputs: None,
             },
         )]
         .into_iter()
@@ -158,6 +167,7 @@ fn test_apply_activity_failed_event() {
         activity_key: Some("activity1".to_string()),
         payload: json!({"error": "Connection timeout"}),
         timestamp: Utc::now(),
+        iteration: None,
     };
 
     apply_event_to_state(&mut state, &event).expect("Failed to apply event");
@@ -186,6 +196,7 @@ fn test_apply_workflow_completed_event() {
         activity_key: None,
         payload: json!({}),
         timestamp: Utc::now(),
+        iteration: None,
     };
 
     apply_event_to_state(&mut state, &event).expect("Failed to apply event");
@@ -211,6 +222,7 @@ fn test_apply_workflow_failed_event() {
         activity_key: None,
         payload: json!({"reason": "Activity timeout"}),
         timestamp: Utc::now(),
+        iteration: None,
     };
 
     apply_event_to_state(&mut state, &event).expect("Failed to apply event");
@@ -238,6 +250,8 @@ fn test_apply_multiple_events_sequential() {
                     attempt: 0,
                     last_error: None,
                     accumulated_cost_usd: Decimal::ZERO,
+                    iteration: 0,
+                    iteration_outputs: None,
                 },
             ),
             (
@@ -252,6 +266,8 @@ fn test_apply_multiple_events_sequential() {
                     attempt: 0,
                     last_error: None,
                     accumulated_cost_usd: Decimal::ZERO,
+                    iteration: 0,
+                    iteration_outputs: None,
                 },
             ),
         ]
@@ -269,6 +285,7 @@ fn test_apply_multiple_events_sequential() {
             activity_key: Some("activity1".to_string()),
             payload: json!({}),
             timestamp: Utc::now(),
+            iteration: None,
         },
         WorkflowEvent {
             id: Uuid::now_v7(),
@@ -277,6 +294,7 @@ fn test_apply_multiple_events_sequential() {
             activity_key: Some("activity1".to_string()),
             payload: json!({"outputs": {"value": 42}}),
             timestamp: Utc::now(),
+            iteration: None,
         },
         WorkflowEvent {
             id: Uuid::now_v7(),
@@ -285,6 +303,7 @@ fn test_apply_multiple_events_sequential() {
             activity_key: Some("activity2".to_string()),
             payload: json!({}),
             timestamp: Utc::now(),
+            iteration: None,
         },
         WorkflowEvent {
             id: Uuid::now_v7(),
@@ -293,6 +312,7 @@ fn test_apply_multiple_events_sequential() {
             activity_key: Some("activity2".to_string()),
             payload: json!({"outputs": {"value": 100}}),
             timestamp: Utc::now(),
+            iteration: None,
         },
     ];
 
@@ -343,6 +363,7 @@ fn test_apply_workflow_updated_event() {
         activity_key: None,
         payload: json!({}),
         timestamp: Utc::now(),
+        iteration: None,
     };
 
     apply_event_to_state(&mut state, &event).expect("Failed to apply event");
@@ -370,6 +391,7 @@ fn test_apply_activity_scheduled_event_nonexistent_activity() {
         activity_key: Some("nonexistent_activity".to_string()),
         payload: json!({}),
         timestamp: Utc::now(),
+        iteration: None,
     };
 
     // Should not panic or error - just silently ignore
@@ -398,6 +420,7 @@ fn test_apply_activity_completed_event_nonexistent_activity() {
         activity_key: Some("nonexistent_activity".to_string()),
         payload: json!({"outputs": {"result": "success"}}),
         timestamp: Utc::now(),
+        iteration: None,
     };
 
     // Should not panic or error - just silently ignore
@@ -426,6 +449,7 @@ fn test_apply_activity_failed_event_nonexistent_activity() {
         activity_key: Some("nonexistent_activity".to_string()),
         payload: json!({"error": "Connection timeout"}),
         timestamp: Utc::now(),
+        iteration: None,
     };
 
     // Should not panic or error - just silently ignore

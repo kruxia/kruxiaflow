@@ -48,6 +48,9 @@ async fn test_store_and_get_workflow_definition() {
             dependency_of: None,
             settings: None,
             output_definitions: None,
+            iteration_scoped: false,
+            iteration_limit: None,
+            is_loop_activity: false,
         }],
     };
 
@@ -91,6 +94,9 @@ async fn test_get_latest_workflow_definition() {
             dependency_of: None,
             settings: None,
             output_definitions: None,
+            iteration_scoped: false,
+            iteration_limit: None,
+            is_loop_activity: false,
         }],
     };
 
@@ -106,6 +112,9 @@ async fn test_get_latest_workflow_definition() {
                 dependency_of: None,
                 settings: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             ActivityDefinition {
                 key: "activity2".to_string(),
@@ -116,6 +125,9 @@ async fn test_get_latest_workflow_definition() {
                 dependency_of: None,
                 settings: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
         ],
     };
@@ -159,6 +171,9 @@ async fn test_list_workflow_definitions() {
             dependency_of: None,
             settings: None,
             output_definitions: None,
+            iteration_scoped: false,
+            iteration_limit: None,
+            is_loop_activity: false,
         }],
     };
 
@@ -173,6 +188,9 @@ async fn test_list_workflow_definitions() {
             dependency_of: None,
             settings: None,
             output_definitions: None,
+            iteration_scoped: false,
+            iteration_limit: None,
+            is_loop_activity: false,
         }],
     };
 
@@ -251,9 +269,13 @@ async fn test_workflow_definition_with_dependencies() {
                 dependency_of: Some(vec![ActivityRelationship {
                     activity_key: "step2".to_string(),
                     conditions: None,
+                    is_back_edge: false,
                 }]),
                 settings: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             ActivityDefinition {
                 key: "step2".to_string(),
@@ -263,10 +285,14 @@ async fn test_workflow_definition_with_dependencies() {
                 depends_on: Some(vec![ActivityRelationship {
                     activity_key: "step1".to_string(),
                     conditions: None,
+                    is_back_edge: false,
                 }]),
                 dependency_of: None,
                 settings: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
         ],
     };
