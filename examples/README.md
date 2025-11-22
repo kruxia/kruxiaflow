@@ -639,6 +639,6 @@ streamflow run examples/07b-agentic-research-complete.yaml \
 
 ## Next Steps
 
-- Example 8 will show advanced file management with external storage (S3-compatible)
+- Example 10 will show advanced file management with external storage (S3-compatible)
 
 See [docs/implementation/mvp-workflows-implementation-plan.md](../docs/implementation/mvp-workflows-implementation-plan.md) for the complete implementation roadmap.
