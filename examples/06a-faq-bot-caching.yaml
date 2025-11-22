@@ -1,0 +1,117 @@
+# Example 6a: FAQ Bot with Semantic Caching
+#
+# This workflow demonstrates US-3.5 (Activity Settings - Caching) and US-5.3 (Semantic Caching).
+# It's the first of three Example 6 workflows focusing on caching fundamentals.
+#
+# What This Example Demonstrates:
+# - Semantic caching for LLM responses
+# - Cache configuration (enabled, ttl_seconds, key)
+# - Cache hit tracking for cost analysis
+# - Dramatic cost reduction for repeated/similar questions
+# - Database logging with cache metrics
+#
+# Related Example 6 Workflows:
+# - 06b-rag-index-builder.yaml: Build vector search index with embeddings
+# - 06c-rag-query.yaml: RAG pattern combining embeddings + LLM with caching
+#
+# Prerequisites:
+# - ANTHROPIC_API_KEY for Claude Haiku model
+# - PostgreSQL database with faq_log table
+# - Optional: Redis for distributed caching (falls back to in-memory)
+#
+# Database Setup:
+# CREATE TABLE faq_log (
+#     id SERIAL PRIMARY KEY,
+#     question TEXT NOT NULL,
+#     answer TEXT NOT NULL,
+#     cost DECIMAL(10, 6),
+#     cache_hit BOOLEAN NOT NULL,
+#     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+# );
+#
+# Optional Redis Setup (for production caching):
+# docker run -d -p 6379:6379 redis:7-alpine
+# export STREAMFLOW_CACHE_PROVIDER=redis
+# export STREAMFLOW_REDIS_URL=redis://localhost:6379
+#
+# How Semantic Caching Works:
+# - First request: LLM call costs ~$0.001, result cached for 1 hour
+# - Identical request: Cache hit, costs $0.000 (100% savings!)
+# - Similar request: Future enhancement (semantic similarity matching)
+#
+# Cost Analysis (100 questions, 70% cache hit rate):
+# - Without caching: 100 × $0.001 = $0.100
+# - With caching: (30 × $0.001) + (70 × $0.000) = $0.030
+# - Savings: $0.070 (70% reduction!)
+#
+# Expected Execution Flow:
+#
+# First Question: "What are your business hours?"
+# 1. answer_question: LLM call → cache miss → costs $0.001
+# 2. store_answer: Logs question, answer, cost=$0.001, cache_hit=false
+#
+# Second Identical Question (within 1 hour): "What are your business hours?"
+# 1. answer_question: Cache hit → costs $0.000
+# 2. store_answer: Logs question, answer, cost=$0.000, cache_hit=true
+#
+# Cache Key Structure:
+# The cache key is deterministically generated from:
+# - Activity name: llm_prompt
+# - Model: anthropic/haiku-4-5
+# - Messages: [system prompt, user question]
+# This ensures identical questions hit the cache while different questions don't.
+#
+# Key Features Demonstrated (from mvp-workflows-implementation-plan.md lines 1057-1063):
+# ✅ Cache settings: enabled, ttl_seconds, key
+# ✅ Cache hit indicator in output ({{answer_question.cache_hit}})
+# ✅ Cost tracking with cache awareness (actual API cost vs cached)
+# ✅ Template expressions for cache metrics
+# ✅ Budget enforcement (even with caching)
+
+name: faq_bot
+description: Answer FAQs using LLM with aggressive caching for cost savings
+
+activities:
+  # Step 1: Answer question with LLM (with caching)
+  - key: answer_question
+    activity_name: llm_prompt
+    parameters:
+      model: anthropic/claude-haiku-4-20250415
+      prompt: |
+        You are a helpful FAQ assistant. Answer questions concisely and accurately.
+
+        Question: {{INPUT.question}}
+      max_tokens: 200
+    outputs:
+      - result      # Contains the answer in result.content
+    settings:
+      cache:
+        enabled: true
+        ttl_seconds: 3600  # Cache for 1 hour
+        # Cache key components (deterministic hash)
+        key:
+          - llm_prompt
+          - "{{parameters.model}}"
+          - "{{parameters.prompt}}"
+      budget:
+        limit_usd: 0.10
+        action: abort
+
+  # Step 2: Store answer with cache metrics for analytics
+  - key: store_answer
+    activity_name: postgres_query
+    parameters:
+      query: |
+        INSERT INTO faq_log
+        (question, answer, cost, cache_hit, created_at)
+        VALUES ($1, $2, $3, $4, NOW())
+        RETURNING id
+      params:
+        - "{{INPUT.question}}"
+        - "{{answer_question.result.content}}"
+        - "{{answer_question.result.cost_usd}}"
+        - "{{answer_question.result.cache_hit}}"
+    outputs:
+      - result
+    depends_on:
+      - answer_question

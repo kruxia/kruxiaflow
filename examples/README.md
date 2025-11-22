@@ -15,6 +15,11 @@ This directory contains example workflows that demonstrate StreamFlow features p
 | `05a-research-assistant-anthropic.yaml` | Budget-aware fallback with Anthropic models only                       | Anthropic API key, Database |
 | `05b-research-assistant-openai.yaml` | Budget-aware fallback with OpenAI models only                             | OpenAI API key, Database |
 | `05c-research-assistant-google.yaml` | Budget-aware fallback with Google models only                             | Google API key, Database |
+| `06a-faq-bot-caching.yaml`            | Semantic caching for LLM responses, cache hit tracking, cost savings                           | Anthropic API key, PostgreSQL, Redis (optional) |
+| `06b-rag-index-builder.yaml`          | Embedding generation, pgvector indexing, batch processing, parallel storage                    | OpenAI API key, PostgreSQL with pgvector, Webhook |
+| `06c-rag-query.yaml`                  | Complete RAG pattern: embed → search → augment → generate, MiniJinja loops                     | OpenAI + Anthropic API keys, PostgreSQL with pgvector, Webhook |
+| `07a-agentic-research-simple.yaml`    | Iterative workflows (loops), iteration-scoped storage, budget-aware loops, conditional exit    | Anthropic API key  |
+| `07b-agentic-research-complete.yaml` | Complete iterative research: HTTP search, file iteration storage, dual success/failure paths   | Anthropic API key, Search API, Webhook URL |
 
 ## Running Examples
 
@@ -310,10 +315,330 @@ streamflow run examples/05c-research-assistant-google.yaml \
 
 **Note**: All three providers have models spanning different price points, so each variant demonstrates budget-aware fallback effectively!
 
+### Example 6a: FAQ Bot with Semantic Caching
+
+This workflow demonstrates semantic caching for LLM responses with dramatic cost reduction for repeated questions:
+1. Answers user questions using Claude Haiku with aggressive caching
+2. Tracks cache hits/misses for cost analysis
+3. Logs all interactions with cache metrics
+
+**Prerequisites:**
+- Anthropic API key (Claude Haiku 4)
+- PostgreSQL database with faq_log table
+- Optional: Redis for distributed caching (falls back to in-memory)
+
+**Database Setup:**
+```sql
+CREATE TABLE faq_log (
+    id SERIAL PRIMARY KEY,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    cost DECIMAL(10, 6),
+    cache_hit BOOLEAN NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+**Redis Setup (optional, for production):**
+```bash
+docker run -d -p 6379:6379 redis:7-alpine
+export STREAMFLOW_CACHE_PROVIDER=redis
+export STREAMFLOW_REDIS_URL=redis://localhost:6379
+```
+
+**Run with StreamFlow CLI:**
+```bash
+export ANTHROPIC_API_KEY=your-key
+streamflow run examples/06a-faq-bot-caching.yaml \
+  --input question="What are your business hours?" \
+  --secret db_url=postgres://user:pass@localhost:5432/dbname
+```
+
+**Expected behavior:**
+
+**First question**: "What are your business hours?"
+1. **answer_question**: LLM call → cache miss → costs $0.001
+2. **store_answer**: Logs question, answer, cost=$0.001, cache_hit=false
+
+**Second identical question** (within 1 hour): "What are your business hours?"
+1. **answer_question**: Cache hit → costs $0.000 (100% savings!)
+2. **store_answer**: Logs question, answer, cost=$0.000, cache_hit=true
+
+**Cost Analysis (100 questions, 70% cache hit rate):**
+- Without caching: 100 × $0.001 = **$0.100**
+- With caching: (30 × $0.001) + (70 × $0.000) = **$0.030**
+- **Savings: $0.070 (70% reduction!)**
+
+**Features demonstrated:**
+- ✅ Semantic caching for LLM responses (US-3.5, US-5.3)
+- ✅ Cache configuration: enabled, ttl_seconds, key
+- ✅ Cache hit tracking in outputs ({{answer_question.result.cache_hit}})
+- ✅ Cost tracking with cache awareness
+- ✅ Budget enforcement
+- ✅ Cache key generation from parameters
+
+### Example 6b: RAG Index Builder
+
+This workflow demonstrates embedding generation and vector index building for RAG:
+1. Generates embeddings for document chunks using OpenAI
+2. Stores chunks with embeddings in PostgreSQL with pgvector
+3. Executes parallel storage for efficiency
+4. Sends completion notification
+
+**Prerequisites:**
+- OpenAI API key for embedding generation
+- PostgreSQL with pgvector extension
+- Webhook URL for completion notification
+
+**Database Setup:**
+```sql
+-- Enable pgvector extension
+CREATE EXTENSION IF NOT EXISTS vector;
+
+-- Document chunks table with vector column
+CREATE TABLE document_chunks (
+    id SERIAL PRIMARY KEY,
+    content TEXT NOT NULL,
+    embedding vector(1536) NOT NULL,  -- OpenAI text-embedding-3-small dimension
+    metadata JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Create vector similarity index (IVFFlat for cosine distance)
+CREATE INDEX document_chunks_embedding_idx ON document_chunks
+USING ivfflat (embedding vector_cosine_ops)
+WITH (lists = 100);
+```
+
+**Run with StreamFlow CLI:**
+```bash
+export OPENAI_API_KEY=your-key
+streamflow run examples/06b-rag-index-builder.yaml \
+  --input chunks='["Rust is a systems programming language...","Rust'\''s ownership model ensures memory safety...","Cargo is Rust'\''s package manager..."]' \
+  --input source="rust_documentation" \
+  --input notification_webhook_url=https://webhook.site/your-id \
+  --secret db_url=postgres://user:pass@localhost:5432/dbname
+```
+
+**Expected behavior:**
+1. **generate_embeddings**: Sends 3 chunks to OpenAI → receives 3 × 1536-dimensional vectors (~$0.00002)
+2. **store_chunk_1, store_chunk_2, store_chunk_3**: Execute in parallel, storing chunks with embeddings
+3. **confirm_indexing**: Waits for all storage to complete (fan-in), POSTs notification with metadata
+
+**Total cost**: ~$0.00002 (embedding only, storage is free)
+**Total time**: ~1-2 seconds
+
+**Features demonstrated:**
+- ✅ embedding_generate activity (US-5.1)
+- ✅ Batch embedding processing
+- ✅ Array template expressions: {{generate_embeddings.embeddings.embeddings[0]}}
+- ✅ Vector type support: $2::vector casting in PostgreSQL
+- ✅ JSONB metadata storage
+- ✅ Parallel execution (fan-out: 1 → 3)
+- ✅ Fan-in synchronization (3 → 1)
+- ✅ pgvector similarity index creation
+
+### Example 6c: RAG Query and Q&A
+
+This workflow demonstrates the complete RAG (Retrieval-Augmented Generation) pattern:
+1. Embeds user question for semantic search
+2. Searches knowledge base using pgvector similarity
+3. Passes retrieved context to LLM
+4. Generates grounded answer
+5. Logs Q&A with cost tracking
+
+**Prerequisites:**
+- OpenAI API key for embedding generation
+- Anthropic API key for LLM (Claude Sonnet)
+- PostgreSQL with pgvector and populated document_chunks table
+- Run 06b-rag-index-builder.yaml first to populate the index
+- Webhook URL for response delivery
+
+**Database Setup (includes qa_log table):**
+```sql
+-- Same document_chunks table as 06b, plus:
+CREATE TABLE qa_log (
+    id SERIAL PRIMARY KEY,
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    chunks_used INTEGER NOT NULL,
+    embedding_cost DECIMAL(10, 6),
+    llm_cost DECIMAL(10, 6),
+    total_cost DECIMAL(10, 6),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+**Run with StreamFlow CLI:**
+```bash
+export OPENAI_API_KEY=your-key
+export ANTHROPIC_API_KEY=your-key
+streamflow run examples/06c-rag-query.yaml \
+  --input question="What is Rust's ownership model?" \
+  --input response_webhook_url=https://webhook.site/your-id \
+  --secret db_url=postgres://user:pass@localhost:5432/dbname
+```
+
+**Expected behavior:**
+1. **embed_question**: Converts question to 1536-dimensional vector (~$0.000002)
+2. **search_similar_chunks**: Uses pgvector cosine distance (<=>), finds top 3 similar chunks
+3. **generate_answer**: LLM generates answer using retrieved context (~$0.015)
+4. **store_qa_result**: Logs Q&A with cost breakdown
+5. **send_response**: POSTs answer to webhook with metadata
+
+**Total cost**: ~$0.015002 (embedding + LLM)
+**Total time**: ~2-3 seconds
+
+**RAG Pattern (4 Steps):**
+1. **Embed**: Convert question to vector
+2. **Search**: Find top-k most similar chunks (cosine distance)
+3. **Augment**: Pass retrieved chunks as context to LLM
+4. **Generate**: LLM produces grounded answer
+
+**Features demonstrated:**
+- ✅ Complete RAG workflow pattern
+- ✅ embedding_generate for question embedding
+- ✅ pgvector similarity search: embedding <=> $1::vector
+- ✅ MiniJinja loops in prompts: {% for chunk in search_similar_chunks.result.rows %}
+- ✅ Template expressions for complex data access (chunk.content, chunk.metadata.source)
+- ✅ Cost tracking across multiple activities
+- ✅ Sequential data flow with dependencies
+
+**Combining 06a + 06c (RAG with Caching):**
+Add cache settings to embed_question and generate_answer activities to reduce costs by 50-70% for repeated queries.
+
+**Related Documentation:**
+- Semantic Caching: `docs/features/semantic-caching.md`
+- Multi-Provider LLM: `docs/implementation/US-5.1-multi-provider-llm.md`
+- Embedding Generation: `docs/implementation/US-5.1-multi-provider-llm.md`
+
+### Example 7a: Simple Agentic Research (Iterative Workflows with Loops)
+
+This workflow demonstrates iterative/looping workflows (US-3.4) with a simplified, self-contained example:
+1. Initializes research plan with strategy and success criteria
+2. Performs iterative "research" using LLM (simulated search, no external APIs)
+3. Evaluates after each iteration if information is sufficient
+4. Loops back for more research if insufficient (back-edge dependency)
+5. Compiles final report when sufficient information is gathered
+
+**Prerequisites:**
+- Anthropic API key (Claude Haiku 4 and Sonnet 4.5)
+
+**Run with StreamFlow CLI:**
+```bash
+export ANTHROPIC_API_KEY=your-key
+streamflow run examples/07a-agentic-research-simple.yaml \
+  --input topic="Benefits of Rust for systems programming"
+```
+
+**Expected behavior:**
+1. **initialize** creates research plan (~$0.001)
+2. **perform_search** iteration 0: First research pass (~$0.005)
+3. **evaluate** iteration 0: Returns "CONTINUE" (~$0.001)
+4. **perform_search** iteration 1: Second research pass, builds on iteration 0 (~$0.005)
+5. **evaluate** iteration 1: Returns "CONTINUE" (~$0.001)
+6. **perform_search** iteration 2: Third research pass (~$0.005)
+7. **evaluate** iteration 2: Returns "SUFFICIENT" (~$0.001)
+8. **compile_report**: Synthesizes all findings from 3 iterations (~$0.020)
+9. Total cost: ~$0.039, Total iterations: 3
+
+**Loop exit conditions:**
+- Normal: `evaluate` returns "SUFFICIENT" (condition-based)
+- Safety: Reaches 5 iterations (iteration_limit)
+- Budget: Exceeds $0.05 for perform_search (budget-based)
+- Error: Any activity fails
+
+**Features demonstrated:**
+- ✅ Loop execution via back-edge (`evaluate → perform_search`)
+- ✅ Iteration-scoped storage (`iteration_scoped: true`)
+- ✅ Access all iteration results (`{{perform_search.findings}}` array)
+- ✅ Access latest iteration (`{{evaluate.result.content | last}}`)
+- ✅ Iteration counter (`{{ACTIVITY.iteration}}`)
+- ✅ Budget accumulation across iterations
+- ✅ Remaining budget tracking (`{{ACTIVITY.remaining_budget_usd}}`)
+- ✅ Conditional loop back (checking for "CONTINUE")
+- ✅ Conditional loop exit (checking for "SUFFICIENT")
+- ✅ Maximum iterations limit (`iteration_limit: 5`)
+
+**Why "Simple"?**
+- Uses only LLM activities (no HTTP search APIs)
+- Uses string matching for conditions (no structured field extraction)
+- Single success path (no explicit failure handling)
+- Inline JSON results (no file storage)
+- Can run immediately with just Anthropic API key
+
+### Example 7b: Complete Agentic Research (Production-Ready Pattern)
+
+This workflow demonstrates the **full Example 7 specification** from the implementation plan:
+1. Performs real HTTP-based research using external search APIs
+2. Stores large search results as files with iteration scoping
+3. Uses structured field extraction from LLM outputs
+4. Implements dual success/failure paths
+5. Demonstrates advanced array access patterns and complex boolean conditions
+
+**Prerequisites:**
+- Anthropic API key (Claude Haiku 4 and Sonnet 4.5)
+- Search API key (SerpAPI, Brave Search, or custom search service)
+- Webhook URL to receive final results
+
+**Run with StreamFlow CLI:**
+```bash
+export ANTHROPIC_API_KEY=your-key
+streamflow run examples/07b-agentic-research-complete.yaml \
+  --input research_topic="Impact of quantum computing on cryptography" \
+  --input publish_url=https://webhook.site/your-id \
+  --secret search_api_key=your-search-api-key
+```
+
+**Expected behavior (success scenario):**
+1. **search_information** iteration 0: HTTP search API call → results stored as file (~$0.10)
+2. **evaluate_sufficiency** iteration 0: Returns `sufficient=false` (~$0.001)
+3. **search_information** iteration 1: Refined search → results file 1 (~$0.10)
+4. **evaluate_sufficiency** iteration 1: Returns `sufficient=false` (~$0.001)
+5. **search_information** iteration 2: Comprehensive search → results file 2 (~$0.10)
+6. **evaluate_sufficiency** iteration 2: Returns `sufficient=true` (~$0.001)
+7. **compile_report**: Synthesizes all 3 iterations from file storage (~$0.020)
+8. **publish_success**: POSTs report file + metadata to webhook (~$0.00)
+9. Total cost: ~$0.323, Total iterations: 3
+
+**Expected behavior (failure scenario - budget exhausted):**
+1-4. [Same through iteration 1]
+5. **evaluate_sufficiency** iteration 4: `sufficient=false`, `remaining_budget_usd=$0.007` (~$0.001)
+6. Loop exits (budget < $0.10 threshold)
+7. **publish_failure**: POSTs failure report with gaps analysis (~$0.00)
+8. Total cost: ~$0.493, Total iterations: 4
+
+**Features demonstrated (beyond 07a):**
+- ✅ Real HTTP-based research (not LLM simulation)
+- ✅ File storage with iteration scoping (`type: file`, `iteration_scoped: true`)
+- ✅ Structured field extraction (`{{evaluate.sufficient}}` not string matching)
+- ✅ Array access with bracket notation (`{{search_information[*].results}}`)
+- ✅ Dual success/failure paths (`publish_success` and `publish_failure`)
+- ✅ Complex boolean conditions (`AND`, `<`, `>`)
+- ✅ Budget checks in conditions (`{{evaluate.remaining_budget_usd}} > 0.10`)
+- ✅ File uploads in HTTP requests (`files:` parameter)
+- ✅ Production-ready error handling
+
+**Differences from 07a:**
+
+| Feature                  | 07a (Simple)                | 07b (Complete)                       |
+|--------------------------|-----------------------------|--------------------------------------|
+| Research activity        | LLM simulates research      | Real HTTP search API calls           |
+| Loop condition syntax    | String matching             | Structured field access              |
+| Results storage          | Inline JSON                 | Files with iteration scoping         |
+| Array access             | Implicit (Jinja filters)    | Explicit ([*] bracket notation)      |
+| Failure handling         | Implicit (timeout/error)    | Explicit publish_failure activity    |
+| Budget checks            | Activity-level only         | Condition-level remaining checks     |
+| External dependencies    | None (LLM-only)             | Search API + webhook endpoint        |
+| Production readiness     | Educational demo            | Production-ready pattern             |
+
+**Note**: Adapt the search API configuration to your provider:
+- **SerpAPI**: `url: "https://serpapi.com/search"`, add `api_key` to query params
+- **Brave Search**: `url: "https://api.search.brave.com/res/v1/web/search"`
+- **Custom**: Any search service that returns JSON results
+
 ## Next Steps
 
-- Example 6 will demonstrate semantic caching with embeddings and RAG patterns
-- Example 7 will introduce iterative workflows with loops
-- Example 8 will show advanced file management with external storage
+- Example 8 will show advanced file management with external storage (S3-compatible)
 
 See [docs/implementation/mvp-workflows-implementation-plan.md](../docs/implementation/mvp-workflows-implementation-plan.md) for the complete implementation roadmap.

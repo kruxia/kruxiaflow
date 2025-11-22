@@ -8,7 +8,7 @@
 - **Epic 1B**: ✅ Complete (Built-in Worker)
 - **Epic 1C**: ⏳ Partial (StreamFlow Binary - US-1C.1, US-1C.2, US-1C.7 complete)
 - **Epic 2**: ✅ Complete (Performance Benchmarking - US-2.1, US-2.2 complete)
-- **Epic 3**: ⏳ In Progress (YAML Workflows - Examples 1-6 complete, US-3.4 implemented)
+- **Epic 3**: ⏳ In Progress (YAML Workflows - Examples 1-7 complete, US-3.4 implemented)
 - **Epic 5**: ⏳ In Progress (Built-In Activities - US-5.1, US-5.3, US-5.4 complete)
 - **Epic 7**: 📋 Next Priority (US-7.1 Token Streaming - depends on US-1A.9a)
 **Target Release**: Q1 2026 with full AI-native feature set including token streaming
@@ -1807,11 +1807,20 @@ flowchart TB
   - Comprehensive end-to-end tests
 
 **Phase 4: Epic 3 Examples 3-10 (Weeks 12-18)** 🎯 **IN PROGRESS**
-- 📋 **Example 3**: Parallel execution with file management (4-5 days)
-- 📋 **Example 4**: LLM with cost tracking and retry (5-6 days)
-- 📋 **Example 5**: Multi-model LLM fallback (4-5 days)
-- 📋 **Example 6**: Semantic caching (3-4 days)
-- 📋 **Example 7**: Iterative workflows/loops (5-6 days)
+- ✅ **Example 3**: Parallel execution with file management (completed 2025-11-18)
+  - document-processing.yaml
+- ✅ **Example 4**: LLM with cost tracking and retry (completed 2025-11-19)
+  - moderate-content.yaml
+- ✅ **Example 5**: Multi-model LLM fallback (completed 2025-11-19)
+  - research-assistant.yaml (multi-provider)
+  - research-assistant-anthropic.yaml, research-assistant-openai.yaml, research-assistant-google.yaml (single-provider variants)
+- ✅ **Example 6**: Semantic caching and RAG (completed 2025-11-22)
+  - 06a-faq-bot-caching.yaml (caching fundamentals)
+  - 06b-rag-index-builder.yaml (embedding generation and vector indexing)
+  - 06c-rag-query.yaml (complete RAG pattern)
+- ✅ **Example 7**: Iterative workflows/loops (completed 2025-11-22)
+  - 07a-agentic-research-simple.yaml (simplified LLM-only loops)
+  - 07b-agentic-research-complete.yaml (full spec: HTTP search, file iteration, dual paths)
 - 📋 **Example 8**: Advanced file management (3-4 days)
 - 📋 **Example 9**: HTTP/DB advanced features (3-4 days)
 - 📋 **Example 10**: Scheduled/delayed activities (2-3 days)

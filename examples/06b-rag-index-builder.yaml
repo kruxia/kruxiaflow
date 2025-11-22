@@ -1,0 +1,182 @@
+# Example 6b: RAG Index Builder
+#
+# This workflow demonstrates US-5.1 (Embedding Generation) for building a vector search index.
+# It's the second of three Example 6 workflows focusing on the indexing phase of RAG.
+#
+# What This Example Demonstrates:
+# - Embedding generation using OpenAI text-embedding-3-small
+# - Batch embedding processing (multiple chunks in one API call)
+# - PostgreSQL vector storage with pgvector extension
+# - Creating a searchable knowledge base
+# - Parallel storage of embedded chunks
+# - Fan-in pattern (notification waits for all chunks)
+#
+# Related Example 6 Workflows:
+# - 06a-faq-bot-caching.yaml: Semantic caching fundamentals
+# - 06c-rag-query.yaml: Query the index built here with RAG pattern
+#
+# Prerequisites:
+# - OPENAI_API_KEY for embedding generation
+# - PostgreSQL with pgvector extension installed
+# - Webhook URL for completion notification
+#
+# Database Setup:
+# -- Enable pgvector extension
+# CREATE EXTENSION IF NOT EXISTS vector;
+#
+# -- Document chunks table with vector column
+# CREATE TABLE document_chunks (
+#     id SERIAL PRIMARY KEY,
+#     content TEXT NOT NULL,
+#     embedding vector(1536) NOT NULL,  -- OpenAI text-embedding-3-small dimension
+#     metadata JSONB,
+#     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+# );
+#
+# -- Create vector similarity index (IVFFlat for cosine distance)
+# CREATE INDEX document_chunks_embedding_idx ON document_chunks
+# USING ivfflat (embedding vector_cosine_ops)
+# WITH (lists = 100);
+#
+# How Embedding Generation Works:
+# - Input: Array of text chunks (up to 2048 per batch for OpenAI)
+# - Output: Array of 1536-dimensional vectors (one per chunk)
+# - Cost: ~$0.00002 per 1K tokens (extremely cheap!)
+# - The embedding_generate activity handles batching automatically
+#
+# Workflow Pattern:
+# generate_embeddings → [store_chunk_1, store_chunk_2, store_chunk_3] → confirm_indexing
+#                              ↓              ↓              ↓
+#                              └──────────────┴──────────────┘
+#                                   (parallel storage)
+#
+# Expected Execution Flow:
+#
+# Given input chunks: [
+#   "Rust is a systems programming language...",
+#   "Rust's ownership model ensures memory safety...",
+#   "Cargo is Rust's package manager..."
+# ]
+#
+# 1. generate_embeddings:
+#    - Sends all 3 chunks to OpenAI in one API call
+#    - Receives 3 × 1536-dimensional vectors
+#    - Cost: ~$0.00002 (depends on token count)
+#
+# 2. store_chunk_1, store_chunk_2, store_chunk_3 (parallel):
+#    - Each stores one chunk with its corresponding embedding
+#    - Uses PostgreSQL vector type casting: $2::vector
+#    - Includes metadata (source, chunk_index) as JSONB
+#    - All three execute in parallel (no dependencies between them)
+#
+# 3. confirm_indexing:
+#    - Waits for all three storage activities to complete (fan-in)
+#    - POSTs notification with metadata (chunks indexed, cost, source)
+#    - Webhook receives confirmation that indexing is complete
+#
+# Total cost: ~$0.00002 (embedding generation only, DB storage is free)
+# Total time: ~1-2 seconds (parallel storage is fast)
+#
+# Production Considerations:
+# - This example uses 3 chunks for simplicity
+# - Production: Use loops (Example 7) or dynamic workflows for N chunks
+# - Consider batch size limits (OpenAI: 2048 inputs per request)
+# - IVFFlat index is approximate (fast but not exact nearest neighbors)
+# - For exact search or small datasets (<10K vectors), use brute force
+#
+# Key Features Demonstrated (from mvp-workflows-implementation-plan.md lines 1057-1070):
+# ✅ embedding_generate activity (US-5.1)
+# ✅ Array template expressions: Access array elements {{generate_embeddings.embeddings.embeddings[0]}}
+# ✅ Vector type support in PostgreSQL: $2::vector casting
+# ✅ JSONB metadata storage
+# ✅ Parallel activity execution (fan-out: 1 → 3)
+# ✅ Fan-in synchronization (3 → 1: wait for all)
+# ✅ Cost tracking for embedding generation
+
+name: rag_index_builder
+description: Build a vector search index by embedding document chunks and storing them in PostgreSQL with pgvector
+
+activities:
+  # Step 1: Generate embeddings for all document chunks in batch
+  - key: generate_embeddings
+    activity_name: embedding_generate
+    parameters:
+      provider: openai
+      model: text-embedding-3-small  # 1536 dimensions, $0.00002 per 1K tokens
+      input: "{{INPUT.chunks}}"  # Array of text chunks (e.g., ["chunk1", "chunk2", "chunk3"])
+    outputs:
+      - embeddings  # Contains array of vectors in embeddings.embeddings
+
+  # Step 2a: Store first chunk with its embedding (parallel with 2b, 2c)
+  - key: store_chunk_1
+    activity_name: postgres_query
+    parameters:
+      query: |
+        INSERT INTO document_chunks (content, embedding, metadata)
+        VALUES ($1, $2::vector, $3::jsonb)
+        RETURNING id
+      params:
+        - "{{INPUT.chunks[0]}}"
+        - "{{generate_embeddings.embeddings.embeddings[0]}}"
+        - '{"source": "{{INPUT.source}}", "chunk_index": 0}'
+    outputs:
+      - result
+    depends_on:
+      - generate_embeddings
+
+  # Step 2b: Store second chunk with its embedding (parallel with 2a, 2c)
+  - key: store_chunk_2
+    activity_name: postgres_query
+    parameters:
+      query: |
+        INSERT INTO document_chunks (content, embedding, metadata)
+        VALUES ($1, $2::vector, $3::jsonb)
+        RETURNING id
+      params:
+        - "{{INPUT.chunks[1]}}"
+        - "{{generate_embeddings.embeddings.embeddings[1]}}"
+        - '{"source": "{{INPUT.source}}", "chunk_index": 1}'
+    outputs:
+      - result
+    depends_on:
+      - generate_embeddings
+
+  # Step 2c: Store third chunk with its embedding (parallel with 2a, 2b)
+  - key: store_chunk_3
+    activity_name: postgres_query
+    parameters:
+      query: |
+        INSERT INTO document_chunks (content, embedding, metadata)
+        VALUES ($1, $2::vector, $3::jsonb)
+        RETURNING id
+      params:
+        - "{{INPUT.chunks[2]}}"
+        - "{{generate_embeddings.embeddings.embeddings[2]}}"
+        - '{"source": "{{INPUT.source}}", "chunk_index": 2}'
+    outputs:
+      - result
+    depends_on:
+      - generate_embeddings
+
+  # Step 3: Confirm indexing complete (fan-in: waits for all storage activities)
+  - key: confirm_indexing
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.notification_webhook_url}}"
+      headers:
+        Content-Type: "application/json"
+      body:
+        status: "indexing_complete"
+        workflow_id: "{{WORKFLOW.id}}"
+        chunks_indexed: 3
+        cost_usd: "{{generate_embeddings.embeddings.cost_usd}}"
+        source: "{{INPUT.source}}"
+        chunk_ids:
+          - "{{store_chunk_1.result.rows[0].id}}"
+          - "{{store_chunk_2.result.rows[0].id}}"
+          - "{{store_chunk_3.result.rows[0].id}}"
+    depends_on:
+      - store_chunk_1
+      - store_chunk_2
+      - store_chunk_3
