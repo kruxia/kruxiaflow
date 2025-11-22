@@ -209,7 +209,9 @@ if [ "$COVERAGE" = true ]; then
             CMD="$CMD --doc"
             ;;
         all)
-            CMD="$CMD --all-targets"
+            # Use --lib --bins --tests instead of --all-targets to exclude benchmarks
+            # Benchmarks don't accept --test-threads argument
+            CMD="$CMD --lib --bins --tests"
             ;;
     esac
 
@@ -290,7 +292,8 @@ else
             CMD="$CMD --doc"
             ;;
         all)
-            CMD="$CMD --all"
+            # Use explicit flags to exclude benchmarks (they don't accept --test-threads)
+            CMD="$CMD --workspace --lib --bins --tests --doc"
             ;;
     esac
 
