@@ -1,4 +1,12 @@
-# This workflow demonstrates US-3.4: Iterative Workflows (Loops)
+# Example 7a: Simple Agentic Research (Iterative Workflows with Loops)
+#
+# This is a SIMPLIFIED, SELF-CONTAINED introduction to US-3.4: Iterative Workflows (Loops).
+# It uses only LLM activities to simulate research, making it easy to run without external dependencies.
+#
+# For the COMPLETE example with HTTP-based research, structured field extraction, file storage,
+# and dual success/failure paths, see 07b-agentic-research-complete.yaml.
+#
+# What This Example Demonstrates (US-3.4 Core Features):
 # - Loop execution via back-edge (depends_on from later to earlier activity)
 # - Iteration-scoped output storage (arrays of results from each iteration)
 # - Conditional loop exit ({{evaluate.decision | last}} == "SUFFICIENT")
@@ -7,7 +15,14 @@
 # - Accessing all iteration results ({{perform_search.findings}})
 # - Accessing latest iteration result ({{evaluate.decision | last}})
 # - Current iteration counter ({{ACTIVITY.iteration}})
-# 
+#
+# What Makes This "Simple":
+# ✓ Uses only LLM activities (no HTTP requests to external search APIs)
+# ✓ Uses string matching for loop conditions (no structured field extraction yet)
+# ✓ Single success path (no explicit failure handling activity)
+# ✓ Inline JSON results (no file storage with iteration scoping)
+# ✓ Can run immediately with just ANTHROPIC_API_KEY
+#
 # Prerequisites:
 # - ANTHROPIC_API_KEY configured for Claude models
 # 
@@ -85,8 +100,8 @@
 # 1. Having LLMs return simple control strings for flow decisions
 # 2. Or use US-3.4+ Output Field Extraction feature (see implementation plan)
 
-name: agentic_research
-description: Iterative research workflow that loops until sufficient information is gathered
+name: simple_agentic_research
+description: Simple iterative research workflow demonstrating loop fundamentals (LLM-only, no external APIs)
 activities:
   # Step 1: Create research plan (runs once)
   - key: initialize
