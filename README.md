@@ -561,9 +561,9 @@ openssl rsa -in private.pem -pubout -out public.pem
 - 📋 Example 5: Multi-model LLM fallback (4-5 days)
 - 📋 Example 6: Semantic caching (3-4 days)
 - 📋 Example 7: Iterative workflows/loops (5-6 days)
-- 📋 Example 8: Advanced file management (3-4 days)
+- 📋 Example 10: Advanced file management (3-4 days)
 - 📋 Example 9: HTTP/DB advanced features (3-4 days)
-- 📋 Example 10: Scheduled/delayed activities (2-3 days)
+- 📋 Example 8: Scheduled/delayed activities (2-3 days)
 
 **Total: ~32-42 days (6-8 weeks)** - See [MVP Workflows Implementation Plan](docs/implementation/mvp-workflows-implementation-plan.md)
 
