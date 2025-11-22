@@ -1746,6 +1746,10 @@ class TestPaymentWorkflow(WorkflowTest):
   - Worker count (active workers)
   - Database connection pool utilization
   - Error rates (by error type)
+  - **Activity scheduling metrics**:
+    - Scheduled vs immediate activities (ratio)
+    - Scheduling delay distribution (P50, P95, P99 of delay duration)
+    - Activities scheduled in the past (warning count)
 - Custom metrics support
 - Grafana dashboards (pre-built)
 - Alerting rules (Prometheus AlertManager)
@@ -1759,6 +1763,9 @@ streamflow_activity_duration_seconds{worker,name,quantile}
 streamflow_queue_depth{worker,name}
 streamflow_orchestrator_evaluation_duration_seconds{quantile}
 streamflow_db_connections{state="idle|active"}
+streamflow_activities_scheduled_total{type="immediate|delayed"}
+streamflow_activity_schedule_delay_seconds{quantile="0.5|0.95|0.99"}
+streamflow_activities_scheduled_past_total
 ```
 
 **Benefits**:
@@ -2744,108 +2751,6 @@ activities:
 - Better developer experience (clear error messages)
 - Safe conditional loops (retry logic, polling)
 - Confidence in workflow correctness
-
----
-
-### Story 6.9: Delayed Activity Scheduling
-
-**Priority**: P1 (High - Table stakes for workflow orchestrators)
-
-**As** a workflow developer
-**I want** to schedule activities to execute at a specific future time
-**So that** I can implement rate limiting, time-based workflows, and custom backoff strategies
-
-**Current Status**: The ActivityQueue infrastructure fully supports delayed scheduling via the `scheduled_for` field, but the orchestrator currently always passes `None`, scheduling all activities for immediate execution.
-
-**Scope**:
-- Add `scheduled_for` field to `ActivityDefinition` (optional timestamp or duration)
-- Support absolute times (ISO 8601 timestamp)
-- Support relative delays (duration from now: "5m", "1h", "1d")
-- Support delays based on previous activity outputs (dynamic scheduling)
-- Orchestrator passes `scheduled_for` to queue instead of `None`
-- Workers respect `scheduled_for` (already implemented in queue)
-- Metrics on scheduled vs immediate activities
-
-**Example - Fixed Delay**:
-```yaml
-activities:
-  - key: fetch_data
-    worker: api
-    name: get_user_data
-    scheduled_for: "2025-10-30T12:00:00Z"  # Absolute time
-
-  - key: retry_after_delay
-    worker: api
-    name: retry_request
-    scheduled_for: "+5m"  # 5 minutes from now
-```
-
-**Example - Rate Limiting**:
-```yaml
-activities:
-  - key: call_api_1
-    worker: external
-    name: api_call
-    scheduled_for: "+0s"  # Immediate
-
-  - key: call_api_2
-    worker: external
-    name: api_call
-    scheduled_for: "+1s"  # 1 second delay (rate limit)
-    depends_on:
-      - activity_key: call_api_1
-
-  - key: call_api_3
-    worker: external
-    name: api_call
-    scheduled_for: "+1s"  # Another 1 second delay
-    depends_on:
-      - activity_key: call_api_2
-```
-
-**Example - Dynamic Delay from Output**:
-```yaml
-activities:
-  - key: check_status
-    worker: polling
-    name: get_status
-    outputs:
-      - retry_after  # Returns delay in seconds
-
-  - key: retry_check
-    worker: polling
-    name: get_status
-    scheduled_for: "{{check_status.retry_after}}s"  # Dynamic delay
-    depends_on:
-      - activity_key: check_status
-```
-
-**Architecture Reference**:
-- Queue infrastructure: `core/src/queue/models.rs:13` (`scheduled_for` field)
-- Queue implementation: `core/src/queue/postgres_queue.rs:59` (defaults to now)
-- Orchestrator: `core/src/orchestrator/orchestrator.rs:128` (currently passes None)
-
-**Implementation Tasks**:
-1. Add `scheduled_for` field to `ActivityDefinition` model
-2. Parse timestamp/duration strings in orchestrator
-3. Pass computed timestamp to queue instead of None
-4. Add validation (scheduled_for not in past)
-5. Update documentation and examples
-
-**Benefits**:
-- Rate limiting (avoid overwhelming external APIs)
-- Time-based workflows (schedule activities for specific times)
-- Custom backoff strategies at workflow definition level
-- Polling patterns (check status every N seconds)
-- Cost optimization (delay non-urgent activities to off-peak hours)
-- Compliance (delay sensitive operations until business hours)
-
-**Use Cases**:
-- API rate limiting (max 1 call per second)
-- Batch processing (delay until off-peak hours)
-- Polling workflows (check status every 30 seconds)
-- Time-sensitive operations (execute at specific time)
-- Custom retry strategies (exponential backoff at workflow level)
 
 ---
 

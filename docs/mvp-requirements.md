@@ -709,10 +709,14 @@ streamflow/
 - **I want** to schedule activities for future execution or delay them by a specified duration
 - **So that** I can implement rate limiting, scheduled reports, delayed notifications, and time-based workflows
 - **Acceptance Criteria**:
-  - **Relative delays**: `settings.delay_seconds` delays activity execution by specified seconds after it becomes ready
-  - **Absolute scheduling**: `settings.scheduled_at` schedules activity for specific ISO 8601 timestamp
-  - **Template support**: `scheduled_at` supports template expressions like `{{INPUT.deadline}}`
-  - **Validation**: Cannot specify both `delay_seconds` and `scheduled_at` (mutually exclusive)
+  - **Relative delays**: `settings.delay` accepts duration strings with flexible units
+    - Supported units: `s` (seconds), `m` (minutes), `h` (hours), `d` (days), `w` (weeks), `y` (years)
+    - Examples: `"5s"`, `"30m"`, `"2h"`, `"7d"`, `"1w"`, `"1y"`
+    - Template support: `"{{INPUT.delay_amount}}m"` or `"{{check_status.retry_after}}s"`
+  - **Absolute scheduling**: `settings.scheduled_for` schedules activity for specific ISO 8601 timestamp
+    - Supports ISO 8601 format with timezone: `"2025-12-01T09:00:00-08:00"`
+    - Template support: `"{{INPUT.report_deadline}}"`
+  - **Validation**: Cannot specify both `delay` and `scheduled_for` (mutually exclusive)
   - **Infrastructure**: Leverages existing `activity_queue.scheduled_for` column (no schema changes)
   - **Worker behavior**: Workers only claim activities where `scheduled_for <= NOW()`
   - **Use cases**:
@@ -726,16 +730,17 @@ streamflow/
     send_first_reminder:
       activity: http_request
       settings:
-        delay_seconds: 300  # Wait 5 minutes
+        delay: "5m"  # Wait 5 minutes
 
     send_daily_report:
       activity: generate_report
       settings:
-        scheduled_at: "{{INPUT.report_time}}"  # ISO timestamp
+        scheduled_for: "{{INPUT.report_time}}"  # ISO timestamp
   ```
 - **Non-Goal (Post-MVP)**: Event-driven suspension (waiting for external events) - see absurd analysis Phase 2
 - **Implementation Duration**: 2-3 days
 - **Dependencies**: Requires workflow parser, activity executors from Slices 1-7
+- **Implementation Plan**: See `docs/implementation/US-3.7-activity-scheduling.md`
 
 **US-3.8: Database Cleanup with TTL**
 - **As** a platform operator
@@ -1821,9 +1826,11 @@ flowchart TB
 - ✅ **Example 7**: Iterative workflows/loops (completed 2025-11-22)
   - 07a-agentic-research-simple.yaml (simplified LLM-only loops)
   - 07b-agentic-research-complete.yaml (full spec: HTTP search, file iteration, dual paths)
-- 📋 **Example 8**: Advanced file management (3-4 days)
+- 📋 **Example 8**: Activity scheduling and delays (2-3 days) - **NEXT PRIORITY**
+  - US-3.7: Table stakes feature required before token streaming
+  - 08a-rate-limited-api-calls.yaml, 08b-scheduled-daily-report.yaml, 08c-delayed-reminders.yaml
 - 📋 **Example 9**: HTTP/DB advanced features (3-4 days)
-- 📋 **Example 10**: Scheduled/delayed activities (2-3 days)
+- 📋 **Example 10**: Advanced file management (3-4 days)
 
 **Phase 5: Epic 2 Performance Benchmarking** 📋 **DEFERRED**
 - Establish performance baseline after Epic 3 completion

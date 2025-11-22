@@ -1437,124 +1437,244 @@ activities:
 
 ---
 
-### Example 8: Advanced File Management Features
-**Duration**: 3-4 days
-**Epic 3**: (No new YAML features)
-**Epic 5**: US-5.4 (Object Storage and File Management - Complete)
+### Example 8: Activity Scheduling and Delays
+**Duration**: 2-3 days
+**Epic 3**: US-3.7 (Activity Scheduling and Delays)
+**Epic 5**: (No new activities - exposes existing infrastructure)
+**Status**: 📋 Ready for Implementation
+**Implementation Plan**: See `docs/implementation/US-3.7-activity-scheduling.md` for detailed plan
+**Example Workflows**:
+- 08a-rate-limited-api-calls.yaml: Rate limiting with delay (supports s/m/h/d/w/y)
+- 08b-scheduled-daily-report.yaml: Absolute scheduling with scheduled_for
+- 08c-delayed-reminders.yaml: Cascading delays for reminder system
 
-#### Example Workflow: ETL Pipeline with File Lifecycle Management
+#### Example Workflow 8a: Rate Limiting with Delays
+Demonstrates using `delay` with flexible duration units to respect API rate limits.
+
 ```yaml
-name: data_pipeline
-description: ETL pipeline demonstrating advanced file management with external storage integration
+name: rate_limited_api_calls
+description: Make multiple API calls with delays to respect rate limits
 
 activities:
-  # Fetch raw data from external S3 bucket (not workflow storage)
-  fetch_raw_data:
-    activity: s3_get
+  - key: call_api_1
+    activity_name: http_request
     parameters:
-      bucket: "{{INPUT.source_bucket}}"
-      key: "raw/data-{{INPUT.date}}.csv"
-      region: "us-east-1"
+      method: GET
+      url: "https://api.example.com/data?page=1"
     outputs:
-      - name: raw_data
-        type: file  # Downloaded and stored in workflow storage
+      - result
 
-  # Transform the data (reads from workflow storage, writes to workflow storage)
-  transform_data:
-    activity: python_script
+  - key: call_api_2
+    activity_name: http_request
     parameters:
-      script: |
-        import pandas as pd
-        # File path provided by framework
-        df = pd.read_csv(input_files['raw_data'])
-        df_transformed = df.transform(...)
-        df_transformed.to_parquet(output_files['transformed_data'])
-      files:
-        raw_data: "{{FILE.fetch_raw_data.raw_data}}"
+      method: GET
+      url: "https://api.example.com/data?page=2"
     outputs:
-      - name: transformed_data
-        type: file
+      - result
+    settings:
+      delay: "5s"  # Wait 5 seconds (rate limit: 1 req/5sec)
+    depends_on:
+      - call_api_1
 
-  validate_output:
-    activity: python_script
+  - key: call_api_3
+    activity_name: http_request
     parameters:
-      script: |
-        import pandas as pd
-        df = pd.read_parquet(input_files['data'])
-        assert len(df) > 0
-        # Return validation metadata as JSON
-        return {"row_count": len(df), "valid": True}
-      files:
-        data: "{{FILE.transform_data.transformed_data}}"
+      method: GET
+      url: "https://api.example.com/data?page=3"
     outputs:
-      - name: validation_result  # JSON output, not a file
+      - result
+    settings:
+      delay: "5s"  # Wait another 5 seconds
     depends_on:
-      - transform_data
-
-  # Upload result to external destination S3 bucket
-  upload_result:
-    activity: s3_put
-    parameters:
-      bucket: "{{INPUT.dest_bucket}}"
-      key: "processed/data-{{INPUT.date}}.parquet"
-      region: "us-east-1"
-      file: "{{FILE.transform_data.transformed_data}}"
-      metadata:
-        source: "streamflow-etl"
-        row_count: "{{validate_output.validation_result.row_count}}"
-    depends_on:
-      - validate_output
-
-  # Delete source file from external S3 (not workflow storage)
-  cleanup_source:
-    activity: s3_delete
-    parameters:
-      bucket: "{{INPUT.source_bucket}}"
-      key: "raw/data-{{INPUT.date}}.csv"
-      region: "us-east-1"
-    depends_on:
-      - upload_result
+      - call_api_2
 ```
 
+**Use Case**: Sequential API calls with mandatory delays to respect rate limits.
+**Duration Units**: Supports s/m/h/d/w/y (e.g., `"30m"`, `"2h"`, `"7d"`).
+
+#### Example Workflow 8b: Scheduled Report Generation
+Demonstrates using `scheduled_for` with absolute timestamps for scheduled reports.
+
+```yaml
+name: scheduled_daily_report
+description: Generate and send daily report at specific time
+
+activities:
+  - key: generate_report
+    activity_name: llm_prompt
+    parameters:
+      model: anthropic/claude-sonnet-4-5-20250929
+      prompt: "Generate a daily summary report for {{INPUT.report_date}}..."
+      max_tokens: 2000
+    outputs:
+      - result
+    settings:
+      # Schedule for specific time (e.g., 9:00 AM Pacific)
+      # Input format: "2025-12-01T09:00:00-08:00"
+      scheduled_for: "{{INPUT.report_time}}"
+      budget:
+        limit_usd: 0.10
+        action: abort
+
+  - key: send_report
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.notification_webhook}}"
+      body:
+        subject: "Daily Report - {{INPUT.report_date}}"
+        content: "{{generate_report.result.content}}"
+    depends_on:
+      - generate_report
+```
+
+**Use Case**: Scheduled reports at specific times using dynamic timestamps from workflow input.
+
+#### Example Workflow 8c: Cascading Delayed Reminders
+Demonstrates combining delays with conditionals for reminder workflows.
+
+```yaml
+name: delayed_reminder_system
+description: Send escalating reminders after delays
+
+activities:
+  - key: send_initial_notification
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.user_webhook}}"
+      body:
+        message: "Task assigned: {{INPUT.task_name}}"
+        priority: "normal"
+
+  - key: send_first_reminder
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.user_webhook}}"
+      body:
+        message: "Reminder: {{INPUT.task_name}} is still pending"
+    settings:
+      delay: "1h"  # Wait 1 hour
+    depends_on:
+      - send_initial_notification
+
+  - key: send_escalated_reminder
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.manager_webhook}}"
+      body:
+        message: "ESCALATED: {{INPUT.task_name}} pending for 4 hours"
+        priority: "high"
+    settings:
+      delay: "3h"  # Wait 3 more hours (4 hours total)
+    depends_on:
+      - send_first_reminder
+
+  - key: send_final_escalation
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.oncall_webhook}}"
+      body:
+        message: "CRITICAL: {{INPUT.task_name}} pending for 24 hours"
+        priority: "critical"
+    settings:
+      delay: "20h"  # Wait 20 more hours (24 hours total)
+    depends_on:
+      - send_escalated_reminder
+```
+
+**Use Case**: Escalating reminder system with increasing urgency over time.
+
 #### YAML Features Implemented
-- ✅ `{{FILE.activity_key.output_name}}` - Reference files from previous activities
-- ✅ `{{FOLDER.activity_key.folder_name}}` - Reference folders (when needed)
-- ✅ Mixed file and JSON outputs in same workflow
+
+**New Features (US-3.7)**:
+- ✅ `settings.delay` - Delay activity execution with flexible units (s/m/h/d/w/y)
+- ✅ `settings.scheduled_for` - Schedule activity for absolute timestamp (ISO 8601)
+- ✅ Template support in `scheduled_for` - Dynamic scheduling from workflow inputs
+
+**Existing Features Used**:
+- Sequential dependencies (`depends_on`)
+- Conditional execution
+- Template expressions (`{{INPUT.*}}`)
+- HTTP request activity
 
 #### Built-in Activities Implemented
-- ✅ `s3_get` - Fetch file from external S3 bucket into workflow storage
-- ✅ `s3_put` - Upload file from workflow storage to external S3 bucket
-- ✅ `s3_delete` - Delete file from external S3 bucket
-- ✅ `s3_list` - List files in external S3 bucket (for dynamic workflows)
-- ✅ `python_script` - Execute Python with file inputs/outputs
-- ✅ Multi-cloud support (GCS, Azure Blob, MinIO)
+
+**No New Activities**:
+- Uses existing `http_request` activity
+- Scheduling is a YAML feature, not an activity feature
 
 #### Implementation Tasks
-1. **External storage integration**:
-   - S3 operations (get, put, delete, list) for external buckets
-   - GCS, Azure Blob, MinIO provider implementations
-   - Authentication per provider
-2. **Python activity with file support**:
-   - Provide `input_files` dict with local paths
-   - Provide `output_files` dict for writing results
-   - Automatic upload of file outputs
-3. **File lifecycle management**:
-   - Automatic cleanup of workflow files based on retention policy
-   - Metadata tagging: workflow_id, activity_key, timestamp
-   - Storage backend configuration (local, S3, GCS, etc.)
-4. **Advanced features**:
-   - Signed URL generation for time-limited access
-   - Large file streaming (no full memory load)
-   - Compression support (gzip, zstd)
-5. End-to-end test: ETL pipeline with external S3 integration, verify cleanup
+
+**1. Update ActivitySettings Model**
+- Add `delay: Option<String>` field (duration string: "5s", "30m", "2h", "7d")
+- Add `scheduled_for: Option<String>` field (ISO 8601 timestamp)
+- Validation: `scheduled_for` must be valid ISO 8601 or template expression
+- Validation: Cannot specify both `delay` and `scheduled_for`
+- Duration parsing: Regex `^(\d+)(s|m|h|d|w|y)$` with unit conversion
+
+**2. Update Orchestrator Activity Scheduling**
+- When scheduling activity, check `settings.delay`
+- If present, parse duration string and calculate `scheduled_for = NOW() + delay`
+- If `scheduled_for` present, parse timestamp and use as `scheduled_for`
+- Template evaluation: Resolve `{{INPUT.*}}` expressions before parsing timestamp or duration
+
+**3. Database Changes**
+- ✅ **No changes needed** - `activity_queue.scheduled_for` already exists
+- ✅ Worker polling already filters by `scheduled_for <= NOW()`
+
+**4. Testing**
+- Unit tests for ActivitySettings validation
+- Integration test: Verify delayed activity doesn't execute early
+- Integration test: Verify scheduled activity executes at correct time
+- Integration test: Verify template resolution in `scheduled_for`
+- End-to-end test with example workflow
+
+**5. Documentation**
+- Update workflow definition language docs
+- Add scheduling examples to documentation
+- Document use cases: rate limiting, delayed retries, scheduled reports
 
 #### Success Criteria
-- ✅ Files pass between activities without JSON serialization
-- ✅ External S3 operations (get, put, delete, list) work correctly
-- ✅ Python activities can read/write files
-- ✅ Multi-cloud storage providers supported
-- ✅ Workflow files automatically cleaned up after retention period
-- ✅ Large files (>100MB) handled efficiently
+
+**Functional**:
+- ✅ Activities can be delayed with flexible duration units (`delay`: "5s", "30m", "2h", "7d", "1w", "1y")
+- ✅ Activities can be scheduled for absolute time (`scheduled_for`)
+- ✅ Templates work in `scheduled_for` parameter
+- ✅ Templates work in `delay` parameter
+- ✅ Workers don't claim activities before `scheduled_for` time
+- ✅ Validation prevents both `delay` and `scheduled_for` together
+- ✅ Example workflows run successfully:
+  - `examples/08a-rate-limited-api-calls.yaml`
+  - `examples/08b-scheduled-daily-report.yaml`
+  - `examples/08c-delayed-reminders.yaml`
+
+**Non-Functional**:
+- ✅ No performance degradation (existing index supports scheduled queries)
+- ✅ Scheduled activities don't consume worker resources while waiting
+- ✅ Time precision: Activities execute within 1 second of scheduled time (polling interval)
+
+#### Implementation Notes
+
+**Why This is Simple**:
+- Database infrastructure already exists (`activity_queue.scheduled_for`)
+- Workers already filter by `scheduled_for <= NOW()`
+- Just need to expose in YAML and wire up in orchestrator
+
+**Design Decisions**:
+1. **Relative vs Absolute Time**:
+   - `delay`: Relative to when activity becomes ready, supports s/m/h/d/w/y units (simple, common case)
+   - `scheduled_for`: Absolute timestamp (for scheduled reports, deadlines)
+2. **Mutually Exclusive**: Cannot specify both (validation error)
+3. **Template Support**: Both `delay` and `scheduled_for` can use templates for dynamic scheduling
+4. **No Event Suspension (Yet)**: This example only covers time-based delays, not external events
+5. **Field Naming**: `scheduled_for` matches database column name and is semantically clearer than `scheduled_for`
+
+**Post-MVP Enhancement**:
+- Event-driven suspension (`wait_for_event` activity) - see absurd analysis Section 2, Phase 2
 
 ---
 
@@ -1705,171 +1825,124 @@ activities:
 
 ---
 
-### Example 10: Scheduled and Delayed Activities
-**Duration**: 2-3 days
-**Epic 3**: US-3.7 (Activity Scheduling and Delays)
-**Epic 5**: (No new activities - exposes existing infrastructure)
-**Status**: Not Started
+### Example 10: Advanced File Management Features
+**Duration**: 3-4 days
+**Epic 3**: (No new YAML features)
+**Epic 5**: US-5.4 (Object Storage and File Management - Complete)
 
-#### Example Workflow: Scheduled Reminder System
+#### Example Workflow: ETL Pipeline with File Lifecycle Management
 ```yaml
-name: reminder_system
-description: Scheduled reminder system demonstrating activity delays and absolute scheduling
+name: data_pipeline
+description: ETL pipeline demonstrating advanced file management with external storage integration
 
 activities:
-  # Step 1: Validate the reminder request immediately
-  validate_reminder:
-    activity_name: http_request
+  # Fetch raw data from external S3 bucket (not workflow storage)
+  fetch_raw_data:
+    activity: s3_get
     parameters:
-      method: POST
-      url: "{{INPUT.validation_api}}"
-      headers:
-        Content-Type: "application/json"
-      body:
-        recipient: "{{INPUT.recipient}}"
-        message: "{{INPUT.message}}"
-        reminder_count: 3
+      bucket: "{{INPUT.source_bucket}}"
+      key: "raw/data-{{INPUT.date}}.csv"
+      region: "us-east-1"
     outputs:
-      - validation_result
+      - name: raw_data
+        type: file  # Downloaded and stored in workflow storage
 
-  # Step 2: Wait 5 minutes before sending first reminder
-  # Uses delay_seconds to wait after validation completes
-  send_first_reminder:
-    activity_name: http_request
+  # Transform the data (reads from workflow storage, writes to workflow storage)
+  transform_data:
+    activity: python_script
     parameters:
-      method: POST
-      url: "{{INPUT.notification_webhook}}"
-      headers:
-        Content-Type: "application/json"
-      body:
-        recipient: "{{INPUT.recipient}}"
-        message: "Reminder (1/3): {{INPUT.message}}"
-        timestamp: "{{WORKFLOW.current_time}}"
-    settings:
-      delay_seconds: 300  # Wait 5 minutes after validation completes
-    depends_on:
-      - validate_reminder:
-          condition: "{{validate_reminder.validation_result.valid}} == true"
+      script: |
+        import pandas as pd
+        # File path provided by framework
+        df = pd.read_csv(input_files['raw_data'])
+        df_transformed = df.transform(...)
+        df_transformed.to_parquet(output_files['transformed_data'])
+      files:
+        raw_data: "{{FILE.fetch_raw_data.raw_data}}"
+    outputs:
+      - name: transformed_data
+        type: file
 
-  # Step 3: Wait 1 hour before second reminder
-  # Demonstrates longer delay between sequential activities
-  send_second_reminder:
-    activity_name: http_request
+  validate_output:
+    activity: python_script
     parameters:
-      method: POST
-      url: "{{INPUT.notification_webhook}}"
-      headers:
-        Content-Type: "application/json"
-      body:
-        recipient: "{{INPUT.recipient}}"
-        message: "Reminder (2/3): {{INPUT.message}}"
-        timestamp: "{{WORKFLOW.current_time}}"
-    settings:
-      delay_seconds: 3600  # Wait 1 hour after first reminder
+      script: |
+        import pandas as pd
+        df = pd.read_parquet(input_files['data'])
+        assert len(df) > 0
+        # Return validation metadata as JSON
+        return {"row_count": len(df), "valid": True}
+      files:
+        data: "{{FILE.transform_data.transformed_data}}"
+    outputs:
+      - name: validation_result  # JSON output, not a file
     depends_on:
-      - send_first_reminder
+      - transform_data
 
-  # Step 4: Schedule final reminder for specific deadline
-  # Uses absolute timestamp scheduling via scheduled_at
-  send_final_reminder:
-    activity_name: http_request
+  # Upload result to external destination S3 bucket
+  upload_result:
+    activity: s3_put
     parameters:
-      method: POST
-      url: "{{INPUT.notification_webhook}}"
-      headers:
-        Content-Type: "application/json"
-      body:
-        recipient: "{{INPUT.recipient}}"
-        message: "Final Reminder (3/3): {{INPUT.message}}"
-        deadline: "{{INPUT.deadline}}"
-        timestamp: "{{WORKFLOW.current_time}}"
-    settings:
-      scheduled_at: "{{INPUT.deadline}}"  # Absolute ISO 8601 timestamp
+      bucket: "{{INPUT.dest_bucket}}"
+      key: "processed/data-{{INPUT.date}}.parquet"
+      region: "us-east-1"
+      file: "{{FILE.transform_data.transformed_data}}"
+      metadata:
+        source: "streamflow-etl"
+        row_count: "{{validate_output.validation_result.row_count}}"
     depends_on:
-      - send_second_reminder
+      - validate_output
+
+  # Delete source file from external S3 (not workflow storage)
+  cleanup_source:
+    activity: s3_delete
+    parameters:
+      bucket: "{{INPUT.source_bucket}}"
+      key: "raw/data-{{INPUT.date}}.csv"
+      region: "us-east-1"
+    depends_on:
+      - upload_result
 ```
 
 #### YAML Features Implemented
-
-**New Features (US-3.7)**:
-- ✅ `settings.delay_seconds` - Delay activity execution by specified seconds
-- ✅ `settings.scheduled_at` - Schedule activity for absolute timestamp (ISO 8601)
-- ✅ Template support in `scheduled_at` - Dynamic scheduling from workflow inputs
-
-**Existing Features Used**:
-- Sequential dependencies (`depends_on`)
-- Conditional execution
-- Template expressions (`{{INPUT.*}}`)
-- HTTP request activity
+- ✅ `{{FILE.activity_key.output_name}}` - Reference files from previous activities
+- ✅ `{{FOLDER.activity_key.folder_name}}` - Reference folders (when needed)
+- ✅ Mixed file and JSON outputs in same workflow
 
 #### Built-in Activities Implemented
-
-**No New Activities**:
-- Uses existing `http_request` activity
-- Scheduling is a YAML feature, not an activity feature
+- ✅ `s3_get` - Fetch file from external S3 bucket into workflow storage
+- ✅ `s3_put` - Upload file from workflow storage to external S3 bucket
+- ✅ `s3_delete` - Delete file from external S3 bucket
+- ✅ `s3_list` - List files in external S3 bucket (for dynamic workflows)
+- ✅ `python_script` - Execute Python with file inputs/outputs
+- ✅ Multi-cloud support (GCS, Azure Blob, MinIO)
 
 #### Implementation Tasks
-
-**1. Update ActivitySettings Model**
-- Add `delay_seconds: Option<u64>` field
-- Add `scheduled_at: Option<String>` field (ISO 8601 timestamp)
-- Validation: `scheduled_at` must be valid ISO 8601 or template expression
-- Validation: Cannot specify both `delay_seconds` and `scheduled_at`
-
-**2. Update Orchestrator Activity Scheduling**
-- When scheduling activity, check `settings.delay_seconds`
-- If present, calculate `scheduled_for = NOW() + delay_seconds`
-- If `scheduled_at` present, parse timestamp and use as `scheduled_for`
-- Template evaluation: Resolve `{{INPUT.*}}` expressions before parsing timestamp
-
-**3. Database Changes**
-- ✅ **No changes needed** - `activity_queue.scheduled_for` already exists
-- ✅ Worker polling already filters by `scheduled_for <= NOW()`
-
-**4. Testing**
-- Unit tests for ActivitySettings validation
-- Integration test: Verify delayed activity doesn't execute early
-- Integration test: Verify scheduled activity executes at correct time
-- Integration test: Verify template resolution in `scheduled_at`
-- End-to-end test with example workflow
-
-**5. Documentation**
-- Update workflow definition language docs
-- Add scheduling examples to documentation
-- Document use cases: rate limiting, delayed retries, scheduled reports
+1. **External storage integration**:
+   - S3 operations (get, put, delete, list) for external buckets
+   - GCS, Azure Blob, MinIO provider implementations
+   - Authentication per provider
+2. **Python activity with file support**:
+   - Provide `input_files` dict with local paths
+   - Provide `output_files` dict for writing results
+   - Automatic upload of file outputs
+3. **File lifecycle management**:
+   - Automatic cleanup of workflow files based on retention policy
+   - Metadata tagging: workflow_id, activity_key, timestamp
+   - Storage backend configuration (local, S3, GCS, etc.)
+4. **Advanced features**:
+   - Signed URL generation for time-limited access
+   - Large file streaming (no full memory load)
+   - Compression support (gzip, zstd)
+5. End-to-end test: ETL pipeline with external S3 integration, verify cleanup
 
 #### Success Criteria
-
-**Functional**:
-- ✅ Activities can be delayed by seconds (`delay_seconds`)
-- ✅ Activities can be scheduled for absolute time (`scheduled_at`)
-- ✅ Templates work in `scheduled_at` parameter
-- ✅ Workers don't claim activities before `scheduled_for` time
-- ✅ Validation prevents both `delay_seconds` and `scheduled_at` together
-- ✅ Example workflow `docs/implementation/future-examples/10-reminder-system.yaml` runs successfully
-
-**Non-Functional**:
-- ✅ No performance degradation (existing index supports scheduled queries)
-- ✅ Scheduled activities don't consume worker resources while waiting
-- ✅ Time precision: Activities execute within 1 second of scheduled time (polling interval)
-
-#### Implementation Notes
-
-**Why This is Simple**:
-- Database infrastructure already exists (`activity_queue.scheduled_for`)
-- Workers already filter by `scheduled_for <= NOW()`
-- Just need to expose in YAML and wire up in orchestrator
-
-**Design Decisions**:
-1. **Relative vs Absolute Time**:
-   - `delay_seconds`: Relative to when activity becomes ready (simple, common case)
-   - `scheduled_at`: Absolute timestamp (for scheduled reports, deadlines)
-2. **Mutually Exclusive**: Cannot specify both (validation error)
-3. **Template Support**: `scheduled_at` can use templates for dynamic scheduling
-4. **No Event Suspension (Yet)**: This example only covers time-based delays, not external events
-
-**Post-MVP Enhancement**:
-- Event-driven suspension (`wait_for_event` activity) - see absurd analysis Section 2, Phase 2
+- ✅ Files pass between activities without JSON serialization
+- ✅ External S3 operations (get, put, delete, list) work correctly
+- ✅ Python activities can read/write files
+- ✅ Multi-cloud storage providers supported
+- ✅ Workflow files automatically cleaned up after retention period
+- ✅ Large files (>100MB) handled efficiently
 
 ---
 
@@ -2072,7 +2145,7 @@ tokio::spawn(cleanup_worker.run());
 | 7                     | 5-6 days   | (Example 7 content if needed, or skip - US-3.4 done in Ex. 6)  | Epic 3                     | 32-40           |
 | 8                     | 3-4 days   | Advanced file management, external storage                      | Epic 5                     | 35-44           |
 | 9                     | 3-4 days   | HTTP/DB advanced features                                       | Epic 5                     | 38-48           |
-| 10                    | 2-3 days   | Activity scheduling (delay_seconds, scheduled_at)               | Epic 3                     | 40-51           |
+| 10                    | 2-3 days   | Activity scheduling (delay, scheduled_for)                     | Epic 3                     | 40-51           |
 | **US-3.6**            | 4-5 days   | **CLI Tooling** (validate, test, visualize)                    | **Epic 3**                 | **44-56**       |
 
 **Notes**:

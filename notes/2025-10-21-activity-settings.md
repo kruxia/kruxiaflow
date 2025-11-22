@@ -83,7 +83,7 @@ Key Points:
 1. retry_policy and retry_strategy are mutually exclusive - use one or the other
 2. timeout is optional and only needed for activities that might timeout
 3. budget is optional and used for cost-constrained workflows
-4. scheduled_at is optional for delayed activity execution
+4. scheduled_for is optional for delayed activity execution
 5. The settings block itself is optional - if omitted, defaults are used
 
 Minimal Example (Using Defaults):
