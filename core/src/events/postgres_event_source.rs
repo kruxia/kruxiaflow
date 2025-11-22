@@ -23,14 +23,15 @@ impl EventSource for PostgresEventSource {
     async fn publish(&self, event: NewWorkflowEvent) -> Result<()> {
         sqlx::query!(
             r#"
-            INSERT INTO workflow_events (workflow_id, event_type, activity_key, payload)
-            VALUES ($1, $2, $3, $4)
-            ON CONFLICT (workflow_id, event_type, activity_key) DO NOTHING
+            INSERT INTO workflow_events (workflow_id, event_type, activity_key, payload, iteration)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (workflow_id, event_type, activity_key, iteration) DO NOTHING
             "#,
             event.workflow_id,
             event.event_type as WorkflowEventType,
             event.activity_key,
-            event.payload
+            event.payload,
+            event.iteration
         )
         .execute(&self.pool)
         .await?;
@@ -47,7 +48,7 @@ impl EventSource for PostgresEventSource {
         let events = sqlx::query_as!(
             WorkflowEvent,
             r#"
-            SELECT e.id, e.workflow_id, e.event_type as "event_type: WorkflowEventType", e.activity_key, e.payload, e.timestamp
+            SELECT e.id, e.workflow_id, e.event_type as "event_type: WorkflowEventType", e.activity_key, e.payload, e.timestamp, e.iteration
             FROM workflow_events e
             LEFT JOIN workflow_event_consumers c ON c.consumer_id = $1
             WHERE c.last_event_id IS NULL OR e.id > c.last_event_id

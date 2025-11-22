@@ -22,6 +22,7 @@ fn test_workflow_definition_from_core_to_dto() {
                 dependency_of: Some(vec![workflow::ActivityRelationship {
                     activity_key: "step2".to_string(),
                     conditions: Some(vec!["condition1".to_string()]),
+                    is_back_edge: false,
                 }]),
                 settings: Some(workflow::ActivitySettings {
                     timeout_seconds: Some(300),
@@ -35,8 +36,12 @@ fn test_workflow_definition_from_core_to_dto() {
                     budget: None,
                     cache: false,
                     cache_ttl: None,
+                    iteration_limit: None,
                 }),
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             workflow::ActivityDefinition {
                 key: "step2".to_string(),
@@ -46,10 +51,14 @@ fn test_workflow_definition_from_core_to_dto() {
                 depends_on: Some(vec![workflow::ActivityRelationship {
                     activity_key: "step1".to_string(),
                     conditions: None,
+                    is_back_edge: false,
                 }]),
                 dependency_of: None,
                 settings: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
         ],
     };
@@ -114,6 +123,7 @@ fn test_workflow_definition_from_dto_to_core() {
             dependency_of: Some(vec![dto::ActivityRelationship {
                 activity_key: "step2".to_string(),
                 conditions: None,
+                is_back_edge: false,
             }]),
             settings: Some(dto::ActivitySettings {
                 timeout_seconds: Some(300),
@@ -127,8 +137,12 @@ fn test_workflow_definition_from_dto_to_core() {
                 budget: None,
                 cache: false,
                 cache_ttl: None,
+                iteration_limit: None,
             }),
             output_definitions: None,
+            iteration_scoped: false,
+            iteration_limit: None,
+            is_loop_activity: false,
         }],
     };
 
@@ -161,6 +175,7 @@ fn test_activity_relationship_conversions() {
     let core_rel = workflow::ActivityRelationship {
         activity_key: "next_step".to_string(),
         conditions: Some(vec!["success".to_string()]),
+        is_back_edge: false,
     };
 
     let dto_rel: dto::ActivityRelationship = core_rel.clone().into();
@@ -171,6 +186,7 @@ fn test_activity_relationship_conversions() {
     let dto_rel2 = dto::ActivityRelationship {
         activity_key: "prev_step".to_string(),
         conditions: None,
+        is_back_edge: false,
     };
 
     let core_rel2: workflow::ActivityRelationship = dto_rel2.clone().into();
@@ -193,6 +209,7 @@ fn test_activity_settings_conversions() {
         budget: None,
         cache: false,
         cache_ttl: None,
+        iteration_limit: None,
     };
 
     let dto_settings: dto::ActivitySettings = core_settings.clone().into();
@@ -214,6 +231,7 @@ fn test_activity_settings_conversions() {
         budget: None,
         cache: false,
         cache_ttl: None,
+        iteration_limit: None,
     };
 
     let core_settings2: workflow::ActivitySettings = dto_settings2.clone().into();
@@ -323,6 +341,9 @@ fn test_activity_definition_with_minimal_fields() {
         dependency_of: None,
         settings: None,
         output_definitions: None,
+        iteration_scoped: false,
+        iteration_limit: None,
+        is_loop_activity: false,
     };
 
     let dto_activity: dto::ActivityDefinition = core_activity.clone().into();
@@ -344,6 +365,9 @@ fn test_activity_definition_with_minimal_fields() {
         dependency_of: None,
         settings: None,
         output_definitions: None,
+        iteration_scoped: false,
+        iteration_limit: None,
+        is_loop_activity: false,
     };
 
     let core_activity2: workflow::ActivityDefinition = dto_activity2.clone().into();
@@ -372,14 +396,19 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                     workflow::ActivityRelationship {
                         activity_key: "middle1".to_string(),
                         conditions: None,
+                        is_back_edge: false,
                     },
                     workflow::ActivityRelationship {
                         activity_key: "middle2".to_string(),
                         conditions: Some(vec!["branch".to_string()]),
+                        is_back_edge: false,
                     },
                 ]),
                 settings: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             workflow::ActivityDefinition {
                 key: "middle1".to_string(),
@@ -392,10 +421,12 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                 depends_on: Some(vec![workflow::ActivityRelationship {
                     activity_key: "start".to_string(),
                     conditions: None,
+                    is_back_edge: false,
                 }]),
                 dependency_of: Some(vec![workflow::ActivityRelationship {
                     activity_key: "end".to_string(),
                     conditions: None,
+                    is_back_edge: false,
                 }]),
                 settings: Some(workflow::ActivitySettings {
                     timeout_seconds: Some(100),
@@ -403,8 +434,12 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                     budget: None,
                     cache: false,
                     cache_ttl: None,
+                    iteration_limit: None,
                 }),
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             workflow::ActivityDefinition {
                 key: "middle2".to_string(),
@@ -417,10 +452,12 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                 depends_on: Some(vec![workflow::ActivityRelationship {
                     activity_key: "start".to_string(),
                     conditions: Some(vec!["branch".to_string()]),
+                    is_back_edge: false,
                 }]),
                 dependency_of: Some(vec![workflow::ActivityRelationship {
                     activity_key: "end".to_string(),
                     conditions: None,
+                    is_back_edge: false,
                 }]),
                 settings: Some(workflow::ActivitySettings {
                     timeout_seconds: Some(500),
@@ -434,8 +471,12 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                     budget: None,
                     cache: false,
                     cache_ttl: None,
+                    iteration_limit: None,
                 }),
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
             workflow::ActivityDefinition {
                 key: "end".to_string(),
@@ -446,15 +487,20 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                     workflow::ActivityRelationship {
                         activity_key: "middle1".to_string(),
                         conditions: None,
+                        is_back_edge: false,
                     },
                     workflow::ActivityRelationship {
                         activity_key: "middle2".to_string(),
                         conditions: None,
+                        is_back_edge: false,
                     },
                 ]),
                 dependency_of: None,
                 settings: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             },
         ],
     };

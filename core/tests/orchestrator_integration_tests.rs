@@ -142,6 +142,7 @@ async fn test_sequential_workflow_integration() {
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,
             payload: json!({}),
+            iteration: None,
         })
         .await
         .expect("Failed to publish WorkflowCreated");
@@ -183,6 +184,7 @@ async fn test_sequential_workflow_integration() {
             event_type: WorkflowEventType::ActivityCompleted,
             activity_key: Some("activity1".to_string()),
             payload: json!({"outputs": {"result": "success"}}),
+            iteration: None,
         })
         .await
         .expect("Failed to publish ActivityCompleted");
@@ -327,6 +329,7 @@ async fn test_parallel_workflow_integration() {
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,
             payload: json!({}),
+            iteration: None,
         })
         .await
         .expect("Failed to publish WorkflowCreated");
@@ -366,6 +369,7 @@ async fn test_parallel_workflow_integration() {
             event_type: WorkflowEventType::ActivityCompleted,
             activity_key: Some("root".to_string()),
             payload: json!({"outputs": {"result": "success"}}),
+            iteration: None,
         })
         .await
         .expect("Failed to publish ActivityCompleted");
@@ -413,6 +417,7 @@ async fn test_parallel_workflow_integration() {
                 event_type: WorkflowEventType::ActivityCompleted,
                 activity_key: Some(key.to_string()),
                 payload: json!({"outputs": {"result": "success"}}),
+                iteration: None,
             })
             .await
             .expect("Failed to publish ActivityCompleted");
@@ -521,6 +526,7 @@ async fn test_conditional_workflow_integration() {
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,
             payload: json!({}),
+            iteration: None,
         })
         .await
         .expect("Failed to publish WorkflowCreated");
@@ -548,6 +554,7 @@ async fn test_conditional_workflow_integration() {
             event_type: WorkflowEventType::ActivityCompleted,
             activity_key: Some("validate".to_string()),
             payload: json!({"outputs": {"valid": true}}),
+            iteration: None,
         })
         .await
         .expect("Failed to publish ActivityCompleted");
@@ -625,6 +632,7 @@ async fn test_workflow_completion_success() {
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,
             payload: json!({}),
+            iteration: None,
         })
         .await
         .expect("Failed to publish WorkflowCreated");
@@ -652,6 +660,7 @@ async fn test_workflow_completion_success() {
             event_type: WorkflowEventType::ActivityCompleted,
             activity_key: Some("only_activity".to_string()),
             payload: json!({"outputs": {"result": "success"}}),
+            iteration: None,
         })
         .await
         .expect("Failed to publish ActivityCompleted");
@@ -749,6 +758,7 @@ async fn test_workflow_failure() {
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,
             payload: json!({}),
+            iteration: None,
         })
         .await
         .expect("Failed to publish WorkflowCreated");
@@ -776,6 +786,7 @@ async fn test_workflow_failure() {
             event_type: WorkflowEventType::ActivityFailed,
             activity_key: Some("failing_activity".to_string()),
             payload: json!({"error": "Simulated failure"}),
+            iteration: None,
         })
         .await
         .expect("Failed to publish ActivityFailed");
@@ -905,6 +916,7 @@ async fn test_workflow_completion_with_multiple_activities() {
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,
             payload: json!({}),
+            iteration: None,
         })
         .await
         .expect("Failed to publish");
@@ -929,6 +941,7 @@ async fn test_workflow_completion_with_multiple_activities() {
                 event_type: WorkflowEventType::ActivityCompleted,
                 activity_key: Some(step.to_string()),
                 payload: json!({"outputs": {}}),
+                iteration: None,
             })
             .await
             .unwrap();
@@ -1003,6 +1016,7 @@ async fn test_activity_scheduled_events_published() {
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,
             payload: json!({}),
+            iteration: None,
         })
         .await
         .unwrap();
@@ -1077,6 +1091,7 @@ async fn test_run_orchestrator_loop() {
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,
             payload: json!({}),
+            iteration: None,
         })
         .await
         .unwrap();
@@ -1118,6 +1133,7 @@ async fn test_run_orchestrator_loop() {
             event_type: WorkflowEventType::ActivityCompleted,
             activity_key: Some("task1".to_string()),
             payload: json!({"outputs": {}}),
+            iteration: None,
         })
         .await
         .unwrap();

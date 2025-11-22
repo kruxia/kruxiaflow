@@ -73,6 +73,18 @@ pub struct ActivityDefinition {
     /// Activity-level settings (timeout, retry, etc.)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<ActivitySettings>,
+
+    /// Whether to store separate outputs for each iteration
+    #[serde(default)]
+    pub iteration_scoped: bool,
+
+    /// Maximum number of iterations (prevents infinite loops)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub iteration_limit: Option<u32>,
+
+    /// Cached metadata: whether this activity is part of a loop
+    #[serde(default)]
+    pub is_loop_activity: bool,
 }
 
 impl From<streamflow_core::workflow::ActivityDefinition> for ActivityDefinition {
@@ -92,6 +104,9 @@ impl From<streamflow_core::workflow::ActivityDefinition> for ActivityDefinition 
                 .output_definitions
                 .map(|v| v.into_iter().map(Into::into).collect()),
             settings: def.settings.map(Into::into),
+            iteration_scoped: def.iteration_scoped,
+            iteration_limit: def.iteration_limit,
+            is_loop_activity: def.is_loop_activity,
         }
     }
 }
@@ -113,6 +128,9 @@ impl From<ActivityDefinition> for streamflow_core::workflow::ActivityDefinition 
                 .dependency_of
                 .map(|v| v.into_iter().map(Into::into).collect()),
             settings: def.settings.map(Into::into),
+            iteration_scoped: def.iteration_scoped,
+            iteration_limit: def.iteration_limit,
+            is_loop_activity: def.is_loop_activity,
         }
     }
 }
@@ -126,6 +144,10 @@ pub struct ActivityRelationship {
     /// Optional conditions that must be satisfied for this edge to activate
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conditions: Option<Vec<String>>,
+
+    /// Cached metadata: whether this dependency is a back-edge (loop)
+    #[serde(default)]
+    pub is_back_edge: bool,
 }
 
 impl From<streamflow_core::workflow::ActivityRelationship> for ActivityRelationship {
@@ -133,6 +155,7 @@ impl From<streamflow_core::workflow::ActivityRelationship> for ActivityRelations
         Self {
             activity_key: rel.activity_key,
             conditions: rel.conditions,
+            is_back_edge: rel.is_back_edge,
         }
     }
 }
@@ -142,6 +165,7 @@ impl From<ActivityRelationship> for streamflow_core::workflow::ActivityRelations
         Self {
             activity_key: rel.activity_key,
             conditions: rel.conditions,
+            is_back_edge: rel.is_back_edge,
         }
     }
 }
@@ -168,6 +192,10 @@ pub struct ActivitySettings {
     /// Cache TTL in seconds
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_ttl: Option<u64>,
+
+    /// Per-activity iteration limit (can override activity-level iteration_limit)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub iteration_limit: Option<u32>,
 }
 
 /// Budget configuration for activities
@@ -237,6 +265,7 @@ impl From<streamflow_core::workflow::ActivitySettings> for ActivitySettings {
             budget: settings.budget.map(Into::into),
             cache: settings.cache,
             cache_ttl: settings.cache_ttl,
+            iteration_limit: settings.iteration_limit,
         }
     }
 }
@@ -249,6 +278,7 @@ impl From<ActivitySettings> for streamflow_core::workflow::ActivitySettings {
             budget: settings.budget.map(Into::into),
             cache: settings.cache,
             cache_ttl: settings.cache_ttl,
+            iteration_limit: settings.iteration_limit,
         }
     }
 }

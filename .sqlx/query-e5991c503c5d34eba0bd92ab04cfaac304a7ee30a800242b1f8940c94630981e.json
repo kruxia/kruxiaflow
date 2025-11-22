@@ -1,0 +1,33 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO workflows (id, definition_name, workflow_definition_id, input, status, \n                                      activities, state_data, created_at, updated_at)\n               VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())\n               ON CONFLICT (id) DO UPDATE\n               SET activities = $6, state_data = $7, status = $5, updated_at = NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Jsonb",
+        {
+          "Custom": {
+            "name": "workflow_status",
+            "kind": {
+              "Enum": [
+                "created",
+                "running",
+                "completed",
+                "failed",
+                "paused"
+              ]
+            }
+          }
+        },
+        "Jsonb",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e5991c503c5d34eba0bd92ab04cfaac304a7ee30a800242b1f8940c94630981e"
+}

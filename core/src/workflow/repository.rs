@@ -32,9 +32,9 @@ impl WorkflowDefinitionRepository {
     /// Returns error if definition with same (name, created_at) already exists (virtually impossible).
     pub async fn store(
         &self,
-        definition: WorkflowDefinition,
+        mut definition: WorkflowDefinition,
     ) -> Result<StoredWorkflowDefinition, RepositoryError> {
-        // Validate definition before storing
+        // Validate definition before storing (validation is mutable to cache metadata)
         definition
             .validate()
             .map_err(RepositoryError::ValidationError)?;
@@ -59,14 +59,15 @@ impl WorkflowDefinitionRepository {
         .await
         .map_err(|e| {
             // Check for unique constraint violation (virtually impossible with microsecond precision)
-            if let Some(db_err) = e.as_database_error() {
-                if db_err.is_unique_violation() {
-                    return RepositoryError::DuplicateVersion {
-                        name: name.clone(),
-                        version: format_version(&Utc::now()),
-                    };
-                }
+            if let Some(db_err) = e.as_database_error()
+                && db_err.is_unique_violation()
+            {
+                return RepositoryError::DuplicateVersion {
+                    name: name.clone(),
+                    version: format_version(&Utc::now()),
+                };
             }
+
             RepositoryError::DatabaseError(e)
         })?;
 

@@ -13,6 +13,7 @@ pub fn create_sequential_workflow(num_activities: usize) -> WorkflowDefinition {
             Some(vec![ActivityRelationship {
                 activity_key: format!("activity_{}", i + 1),
                 conditions: None,
+                is_back_edge: false,
             }])
         } else {
             None
@@ -27,6 +28,9 @@ pub fn create_sequential_workflow(num_activities: usize) -> WorkflowDefinition {
             depends_on: None,
             dependency_of,
             settings: None,
+            iteration_scoped: false,
+            iteration_limit: None,
+            is_loop_activity: false,
         });
     }
 
@@ -52,10 +56,14 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
                     .map(|i| ActivityRelationship {
                         activity_key: format!("parallel_{}", i),
                         conditions: None,
+                        is_back_edge: false,
                     })
                     .collect(),
             ),
             settings: None,
+            iteration_scoped: false,
+            iteration_limit: None,
+            is_loop_activity: false,
         },
     ];
 
@@ -70,12 +78,17 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
             depends_on: Some(vec![ActivityRelationship {
                 activity_key: "start".to_string(),
                 conditions: None,
+                is_back_edge: false,
             }]),
             dependency_of: Some(vec![ActivityRelationship {
                 activity_key: "end".to_string(),
                 conditions: None,
+                is_back_edge: false,
             }]),
             settings: None,
+            iteration_scoped: false,
+            iteration_limit: None,
+            is_loop_activity: false,
         });
     }
 
@@ -91,11 +104,15 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
                 .map(|i| ActivityRelationship {
                     activity_key: format!("parallel_{}", i),
                     conditions: None,
+                    is_back_edge: false,
                 })
                 .collect(),
         ),
         dependency_of: None,
         settings: None,
+        iteration_scoped: false,
+        iteration_limit: None,
+        is_loop_activity: false,
     });
 
     WorkflowDefinition {
@@ -110,7 +127,7 @@ mod tests {
 
     #[test]
     fn test_create_sequential_workflow() {
-        let workflow = create_sequential_workflow(5);
+        let mut workflow = create_sequential_workflow(5);
         assert_eq!(workflow.name, "sequential_bench_5");
         assert_eq!(workflow.activities.len(), 5);
 
@@ -126,7 +143,7 @@ mod tests {
 
     #[test]
     fn test_create_parallel_workflow() {
-        let workflow = create_parallel_workflow(10);
+        let mut workflow = create_parallel_workflow(10);
         assert_eq!(workflow.name, "parallel_bench_10");
 
         // Start + 10 parallel + end = 12 total

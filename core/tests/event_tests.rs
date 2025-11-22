@@ -44,6 +44,7 @@ async fn test_publish_event() {
         event_type: WorkflowEventType::WorkflowCreated,
         activity_key: None,
         payload: json!({"state_data": {}}),
+        iteration: None,
     };
 
     // Publish event
@@ -82,6 +83,7 @@ async fn test_publish_event_idempotency() {
         event_type: WorkflowEventType::ActivityCompleted,
         activity_key: Some("test_activity".to_string()),
         payload: json!({"outputs": {"result": "success"}}),
+        iteration: None,
     };
 
     // Publish event twice
@@ -140,6 +142,7 @@ async fn test_poll_with_events() {
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,
             payload: json!({}),
+            iteration: None,
         })
         .await
         .expect("Failed to publish event 1");
@@ -150,6 +153,7 @@ async fn test_poll_with_events() {
             event_type: WorkflowEventType::ActivityScheduled,
             activity_key: Some("activity1".to_string()),
             payload: json!({}),
+            iteration: None,
         })
         .await
         .expect("Failed to publish event 2");
@@ -181,6 +185,7 @@ async fn test_position_tracking() {
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,
             payload: json!({}),
+            iteration: None,
         })
         .await
         .expect("Failed to publish event 1");
@@ -191,6 +196,7 @@ async fn test_position_tracking() {
             event_type: WorkflowEventType::ActivityScheduled,
             activity_key: Some("activity1".to_string()),
             payload: json!({}),
+            iteration: None,
         })
         .await
         .expect("Failed to publish event 2");
@@ -201,6 +207,7 @@ async fn test_position_tracking() {
             event_type: WorkflowEventType::ActivityCompleted,
             activity_key: Some("activity1".to_string()),
             payload: json!({}),
+            iteration: None,
         })
         .await
         .expect("Failed to publish event 3");
@@ -270,6 +277,7 @@ async fn test_multiple_consumers() {
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,
             payload: json!({}),
+            iteration: None,
         })
         .await
         .expect("Failed to publish event");

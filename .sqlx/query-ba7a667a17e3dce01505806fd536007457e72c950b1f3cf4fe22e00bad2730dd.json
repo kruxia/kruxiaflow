@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT e.id, e.workflow_id, e.event_type as \"event_type: WorkflowEventType\", e.activity_key, e.payload, e.timestamp\n            FROM workflow_events e\n            LEFT JOIN workflow_event_consumers c ON c.consumer_id = $1\n            WHERE c.last_event_id IS NULL OR e.id > c.last_event_id\n            ORDER BY e.id ASC\n            LIMIT 100\n            ",
+  "query": "\n            SELECT e.id, e.workflow_id, e.event_type as \"event_type: WorkflowEventType\", e.activity_key, e.payload, e.timestamp, e.iteration\n            FROM workflow_events e\n            LEFT JOIN workflow_event_consumers c ON c.consumer_id = $1\n            WHERE c.last_event_id IS NULL OR e.id > c.last_event_id\n            ORDER BY e.id ASC\n            LIMIT 100\n            ",
   "describe": {
     "columns": [
       {
@@ -47,6 +47,11 @@
         "ordinal": 5,
         "name": "timestamp",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "iteration",
+        "type_info": "Int4"
       }
     ],
     "parameters": {
@@ -60,8 +65,9 @@
       false,
       true,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "e910eb7f73df30c5986dfaa46730d09308a0c740eb63a408869125066fd15fea"
+  "hash": "ba7a667a17e3dce01505806fd536007457e72c950b1f3cf4fe22e00bad2730dd"
 }

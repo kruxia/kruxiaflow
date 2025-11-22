@@ -14,10 +14,11 @@ use async_trait::async_trait;
 use uuid::Uuid;
 
 /// Activity details for event publishing
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ActivitySummary {
     pub workflow_id: Uuid,
     pub activity_key: String,
+    pub iteration: Option<i32>,
 }
 
 /// Activity Queue interface for scheduling and claiming activities

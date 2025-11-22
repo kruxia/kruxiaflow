@@ -49,8 +49,8 @@ impl WorkflowDefinition {
         })
     }
 
-    /// Validate workflow definition structure
-    pub fn validate(&self) -> Result<(), ValidationError> {
+    /// Validate workflow definition structure and compute metadata
+    pub fn validate(&mut self) -> Result<(), ValidationError> {
         let mut errors = ValidationErrors::new();
 
         // Validate workflow name
@@ -85,9 +85,18 @@ impl WorkflowDefinition {
             }
         }
 
-        // Validate graph structure (no cycles, valid references)
+        // Validate graph structure (references, then check for loops vs cycles)
         if let Err(e) = self.validate_graph(&activity_keys) {
             errors.merge(e);
+        }
+
+        // Detect loops (back-edges) and mark activities/dependencies
+        // This happens after basic validation passes
+        if errors.is_empty() {
+            match self.detect_and_validate_loops() {
+                Ok(_) => {}
+                Err(e) => errors.merge(e),
+            }
         }
 
         if errors.is_empty() {
@@ -141,7 +150,7 @@ impl WorkflowDefinition {
         // Build adjacency list for cycle detection
         let mut graph: HashMap<&str, Vec<&str>> = HashMap::new();
         for activity in &self.activities {
-            graph.entry(activity.key.as_str()).or_insert_with(Vec::new);
+            graph.entry(activity.key.as_str()).or_default();
         }
 
         // Validate all activity references
@@ -184,11 +193,305 @@ impl WorkflowDefinition {
             }
         }
 
-        // Detect cycles using DFS
-        if let Some(cycle) = detect_cycle(&graph) {
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Detect loops (back-edges) in the workflow graph and validate them
+    /// Also marks is_loop_activity and is_back_edge metadata for orchestrator performance
+    fn detect_and_validate_loops(&mut self) -> Result<(), ValidationErrors> {
+        let mut errors = ValidationErrors::new();
+
+        // Perform topological sort to identify back-edges
+        // Back-edges are edges from later to earlier in topological order
+        let loops = match self.detect_loops() {
+            Ok(loops) => loops,
+            Err(e) => {
+                errors.add("activities", &e);
+                return Err(errors);
+            }
+        };
+
+        // Mark activities and dependencies that participate in loops (cache for orchestrator hot path)
+        for loop_edge in &loops {
+            // Mark both activities in the loop
+            for activity in &mut self.activities {
+                if activity.key == loop_edge.from || activity.key == loop_edge.to {
+                    activity.is_loop_activity = true;
+                }
+
+                // Mark the specific dependency that is the back-edge
+                // LoopEdge represents the graph edge from -> to
+                // In dependency notation: edge A->B means "B depends_on A"
+                // So the back-edge should be marked on activity.key==to, dep.activity_key==from
+                if activity.key == loop_edge.to {
+                    // Check both depends_on and dependency_of (before normalization)
+                    if let Some(depends_on) = &mut activity.depends_on {
+                        for dep in depends_on {
+                            if dep.activity_key == loop_edge.from {
+                                dep.is_back_edge = true;
+                            }
+                        }
+                    }
+                    if let Some(dependency_of) = &mut activity.dependency_of {
+                        for dep in dependency_of {
+                            if dep.activity_key == loop_edge.from {
+                                dep.is_back_edge = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Validate that loops have proper configuration
+        for loop_edge in loops {
+            if let Err(e) = self.validate_loop_edge(&loop_edge) {
+                errors.merge(e);
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Detect back-edges (loops) in the workflow graph via topological sort
+    fn detect_loops(&self) -> Result<Vec<LoopEdge>, String> {
+        // Build adjacency list
+        let mut graph: HashMap<&str, Vec<&str>> = HashMap::new();
+        for activity in &self.activities {
+            graph.entry(activity.key.as_str()).or_default();
+        }
+
+        // Add edges from dependencies (both depends_on and dependency_of, before normalization)
+        for activity in &self.activities {
+            if let Some(depends_on) = &activity.depends_on {
+                for dep in depends_on {
+                    graph
+                        .get_mut(dep.activity_key.as_str())
+                        .unwrap()
+                        .push(activity.key.as_str());
+                }
+            }
+            if let Some(dependency_of) = &activity.dependency_of {
+                for dep in dependency_of {
+                    graph
+                        .get_mut(activity.key.as_str())
+                        .unwrap()
+                        .push(dep.activity_key.as_str());
+                }
+            }
+        }
+
+        // Perform topological sort using Kahn's algorithm
+        let sorted = match topological_sort_kahn(&graph) {
+            Ok(sorted) => sorted,
+            Err(_cycle) => {
+                // There's a cycle - but we need to check if it's a valid loop
+                // For now, if there's a cycle with no exit mechanism, it will be caught
+                // during loop validation. We'll continue and try to identify back-edges.
+                // If we can't do topological sort, fall back to DFS-based detection
+                return self.detect_loops_via_dfs(&graph);
+            }
+        };
+
+        let mut loops = Vec::new();
+
+        // Build position map for quick lookup
+        let position_map: HashMap<&str, usize> = sorted
+            .iter()
+            .enumerate()
+            .map(|(idx, key)| (key.as_str(), idx))
+            .collect();
+
+        // Any edge from later to earlier in topo order is a back-edge
+        // If activity depends_on dep, the dependency edge is dep → activity
+        // A back-edge occurs when dep comes AFTER activity in topo order (creating a cycle)
+        for activity in &self.activities {
+            if let Some(depends_on) = &activity.depends_on {
+                for dep in depends_on {
+                    let from_pos = position_map.get(activity.key.as_str());
+                    let to_pos = position_map.get(dep.activity_key.as_str());
+
+                    if let (Some(&from_idx), Some(&to_idx)) = (from_pos, to_pos) {
+                        // Back-edge: dependency comes AFTER the dependent activity in topo order
+                        if to_idx > from_idx {
+                            // Back-edge found (dependency points backward in topo order)
+                            // The edge in the graph is dep → activity, so from should be dep
+                            loops.push(LoopEdge {
+                                from: dep.activity_key.clone(),
+                                to: activity.key.clone(),
+                                condition: dep.conditions.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(loops)
+    }
+
+    /// Fallback loop detection using DFS when topological sort fails
+    fn detect_loops_via_dfs(
+        &self,
+        graph: &HashMap<&str, Vec<&str>>,
+    ) -> Result<Vec<LoopEdge>, String> {
+        let mut loops = Vec::new();
+        let mut visited = HashSet::new();
+        let mut rec_stack = HashSet::new();
+
+        // Find all back-edges using DFS
+        for node in graph.keys() {
+            if !visited.contains(node) {
+                self.dfs_find_loops(node, graph, &mut visited, &mut rec_stack, &mut loops);
+            }
+        }
+
+        if loops.is_empty() {
+            // No loops found, but there was a cycle - this is an invalid cycle
+            if let Some(cycle) = detect_cycle(graph) {
+                return Err(format!(
+                    "Workflow contains an invalid cycle (not a valid loop): {}",
+                    cycle.join(" -> ")
+                ));
+            }
+        }
+
+        Ok(loops)
+    }
+
+    /// DFS helper to find back-edges (loops)
+    fn dfs_find_loops<'a>(
+        &'a self,
+        node: &'a str,
+        graph: &HashMap<&'a str, Vec<&'a str>>,
+        visited: &mut HashSet<&'a str>,
+        rec_stack: &mut HashSet<&'a str>,
+        loops: &mut Vec<LoopEdge>,
+    ) {
+        visited.insert(node);
+        rec_stack.insert(node);
+
+        if let Some(neighbors) = graph.get(node) {
+            for &neighbor in neighbors {
+                if !visited.contains(neighbor) {
+                    self.dfs_find_loops(neighbor, graph, visited, rec_stack, loops);
+                } else if rec_stack.contains(neighbor) {
+                    // Found a back-edge (loop)
+                    // In a cycle, check both directions for conditions
+                    // Get condition from current direction (node -> neighbor)
+                    let mut condition_forward = None;
+                    if let Some(from) = self.activities.iter().find(|a| a.key == node)
+                        && let Some(depends_on) = &from.depends_on
+                    {
+                        for dep in depends_on {
+                            if dep.activity_key == neighbor {
+                                condition_forward = dep.conditions.clone();
+                            }
+                        }
+                    }
+
+                    // Also check reverse direction (neighbor -> node) for conditions
+                    let mut condition_reverse = None;
+                    if let Some(to) = self.activities.iter().find(|a| a.key == neighbor)
+                        && let Some(depends_on) = &to.depends_on
+                    {
+                        for dep in depends_on {
+                            if dep.activity_key == node {
+                                condition_reverse = dep.conditions.clone();
+                            }
+                        }
+                    }
+
+                    // Use whichever condition exists (prefer forward, but use reverse if forward has none)
+                    let condition = if condition_forward.is_some() {
+                        condition_forward
+                    } else {
+                        condition_reverse
+                    };
+
+                    loops.push(LoopEdge {
+                        from: node.to_string(),
+                        to: neighbor.to_string(),
+                        condition,
+                    });
+                }
+            }
+        }
+
+        rec_stack.remove(node);
+    }
+
+    /// Validate that a loop edge has proper configuration (exit mechanism)
+    fn validate_loop_edge(&self, loop_edge: &LoopEdge) -> Result<(), ValidationErrors> {
+        let mut errors = ValidationErrors::new();
+
+        let from_activity = self.activities.iter().find(|a| a.key == loop_edge.from);
+        let to_activity = self.activities.iter().find(|a| a.key == loop_edge.to);
+
+        let from_activity = match from_activity {
+            Some(a) => a,
+            None => return Ok(()), // Activity not found, already caught by earlier validation
+        };
+        let to_activity = match to_activity {
+            Some(a) => a,
+            None => return Ok(()),
+        };
+
+        // Check if loop has exit condition
+        let has_condition = loop_edge
+            .condition
+            .as_ref()
+            .map(|c| !c.is_empty())
+            .unwrap_or(false);
+
+        // Check if loop has iteration limit (check both activity-level and settings-level)
+        let has_iteration_limit = from_activity.iteration_limit.is_some()
+            || to_activity.iteration_limit.is_some()
+            || from_activity
+                .settings
+                .as_ref()
+                .and_then(|s| s.iteration_limit)
+                .is_some()
+            || to_activity
+                .settings
+                .as_ref()
+                .and_then(|s| s.iteration_limit)
+                .is_some();
+
+        // Loop MUST have at least one exit mechanism: condition OR iteration_limit OR both
+        if !has_condition && !has_iteration_limit {
             errors.add(
                 "activities",
-                &format!("Workflow contains a cycle: {}", cycle.join(" -> ")),
+                &format!(
+                    "Workflow contains a cycle from '{}' to '{}' that must have at least one exit mechanism:\n\
+                    - Exit condition: conditions: [\"{{{{evaluate.done == true}}}}\"]\n\
+                    - Iteration limit: iteration_limit: 10\n\
+                    - Or both (recommended for production)\n\n\
+                    Examples:\n\
+                    1) Fixed iterations: iteration_limit: 12\n\
+                    2) Conditional: conditions: [\"{{{{status.canceled == false}}}}\"]\n\
+                    3) Bounded conditional: iteration_limit: 10 AND conditions",
+                    loop_edge.from, loop_edge.to
+                ),
+            );
+        }
+
+        // Recommend iteration_scoped for loop activities (warning only, not error)
+        if !from_activity.iteration_scoped && !to_activity.iteration_scoped {
+            tracing::warn!(
+                "Loop from '{}' to '{}' does not use iteration_scoped. \
+                Iteration limits will still be enforced, but only the latest outputs will be available. \
+                Consider setting iteration_scoped: true to track results per iteration.",
+                loop_edge.from,
+                loop_edge.to
             );
         }
 
@@ -220,10 +523,11 @@ impl WorkflowDefinition {
                     // The target activity should depend on this activity
                     dependencies_to_add
                         .entry(relationship.activity_key.clone())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(ActivityRelationship {
                             activity_key: activity.key.clone(),
                             conditions: relationship.conditions.clone(),
+                            is_back_edge: false, // Always computed during validation
                         });
                 }
             }
@@ -252,6 +556,11 @@ impl WorkflowDefinition {
             activity.dependency_of = None;
         }
     }
+}
+
+/// Helper for serde skip_serializing_if
+fn is_false(b: &bool) -> bool {
+    !b
 }
 
 /// Activity definition within a workflow
@@ -287,6 +596,20 @@ pub struct ActivityDefinition {
     /// Activity-level settings (timeout, retry, etc.)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<ActivitySettings>,
+
+    /// Whether to store separate outputs for each iteration
+    #[serde(default)]
+    pub iteration_scoped: bool,
+
+    /// Maximum number of iterations (prevents infinite loops)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub iteration_limit: Option<u32>,
+
+    /// Cached metadata: whether this activity is part of a loop (has back-edge)
+    /// Computed during validation, stored in database
+    /// NOT specified in YAML (ignored if present)
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub is_loop_activity: bool,
 }
 
 /// Relationship between activities (edge in the directed graph)
@@ -298,6 +621,12 @@ pub struct ActivityRelationship {
     /// Optional conditions that must be satisfied for this edge to activate
     #[serde(skip_serializing_if = "Option::is_none")]
     pub conditions: Option<Vec<String>>,
+
+    /// Cached metadata: whether this dependency is a back-edge (loop)
+    /// Computed during validation, stored in database
+    /// NOT specified in YAML (ignored if present)
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub is_back_edge: bool,
 }
 
 impl<'de> Deserialize<'de> for ActivityRelationship {
@@ -310,11 +639,14 @@ impl<'de> Deserialize<'de> for ActivityRelationship {
         enum ActivityRelationshipHelper {
             // Simple string: "activity_key"
             Simple(String),
-            // Full object: {activity_key: "key", conditions: [...]}
+            // Full object: {activity_key: "key", conditions: [...], is_back_edge: bool}
+            // is_back_edge is computed during validation and stored in the database
             Full {
                 activity_key: String,
                 #[serde(alias = "condition")]
                 conditions: Option<ConditionOrConditions>,
+                #[serde(default)]
+                is_back_edge: bool,
             },
         }
 
@@ -329,10 +661,12 @@ impl<'de> Deserialize<'de> for ActivityRelationship {
             ActivityRelationshipHelper::Simple(activity_key) => Ok(ActivityRelationship {
                 activity_key,
                 conditions: None,
+                is_back_edge: false, // Defaults to false for simple string syntax
             }),
             ActivityRelationshipHelper::Full {
                 activity_key,
                 conditions,
+                is_back_edge,
             } => {
                 let conditions = conditions.map(|c| match c {
                     ConditionOrConditions::Single(s) => vec![s],
@@ -341,6 +675,7 @@ impl<'de> Deserialize<'de> for ActivityRelationship {
                 Ok(ActivityRelationship {
                     activity_key,
                     conditions,
+                    is_back_edge, // Use the deserialized value (computed during validation)
                 })
             }
         }
@@ -385,6 +720,10 @@ pub struct ActivitySettings {
     /// Cache TTL in seconds
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cache_ttl: Option<u64>,
+
+    /// Per-activity iteration limit (can override activity-level iteration_limit)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub iteration_limit: Option<u32>,
 }
 
 impl ActivitySettings {
@@ -511,10 +850,64 @@ pub enum BudgetAction {
 // Legacy type aliases for backward compatibility
 pub type RetrySettings = RetryPolicy;
 
+/// Loop edge structure for loop detection
+#[derive(Debug, Clone)]
+struct LoopEdge {
+    from: String,
+    to: String,
+    condition: Option<Vec<String>>,
+}
+
 /// Check if string is valid identifier (alphanumeric, hyphens, underscores)
 fn is_valid_identifier(s: &str) -> bool {
     let re = regex::Regex::new(r"^[a-zA-Z0-9_-]+$").unwrap();
     re.is_match(s)
+}
+
+/// Topological sort using Kahn's algorithm
+/// Returns Ok(sorted_keys) if successful, Err(()) if cycle detected
+fn topological_sort_kahn<'a>(graph: &HashMap<&'a str, Vec<&'a str>>) -> Result<Vec<String>, ()> {
+    // Calculate in-degrees
+    let mut in_degree: HashMap<&str, usize> = HashMap::new();
+    for &node in graph.keys() {
+        in_degree.entry(node).or_insert(0);
+    }
+    for neighbors in graph.values() {
+        for &neighbor in neighbors {
+            *in_degree.entry(neighbor).or_insert(0) += 1;
+        }
+    }
+
+    // Queue of nodes with in-degree 0
+    let mut queue: Vec<&str> = in_degree
+        .iter()
+        .filter(|(_, deg)| **deg == 0)
+        .map(|(&node, _)| node)
+        .collect();
+
+    let mut sorted = Vec::new();
+
+    while let Some(node) = queue.pop() {
+        sorted.push(node.to_string());
+
+        if let Some(neighbors) = graph.get(node) {
+            for &neighbor in neighbors {
+                if let Some(deg) = in_degree.get_mut(neighbor) {
+                    *deg -= 1;
+                    if *deg == 0 {
+                        queue.push(neighbor);
+                    }
+                }
+            }
+        }
+    }
+
+    // If sorted doesn't contain all nodes, there's a cycle
+    if sorted.len() != graph.len() {
+        Err(())
+    } else {
+        Ok(sorted)
+    }
 }
 
 /// Detect cycles in directed graph using DFS
@@ -524,10 +917,10 @@ fn detect_cycle<'a>(graph: &HashMap<&'a str, Vec<&'a str>>) -> Option<Vec<String
     let mut path = Vec::new();
 
     for node in graph.keys() {
-        if !visited.contains(node) {
-            if let Some(cycle) = dfs_cycle(node, graph, &mut visited, &mut rec_stack, &mut path) {
-                return Some(cycle);
-            }
+        if !visited.contains(node)
+            && let Some(cycle) = dfs_cycle(node, graph, &mut visited, &mut rec_stack, &mut path)
+        {
+            return Some(cycle);
         }
     }
 
@@ -571,6 +964,12 @@ pub struct ValidationErrors {
     errors: HashMap<String, Vec<String>>,
 }
 
+impl Default for ValidationErrors {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ValidationErrors {
     pub fn new() -> Self {
         Self {
@@ -581,16 +980,13 @@ impl ValidationErrors {
     pub fn add(&mut self, field: &str, message: &str) {
         self.errors
             .entry(field.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(message.to_string());
     }
 
     pub fn merge(&mut self, other: ValidationErrors) {
         for (field, messages) in other.errors {
-            self.errors
-                .entry(field)
-                .or_insert_with(Vec::new)
-                .extend(messages);
+            self.errors.entry(field).or_default().extend(messages);
         }
     }
 
@@ -710,7 +1106,7 @@ mod tests {
 
     #[test]
     fn test_validate_valid_workflow() {
-        let definition = WorkflowDefinition {
+        let mut definition = WorkflowDefinition {
             name: "payment_processing".to_string(),
             activities: vec![
                 ActivityDefinition {
@@ -722,9 +1118,13 @@ mod tests {
                     dependency_of: Some(vec![ActivityRelationship {
                         activity_key: "authorize".to_string(),
                         conditions: None,
+                        is_back_edge: false,
                     }]),
                     settings: None,
                     output_definitions: None,
+                    iteration_scoped: false,
+                    iteration_limit: None,
+                    is_loop_activity: false,
                 },
                 ActivityDefinition {
                     key: "authorize".to_string(),
@@ -735,6 +1135,9 @@ mod tests {
                     dependency_of: None,
                     settings: None,
                     output_definitions: None,
+                    iteration_scoped: false,
+                    iteration_limit: None,
+                    is_loop_activity: false,
                 },
             ],
         };
@@ -744,7 +1147,7 @@ mod tests {
 
     #[test]
     fn test_validate_duplicate_activity_keys() {
-        let definition = WorkflowDefinition {
+        let mut definition = WorkflowDefinition {
             name: "test".to_string(),
             activities: vec![
                 ActivityDefinition {
@@ -756,6 +1159,9 @@ mod tests {
                     dependency_of: None,
                     settings: None,
                     output_definitions: None,
+                    iteration_scoped: false,
+                    iteration_limit: None,
+                    is_loop_activity: false,
                 },
                 ActivityDefinition {
                     key: "step1".to_string(), // Duplicate!
@@ -766,6 +1172,9 @@ mod tests {
                     dependency_of: None,
                     settings: None,
                     output_definitions: None,
+                    iteration_scoped: false,
+                    iteration_limit: None,
+                    is_loop_activity: false,
                 },
             ],
         };
@@ -784,7 +1193,7 @@ mod tests {
 
     #[test]
     fn test_validate_invalid_activity_reference() {
-        let definition = WorkflowDefinition {
+        let mut definition = WorkflowDefinition {
             name: "test".to_string(),
             activities: vec![ActivityDefinition {
                 key: "step1".to_string(),
@@ -795,9 +1204,13 @@ mod tests {
                 dependency_of: Some(vec![ActivityRelationship {
                     activity_key: "step2".to_string(), // Doesn't exist!
                     conditions: None,
+                    is_back_edge: false,
                 }]),
                 settings: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             }],
         };
 
@@ -815,7 +1228,7 @@ mod tests {
 
     #[test]
     fn test_validate_cycle_detection() {
-        let definition = WorkflowDefinition {
+        let mut definition = WorkflowDefinition {
             name: "test".to_string(),
             activities: vec![
                 ActivityDefinition {
@@ -827,9 +1240,13 @@ mod tests {
                     dependency_of: Some(vec![ActivityRelationship {
                         activity_key: "step2".to_string(),
                         conditions: None,
+                        is_back_edge: false,
                     }]),
                     settings: None,
                     output_definitions: None,
+                    iteration_scoped: false,
+                    iteration_limit: None,
+                    is_loop_activity: false,
                 },
                 ActivityDefinition {
                     key: "step2".to_string(),
@@ -838,11 +1255,15 @@ mod tests {
                     parameters: None,
                     depends_on: None,
                     dependency_of: Some(vec![ActivityRelationship {
-                        activity_key: "step1".to_string(), // Cycle!
+                        activity_key: "step1".to_string(), // Cycle without exit mechanism!
                         conditions: None,
+                        is_back_edge: false,
                     }]),
                     settings: None,
                     output_definitions: None,
+                    iteration_scoped: false,
+                    iteration_limit: None,
+                    is_loop_activity: false,
                 },
             ],
         };
@@ -853,7 +1274,8 @@ mod tests {
             ValidationError::MultipleErrors(errors) => {
                 let json = errors.to_json();
                 let json_str = json.to_string();
-                assert!(json_str.contains("cycle"));
+                // Should fail because loop has no exit mechanism
+                assert!(json_str.contains("exit mechanism") || json_str.contains("cycle"));
             }
             _ => panic!("Expected MultipleErrors"),
         }
@@ -922,7 +1344,7 @@ mod tests {
 
     #[test]
     fn test_empty_workflow_name() {
-        let definition = WorkflowDefinition {
+        let mut definition = WorkflowDefinition {
             name: "".to_string(),
             activities: vec![ActivityDefinition {
                 key: "step1".to_string(),
@@ -933,6 +1355,9 @@ mod tests {
                 dependency_of: None,
                 settings: None,
                 output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
             }],
         };
 
@@ -942,7 +1367,7 @@ mod tests {
 
     #[test]
     fn test_no_activities() {
-        let definition = WorkflowDefinition {
+        let mut definition = WorkflowDefinition {
             name: "test".to_string(),
             activities: vec![],
         };
@@ -957,5 +1382,365 @@ mod tests {
             }
             _ => panic!("Expected MultipleErrors"),
         }
+    }
+
+    // Loop validation tests
+
+    #[test]
+    fn test_loop_with_iteration_limit_only() {
+        // Pattern 1: iteration_limit only
+        let mut definition = WorkflowDefinition {
+            name: "test_loop".to_string(),
+            activities: vec![
+                ActivityDefinition {
+                    key: "search".to_string(),
+                    worker: "test".to_string(),
+                    activity_name: Some("search".to_string()),
+                    parameters: None,
+                    depends_on: Some(vec![ActivityRelationship {
+                        activity_key: "evaluate".to_string(),
+                        conditions: None, // No condition
+                        is_back_edge: false,
+                    }]),
+                    dependency_of: None,
+                    settings: None,
+                    output_definitions: None,
+                    iteration_scoped: true,
+                    iteration_limit: Some(10), // Has iteration_limit
+                    is_loop_activity: false,
+                },
+                ActivityDefinition {
+                    key: "evaluate".to_string(),
+                    worker: "test".to_string(),
+                    activity_name: Some("evaluate".to_string()),
+                    parameters: None,
+                    depends_on: Some(vec![ActivityRelationship {
+                        activity_key: "search".to_string(),
+                        conditions: None,
+                        is_back_edge: false,
+                    }]),
+                    dependency_of: None,
+                    settings: None,
+                    output_definitions: None,
+                    iteration_scoped: true,
+                    iteration_limit: None,
+                    is_loop_activity: false,
+                },
+            ],
+        };
+
+        // Should pass - has iteration_limit
+        let result = definition.validate();
+        assert!(
+            result.is_ok(),
+            "Pattern 1 (iteration_limit only) should pass: {:?}",
+            result
+        );
+
+        // Check that metadata was set
+        let search = definition
+            .activities
+            .iter()
+            .find(|a| a.key == "search")
+            .unwrap();
+        assert!(
+            search.is_loop_activity,
+            "search should be marked as loop activity"
+        );
+    }
+
+    #[test]
+    fn test_loop_with_condition_only() {
+        // Pattern 2: condition only
+        let mut definition = WorkflowDefinition {
+            name: "test_loop".to_string(),
+            activities: vec![
+                ActivityDefinition {
+                    key: "search".to_string(),
+                    worker: "test".to_string(),
+                    activity_name: Some("search".to_string()),
+                    parameters: None,
+                    depends_on: Some(vec![ActivityRelationship {
+                        activity_key: "evaluate".to_string(),
+                        conditions: Some(vec!["{{evaluate.done == false}}".to_string()]), // Has condition
+                        is_back_edge: false,
+                    }]),
+                    dependency_of: None,
+                    settings: None,
+                    output_definitions: None,
+                    iteration_scoped: true,
+                    iteration_limit: None, // No iteration_limit
+                    is_loop_activity: false,
+                },
+                ActivityDefinition {
+                    key: "evaluate".to_string(),
+                    worker: "test".to_string(),
+                    activity_name: Some("evaluate".to_string()),
+                    parameters: None,
+                    depends_on: Some(vec![ActivityRelationship {
+                        activity_key: "search".to_string(),
+                        conditions: None,
+                        is_back_edge: false,
+                    }]),
+                    dependency_of: None,
+                    settings: None,
+                    output_definitions: None,
+                    iteration_scoped: true,
+                    iteration_limit: None,
+                    is_loop_activity: false,
+                },
+            ],
+        };
+
+        // Should pass - has condition
+        let result = definition.validate();
+        assert!(
+            result.is_ok(),
+            "Pattern 2 (condition only) should pass: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_loop_with_both() {
+        // Pattern 3: both condition and iteration_limit
+        let mut definition = WorkflowDefinition {
+            name: "test_loop".to_string(),
+            activities: vec![
+                ActivityDefinition {
+                    key: "search".to_string(),
+                    worker: "test".to_string(),
+                    activity_name: Some("search".to_string()),
+                    parameters: None,
+                    depends_on: Some(vec![ActivityRelationship {
+                        activity_key: "evaluate".to_string(),
+                        conditions: Some(vec!["{{evaluate.done == false}}".to_string()]), // Has condition
+                        is_back_edge: false,
+                    }]),
+                    dependency_of: None,
+                    settings: None,
+                    output_definitions: None,
+                    iteration_scoped: true,
+                    iteration_limit: Some(10), // Has iteration_limit
+                    is_loop_activity: false,
+                },
+                ActivityDefinition {
+                    key: "evaluate".to_string(),
+                    worker: "test".to_string(),
+                    activity_name: Some("evaluate".to_string()),
+                    parameters: None,
+                    depends_on: Some(vec![ActivityRelationship {
+                        activity_key: "search".to_string(),
+                        conditions: None,
+                        is_back_edge: false,
+                    }]),
+                    dependency_of: None,
+                    settings: None,
+                    output_definitions: None,
+                    iteration_scoped: true,
+                    iteration_limit: None,
+                    is_loop_activity: false,
+                },
+            ],
+        };
+
+        // Should pass - has both
+        let result = definition.validate();
+        assert!(result.is_ok(), "Pattern 3 (both) should pass: {:?}", result);
+    }
+
+    #[test]
+    fn test_loop_requires_exit_mechanism() {
+        // Loop with neither condition nor iteration_limit
+        let mut definition = WorkflowDefinition {
+            name: "test_loop".to_string(),
+            activities: vec![
+                ActivityDefinition {
+                    key: "search".to_string(),
+                    worker: "test".to_string(),
+                    activity_name: Some("search".to_string()),
+                    parameters: None,
+                    depends_on: Some(vec![ActivityRelationship {
+                        activity_key: "evaluate".to_string(),
+                        conditions: None, // No condition
+                        is_back_edge: false,
+                    }]),
+                    dependency_of: None,
+                    settings: None,
+                    output_definitions: None,
+                    iteration_scoped: true,
+                    iteration_limit: None, // No iteration_limit
+                    is_loop_activity: false,
+                },
+                ActivityDefinition {
+                    key: "evaluate".to_string(),
+                    worker: "test".to_string(),
+                    activity_name: Some("evaluate".to_string()),
+                    parameters: None,
+                    depends_on: Some(vec![ActivityRelationship {
+                        activity_key: "search".to_string(),
+                        conditions: None,
+                        is_back_edge: false,
+                    }]),
+                    dependency_of: None,
+                    settings: None,
+                    output_definitions: None,
+                    iteration_scoped: true,
+                    iteration_limit: None,
+                    is_loop_activity: false,
+                },
+            ],
+        };
+
+        // Should fail - no exit mechanism
+        let result = definition.validate();
+        assert!(result.is_err(), "Loop without exit mechanism should fail");
+        match result.unwrap_err() {
+            ValidationError::MultipleErrors(errors) => {
+                let json = errors.to_json();
+                let json_str = json.to_string();
+                assert!(
+                    json_str.contains("exit mechanism"),
+                    "Error should mention exit mechanism"
+                );
+            }
+            _ => panic!("Expected MultipleErrors"),
+        }
+    }
+
+    #[test]
+    fn test_metadata_cached_in_validation() {
+        // Test that is_loop_activity and is_back_edge are set correctly
+        // Create a proper loop: init -> search -> evaluate -> search (back-edge)
+        let mut definition = WorkflowDefinition {
+            name: "test_loop".to_string(),
+            activities: vec![
+                ActivityDefinition {
+                    key: "init".to_string(),
+                    worker: "test".to_string(),
+                    activity_name: Some("init".to_string()),
+                    parameters: None,
+                    depends_on: None,
+                    dependency_of: Some(vec![ActivityRelationship {
+                        activity_key: "search".to_string(),
+                        conditions: None,
+                        is_back_edge: false,
+                    }]),
+                    settings: None,
+                    output_definitions: None,
+                    iteration_scoped: false,
+                    iteration_limit: None,
+                    is_loop_activity: false,
+                },
+                ActivityDefinition {
+                    key: "search".to_string(),
+                    worker: "test".to_string(),
+                    activity_name: Some("search".to_string()),
+                    parameters: None,
+                    depends_on: Some(vec![
+                        ActivityRelationship {
+                            activity_key: "init".to_string(),
+                            conditions: None,
+                            is_back_edge: false,
+                        },
+                        ActivityRelationship {
+                            activity_key: "evaluate".to_string(),
+                            conditions: Some(vec!["{{evaluate.done == false}}".to_string()]),
+                            is_back_edge: false,
+                        },
+                    ]),
+                    dependency_of: None,
+                    settings: None,
+                    output_definitions: None,
+                    iteration_scoped: true,
+                    iteration_limit: Some(10),
+                    is_loop_activity: false,
+                },
+                ActivityDefinition {
+                    key: "evaluate".to_string(),
+                    worker: "test".to_string(),
+                    activity_name: Some("evaluate".to_string()),
+                    parameters: None,
+                    depends_on: Some(vec![ActivityRelationship {
+                        activity_key: "search".to_string(),
+                        conditions: None,
+                        is_back_edge: false,
+                    }]),
+                    dependency_of: None,
+                    settings: None,
+                    output_definitions: None,
+                    iteration_scoped: true,
+                    iteration_limit: None,
+                    is_loop_activity: false,
+                },
+            ],
+        };
+
+        let result = definition.validate();
+        assert!(result.is_ok(), "Validation should succeed: {:?}", result);
+
+        // Check that both loop activities are marked (not init)
+        let search = definition
+            .activities
+            .iter()
+            .find(|a| a.key == "search")
+            .unwrap();
+        let evaluate = definition
+            .activities
+            .iter()
+            .find(|a| a.key == "evaluate")
+            .unwrap();
+        let init = definition
+            .activities
+            .iter()
+            .find(|a| a.key == "init")
+            .unwrap();
+
+        assert!(
+            search.is_loop_activity,
+            "search should be marked as loop activity"
+        );
+        assert!(
+            evaluate.is_loop_activity,
+            "evaluate should be marked as loop activity"
+        );
+        assert!(
+            !init.is_loop_activity,
+            "init should NOT be marked as loop activity"
+        );
+
+        // Check that the back-edge is marked
+        // The graph is: init -> search -> evaluate -> search (back-edge)
+        // The back-edge is evaluate -> search, which is represented as search depends_on evaluate
+        let search_depends_on = search.depends_on.as_ref().unwrap();
+        let back_edge = search_depends_on
+            .iter()
+            .find(|d| d.activity_key == "evaluate")
+            .unwrap();
+        assert!(
+            back_edge.is_back_edge,
+            "Edge from evaluate to search (search depends_on evaluate) should be marked as back-edge"
+        );
+
+        // The forward edges (init->search and search->evaluate) should NOT be back-edges
+        let search_depends_on = search.depends_on.as_ref().unwrap();
+        let forward_edge_init = search_depends_on
+            .iter()
+            .find(|d| d.activity_key == "init")
+            .unwrap();
+        assert!(
+            !forward_edge_init.is_back_edge,
+            "Edge from init to search should NOT be marked as back-edge"
+        );
+
+        let evaluate_depends_on = evaluate.depends_on.as_ref().unwrap();
+        let forward_edge_search = evaluate_depends_on
+            .iter()
+            .find(|d| d.activity_key == "search")
+            .unwrap();
+        assert!(
+            !forward_edge_search.is_back_edge,
+            "Edge from search to evaluate (evaluate depends_on search) should NOT be marked as back-edge"
+        );
     }
 }
