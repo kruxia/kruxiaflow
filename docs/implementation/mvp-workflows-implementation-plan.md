@@ -1,12 +1,13 @@
 # MVP Workflows Implementation Plan
 
-**Version**: 1.5
-**Date**: 2025-11-21
-**Status**: Core Complete - Token Streaming Next (Examples 1-6 Complete, US-1A.9a + US-7.1 Priority)
+**Version**: 1.6
+**Date**: 2025-11-22
+**Status**: Core Complete - Token Streaming Next (Examples 1-7 Complete, US-1A.9a + US-7.1 Priority)
 **Recent Updates**:
-- Example 6 (Agentic Research / Iterative Workflows) ✅ Complete
-- US-3.4 (Iterative Workflows) ✅ Complete - Example 6 demonstrates loops
-- **Next Priority**: US-1A.9a (WebSocket Infrastructure) + US-7.1 (Token Streaming) before Examples 7-10
+- Example 6 (Semantic Caching and RAG) ✅ Complete - Three-workflow series (06a, 06b, 06c)
+- Example 7 (Agentic Research / Iterative Workflows) ✅ Complete - Two-workflow series (07a, 07b)
+- US-3.4 (Iterative Workflows) ✅ Complete - Example 7 demonstrates loops with simple and complete variants
+- **Next Priority**: US-1A.9a (WebSocket Infrastructure) + US-7.1 (Token Streaming) before Examples 8-10
 - **Strategic Decision**: Deliver token streaming pre-launch (Option 1) as core AI-native differentiator
 - US-5.3 (Semantic Caching) ✅ Complete - 100% production ready
 - US-5.1 (Multi-Provider LLM) ✅ Phases 1-5 Complete
@@ -34,11 +35,21 @@ Workflow examples are organized as follows:
 **Implemented Examples** (in `examples/`):
 ```
 examples/
-├── 01-weather-report.yaml          # 1: Sequential workflow (✅ COMPLETE)
-├── 01b-weather-report-dynamic.yaml # 1b: Dynamic templates variant (✅ COMPLETE)
-├── 02-user-validation.yaml         # 2: Conditional branching (✅ COMPLETE)
-├── 03-document-processing.yaml     # 3: Parallel execution with file management (✅ COMPLETE)
-└── README.md                       # Index of examples with descriptions
+├── 01-weather-report.yaml              # 1: Sequential workflow (✅ COMPLETE)
+├── 01b-weather-report-dynamic.yaml     # 1b: Dynamic templates variant (✅ COMPLETE)
+├── 02-user-validation.yaml             # 2: Conditional branching (✅ COMPLETE)
+├── 03-document-processing.yaml         # 3: Parallel execution (✅ COMPLETE)
+├── 04-moderate-content.yaml            # 4: LLM with cost tracking (✅ COMPLETE)
+├── 05-research-assistant.yaml          # 5: Multi-model LLM fallback (✅ COMPLETE)
+├── 05a-research-assistant-anthropic.yaml  # 5a: Anthropic-only variant (✅ COMPLETE)
+├── 05b-research-assistant-openai.yaml     # 5b: OpenAI-only variant (✅ COMPLETE)
+├── 05c-research-assistant-google.yaml     # 5c: Google-only variant (✅ COMPLETE)
+├── 06a-faq-bot-caching.yaml            # 6a: Semantic caching (✅ COMPLETE)
+├── 06b-rag-index-builder.yaml          # 6b: RAG index building (✅ COMPLETE)
+├── 06c-rag-query.yaml                  # 6c: RAG query pattern (✅ COMPLETE)
+├── 07a-agentic-research-simple.yaml    # 7a: Simple iterative loops (✅ COMPLETE)
+├── 07b-agentic-research-complete.yaml  # 7b: Complete iterative loops (✅ COMPLETE)
+└── README.md                           # Index of examples with descriptions
 ```
 
 **Naming Convention**:
@@ -775,9 +786,13 @@ activities:
 ---
 
 ### Example 6: Semantic Caching and RAG with Embeddings
-**Duration**: 3-4 days
+**Duration**: 3-4 days (✅ **COMPLETED** 2025-11-22)
 **Epic 3**: US-3.5 (Activity Settings - Caching)
 **Epic 5**: US-5.1 (Embedding Generation), US-5.3 (Semantic Caching)
+**Status**: ✅ **COMPLETE** - Three-workflow series demonstrating caching, embeddings, and RAG
+- ✅ 06a-faq-bot-caching.yaml: Semantic caching fundamentals
+- ✅ 06b-rag-index-builder.yaml: Embedding generation and vector indexing
+- ✅ 06c-rag-query.yaml: Complete RAG pattern (embed → search → augment → generate)
 
 #### Example Workflow 6a: FAQ Bot with Semantic Caching
 ```yaml
@@ -1248,9 +1263,12 @@ See `docs/implementation/US-7.1-token-streaming.md` for detailed implementation 
 ---
 
 ### Example 7: Iterative Workflows with Budget-Aware Loops
-**Duration**: 5-6 days
+**Duration**: 5-6 days (✅ **COMPLETED** 2025-11-22)
 **Epic 3**: US-3.4 (Iterative Workflows / Loops)
 **Epic 5**: (No new activities - combines existing)
+**Status**: ✅ **COMPLETE** - Two-workflow series demonstrating loop fundamentals and production patterns
+- ✅ 07a-agentic-research-simple.yaml: Simplified LLM-only loops (educational introduction)
+- ✅ 07b-agentic-research-complete.yaml: Full specification (HTTP search, file iteration, dual success/failure paths)
 
 #### Example Workflow: Agentic Research with Iteration
 ```yaml

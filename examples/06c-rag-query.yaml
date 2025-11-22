@@ -1,0 +1,227 @@
+# Example 6c: RAG Query and Q&A
+#
+# This workflow demonstrates the complete RAG (Retrieval-Augmented Generation) pattern.
+# It's the third of three Example 6 workflows, combining embeddings + vector search + LLM.
+#
+# What This Example Demonstrates:
+# - Complete RAG pattern: embed → search → augment → generate
+# - Embedding a user question for semantic search
+# - pgvector similarity search with cosine distance
+# - Passing retrieved context to LLM for answer generation
+# - MiniJinja loops in LLM prompts ({% for chunk in rows %})
+# - Sequential workflow with clear data flow
+# - Cost tracking across embedding + LLM activities
+#
+# Related Example 6 Workflows:
+# - 06a-faq-bot-caching.yaml: Semantic caching fundamentals
+# - 06b-rag-index-builder.yaml: Build the index queried here
+#
+# Prerequisites:
+# - OPENAI_API_KEY for embedding generation
+# - ANTHROPIC_API_KEY for LLM (Claude Sonnet)
+# - PostgreSQL with pgvector extension and populated document_chunks table
+# - Run 06b-rag-index-builder.yaml first to populate the index
+# - Webhook URL for response delivery
+#
+# Database Setup (same as 06b):
+# CREATE EXTENSION IF NOT EXISTS vector;
+#
+# CREATE TABLE document_chunks (
+#     id SERIAL PRIMARY KEY,
+#     content TEXT NOT NULL,
+#     embedding vector(1536) NOT NULL,
+#     metadata JSONB,
+#     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+# );
+#
+# CREATE INDEX document_chunks_embedding_idx ON document_chunks
+# USING ivfflat (embedding vector_cosine_ops)
+# WITH (lists = 100);
+#
+# CREATE TABLE qa_log (
+#     id SERIAL PRIMARY KEY,
+#     question TEXT NOT NULL,
+#     answer TEXT NOT NULL,
+#     chunks_used INTEGER NOT NULL,
+#     embedding_cost DECIMAL(10, 6),
+#     llm_cost DECIMAL(10, 6),
+#     total_cost DECIMAL(10, 6),
+#     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+# );
+#
+# How RAG Works (4-Step Pattern):
+# 1. Embed: Convert user question to vector (1536-dimensional)
+# 2. Search: Find top-k most similar chunks using cosine distance
+# 3. Augment: Pass retrieved chunks as context to LLM
+# 4. Generate: LLM produces answer grounded in retrieved context
+#
+# Workflow Pattern:
+# embed_question → search_similar_chunks → generate_answer → store_qa_result → send_response
+#
+# Expected Execution Flow:
+#
+# Given question: "What is Rust's ownership model?"
+#
+# 1. embed_question:
+#    - Converts question to 1536-dimensional vector
+#    - Cost: ~$0.000002 (extremely cheap)
+#    - Output: Single embedding vector
+#
+# 2. search_similar_chunks:
+#    - Uses pgvector cosine distance operator (<=>)
+#    - Finds 3 most similar chunks from document_chunks table
+#    - Returns: [{content, metadata, distance}, ...]
+#    - Lower distance = more similar (0 = identical, 2 = opposite)
+#    - Cost: Free (PostgreSQL query)
+#
+# 3. generate_answer:
+#    - Receives retrieved chunks in prompt context
+#    - Uses MiniJinja loop to format chunks: {% for chunk in rows %}
+#    - LLM generates answer using ONLY provided context
+#    - Cost: ~$0.015 (Sonnet, depends on context + answer length)
+#
+# 4. store_qa_result:
+#    - Logs Q&A pair with cost breakdown
+#    - Tracks embedding_cost, llm_cost, total_cost
+#    - Useful for analytics and cost monitoring
+#    - Cost: Free (PostgreSQL insert)
+#
+# 5. send_response:
+#    - POSTs answer to webhook
+#    - Includes metadata: sources_count, total_cost, workflow_id
+#    - Cost: Free (HTTP request)
+#
+# Total cost: ~$0.015002 (embedding + LLM)
+# Total time: ~2-3 seconds
+#
+# RAG Benefits vs Pure LLM:
+# - Grounded in your specific knowledge base (not general training data)
+# - Cites sources (metadata.source shows where info came from)
+# - Always up-to-date (add new chunks, instant availability)
+# - Privacy (data stays in your database, not in LLM training)
+# - Cost-effective (only pays for small context, not retraining)
+#
+# Combining with Semantic Caching (06a):
+# - Add caching settings to embed_question and generate_answer
+# - Identical questions reuse embeddings (100% savings on embedding)
+# - Similar context + question reuse LLM responses
+# - Can reduce costs by 50-70% for repeated queries
+#
+# Production Optimizations:
+# - Use cached embeddings for common questions (see 06a)
+# - Adjust top-k (LIMIT) based on answer quality vs cost tradeoff
+# - Add distance threshold to filter low-quality matches
+# - Use temperature=0 for deterministic answers (better caching)
+# - Consider reranking retrieved chunks for better relevance
+#
+# Key Features Demonstrated (from mvp-workflows-implementation-plan.md lines 1057-1063):
+# ✅ embedding_generate activity for question embedding
+# ✅ Vector similarity search: embedding <=> $1::vector (pgvector)
+# ✅ MiniJinja loops in LLM prompts: {% for chunk in search_similar_chunks.rows %}
+# ✅ Array template expressions for accessing query results
+# ✅ Cost tracking across multiple activities
+# ✅ Sequential data flow with clear dependencies
+# ✅ Template expressions for complex data access (chunk.content, chunk.metadata.source)
+
+name: rag_query
+description: Answer questions using RAG (Retrieval-Augmented Generation) with embeddings and LLM
+
+activities:
+  # Step 1: Generate embedding for user question
+  - key: embed_question
+    activity_name: embedding_generate
+    parameters:
+      provider: openai
+      model: text-embedding-3-small  # Same model as indexing (06b)
+      input:
+        - "{{INPUT.question}}"  # Single question as array element
+    outputs:
+      - embeddings  # Contains embedding vector in embeddings.embeddings[0]
+
+  # Step 2: Search for similar chunks using vector similarity (pgvector)
+  - key: search_similar_chunks
+    activity_name: postgres_query
+    parameters:
+      query: |
+        SELECT
+          content,
+          metadata,
+          (embedding <=> $1::vector) AS distance
+        FROM document_chunks
+        ORDER BY embedding <=> $1::vector
+        LIMIT 3
+      params:
+        - "{{embed_question.embeddings.embeddings[0]}}"
+    outputs:
+      - result  # Contains rows array: [{content, metadata, distance}, ...]
+    depends_on:
+      - embed_question
+
+  # Step 3: Generate answer using LLM with retrieved context
+  - key: generate_answer
+    activity_name: llm_prompt
+    parameters:
+      model: anthropic/claude-sonnet-4-5-20250929
+      prompt: |
+        You are a helpful assistant. Answer the user's question using ONLY the context provided below.
+        If the context doesn't contain relevant information, say so clearly.
+
+        Context from knowledge base:
+        {% for chunk in search_similar_chunks.result.rows %}
+        ---
+        {{ chunk.content }}
+        (Source: {{ chunk.metadata.source }}, Similarity Distance: {{ chunk.distance }})
+        {% endfor %}
+        ---
+
+        Question: {{INPUT.question}}
+
+        Please answer the question based on the context above. Cite sources when relevant.
+      max_tokens: 500
+    outputs:
+      - result  # Contains answer in result.content
+    settings:
+      budget:
+        limit_usd: 0.50
+        action: abort
+    depends_on:
+      - search_similar_chunks
+
+  # Step 4: Store Q&A result for analytics
+  - key: store_qa_result
+    activity_name: postgres_query
+    parameters:
+      query: |
+        INSERT INTO qa_log
+        (question, answer, chunks_used, embedding_cost, llm_cost, total_cost, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        RETURNING id
+      params:
+        - "{{INPUT.question}}"
+        - "{{generate_answer.result.content}}"
+        - 3
+        - "{{embed_question.embeddings.cost_usd}}"
+        - "{{generate_answer.result.cost_usd}}"
+        # Total cost calculation using Jinja2 addition
+        - "{{embed_question.embeddings.cost_usd + generate_answer.result.cost_usd}}"
+    outputs:
+      - result
+    depends_on:
+      - generate_answer
+
+  # Step 5: Return answer to user via webhook
+  - key: send_response
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.response_webhook_url}}"
+      headers:
+        Content-Type: "application/json"
+      body:
+        question: "{{INPUT.question}}"
+        answer: "{{generate_answer.result.content}}"
+        sources_count: 3
+        total_cost_usd: "{{embed_question.embeddings.cost_usd + generate_answer.result.cost_usd}}"
+        workflow_id: "{{WORKFLOW.id}}"
+    depends_on:
+      - store_qa_result

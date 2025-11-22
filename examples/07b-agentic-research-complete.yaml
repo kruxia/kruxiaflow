@@ -1,0 +1,282 @@
+# Example 7b: Complete Agentic Research (Iterative Workflows with Budget-Aware Loops)
+#
+# This is the COMPLETE implementation of Example 7 from mvp-workflows-implementation-plan.md.
+# It demonstrates advanced features beyond the simplified 07a version.
+#
+# For a SIMPLER, SELF-CONTAINED introduction to loops (LLM-only, no external dependencies),
+# see 07a-agentic-research-simple.yaml first.
+#
+# What This Example Adds Beyond 07a (Advanced US-3.4 Features):
+# ✓ Real HTTP-based research using external search APIs (not LLM simulation)
+# ✓ Structured field extraction from LLM outputs ({{evaluate.sufficient}} not string matching)
+# ✓ File storage with iteration scoping (large search results stored as files)
+# ✓ Dual success/failure paths (explicit publish_success and publish_failure activities)
+# ✓ Array access patterns ({{search_information[*].results}} - all iterations)
+# ✓ Complex boolean conditions (AND, <, > operators)
+# ✓ Remaining budget checks in conditions ({{evaluate.remaining_budget_usd}})
+# ✓ Comprehensive iteration metadata tracking
+#
+# Prerequisites:
+# - ANTHROPIC_API_KEY for Claude Haiku and Sonnet models
+# - Search API endpoint (e.g., SerpAPI, Brave Search, or custom search service)
+# - Webhook/API endpoint to publish final results
+#
+# Workflow Pattern:
+# search_information → evaluate_sufficiency → [loop back if not sufficient] → compile_report → publish_success
+#            ↑_____________________________|                                                          ↓
+#                                                                                              publish_failure
+#
+# Budget-Aware Loop Behavior:
+# - Each iteration of search_information costs ~$0.10 (API call cost)
+# - Each iteration of evaluate_sufficiency costs ~$0.001 (Haiku 4)
+# - With $0.50 budget and 5 iteration limit:
+#   - Max theoretical iterations: ~4 (budget-limited for evaluate)
+#   - Max enforced iterations: 5 (iteration_limit)
+#   - Loop will stop at whichever limit is reached first
+# - Budget accumulates across ALL iterations (not per-iteration)
+# - If budget exceeded, activity fails and publish_failure runs
+#
+# Expected Execution Flow (Success Scenario):
+#
+# 1. search_information (iteration 0): First search API call
+#    - Cost: ~$0.10, Total: $0.10
+#    - Outputs: {{search_information.results}} = [results_file_0] (stored as file)
+#
+# 2. evaluate_sufficiency (iteration 0): Not sufficient yet → sufficient=false
+#    - Cost: ~$0.001, Total: $0.101
+#    - Loop back condition met → schedule search_information again
+#
+# 3. search_information (iteration 1): Second search with refined query
+#    - Cost: ~$0.10, Total: $0.201
+#    - Outputs: {{search_information.results}} = [results_file_0, results_file_1]
+#
+# 4. evaluate_sufficiency (iteration 1): Still not sufficient → sufficient=false
+#    - Cost: ~$0.001, Total: $0.202
+#    - Loop back condition met → schedule search_information again
+#
+# 5. search_information (iteration 2): Third search, comprehensive coverage
+#    - Cost: ~$0.10, Total: $0.302
+#    - Outputs: {{search_information.results}} = [results_file_0, results_file_1, results_file_2]
+#
+# 6. evaluate_sufficiency (iteration 2): Now sufficient → sufficient=true
+#    - Cost: ~$0.001, Total: $0.303
+#    - Loop back condition NOT met (sufficient == true)
+#    - compile_report condition IS met (sufficient == true)
+#
+# 7. compile_report: Synthesize all findings from 3 iterations
+#    - Cost: ~$0.020 (Sonnet 4.5), Total: $0.323
+#    - Accesses all iteration files: {{search_information[*].results}}
+#
+# 8. publish_success: POST report to webhook
+#    - Cost: ~$0.00, Total: $0.323
+#    - Includes metadata: topic, iterations=3, total_cost=$0.323
+#
+# Total iterations: 3 (stopped by evaluate decision)
+# Total cost: ~$0.323 (under $1.50 total budget)
+#
+# Expected Execution Flow (Failure Scenario - Budget Exhausted):
+#
+# 1-4. [Same as above through iteration 1]
+#
+# 5. evaluate_sufficiency (iteration 4): Still insufficient, but budget low
+#    - Cost: ~$0.001, Total: $0.493
+#    - remaining_budget_usd = $0.007 (< $0.10 threshold)
+#    - Loop back condition NOT met (insufficient budget)
+#    - publish_failure condition IS met
+#
+# 6. publish_failure: POST failure report to webhook
+#    - Includes: reason="Insufficient information after 4 iterations"
+#    - Includes: gaps from last evaluation, total_cost=$0.493
+#
+# Loop Exit Scenarios:
+# 1. Normal exit: evaluate returns sufficient=true (condition-based)
+# 2. Iteration limit: reaches 5 iterations (iteration_limit-based)
+# 3. Budget exhausted: remaining_budget_usd < $0.10 (budget-based)
+# 4. Activity failure: any activity fails (error-based)
+#
+# Differences from 07a (Simple Version):
+#
+# | Feature                      | 07a (Simple)                    | 07b (Complete)                           |
+# |------------------------------|---------------------------------|------------------------------------------|
+# | Research activity            | LLM simulates research          | Real HTTP search API calls               |
+# | Loop condition syntax        | String matching (.contains())   | Structured field access (.sufficient)    |
+# | Results storage              | Inline JSON                     | Files with iteration scoping             |
+# | Array access                 | Implicit (Jinja filters)        | Explicit ([*] bracket notation)          |
+# | Failure handling             | Implicit (timeout/error)        | Explicit publish_failure activity        |
+# | Budget checks                | Activity-level only             | Condition-level remaining budget checks  |
+# | External dependencies        | None (LLM-only)                 | Search API + webhook endpoint            |
+# | Production readiness         | Educational demo                | Production-ready pattern                 |
+#
+# Key YAML Features Demonstrated (from mvp-workflows-implementation-plan.md lines 1376-1386):
+# ✅ Loop edges (activity depends on itself with condition)
+# ✅ Iteration-scoped outputs: iteration_scoped: true
+# ✅ Access all iteration results: {{activity_key[*].output_name}} (array of all iterations)
+# ✅ Access current iteration: {{activity_key.output_name}} (latest iteration)
+# ✅ Activity context variables: {{activity_key.iteration}} - iteration count
+# ✅ Budget tracking per activity: {{activity_key.remaining_budget_usd}}
+# ✅ Maximum iteration limits (prevent infinite loops)
+# ✅ Complex boolean expressions with AND, <
+# ✅ File outputs with iteration scoping (large data handling)
+#
+# Implementation Notes:
+# - This example uses hypothetical search API syntax - adapt to your actual search provider
+# - For SerpAPI: url: "https://serpapi.com/search", add api_key to query params
+# - For Brave Search: url: "https://api.search.brave.com/res/v1/web/search"
+# - Output field extraction ({{evaluate.sufficient}}) requires US-3.4+ features
+
+name: agentic_research_complete
+description: Complete iterative research workflow with HTTP search, file storage, and dual success/failure paths
+
+activities:
+  # Step 1: Iterative information search via HTTP API (loops until sufficient)
+  - key: search_information
+    activity_name: http_request
+    iteration_scoped: true       # Store each iteration's results as separate file
+    iteration_limit: 5           # Safety bound: max 5 iterations
+    parameters:
+      method: POST
+      url: "https://api.search.com/query"
+      headers:
+        Authorization: "Bearer {{SECRET.search_api_key}}"
+        Content-Type: "application/json"
+      body:
+        query: "{{INPUT.research_topic}}"
+        # Iteration context available in search query refinement
+        iteration: "{{search_information.iteration}}"
+        previous_results_count: "{{search_information[*].results | length}}"
+    outputs:
+      - name: results
+        type: file  # Store large search results as file, not inline JSON
+        # File path format: {workflow_id}/search_information/iteration-{N}/results
+    depends_on:
+      # Loop: search depends on evaluate with conditions
+      - activity_key: evaluate_sufficiency
+        conditions:
+          # Loop back if:
+          # 1. Current iteration < 5 (redundant with iteration_limit, but explicit)
+          # 2. evaluate said insufficient (sufficient == false)
+          # 3. Remaining budget > $0.10 (enough for another search iteration)
+          - "{{search_information.iteration}} < 5"
+          - "{{evaluate_sufficiency.sufficient}} == false"
+          - "{{evaluate_sufficiency.remaining_budget_usd}} > 0.10"
+
+  # Step 2: Evaluate if gathered information is sufficient (after each search)
+  - key: evaluate_sufficiency
+    activity_name: llm_prompt
+    parameters:
+      model: anthropic/claude-haiku-4-20250415
+      prompt: |
+        You are a research assistant. Determine if the gathered information
+        is sufficient to answer the research question. Respond with ONLY valid JSON (no markdown):
+
+        {
+          "sufficient": true or false,
+          "reason": "explanation of why sufficient or insufficient",
+          "gaps": ["list", "of", "information", "gaps"]
+        }
+
+        Research question: {{INPUT.research_topic}}
+        Current iteration: {{search_information.iteration}}
+
+        All information gathered across {{search_information[*].results | length}} iterations:
+        {{search_information[*].results}}
+
+        Current iteration's findings:
+        {{search_information.results}}
+
+        Remaining budget: ${{ACTIVITY.remaining_budget_usd}}
+      max_tokens: 200
+    outputs:
+      # Structured field extraction (US-3.4+ feature)
+      # Framework extracts JSON fields as separate named outputs
+      - sufficient    # Boolean: true if sufficient, false otherwise
+      - reason        # String: explanation
+      - gaps          # Array: list of information gaps
+    settings:
+      budget:
+        limit_usd: 0.50
+        action: abort
+    depends_on:
+      - search_information
+
+  # Step 3: Compile comprehensive report (runs once, after loop exits via sufficient=true)
+  - key: compile_report
+    activity_name: llm_prompt
+    parameters:
+      model: anthropic/claude-sonnet-4-5-20250929
+      prompt: |
+        Compile a comprehensive research report from all gathered information.
+
+        Topic: {{INPUT.research_topic}}
+        Total iterations: {{search_information.iteration}}
+
+        All research findings from {{search_information[*].results | length}} iterations:
+        {{search_information[*].results}}
+
+        Evaluation assessments from each iteration:
+        {{evaluate_sufficiency[*].reason}}
+
+        Create a well-structured report that:
+        1. Answers the research question comprehensively
+        2. Cites sources from the search results
+        3. Addresses all gaps identified during the research
+        4. Provides actionable insights
+      max_tokens: 4000
+    outputs:
+      - name: report
+        type: file  # Store report as file (could be large)
+    settings:
+      budget:
+        limit_usd: 1.00
+        action: abort
+    depends_on:
+      - activity_key: evaluate_sufficiency
+        conditions:
+          # Only compile report when evaluate said sufficient
+          - "{{evaluate_sufficiency.sufficient}} == true"
+
+  # Step 4a: Publish success result (after successful research completion)
+  - key: publish_success
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.publish_url}}"
+      headers:
+        Content-Type: "multipart/form-data"
+      files:
+        # Upload the compiled report file
+        report: "{{FILE.compile_report.report}}"
+      body:
+        status: "success"
+        topic: "{{INPUT.research_topic}}"
+        iterations: "{{search_information.iteration}}"
+        total_cost_usd: "{{search_information.total_cost_usd}}"
+        workflow_id: "{{WORKFLOW.id}}"
+    depends_on:
+      - compile_report
+
+  # Step 4b: Publish failure result (when loop exits without sufficient information)
+  - key: publish_failure
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.publish_url}}"
+      headers:
+        Content-Type: "application/json"
+      body:
+        status: "failed"
+        topic: "{{INPUT.research_topic}}"
+        reason: "Insufficient information after {{search_information.iteration}} iterations"
+        iterations: "{{search_information.iteration}}"
+        total_cost_usd: "{{search_information.total_cost_usd}}"
+        last_assessment: "{{evaluate_sufficiency.reason}}"
+        gaps: "{{evaluate_sufficiency.gaps}}"
+        workflow_id: "{{WORKFLOW.id}}"
+    depends_on:
+      - activity_key: evaluate_sufficiency
+        conditions:
+          # Publish failure if:
+          # 1. evaluate said insufficient (sufficient == false) AND
+          # 2. Either budget exhausted OR iteration limit reached
+          - "{{evaluate_sufficiency.sufficient}} == false"
+          - "{{evaluate_sufficiency.remaining_budget_usd}} < 0.10 OR {{search_information.iteration}} >= 5"
