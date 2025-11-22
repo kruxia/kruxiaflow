@@ -152,6 +152,7 @@ fn test_new_workflow_event_serialization() {
         event_type: WorkflowEventType::WorkflowCreated,
         activity_key: Some("activity1".to_string()),
         payload: json!({"key": "value"}),
+        iteration: None,
     };
 
     let json = serde_json::to_string(&event).unwrap();
@@ -186,6 +187,7 @@ fn test_new_workflow_event_without_activity_key() {
         event_type: WorkflowEventType::WorkflowCreated,
         activity_key: None,
         payload: json!({}),
+        iteration: None,
     };
 
     let json = serde_json::to_string(&event).unwrap();
@@ -201,6 +203,7 @@ fn test_new_workflow_event_clone() {
         event_type: WorkflowEventType::ActivityCompleted,
         activity_key: Some("act1".to_string()),
         payload: json!({"result": "success"}),
+        iteration: None,
     };
 
     let event2 = event1.clone();
@@ -224,6 +227,7 @@ fn test_workflow_event_serialization() {
         activity_key: Some("activity1".to_string()),
         payload: json!({"result": "ok"}),
         timestamp: Utc::now(),
+        iteration: None,
     };
 
     let json = serde_json::to_string(&event).unwrap();

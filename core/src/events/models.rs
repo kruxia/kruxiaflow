@@ -9,6 +9,8 @@ pub struct NewWorkflowEvent {
     pub event_type: WorkflowEventType,
     pub activity_key: Option<String>,
     pub payload: serde_json::Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iteration: Option<i32>,
 }
 
 /// Event returned from polling (includes database-generated fields)
@@ -20,6 +22,8 @@ pub struct WorkflowEvent {
     pub activity_key: Option<String>,
     pub payload: serde_json::Value,
     pub timestamp: DateTime<Utc>,
+    #[serde(default)]
+    pub iteration: Option<i32>,
 }
 
 /// Workflow definition structure

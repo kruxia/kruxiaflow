@@ -25,29 +25,55 @@ impl From<minijinja::Error> for TemplateError {
     }
 }
 
+/// Activity state information for template context
+#[derive(Debug, Clone)]
+pub struct ActivityContextInfo {
+    /// Structured outputs with type information
+    pub outputs: Vec<ActivityOutput>,
+
+    /// Iteration-scoped outputs (grouped by name as arrays)
+    /// Only present for iteration_scoped activities
+    pub iteration_outputs: Option<HashMap<String, Vec<Value>>>,
+
+    /// Current iteration number (0-based)
+    pub iteration: u32,
+
+    /// Accumulated cost in USD across all attempts/iterations
+    pub accumulated_cost_usd: rust_decimal::Decimal,
+}
+
 /// Template context for resolving expressions
 #[derive(Debug, Clone)]
 pub struct TemplateContext {
     /// Workflow inputs provided at runtime
     pub inputs: HashMap<String, Value>,
 
-    /// Activity outputs (key = activity_key, value = structured outputs with type info)
-    pub outputs: HashMap<String, Vec<ActivityOutput>>,
+    /// Activity state information (key = activity_key)
+    pub activity_states: HashMap<String, ActivityContextInfo>,
 
     /// Secrets (e.g., API keys)
     pub secrets: HashMap<String, String>,
 
     /// Workflow-level variables
     pub workflow: HashMap<String, Value>,
+
+    /// Current activity context (for {{ACTIVITY.*}} variables)
+    /// Key is the activity_key being resolved
+    pub current_activity_key: Option<String>,
+
+    /// Budget settings for current activity (used for remaining_budget_usd calculation)
+    pub current_activity_budget_limit: Option<rust_decimal::Decimal>,
 }
 
 impl TemplateContext {
     pub fn new() -> Self {
         Self {
             inputs: HashMap::new(),
-            outputs: HashMap::new(),
+            activity_states: HashMap::new(),
             secrets: HashMap::new(),
             workflow: HashMap::new(),
+            current_activity_key: None,
+            current_activity_budget_limit: None,
         }
     }
 
@@ -61,8 +87,40 @@ impl TemplateContext {
         self
     }
 
+    /// Add activity state information for template resolution
+    pub fn add_activity_state(
+        &mut self,
+        activity_key: String,
+        outputs: Vec<ActivityOutput>,
+        iteration_outputs: Option<HashMap<String, Vec<Value>>>,
+        iteration: u32,
+        accumulated_cost_usd: rust_decimal::Decimal,
+    ) {
+        self.activity_states.insert(
+            activity_key,
+            ActivityContextInfo {
+                outputs,
+                iteration_outputs,
+                iteration,
+                accumulated_cost_usd,
+            },
+        );
+    }
+
+    /// Legacy method for backward compatibility
     pub fn add_activity_output(&mut self, activity_key: String, outputs: Vec<ActivityOutput>) {
-        self.outputs.insert(activity_key, outputs);
+        self.add_activity_state(activity_key, outputs, None, 0, rust_decimal::Decimal::ZERO);
+    }
+
+    /// Set current activity context for {{ACTIVITY.*}} variables
+    pub fn with_current_activity(
+        mut self,
+        activity_key: String,
+        budget_limit: Option<rust_decimal::Decimal>,
+    ) -> Self {
+        self.current_activity_key = Some(activity_key);
+        self.current_activity_budget_limit = budget_limit;
+        self
     }
 
     /// Convert TemplateContext to minijinja Value for template evaluation
@@ -102,50 +160,71 @@ impl TemplateContext {
             )),
         );
 
-        // Add activity outputs as top-level keys (for Value-type outputs)
+        // Add activity outputs as top-level keys.
+        // For iteration-scoped activities: serialize outputs grouped by name as arrays
+        // For non-iteration-scoped activities: serialize outputs as single values
         // Also build FILE and FOLDER context maps
         let mut file_map: HashMap<String, HashMap<String, String>> = HashMap::new();
         let mut folder_map: HashMap<String, HashMap<String, String>> = HashMap::new();
 
-        for (activity_key, outputs) in &self.outputs {
-            let mut value_outputs = HashMap::new();
-            let mut file_outputs = HashMap::new();
-            let mut folder_outputs = HashMap::new();
+        for (activity_key, activity_info) in &self.activity_states {
+            // Check if this is an iteration-scoped activity
+            if let Some(iteration_outputs) = &activity_info.iteration_outputs {
+                // Iteration-scoped: outputs are already grouped by name as arrays
+                let value_map: serde_json::Map<String, Value> = iteration_outputs
+                    .iter()
+                    .map(|(name, values)| (name.clone(), Value::Array(values.clone())))
+                    .collect();
 
-            for output in outputs {
-                match output.output_type {
-                    OutputType::Value => {
-                        value_outputs.insert(output.name.clone(), output.value.clone());
-                    }
-                    OutputType::File => {
-                        if let Some(file_ref) = output.value.as_str() {
-                            file_outputs.insert(output.name.clone(), file_ref.to_string());
+                // Always add iteration-scoped activities to context, even if empty
+                // This ensures templates can reference them (e.g., {{activity.output | last}})
+                context_map.insert(
+                    activity_key.clone(),
+                    serde_json_to_minijinja(&Value::Object(value_map)),
+                );
+            } else {
+                // Non-iteration-scoped: serialize outputs as single values (current behavior)
+                let mut value_outputs = HashMap::new();
+                let mut file_outputs = HashMap::new();
+                let mut folder_outputs = HashMap::new();
+
+                for output in &activity_info.outputs {
+                    match output.output_type {
+                        OutputType::Value => {
+                            value_outputs.insert(output.name.clone(), output.value.clone());
                         }
-                    }
-                    OutputType::Folder => {
-                        if let Some(folder_ref) = output.value.as_str() {
-                            folder_outputs.insert(output.name.clone(), folder_ref.to_string());
+                        OutputType::File => {
+                            if let Some(file_ref) = output.value.as_str() {
+                                file_outputs.insert(output.name.clone(), file_ref.to_string());
+                            }
+                        }
+                        OutputType::Folder => {
+                            if let Some(folder_ref) = output.value.as_str() {
+                                folder_outputs.insert(output.name.clone(), folder_ref.to_string());
+                            }
                         }
                     }
                 }
-            }
 
-            // Add value outputs as top-level activity key
-            if !value_outputs.is_empty() {
-                context_map.insert(
-                    activity_key.clone(),
-                    serde_json_to_minijinja(&Value::Object(value_outputs.into_iter().collect())),
-                );
-            }
+                // Add value outputs as top-level activity key
+                if !value_outputs.is_empty() {
+                    context_map.insert(
+                        activity_key.clone(),
+                        serde_json_to_minijinja(&Value::Object(
+                            value_outputs.into_iter().collect(),
+                        )),
+                    );
+                }
 
-            // Add to FILE map
-            if !file_outputs.is_empty() {
-                file_map.insert(activity_key.clone(), file_outputs);
-            }
+                // Add to FILE map
+                if !file_outputs.is_empty() {
+                    file_map.insert(activity_key.clone(), file_outputs);
+                }
 
-            // Add to FOLDER map
-            if !folder_outputs.is_empty() {
-                folder_map.insert(activity_key.clone(), folder_outputs);
+                // Add to FOLDER map
+                if !folder_outputs.is_empty() {
+                    folder_map.insert(activity_key.clone(), folder_outputs);
+                }
             }
         }
 
@@ -189,6 +268,30 @@ impl TemplateContext {
             context_map.insert("FOLDER".to_string(), serde_json_to_minijinja(&folder_value));
         }
 
+        // Add ACTIVITY context (for current activity being resolved)
+        if let Some(current_key) = &self.current_activity_key
+            && let Some(activity_info) = self.activity_states.get(current_key)
+        {
+            let remaining_budget = if let Some(limit) = self.current_activity_budget_limit {
+                (limit - activity_info.accumulated_cost_usd)
+                    .max(rust_decimal::Decimal::ZERO)
+                    .to_string()
+            } else {
+                "0.00".to_string()
+            };
+
+            let activity_context = serde_json::json!({
+                "iteration": activity_info.iteration,
+                "accumulated_cost_usd": activity_info.accumulated_cost_usd.to_string(),
+                "remaining_budget_usd": remaining_budget,
+            });
+
+            context_map.insert(
+                "ACTIVITY".to_string(),
+                serde_json_to_minijinja(&activity_context),
+            );
+        }
+
         MiniValue::from_object(context_map)
     }
 }
@@ -209,7 +312,7 @@ fn is_whole_template(s: &str) -> bool {
     let trimmed = s.trim();
     trimmed.starts_with("{{")
         && trimmed.ends_with("}}")
-        && trimmed[2..trimmed.len() - 2].find("{{").is_none() // No nested {{
+        && !trimmed[2..trimmed.len() - 2].contains("{{") // No nested {{
 }
 
 /// Extract expression from template string "{{expr}}" -> "expr"
@@ -576,5 +679,315 @@ mod tests {
         let template = "{{INPUT.missing}}";
         let result = resolve_template(template, &context);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_resolve_iteration_scoped_as_array() {
+        let mut context = TemplateContext::new();
+
+        // Create iteration outputs grouped by name as arrays
+        let mut iteration_outputs = HashMap::new();
+        iteration_outputs.insert(
+            "results".to_string(),
+            vec![
+                serde_json::json!("result1"),
+                serde_json::json!("result2"),
+                serde_json::json!("result3"),
+            ],
+        );
+        iteration_outputs.insert(
+            "score".to_string(),
+            vec![
+                serde_json::json!(10),
+                serde_json::json!(20),
+                serde_json::json!(30),
+            ],
+        );
+
+        context.add_activity_state(
+            "search".to_string(),
+            vec![],
+            Some(iteration_outputs),
+            2,
+            rust_decimal::Decimal::new(750, 2), // $7.50
+        );
+
+        // Access all iterations as array
+        let value = Value::String("{{search.results}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(
+            result,
+            Value::Array(vec![
+                serde_json::json!("result1"),
+                serde_json::json!("result2"),
+                serde_json::json!("result3"),
+            ])
+        );
+
+        // Access scores array
+        let value = Value::String("{{search.score}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(
+            result,
+            Value::Array(vec![
+                serde_json::json!(10),
+                serde_json::json!(20),
+                serde_json::json!(30),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_resolve_latest_with_filter() {
+        let mut context = TemplateContext::new();
+
+        // Create iteration outputs
+        let mut iteration_outputs = HashMap::new();
+        iteration_outputs.insert(
+            "results".to_string(),
+            vec![
+                serde_json::json!("result1"),
+                serde_json::json!("result2"),
+                serde_json::json!("result3"),
+            ],
+        );
+
+        context.add_activity_state(
+            "search".to_string(),
+            vec![],
+            Some(iteration_outputs),
+            2,
+            rust_decimal::Decimal::ZERO,
+        );
+
+        // Access latest value using | last filter
+        let value = Value::String("{{search.results | last}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, serde_json::json!("result3"));
+
+        // Access first value using | first filter
+        let value = Value::String("{{search.results | first}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, serde_json::json!("result1"));
+    }
+
+    #[test]
+    fn test_resolve_array_length_filter() {
+        let mut context = TemplateContext::new();
+
+        let mut iteration_outputs = HashMap::new();
+        iteration_outputs.insert(
+            "results".to_string(),
+            vec![
+                serde_json::json!("result1"),
+                serde_json::json!("result2"),
+                serde_json::json!("result3"),
+            ],
+        );
+
+        context.add_activity_state(
+            "search".to_string(),
+            vec![],
+            Some(iteration_outputs),
+            2,
+            rust_decimal::Decimal::ZERO,
+        );
+
+        // Get array length using | length filter
+        let value = Value::String("{{search.results | length}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Number(3.into()));
+    }
+
+    #[test]
+    fn test_resolve_iteration_counter() {
+        let mut context = TemplateContext::new();
+
+        let mut iteration_outputs = HashMap::new();
+        iteration_outputs.insert("results".to_string(), vec![serde_json::json!("result1")]);
+
+        context.add_activity_state(
+            "search".to_string(),
+            vec![],
+            Some(iteration_outputs),
+            2, // iteration = 2
+            rust_decimal::Decimal::ZERO,
+        );
+
+        // Set current activity context
+        context = context.with_current_activity("search".to_string(), None);
+
+        // Access iteration counter via {{ACTIVITY.iteration}}
+        let value = Value::String("{{ACTIVITY.iteration}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Number(2.into()));
+    }
+
+    #[test]
+    fn test_resolve_accumulated_cost() {
+        let mut context = TemplateContext::new();
+
+        let mut iteration_outputs = HashMap::new();
+        iteration_outputs.insert("results".to_string(), vec![serde_json::json!("result1")]);
+
+        context.add_activity_state(
+            "search".to_string(),
+            vec![],
+            Some(iteration_outputs),
+            2,
+            rust_decimal::Decimal::new(1050, 2), // $10.50
+        );
+
+        // Set current activity context
+        context = context.with_current_activity("search".to_string(), None);
+
+        // Access accumulated cost via {{ACTIVITY.accumulated_cost_usd}}
+        let value = Value::String("{{ACTIVITY.accumulated_cost_usd}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("10.50".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_remaining_budget() {
+        let mut context = TemplateContext::new();
+
+        let mut iteration_outputs = HashMap::new();
+        iteration_outputs.insert("results".to_string(), vec![serde_json::json!("result1")]);
+
+        context.add_activity_state(
+            "search".to_string(),
+            vec![],
+            Some(iteration_outputs),
+            2,
+            rust_decimal::Decimal::new(750, 2), // $7.50 accumulated
+        );
+
+        // Set current activity context with budget limit of $10.00
+        context = context.with_current_activity(
+            "search".to_string(),
+            Some(rust_decimal::Decimal::new(1000, 2)), // $10.00 limit
+        );
+
+        // Access remaining budget via {{ACTIVITY.remaining_budget_usd}}
+        let value = Value::String("{{ACTIVITY.remaining_budget_usd}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("2.50".to_string())); // $10.00 - $7.50 = $2.50
+    }
+
+    #[test]
+    fn test_non_iteration_scoped_outputs() {
+        use crate::workflow::{ActivityOutput, OutputType};
+
+        let mut context = TemplateContext::new();
+
+        // Non-iteration-scoped activity (iteration_outputs = None)
+        context.add_activity_state(
+            "fetch".to_string(),
+            vec![
+                ActivityOutput {
+                    name: "temperature".to_string(),
+                    output_type: OutputType::Value,
+                    value: Value::Number(72.into()),
+                },
+                ActivityOutput {
+                    name: "conditions".to_string(),
+                    output_type: OutputType::Value,
+                    value: Value::String("sunny".to_string()),
+                },
+            ],
+            None, // Not iteration-scoped
+            0,
+            rust_decimal::Decimal::ZERO,
+        );
+
+        // Should return single values (not arrays)
+        let value = Value::String("{{fetch.temperature}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Number(72.into()));
+
+        let value = Value::String("{{fetch.conditions}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("sunny".to_string()));
+    }
+
+    #[test]
+    fn test_iteration_array_in_condition() {
+        let mut context = TemplateContext::new();
+
+        let mut iteration_outputs = HashMap::new();
+        iteration_outputs.insert(
+            "sufficient".to_string(),
+            vec![
+                serde_json::json!(false),
+                serde_json::json!(false),
+                serde_json::json!(true),
+            ],
+        );
+
+        context.add_activity_state(
+            "evaluate".to_string(),
+            vec![],
+            Some(iteration_outputs),
+            2,
+            rust_decimal::Decimal::ZERO,
+        );
+
+        // Check latest iteration result in condition (typical loop pattern)
+        let value = Value::String("{{evaluate.sufficient | last}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Bool(true));
+
+        // Test with false value
+        let mut iteration_outputs_false = HashMap::new();
+        iteration_outputs_false.insert(
+            "sufficient".to_string(),
+            vec![
+                serde_json::json!(false),
+                serde_json::json!(false),
+                serde_json::json!(false),
+            ],
+        );
+
+        let mut context2 = TemplateContext::new();
+        context2.add_activity_state(
+            "evaluate".to_string(),
+            vec![],
+            Some(iteration_outputs_false),
+            2,
+            rust_decimal::Decimal::ZERO,
+        );
+
+        let value2 = Value::String("{{evaluate.sufficient | last}}".to_string());
+        let result2 = resolve_template_value(&value2, &context2).unwrap();
+        assert_eq!(result2, Value::Bool(false));
+    }
+
+    #[test]
+    fn test_activity_context_only_for_current_activity() {
+        let mut context = TemplateContext::new();
+
+        let mut iteration_outputs = HashMap::new();
+        iteration_outputs.insert("results".to_string(), vec![serde_json::json!("result1")]);
+
+        context.add_activity_state(
+            "search".to_string(),
+            vec![],
+            Some(iteration_outputs),
+            2,
+            rust_decimal::Decimal::new(750, 2),
+        );
+
+        // Don't set current_activity_key - ACTIVITY context should not be available
+        // This should fail because ACTIVITY is undefined and we use strict mode
+        let value = Value::String("{{ACTIVITY.iteration}}".to_string());
+        let result = resolve_template_value(&value, &context);
+        assert!(result.is_err()); // Should fail with undefined error
+
+        // Now set current activity
+        context = context.with_current_activity("search".to_string(), None);
+
+        let value = Value::String("{{ACTIVITY.iteration}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Number(2.into())); // Should return actual value
     }
 }

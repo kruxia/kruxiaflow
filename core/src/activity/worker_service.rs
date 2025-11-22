@@ -202,6 +202,7 @@ impl ActivityWorkerService {
                 event_type: WorkflowEventType::ActivityCompleted,
                 activity_key: Some(activity.activity_key.clone()),
                 payload: event_payload,
+                iteration: activity.iteration,
             })
             .await?;
 
@@ -274,6 +275,7 @@ impl ActivityWorkerService {
                 event_type: WorkflowEventType::ActivityFailed,
                 activity_key: Some(activity.activity_key.clone()),
                 payload: event_payload,
+                iteration: activity.iteration,
             })
             .await?;
 

@@ -59,13 +59,13 @@ impl ActivityQueue for PostgresQueue {
             let settings_json = activity
                 .settings
                 .as_ref()
-                .map(|s| serde_json::to_value(s))
+                .map(serde_json::to_value)
                 .transpose()?;
 
             let output_definitions_json = activity
                 .output_definitions
                 .as_ref()
-                .map(|o| serde_json::to_value(o))
+                .map(serde_json::to_value)
                 .transpose()?;
 
             // Idempotent insert - ON CONFLICT DO NOTHING
@@ -75,9 +75,12 @@ impl ActivityQueue for PostgresQueue {
                 r#"
                 INSERT INTO activity_queue (
                     workflow_id, activity_key, worker, name,
-                    parameters, settings, scheduled_for, timeout_duration, max_retries, output_definitions
-                ) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, NOW()), make_interval(secs => $8), $9, $10)
-                ON CONFLICT (workflow_id, activity_key) DO NOTHING
+                    parameters, settings, scheduled_for, timeout_duration, 
+                    max_retries, output_definitions, iteration
+                ) VALUES ($1, $2, $3, $4, 
+                          $5, $6, COALESCE($7, NOW()), make_interval(secs => $8), 
+                          $9, $10, $11)
+                ON CONFLICT (workflow_id, activity_key, iteration) DO NOTHING
                 "#,
                 workflow_id,
                 activity.key,
@@ -88,7 +91,8 @@ impl ActivityQueue for PostgresQueue {
                 activity.scheduled_for,
                 timeout as f64,
                 max_retries,
-                output_definitions_json
+                output_definitions_json,
+                activity.iteration
             )
             .execute(&self.pool)
             .await?;
@@ -152,7 +156,7 @@ impl ActivityQueue for PostgresQueue {
                 FOR UPDATE SKIP LOCKED
             )
             RETURNING id, workflow_id, activity_key, worker, name as activity_name,
-                      parameters, settings, retry_count, claimed_at, output_definitions
+                      parameters, settings, retry_count, claimed_at, output_definitions, iteration
             "#,
             worker,
             name,
@@ -184,6 +188,7 @@ impl ActivityQueue for PostgresQueue {
                     retry_count: row.retry_count,
                     claimed_at: row.claimed_at.unwrap(),
                     output_definitions,
+                    iteration: row.iteration,
                 };
 
                 if queued.retry_count > 0 {
@@ -213,7 +218,7 @@ impl ActivityQueue for PostgresQueue {
     async fn get_activity_summary(&self, activity_id: Uuid) -> Result<ActivitySummary> {
         let details = sqlx::query!(
             r#"
-            SELECT workflow_id, activity_key
+            SELECT workflow_id, activity_key, iteration
             FROM activity_queue
             WHERE id = $1
             "#,
@@ -226,6 +231,7 @@ impl ActivityQueue for PostgresQueue {
         Ok(ActivitySummary {
             workflow_id: details.workflow_id,
             activity_key: details.activity_key,
+            iteration: details.iteration,
         })
     }
 

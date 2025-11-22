@@ -16,5 +16,5 @@ pub use orchestrator::run_orchestrator;
 pub use workflow_state::{
     ActivityState, WorkflowActivityStatus, WorkflowState, apply_event_to_state,
     initialize_workflow_state, load_materialized_state, load_workflow_definition,
-    save_materialized_state,
+    load_workflow_definition_by_id, save_materialized_state,
 };

@@ -30,13 +30,14 @@ minijinja = "2.6"
 sha2 = "0.10"
 
 # Optional dependencies
-redis = { version = "0.25", features = ["tokio-comp", "connection-manager"], optional = true }
+redis = { version = "0.32", features = ["tokio-comp", "connection-manager"], optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 mockall.workspace = true
 serial_test.workspace = true
 rust_decimal_macros = "1.36"
+criterion = "0.5"
 
 [features]
 # Enable profiling feature for detailed instrumentation
@@ -45,3 +46,7 @@ profiling = []
 
 # Enable Redis-backed caching
 redis-cache = ["redis"]
+
+[[bench]]
+name = "loop_performance"
+harness = false

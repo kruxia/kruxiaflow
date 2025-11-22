@@ -64,6 +64,7 @@ async fn schedule_test_activity(
         settings: None,
         scheduled_for: None,
         output_definitions: None,
+        iteration: None,
     };
 
     queue

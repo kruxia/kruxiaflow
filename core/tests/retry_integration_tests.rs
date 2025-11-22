@@ -197,6 +197,7 @@ async fn test_activity_retry_with_exponential_backoff() {
                 budget: None,
                 cache: false,
                 cache_ttl: None,
+                iteration_limit: None,
             }),
             depends_on: None,
             dependency_of: None,
@@ -220,6 +221,7 @@ async fn test_activity_retry_with_exponential_backoff() {
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,
             payload: json!({}),
+            iteration: None,
         })
         .await
         .expect("Failed to publish WorkflowCreated");
@@ -243,6 +245,7 @@ async fn test_activity_retry_with_exponential_backoff() {
             event_type: WorkflowEventType::ActivityFailed,
             activity_key: Some("flaky_task".to_string()),
             payload: json!({"error": "Connection timeout"}),
+            iteration: None,
         })
         .await
         .unwrap();
@@ -267,6 +270,7 @@ async fn test_activity_retry_with_exponential_backoff() {
             event_type: WorkflowEventType::ActivityFailed,
             activity_key: Some("flaky_task".to_string()),
             payload: json!({"error": "Service unavailable"}),
+            iteration: None,
         })
         .await
         .unwrap();
@@ -311,6 +315,7 @@ async fn test_activity_retry_with_exponential_backoff() {
             event_type: WorkflowEventType::ActivityCompleted,
             activity_key: Some("flaky_task".to_string()),
             payload: json!({"outputs": {"result": "success"}}),
+            iteration: None,
         })
         .await
         .unwrap();
@@ -373,6 +378,7 @@ async fn test_activity_retry_max_attempts_reached() {
                 budget: None,
                 cache: false,
                 cache_ttl: None,
+                iteration_limit: None,
             }),
             depends_on: None,
             dependency_of: None,
@@ -396,6 +402,7 @@ async fn test_activity_retry_max_attempts_reached() {
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,
             payload: json!({}),
+            iteration: None,
         })
         .await
         .unwrap();
@@ -419,6 +426,7 @@ async fn test_activity_retry_max_attempts_reached() {
             event_type: WorkflowEventType::ActivityFailed,
             activity_key: Some("failing_task".to_string()),
             payload: json!({"error": "Permanent error"}),
+            iteration: None,
         })
         .await
         .unwrap();
@@ -443,6 +451,7 @@ async fn test_activity_retry_max_attempts_reached() {
             event_type: WorkflowEventType::ActivityFailed,
             activity_key: Some("failing_task".to_string()),
             payload: json!({"error": "Still failing"}),
+            iteration: None,
         })
         .await
         .unwrap();
@@ -520,6 +529,7 @@ async fn test_activity_retry_with_fixed_backoff() {
                 budget: None,
                 cache: false,
                 cache_ttl: None,
+                iteration_limit: None,
             }),
             depends_on: None,
             dependency_of: None,
@@ -543,6 +553,7 @@ async fn test_activity_retry_with_fixed_backoff() {
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,
             payload: json!({}),
+            iteration: None,
         })
         .await
         .unwrap();
@@ -566,6 +577,7 @@ async fn test_activity_retry_with_fixed_backoff() {
             event_type: WorkflowEventType::ActivityFailed,
             activity_key: Some("task_with_fixed_retry".to_string()),
             payload: json!({"error": "Temporary failure"}),
+            iteration: None,
         })
         .await
         .unwrap();
@@ -651,6 +663,7 @@ async fn test_activity_without_retry_fails_immediately() {
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,
             payload: json!({}),
+            iteration: None,
         })
         .await
         .unwrap();
@@ -674,6 +687,7 @@ async fn test_activity_without_retry_fails_immediately() {
             event_type: WorkflowEventType::ActivityFailed,
             activity_key: Some("no_retry_task".to_string()),
             payload: json!({"error": "Failed"}),
+            iteration: None,
         })
         .await
         .unwrap();
@@ -761,6 +775,7 @@ async fn test_retry_state_tracking_with_cost_accumulation() {
                 budget: None,
                 cache: false,
                 cache_ttl: None,
+                iteration_limit: None,
             }),
             depends_on: None,
             dependency_of: None,
@@ -784,6 +799,7 @@ async fn test_retry_state_tracking_with_cost_accumulation() {
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,
             payload: json!({}),
+            iteration: None,
         })
         .await
         .unwrap();
@@ -807,6 +823,7 @@ async fn test_retry_state_tracking_with_cost_accumulation() {
             event_type: WorkflowEventType::ActivityFailed,
             activity_key: Some("expensive_task".to_string()),
             payload: json!({"error": "Rate limited"}),
+            iteration: None,
         })
         .await
         .unwrap();
