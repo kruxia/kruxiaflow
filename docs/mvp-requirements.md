@@ -1,16 +1,16 @@
 # StreamFlow v0.2 Product Requirements Document
 
 **Version**: 0.2.0
-**Date**: November 21, 2025
+**Date**: November 23, 2025
 **Status**: In Development - Core Complete, Token Streaming Next
 - **Epic 1**: ✅ Complete (Event-Driven Orchestration)
-- **Epic 1A**: ⏳ In Progress (API Server - 7/9 stories complete, US-1A.9a token streaming pending)
+- **Epic 1A**: ⏳ In Progress (API Server - 7/9 stories complete, US-1A.9a WebSocket pending)
 - **Epic 1B**: ✅ Complete (Built-in Worker)
 - **Epic 1C**: ⏳ Partial (StreamFlow Binary - US-1C.1, US-1C.2, US-1C.7 complete)
 - **Epic 2**: ✅ Complete (Performance Benchmarking - US-2.1, US-2.2 complete)
-- **Epic 3**: ⏳ In Progress (YAML Workflows - Examples 1-8 complete, US-3.4 and US-3.7 implemented)
-- **Epic 5**: ⏳ In Progress (Built-In Activities - US-5.1, US-5.3, US-5.4 complete)
-- **Epic 7**: 📋 Next Priority (US-7.1 Token Streaming - depends on US-1A.9a)
+- **Epic 3**: ⏳ In Progress (YAML Workflows - Examples 1-8 ✅ complete, US-3.4 and US-3.7 ✅ complete)
+- **Epic 5**: ⏳ In Progress (Built-In Activities - US-5.1, US-5.3, US-5.4, US-5.5 partial complete)
+- **Epic 7**: 📋 Next Priority (US-7.1 Token Streaming - depends on US-1A.9a WebSocket Infrastructure)
 **Target Release**: Q1 2026 with full AI-native feature set including token streaming
 
 ---
@@ -710,8 +710,9 @@ streamflow/
 - **So that** I can implement rate limiting, scheduled reports, delayed notifications, and time-based workflows
 - **Acceptance Criteria**:
   - **Relative delays**: `settings.delay` accepts duration strings with flexible units
-    - Supported units: `s` (seconds), `m` (minutes), `h` (hours), `d` (days), `w` (weeks), `y` (years)
-    - Examples: `"5s"`, `"30m"`, `"2h"`, `"7d"`, `"1w"`, `"1y"`
+    - Supported units: `ms` (milliseconds), `s` (seconds), `m`/`mi` (minutes), `h` (hours), `d` (days), `w` (weeks), `mo` (months), `y` (years)
+    - Examples: `"500ms"`, `"5s"`, `"30m"`, `"30mi"`, `"2h"`, `"7d"`, `"1w"`, `"2mo"`, `"1y"`
+    - Calendar-aware: Months and years use proper calendar arithmetic (handles variable month lengths, leap years)
     - Template support: `"{{INPUT.delay_amount}}m"` or `"{{check_status.retry_after}}s"`
   - **Absolute scheduling**: `settings.scheduled_for` schedules activity for specific ISO 8601 timestamp
     - Supports ISO 8601 format with timezone: `"2025-12-01T09:00:00-08:00"`
@@ -1826,11 +1827,16 @@ flowchart TB
 - ✅ **Example 7**: Iterative workflows/loops (completed 2025-11-22)
   - 07a-agentic-research-simple.yaml (simplified LLM-only loops)
   - 07b-agentic-research-complete.yaml (full spec: HTTP search, file iteration, dual paths)
-- 📋 **Example 8**: Activity scheduling and delays (2-3 days) - **NEXT PRIORITY**
-  - US-3.7: Table stakes feature required before token streaming
+- ✅ **Example 8**: Activity scheduling and delays (completed 2025-11-23)
+  - US-3.7: ✅ Complete - delay (ms/s/m/mi/h/d/w/mo/y) and scheduled_for (ISO 8601)
   - 08a-rate-limited-api-calls.yaml, 08b-scheduled-daily-report.yaml, 08c-delayed-reminders.yaml
-- 📋 **Example 9**: HTTP/DB advanced features (3-4 days)
-- 📋 **Example 10**: Advanced file management (3-4 days)
+  - Template support for dynamic scheduling, calendar-aware month/year arithmetic
+- 📋 **Token Streaming Infrastructure** (5-7 days) - **NEXT PRIORITY**
+  - US-1A.9a: WebSocket infrastructure for real-time streaming
+  - US-7.1: Token streaming for LLM activities
+  - Critical AI-native differentiator for Q1 2026 launch
+- 📋 **Example 9**: HTTP/DB advanced features (3-4 days) - **AFTER TOKEN STREAMING**
+- 📋 **Example 10**: Advanced file management (3-4 days) - **AFTER TOKEN STREAMING**
 
 **Phase 5: Epic 2 Performance Benchmarking** 📋 **DEFERRED**
 - Establish performance baseline after Epic 3 completion
