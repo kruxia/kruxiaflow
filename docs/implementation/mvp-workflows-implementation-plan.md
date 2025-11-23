@@ -1,13 +1,15 @@
 # MVP Workflows Implementation Plan
 
-**Version**: 1.6
-**Date**: 2025-11-22
-**Status**: Core Complete - Token Streaming Next (Examples 1-7 Complete, US-1A.9a + US-7.1 Priority)
+**Version**: 1.7
+**Date**: 2025-11-23
+**Status**: Core Complete - Token Streaming Next (Examples 1-8 Complete, US-1A.9a + US-7.1 Priority)
 **Recent Updates**:
-- Example 6 (Semantic Caching and RAG) ✅ Complete - Three-workflow series (06a, 06b, 06c)
+- Example 8 (Activity Scheduling and Delays) ✅ Complete - Three-workflow series (08a, 08b, 08c)
+- US-3.7 (Activity Scheduling) ✅ Complete - delay and scheduled_for with template support
 - Example 7 (Agentic Research / Iterative Workflows) ✅ Complete - Two-workflow series (07a, 07b)
+- Example 6 (Semantic Caching and RAG) ✅ Complete - Three-workflow series (06a, 06b, 06c)
 - US-3.4 (Iterative Workflows) ✅ Complete - Example 7 demonstrates loops with simple and complete variants
-- **Next Priority**: US-1A.9a (WebSocket Infrastructure) + US-7.1 (Token Streaming) before Examples 8-10
+- **Next Priority**: US-1A.9a (WebSocket Infrastructure) + US-7.1 (Token Streaming) before Examples 9-10
 - **Strategic Decision**: Deliver token streaming pre-launch (Option 1) as core AI-native differentiator
 - US-5.3 (Semantic Caching) ✅ Complete - 100% production ready
 - US-5.1 (Multi-Provider LLM) ✅ Phases 1-5 Complete
@@ -49,6 +51,9 @@ examples/
 ├── 06c-rag-query.yaml                  # 6c: RAG query pattern (✅ COMPLETE)
 ├── 07a-agentic-research-simple.yaml    # 7a: Simple iterative loops (✅ COMPLETE)
 ├── 07b-agentic-research-complete.yaml  # 7b: Complete iterative loops (✅ COMPLETE)
+├── 08a-rate-limited-api-calls.yaml     # 8a: Rate limiting with delay (✅ COMPLETE)
+├── 08b-scheduled-daily-report.yaml     # 8b: Absolute scheduling with scheduled_for (✅ COMPLETE)
+├── 08c-delayed-reminders.yaml          # 8c: Cascading delays (✅ COMPLETE)
 └── README.md                           # Index of examples with descriptions
 ```
 
@@ -1141,127 +1146,6 @@ activities:
 
 ---
 
-## 🎯 PRIORITY: Token Streaming Implementation (Pre-Launch)
-
-**Strategic Decision**: Before continuing with Examples 7-10, implement US-1A.9a (WebSocket Infrastructure) + US-7.1 (Token Streaming) to deliver on core AI-native value proposition.
-
-**Rationale**: Token streaming is explicitly promised in the Executive Summary as a key differentiator. Delivering this before public launch (Option 1) is strategically justified because:
-1. **Core Value Proposition**: Required for production AI workflows with user-facing UX
-2. **Unique Differentiator**: No competitor (Temporal, Airflow, Conductor) offers this
-3. **AI-Native Positioning**: Validates the "AI-native" claim with concrete capability
-4. **User Expectation**: AI startup engineers (primary persona) expect streaming for ChatGPT-style UX
-5. **Contained Scope**: 1-1.5 weeks implementation time (US-1A.9a ~15h + US-7.1 ~20-30h)
-
-**Total Duration**: ~35-45 hours (5-7 days)
-
-### US-1A.9a: WebSocket Infrastructure for Token Streaming
-**Duration**: ~15 hours (2 days)
-**Epic**: Epic 1A (API Server)
-**Status**: 📋 Next Priority
-
-#### Overview
-Build WebSocket infrastructure to support real-time token streaming from LLM activities. This provides the foundation for US-7.1 token streaming.
-
-#### Acceptance Criteria
-- ✅ WebSocket endpoint: `WS /api/v1/activities/{id}/stream`
-- ✅ Authentication: Bearer token in query parameter or initial message
-- ✅ Connection management: Handle 1,000+ concurrent connections
-- ✅ Message format: JSON messages over WebSocket (`{type: "token", ...}`)
-- ✅ Backpressure handling to prevent buffer overflow
-- ✅ Graceful connection close on activity completion
-- ✅ Error handling: Stream errors as messages before closing
-
-#### Implementation Tasks
-1. **WebSocket Handler** (4-5 hours)
-   - Axum WebSocket route handler
-   - Connection upgrade from HTTP
-   - Authentication via Bearer token
-   - Connection state management
-
-2. **Connection Manager** (3-4 hours)
-   - Maintain map of active connections per activity_id
-   - Handle concurrent connections to same activity
-   - Graceful connection close
-   - Cleanup on activity completion
-
-3. **Message Protocol** (2-3 hours)
-   - Define message types: `token`, `complete`, `error`
-   - JSON serialization/deserialization
-   - Message ordering guarantees
-
-4. **Integration with Activity Execution** (3-4 hours)
-   - Hook into activity execution flow
-   - Publish streaming events to connected WebSocket clients
-   - Handle non-streaming activities (graceful fallback)
-
-5. **Testing** (3-4 hours)
-   - Unit tests for WebSocket handler
-   - Integration tests with mock streaming activity
-   - Load test: 1,000 concurrent connections
-
-#### Implementation Plan
-See `docs/implementation/US-1A.9a-websocket-infrastructure.md` for detailed implementation plan.
-
----
-
-### US-7.1: Token Streaming for Real-Time UX
-**Duration**: ~20-30 hours (3-4 days)
-**Epic**: Epic 7 (AI-Native Features)
-**Status**: 📋 Depends on US-1A.9a
-**Dependencies**: US-1A.9a must be complete first
-
-#### Overview
-Implement token-by-token streaming from LLM activities (Anthropic, OpenAI, Google) to WebSocket clients, enabling ChatGPT-style real-time UX in workflows.
-
-#### Acceptance Criteria
-- ✅ LLM providers support streaming (Anthropic SSE, OpenAI SSE, Google SSE)
-- ✅ Activity-level streaming events published to WebSocket subscribers
-- ✅ Token-by-token delivery: `{type: "token", text: "hello", index: 0}`
-- ✅ <10ms P95 token latency (achievable with async streaming)
-- ✅ Support 1,000 concurrent streaming connections
-- ✅ Graceful fallback: Non-streaming activities complete normally
-- ✅ Integration with Example 6 (agentic research) for demonstration
-- ✅ Client library examples for JavaScript/Python
-
-#### Implementation Tasks
-1. **LLM Provider Streaming Integration** (8-10 hours)
-   - Anthropic streaming API integration (SSE)
-   - OpenAI streaming API integration (SSE)
-   - Google streaming API integration (SSE)
-   - Handle streaming responses asynchronously
-
-2. **Activity Streaming Layer** (6-8 hours)
-   - Hook LLM streaming into activity execution
-   - Publish tokens to WebSocket connections via US-1A.9a infrastructure
-   - Handle streaming errors and reconnection
-   - Accumulate full response for activity output
-
-3. **Non-Streaming Fallback** (2-3 hours)
-   - Detect non-streaming activities
-   - Complete normally without WebSocket streaming
-   - Log when streaming not available
-
-4. **Example Integration** (3-4 hours)
-   - Update Example 6 (agentic research) to demonstrate streaming
-   - Add streaming example to `examples/` directory
-   - Document streaming usage in examples/README.md
-
-5. **Client Libraries** (4-6 hours)
-   - JavaScript WebSocket client example
-   - Python WebSocket client example
-   - Documentation for client integration
-
-6. **Testing** (5-6 hours)
-   - Unit tests for streaming integration
-   - Integration test: End-to-end workflow with streaming
-   - Load test: 1,000 concurrent streaming connections
-   - Test with all three LLM providers
-
-#### Implementation Plan
-See `docs/implementation/US-7.1-token-streaming.md` for detailed implementation plan.
-
----
-
 ### Example 7: Iterative Workflows with Budget-Aware Loops
 **Duration**: 5-6 days (✅ **COMPLETED** 2025-11-22)
 **Epic 3**: US-3.4 (Iterative Workflows / Loops)
@@ -1438,15 +1322,15 @@ activities:
 ---
 
 ### Example 8: Activity Scheduling and Delays
-**Duration**: 2-3 days
+**Duration**: 2-3 days (✅ **COMPLETED** 2025-11-23)
 **Epic 3**: US-3.7 (Activity Scheduling and Delays)
 **Epic 5**: (No new activities - exposes existing infrastructure)
-**Status**: 📋 Ready for Implementation
+**Status**: ✅ **COMPLETE** - All scheduling features implemented and tested
 **Implementation Plan**: See `docs/implementation/US-3.7-activity-scheduling.md` for detailed plan
 **Example Workflows**:
-- 08a-rate-limited-api-calls.yaml: Rate limiting with delay (supports s/m/h/d/w/y)
-- 08b-scheduled-daily-report.yaml: Absolute scheduling with scheduled_for
-- 08c-delayed-reminders.yaml: Cascading delays for reminder system
+- 08a-rate-limited-api-calls.yaml: Rate limiting with delay (supports ms/s/m/mi/h/d/w/mo/y) ✅
+- 08b-scheduled-daily-report.yaml: Absolute scheduling with scheduled_for (ISO 8601) ✅
+- 08c-delayed-reminders.yaml: Cascading delays for reminder system (1h → 4h → 24h) ✅
 
 #### Example Workflow 8a: Rate Limiting with Delays
 Demonstrates using `delay` with flexible duration units to respect API rate limits.
@@ -1591,9 +1475,9 @@ activities:
 #### YAML Features Implemented
 
 **New Features (US-3.7)**:
-- ✅ `settings.delay` - Delay activity execution with flexible units (s/m/h/d/w/y)
+- ✅ `settings.delay` - Delay activity execution with flexible units (ms/s/m/mi/h/d/w/mo/y)
 - ✅ `settings.scheduled_for` - Schedule activity for absolute timestamp (ISO 8601)
-- ✅ Template support in `scheduled_for` - Dynamic scheduling from workflow inputs
+- ✅ Template support in both `scheduled_for` and `delay` - Dynamic scheduling from workflow inputs
 
 **Existing Features Used**:
 - Sequential dependencies (`depends_on`)
@@ -1610,11 +1494,11 @@ activities:
 #### Implementation Tasks
 
 **1. Update ActivitySettings Model**
-- Add `delay: Option<String>` field (duration string: "5s", "30m", "2h", "7d")
+- Add `delay: Option<String>` field (duration string: "500ms", "5s", "30m", "2h", "7d", "1w", "2mo", "1y")
 - Add `scheduled_for: Option<String>` field (ISO 8601 timestamp)
 - Validation: `scheduled_for` must be valid ISO 8601 or template expression
 - Validation: Cannot specify both `delay` and `scheduled_for`
-- Duration parsing: Regex `^(\d+)(s|m|h|d|w|y)$` with unit conversion
+- Duration parsing: Regex `^(\d+)(ms|s|m|mi|h|d|w|mo|y)$` with unit conversion
 
 **2. Update Orchestrator Activity Scheduling**
 - When scheduling activity, check `settings.delay`
@@ -1641,10 +1525,11 @@ activities:
 #### Success Criteria
 
 **Functional**:
-- ✅ Activities can be delayed with flexible duration units (`delay`: "5s", "30m", "2h", "7d", "1w", "1y")
-- ✅ Activities can be scheduled for absolute time (`scheduled_for`)
-- ✅ Templates work in `scheduled_for` parameter
-- ✅ Templates work in `delay` parameter
+- ✅ Activities can be delayed with flexible duration units (`delay`: "500ms", "5s", "30m", "2h", "7d", "1w", "2mo", "1y")
+- ✅ Both `m` and `mi` accepted for minutes (user preference for clarity)
+- ✅ Activities can be scheduled for absolute time (`scheduled_for`: ISO 8601 with timezone)
+- ✅ Templates work in `scheduled_for` parameter (e.g., `"{{INPUT.report_time}}"`)
+- ✅ Templates work in `delay` parameter (e.g., `"{{INPUT.delay_minutes}}m"`)
 - ✅ Workers don't claim activities before `scheduled_for` time
 - ✅ Validation prevents both `delay` and `scheduled_for` together
 - ✅ Example workflows run successfully:
@@ -1666,15 +1551,137 @@ activities:
 
 **Design Decisions**:
 1. **Relative vs Absolute Time**:
-   - `delay`: Relative to when activity becomes ready, supports s/m/h/d/w/y units (simple, common case)
-   - `scheduled_for`: Absolute timestamp (for scheduled reports, deadlines)
-2. **Mutually Exclusive**: Cannot specify both (validation error)
+   - `delay`: Relative to when activity becomes ready, supports ms/s/m/mi/h/d/w/mo/y units (simple, common case)
+   - `scheduled_for`: Absolute ISO 8601 timestamp with timezone (for scheduled reports, deadlines)
+2. **Mutually Exclusive**: Cannot specify both (validation error at workflow parse time)
 3. **Template Support**: Both `delay` and `scheduled_for` can use templates for dynamic scheduling
-4. **No Event Suspension (Yet)**: This example only covers time-based delays, not external events
-5. **Field Naming**: `scheduled_for` matches database column name and is semantically clearer than `scheduled_for`
+4. **Calendar Arithmetic**: Months and years use chrono's calendar-aware arithmetic (handles variable month lengths, leap years)
+5. **No Event Suspension (Yet)**: This example only covers time-based delays, not external events
+6. **Field Naming**: `scheduled_for` matches database column name and is semantically clear
 
 **Post-MVP Enhancement**:
 - Event-driven suspension (`wait_for_event` activity) - see absurd analysis Section 2, Phase 2
+
+---
+
+### 🎯 PRIORITY: Token Streaming Implementation (Pre-Launch)
+
+**Strategic Decision**: Before continuing with Examples 9-10, implement US-1A.9a (WebSocket Infrastructure) + US-7.1 (Token Streaming) to deliver on core AI-native value proposition.
+
+**Rationale**: Token streaming is explicitly promised in the Executive Summary as a key differentiator. Delivering this before public launch (Option 1) is strategically justified because:
+1. **Core Value Proposition**: Required for production AI workflows with user-facing UX
+2. **Unique Differentiator**: No competitor (Temporal, Airflow, Conductor) offers this
+3. **AI-Native Positioning**: Validates the "AI-native" claim with concrete capability
+4. **User Expectation**: AI startup engineers (primary persona) expect streaming for ChatGPT-style UX
+5. **Contained Scope**: 1-1.5 weeks implementation time (US-1A.9a ~15h + US-7.1 ~20-30h)
+
+**Total Duration**: ~35-45 hours (5-7 days)
+
+### US-1A.9a: WebSocket Infrastructure for Token Streaming
+**Duration**: ~15 hours (2 days)
+**Epic**: Epic 1A (API Server)
+**Status**: 📋 Next Priority
+
+#### Overview
+Build WebSocket infrastructure to support real-time token streaming from LLM activities. This provides the foundation for US-7.1 token streaming.
+
+#### Acceptance Criteria
+- ✅ WebSocket endpoint: `WS /api/v1/activities/{id}/stream`
+- ✅ Authentication: Bearer token in query parameter or initial message
+- ✅ Connection management: Handle 1,000+ concurrent connections
+- ✅ Message format: JSON messages over WebSocket (`{type: "token", ...}`)
+- ✅ Backpressure handling to prevent buffer overflow
+- ✅ Graceful connection close on activity completion
+- ✅ Error handling: Stream errors as messages before closing
+
+#### Implementation Tasks
+1. **WebSocket Handler** (4-5 hours)
+   - Axum WebSocket route handler
+   - Connection upgrade from HTTP
+   - Authentication via Bearer token
+   - Connection state management
+
+2. **Connection Manager** (3-4 hours)
+   - Maintain map of active connections per activity_id
+   - Handle concurrent connections to same activity
+   - Graceful connection close
+   - Cleanup on activity completion
+
+3. **Message Protocol** (2-3 hours)
+   - Define message types: `token`, `complete`, `error`
+   - JSON serialization/deserialization
+   - Message ordering guarantees
+
+4. **Integration with Activity Execution** (3-4 hours)
+   - Hook into activity execution flow
+   - Publish streaming events to connected WebSocket clients
+   - Handle non-streaming activities (graceful fallback)
+
+5. **Testing** (3-4 hours)
+   - Unit tests for WebSocket handler
+   - Integration tests with mock streaming activity
+   - Load test: 1,000 concurrent connections
+
+#### Implementation Plan
+See `docs/implementation/US-1A.9a-websocket-infrastructure.md` for detailed implementation plan.
+
+---
+
+### US-7.1: Token Streaming for Real-Time UX
+**Duration**: ~20-30 hours (3-4 days)
+**Epic**: Epic 7 (AI-Native Features)
+**Status**: 📋 Depends on US-1A.9a
+**Dependencies**: US-1A.9a must be complete first
+
+#### Overview
+Implement token-by-token streaming from LLM activities (Anthropic, OpenAI, Google) to WebSocket clients, enabling ChatGPT-style real-time UX in workflows.
+
+#### Acceptance Criteria
+- ✅ LLM providers support streaming (Anthropic SSE, OpenAI SSE, Google SSE)
+- ✅ Activity-level streaming events published to WebSocket subscribers
+- ✅ Token-by-token delivery: `{type: "token", text: "hello", index: 0}`
+- ✅ <10ms P95 token latency (achievable with async streaming)
+- ✅ Support 1,000 concurrent streaming connections
+- ✅ Graceful fallback: Non-streaming activities complete normally
+- ✅ Integration with Example 6 (agentic research) for demonstration
+- ✅ Client library examples for JavaScript/Python
+
+#### Implementation Tasks
+1. **LLM Provider Streaming Integration** (8-10 hours)
+   - Anthropic streaming API integration (SSE)
+   - OpenAI streaming API integration (SSE)
+   - Google streaming API integration (SSE)
+   - Handle streaming responses asynchronously
+
+2. **Activity Streaming Layer** (6-8 hours)
+   - Hook LLM streaming into activity execution
+   - Publish tokens to WebSocket connections via US-1A.9a infrastructure
+   - Handle streaming errors and reconnection
+   - Accumulate full response for activity output
+
+3. **Non-Streaming Fallback** (2-3 hours)
+   - Detect non-streaming activities
+   - Complete normally without WebSocket streaming
+   - Log when streaming not available
+
+4. **Example Integration** (3-4 hours)
+   - Update Example 6 (agentic research) to demonstrate streaming
+   - Add streaming example to `examples/` directory
+   - Document streaming usage in examples/README.md
+
+5. **Client Libraries** (4-6 hours)
+   - JavaScript WebSocket client example
+   - Python WebSocket client example
+   - Documentation for client integration
+
+6. **Testing** (5-6 hours)
+   - Unit tests for streaming integration
+   - Integration test: End-to-end workflow with streaming
+   - Load test: 1,000 concurrent streaming connections
+   - Test with all three LLM providers
+
+#### Implementation Plan
+See `docs/implementation/US-7.1-token-streaming.md` for detailed implementation plan.
 
 ---
 
