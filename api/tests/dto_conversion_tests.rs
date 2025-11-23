@@ -37,6 +37,8 @@ fn test_workflow_definition_from_core_to_dto() {
                     cache: false,
                     cache_ttl: None,
                     iteration_limit: None,
+                    delay: None,
+                    scheduled_for: None,
                 }),
                 output_definitions: None,
                 iteration_scoped: false,
@@ -138,6 +140,8 @@ fn test_workflow_definition_from_dto_to_core() {
                 cache: false,
                 cache_ttl: None,
                 iteration_limit: None,
+                delay: None,
+                scheduled_for: None,
             }),
             output_definitions: None,
             iteration_scoped: false,
@@ -210,6 +214,8 @@ fn test_activity_settings_conversions() {
         cache: false,
         cache_ttl: None,
         iteration_limit: None,
+        delay: None,
+        scheduled_for: None,
     };
 
     let dto_settings: dto::ActivitySettings = core_settings.clone().into();
@@ -232,6 +238,8 @@ fn test_activity_settings_conversions() {
         cache: false,
         cache_ttl: None,
         iteration_limit: None,
+        delay: None,
+        scheduled_for: None,
     };
 
     let core_settings2: workflow::ActivitySettings = dto_settings2.clone().into();
@@ -435,6 +443,8 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                     cache: false,
                     cache_ttl: None,
                     iteration_limit: None,
+                    delay: None,
+                    scheduled_for: None,
                 }),
                 output_definitions: None,
                 iteration_scoped: false,
@@ -472,6 +482,8 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                     cache: false,
                     cache_ttl: None,
                     iteration_limit: None,
+                    delay: None,
+                    scheduled_for: None,
                 }),
                 output_definitions: None,
                 iteration_scoped: false,

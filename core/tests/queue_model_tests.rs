@@ -103,6 +103,8 @@ fn test_activity_with_settings() {
         cache: false,
         cache_ttl: None,
         iteration_limit: None,
+        delay: None,
+        scheduled_for: None,
     };
 
     let activity = Activity {
@@ -171,6 +173,8 @@ fn test_activity_settings_default_values() {
         cache: false,
         cache_ttl: None,
         iteration_limit: None,
+        delay: None,
+        scheduled_for: None,
     };
 
     let json = serde_json::to_string(&settings).unwrap();
@@ -197,6 +201,8 @@ fn test_activity_settings_with_all_options() {
         cache: true,
         cache_ttl: Some(3600),
         iteration_limit: None,
+        delay: None,
+        scheduled_for: None,
     };
 
     let json = serde_json::to_string(&settings).unwrap();
@@ -215,6 +221,8 @@ fn test_activity_settings_serialization_skips_none() {
         cache: false,
         cache_ttl: None,
         iteration_limit: None,
+        delay: None,
+        scheduled_for: None,
     };
 
     let json = serde_json::to_string(&settings).unwrap();
@@ -241,6 +249,8 @@ fn test_activity_settings_clone() {
         cache: false,
         cache_ttl: None,
         iteration_limit: None,
+        delay: None,
+        scheduled_for: None,
     };
 
     let settings2 = settings1.clone();
@@ -393,6 +403,8 @@ fn test_queued_activity_with_settings() {
         cache: false,
         cache_ttl: None,
         iteration_limit: None,
+        delay: None,
+        scheduled_for: None,
     };
 
     let activity = QueuedActivity {

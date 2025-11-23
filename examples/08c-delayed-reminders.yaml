@@ -1,0 +1,55 @@
+name: delayed_reminder_system
+activities:
+  # Send initial notification
+  - key: send_initial_notification
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.user_webhook}}"
+      body:
+        message: "Task assigned: {{INPUT.task_name}}"
+        priority: "normal"
+
+  # Wait 1 hour, then send first reminder
+  - key: send_first_reminder
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.user_webhook}}"
+      body:
+        message: "Reminder: {{INPUT.task_name}} is still pending"
+        priority: "normal"
+    settings:
+      delay: "1h"  # 1 hour
+    depends_on:
+      - send_initial_notification
+
+  # Wait 3 more hours (4 hours total), send escalated reminder
+  - key: send_escalated_reminder
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.manager_webhook}}"
+      body:
+        message: "ESCALATED: {{INPUT.task_name}} pending for 4 hours"
+        priority: "high"
+        assigned_to: "{{INPUT.assigned_user}}"
+    settings:
+      delay: "3h"  # 3 hours (from first_reminder)
+    depends_on:
+      - send_first_reminder
+
+  # Final escalation after 24 hours total
+  - key: send_final_escalation
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.oncall_webhook}}"
+      body:
+        message: "CRITICAL: {{INPUT.task_name}} pending for 24 hours"
+        priority: "critical"
+        requires_immediate_action: true
+    settings:
+      delay: "20h"  # 20 more hours (24 total)
+    depends_on:
+      - send_escalated_reminder

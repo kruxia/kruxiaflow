@@ -8,7 +8,7 @@
 - **Epic 1B**: ✅ Complete (Built-in Worker)
 - **Epic 1C**: ⏳ Partial (StreamFlow Binary - US-1C.1, US-1C.2, US-1C.7 complete)
 - **Epic 2**: ✅ Complete (Performance Benchmarking - US-2.1, US-2.2 complete)
-- **Epic 3**: ⏳ In Progress (YAML Workflows - Examples 1-7 complete, US-3.4 implemented)
+- **Epic 3**: ⏳ In Progress (YAML Workflows - Examples 1-8 complete, US-3.4 and US-3.7 implemented)
 - **Epic 5**: ⏳ In Progress (Built-In Activities - US-5.1, US-5.3, US-5.4 complete)
 - **Epic 7**: 📋 Next Priority (US-7.1 Token Streaming - depends on US-1A.9a)
 **Target Release**: Q1 2026 with full AI-native feature set including token streaming
@@ -704,7 +704,7 @@ streamflow/
     - Highlight conditional edges and loops
   - **Activity Type Registry**:
 
-**US-3.7: Activity Scheduling and Delays**
+**US-3.7: Activity Scheduling and Delays** ✅ Complete
 - **As** a workflow developer
 - **I want** to schedule activities for future execution or delay them by a specified duration
 - **So that** I can implement rate limiting, scheduled reports, delayed notifications, and time-based workflows

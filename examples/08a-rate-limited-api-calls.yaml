@@ -1,0 +1,57 @@
+name: rate_limited_api_calls
+activities:
+  # First call: immediate
+  - key: call_api_1
+    activity_name: http_request
+    parameters:
+      method: GET
+      url: "https://api.example.com/data?page=1"
+      headers:
+        Authorization: "Bearer {{SECRET.api_key}}"
+    outputs:
+      - result
+
+  # Second call: wait 5 seconds (rate limit: 1 req/5sec)
+  - key: call_api_2
+    activity_name: http_request
+    parameters:
+      method: GET
+      url: "https://api.example.com/data?page=2"
+      headers:
+        Authorization: "Bearer {{SECRET.api_key}}"
+    outputs:
+      - result
+    settings:
+      delay: "5s"  # Wait 5 seconds after dependencies met
+    depends_on:
+      - call_api_1
+
+  # Third call: wait another 5 seconds
+  - key: call_api_3
+    activity_name: http_request
+    parameters:
+      method: GET
+      url: "https://api.example.com/data?page=3"
+      headers:
+        Authorization: "Bearer {{SECRET.api_key}}"
+    outputs:
+      - result
+    settings:
+      delay: "5s"
+    depends_on:
+      - call_api_2
+
+  # Aggregate results after all calls complete
+  - key: aggregate_results
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.webhook_url}}"
+      headers:
+        Content-Type: "application/json"
+      body:
+        page_1: "{{call_api_1.result.data}}"
+        page_2: "{{call_api_2.result.data}}"
+        page_3: "{{call_api_3.result.data}}"
+    depends_on:
+      - call_api_3

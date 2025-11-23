@@ -1,0 +1,41 @@
+name: scheduled_daily_report
+activities:
+  # Wait until scheduled time (e.g., 9 AM Pacific)
+  - key: generate_report
+    activity_name: llm_prompt
+    parameters:
+      model: anthropic/claude-sonnet-4-5-20250929
+      prompt: |
+        Generate a daily summary report for {{INPUT.report_date}}.
+
+        Include:
+        - Key metrics and trends
+        - Notable events
+        - Action items
+
+        Format as markdown.
+      max_tokens: 2000
+    outputs:
+      - result
+    settings:
+      # Schedule for 9:00 AM Pacific Time on specified date
+      # Input format: "2025-12-01T09:00:00-08:00"
+      scheduled_for: "{{INPUT.report_time}}"
+      budget:
+        limit_usd: 0.10
+        action: abort
+
+  # Send report via email/webhook after generation
+  - key: send_report
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.notification_webhook}}"
+      headers:
+        Content-Type: "application/json"
+      body:
+        subject: "Daily Report - {{INPUT.report_date}}"
+        content: "{{generate_report.result.content}}"
+        scheduled_for: "{{INPUT.report_time}}"
+    depends_on:
+      - generate_report
