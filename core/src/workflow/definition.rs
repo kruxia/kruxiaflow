@@ -136,6 +136,13 @@ impl WorkflowDefinition {
             );
         }
 
+        // Validate scheduling settings
+        if let Some(settings) = &activity.settings
+            && let Err(e) = validate_activity_settings(settings, &activity.key)
+        {
+            errors.merge(e);
+        }
+
         if errors.is_empty() {
             Ok(())
         } else {
@@ -702,15 +709,15 @@ pub struct WorkflowSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ActivitySettings {
     /// Timeout in seconds for activity execution
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u64>,
 
     /// Retry policy
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry: Option<RetryPolicy>,
 
     /// Budget limits
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub budget: Option<BudgetSettings>,
 
     /// Enable result caching
@@ -718,12 +725,22 @@ pub struct ActivitySettings {
     pub cache: bool,
 
     /// Cache TTL in seconds
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_ttl: Option<u64>,
 
     /// Per-activity iteration limit (can override activity-level iteration_limit)
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iteration_limit: Option<u32>,
+
+    /// Relative delay: "500ms", "5s", "30m", "30mi", "2h", "7d", "1w", "2mo", "1y"
+    /// Template-aware: "{{INPUT.delay_amount}}m"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delay: Option<String>,
+
+    /// Absolute ISO 8601 timestamp for scheduling (template-aware)
+    /// Example: "2025-12-01T09:00:00-08:00" or "{{INPUT.report_deadline}}"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scheduled_for: Option<String>,
 }
 
 impl ActivitySettings {
@@ -862,6 +879,87 @@ struct LoopEdge {
 fn is_valid_identifier(s: &str) -> bool {
     let re = regex::Regex::new(r"^[a-zA-Z0-9_-]+$").unwrap();
     re.is_match(s)
+}
+
+/// Validate activity settings (scheduling constraints)
+fn validate_activity_settings(
+    settings: &ActivitySettings,
+    activity_key: &str,
+) -> Result<(), ValidationErrors> {
+    let mut errors = ValidationErrors::new();
+
+    // Mutually exclusive check: cannot specify both delay and scheduled_for
+    if settings.delay.is_some() && settings.scheduled_for.is_some() {
+        errors.add(
+            &format!("activity.{}.settings", activity_key),
+            "Cannot specify both 'delay' and 'scheduled_for' - these fields are mutually exclusive",
+        );
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+/// Parse duration string and add to a given DateTime
+///
+/// Supports units: ms, s, m, mi, h, d, w, mo, y
+/// Examples: "500ms", "5s", "30m", "30mi", "2h", "7d", "1w", "2mo", "1y"
+pub fn apply_duration(
+    base_time: DateTime<Utc>,
+    duration_str: &str,
+) -> Result<DateTime<Utc>, String> {
+    use chrono::{Duration, Months};
+    use regex::Regex;
+
+    let re = Regex::new(r"^(\d+)(ms|s|m|mi|h|d|w|mo|y)$").unwrap();
+
+    let caps = re.captures(duration_str).ok_or_else(|| {
+        format!(
+            "Invalid duration format: '{}'. Expected format: <number><unit> (e.g., 500ms, 5s, 30m, 2h, 7d, 2mo)",
+            duration_str
+        )
+    })?;
+
+    let amount: i64 = caps[1]
+        .parse()
+        .map_err(|e| format!("Invalid number: {}", e))?;
+    let unit = &caps[2];
+
+    let result = match unit {
+        "ms" => base_time + Duration::milliseconds(amount),
+        "s" => base_time + Duration::seconds(amount),
+        "m" | "mi" => base_time + Duration::minutes(amount),
+        "h" => base_time + Duration::hours(amount),
+        "d" => base_time + Duration::days(amount),
+        "w" => base_time + Duration::weeks(amount),
+        "mo" => {
+            let months = Months::new(amount as u32);
+            base_time
+                .checked_add_months(months)
+                .ok_or_else(|| format!("Month addition overflow: {}", duration_str))?
+        }
+        "y" => {
+            let months = Months::new((amount * 12) as u32);
+            base_time
+                .checked_add_months(months)
+                .ok_or_else(|| format!("Year addition overflow: {}", duration_str))?
+        }
+        _ => return Err(format!("Unknown unit: {}", unit)),
+    };
+
+    Ok(result)
+}
+
+/// Parse ISO 8601 timestamp string to DateTime<Utc>
+///
+/// Example: "2025-12-01T09:00:00-08:00"
+pub fn parse_scheduled_for(timestamp_str: &str) -> Result<DateTime<Utc>, String> {
+    DateTime::parse_from_rfc3339(timestamp_str)
+        .map(|dt| dt.with_timezone(&Utc))
+        .map_err(|e| format!("Invalid ISO 8601 timestamp: {}", e))
 }
 
 /// Topological sort using Kahn's algorithm
@@ -1606,6 +1704,405 @@ mod tests {
             }
             _ => panic!("Expected MultipleErrors"),
         }
+    }
+
+    // Activity scheduling tests (US-3.7 Phase 1)
+
+    #[test]
+    fn test_parse_delay_milliseconds() {
+        let yaml = r#"
+name: test_delay
+activities:
+  - key: task1
+    worker: builtin
+    settings:
+      delay: "500ms"
+"#;
+        let result = WorkflowDefinition::from_yaml(yaml);
+        assert!(result.is_ok(), "Should parse delay with milliseconds");
+        let workflow = result.unwrap();
+        let settings = workflow.activities[0].settings.as_ref().unwrap();
+        assert_eq!(settings.delay, Some("500ms".to_string()));
+    }
+
+    #[test]
+    fn test_parse_delay_seconds() {
+        let yaml = r#"
+name: test_delay
+activities:
+  - key: task1
+    worker: builtin
+    settings:
+      delay: "5s"
+"#;
+        let result = WorkflowDefinition::from_yaml(yaml);
+        assert!(result.is_ok(), "Should parse delay with seconds");
+        let workflow = result.unwrap();
+        let settings = workflow.activities[0].settings.as_ref().unwrap();
+        assert_eq!(settings.delay, Some("5s".to_string()));
+    }
+
+    #[test]
+    fn test_parse_delay_minutes_m() {
+        let yaml = r#"
+name: test_delay
+activities:
+  - key: task1
+    worker: builtin
+    settings:
+      delay: "30m"
+"#;
+        let result = WorkflowDefinition::from_yaml(yaml);
+        assert!(result.is_ok(), "Should parse delay with minutes (m)");
+        let workflow = result.unwrap();
+        let settings = workflow.activities[0].settings.as_ref().unwrap();
+        assert_eq!(settings.delay, Some("30m".to_string()));
+    }
+
+    #[test]
+    fn test_parse_delay_minutes_mi() {
+        let yaml = r#"
+name: test_delay
+activities:
+  - key: task1
+    worker: builtin
+    settings:
+      delay: "30mi"
+"#;
+        let result = WorkflowDefinition::from_yaml(yaml);
+        assert!(result.is_ok(), "Should parse delay with minutes (mi)");
+        let workflow = result.unwrap();
+        let settings = workflow.activities[0].settings.as_ref().unwrap();
+        assert_eq!(settings.delay, Some("30mi".to_string()));
+    }
+
+    #[test]
+    fn test_parse_delay_hours() {
+        let yaml = r#"
+name: test_delay
+activities:
+  - key: task1
+    worker: builtin
+    settings:
+      delay: "2h"
+"#;
+        let result = WorkflowDefinition::from_yaml(yaml);
+        assert!(result.is_ok(), "Should parse delay with hours");
+        let workflow = result.unwrap();
+        let settings = workflow.activities[0].settings.as_ref().unwrap();
+        assert_eq!(settings.delay, Some("2h".to_string()));
+    }
+
+    #[test]
+    fn test_parse_delay_days() {
+        let yaml = r#"
+name: test_delay
+activities:
+  - key: task1
+    worker: builtin
+    settings:
+      delay: "7d"
+"#;
+        let result = WorkflowDefinition::from_yaml(yaml);
+        assert!(result.is_ok(), "Should parse delay with days");
+        let workflow = result.unwrap();
+        let settings = workflow.activities[0].settings.as_ref().unwrap();
+        assert_eq!(settings.delay, Some("7d".to_string()));
+    }
+
+    #[test]
+    fn test_parse_delay_weeks() {
+        let yaml = r#"
+name: test_delay
+activities:
+  - key: task1
+    worker: builtin
+    settings:
+      delay: "1w"
+"#;
+        let result = WorkflowDefinition::from_yaml(yaml);
+        assert!(result.is_ok(), "Should parse delay with weeks");
+        let workflow = result.unwrap();
+        let settings = workflow.activities[0].settings.as_ref().unwrap();
+        assert_eq!(settings.delay, Some("1w".to_string()));
+    }
+
+    #[test]
+    fn test_parse_delay_months() {
+        let yaml = r#"
+name: test_delay
+activities:
+  - key: task1
+    worker: builtin
+    settings:
+      delay: "2mo"
+"#;
+        let result = WorkflowDefinition::from_yaml(yaml);
+        assert!(result.is_ok(), "Should parse delay with months");
+        let workflow = result.unwrap();
+        let settings = workflow.activities[0].settings.as_ref().unwrap();
+        assert_eq!(settings.delay, Some("2mo".to_string()));
+    }
+
+    #[test]
+    fn test_parse_delay_years() {
+        let yaml = r#"
+name: test_delay
+activities:
+  - key: task1
+    worker: builtin
+    settings:
+      delay: "1y"
+"#;
+        let result = WorkflowDefinition::from_yaml(yaml);
+        assert!(result.is_ok(), "Should parse delay with years");
+        let workflow = result.unwrap();
+        let settings = workflow.activities[0].settings.as_ref().unwrap();
+        assert_eq!(settings.delay, Some("1y".to_string()));
+    }
+
+    #[test]
+    fn test_parse_scheduled_for() {
+        let yaml = r#"
+name: test_scheduled
+activities:
+  - key: task1
+    worker: builtin
+    settings:
+      scheduled_for: "2025-12-01T09:00:00Z"
+"#;
+        let result = WorkflowDefinition::from_yaml(yaml);
+        assert!(result.is_ok(), "Should parse scheduled_for with ISO 8601");
+        let workflow = result.unwrap();
+        let settings = workflow.activities[0].settings.as_ref().unwrap();
+        assert_eq!(
+            settings.scheduled_for,
+            Some("2025-12-01T09:00:00Z".to_string())
+        );
+    }
+
+    #[test]
+    fn test_reject_both_scheduling_fields() {
+        let yaml = r#"
+name: test_both
+activities:
+  - key: task1
+    worker: builtin
+    settings:
+      delay: "5s"
+      scheduled_for: "2025-12-01T09:00:00Z"
+"#;
+        let result = WorkflowDefinition::from_yaml(yaml);
+        assert!(
+            result.is_err(),
+            "Should reject workflow with both delay and scheduled_for"
+        );
+        match result.unwrap_err() {
+            ValidationError::MultipleErrors(errors) => {
+                let json = errors.to_json();
+                let json_str = json.to_string();
+                assert!(
+                    json_str.contains("mutually exclusive"),
+                    "Error should mention mutually exclusive fields"
+                );
+            }
+            _ => panic!("Expected MultipleErrors"),
+        }
+    }
+
+    #[test]
+    fn test_parse_scheduled_for_with_template() {
+        let yaml = r#"
+name: test_template
+activities:
+  - key: task1
+    worker: builtin
+    settings:
+      scheduled_for: "{{INPUT.deadline}}"
+"#;
+        let result = WorkflowDefinition::from_yaml(yaml);
+        assert!(result.is_ok(), "Should parse scheduled_for with template");
+        let workflow = result.unwrap();
+        let settings = workflow.activities[0].settings.as_ref().unwrap();
+        assert_eq!(
+            settings.scheduled_for,
+            Some("{{INPUT.deadline}}".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_delay_with_template() {
+        let yaml = r#"
+name: test_template
+activities:
+  - key: task1
+    worker: builtin
+    settings:
+      delay: "{{INPUT.delay_minutes}}m"
+"#;
+        let result = WorkflowDefinition::from_yaml(yaml);
+        assert!(result.is_ok(), "Should parse delay with template");
+        let workflow = result.unwrap();
+        let settings = workflow.activities[0].settings.as_ref().unwrap();
+        assert_eq!(settings.delay, Some("{{INPUT.delay_minutes}}m".to_string()));
+    }
+
+    // Duration parsing function tests
+
+    #[test]
+    fn test_apply_duration_milliseconds() {
+        let base = Utc::now();
+        let result = apply_duration(base, "500ms");
+        assert!(result.is_ok());
+        let expected = base + chrono::Duration::milliseconds(500);
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_apply_duration_seconds() {
+        let base = Utc::now();
+        let result = apply_duration(base, "5s");
+        assert!(result.is_ok());
+        let expected = base + chrono::Duration::seconds(5);
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_apply_duration_minutes_m() {
+        let base = Utc::now();
+        let result = apply_duration(base, "30m");
+        assert!(result.is_ok());
+        let expected = base + chrono::Duration::minutes(30);
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_apply_duration_minutes_mi() {
+        let base = Utc::now();
+        let result = apply_duration(base, "30mi");
+        assert!(result.is_ok());
+        let expected = base + chrono::Duration::minutes(30);
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_apply_duration_hours() {
+        let base = Utc::now();
+        let result = apply_duration(base, "2h");
+        assert!(result.is_ok());
+        let expected = base + chrono::Duration::hours(2);
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_apply_duration_days() {
+        let base = Utc::now();
+        let result = apply_duration(base, "7d");
+        assert!(result.is_ok());
+        let expected = base + chrono::Duration::days(7);
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_apply_duration_weeks() {
+        let base = Utc::now();
+        let result = apply_duration(base, "1w");
+        assert!(result.is_ok());
+        let expected = base + chrono::Duration::weeks(1);
+        assert_eq!(result.unwrap(), expected);
+    }
+
+    #[test]
+    fn test_apply_duration_months() {
+        use chrono::{Months, NaiveDate};
+        // Test month-aware addition: Jan 31 + 1 month = Feb 28/29
+        let base = DateTime::<Utc>::from_naive_utc_and_offset(
+            chrono::NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2025, 1, 31).unwrap(),
+                chrono::NaiveTime::from_hms_opt(12, 0, 0).unwrap(),
+            ),
+            Utc,
+        );
+        let result = apply_duration(base, "1mo");
+        assert!(result.is_ok());
+        let dt = result.unwrap();
+        let expected = base
+            .checked_add_months(Months::new(1))
+            .expect("month addition");
+        assert_eq!(dt, expected);
+        // Jan 31 + 1 month should be Feb 28 (2025 is not a leap year)
+        assert_eq!(dt.day(), 28);
+        assert_eq!(dt.month(), 2);
+    }
+
+    #[test]
+    fn test_apply_duration_years() {
+        use chrono::{Months, NaiveDate};
+        let base = DateTime::<Utc>::from_naive_utc_and_offset(
+            chrono::NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2024, 2, 29).unwrap(), // Leap year
+                chrono::NaiveTime::from_hms_opt(12, 0, 0).unwrap(),
+            ),
+            Utc,
+        );
+        let result = apply_duration(base, "1y");
+        assert!(result.is_ok());
+        let dt = result.unwrap();
+        let expected = base
+            .checked_add_months(Months::new(12))
+            .expect("year addition");
+        assert_eq!(dt, expected);
+        // Feb 29, 2024 + 1 year = Feb 28, 2025 (not a leap year)
+        assert_eq!(dt.day(), 28);
+        assert_eq!(dt.month(), 2);
+        assert_eq!(dt.year(), 2025);
+    }
+
+    #[test]
+    fn test_reject_invalid_duration_format() {
+        let base = Utc::now();
+        let result = apply_duration(base, "5x");
+        assert!(result.is_err(), "Should reject invalid unit");
+        let result = apply_duration(base, "abc");
+        assert!(result.is_err(), "Should reject invalid format");
+        let result = apply_duration(base, "5");
+        assert!(result.is_err(), "Should reject missing unit");
+    }
+
+    // ISO 8601 parsing tests
+
+    #[test]
+    fn test_parse_scheduled_for_valid() {
+        let result = parse_scheduled_for("2025-12-01T09:00:00Z");
+        assert!(result.is_ok(), "Should parse valid ISO 8601 timestamp");
+        let dt = result.unwrap();
+        assert_eq!(dt.year(), 2025);
+        assert_eq!(dt.month(), 12);
+        assert_eq!(dt.day(), 1);
+        assert_eq!(dt.hour(), 9);
+        assert_eq!(dt.minute(), 0);
+    }
+
+    #[test]
+    fn test_parse_scheduled_for_with_timezone() {
+        let result = parse_scheduled_for("2025-12-01T09:00:00-08:00");
+        assert!(
+            result.is_ok(),
+            "Should parse ISO 8601 timestamp with timezone"
+        );
+        let dt = result.unwrap();
+        // Should be converted to UTC (9 AM PST = 5 PM UTC)
+        assert_eq!(dt.hour(), 17); // 9 AM + 8 hours = 5 PM UTC
+    }
+
+    #[test]
+    fn test_reject_invalid_iso8601() {
+        let result = parse_scheduled_for("2025-12-01");
+        assert!(result.is_err(), "Should reject date without time");
+        let result = parse_scheduled_for("invalid");
+        assert!(result.is_err(), "Should reject invalid format");
+        let result = parse_scheduled_for("2025-13-01T09:00:00Z");
+        assert!(result.is_err(), "Should reject invalid month");
     }
 
     #[test]

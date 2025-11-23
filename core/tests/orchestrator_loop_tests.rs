@@ -608,6 +608,8 @@ async fn test_iteration_budget_accumulation() {
                 cache: false,
                 cache_ttl: None,
                 iteration_limit: None,
+                delay: None,
+                scheduled_for: None,
             }),
             depends_on: Some(vec![ActivityRelationship {
                 activity_key: "expensive_task".to_string(),

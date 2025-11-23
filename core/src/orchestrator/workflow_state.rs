@@ -17,6 +17,7 @@ pub struct WorkflowState {
     pub status: WorkflowStatus,
     pub activities: HashMap<String, ActivityState>,
     pub state_data: serde_json::Value,
+    pub input: serde_json::Value,
 }
 
 /// State of individual activity
@@ -174,7 +175,7 @@ pub async fn load_materialized_state(
     workflow_id: Uuid,
 ) -> Result<WorkflowState> {
     let row = sqlx::query!(
-        r#"SELECT id, definition_name, status AS "status: WorkflowStatus", activities, state_data
+        r#"SELECT id, definition_name, status AS "status: WorkflowStatus", activities, state_data, input
            FROM workflows WHERE id = $1"#,
         workflow_id
     )
@@ -192,6 +193,7 @@ pub async fn load_materialized_state(
         status: row.status,
         activities,
         state_data: row.state_data,
+        input: row.input,
     })
 }
 
@@ -263,6 +265,7 @@ pub async fn initialize_workflow_state(
         status: WorkflowStatus::Running,
         activities: activities.clone(),
         state_data: initial_state_data.unwrap_or_else(|| json!({})),
+        input: input.clone().unwrap_or_else(|| json!({})),
     };
 
     // Serialize activities and state_data for storage

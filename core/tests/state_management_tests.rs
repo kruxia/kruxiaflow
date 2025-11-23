@@ -17,6 +17,7 @@ fn test_apply_workflow_created_event() {
         status: WorkflowStatus::Running,
         activities: Default::default(),
         state_data: json!({}),
+        input: json!({}),
     };
 
     let event = WorkflowEvent {
@@ -60,6 +61,7 @@ fn test_apply_activity_scheduled_event() {
         .into_iter()
         .collect(),
         state_data: json!({}),
+        input: json!({}),
     };
 
     let event = WorkflowEvent {
@@ -105,6 +107,7 @@ fn test_apply_activity_completed_event() {
         .into_iter()
         .collect(),
         state_data: json!({}),
+        input: json!({}),
     };
 
     let event = WorkflowEvent {
@@ -158,6 +161,7 @@ fn test_apply_activity_failed_event() {
         .into_iter()
         .collect(),
         state_data: json!({}),
+        input: json!({}),
     };
 
     let event = WorkflowEvent {
@@ -187,6 +191,7 @@ fn test_apply_workflow_completed_event() {
         status: WorkflowStatus::Running,
         activities: Default::default(),
         state_data: json!({}),
+        input: json!({}),
     };
 
     let event = WorkflowEvent {
@@ -213,6 +218,7 @@ fn test_apply_workflow_failed_event() {
         status: WorkflowStatus::Running,
         activities: Default::default(),
         state_data: json!({}),
+        input: json!({}),
     };
 
     let event = WorkflowEvent {
@@ -274,6 +280,7 @@ fn test_apply_multiple_events_sequential() {
         .into_iter()
         .collect(),
         state_data: json!({}),
+        input: json!({}),
     };
 
     // Apply sequence of events
@@ -354,6 +361,7 @@ fn test_apply_workflow_updated_event() {
         status: WorkflowStatus::Running,
         activities: Default::default(),
         state_data: json!({}),
+        input: json!({}),
     };
 
     let event = WorkflowEvent {
@@ -382,6 +390,7 @@ fn test_apply_activity_scheduled_event_nonexistent_activity() {
         status: WorkflowStatus::Running,
         activities: Default::default(), // Empty activities map
         state_data: json!({}),
+        input: json!({}),
     };
 
     let event = WorkflowEvent {
@@ -411,6 +420,7 @@ fn test_apply_activity_completed_event_nonexistent_activity() {
         status: WorkflowStatus::Running,
         activities: Default::default(), // Empty activities map
         state_data: json!({}),
+        input: json!({}),
     };
 
     let event = WorkflowEvent {
@@ -440,6 +450,7 @@ fn test_apply_activity_failed_event_nonexistent_activity() {
         status: WorkflowStatus::Running,
         activities: Default::default(), // Empty activities map
         state_data: json!({}),
+        input: json!({}),
     };
 
     let event = WorkflowEvent {

@@ -20,6 +20,9 @@ This directory contains example workflows that demonstrate StreamFlow features p
 | `06c-rag-query.yaml`                  | Complete RAG pattern: embed → search → augment → generate, MiniJinja loops                     | OpenAI + Anthropic API keys, PostgreSQL with pgvector, Webhook |
 | `07a-agentic-research-simple.yaml`    | Iterative workflows (loops), iteration-scoped storage, budget-aware loops, conditional exit    | Anthropic API key  |
 | `07b-agentic-research-complete.yaml` | Complete iterative research: HTTP search, file iteration storage, dual success/failure paths   | Anthropic API key, Search API, Webhook URL |
+| `08a-rate-limited-api-calls.yaml`    | Activity scheduling with `delay`, rate limiting, sequential delays (5s between calls)          | API key, Webhook URL |
+| `08b-scheduled-daily-report.yaml`    | Activity scheduling with `scheduled_for`, absolute timestamps, ISO 8601, template scheduling   | Anthropic API key, Webhook URL |
+| `08c-delayed-reminders.yaml`         | Cascading delays, escalating reminders (1h → 4h → 24h), multi-webhook notifications           | Webhook URLs |
 
 ## Running Examples
 
@@ -636,6 +639,175 @@ streamflow run examples/07b-agentic-research-complete.yaml \
 - **SerpAPI**: `url: "https://serpapi.com/search"`, add `api_key` to query params
 - **Brave Search**: `url: "https://api.search.brave.com/res/v1/web/search"`
 - **Custom**: Any search service that returns JSON results
+
+---
+
+### Example 8: Activity Scheduling and Delays
+
+Example 8 demonstrates activity scheduling features using both relative delays (`delay`) and absolute timestamps (`scheduled_for`).
+
+#### Example 8a: Rate-Limited API Calls (`08a-rate-limited-api-calls.yaml`)
+
+This workflow demonstrates using `delay` to respect API rate limits by spacing out sequential HTTP requests.
+
+**Use Case**: Make multiple API calls while respecting rate limits (e.g., 1 request per 5 seconds)
+
+**Prerequisites:**
+- API key for the API service
+- Webhook URL to receive aggregated results
+
+**Run with StreamFlow CLI:**
+```bash
+streamflow run examples/08a-rate-limited-api-calls.yaml \
+  --input webhook_url=https://webhook.site/your-unique-id \
+  --secret api_key=your-api-key
+```
+
+**Expected behavior:**
+1. First API call executes immediately (page 1)
+2. Second API call waits 5 seconds, then executes (page 2)
+3. Third API call waits another 5 seconds, then executes (page 3)
+4. Results are aggregated and sent to webhook after all calls complete
+5. Total workflow time: ~10 seconds (5s + 5s delays)
+
+**Features demonstrated:**
+- ✅ `settings.delay` for relative time delays
+- ✅ Duration units: seconds (`"5s"`)
+- ✅ Sequential delays with `depends_on` chains
+- ✅ Rate limiting pattern for API compliance
+- ✅ Result aggregation from multiple delayed activities
+
+**Supported delay units:**
+- `ms` - milliseconds: `"500ms"`
+- `s` - seconds: `"5s"`
+- `m` or `mi` - minutes: `"30m"` or `"30mi"`
+- `h` - hours: `"2h"`
+- `d` - days: `"7d"`
+- `w` - weeks: `"1w"`
+- `mo` - months: `"2mo"` (calendar-aware)
+- `y` - years: `"1y"` (handles leap years)
+
+**Timing diagram:**
+```
+t=0s     call_api_1 ━━━┓
+                        │
+t=5s                    └─→ call_api_2 ━━━┓
+                                           │
+t=10s                                      └─→ call_api_3 ━━━┓
+                                                               │
+t=10s+                                                         └─→ aggregate_results
+```
+
+---
+
+#### Example 8b: Scheduled Daily Report (`08b-scheduled-daily-report.yaml`)
+
+This workflow demonstrates using `scheduled_for` to execute activities at specific absolute times.
+
+**Use Case**: Generate and send daily reports at a scheduled time (e.g., 9 AM Pacific)
+
+**Prerequisites:**
+- Anthropic API key
+- Webhook URL to receive the report
+
+**Run with StreamFlow CLI:**
+```bash
+# Schedule for a future timestamp (ISO 8601 format with timezone)
+streamflow run examples/08b-scheduled-daily-report.yaml \
+  --input report_date="2025-12-01" \
+  --input report_time="2025-12-01T09:00:00-08:00" \
+  --input notification_webhook="https://webhook.site/your-unique-id" \
+  --secret anthropic_api_key=your-api-key
+```
+
+**Expected behavior:**
+1. Workflow is submitted immediately
+2. `generate_report` activity waits until `report_time` (9 AM Pacific)
+3. At scheduled time, LLM generates the daily report
+4. Report is sent to webhook immediately after generation
+5. Budget limit of $0.10 enforced
+
+**Features demonstrated:**
+- ✅ `settings.scheduled_for` for absolute timestamps
+- ✅ ISO 8601 timestamp format with timezone
+- ✅ Template resolution in `scheduled_for`: `"{{INPUT.report_time}}"`
+- ✅ Scheduled LLM execution with budget limits
+- ✅ Workers respect scheduling (won't claim early)
+
+**Timestamp formats supported:**
+- UTC: `"2025-12-01T09:00:00Z"`
+- With timezone offset: `"2025-12-01T09:00:00-08:00"`
+- Microsecond precision: `"2025-12-01T09:00:00.123456Z"`
+
+**Notes:**
+- If `scheduled_for` is in the past, activity executes immediately (with warning logged)
+- Timezone is converted to UTC for storage
+- Template variables can provide dynamic scheduling: `"{{INPUT.deadline}}"`
+
+---
+
+#### Example 8c: Delayed Reminder System (`08c-delayed-reminders.yaml`)
+
+This workflow demonstrates cascading delays for escalating notifications.
+
+**Use Case**: Send escalating reminders at increasing intervals (1 hour → 4 hours → 24 hours)
+
+**Prerequisites:**
+- Webhook URLs for user, manager, and on-call notifications
+
+**Run with StreamFlow CLI:**
+```bash
+streamflow run examples/08c-delayed-reminders.yaml \
+  --input task_name="Complete quarterly report" \
+  --input assigned_user="alice@example.com" \
+  --input user_webhook="https://webhook.site/user-id" \
+  --input manager_webhook="https://webhook.site/manager-id" \
+  --input oncall_webhook="https://webhook.site/oncall-id"
+```
+
+**Expected behavior:**
+1. Initial notification sent immediately
+2. First reminder sent after 1 hour
+3. Escalated reminder sent after 4 hours total (3h from first reminder)
+4. Final critical escalation sent after 24 hours total (20h from escalated)
+5. Each notification goes to appropriate recipient (user → manager → on-call)
+
+**Features demonstrated:**
+- ✅ Cascading delays with different intervals
+- ✅ Duration units: hours (`"1h"`, `"3h"`, `"20h"`)
+- ✅ Multi-stage escalation pattern
+- ✅ Different notification targets for each stage
+- ✅ Priority escalation over time
+
+**Timing diagram:**
+```
+t=0h     send_initial_notification ━━┓
+                                      │
+t=1h                                  └─→ send_first_reminder ━━┓
+                                                                 │
+t=4h                                                             └─→ send_escalated_reminder ━━┓
+                                                                                                │
+t=24h                                                                                           └─→ send_final_escalation
+```
+
+**Common patterns:**
+- **Immediate retry**: `delay: "500ms"` (sub-second)
+- **Short delays**: `delay: "5s"` or `"30s"`
+- **Medium delays**: `delay: "5m"` or `"1h"`
+- **Long delays**: `delay: "7d"` or `"1w"`
+- **Template-based**: `delay: "{{INPUT.delay_minutes}}m"` (dynamic)
+
+**Delay vs. Scheduled_for:**
+
+| Feature          | `delay` (relative)                     | `scheduled_for` (absolute)           |
+|------------------|----------------------------------------|--------------------------------------|
+| Use case         | Wait for duration after ready          | Execute at specific time             |
+| Format           | Duration string (`"5s"`, `"2h"`)       | ISO 8601 timestamp                   |
+| Reference point  | When activity becomes ready            | Clock time                           |
+| Template example | `"{{INPUT.wait_time}}m"`               | `"{{INPUT.deadline}}"`               |
+| Typical use      | Rate limiting, retries, staged delays  | Scheduled reports, future execution  |
+
+---
 
 ## Next Steps
 
