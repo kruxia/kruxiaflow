@@ -196,6 +196,16 @@ pub struct ActivitySettings {
     /// Per-activity iteration limit (can override activity-level iteration_limit)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub iteration_limit: Option<u32>,
+
+    /// Relative delay: "500ms", "5s", "30m", "30mi", "2h", "7d", "1w", "2mo", "1y"
+    /// Template-aware: "{{INPUT.delay_amount}}m"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delay: Option<String>,
+
+    /// Absolute ISO 8601 timestamp for scheduling (template-aware)
+    /// Example: "2025-12-01T09:00:00-08:00" or "{{INPUT.report_deadline}}"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduled_for: Option<String>,
 }
 
 /// Budget configuration for activities
@@ -266,6 +276,8 @@ impl From<streamflow_core::workflow::ActivitySettings> for ActivitySettings {
             cache: settings.cache,
             cache_ttl: settings.cache_ttl,
             iteration_limit: settings.iteration_limit,
+            delay: settings.delay,
+            scheduled_for: settings.scheduled_for,
         }
     }
 }
@@ -279,6 +291,8 @@ impl From<ActivitySettings> for streamflow_core::workflow::ActivitySettings {
             cache: settings.cache,
             cache_ttl: settings.cache_ttl,
             iteration_limit: settings.iteration_limit,
+            delay: settings.delay,
+            scheduled_for: settings.scheduled_for,
         }
     }
 }

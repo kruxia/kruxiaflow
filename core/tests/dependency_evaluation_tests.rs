@@ -47,6 +47,7 @@ fn create_test_state_with_activities(
         status: WorkflowStatus::Running,
         activities: activities_map,
         state_data: json!({}),
+        input: json!({}),
     }
 }
 

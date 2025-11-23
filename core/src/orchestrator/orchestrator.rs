@@ -14,8 +14,9 @@ use crate::events::{
     EventSource, NewWorkflowEvent, WorkflowEvent, WorkflowEventType, WorkflowStatus,
 };
 use crate::queue::{Activity, ActivityQueue};
-use crate::workflow::BudgetAction;
 use crate::workflow::template::{TemplateContext, resolve_template_value};
+use crate::workflow::{BudgetAction, apply_duration, parse_scheduled_for};
+use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde_json::json;
 use std::collections::HashMap;
@@ -135,6 +136,124 @@ pub async fn run_orchestrator(
     }
 }
 
+/// Compute scheduled_for timestamp based on activity settings
+///
+/// Handles both relative delays (e.g., "5s", "30m") and absolute timestamps (ISO 8601).
+/// Templates are resolved using the provided context.
+///
+/// User-specified scheduling only applies to initial attempts (iteration 0).
+/// Retry attempts use the backoff logic instead.
+///
+/// Returns:
+/// - Some(DateTime) if activity should be delayed
+/// - None if activity should execute immediately
+fn compute_scheduled_for(
+    activity_def: &crate::workflow::ActivityDefinition,
+    template_context: &TemplateContext,
+    iteration: Option<i32>,
+) -> Result<Option<DateTime<Utc>>> {
+    // User-specified scheduling only applies to initial attempt (iteration = 0 or None)
+    // Retries (iteration > 0) use backoff logic, which is handled separately by the queue
+    let is_initial_attempt = iteration.unwrap_or(0) == 0;
+
+    if !is_initial_attempt {
+        // For retries, scheduled_for is handled by the retry backoff logic
+        return Ok(None);
+    }
+
+    let settings = match &activity_def.settings {
+        Some(s) => s,
+        None => return Ok(None), // No settings = immediate execution
+    };
+
+    // Case 1: delay (relative with flexible units)
+    if let Some(delay_str) = &settings.delay {
+        // Resolve template (in case of "{{INPUT.delay}}m")
+        let delay_value = serde_json::Value::String(delay_str.clone());
+        let resolved_value =
+            resolve_template_value(&delay_value, template_context).map_err(|e| {
+                super::OrchestratorError::TemplateFailed(format!(
+                    "Failed to resolve delay template for activity {}: {}",
+                    activity_def.key, e
+                ))
+            })?;
+
+        let resolved_delay = resolved_value.as_str().ok_or_else(|| {
+            super::OrchestratorError::TemplateFailed(format!(
+                "Resolved delay template for activity {} is not a string: {}",
+                activity_def.key, resolved_value
+            ))
+        })?;
+
+        // Apply duration to current time
+        let scheduled_time = apply_duration(Utc::now(), resolved_delay).map_err(|e| {
+            super::OrchestratorError::TemplateFailed(format!(
+                "Failed to parse duration '{}' for activity {}: {}",
+                resolved_delay, activity_def.key, e
+            ))
+        })?;
+
+        tracing::debug!(
+            "Activity {} scheduled with delay {} (resolved: {}) -> {}",
+            activity_def.key,
+            delay_str,
+            resolved_delay,
+            scheduled_time
+        );
+
+        return Ok(Some(scheduled_time));
+    }
+
+    // Case 2: scheduled_for (absolute)
+    if let Some(template) = &settings.scheduled_for {
+        // Resolve template to get ISO 8601 string
+        let scheduled_value = serde_json::Value::String(template.clone());
+        let resolved_value =
+            resolve_template_value(&scheduled_value, template_context).map_err(|e| {
+                super::OrchestratorError::TemplateFailed(format!(
+                    "Failed to resolve scheduled_for template for activity {}: {}",
+                    activity_def.key, e
+                ))
+            })?;
+
+        let resolved_timestamp = resolved_value.as_str().ok_or_else(|| {
+            super::OrchestratorError::TemplateFailed(format!(
+                "Resolved scheduled_for template for activity {} is not a string: {}",
+                activity_def.key, resolved_value
+            ))
+        })?;
+
+        // Parse ISO 8601 to DateTime
+        let dt = parse_scheduled_for(resolved_timestamp).map_err(|e| {
+            super::OrchestratorError::TemplateFailed(format!(
+                "Failed to parse timestamp '{}' for activity {}: {}",
+                resolved_timestamp, activity_def.key, e
+            ))
+        })?;
+
+        // Validate not in the past (warning, not error)
+        if dt < Utc::now() {
+            tracing::warn!(
+                "Activity {} scheduled in the past: {} (will execute immediately)",
+                activity_def.key,
+                dt
+            );
+        }
+
+        tracing::debug!(
+            "Activity {} scheduled for absolute time {} (resolved: {})",
+            activity_def.key,
+            template,
+            dt
+        );
+
+        return Ok(Some(dt));
+    }
+
+    // Case 3: No scheduling (immediate execution)
+    Ok(None)
+}
+
 /// Build TemplateContext from WorkflowState for resolving template expressions
 fn build_template_context(
     state: &super::workflow_state::WorkflowState,
@@ -142,9 +261,9 @@ fn build_template_context(
 ) -> TemplateContext {
     let mut context = TemplateContext::new();
 
-    // Add workflow inputs from state_data
-    if let serde_json::Value::Object(state_obj) = &state.state_data {
-        let inputs: HashMap<String, serde_json::Value> = state_obj
+    // Add workflow inputs from input field
+    if let serde_json::Value::Object(input_obj) = &state.input {
+        let inputs: HashMap<String, serde_json::Value> = input_obj
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
@@ -1001,19 +1120,25 @@ pub async fn process_workflow_event(
                     continue;
                 }
 
+                // Compute iteration for loop activities
+                let iteration = if a.is_loop_activity {
+                    state.activities.get(&a.key).map(|s| s.iteration as i32)
+                } else {
+                    None
+                };
+
+                // Compute scheduled_for based on activity settings
+                let scheduled_for = compute_scheduled_for(a, &template_context, iteration)?;
+
                 activities_to_schedule.push(Activity {
                     key: a.key.clone(),
                     worker: a.worker.clone(),
                     activity_name: a.activity_name.clone().unwrap_or_default(),
                     parameters: params_w_budget,
                     settings: a.settings.clone(),
-                    scheduled_for: None, // Schedule immediately (delayed scheduling deferred post-MVP)
+                    scheduled_for,
                     output_definitions: a.output_definitions.clone(),
-                    iteration: if a.is_loop_activity {
-                        state.activities.get(&a.key).map(|s| s.iteration as i32)
-                    } else {
-                        None
-                    },
+                    iteration,
                 });
             }
 
