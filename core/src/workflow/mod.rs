@@ -7,8 +7,8 @@ pub mod template;
 
 pub use definition::{
     ActivityDefinition, ActivityRelationship, ActivitySettings, BackoffStrategy, BudgetAction,
-    BudgetSettings, RetryPolicy, RetrySettings, ValidationError, ValidationErrors,
-    WorkflowDefinition, WorkflowSettings, apply_duration, parse_scheduled_for,
+    BudgetSettings, RetryPolicy, RetrySettings, StreamingConfig, StreamingOptions, ValidationError,
+    ValidationErrors, WorkflowDefinition, WorkflowSettings, apply_duration, parse_scheduled_for,
 };
 
 pub use outputs::{ActivityOutput, ActivityOutputDefinition, OutputType};

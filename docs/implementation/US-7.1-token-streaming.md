@@ -2,10 +2,36 @@
 
 **Epic**: Epic 7 - AI-Native Features (Differentiators)
 **User Story**: US-7.1
-**Status**: 📋 Next Priority (Pre-Launch, depends on US-1A.9a)
+**Status**: ✅ Implemented
 **Priority**: MVP Critical - Core AI-Native Differentiator
 **Estimated Duration**: ~22-32 hours (3-4 days)
-**Dependencies**: US-1A.9a (WebSocket Infrastructure) must be complete first
+**Dependencies**: US-1A.9a (WebSocket Infrastructure) - ✅ Complete
+
+## Implementation Status
+
+| Task                                         | Status       | Notes                                           |
+|----------------------------------------------|--------------|------------------------------------------------|
+| Task 0: StreamingConfig Types                | ✅ Complete | `core/src/workflow/definition.rs`               |
+| Task 1: Anthropic SSE Streaming              | ✅ Complete | `worker/src/llm/anthropic.rs`                   |
+| Task 2: OpenAI SSE Streaming                 | ✅ Complete | `worker/src/llm/openai.rs`                      |
+| Task 3: Google Gemini Streaming              | ✅ Complete | `worker/src/llm/google.rs`                      |
+| Task 4: Activity Streaming Layer             | ✅ Complete | `worker/src/activities/llm.rs`, `api/src/handlers/streaming.rs` |
+| Task 5: Example Integration                  | ✅ Complete | `examples/09a-streaming-llm.yaml`, `examples/09b-streaming-research.yaml` |
+| Task 6: Testing                              | ✅ Complete | Unit tests and integration tests added          |
+
+### Key Files Modified/Created
+
+- `core/src/workflow/definition.rs` - Added `StreamingConfig` and `StreamingOptions` types
+- `api/src/dto/workflow.rs` - Added DTO versions of streaming types
+- `api/src/handlers/streaming.rs` - New internal API for token publishing
+- `worker/src/llm/anthropic.rs` - Implemented `prompt_stream()` with SSE parsing
+- `worker/src/llm/openai.rs` - Implemented `prompt_stream()` with SSE parsing
+- `worker/src/llm/google.rs` - Implemented `prompt_stream()` with SSE parsing
+- `worker/src/streaming.rs` - Added `HttpStreamSender` for HTTP-based token delivery
+- `worker/src/activities/llm.rs` - Implemented `StreamingActivity` trait for `LLMPromptActivity`
+- `examples/09a-streaming-llm.yaml` - Simple streaming example
+- `examples/09b-streaming-research.yaml` - Multi-step workflow with streaming
+- `api/tests/websocket_integration_tests.rs` - Added internal streaming API tests
 
 ---
 
@@ -855,7 +881,7 @@ Pass ConnectionManager to worker:
 // Option 2: Worker has direct access to ConnectionManager (shared state)
 
 // For MVP, use Option 1: Worker publishes via API endpoint
-// POST /api/v1/internal/activities/{id}/stream_token
+// POST /api/v1/activities/{id}/stream/token
 // This keeps built-in worker consistent with external workers
 
 pub async fn publish_stream_token(
@@ -865,7 +891,7 @@ pub async fn publish_stream_token(
 ) -> Result<(), reqwest::Error> {
     let client = reqwest::Client::new();
     client
-        .post(format!("{}/api/v1/internal/activities/{}/stream_token", api_url, activity_id))
+        .post(format!("{}/api/v1/activities/{}/stream/token", api_url, activity_id))
         .json(&serde_json::json!({
             "text": token.text,
             "index": token.index,
@@ -881,8 +907,8 @@ pub async fn publish_stream_token(
 Internal API endpoint for worker to publish tokens:
 
 ```rust
-/// Internal endpoint for worker to publish streaming tokens
-/// POST /api/v1/internal/activities/{id}/stream_token
+/// Endpoint for worker to publish streaming tokens
+/// POST /api/v1/activities/{id}/stream/token
 pub async fn publish_stream_token(
     Path(activity_id): Path<Uuid>,
     State(state): State<Arc<AppState>>,
