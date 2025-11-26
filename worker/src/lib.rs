@@ -8,6 +8,7 @@ pub mod llm;
 pub mod manager;
 pub mod poller;
 pub mod registry;
+pub mod streaming;
 
 pub use activities::{
     EchoActivity, EmbeddingActivity, HttpRequestActivity, LLMPromptActivity, PostgresQueryActivity,
@@ -18,3 +19,7 @@ pub use client::WorkerApiClient;
 pub use config::WorkerConfig;
 pub use manager::WorkerManager;
 pub use registry::{ActivityImpl, ActivityRegistry};
+pub use streaming::{
+    CollectingStreamSender, NoOpStreamSender, StreamError, StreamSender, StreamToken,
+    StreamingActivity,
+};
