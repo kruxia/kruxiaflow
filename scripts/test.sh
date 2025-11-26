@@ -26,6 +26,15 @@
 #   ./scripts/test.sh -p streamflow-api         # Test only API crate
 #   ./scripts/test.sh --unit                    # Unit tests only
 #   ./scripts/test.sh --skip-db-setup           # Skip DB setup
+#
+# Coverage Exclusions:
+#   The following files are excluded from coverage reports (dev/tooling):
+#   - profiling/src/bin/*           Profiling binaries
+#   - profiling/src/client.rs       Profiling HTTP client
+#   - profiling/src/metrics.rs      Profiling metrics utilities
+#   - streamflow/src/bin/seed-*     Database seeding scripts
+#   - streamflow/src/commands/seed_llm.rs  LLM seeding command
+#   - streamflow/src/llm_catalog.rs LLM catalog for seeding
 
 set -e
 
@@ -217,6 +226,11 @@ if [ "$COVERAGE" = true ]; then
 
     # Add workspace flag
     CMD="$CMD --workspace"
+
+    # Exclude profiling and seed scripts from coverage reports
+    # These are development/tooling files that don't need test coverage
+    # Combined into single regex: profiling tools OR seed scripts
+    CMD="$CMD --ignore-filename-regex '(profiling/src/(bin/|client\\.rs|metrics\\.rs)|streamflow/src/(bin/seed|commands/seed_llm\\.rs|llm_catalog\\.rs))'"
 
     # Add package filter if specified
     if [ -n "$PACKAGE" ]; then

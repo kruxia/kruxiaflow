@@ -355,7 +355,10 @@ impl WorkflowDefinition {
         let mut rec_stack = HashSet::new();
 
         // Find all back-edges using DFS
-        for node in graph.keys() {
+        // Sort keys for deterministic iteration order (HashMap iteration is non-deterministic)
+        let mut nodes: Vec<&str> = graph.keys().copied().collect();
+        nodes.sort();
+        for node in nodes {
             if !visited.contains(node) {
                 self.dfs_find_loops(node, graph, &mut visited, &mut rec_stack, &mut loops);
             }
@@ -393,42 +396,51 @@ impl WorkflowDefinition {
                 } else if rec_stack.contains(neighbor) {
                     // Found a back-edge (loop)
                     // In a cycle, check both directions for conditions
-                    // Get condition from current direction (node -> neighbor)
+                    // The back-edge is the one with the loop condition
+
+                    // Check current direction: node depends_on neighbor (edge: neighbor -> node)
+                    // This means "neighbor.depends_on.node" has the condition
                     let mut condition_forward = None;
-                    if let Some(from) = self.activities.iter().find(|a| a.key == node)
-                        && let Some(depends_on) = &from.depends_on
+                    if let Some(activity) = self.activities.iter().find(|a| a.key == neighbor)
+                        && let Some(depends_on) = &activity.depends_on
                     {
                         for dep in depends_on {
-                            if dep.activity_key == neighbor {
+                            if dep.activity_key == node {
                                 condition_forward = dep.conditions.clone();
                             }
                         }
                     }
 
-                    // Also check reverse direction (neighbor -> node) for conditions
+                    // Check reverse direction: neighbor depends_on node (edge: node -> neighbor)
+                    // This means "node.depends_on.neighbor" has the condition
                     let mut condition_reverse = None;
-                    if let Some(to) = self.activities.iter().find(|a| a.key == neighbor)
-                        && let Some(depends_on) = &to.depends_on
+                    if let Some(activity) = self.activities.iter().find(|a| a.key == node)
+                        && let Some(depends_on) = &activity.depends_on
                     {
                         for dep in depends_on {
-                            if dep.activity_key == node {
+                            if dep.activity_key == neighbor {
                                 condition_reverse = dep.conditions.clone();
                             }
                         }
                     }
 
-                    // Use whichever condition exists (prefer forward, but use reverse if forward has none)
-                    let condition = if condition_forward.is_some() {
-                        condition_forward
+                    // Determine back-edge direction based on which edge has the condition
+                    // The back-edge is the one that loops back (has the condition)
+                    // condition_reverse: node depends_on neighbor → edge is neighbor -> node
+                    // condition_forward: neighbor depends_on node → edge is node -> neighbor
+                    let (from, to, condition) = if condition_reverse.is_some() {
+                        // node depends_on neighbor with condition → back-edge: neighbor -> node
+                        (neighbor.to_string(), node.to_string(), condition_reverse)
+                    } else if condition_forward.is_some() {
+                        // neighbor depends_on node with condition → back-edge: node -> neighbor
+                        (node.to_string(), neighbor.to_string(), condition_forward)
                     } else {
-                        condition_reverse
+                        // No condition found - use DFS traversal direction as default
+                        // DFS edge node -> neighbor means we're at node going to neighbor
+                        (node.to_string(), neighbor.to_string(), None)
                     };
 
-                    loops.push(LoopEdge {
-                        from: node.to_string(),
-                        to: neighbor.to_string(),
-                        condition,
-                    });
+                    loops.push(LoopEdge { from, to, condition });
                 }
             }
         }

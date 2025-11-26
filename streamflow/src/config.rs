@@ -207,6 +207,139 @@ mod tests {
     use super::*;
     use serial_test::serial;
 
+    // =========================================================================
+    // CacheConfig tests
+    // =========================================================================
+
+    #[test]
+    #[serial]
+    fn test_cache_config_default_provider() {
+        // Clean environment
+        unsafe {
+            std::env::remove_var("STREAMFLOW_CACHE_PROVIDER");
+            std::env::remove_var("STREAMFLOW_REDIS_URL");
+            std::env::remove_var("STREAMFLOW_REDIS_KEY_PREFIX");
+        }
+
+        let config = CacheConfig::new();
+
+        assert_eq!(config.provider, "noop");
+        assert!(config.redis_url.is_none());
+        assert!(config.redis_key_prefix.is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn test_cache_config_from_environment() {
+        unsafe {
+            std::env::set_var("STREAMFLOW_CACHE_PROVIDER", "Redis"); // Mixed case
+            std::env::set_var("STREAMFLOW_REDIS_URL", "redis://localhost:6380");
+            std::env::set_var("STREAMFLOW_REDIS_KEY_PREFIX", "test:");
+        }
+
+        let config = CacheConfig::new();
+
+        assert_eq!(config.provider, "redis"); // Normalized to lowercase
+        assert_eq!(config.redis_url, Some("redis://localhost:6380".to_string()));
+        assert_eq!(config.redis_key_prefix, Some("test:".to_string()));
+
+        // Clean up
+        unsafe {
+            std::env::remove_var("STREAMFLOW_CACHE_PROVIDER");
+            std::env::remove_var("STREAMFLOW_REDIS_URL");
+            std::env::remove_var("STREAMFLOW_REDIS_KEY_PREFIX");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_cache_config_default_is_same_as_new() {
+        unsafe {
+            std::env::remove_var("STREAMFLOW_CACHE_PROVIDER");
+            std::env::remove_var("STREAMFLOW_REDIS_URL");
+            std::env::remove_var("STREAMFLOW_REDIS_KEY_PREFIX");
+        }
+
+        let config_new = CacheConfig::new();
+        let config_default = CacheConfig::default();
+
+        assert_eq!(config_new.provider, config_default.provider);
+        assert_eq!(config_new.redis_url, config_default.redis_url);
+        assert_eq!(config_new.redis_key_prefix, config_default.redis_key_prefix);
+    }
+
+    #[test]
+    fn test_cache_config_redact_redis_url_with_password() {
+        let config = CacheConfig {
+            provider: "redis".to_string(),
+            redis_url: Some("redis://:secretpassword@localhost:6379".to_string()),
+            redis_key_prefix: None,
+        };
+
+        let redacted = config.redact_redis_url("redis://:secretpassword@localhost:6379");
+        assert!(redacted.contains("***"));
+        assert!(!redacted.contains("secretpassword"));
+        assert!(redacted.contains("localhost:6379"));
+    }
+
+    #[test]
+    fn test_cache_config_redact_redis_url_with_user_and_password() {
+        let config = CacheConfig {
+            provider: "redis".to_string(),
+            redis_url: Some("redis://user:password123@redis.example.com:6379/0".to_string()),
+            redis_key_prefix: None,
+        };
+
+        let redacted = config.redact_redis_url("redis://user:password123@redis.example.com:6379/0");
+        assert!(redacted.contains("***"));
+        assert!(!redacted.contains("password123"));
+        assert!(redacted.contains("redis.example.com"));
+    }
+
+    #[test]
+    fn test_cache_config_redact_redis_url_without_password() {
+        let config = CacheConfig {
+            provider: "redis".to_string(),
+            redis_url: Some("redis://localhost:6379".to_string()),
+            redis_key_prefix: None,
+        };
+
+        let redacted = config.redact_redis_url("redis://localhost:6379");
+        // Should return URL unchanged when no password
+        assert_eq!(redacted, "redis://localhost:6379");
+    }
+
+    #[test]
+    #[serial]
+    fn test_cache_config_create_noop_cache() {
+        unsafe {
+            std::env::remove_var("STREAMFLOW_CACHE_PROVIDER");
+        }
+
+        let config = CacheConfig::new();
+        let _cache = config.create_cache_service();
+
+        // NoOpCache should be created - we can't directly test the type
+        // but we can verify it doesn't panic and returns an Arc<dyn CacheService>
+    }
+
+    #[test]
+    #[serial]
+    fn test_cache_config_create_cache_with_unknown_provider() {
+        let config = CacheConfig {
+            provider: "unknown_provider".to_string(),
+            redis_url: None,
+            redis_key_prefix: None,
+        };
+
+        // Should fall back to NoOpCache for unknown providers
+        let _cache = config.create_cache_service();
+    }
+
+    // =========================================================================
+    // ApiConfig tests
+    // =========================================================================
+
     #[test]
     fn test_database_url_redaction() {
         let config = ApiConfig {
@@ -331,5 +464,81 @@ mod tests {
                 .to_string()
                 .contains("Database URL is required")
         );
+    }
+
+    #[test]
+    fn test_database_url_redaction_without_password() {
+        // Database URL without password (e.g., local dev with trust auth)
+        let config = ApiConfig {
+            database_url: "postgres://localhost/testdb".to_string(),
+            port: 8080,
+            bind: "0.0.0.0".to_string(),
+        };
+
+        let redacted = config.redact_database_url();
+        // When no @ symbol with password, returns "***" as fallback
+        assert_eq!(redacted, "***");
+    }
+
+    #[test]
+    fn test_database_url_redaction_with_at_but_no_password() {
+        // Edge case: URL with @ but user only (no password)
+        // The function finds the protocol colon and redacts from there to @
+        let config = ApiConfig {
+            database_url: "postgres://user@localhost:5432/db".to_string(),
+            port: 8080,
+            bind: "0.0.0.0".to_string(),
+        };
+
+        let redacted = config.redact_database_url();
+        // Finds protocol colon and redacts "//user" portion
+        assert!(redacted.contains("***"));
+        assert!(redacted.contains("@localhost"));
+    }
+
+    #[test]
+    #[serial]
+    fn test_invalid_port_from_environment() {
+        unsafe {
+            std::env::set_var("DATABASE_URL", "postgres://localhost/test");
+            std::env::set_var("STREAMFLOW_API_PORT", "invalid_port");
+        }
+
+        // Invalid port string should fall back to default
+        let config = ApiConfig::new(None, None, None).unwrap();
+        assert_eq!(config.port, 8080); // Default port
+
+        // Clean up
+        unsafe {
+            std::env::remove_var("DATABASE_URL");
+            std::env::remove_var("STREAMFLOW_API_PORT");
+        }
+    }
+
+    #[test]
+    fn test_api_config_clone() {
+        let config = ApiConfig {
+            database_url: "postgres://localhost/db".to_string(),
+            port: 9090,
+            bind: "127.0.0.1".to_string(),
+        };
+
+        let cloned = config.clone();
+        assert_eq!(cloned.database_url, config.database_url);
+        assert_eq!(cloned.port, config.port);
+        assert_eq!(cloned.bind, config.bind);
+    }
+
+    #[test]
+    fn test_api_config_debug() {
+        let config = ApiConfig {
+            database_url: "postgres://localhost/db".to_string(),
+            port: 8080,
+            bind: "0.0.0.0".to_string(),
+        };
+
+        let debug_str = format!("{:?}", config);
+        assert!(debug_str.contains("ApiConfig"));
+        assert!(debug_str.contains("8080"));
     }
 }

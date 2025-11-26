@@ -612,3 +612,431 @@ pub async fn list_workflows(
         offset: query.offset,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+    use serde_json::json;
+
+    // =========================================================================
+    // SubmitWorkflowRequest validation tests
+    // =========================================================================
+
+    #[test]
+    fn test_submit_workflow_request_valid() {
+        let request = SubmitWorkflowRequest {
+            definition_name: "payment_processing".to_string(),
+            version: None,
+            input: json!({"amount": 100.00}),
+            unique_key: None,
+        };
+
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn test_submit_workflow_request_valid_with_all_fields() {
+        let request = SubmitWorkflowRequest {
+            definition_name: "payment_processing".to_string(),
+            version: Some("20251105.143022.123456".to_string()),
+            input: json!({"amount": 100.00, "card_token": "tok_123"}),
+            unique_key: Some("order_12345_payment".to_string()),
+        };
+
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn test_submit_workflow_request_empty_definition_name() {
+        let request = SubmitWorkflowRequest {
+            definition_name: "".to_string(),
+            version: None,
+            input: json!({}),
+            unique_key: None,
+        };
+
+        let result = request.validate();
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.has_error("definition_name"));
+    }
+
+    #[test]
+    fn test_submit_workflow_request_input_must_be_object() {
+        // Array input
+        let request = SubmitWorkflowRequest {
+            definition_name: "test".to_string(),
+            version: None,
+            input: json!(["array", "input"]),
+            unique_key: None,
+        };
+
+        let result = request.validate();
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.has_error("input"));
+    }
+
+    #[test]
+    fn test_submit_workflow_request_input_primitive_rejected() {
+        // String input
+        let request = SubmitWorkflowRequest {
+            definition_name: "test".to_string(),
+            version: None,
+            input: json!("just a string"),
+            unique_key: None,
+        };
+
+        let result = request.validate();
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.has_error("input"));
+    }
+
+    #[test]
+    fn test_submit_workflow_request_empty_unique_key() {
+        let request = SubmitWorkflowRequest {
+            definition_name: "test".to_string(),
+            version: None,
+            input: json!({}),
+            unique_key: Some("".to_string()),
+        };
+
+        let result = request.validate();
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.has_error("unique_key"));
+    }
+
+    #[test]
+    fn test_submit_workflow_request_unique_key_too_long() {
+        let long_key = "x".repeat(256);
+        let request = SubmitWorkflowRequest {
+            definition_name: "test".to_string(),
+            version: None,
+            input: json!({}),
+            unique_key: Some(long_key),
+        };
+
+        let result = request.validate();
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.has_error("unique_key"));
+    }
+
+    #[test]
+    fn test_submit_workflow_request_unique_key_max_length() {
+        let max_key = "x".repeat(255);
+        let request = SubmitWorkflowRequest {
+            definition_name: "test".to_string(),
+            version: None,
+            input: json!({}),
+            unique_key: Some(max_key),
+        };
+
+        assert!(request.validate().is_ok());
+    }
+
+    // =========================================================================
+    // ListWorkflowsQuery validation tests
+    // =========================================================================
+
+    #[test]
+    fn test_list_workflows_query_valid_defaults() {
+        let query = ListWorkflowsQuery {
+            status: None,
+            definition_name: None,
+            created_after: None,
+            created_before: None,
+            limit: 100,
+            offset: 0,
+        };
+
+        assert!(query.validate().is_ok());
+    }
+
+    #[test]
+    fn test_list_workflows_query_valid_with_filters() {
+        let query = ListWorkflowsQuery {
+            status: Some("running".to_string()),
+            definition_name: Some("payment_processing".to_string()),
+            created_after: Some(Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap()),
+            created_before: Some(Utc.with_ymd_and_hms(2025, 12, 31, 23, 59, 59).unwrap()),
+            limit: 50,
+            offset: 10,
+        };
+
+        assert!(query.validate().is_ok());
+    }
+
+    #[test]
+    fn test_list_workflows_query_limit_zero() {
+        let query = ListWorkflowsQuery {
+            status: None,
+            definition_name: None,
+            created_after: None,
+            created_before: None,
+            limit: 0,
+            offset: 0,
+        };
+
+        let result = query.validate();
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.has_error("limit"));
+    }
+
+    #[test]
+    fn test_list_workflows_query_limit_exceeds_max() {
+        let query = ListWorkflowsQuery {
+            status: None,
+            definition_name: None,
+            created_after: None,
+            created_before: None,
+            limit: 1001,
+            offset: 0,
+        };
+
+        let result = query.validate();
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.has_error("limit"));
+    }
+
+    #[test]
+    fn test_list_workflows_query_limit_max_allowed() {
+        let query = ListWorkflowsQuery {
+            status: None,
+            definition_name: None,
+            created_after: None,
+            created_before: None,
+            limit: 1000,
+            offset: 0,
+        };
+
+        assert!(query.validate().is_ok());
+    }
+
+    #[test]
+    fn test_list_workflows_query_negative_offset() {
+        let query = ListWorkflowsQuery {
+            status: None,
+            definition_name: None,
+            created_after: None,
+            created_before: None,
+            limit: 100,
+            offset: -1,
+        };
+
+        let result = query.validate();
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.has_error("offset"));
+    }
+
+    #[test]
+    fn test_list_workflows_query_invalid_time_range() {
+        // created_after >= created_before
+        let query = ListWorkflowsQuery {
+            status: None,
+            definition_name: None,
+            created_after: Some(Utc.with_ymd_and_hms(2025, 12, 31, 0, 0, 0).unwrap()),
+            created_before: Some(Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap()),
+            limit: 100,
+            offset: 0,
+        };
+
+        let result = query.validate();
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.has_error("created_after"));
+    }
+
+    #[test]
+    fn test_list_workflows_query_same_time_range() {
+        // created_after == created_before is invalid
+        let same_time = Utc.with_ymd_and_hms(2025, 6, 15, 12, 0, 0).unwrap();
+        let query = ListWorkflowsQuery {
+            status: None,
+            definition_name: None,
+            created_after: Some(same_time),
+            created_before: Some(same_time),
+            limit: 100,
+            offset: 0,
+        };
+
+        let result = query.validate();
+        assert!(result.is_err());
+    }
+
+    // =========================================================================
+    // parse_activities tests
+    // =========================================================================
+
+    #[test]
+    fn test_parse_activities_valid() {
+        let activities_json = json!({
+            "step1": {
+                "status": "completed",
+                "outputs": {"result": "success"},
+                "started_at": "2025-11-06T10:00:00Z",
+                "completed_at": "2025-11-06T10:00:05Z"
+            },
+            "step2": {
+                "status": "running",
+                "outputs": null,
+                "started_at": "2025-11-06T10:00:05Z"
+            }
+        });
+
+        let result = parse_activities(&activities_json);
+        assert!(result.is_ok());
+
+        let activities = result.unwrap();
+        assert_eq!(activities.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_activities_empty() {
+        let activities_json = json!({});
+
+        let result = parse_activities(&activities_json);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_parse_activities_not_object() {
+        let activities_json = json!(["array", "not", "object"]);
+
+        let result = parse_activities(&activities_json);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not an object"));
+    }
+
+    #[test]
+    fn test_parse_activities_missing_status() {
+        let activities_json = json!({
+            "step1": {
+                "outputs": null
+            }
+        });
+
+        let result = parse_activities(&activities_json);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing status"));
+    }
+
+    #[test]
+    fn test_parse_activities_invalid_status() {
+        let activities_json = json!({
+            "step1": {
+                "status": "invalid_status"
+            }
+        });
+
+        let result = parse_activities(&activities_json);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid status"));
+    }
+
+    #[test]
+    fn test_parse_activities_all_statuses() {
+        let activities_json = json!({
+            "not_scheduled": {"status": "not_scheduled"},
+            "pending": {"status": "pending"},
+            "running": {"status": "running"},
+            "completed": {"status": "completed"},
+            "failed": {"status": "failed"},
+            "skipped": {"status": "skipped"}
+        });
+
+        let result = parse_activities(&activities_json);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().len(), 6);
+    }
+
+    #[test]
+    fn test_parse_activities_with_outputs() {
+        let activities_json = json!({
+            "step1": {
+                "status": "completed",
+                "outputs": [
+                    {"name": "result", "value": "success", "type": "value"}
+                ]
+            }
+        });
+
+        let result = parse_activities(&activities_json);
+        assert!(result.is_ok());
+
+        let activities = result.unwrap();
+        assert!(activities[0].outputs.is_some());
+    }
+
+    // =========================================================================
+    // Response serialization tests
+    // =========================================================================
+
+    #[test]
+    fn test_submit_workflow_response_serialization() {
+        let response = SubmitWorkflowResponse {
+            workflow_id: Uuid::nil(),
+            definition_name: "test_workflow".to_string(),
+            definition_version: "20251105.143022.123456".to_string(),
+            status: "created".to_string(),
+            created_at: Utc.with_ymd_and_hms(2025, 11, 5, 14, 30, 22).unwrap(),
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("workflow_id"));
+        assert!(json.contains("definition_name"));
+        assert!(json.contains("status"));
+    }
+
+    #[test]
+    fn test_get_workflow_response_serialization() {
+        let response = GetWorkflowResponse {
+            id: Uuid::nil(),
+            status: "running".to_string(),
+            definition_name: "test".to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            activities: vec![ActivityState {
+                activity_key: "step1".to_string(),
+                status: WorkflowActivityStatus::Completed,
+                outputs: Some(json!({"result": "success"})),
+                started_at: Some(Utc::now()),
+                completed_at: Some(Utc::now()),
+            }],
+            state_data: json!({}),
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("activities"));
+        assert!(json.contains("step1"));
+    }
+
+    #[test]
+    fn test_list_workflows_response_serialization() {
+        let response = ListWorkflowsResponse {
+            workflows: vec![WorkflowSummary {
+                id: Uuid::nil(),
+                status: WorkflowStatus::Running,
+                definition_name: "test".to_string(),
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+            }],
+            total: 1,
+            count: 1,
+            limit: 100,
+            offset: 0,
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("workflows"));
+        assert!(json.contains("total"));
+        assert!(json.contains("count"));
+    }
+}
