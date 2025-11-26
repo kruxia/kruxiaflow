@@ -1,3 +1,4 @@
+use crate::websocket::ConnectionManager;
 use sqlx::PgPool;
 use std::sync::Arc;
 use streamflow_core::cache::CacheService;
@@ -50,6 +51,10 @@ pub struct AppState {
     /// Swappable: RedisCache → NoOpCache (when Redis unavailable)
     pub cache_service: Arc<dyn CacheService>,
 
+    /// WebSocket connection manager for activity streaming
+    /// Manages active WebSocket connections per activity for real-time token streaming
+    pub connection_manager: ConnectionManager,
+
     /// Shutdown coordination token for graceful shutdown
     pub shutdown_token: CancellationToken,
 
@@ -96,6 +101,7 @@ impl AppState {
             event_source,
             workflow_storage,
             cache_service,
+            connection_manager: ConnectionManager::new(),
             shutdown_token,
             version: env!("CARGO_PKG_VERSION").to_string(),
             build: AppStateBuild {
@@ -149,6 +155,7 @@ impl AppState {
             event_source,
             workflow_storage,
             cache_service,
+            connection_manager: ConnectionManager::new(),
             shutdown_token,
             version,
             build,

@@ -21,18 +21,27 @@ async fn fallback_404() -> impl IntoResponse {
 /// - GET /health/ready - Readiness probe
 /// - GET /api/v1/info - Service information
 /// - POST /api/v1/oauth/token - OAuth 2.0 token issuance
+/// - GET /api/v1/activities/{id}/stream - WebSocket for activity streaming (auth via query param)
 ///
-/// These routes are accessible without authentication.
+/// These routes are accessible without HTTP header authentication.
 ///
 /// Note: The token endpoint accepts both application/json and
 /// application/x-www-form-urlencoded per OAuth 2.0 spec using
 /// Axum's Either extractor to handle both content types.
+///
+/// Note: The WebSocket endpoint handles authentication via query parameter
+/// (?token=<jwt>) since WebSocket upgrade bypasses HTTP middleware.
 pub fn public_routes() -> Router<AppState> {
     Router::new()
         .route("/health", get(handlers::liveness_handler))
         .route("/health/ready", get(handlers::readiness_handler))
         .route("/api/v1/info", get(handlers::service_info_handler))
         .route("/api/v1/oauth/token", post(handlers::token_handler))
+        // WebSocket endpoint - auth handled in handler via query param
+        .route(
+            "/api/v1/activities/:activity_id/stream",
+            get(handlers::activity_stream_handler),
+        )
 }
 
 /// Protected API routes (require authentication)

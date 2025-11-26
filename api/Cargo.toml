@@ -27,6 +27,7 @@ tower.workspace = true
 tower-http.workspace = true
 jsonwebtoken.workspace = true
 bcrypt.workspace = true
+futures.workspace = true
 
 # OpenAPI generation and documentation
 utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono", "decimal_float"] }
@@ -39,3 +40,4 @@ serial_test.workspace = true
 axum-test = "15.0"
 futures = "0.3"
 reqwest = { workspace = true }
+tokio-tungstenite = "0.24"
