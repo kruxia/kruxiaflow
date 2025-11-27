@@ -828,6 +828,71 @@ STREAMFLOW_CACHE_TTL_DEFAULT=3600  # 1 hour
 
 ---
 
+### Story 1.14: Activity I/O Backends
+
+**Priority**: P2 (Medium - Large data handling)
+
+**As** a workflow developer
+**I want** to configure where activity outputs are stored
+**So that** large intermediate results don't bloat workflow state
+
+**Background**: MVP stores all activity outputs in workflow state (PostgreSQL JSONB). This works well for small results but becomes problematic for:
+- Large LLM responses (>100KB)
+- File processing pipelines (images, PDFs, datasets)
+- High-throughput workflows where state serialization becomes a bottleneck
+
+**Scope**:
+- Per-activity `output_store` setting: `state` (default), `redis`, `s3`, `postgres_lo`
+- Transparent input resolution: `{{activity.result}}` fetches from configured backend
+- TTL support for ephemeral data (Redis)
+- Automatic cleanup on workflow completion
+- Cross-workflow data sharing via explicit keys
+
+**YAML Example**:
+```yaml
+activities:
+  - key: generate_report
+    activity_name: llm_prompt
+    parameters:
+      prompt: "Generate a detailed analysis..."
+      max_tokens: 10000
+    settings:
+      output_store: redis      # Store large output in Redis
+      output_ttl: 3600         # Auto-expire after 1 hour
+
+  - key: process_report
+    activity_name: some_processor
+    depends_on: [generate_report]
+    parameters:
+      # Transparently fetched from Redis
+      report: "{{generate_report.result.content}}"
+```
+
+**Backends**:
+| Backend       | Use Case                          | TTL Support | Cross-Workflow |
+|---------------|-----------------------------------|-------------|----------------|
+| `state`       | Small results (<10KB), default    | No          | No             |
+| `redis`       | Large ephemeral data, fast access | Yes         | Yes            |
+| `s3`          | Very large files, persistence     | Yes         | Yes            |
+| `postgres_lo` | Large objects, no external deps   | No          | No             |
+
+**Benefits**:
+- Workflow state stays small and fast
+- Large data handled efficiently
+- Flexible per-activity configuration
+- No changes to activity code (transparent)
+
+**Trade-offs**:
+- Additional infrastructure (Redis/S3) for some backends
+- Complexity in output resolution
+- Cleanup coordination on workflow failure
+
+**Related Stories**:
+- Story 1.8: Redis Activity Queue (different - queue backend, not I/O)
+- Story 1.13: Redis Result Caching (different - semantic caching, not storage)
+
+---
+
 ## Epic 2: Performance Optimization
 
 **Goal**: Achieve >10,000 workflows/sec throughput and <1ms orchestration latency through architectural optimizations.
