@@ -1763,3 +1763,418 @@ async fn check_and_timeout_stuck_workflows(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::WorkflowStatus;
+    use crate::orchestrator::workflow_state::{
+        ActivityState, WorkflowActivityStatus, WorkflowState,
+    };
+    use crate::workflow::{ActivityDefinition, ActivityOutput, ActivitySettings, OutputType};
+    use rust_decimal::Decimal;
+    use serde_json::json;
+    use std::collections::HashMap;
+    use uuid::Uuid;
+
+    fn create_activity_def(key: &str, settings: Option<ActivitySettings>) -> ActivityDefinition {
+        ActivityDefinition {
+            key: key.to_string(),
+            worker: "test".to_string(),
+            activity_name: Some("test_activity".to_string()),
+            parameters: Some(HashMap::new()),
+            settings,
+            depends_on: None,
+            dependency_of: None,
+            output_definitions: None,
+            iteration_scoped: false,
+            iteration_limit: None,
+            is_loop_activity: false,
+        }
+    }
+
+    fn create_test_workflow_state(
+        activities: Vec<(&str, WorkflowActivityStatus, Option<Vec<ActivityOutput>>)>,
+        input: serde_json::Value,
+    ) -> WorkflowState {
+        let activities_map = activities
+            .into_iter()
+            .map(|(key, status, outputs)| {
+                (
+                    key.to_string(),
+                    ActivityState {
+                        key: key.to_string(),
+                        status,
+                        outputs,
+                        error: None,
+                        started_at: None,
+                        completed_at: None,
+                        attempt: 0,
+                        last_error: None,
+                        accumulated_cost_usd: Decimal::ZERO,
+                        iteration: 0,
+                        iteration_outputs: None,
+                    },
+                )
+            })
+            .collect();
+
+        WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test_workflow".to_string(),
+            status: WorkflowStatus::Running,
+            activities: activities_map,
+            state_data: json!({}),
+            input,
+        }
+    }
+
+    // =========================================================================
+    // compute_scheduled_for tests
+    // =========================================================================
+
+    #[test]
+    fn test_compute_scheduled_for_no_settings() {
+        let activity_def = create_activity_def("test", None);
+        let context = TemplateContext::new();
+
+        let result = compute_scheduled_for(&activity_def, &context, None).unwrap();
+        assert!(
+            result.is_none(),
+            "No settings should result in immediate execution"
+        );
+    }
+
+    #[test]
+    fn test_compute_scheduled_for_empty_settings() {
+        let settings = ActivitySettings {
+            timeout_seconds: Some(30),
+            retry: None,
+            budget: None,
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: None,
+            scheduled_for: None,
+        };
+        let activity_def = create_activity_def("test", Some(settings));
+        let context = TemplateContext::new();
+
+        let result = compute_scheduled_for(&activity_def, &context, None).unwrap();
+        assert!(
+            result.is_none(),
+            "Settings without delay/scheduled_for should result in immediate execution"
+        );
+    }
+
+    #[test]
+    fn test_compute_scheduled_for_with_delay_seconds() {
+        let settings = ActivitySettings {
+            timeout_seconds: None,
+            retry: None,
+            budget: None,
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: Some("10s".to_string()),
+            scheduled_for: None,
+        };
+        let activity_def = create_activity_def("test", Some(settings));
+        let context = TemplateContext::new();
+
+        let before = Utc::now();
+        let result = compute_scheduled_for(&activity_def, &context, None)
+            .unwrap()
+            .unwrap();
+        let after = Utc::now();
+
+        // Result should be ~10 seconds in the future
+        let expected_min = before + chrono::Duration::seconds(9);
+        let expected_max = after + chrono::Duration::seconds(11);
+
+        assert!(
+            result >= expected_min && result <= expected_max,
+            "Scheduled time {:?} should be ~10 seconds after {:?}",
+            result,
+            before
+        );
+    }
+
+    #[test]
+    fn test_compute_scheduled_for_with_delay_minutes() {
+        let settings = ActivitySettings {
+            timeout_seconds: None,
+            retry: None,
+            budget: None,
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: Some("5m".to_string()),
+            scheduled_for: None,
+        };
+        let activity_def = create_activity_def("test", Some(settings));
+        let context = TemplateContext::new();
+
+        let before = Utc::now();
+        let result = compute_scheduled_for(&activity_def, &context, None)
+            .unwrap()
+            .unwrap();
+
+        // Result should be ~5 minutes in the future
+        let expected_min = before + chrono::Duration::minutes(4);
+        let expected_max = before + chrono::Duration::minutes(6);
+
+        assert!(
+            result >= expected_min && result <= expected_max,
+            "Scheduled time {:?} should be ~5 minutes after {:?}",
+            result,
+            before
+        );
+    }
+
+    #[test]
+    fn test_compute_scheduled_for_retry_ignores_delay() {
+        // On retry (iteration > 0), delay should be ignored
+        let settings = ActivitySettings {
+            timeout_seconds: None,
+            retry: None,
+            budget: None,
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: Some("1h".to_string()), // 1 hour delay
+            scheduled_for: None,
+        };
+        let activity_def = create_activity_def("test", Some(settings));
+        let context = TemplateContext::new();
+
+        // Iteration 1 = retry, should ignore delay
+        let result = compute_scheduled_for(&activity_def, &context, Some(1)).unwrap();
+        assert!(
+            result.is_none(),
+            "Retry attempts should ignore delay and execute immediately"
+        );
+    }
+
+    #[test]
+    fn test_compute_scheduled_for_with_absolute_time() {
+        let future_time = Utc::now() + chrono::Duration::hours(1);
+        let iso_time = future_time.to_rfc3339();
+
+        let settings = ActivitySettings {
+            timeout_seconds: None,
+            retry: None,
+            budget: None,
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: None,
+            scheduled_for: Some(iso_time.clone()),
+        };
+        let activity_def = create_activity_def("test", Some(settings));
+        let context = TemplateContext::new();
+
+        let result = compute_scheduled_for(&activity_def, &context, None)
+            .unwrap()
+            .unwrap();
+
+        // Result should be within a second of the specified time
+        let diff = (result - future_time).num_seconds().abs();
+        assert!(
+            diff <= 1,
+            "Scheduled time should match specified absolute time (diff: {}s)",
+            diff
+        );
+    }
+
+    #[test]
+    fn test_compute_scheduled_for_with_template_delay() {
+        let settings = ActivitySettings {
+            timeout_seconds: None,
+            retry: None,
+            budget: None,
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: Some("{{INPUT.delay_value}}".to_string()),
+            scheduled_for: None,
+        };
+        let activity_def = create_activity_def("test", Some(settings));
+
+        let mut inputs = HashMap::new();
+        inputs.insert("delay_value".to_string(), json!("30s"));
+        let context = TemplateContext::new().with_inputs(inputs);
+
+        let before = Utc::now();
+        let result = compute_scheduled_for(&activity_def, &context, None)
+            .unwrap()
+            .unwrap();
+
+        // Result should be ~30 seconds in the future
+        let expected_min = before + chrono::Duration::seconds(29);
+        let expected_max = before + chrono::Duration::seconds(31);
+
+        assert!(
+            result >= expected_min && result <= expected_max,
+            "Template-resolved delay should work correctly"
+        );
+    }
+
+    // =========================================================================
+    // build_template_context tests
+    // =========================================================================
+
+    #[test]
+    fn test_build_template_context_empty_state() {
+        let state = create_test_workflow_state(vec![], json!({}));
+        let workflow_id = state.workflow_id;
+
+        let context = build_template_context(&state, workflow_id);
+
+        assert!(context.inputs.is_empty());
+        assert!(context.activity_states.is_empty());
+        assert_eq!(
+            context.workflow.get("id").unwrap().as_str().unwrap(),
+            workflow_id.to_string()
+        );
+    }
+
+    #[test]
+    fn test_build_template_context_with_inputs() {
+        let input = json!({
+            "topic": "rust programming",
+            "max_results": 10
+        });
+        let state = create_test_workflow_state(vec![], input);
+        let workflow_id = state.workflow_id;
+
+        let context = build_template_context(&state, workflow_id);
+
+        assert_eq!(
+            context.inputs.get("topic").unwrap().as_str().unwrap(),
+            "rust programming"
+        );
+        assert_eq!(
+            context.inputs.get("max_results").unwrap().as_i64().unwrap(),
+            10
+        );
+    }
+
+    #[test]
+    fn test_build_template_context_with_activity_outputs() {
+        let state = create_test_workflow_state(
+            vec![(
+                "search",
+                WorkflowActivityStatus::Completed,
+                Some(vec![ActivityOutput {
+                    name: "results".to_string(),
+                    output_type: OutputType::Value,
+                    value: json!(["result1", "result2"]),
+                }]),
+            )],
+            json!({}),
+        );
+        let workflow_id = state.workflow_id;
+
+        let context = build_template_context(&state, workflow_id);
+
+        // Verify activity was added to context
+        assert!(context.activity_states.contains_key("search"));
+    }
+
+    #[test]
+    fn test_build_template_context_workflow_status() {
+        let state = create_test_workflow_state(vec![], json!({}));
+        let workflow_id = state.workflow_id;
+
+        let context = build_template_context(&state, workflow_id);
+
+        assert_eq!(
+            context.workflow.get("status").unwrap().as_str().unwrap(),
+            "running"
+        );
+    }
+
+    #[test]
+    fn test_build_template_context_with_multiple_activities() {
+        let state = create_test_workflow_state(
+            vec![
+                (
+                    "activity1",
+                    WorkflowActivityStatus::Completed,
+                    Some(vec![ActivityOutput {
+                        name: "output1".to_string(),
+                        output_type: OutputType::Value,
+                        value: json!("value1"),
+                    }]),
+                ),
+                (
+                    "activity2",
+                    WorkflowActivityStatus::Completed,
+                    Some(vec![ActivityOutput {
+                        name: "output2".to_string(),
+                        output_type: OutputType::Value,
+                        value: json!("value2"),
+                    }]),
+                ),
+                ("activity3", WorkflowActivityStatus::Pending, None),
+            ],
+            json!({}),
+        );
+        let workflow_id = state.workflow_id;
+
+        let context = build_template_context(&state, workflow_id);
+
+        // All activities should be in context, even pending ones
+        assert!(context.activity_states.contains_key("activity1"));
+        assert!(context.activity_states.contains_key("activity2"));
+        assert!(context.activity_states.contains_key("activity3"));
+    }
+
+    #[test]
+    fn test_build_template_context_with_iteration_state() {
+        let mut activities_map = HashMap::new();
+        activities_map.insert(
+            "loop_activity".to_string(),
+            ActivityState {
+                key: "loop_activity".to_string(),
+                status: WorkflowActivityStatus::Completed,
+                outputs: Some(vec![ActivityOutput {
+                    name: "result".to_string(),
+                    output_type: OutputType::Value,
+                    value: json!("iteration_2_result"),
+                }]),
+                error: None,
+                started_at: None,
+                completed_at: None,
+                attempt: 0,
+                last_error: None,
+                accumulated_cost_usd: Decimal::new(150, 2), // $1.50
+                iteration: 2,
+                iteration_outputs: Some({
+                    let mut map = HashMap::new();
+                    map.insert(
+                        "result".to_string(),
+                        vec![json!("iter0"), json!("iter1"), json!("iteration_2_result")],
+                    );
+                    map
+                }),
+            },
+        );
+
+        let state = WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: WorkflowStatus::Running,
+            activities: activities_map,
+            state_data: json!({}),
+            input: json!({}),
+        };
+        let workflow_id = state.workflow_id;
+
+        let context = build_template_context(&state, workflow_id);
+
+        // Verify iteration context is captured
+        assert!(context.activity_states.contains_key("loop_activity"));
+    }
+}
