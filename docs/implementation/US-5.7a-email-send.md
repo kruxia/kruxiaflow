@@ -1,18 +1,24 @@
-# US-5.7: Notification Activities Implementation Plan
+# US-5.7a: Email Notification Activity Implementation Plan
 
 **Version**: 1.0
 **Date**: 2025-11-26
 **Status**: Planning
 **Epic**: 5 - Built-In Activity Library
+**Dependency of**: Example 10 (Order Processing with Email Notification)
 
 ---
 
 ## Overview
 
-This story implements built-in notification activities that enable workflows to send alerts and messages without external services.
+This story implements the `email_send` built-in activity that enables workflows to send email notifications via SMTP.
 
-**User Story**:
+**User Story** (US-5.7):
 > As a platform engineering lead, I want built-in notification activities, so that workflows can alert without external services.
+
+**MVP Scope** (US-5.7a):
+> Implement `email_send` activity with SMTP support, HTML/plain text content, and rate limiting.
+
+**Note**: After US-5.7a + Example 10, the MVP orchestrator and built-in worker with activities are feature-complete.
 
 ---
 
@@ -25,7 +31,7 @@ This story implements built-in notification activities that enable workflows to 
 | Retry on delivery failure              | 📋     |
 | Rate limiting to prevent spam          | 📋     |
 
-**Deferred to Post-MVP**: `slack_message`, `teams_notify`, `discord_send` (see `docs/post-mvp.md`)
+**Deferred to Post-MVP**: `slack_message`, `teams_notify`, `discord_send`, `gchat_send` (see `docs/post-mvp.md` Story 1.15)
 
 ---
 

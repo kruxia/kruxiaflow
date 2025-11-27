@@ -18,6 +18,7 @@ use streamflow_core::{OrchestratorConfig, run_orchestrator};
 use streamflow_oauth::{AuthConfig, PostgresAuthService};
 use streamflow_worker::{
     ActivityRegistry, HttpRequestActivity, PostgresQueryActivity, WorkerConfig, WorkerManager,
+    new_pool_cache,
 };
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -486,7 +487,7 @@ async fn test_conditional_branching_workflow() {
     // Start worker with HTTP and PostgreSQL activities
     let mut registry = ActivityRegistry::new(Arc::new(streamflow_core::NoOpCache::new()));
     registry.register(Arc::new(HttpRequestActivity::new()));
-    registry.register(Arc::new(PostgresQueryActivity::new()));
+    registry.register(Arc::new(PostgresQueryActivity::new(new_pool_cache())));
 
     let worker_config = WorkerConfig {
         api_url: api_url.clone(),
