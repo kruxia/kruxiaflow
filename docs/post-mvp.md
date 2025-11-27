@@ -893,6 +893,92 @@ activities:
 
 ---
 
+### Story 1.15: Chat/Collaboration Notification Activities
+
+**Priority**: P2 (Medium - Extends MVP email notifications to popular platforms)
+
+**As** a platform engineering lead
+**I want** built-in notification activities for Slack, Teams, and Discord
+**So that** workflows can alert teams on their preferred collaboration platforms
+
+**Scope**:
+- `slack_message` - Post messages to Slack channels/users
+- `teams_notify` - Send notifications to Microsoft Teams
+- `discord_send` - Send messages to Discord channels
+- `gchat_send` - Send messages to Google Chat spaces
+
+**Slack Activity** (`slack_message`):
+```yaml
+activities:
+  notify_team:
+    activity: slack_message
+    parameters:
+      webhook_url: "{{SECRET.slack_webhook}}"
+      channel: "#alerts"
+      text: "Workflow {{WORKFLOW.id}} completed"
+      blocks:  # Optional rich formatting
+        - type: section
+          text:
+            type: mrkdwn
+            text: "*Status:* Success"
+      thread_ts: "{{INPUT.parent_message}}"  # Optional threading
+```
+
+**Teams Activity** (`teams_notify`):
+```yaml
+activities:
+  notify_ops:
+    activity: teams_notify
+    parameters:
+      webhook_url: "{{SECRET.teams_webhook}}"
+      title: "Pipeline Complete"
+      text: "Processed {{process.row_count}} records"
+      theme_color: "00FF00"
+      sections:
+        - facts:
+            - name: "Duration"
+              value: "{{WORKFLOW.duration_ms}}ms"
+```
+
+**Discord Activity** (`discord_send`):
+```yaml
+activities:
+  notify_discord:
+    activity: discord_send
+    parameters:
+      webhook_url: "{{SECRET.discord_webhook}}"
+      content: "Workflow completed!"
+      embeds:
+        - title: "Results"
+          color: 0x00FF00
+          fields:
+            - name: "Records"
+              value: "{{process.count}}"
+```
+
+**Benefits**:
+- Native integration with popular collaboration tools
+- Rich message formatting (blocks, cards, embeds)
+- Thread/conversation support
+- No external workers required
+
+**Trade-offs**:
+- Each platform has unique API requirements
+- Webhook management complexity
+- Rate limiting varies by platform
+- OAuth flows for bot token mode (Slack)
+
+**Implementation Notes**:
+- Start with webhook-based integrations (simplest)
+- Bot token mode (Slack) enables more features but requires OAuth
+- Consider separate workers for each platform for isolation
+- Rate limiting should be per-workspace/server
+
+**Related Stories**:
+- US-5.7 (MVP): `email_send` activity provides foundational notification support
+
+---
+
 ## Epic 2: Performance Optimization
 
 **Goal**: Achieve >10,000 workflows/sec throughput and <1ms orchestration latency through architectural optimizations.
