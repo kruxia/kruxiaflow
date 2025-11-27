@@ -1,18 +1,22 @@
 # MVP Workflows Implementation Plan
 
-**Version**: 1.7
-**Date**: 2025-11-23
-**Status**: Core Complete - Token Streaming Next (Examples 1-8 Complete, US-1A.9a + US-7.1 Priority)
+**Version**: 0.2.8
+**Date**: 2025-11-26
+**Status**: Core Complete - Examples 9-10 Next (Examples 1-8 ✅, US-1A.9a ✅, US-7.1 ✅)
+**Test Coverage**: 90.56% (target >90% achieved)
+
 **Recent Updates**:
+- US-7.1 (Token Streaming) ✅ Complete - WebSocket-based real-time LLM streaming
+- US-1A.9a (WebSocket Infrastructure) ✅ Complete - Foundation for token streaming
 - Example 8 (Activity Scheduling and Delays) ✅ Complete - Three-workflow series (08a, 08b, 08c)
 - US-3.7 (Activity Scheduling) ✅ Complete - delay and scheduled_for with template support
 - Example 7 (Agentic Research / Iterative Workflows) ✅ Complete - Two-workflow series (07a, 07b)
 - Example 6 (Semantic Caching and RAG) ✅ Complete - Three-workflow series (06a, 06b, 06c)
 - US-3.4 (Iterative Workflows) ✅ Complete - Example 7 demonstrates loops with simple and complete variants
-- **Next Priority**: US-1A.9a (WebSocket Infrastructure) + US-7.1 (Token Streaming) before Examples 9-10
-- **Strategic Decision**: Deliver token streaming pre-launch (Option 1) as core AI-native differentiator
 - US-5.3 (Semantic Caching) ✅ Complete - 100% production ready
 - US-5.1 (Multi-Provider LLM) ✅ Phases 1-5 Complete
+
+**Next Priority**: Examples 9-10 (Advanced HTTP/GraphQL, additional database operations)
 
 ---
 
@@ -1685,7 +1689,149 @@ See `docs/implementation/US-7.1-token-streaming.md` for detailed implementation 
 
 ---
 
-### Example 9: Additional HTTP and Database Features
+### Example 9: Token Streaming
+**Duration**: Included in US-1A.9a + US-7.1 above
+**Epic 3**: US-3.8 (Streaming Activity Flag)
+**Epic 7**: US-7.1 (Token Streaming)
+
+#### Example 9a: Basic LLM Streaming (`examples/09a-streaming-llm.yaml`)
+
+Demonstrates single-activity streaming with provider fallback:
+
+```yaml
+name: streaming_llm_example
+description: LLM prompt with token streaming over WebSocket
+
+activities:
+  - key: generate_story
+    worker: builtin
+    activity_name: llm_prompt
+    streaming: true  # Enable token streaming
+    parameters:
+      model:
+        - anthropic/claude-3-5-haiku-20241022
+        - openai/gpt-4o-mini
+        - google/gemini-1.5-flash
+      prompt: |
+        Write a short story about {{INPUT.topic}} in approximately 200 words.
+      max_tokens: 500
+      temperature: 0.8
+    outputs:
+      - result
+```
+
+**Key Features**:
+- `streaming: true` enables token-by-token delivery via WebSocket
+- Provider fallback chain (all three providers support streaming)
+- Two-level opt-in: activity config + WebSocket subscribers present
+
+**Client Connection Flow**:
+1. Submit workflow via `POST /api/v1/workflows`
+2. Get activity_id from workflow status (`GET /api/v1/workflows/{id}`)
+3. Connect to WebSocket: `ws://host/api/v1/activities/{activity_id}/stream?token=<jwt>`
+4. Receive `StreamMessage` events: `token`, `complete`, `error`
+
+#### Example 9b: Selective Streaming (`examples/09b-streaming-research.yaml`)
+
+Demonstrates multi-step workflow with streaming only on the final output:
+
+```yaml
+name: streaming_research_workflow
+description: Research assistant with streaming analysis output
+
+# Workflow DAG:
+#   summarize_topic ──┬──► analyze_findings (STREAMING)
+#   gather_sources ───┘
+
+activities:
+  # Non-streaming preparation steps (fast, efficient)
+  - key: summarize_topic
+    activity_name: llm_prompt
+    streaming: false  # Non-streaming for speed
+    parameters:
+      model: anthropic/claude-3-5-haiku-20241022
+      prompt: Provide a brief overview of: {{INPUT.topic}}
+      max_tokens: 200
+
+  - key: gather_sources
+    activity_name: llm_prompt
+    streaming: false
+    parameters:
+      model: anthropic/claude-3-5-haiku-20241022
+      prompt: Generate 3 research questions for: {{INPUT.topic}}
+      max_tokens: 300
+
+  # Streaming final analysis (user sees tokens as generated)
+  - key: analyze_findings
+    activity_name: llm_prompt
+    streaming: true  # Enable streaming for real-time output
+    parameters:
+      model:
+        - anthropic/claude-3-5-sonnet-20241022
+        - anthropic/claude-3-5-haiku-20241022
+      prompt: |
+        Write a comprehensive research analysis on: {{INPUT.topic}}
+        Context: {{summarize_topic.result.content}}
+        Questions: {{gather_sources.result.content}}
+      max_tokens: 1500
+    depends_on:
+      - summarize_topic
+      - gather_sources
+    settings:
+      budget:
+        limit_usd: 0.10
+        action: warn
+```
+
+**Key Features**:
+- Selective streaming: only the user-facing analysis step streams
+- Non-streaming prep steps run efficiently without WebSocket overhead
+- Cost budget enforcement on expensive streaming activity
+- DAG dependencies ensure context is available before analysis
+
+#### Streaming Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        API Server                                │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │              ConnectionManager                           │    │
+│  │  ┌─────────────────────────────────────────────────┐    │    │
+│  │  │ activity_id → [WebSocket connections...]        │    │    │
+│  │  └─────────────────────────────────────────────────┘    │    │
+│  └─────────────────────────────────────────────────────────┘    │
+│         ▲                              │                         │
+│         │ register/broadcast           │ tokens                  │
+│         │                              ▼                         │
+│  ┌──────┴──────────────────────────────────────────────────┐    │
+│  │ WS /api/v1/activities/{id}/stream                       │    │
+│  └─────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────┘
+         ▲                              │
+         │ connect                      │ StreamMessage
+         │                              ▼
+    ┌────┴────┐                    ┌─────────┐
+    │ Client  │◄───────────────────│ Worker  │
+    │ (WS)    │   token/complete   │ (LLM)   │
+    └─────────┘                    └─────────┘
+```
+
+**Message Types**:
+- `{"type": "token", "text": "Hello", "index": 0, "timestamp": "..."}`
+- `{"type": "complete", "activity_id": "...", "result": {...}, "timestamp": "..."}`
+- `{"type": "error", "activity_id": "...", "error": "...", "timestamp": "..."}`
+
+#### Success Criteria
+- ✅ `streaming: true/false` activity flag controls streaming behavior
+- ✅ Worker checks for subscribers before streaming (two-level opt-in)
+- ✅ Tokens delivered via WebSocket with <10ms P95 latency
+- ✅ Non-streaming activities complete efficiently without overhead
+- ✅ Provider fallback works with streaming enabled
+- ✅ Cost tracking works for streaming activities
+
+---
+
+### Example 10: Additional HTTP and Database Features
 **Duration**: 3-4 days
 **Epic 3**: (No new YAML features)
 **Epic 5**: US-5.5 (HTTP - Complete), US-5.6 (Database - Complete)
@@ -1791,7 +1937,6 @@ activities:
 
 #### Built-in Activities Implemented
 - ✅ `http_request` - Generic HTTP request (any method)
-- ✅ `http_graphql` - GraphQL query execution
 - ✅ HTTP authentication patterns:
   - Bearer token: `Authorization: Bearer {{SECRET.token}}`
   - Basic auth: `Authorization: Basic <base64(user:pass)>`
@@ -1799,8 +1944,6 @@ activities:
   - Custom auth headers
 - ✅ `postgres_transaction` - Multi-statement transaction
 - ✅ `postgres_query` - Execute SQL queries (SELECT, INSERT, UPDATE, DELETE)
-- ✅ `sqlite_query` - SQLite support
-- ✅ `redis_get` / `redis_set` - Redis operations
 
 #### Implementation Tasks
 1. HTTP activity enhancements
@@ -1832,7 +1975,7 @@ activities:
 
 ---
 
-### Example 10: Advanced File Management Features
+### Example 11: Advanced File Management Features
 **Duration**: 3-4 days
 **Epic 3**: (No new YAML features)
 **Epic 5**: US-5.4 (Object Storage and File Management - Complete)
@@ -2104,17 +2247,17 @@ tokio::spawn(cleanup_worker.run());
 
 ## Post-MVP Examples (Optional Enhancements)
 
-### Example 11: Notification Activities
+### Example 12: Notification Activities
 **Duration**: 2-3 days
 **Epic 5**: US-5.7 (Notification Activities)
 
 #### Activities
-- `slack_send_message` - Send Slack notification
+- `slack_send` - Send Slack notification
 - `email_send` - Send email via SMTP
 - `discord_send` - Discord webhook
 - `teams_send` - Microsoft Teams notification
 
-### Example 12: Edge/IoT Activities (Unique Differentiator)
+### Example 13: Edge/IoT Activities (Unique Differentiator)
 **Duration**: 4-5 days
 **Epic 5**: US-5.8 (Edge/IoT Activities)
 
@@ -2151,8 +2294,8 @@ tokio::spawn(cleanup_worker.run());
 | **🎯 US-7.1**         | **3-4 days** | **LLM Token Streaming (Anthropic, OpenAI, Google)**           | **Epic 7**                 | **27-34** 🎯    |
 | 7                     | 5-6 days   | (Example 7 content if needed, or skip - US-3.4 done in Ex. 6)  | Epic 3                     | 32-40           |
 | 8                     | 3-4 days   | Advanced file management, external storage                      | Epic 5                     | 35-44           |
-| 9                     | 3-4 days   | HTTP/DB advanced features                                       | Epic 5                     | 38-48           |
-| 10                    | 2-3 days   | Activity scheduling (delay, scheduled_for)                     | Epic 3                     | 40-51           |
+| 10                    | 3-4 days   | HTTP/DB advanced features                                       | Epic 5                     | 38-48           |
+| 11                    | 2-3 days   | Activity scheduling (delay, scheduled_for)                     | Epic 3                     | 40-51           |
 | **US-3.6**            | 4-5 days   | **CLI Tooling** (validate, test, visualize)                    | **Epic 3**                 | **44-56**       |
 
 **Notes**:
@@ -2324,13 +2467,12 @@ All HTTP activities support:
 - Request/response body handling
 
 Activities:
-- `http_request` - Generic HTTP request (configurable method: GET, POST, PUT, DELETE, PATCH, etc.)
+- ✅ `http_request` - Generic HTTP request (configurable method: GET, POST, PUT, DELETE, PATCH, etc.)
   - Supports all HTTP methods via `method` parameter
   - Full control over headers, query params, request body, and files
-- `http_graphql` - GraphQL query with authentication
 
 ### Database Activities
-- `postgres_query` - Execute SQL queries with parameter binding
+- ✅ `postgres_query` - Execute SQL queries with parameter binding
   - SELECT: Returns result rows
   - INSERT/UPDATE/DELETE: Returns affected row count and RETURNING clause values
   - Supports parameterized queries for SQL injection prevention
@@ -2338,13 +2480,10 @@ Activities:
   - Multiple SQL statements executed atomically
   - Automatic rollback on error
   - RETURNING clause support
-- `sqlite_query` - SQLite query execution (same interface as postgres_query)
-- `redis_get` - Redis GET operation
-- `redis_set` - Redis SET operation
 
 ### LLM Activities
-- `llm_prompt` - LLM completion (OpenAI, Anthropic, Gemini)
-- `llm_embed` - Generate embeddings (future)
+- ✅ `llm_prompt` - LLM completion (OpenAI, Anthropic, Gemini, Ollama)
+- ✅ `embeddings` - Generate LLM embeddings (OpenAI, Gemini, Ollama)
 
 ### External Storage Activities
 **Note**: File management is a cross-cutting framework capability. These activities provide integration with external storage services (not workflow storage).
@@ -2355,19 +2494,19 @@ Activities:
 - `s3_delete` - Delete file from external S3 bucket
 - `gcs_get` / `gcs_put` / `gcs_list` / `gcs_delete` - Google Cloud Storage
 - `azure_blob_get` / `azure_blob_put` / `azure_blob_list` / `azure_blob_delete` - Azure Blob Storage
-- `minio_get` / `minio_put` / `minio_list` / `minio_delete` - MinIO (self-hosted S3-compatible)
 
 ### Scripting Activities
 - `python_script` - Execute Python script with file inputs/outputs
 
 ### Notification Activities (Post-MVP)
-- `slack_send_message`
 - `email_send`
+- `slack_send`
 - `discord_send`
 - `teams_send`
 
 ### Edge/IoT Activities (Post-MVP)
-- `gpio_read` / `gpio_write`
+- `gpio_read` 
+- `gpio_write`
 - `i2c_communicate`
 - `camera_capture`
 - `gps_location`
