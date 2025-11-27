@@ -51,6 +51,7 @@ async fn test_store_and_get_workflow_definition() {
             iteration_scoped: false,
             iteration_limit: None,
             is_loop_activity: false,
+            streaming: Default::default(),
         }],
     };
 
@@ -97,6 +98,7 @@ async fn test_get_latest_workflow_definition() {
             iteration_scoped: false,
             iteration_limit: None,
             is_loop_activity: false,
+            streaming: Default::default(),
         }],
     };
 
@@ -115,6 +117,7 @@ async fn test_get_latest_workflow_definition() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "activity2".to_string(),
@@ -128,6 +131,7 @@ async fn test_get_latest_workflow_definition() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
         ],
     };
@@ -174,6 +178,7 @@ async fn test_list_workflow_definitions() {
             iteration_scoped: false,
             iteration_limit: None,
             is_loop_activity: false,
+            streaming: Default::default(),
         }],
     };
 
@@ -191,6 +196,7 @@ async fn test_list_workflow_definitions() {
             iteration_scoped: false,
             iteration_limit: None,
             is_loop_activity: false,
+            streaming: Default::default(),
         }],
     };
 
@@ -276,6 +282,7 @@ async fn test_workflow_definition_with_dependencies() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "step2".to_string(),
@@ -293,6 +300,7 @@ async fn test_workflow_definition_with_dependencies() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
         ],
     };

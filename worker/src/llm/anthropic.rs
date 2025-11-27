@@ -1,7 +1,9 @@
 use super::provider::*;
 use async_trait::async_trait;
-use futures::stream::Stream;
+use bytes::Bytes;
+use futures::stream::{Stream, StreamExt};
 use reqwest::Client;
+use serde::Deserialize;
 use serde_json::json;
 use std::pin::Pin;
 
@@ -22,6 +24,128 @@ impl AnthropicProvider {
             api_key,
             base_url,
         }
+    }
+}
+
+// SSE event types for Anthropic streaming API
+// Fields are needed for serde deserialization even if not directly read
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+#[allow(dead_code)]
+enum AnthropicEvent {
+    #[serde(rename = "message_start")]
+    MessageStart { message: MessageStartPayload },
+    #[serde(rename = "content_block_start")]
+    ContentBlockStart {
+        index: u32,
+        content_block: ContentBlock,
+    },
+    #[serde(rename = "content_block_delta")]
+    ContentBlockDelta { index: u32, delta: ContentDelta },
+    #[serde(rename = "content_block_stop")]
+    ContentBlockStop { index: u32 },
+    #[serde(rename = "message_delta")]
+    MessageDelta {
+        delta: MessageDeltaPayload,
+        usage: Option<UsagePayload>,
+    },
+    #[serde(rename = "message_stop")]
+    MessageStop,
+    #[serde(rename = "ping")]
+    Ping,
+    #[serde(rename = "error")]
+    Error { error: ErrorPayload },
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct MessageStartPayload {
+    id: String,
+    model: String,
+    usage: Option<UsagePayload>,
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct ContentBlock {
+    #[serde(rename = "type")]
+    block_type: String,
+    text: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ContentDelta {
+    #[serde(rename = "type")]
+    delta_type: String,
+    text: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct MessageDeltaPayload {
+    stop_reason: Option<String>,
+    stop_sequence: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct UsagePayload {
+    #[serde(default)]
+    input_tokens: u32,
+    #[serde(default)]
+    output_tokens: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct ErrorPayload {
+    #[serde(rename = "type")]
+    error_type: String,
+    message: String,
+}
+
+/// Parse a single SSE line (after "data: " prefix) into an AnthropicEvent
+fn parse_sse_data(data: &str) -> Option<AnthropicEvent> {
+    if data.trim().is_empty() || data == "[DONE]" {
+        return None;
+    }
+    serde_json::from_str(data).ok()
+}
+
+/// Parse SSE events from a byte chunk, handling partial lines
+struct SseParser {
+    buffer: String,
+}
+
+impl SseParser {
+    fn new() -> Self {
+        Self {
+            buffer: String::new(),
+        }
+    }
+
+    /// Process incoming bytes and return complete events
+    fn process(&mut self, bytes: &Bytes) -> Vec<AnthropicEvent> {
+        let text = String::from_utf8_lossy(bytes);
+        self.buffer.push_str(&text);
+
+        let mut events = Vec::new();
+
+        // Process complete lines
+        while let Some(pos) = self.buffer.find("\n\n") {
+            let chunk = self.buffer[..pos].to_string();
+            self.buffer = self.buffer[pos + 2..].to_string();
+
+            // Parse SSE format: "event: xxx\ndata: {...}"
+            for line in chunk.lines() {
+                if let Some(data) = line.strip_prefix("data: ") {
+                    if let Some(event) = parse_sse_data(data) {
+                        events.push(event);
+                    }
+                }
+            }
+        }
+
+        events
     }
 }
 
@@ -114,12 +238,141 @@ impl LLMProvider for AnthropicProvider {
 
     async fn prompt_stream(
         &self,
-        _request: &PromptRequest,
+        request: &PromptRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<PromptChunk>> + Send>>> {
-        // Post-MVP: Implement streaming using Server-Sent Events (SSE)
-        Err(LLMError::ProviderError(
-            "Streaming support is post-MVP".to_string(),
-        ))
+        let messages = vec![json!({
+            "role": "user",
+            "content": request.prompt,
+        })];
+
+        let mut body = json!({
+            "model": request.model,
+            "messages": messages,
+            "max_tokens": request.max_tokens.unwrap_or(4096),
+            "stream": true,
+        });
+
+        if let Some(system) = &request.system_prompt {
+            body["system"] = json!(system);
+        }
+
+        if let Some(temp) = request.temperature {
+            body["temperature"] = json!(temp);
+        }
+
+        if let Some(top_p) = request.top_p {
+            body["top_p"] = json!(top_p);
+        }
+
+        if let Some(stops) = &request.stop_sequences {
+            body["stop_sequences"] = json!(stops);
+        }
+
+        let url = format!("{}/v1/messages", self.base_url);
+        let response = self
+            .client
+            .post(&url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(LLMError::ProviderError(error_text));
+        }
+
+        // Create a stream that parses SSE events and yields PromptChunks
+        let byte_stream = response.bytes_stream();
+
+        // State for the stream: byte_stream, parser, pending chunks, finish reason
+        let stream = futures::stream::unfold(
+            (
+                byte_stream,
+                SseParser::new(),
+                Vec::<PromptChunk>::new(),
+                None::<FinishReason>,
+            ),
+            |(mut byte_stream, mut parser, mut pending_chunks, mut finish_reason)| async move {
+                // First, yield any pending chunks
+                if !pending_chunks.is_empty() {
+                    let chunk = pending_chunks.remove(0);
+                    return Some((
+                        Ok(chunk),
+                        (byte_stream, parser, pending_chunks, finish_reason),
+                    ));
+                }
+
+                // Then fetch more data from the stream
+                loop {
+                    match byte_stream.next().await {
+                        Some(Ok(bytes)) => {
+                            let events = parser.process(&bytes);
+                            for event in events {
+                                match event {
+                                    AnthropicEvent::ContentBlockDelta { delta, .. } => {
+                                        if delta.delta_type == "text_delta" {
+                                            if let Some(text) = delta.text {
+                                                pending_chunks.push(PromptChunk {
+                                                    content: text,
+                                                    finish_reason: None,
+                                                });
+                                            }
+                                        }
+                                    }
+                                    AnthropicEvent::MessageDelta { delta, .. } => {
+                                        finish_reason =
+                                            delta.stop_reason.map(|r| match r.as_str() {
+                                                "end_turn" => FinishReason::Stop,
+                                                "max_tokens" => FinishReason::MaxTokens,
+                                                "stop_sequence" => FinishReason::Stop,
+                                                _ => FinishReason::Stop,
+                                            });
+                                    }
+                                    AnthropicEvent::MessageStop => {
+                                        // Add final chunk with finish reason
+                                        pending_chunks.push(PromptChunk {
+                                            content: String::new(),
+                                            finish_reason: finish_reason.take(),
+                                        });
+                                    }
+                                    AnthropicEvent::Error { error } => {
+                                        return Some((
+                                            Err(LLMError::ProviderError(format!(
+                                                "{}: {}",
+                                                error.error_type, error.message
+                                            ))),
+                                            (byte_stream, parser, pending_chunks, finish_reason),
+                                        ));
+                                    }
+                                    _ => {}
+                                }
+                            }
+
+                            // If we have pending chunks, yield the first one
+                            if !pending_chunks.is_empty() {
+                                let chunk = pending_chunks.remove(0);
+                                return Some((
+                                    Ok(chunk),
+                                    (byte_stream, parser, pending_chunks, finish_reason),
+                                ));
+                            }
+                        }
+                        Some(Err(e)) => {
+                            return Some((
+                                Err(LLMError::RequestError(e)),
+                                (byte_stream, parser, pending_chunks, finish_reason),
+                            ));
+                        }
+                        None => return None, // Stream ended
+                    }
+                }
+            },
+        );
+
+        Ok(Box::pin(stream))
     }
 
     async fn embed(&self, _request: &EmbeddingRequest) -> Result<EmbeddingResponse> {
@@ -331,11 +584,99 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_streaming_not_supported() {
-        let provider = AnthropicProvider::new("test-key".to_string());
+    async fn test_streaming_success() {
+        let mock_server = MockServer::start().await;
+
+        // SSE response body simulating Anthropic streaming
+        let sse_body = r#"event: message_start
+data: {"type":"message_start","message":{"id":"msg_123","type":"message","role":"assistant","content":[],"model":"claude-3-sonnet-20240229","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":0}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"!"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":2}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+"#;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .and(header("x-api-key", "test-key"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(sse_body)
+                    .insert_header("content-type", "text/event-stream"),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let provider = AnthropicProvider::with_base_url("test-key".to_string(), mock_server.uri());
+
         let request = PromptRequest {
-            model: "claude-3-sonnet".to_string(),
-            prompt: "test".to_string(),
+            model: "claude-3-sonnet-20240229".to_string(),
+            prompt: "Say hello".to_string(),
+            system_prompt: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            stop_sequences: None,
+        };
+
+        let stream = provider.prompt_stream(&request).await.unwrap();
+
+        // Collect all chunks from the stream
+        let chunks: Vec<_> = stream.collect().await;
+
+        // Should have received text chunks: "Hello", "!", and final empty chunk with finish reason
+        assert!(
+            chunks.len() >= 2,
+            "Expected at least 2 chunks, got {}",
+            chunks.len()
+        );
+
+        // First chunk should be "Hello"
+        let first = chunks[0].as_ref().unwrap();
+        assert_eq!(first.content, "Hello");
+        assert!(first.finish_reason.is_none());
+
+        // Second chunk should be "!"
+        let second = chunks[1].as_ref().unwrap();
+        assert_eq!(second.content, "!");
+        assert!(second.finish_reason.is_none());
+
+        // Last chunk should have finish reason
+        let last = chunks.last().unwrap().as_ref().unwrap();
+        assert!(matches!(last.finish_reason, Some(FinishReason::Stop)));
+    }
+
+    #[tokio::test]
+    async fn test_streaming_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/messages"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("Invalid API key"))
+            .mount(&mock_server)
+            .await;
+
+        let provider =
+            AnthropicProvider::with_base_url("invalid-key".to_string(), mock_server.uri());
+
+        let request = PromptRequest {
+            model: "claude-3-sonnet-20240229".to_string(),
+            prompt: "Hello".to_string(),
             system_prompt: None,
             max_tokens: None,
             temperature: None,
@@ -345,8 +686,5 @@ mod tests {
 
         let result = provider.prompt_stream(&request).await;
         assert!(result.is_err());
-        if let Err(e) = result {
-            assert!(e.to_string().contains("Streaming support is post-MVP"));
-        }
     }
 }

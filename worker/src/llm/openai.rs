@@ -1,7 +1,9 @@
 use super::provider::*;
 use async_trait::async_trait;
-use futures::stream::Stream;
+use bytes::Bytes;
+use futures::stream::{Stream, StreamExt};
 use reqwest::Client;
+use serde::Deserialize;
 use serde_json::json;
 use std::pin::Pin;
 
@@ -22,6 +24,94 @@ impl OpenAIProvider {
             api_key,
             base_url,
         }
+    }
+}
+
+// SSE event types for OpenAI streaming API
+#[derive(Debug, Deserialize)]
+struct OpenAIStreamChunk {
+    #[allow(dead_code)]
+    id: String,
+    #[allow(dead_code)]
+    object: String,
+    #[allow(dead_code)]
+    created: u64,
+    #[allow(dead_code)]
+    model: String,
+    choices: Vec<StreamChoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamChoice {
+    #[allow(dead_code)]
+    index: u32,
+    delta: StreamDelta,
+    finish_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamDelta {
+    #[allow(dead_code)]
+    role: Option<String>,
+    content: Option<String>,
+}
+
+/// Parse a single SSE line (after "data: " prefix) into an OpenAIStreamChunk
+fn parse_sse_data(data: &str) -> Option<OpenAIStreamChunk> {
+    let trimmed = data.trim();
+    if trimmed.is_empty() || trimmed == "[DONE]" {
+        return None;
+    }
+    serde_json::from_str(trimmed).ok()
+}
+
+/// Parse SSE events from a byte chunk, handling partial lines
+struct SseParser {
+    buffer: String,
+}
+
+impl SseParser {
+    fn new() -> Self {
+        Self {
+            buffer: String::new(),
+        }
+    }
+
+    /// Process incoming bytes and return complete events
+    fn process(&mut self, bytes: &Bytes) -> Vec<OpenAIStreamChunk> {
+        let text = String::from_utf8_lossy(bytes);
+        self.buffer.push_str(&text);
+
+        let mut events = Vec::new();
+
+        // Process complete lines (OpenAI uses single newlines between data lines)
+        while let Some(pos) = self.buffer.find("\n\n") {
+            let chunk = self.buffer[..pos].to_string();
+            self.buffer = self.buffer[pos + 2..].to_string();
+
+            // Parse SSE format: "data: {...}"
+            for line in chunk.lines() {
+                if let Some(data) = line.strip_prefix("data: ") {
+                    if let Some(event) = parse_sse_data(data) {
+                        events.push(event);
+                    }
+                }
+            }
+        }
+
+        // Also check for single-newline separated lines (OpenAI sometimes does this)
+        while let Some(pos) = self.buffer.find('\n') {
+            let line = self.buffer[..pos].to_string();
+            self.buffer = self.buffer[pos + 1..].to_string();
+
+            if let Some(data) = line.strip_prefix("data: ") {
+                if let Some(event) = parse_sse_data(data) {
+                    events.push(event);
+                }
+            }
+        }
+
+        events
     }
 }
 
@@ -125,12 +215,139 @@ impl LLMProvider for OpenAIProvider {
 
     async fn prompt_stream(
         &self,
-        _request: &PromptRequest,
+        request: &PromptRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<PromptChunk>> + Send>>> {
-        // Post-MVP: Implement streaming using Server-Sent Events (SSE)
-        Err(LLMError::ProviderError(
-            "Streaming support is post-MVP".to_string(),
-        ))
+        let mut messages = vec![];
+
+        // Add system prompt if provided
+        if let Some(system) = &request.system_prompt {
+            messages.push(json!({
+                "role": "system",
+                "content": system,
+            }));
+        }
+
+        // Add user prompt
+        messages.push(json!({
+            "role": "user",
+            "content": request.prompt,
+        }));
+
+        let mut body = json!({
+            "model": request.model,
+            "messages": messages,
+            "stream": true,
+        });
+
+        if let Some(max_tokens) = request.max_tokens {
+            body["max_tokens"] = json!(max_tokens);
+        }
+
+        if let Some(temp) = request.temperature {
+            body["temperature"] = json!(temp);
+        }
+
+        if let Some(top_p) = request.top_p {
+            body["top_p"] = json!(top_p);
+        }
+
+        if let Some(stops) = &request.stop_sequences {
+            body["stop"] = json!(stops);
+        }
+
+        let url = format!("{}/v1/chat/completions", self.base_url);
+        let response = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(LLMError::ProviderError(error_text));
+        }
+
+        // Create a stream that parses SSE events and yields PromptChunks
+        let byte_stream = response.bytes_stream();
+
+        // State for the stream: byte_stream, parser, pending chunks, finish reason
+        let stream = futures::stream::unfold(
+            (
+                byte_stream,
+                SseParser::new(),
+                Vec::<PromptChunk>::new(),
+                None::<FinishReason>,
+            ),
+            |(mut byte_stream, mut parser, mut pending_chunks, mut finish_reason)| async move {
+                // First, yield any pending chunks
+                if !pending_chunks.is_empty() {
+                    let chunk = pending_chunks.remove(0);
+                    return Some((
+                        Ok(chunk),
+                        (byte_stream, parser, pending_chunks, finish_reason),
+                    ));
+                }
+
+                // Then fetch more data from the stream
+                loop {
+                    match byte_stream.next().await {
+                        Some(Ok(bytes)) => {
+                            let events = parser.process(&bytes);
+                            for event in events {
+                                if let Some(choice) = event.choices.first() {
+                                    // Check for content delta
+                                    if let Some(content) = &choice.delta.content {
+                                        if !content.is_empty() {
+                                            pending_chunks.push(PromptChunk {
+                                                content: content.clone(),
+                                                finish_reason: None,
+                                            });
+                                        }
+                                    }
+
+                                    // Check for finish reason
+                                    if let Some(reason) = &choice.finish_reason {
+                                        finish_reason = Some(match reason.as_str() {
+                                            "stop" => FinishReason::Stop,
+                                            "length" => FinishReason::MaxTokens,
+                                            "content_filter" => FinishReason::ContentFilter,
+                                            _ => FinishReason::Stop,
+                                        });
+
+                                        // Add final chunk with finish reason
+                                        pending_chunks.push(PromptChunk {
+                                            content: String::new(),
+                                            finish_reason: finish_reason.take(),
+                                        });
+                                    }
+                                }
+                            }
+
+                            // If we have pending chunks, yield the first one
+                            if !pending_chunks.is_empty() {
+                                let chunk = pending_chunks.remove(0);
+                                return Some((
+                                    Ok(chunk),
+                                    (byte_stream, parser, pending_chunks, finish_reason),
+                                ));
+                            }
+                        }
+                        Some(Err(e)) => {
+                            return Some((
+                                Err(LLMError::RequestError(e)),
+                                (byte_stream, parser, pending_chunks, finish_reason),
+                            ));
+                        }
+                        None => return None, // Stream ended
+                    }
+                }
+            },
+        );
+
+        Ok(Box::pin(stream))
     }
 
     async fn embed(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse> {
@@ -465,11 +682,87 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_streaming_not_supported() {
-        let provider = OpenAIProvider::new("test-key".to_string());
+    async fn test_streaming_success() {
+        let mock_server = MockServer::start().await;
+
+        // SSE response body simulating OpenAI streaming
+        let sse_body = r#"data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"gpt-4","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"gpt-4","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"gpt-4","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1677652288,"model":"gpt-4","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+
+"#;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .and(header("Authorization", "Bearer test-key"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(sse_body)
+                    .insert_header("content-type", "text/event-stream"),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let provider = OpenAIProvider::with_base_url("test-key".to_string(), mock_server.uri());
+
         let request = PromptRequest {
             model: "gpt-4".to_string(),
-            prompt: "test".to_string(),
+            prompt: "Say hello".to_string(),
+            system_prompt: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            stop_sequences: None,
+        };
+
+        let stream = provider.prompt_stream(&request).await.unwrap();
+
+        // Collect all chunks from the stream
+        let chunks: Vec<_> = stream.collect().await;
+
+        // Should have received text chunks: "Hello", "!", and final empty chunk with finish reason
+        assert!(
+            chunks.len() >= 2,
+            "Expected at least 2 chunks, got {}",
+            chunks.len()
+        );
+
+        // First chunk should be "Hello"
+        let first = chunks[0].as_ref().unwrap();
+        assert_eq!(first.content, "Hello");
+        assert!(first.finish_reason.is_none());
+
+        // Second chunk should be "!"
+        let second = chunks[1].as_ref().unwrap();
+        assert_eq!(second.content, "!");
+        assert!(second.finish_reason.is_none());
+
+        // Last chunk should have finish reason
+        let last = chunks.last().unwrap().as_ref().unwrap();
+        assert!(matches!(last.finish_reason, Some(FinishReason::Stop)));
+    }
+
+    #[tokio::test]
+    async fn test_streaming_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/v1/chat/completions"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("Invalid API key"))
+            .mount(&mock_server)
+            .await;
+
+        let provider = OpenAIProvider::with_base_url("invalid-key".to_string(), mock_server.uri());
+
+        let request = PromptRequest {
+            model: "gpt-4".to_string(),
+            prompt: "Hello".to_string(),
             system_prompt: None,
             max_tokens: None,
             temperature: None,
@@ -479,8 +772,5 @@ mod tests {
 
         let result = provider.prompt_stream(&request).await;
         assert!(result.is_err());
-        if let Err(e) = result {
-            assert!(e.to_string().contains("Streaming support is post-MVP"));
-        }
     }
 }

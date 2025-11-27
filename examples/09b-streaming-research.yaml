@@ -1,0 +1,103 @@
+name: streaming_research_workflow
+description: Research assistant with streaming analysis output
+
+# This workflow demonstrates:
+# - Selective streaming: only the final analysis streams tokens
+# - Non-streaming activities for data collection
+# - Multi-step workflow with streaming final output
+# - Cost tracking across the entire workflow
+
+# Use Case:
+# A research workflow that:
+# 1. Collects information from multiple sources (non-streaming)
+# 2. Analyzes and synthesizes findings (streaming for real-time feedback)
+#
+# The final analysis step streams tokens so the user sees results
+# as they're generated, providing a responsive experience.
+
+# Prerequisites:
+# - ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable
+# - API server running for WebSocket connections
+
+# Workflow Architecture:
+#
+#   gather_sources ──┬──► analyze_findings (STREAMING)
+#   summarize_topic ─┘
+#
+# Only the analysis step streams - the preparation steps run quickly
+# in non-streaming mode for efficiency.
+
+activities:
+  # Step 1: Generate a topic summary (non-streaming for speed)
+  - key: summarize_topic
+    worker: builtin
+    activity_name: llm_prompt
+    streaming: false  # Explicit: non-streaming for efficiency
+    parameters:
+      model: anthropic/claude-3-5-haiku-20241022
+      prompt: |
+        Provide a brief 2-3 sentence overview of the topic: {{INPUT.topic}}
+        Focus on the key aspects that would be relevant for a research report.
+      max_tokens: 200
+    outputs:
+      - result
+    settings:
+      timeout_seconds: 30
+
+  # Step 2: Generate research questions (non-streaming)
+  - key: gather_sources
+    worker: builtin
+    activity_name: llm_prompt
+    streaming: false
+    parameters:
+      model: anthropic/claude-3-5-haiku-20241022
+      prompt: |
+        Based on the topic "{{INPUT.topic}}", generate 3 key research questions
+        that would help provide a comprehensive analysis.
+        Format as a numbered list.
+      max_tokens: 300
+    outputs:
+      - result
+    settings:
+      timeout_seconds: 30
+
+  # Step 3: Comprehensive analysis (STREAMING for real-time output)
+  - key: analyze_findings
+    worker: builtin
+    activity_name: llm_prompt
+    streaming: true  # Enable streaming for this long-form output
+    parameters:
+      model:
+        - anthropic/claude-3-5-sonnet-20241022  # Higher quality for analysis
+        - anthropic/claude-3-5-haiku-20241022   # Fallback
+      prompt: |
+        Write a comprehensive research analysis on: {{INPUT.topic}}
+
+        Context:
+        {{summarize_topic.result.content}}
+
+        Key questions to address:
+        {{gather_sources.result.content}}
+
+        Structure your analysis with:
+        1. Introduction
+        2. Key findings for each research question
+        3. Synthesis and conclusions
+        4. Areas for further research
+
+        Aim for approximately 500 words.
+      system_prompt: |
+        You are a research analyst providing thorough, well-structured analysis.
+        Use clear headings and provide evidence-based insights.
+      max_tokens: 1500
+      temperature: 0.7
+    outputs:
+      - result
+    depends_on:
+      - summarize_topic
+      - gather_sources
+    settings:
+      timeout_seconds: 180
+      budget:
+        limit_usd: 0.10
+        action: warn

@@ -5,6 +5,10 @@ use crate::handlers::llm_catalog::{
     ModelResponse, ModelSearchCriterion, ModelSearchRequest, ModelSearchResponse, ProviderResponse,
 };
 use crate::handlers::oauth::{GrantType, TokenRequest, TokenResponse};
+use crate::handlers::streaming::{
+    PublishResponse, StreamCompletePayload, StreamErrorPayload, StreamTokenPayload,
+    SubscriberCountResponse,
+};
 use crate::handlers::workers::{
     ActivityError, ActivityHeartbeatRequest, ActivityHeartbeatResponse, CompleteActivityRequest,
     CompleteActivityResponse, FailActivityRequest, FailActivityResponse, PendingActivity,
@@ -78,6 +82,13 @@ use utoipa::OpenApi;
         // Cache Invalidation APIs
         crate::handlers::cache::invalidate_cache_key,
         crate::handlers::cache::invalidate_cache_pattern,
+
+        // Streaming APIs
+        crate::handlers::streaming::publish_stream_token,
+        crate::handlers::streaming::publish_stream_complete,
+        crate::handlers::streaming::publish_stream_error,
+        crate::handlers::streaming::get_subscriber_count,
+        crate::handlers::websocket::activity_stream_handler,
     ),
     components(
         schemas(
@@ -134,6 +145,13 @@ use utoipa::OpenApi;
             InvalidatePatternRequest,
             InvalidateResponse,
 
+            // Streaming schemas
+            StreamTokenPayload,
+            StreamCompletePayload,
+            StreamErrorPayload,
+            PublishResponse,
+            SubscriberCountResponse,
+
             // Error response schemas
             ApiErrorResponse,
             ApiError,
@@ -147,6 +165,7 @@ use utoipa::OpenApi;
         (name = "Workflow Definitions", description = "Workflow definition deployment and management"),
         (name = "Workflows", description = "Workflow submission, query, and management"),
         (name = "Workers", description = "Worker activity polling and execution"),
+        (name = "Streaming", description = "Real-time token streaming for LLM activities via WebSocket"),
         (name = "Cost Tracking", description = "LLM and activity cost tracking, budget enforcement, and analytics"),
         (name = "LLM Catalog", description = "LLM provider and model discovery with pricing information"),
         (name = "Cache", description = "Cache invalidation and management"),

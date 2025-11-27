@@ -120,6 +120,23 @@ pub fn protected_routes() -> Router<AppState> {
             "/api/v1/activities/:activity_id/fail",
             post(handlers::fail_activity),
         )
+        // Streaming APIs (for workers to publish tokens)
+        .route(
+            "/api/v1/activities/:activity_id/stream/token",
+            post(handlers::publish_stream_token),
+        )
+        .route(
+            "/api/v1/activities/:activity_id/stream/complete",
+            post(handlers::publish_stream_complete),
+        )
+        .route(
+            "/api/v1/activities/:activity_id/stream/error",
+            post(handlers::publish_stream_error),
+        )
+        .route(
+            "/api/v1/activities/:activity_id/stream/subscribers",
+            get(handlers::get_subscriber_count),
+        )
 }
 
 /// Create the complete application router

@@ -4,8 +4,10 @@ use crate::llm::{
     OpenAIProvider, PromptRequest,
 };
 use crate::registry::ActivityImpl;
+use crate::streaming::{StreamSender, StreamingActivity};
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
+use futures::StreamExt;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -13,6 +15,7 @@ use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
 use streamflow_core::cost::{CostCalculator, ModelPricing};
+use uuid::Uuid;
 
 // ============================================================================
 // Provider Configuration
@@ -220,6 +223,175 @@ impl FallbackChain {
 
         Err(anyhow!(
             "All providers failed. Last error: {}",
+            last_error
+                .map(|e| e.to_string())
+                .unwrap_or_else(|| "No providers configured".to_string())
+        ))
+    }
+
+    /// Execute a prompt request with streaming and fallback.
+    ///
+    /// Streams tokens to the provided sender while accumulating the full response.
+    /// Returns the complete response after streaming finishes.
+    pub async fn prompt_stream(
+        &self,
+        base_request: &PromptRequest,
+        budget_params: Option<&BudgetParams>,
+        sender: &dyn StreamSender,
+    ) -> Result<PromptResponse> {
+        let config = ProviderConfig::from_env();
+        let mut last_error = None;
+        let mut cumulative_cost = budget_params
+            .map(|bp| bp.cumulative_cost_usd)
+            .unwrap_or(Decimal::ZERO);
+        let mut calculated_cost: Option<Decimal> = None;
+
+        for (provider_name, model_name) in &self.provider_models {
+            // Budget check before attempting this provider (same as non-streaming)
+            if let Some(budget) = budget_params {
+                let model_key = format!("{}/{}", provider_name, model_name);
+
+                if let Some(pricing) = budget.model_pricing.get(&model_key) {
+                    let mut input_text = base_request.prompt.clone();
+                    if let Some(system) = &base_request.system_prompt {
+                        input_text.push_str(system);
+                    }
+                    let estimated_input_tokens =
+                        CostCalculator::estimate_tokens(provider_name, &input_text);
+                    let estimated_output_tokens = base_request.max_tokens.unwrap_or(4096);
+
+                    let input_cost = Decimal::from(estimated_input_tokens)
+                        * pricing.input_price_per_million
+                        / Decimal::from(1_000_000);
+                    let output_cost = Decimal::from(estimated_output_tokens)
+                        * pricing.output_price_per_million
+                        / Decimal::from(1_000_000);
+                    let estimated_cost = input_cost + output_cost;
+
+                    if cumulative_cost + estimated_cost > budget.budget_limit_usd {
+                        tracing::warn!(
+                            "Skipping {}/{}: estimated cost ${:.6} would exceed budget",
+                            provider_name,
+                            model_name,
+                            estimated_cost
+                        );
+                        continue;
+                    }
+                }
+            }
+
+            match config.create_provider(provider_name) {
+                Ok(provider) => {
+                    let request = PromptRequest {
+                        model: model_name.clone(),
+                        prompt: base_request.prompt.clone(),
+                        system_prompt: base_request.system_prompt.clone(),
+                        max_tokens: base_request.max_tokens,
+                        temperature: base_request.temperature,
+                        top_p: base_request.top_p,
+                        stop_sequences: base_request.stop_sequences.clone(),
+                    };
+
+                    // Use streaming API
+                    match provider.prompt_stream(&request).await {
+                        Ok(mut stream) => {
+                            let mut full_content = String::new();
+                            let mut token_index = 0u32;
+                            let mut finish_reason = crate::llm::FinishReason::Stop;
+
+                            // Stream tokens
+                            while let Some(chunk_result) = stream.next().await {
+                                match chunk_result {
+                                    Ok(chunk) => {
+                                        if !chunk.content.is_empty() {
+                                            full_content.push_str(&chunk.content);
+
+                                            // Send token to subscribers
+                                            if let Err(e) =
+                                                sender.send_token(&chunk.content, token_index).await
+                                            {
+                                                tracing::warn!("Failed to send token: {}", e);
+                                            }
+                                            token_index += 1;
+                                        }
+
+                                        if let Some(reason) = chunk.finish_reason {
+                                            finish_reason = reason;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        last_error = Some(e);
+                                        break;
+                                    }
+                                }
+                            }
+
+                            // If we got content, we succeeded
+                            if !full_content.is_empty() || last_error.is_none() {
+                                // Estimate cost (streaming doesn't always provide usage)
+                                if let Some(budget) = budget_params {
+                                    let model_key = format!("{}/{}", provider_name, model_name);
+                                    if let Some(pricing) = budget.model_pricing.get(&model_key) {
+                                        // Estimate based on content length
+                                        let estimated_output_tokens =
+                                            CostCalculator::estimate_tokens(
+                                                provider_name,
+                                                &full_content,
+                                            );
+                                        let input_cost =
+                                            Decimal::from(CostCalculator::estimate_tokens(
+                                                provider_name,
+                                                &base_request.prompt,
+                                            )) * pricing.input_price_per_million
+                                                / Decimal::from(1_000_000);
+                                        let output_cost = Decimal::from(estimated_output_tokens)
+                                            * pricing.output_price_per_million
+                                            / Decimal::from(1_000_000);
+                                        let actual_cost = input_cost + output_cost;
+                                        calculated_cost = Some(actual_cost);
+                                        cumulative_cost += actual_cost;
+                                    }
+                                }
+
+                                return Ok(PromptResponse {
+                                    content: full_content,
+                                    model: model_name.clone(),
+                                    provider: provider_name.clone(),
+                                    usage: crate::llm::TokenUsage {
+                                        prompt_tokens: 0, // Not available in streaming
+                                        output_tokens: 0,
+                                        total_tokens: 0,
+                                        cached_tokens: None,
+                                    },
+                                    finish_reason,
+                                    cost_usd: calculated_cost,
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Provider {}/{} streaming failed: {}. Trying next provider...",
+                                provider_name,
+                                model_name,
+                                e
+                            );
+                            last_error = Some(e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to create provider {}: {}. Trying next provider...",
+                        provider_name,
+                        e
+                    );
+                    last_error = Some(LLMError::ProviderError(e.to_string()));
+                }
+            }
+        }
+
+        Err(anyhow!(
+            "All providers failed for streaming. Last error: {}",
             last_error
                 .map(|e| e.to_string())
                 .unwrap_or_else(|| "No providers configured".to_string())
@@ -492,6 +664,105 @@ impl ActivityImpl for LLMPromptActivity {
 
     fn worker(&self) -> &str {
         "builtin"
+    }
+}
+
+#[async_trait]
+impl StreamingActivity for LLMPromptActivity {
+    async fn execute_streaming(
+        &self,
+        activity_id: Uuid,
+        parameters: Value,
+        sender: Box<dyn StreamSender>,
+    ) -> Result<ActivityResult> {
+        let params: LLMPromptParams =
+            serde_json::from_value(parameters).context("Failed to parse LLM prompt parameters")?;
+
+        // Convert model spec to fallback chain
+        let fallback_chain = params.model.to_fallback_chain()?;
+
+        // Construct budget parameters if provided by orchestrator
+        let budget_params = if let Some(model_pricing) = params.model_pricing {
+            let budget_limit = match (
+                params.activity_budget_limit_usd,
+                params.workflow_budget_limit_usd,
+            ) {
+                (Some(activity_limit), Some(workflow_limit)) => {
+                    if activity_limit < workflow_limit {
+                        Some(activity_limit)
+                    } else {
+                        Some(workflow_limit)
+                    }
+                }
+                (Some(activity_limit), None) => Some(activity_limit),
+                (None, Some(workflow_limit)) => Some(workflow_limit),
+                (None, None) => None,
+            };
+
+            budget_limit.map(|limit| BudgetParams {
+                model_pricing,
+                budget_limit_usd: limit,
+                cumulative_cost_usd: params.cumulative_activity_cost_usd.unwrap_or(Decimal::ZERO),
+            })
+        } else {
+            None
+        };
+
+        // Create base request
+        let base_request = PromptRequest {
+            model: String::new(),
+            prompt: params.prompt,
+            system_prompt: params.system_prompt,
+            max_tokens: params.max_tokens,
+            temperature: params.temperature,
+            top_p: params.top_p,
+            stop_sequences: params.stop_sequences,
+        };
+
+        // Use streaming execution
+        let response = fallback_chain
+            .prompt_stream(&base_request, budget_params.as_ref(), sender.as_ref())
+            .await?;
+
+        // Send completion message
+        let result_value = json!({
+            "content": response.content,
+            "model": response.model,
+            "provider": response.provider,
+            "finish_reason": response.finish_reason,
+            "cost_usd": response.cost_usd,
+            "usage": {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "output_tokens": response.usage.output_tokens,
+                "total_tokens": response.usage.total_tokens,
+                "cached_tokens": response.usage.cached_tokens,
+            }
+        });
+
+        if let Err(e) = sender
+            .send_complete(activity_id, result_value.clone())
+            .await
+        {
+            tracing::warn!(
+                activity_id = %activity_id,
+                "Failed to send completion message: {}",
+                e
+            );
+        }
+
+        if let Err(e) = sender.close().await {
+            tracing::warn!(
+                activity_id = %activity_id,
+                "Failed to close stream sender: {}",
+                e
+            );
+        }
+
+        Ok(ActivityResult::value("result", result_value))
+    }
+
+    fn supports_streaming(&self) -> bool {
+        true
     }
 }
 
