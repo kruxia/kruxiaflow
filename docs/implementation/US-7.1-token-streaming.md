@@ -4,7 +4,7 @@
 **User Story**: US-7.1
 **Status**: 📋 Next Priority (Pre-Launch, depends on US-1A.9a)
 **Priority**: MVP Critical - Core AI-Native Differentiator
-**Estimated Duration**: ~20-30 hours (3-4 days)
+**Estimated Duration**: ~22-32 hours (3-4 days)
 **Dependencies**: US-1A.9a (WebSocket Infrastructure) must be complete first
 
 ---
@@ -18,11 +18,12 @@
 ### Acceptance Criteria
 
 - ✅ LLM providers support streaming (Anthropic SSE, OpenAI SSE, Google SSE)
-- ✅ Activity-level streaming events published to WebSocket subscribers
+- ✅ Activity-level streaming via `streaming: true` in activity definition (opt-in)
 - ✅ Token-by-token delivery: `{type: "token", text: "hello", index: 0}`
 - ✅ <10ms P95 token latency (achievable with async streaming)
 - ✅ Support 1,000 concurrent streaming connections
-- ✅ Graceful fallback: Non-streaming activities complete normally
+- ✅ Two-level opt-in: activity config + WebSocket subscriber presence
+- ✅ Graceful fallback: Non-streaming activities complete normally (no overhead)
 - ✅ Integration with Example 6 (agentic research) for demonstration
 - ✅ Client library examples for JavaScript/Python
 
@@ -105,7 +106,232 @@ sequenceDiagram
 
 ---
 
+## Streaming Configuration Design
+
+### Design Principles
+
+Streaming configuration is a **top-level property** on ActivityDefinition, separate from both `parameters` and `settings`:
+
+| Location     | Contains                          | Character     |
+|--------------|-----------------------------------|---------------|
+| `parameters` | Type-specific inputs              | Functional    |
+| `settings`   | Universal execution behavior      | Operational   |
+| `streaming`  | Type-specific progress reporting  | Observability |
+
+**Rationale**:
+- Streaming doesn't change *what* the activity computes (not `parameters`)
+- Streaming isn't universal to all activity types like retry/timeout (not `settings`)
+- Streaming is about observability/UX - how progress is reported to observers
+- Different activity types have different streaming semantics (tokens vs rows vs chunks)
+
+### Future Extensibility
+
+While MVP focuses on LLM token streaming, the design accommodates future streaming use cases:
+
+| Activity Type   | Streaming Unit | Type-Specific Options (Post-MVP)  |
+|-----------------|----------------|-----------------------------------|
+| LLM             | tokens         | `include_usage_events: bool`      |
+| PostgreSQL      | rows           | `batch_size: 100`                 |
+| HTTP (SSE)      | events         | `buffer_size: 1024`               |
+| File processing | lines/records  | `chunk_size: 1000`                |
+
+### Activity Definition Schema
+
+```yaml
+activities:
+  generate_summary:
+    type: llm
+    streaming: true              # Shorthand for { enabled: true }
+    settings:
+      timeout: 60s
+    parameters:
+      model: claude-3-5-sonnet
+      prompt: "Summarize this document..."
+
+  # Expanded form (for future type-specific options)
+  generate_report:
+    type: llm
+    streaming:
+      enabled: true
+      # Future LLM-specific options here
+    parameters:
+      model: claude-3-5-sonnet
+      prompt: "Generate a detailed report..."
+
+  # Non-streaming activity (default)
+  fetch_data:
+    type: http
+    # streaming: false (default, can be omitted)
+    parameters:
+      url: "https://api.example.com/data"
+```
+
+### Rust Types
+
+**File**: `shared/src/types/workflow.rs` (update)
+
+```rust
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActivityDefinition {
+    #[serde(rename = "type")]
+    pub activity_type: String,
+
+    /// Streaming configuration (optional, defaults to disabled)
+    #[serde(default)]
+    pub streaming: StreamingConfig,
+
+    /// Execution settings (retry, timeout, etc.)
+    #[serde(default)]
+    pub settings: ActivitySettings,
+
+    /// Activity-specific parameters
+    pub parameters: serde_json::Value,
+
+    // ... other fields (depends_on, etc.)
+}
+
+/// Streaming configuration supporting both shorthand and detailed forms.
+///
+/// Shorthand: `streaming: true` or `streaming: false`
+/// Detailed:  `streaming: { enabled: true, ... }`
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum StreamingConfig {
+    /// Streaming disabled (default)
+    #[default]
+    Disabled,
+    /// Shorthand form: `streaming: true/false`
+    Simple(bool),
+    /// Detailed form with options: `streaming: { enabled: true, ... }`
+    Detailed(StreamingOptions),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamingOptions {
+    /// Whether streaming is enabled for this activity
+    pub enabled: bool,
+
+    /// Type-specific streaming options (validated at execution time)
+    /// Post-MVP: LLM might have `include_usage_events`, PostgreSQL might have `batch_size`
+    #[serde(flatten)]
+    pub options: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+impl StreamingConfig {
+    /// Check if streaming is enabled for this activity
+    pub fn is_enabled(&self) -> bool {
+        match self {
+            StreamingConfig::Disabled => false,
+            StreamingConfig::Simple(enabled) => *enabled,
+            StreamingConfig::Detailed(opts) => opts.enabled,
+        }
+    }
+
+    /// Get type-specific options (if any)
+    pub fn options(&self) -> Option<&serde_json::Map<String, serde_json::Value>> {
+        match self {
+            StreamingConfig::Detailed(opts) => opts.options.as_ref(),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod streaming_config_tests {
+    use super::*;
+
+    #[test]
+    fn test_streaming_disabled_by_default() {
+        let yaml = r#"
+            type: llm
+            parameters:
+              model: claude-3-5-sonnet
+        "#;
+        let def: ActivityDefinition = serde_yaml::from_str(yaml).unwrap();
+        assert!(!def.streaming.is_enabled());
+    }
+
+    #[test]
+    fn test_streaming_shorthand_true() {
+        let yaml = r#"
+            type: llm
+            streaming: true
+            parameters:
+              model: claude-3-5-sonnet
+        "#;
+        let def: ActivityDefinition = serde_yaml::from_str(yaml).unwrap();
+        assert!(def.streaming.is_enabled());
+    }
+
+    #[test]
+    fn test_streaming_shorthand_false() {
+        let yaml = r#"
+            type: llm
+            streaming: false
+            parameters:
+              model: claude-3-5-sonnet
+        "#;
+        let def: ActivityDefinition = serde_yaml::from_str(yaml).unwrap();
+        assert!(!def.streaming.is_enabled());
+    }
+
+    #[test]
+    fn test_streaming_detailed_form() {
+        let yaml = r#"
+            type: llm
+            streaming:
+              enabled: true
+            parameters:
+              model: claude-3-5-sonnet
+        "#;
+        let def: ActivityDefinition = serde_yaml::from_str(yaml).unwrap();
+        assert!(def.streaming.is_enabled());
+    }
+}
+```
+
+### Two-Level Opt-In
+
+Streaming requires **both** conditions to be true:
+
+1. **Activity-level opt-in**: `streaming: true` in workflow definition
+2. **Runtime opt-in**: At least one WebSocket subscriber connected
+
+This design ensures:
+- Activities that don't need streaming never incur any overhead
+- Even streaming-enabled activities fall back to efficient non-streaming when no one is listening
+- Clear intent in workflow definitions
+- Future extensibility for type-specific streaming options
+
+---
+
 ## Implementation Tasks
+
+### Task 0: StreamingConfig Types (1-2 hours)
+
+**File**: `shared/src/types/workflow.rs` (update)
+
+Add `StreamingConfig` types to ActivityDefinition as documented in the "Streaming Configuration Design" section above.
+
+**Key Implementation Points**:
+
+1. Add `streaming` field to `ActivityDefinition` struct
+2. Implement `StreamingConfig` enum with `#[serde(untagged)]` for shorthand/detailed form support
+3. Implement `StreamingOptions` struct with `#[serde(flatten)]` for future extensibility
+4. Add `is_enabled()` and `options()` helper methods
+5. Add unit tests for YAML/JSON parsing of all forms
+
+**Acceptance Criteria**:
+- ✅ `streaming: true` shorthand parses correctly
+- ✅ `streaming: false` shorthand parses correctly
+- ✅ `streaming: { enabled: true }` detailed form parses correctly
+- ✅ Missing `streaming` field defaults to disabled
+- ✅ `is_enabled()` returns correct value for all forms
+- ✅ Unit tests cover all parsing scenarios
+
+---
 
 ### Task 1: Anthropic Streaming Integration (3-4 hours)
 
@@ -493,25 +719,30 @@ impl GoogleProvider {
 
 **File**: `worker/src/activities/llm.rs` (update)
 
-Integrate streaming into activity execution:
+Integrate streaming into activity execution with two-level opt-in:
 
 ```rust
 use crate::websocket::ConnectionManager;
+use shared::types::workflow::StreamingConfig;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-pub async fn execute_llm_activity_with_streaming(
+pub async fn execute_llm_activity(
     activity_id: Uuid,
     workflow_id: Uuid,
     parameters: &LLMActivityParameters,
+    streaming_config: &StreamingConfig,
     connection_manager: Arc<ConnectionManager>,
     api_url: &str,
 ) -> Result<ActivityResult, ActivityError> {
-    // Check if there are any WebSocket subscribers
-    let has_subscribers = connection_manager.connection_count(activity_id).await > 0;
+    // Two-level opt-in check:
+    // 1. Activity-level: streaming must be enabled in workflow definition
+    // 2. Runtime-level: at least one WebSocket subscriber must be connected
+    let should_stream = streaming_config.is_enabled()
+        && connection_manager.connection_count(activity_id).await > 0;
 
-    if !has_subscribers {
-        // No subscribers - execute without streaming (more efficient)
+    if !should_stream {
+        // Either streaming not enabled or no subscribers - use efficient non-streaming path
         return execute_llm_activity_non_streaming(activity_id, workflow_id, parameters).await;
     }
 
@@ -680,24 +911,28 @@ struct StreamTokenPayload {
 ```
 
 **Acceptance Criteria**:
-- ✅ Check for WebSocket subscribers before streaming
-- ✅ Execute non-streaming when no subscribers (performance optimization)
+- ✅ Two-level opt-in: check `streaming_config.is_enabled()` AND subscriber count
+- ✅ Execute non-streaming when either condition is false (performance optimization)
 - ✅ Forward tokens to WebSocket via ConnectionManager or internal API
 - ✅ Accumulate full response for activity result
 - ✅ Send completion message after streaming finishes
 - ✅ Handle errors during streaming gracefully
+- ✅ StreamingConfig types added to `shared/src/types/workflow.rs`
 
 ---
 
 ### Task 5: Example Integration and Documentation (3-4 hours)
 
-**File**: `examples/06b-agentic-research-streaming.yaml` (new)
+**File**: `examples/06d-agentic-research-streaming.yaml` (new)
 
 Add streaming example variant of Example 6:
 
 ```yaml
 # This example demonstrates real-time token streaming from LLM activities
 # Clients can connect to WebSocket endpoint to see live responses
+#
+# IMPORTANT: Activities must have `streaming: true` to enable token streaming.
+# This is an explicit opt-in to avoid streaming overhead for activities that don't need it.
 #
 # WebSocket connection:
 # ws://localhost:8080/api/v1/activities/{activity_id}/stream?token=YOUR_TOKEN
@@ -710,8 +945,34 @@ name: agentic_research_streaming
 description: Iterative research with real-time token streaming (demonstrates US-7.1)
 
 activities:
-  # ... same as 06-agentic-research.yaml ...
-  # All LLM activities automatically support streaming when clients connect
+  # LLM activities with streaming enabled
+  initial_research:
+    type: llm
+    streaming: true  # Enable token streaming for this activity
+    parameters:
+      model: claude-3-5-sonnet
+      prompt: "Research the following topic: {{inputs.topic}}"
+
+  synthesize_findings:
+    type: llm
+    streaming: true  # Enable token streaming
+    depends_on: [initial_research]
+    parameters:
+      model: claude-3-5-sonnet
+      prompt: |
+        Based on the research findings, synthesize a comprehensive summary:
+        {{initial_research.outputs.result.content}}
+
+  # Non-streaming activities (default behavior)
+  save_results:
+    type: http
+    # streaming: false (default, omitted)
+    depends_on: [synthesize_findings]
+    parameters:
+      method: POST
+      url: "{{inputs.callback_url}}"
+      body:
+        summary: "{{synthesize_findings.outputs.result.content}}"
 ```
 
 **File**: `examples/streaming-client.js` (new)
@@ -846,16 +1107,32 @@ Add streaming documentation:
 ```markdown
 ## Token Streaming (US-7.1)
 
-All LLM activities support real-time token streaming when clients connect to the WebSocket endpoint.
+LLM activities support real-time token streaming when:
+1. The activity has `streaming: true` in its definition (explicit opt-in)
+2. At least one WebSocket client is connected to the activity stream
+
+### Enabling Streaming in Workflow Definitions
+
+```yaml
+activities:
+  my_llm_activity:
+    type: llm
+    streaming: true  # Required to enable token streaming
+    parameters:
+      model: claude-3-5-sonnet
+      prompt: "Generate a response..."
+```
+
+Streaming is **disabled by default** to avoid overhead for activities that don't need it.
 
 ### How to Use Token Streaming
 
-1. **Start a workflow** with LLM activities:
+1. **Start a workflow** with streaming-enabled LLM activities:
    ```bash
    curl -X POST http://localhost:8080/api/v1/workflows \
      -H "Authorization: Bearer YOUR_TOKEN" \
      -H "Content-Type: application/json" \
-     -d @examples/06-agentic-research.yaml
+     -d @examples/06d-agentic-research-streaming.yaml
    ```
 
 2. **Get activity ID** from workflow status:
@@ -864,7 +1141,7 @@ All LLM activities support real-time token streaming when clients connect to the
      -H "Authorization: Bearer YOUR_TOKEN"
    ```
 
-3. **Connect WebSocket** to stream tokens:
+3. **Connect WebSocket** before activity executes to stream tokens:
    ```javascript
    const ws = new WebSocket(
      'ws://localhost:8080/api/v1/activities/{activity_id}/stream?token=YOUR_TOKEN'
@@ -877,6 +1154,9 @@ All LLM activities support real-time token streaming when clients connect to the
    {"type": "token", "text": " world", "index": 1}
    {"type": "complete", "result": {...}}
    ```
+
+**Note**: If no WebSocket clients are connected when the activity executes, the activity
+runs in efficient non-streaming mode regardless of the `streaming` setting.
 
 See `examples/streaming-client.js` and `examples/streaming-client.py` for complete examples.
 ```
@@ -992,12 +1272,12 @@ async fn test_streaming_with_multiple_subscribers() {
 }
 
 #[tokio::test]
-async fn test_non_streaming_fallback() {
+async fn test_non_streaming_fallback_no_subscribers() {
     let app = create_test_app().await;
     let token = create_test_token(&app).await;
 
-    // Submit workflow but DON'T connect WebSocket
-    let workflow_id = submit_test_workflow(&app, &token).await;
+    // Submit workflow with streaming: true but DON'T connect WebSocket
+    let workflow_id = submit_streaming_workflow(&app, &token).await;
 
     // Wait for workflow to complete
     wait_for_workflow_completion(&app, workflow_id, &token).await;
@@ -1005,6 +1285,48 @@ async fn test_non_streaming_fallback() {
     // Verify activity completed successfully without streaming
     let workflow_status = get_workflow_status(&app, workflow_id, &token).await;
     assert_eq!(workflow_status["status"], "Completed");
+}
+
+#[tokio::test]
+async fn test_streaming_disabled_by_default() {
+    let app = create_test_app().await;
+    let token = create_test_token(&app).await;
+
+    // Submit workflow WITHOUT streaming: true (default behavior)
+    let workflow_id = submit_test_workflow(&app, &token).await;
+    let activity_id = get_first_activity_id(&app, workflow_id, &token).await;
+
+    // Connect WebSocket subscriber
+    let ws_url = format!(
+        "ws://localhost/api/v1/activities/{}/stream?token={}",
+        activity_id, token
+    );
+    let (mut ws, _) = tokio_tungstenite::connect_async(&ws_url).await.unwrap();
+
+    // Wait for workflow to complete
+    wait_for_workflow_completion(&app, workflow_id, &token).await;
+
+    // Should NOT receive tokens (only completion) because streaming: true not set
+    let mut tokens_received = 0;
+    let mut complete_received = false;
+
+    while let Some(msg) = ws.next().await {
+        let msg = msg.unwrap();
+        let json: serde_json::Value = serde_json::from_str(msg.to_text().unwrap()).unwrap();
+
+        match json["type"].as_str().unwrap() {
+            "token" => tokens_received += 1,
+            "complete" => {
+                complete_received = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    // No tokens should be streamed when streaming is not enabled
+    assert_eq!(tokens_received, 0, "Should not receive tokens when streaming disabled");
+    assert!(complete_received, "Should receive completion message");
 }
 
 #[tokio::test]
@@ -1039,12 +1361,14 @@ async fn test_streaming_error_handling() {
 ```
 
 **Acceptance Criteria**:
-- ✅ Test streaming with single subscriber
+- ✅ Test streaming with single subscriber (streaming: true + subscriber)
 - ✅ Test streaming with multiple subscribers
-- ✅ Test non-streaming fallback (no subscribers)
+- ✅ Test non-streaming fallback when no subscribers (streaming: true but no WebSocket)
+- ✅ Test streaming disabled by default (no streaming: true, even with subscriber)
 - ✅ Test error handling during streaming
 - ✅ Test all three LLM providers (Anthropic, OpenAI, Google)
 - ✅ Verify streamed tokens match final result
+- ✅ Test StreamingConfig parsing (shorthand and detailed forms)
 
 ---
 
@@ -1058,8 +1382,10 @@ async fn test_streaming_error_handling() {
 - ✅ Tokens delivered in real-time (<10ms P95 latency)
 - ✅ Full response accumulated correctly
 - ✅ Cost tracking works with streaming
+- ✅ `streaming: true/false` activity property parsed correctly (shorthand and detailed forms)
+- ✅ Two-level opt-in: streaming only when `streaming: true` AND subscribers present
 - ✅ Non-streaming activities not affected (HTTP, PostgreSQL, etc.)
-- ✅ Graceful fallback when no WebSocket subscribers
+- ✅ Zero overhead for activities without `streaming: true`
 
 ### Non-Functional Requirements
 
