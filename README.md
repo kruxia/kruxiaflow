@@ -14,19 +14,20 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 ## Status
 
 **Current Version**: 0.2.0 MVP (In Development)
-**Last Updated**: November 19, 2025
+**Last Updated**: November 26, 2025
 **Branch**: `epic-3-mvp-activities-examples`
 
-**Implementation Phase**: Epic 3 & 5 (YAML Workflows + Built-In Activities)
+**Implementation Phase**: Epic 3 & 5 Core Complete - Examples 9-10 Next
 - **Epic 1**: ✅ Complete (Event-Driven Orchestration)
-- **Epic 1A**: ✅ Complete (API Server - all 7 stories)
+- **Epic 1A**: ✅ Complete (API Server - 8/9 stories, including US-1A.9a WebSocket)
 - **Epic 1B**: ✅ Complete (Built-in Worker)
 - **Epic 1C**: ⏳ Partial (3/7 stories - serve command, graceful shutdown)
 - **Epic 2**: ✅ Complete (Performance Benchmarking - 1.6x faster than Temporal)
-- **Epic 3**: ⏳ 60% (YAML Workflows - Examples 1-5 complete, US-3.4 plan ready)
-- **Epic 5**: ⏳ 38% (Built-In Activities - US-5.1, US-5.3, US-5.4 complete)
+- **Epic 3**: ✅ 80% (YAML Workflows - Examples 1-8 complete, US-3.4, US-3.5, US-3.7 complete)
+- **Epic 5**: ⏳ 60% (Built-In Activities - US-5.1, US-5.3, US-5.4, US-5.5 partial, US-5.6 partial)
+- **Epic 7**: ✅ US-7.1 Complete (Token Streaming via WebSocket)
 
-**Next Milestone**: US-3.4 Iterative Workflows (for agentic research patterns)
+**Next Milestone**: Examples 9-10 (Advanced features)
 
 📊 **Detailed Status**: See [PROJECT-STATUS.md](docs/PROJECT-STATUS.md) for comprehensive progress tracking
 
@@ -36,7 +37,7 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 - ✅ **[US-1.1: Activity Queue](docs/implementation/US-1.1-activity-queue.md)** - PostgreSQL-based queue with safe concurrency
 - ✅ **[US-1.2: Event-Driven Dynamic Scheduling](docs/implementation/US-1.2-event-driven-scheduling.md)** - Reactive orchestrator with <1ms evaluation
 
-**Epic 1A: API Server** (Complete - 7 of 9 stories, 2 deferred to Post-Epic 2)
+**Epic 1A: API Server** (Complete - 8 of 9 stories, 1 deferred to Post-MVP)
 - ✅ **[US-1A.1: Health Check and Service Discovery](docs/implementation/US-1A.1-health-checks.md)** - Liveness/readiness probes with parallel health checks
 - ✅ **[US-1A.1.5: API Server CLI Launcher](docs/implementation/US-1A.1.5-api-server-launcher.md)** - `streamflow api` command with configuration management
 - ✅ **[US-1A.2: Error Handling and API Contracts](docs/implementation/US-1A.2-error-handling.md)** - Standard error responses, OpenAPI/ReDoc docs, CORS, request tracing
@@ -45,6 +46,7 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 - ✅ **[US-1A.5: Workflow Submission API](docs/implementation/US-1A.5-workflow-submission.md)** - Submit workflows with idempotency support
 - ✅ **[US-1A.6: Workflow Status Query](docs/implementation/US-1A.6-workflow-status-query.md)** - Query workflow status and activities
 - ✅ **[US-1A.7: Worker Activity APIs](docs/implementation/US-1A.7-worker-activity-apis.md)** - Poll, heartbeat, complete, fail endpoints
+- ✅ **[US-1A.9a: WebSocket Infrastructure](docs/implementation/US-1A.9a-websocket-infrastructure.md)** - Token streaming WebSocket support
 
 **Epic 1B: Built-in Worker** (Complete)
 - ✅ **[US-1B.1: Worker Polling with Concurrency Safety](docs/implementation/US-1B.1-built-in-worker.md)** - Worker implementation using API endpoints
@@ -63,8 +65,10 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
   - **Results**: StreamFlow 56 wf/sec avg | Temporal 35 wf/sec | Airflow 1.3 wf/sec
   - **Speedup**: 1.6x faster than Temporal, 44x faster than Airflow
 
-**Epic 3: YAML Workflow Definition Language** (In Progress - 60%)
+**Epic 3: YAML Workflow Definition Language** (80% Complete - Examples 1-8 Done)
 - ✅ **[US-3.5: Activity Settings](docs/implementation/US-3.5-activity-settings.md)** - Retry policies, timeout, budget tracking
+- ✅ **[US-3.4: Iterative Workflows](docs/implementation/US-3.4-iterative-workflows.md)** - Loop support with counters
+- ✅ **[US-3.7: Activity Scheduling](docs/implementation/US-3.7-activity-scheduling.md)** - Delay and scheduled_for with template support
 - ✅ **Example 1: Sequential Workflow** - HTTP activity, template expressions, YAML parser
   - Sequential workflows with `depends_on`
   - Template expressions: `{{INPUT.*}}`, `{{activity.output}}`, `{{SECRET.*}}`
@@ -94,9 +98,23 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
   - Budget-aware model selection (skip expensive models when constrained)
   - Cost optimization across providers
   - Provider-specific examples: `05-research-assistant.yaml`, `05a-anthropic.yaml`, `05b-openai.yaml`, `05c-google.yaml`
-- 📋 **Example 6**: Agentic Research with Iterative Workflows (Next - requires US-3.4)
+- ✅ **Example 6: Semantic Caching and RAG** - Intelligent caching patterns
+  - Semantic caching for LLM responses (`06a-faq-bot-caching.yaml`)
+  - RAG index building (`06b-rag-index-builder.yaml`)
+  - RAG query patterns (`06c-rag-query.yaml`)
+- ✅ **Example 7: Agentic Research / Iterative Workflows** - Loop support
+  - Simple iterative loops (`07a-agentic-research-simple.yaml`)
+  - Complete iterative workflows (`07b-agentic-research-complete.yaml`)
+- ✅ **Example 8: Activity Scheduling and Delays** - Temporal control
+  - Rate limiting with delays (`08a-rate-limited-api-calls.yaml`)
+  - Absolute scheduling with scheduled_for (`08b-scheduled-daily-report.yaml`)
+  - Cascading delays (`08c-delayed-reminders.yaml`)
+- 📋 **Examples 9-10**: Advanced features (Next)
 
-**Epic 5: Built-In Activity Library** (In Progress - 38%)
+**Epic 7: AI-Native Features** (Token Streaming Complete)
+- ✅ **[US-7.1: Token Streaming](docs/implementation/US-7.1-token-streaming.md)** - Real-time LLM token streaming via WebSocket
+
+**Epic 5: Built-In Activity Library** (In Progress - 60%)
 - ✅ **[US-5.1: Multi-Provider LLM Activities](docs/implementation/US-5.1-multi-provider-llm.md)** - Phases 1-5 complete
   - Anthropic (Claude 3.5 Sonnet, Haiku)
   - OpenAI (GPT-4, GPT-3.5)
@@ -122,16 +140,41 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
   - Automatic lifecycle management
   - Cross-cutting capability for all activities
 - ⏳ **US-5.5**: HTTP/REST Operations (http_request complete, webhook/GraphQL pending)
-- ⏳ **US-5.6**: Database Operations (postgres_query complete, SQLite/Redis pending)
+- ⏳ **[US-5.6: Database Operations](docs/implementation/US-5.6-database-operations.md)** (postgres_query ✅, postgres_transaction pending)
 
 ### Current Focus 🎯
 
-**Epic 3 & 5: YAML Workflows + Built-In Activities**
-- Implementing Epic 3 (YAML DSL) and Epic 5 (Built-in Activities) together through realistic workflow examples
-- **Next**: US-3.4 Iterative Workflows (for Example 6: Agentic Research)
+**Examples 9-10: Advanced Features**
+- Core YAML workflows (Examples 1-8) and token streaming complete
+- **Next**: Examples 9-10 (advanced HTTP/GraphQL features, additional database operations)
 - See [MVP Workflows Implementation Plan](docs/implementation/mvp-workflows-implementation-plan.md) for full roadmap
 
 ### Recent Completions ✅
+
+**Week of Nov 25-26, 2025** - Token Streaming and WebSocket Infrastructure Complete ✅
+- ✅ **US-7.1**: Token Streaming for Real-Time UX
+  - WebSocket-based token streaming from LLM activities
+  - Real-time token-by-token delivery for ChatGPT-style UX
+  - Integration with multi-provider LLM activities
+- ✅ **US-1A.9a**: WebSocket Infrastructure
+  - WebSocket endpoint for activity streaming
+  - Authentication via Bearer token
+  - Connection management for concurrent streams
+  - **Test Coverage**: 90.56% (target >90% achieved)
+
+**Week of Nov 20-24, 2025** - Examples 6-8 Complete ✅
+- ✅ **Example 6**: Semantic Caching and RAG Patterns
+  - FAQ bot with semantic caching (`06a-faq-bot-caching.yaml`)
+  - RAG index builder (`06b-rag-index-builder.yaml`)
+  - RAG query workflow (`06c-rag-query.yaml`)
+- ✅ **Example 7**: Agentic Research / Iterative Workflows (US-3.4)
+  - Simple iterative loops (`07a-agentic-research-simple.yaml`)
+  - Complete iterative workflows (`07b-agentic-research-complete.yaml`)
+  - Loop counter support with max iterations
+- ✅ **Example 8**: Activity Scheduling and Delays (US-3.7)
+  - Rate limiting with relative delays (`08a-rate-limited-api-calls.yaml`)
+  - Absolute scheduling with scheduled_for (`08b-scheduled-daily-report.yaml`)
+  - Cascading delays pattern (`08c-delayed-reminders.yaml`)
 
 **Week of Nov 18-19, 2025** - Epic 3 Examples 3-5 + Epic 5 Stories Complete ✅
 - ✅ **Example 3**: Parallel Execution with File Management
@@ -153,44 +196,12 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
   - Provider-specific variants for testing each provider
   - Example workflows: `05-research-assistant.yaml`, `05a-anthropic.yaml`, `05b-openai.yaml`, `05c-google.yaml`
 - ✅ **US-5.1**: Multi-Provider LLM Activities (Phases 1-5)
-  - Database schema with LLM catalog and cost tracking
-  - Seed data loader (`streamflow seed-llm`)
-  - Core services (CostCalculator, CostTracker)
-  - All 4 LLM provider implementations
-  - Budget-aware orchestrator parameter enrichment
-  - Worker-side budget enforcement in fallback chain
 - ✅ **US-5.3**: Semantic Caching (100% production ready)
-  - Redis-backed caching with TTL and graceful NoOpCache fallback
-  - Universal caching for all activity types (not just LLM)
-  - SHA256-based deterministic cache keys
-  - Cache invalidation API endpoints with pattern matching
-  - Complete integration and API handler tests (13 tests)
-  - 50-80% cost savings for repeated queries
 - ✅ **US-5.4**: Object Storage and File Management
-  - PostgreSQL Large Objects implementation
-  - File production and consumption via template expressions
-  - Automatic lifecycle management
-- ✅ **US-1C.2**: All-in-One Service Launcher
-  - `streamflow serve` command launches orchestrator + API + workers
-  - Graceful shutdown with configurable timeout
-- ✅ **US-1C.7**: Graceful Shutdown and Signal Handling
-  - SIGTERM/SIGINT handling with CancellationToken
-  - Clean shutdown sequences for all services
 
 **Week of Nov 11-16, 2025** - Epic 3 Examples 1-2 Complete ✅
 - ✅ **Example 1**: Sequential Workflow
-  - YAML parser with workflow definition support
-  - Template expression engine (MiniJinja) for `{{INPUT.*}}`, `{{activity.output}}`, `{{SECRET.*}}`
-  - HTTP activity executor with custom headers, query parameters
-  - End-to-end workflow tests
-  - Example workflows: `01-weather-report.yaml`, `01b-weather-report-dynamic.yaml`
 - ✅ **Example 2**: Conditional Branching
-  - MiniJinja conditional evaluation in dependency edges
-  - PostgreSQL activity with parameterized queries and connection pooling
-  - Flexible condition syntax (single condition or array of conditions)
-  - `depends_on` alias for user-friendly YAML
-  - Example workflow: `02-user-validation.yaml`
-  - Comprehensive end-to-end tests for conditional workflows
 
 **Week of Nov 4-11, 2025** - Epic 1 Complete ✅
 - ✅ All Epic 1A, 1B, 1C user stories complete
@@ -201,17 +212,17 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
 
 ### Deferred Features 📋
 
-**Post-Epic 3 (YAML Workflows)**:
+**Post-MVP**:
 - 📋 **US-1A.8**: Activity Results and Output Retrieval (~8 hours)
-- 📋 **US-1A.9**: WebSocket Streaming for Real-Time Updates (~15 hours)
+- 📋 **US-1A.9b**: WebSocket Streaming for Workflow Events (~10 hours)
 - 📋 **US-1C.3**: Individual Service Launchers (~5 hours)
 - 📋 **US-1C.4**: Configuration Management (~4 hours)
 - 📋 **US-1C.5**: Database Migration CLI (~3 hours)
 - 📋 **US-1C.6**: Health Checks and Service Monitoring (~5 hours)
 
-**Epic 2: Performance Benchmarking** (Deferred until after Epic 3):
+**Epic 2: Performance Benchmarking** (Additional stories post-MVP):
+- ✅ **US-2.1**: Automated Performance Test Suite (Complete)
 - ✅ **US-2.2**: Competitor Comparison Benchmarks (Complete)
-- 📋 **US-2.1**: Automated Performance Test Suite
 - 📋 **US-2.3**: PostgreSQL Performance Profiling
 - 📋 **US-2.4**: Stress Testing and Capacity Planning
 - 📋 **US-2.5**: Grafana Performance Dashboard
@@ -484,7 +495,7 @@ openssl rsa -in private.pem -pubout -out public.pem
   - **Epic 1: Event-Driven Orchestration** ✅
     - [US-1.1: Activity Queue](docs/implementation/US-1.1-activity-queue.md)
     - [US-1.2: Event-Driven Scheduling](docs/implementation/US-1.2-event-driven-scheduling.md)
-  - **Epic 1A: API Server** ✅ (7 of 9 complete)
+  - **Epic 1A: API Server** ✅ (8 of 9 complete)
     - [US-1A.1: Health Check and Service Discovery](docs/implementation/US-1A.1-health-checks.md)
     - [US-1A.1.5: API Server CLI Launcher](docs/implementation/US-1A.1.5-api-server-launcher.md)
     - [US-1A.2: Error Handling and API Contracts](docs/implementation/US-1A.2-error-handling.md)
@@ -493,6 +504,9 @@ openssl rsa -in private.pem -pubout -out public.pem
     - [US-1A.5: Workflow Submission API](docs/implementation/US-1A.5-workflow-submission.md)
     - [US-1A.6: Workflow Status Query](docs/implementation/US-1A.6-workflow-status-query.md)
     - [US-1A.7: Worker Activity APIs](docs/implementation/US-1A.7-worker-activity-apis.md)
+    - [US-1A.9a: WebSocket Infrastructure](docs/implementation/US-1A.9a-websocket-infrastructure.md)
+  - **Epic 7: AI-Native Features** ✅
+    - [US-7.1: Token Streaming](docs/implementation/US-7.1-token-streaming.md)
   - **Epic 1B: Built-in Worker** ✅
     - [US-1B.1: Worker Polling with Concurrency Safety](docs/implementation/US-1B.1-built-in-worker.md)
   - **Epic 1C: Main Binary and CLI** (Partial - 3 of 6 complete, Pre-Epic 2 requirements met)
@@ -554,18 +568,20 @@ openssl rsa -in private.pem -pubout -out public.pem
   - depends_on alias and flexible condition syntax
   - Example workflow: user-validation.yaml
 
-### Phase 4: YAML Workflows - Examples 3-10 (Weeks 12-18) 🎯 **IN PROGRESS**
-**Continuing Epic 3 + Epic 5 (Built-in Activities)**
-- 📋 Example 3: Parallel execution with file management (4-5 days) - **Next**
-- 📋 Example 4: LLM with cost tracking and retry (5-6 days)
-- 📋 Example 5: Multi-model LLM fallback (4-5 days)
-- 📋 Example 6: Semantic caching (3-4 days)
-- 📋 Example 7: Iterative workflows/loops (5-6 days)
+### Phase 4: YAML Workflows - Examples 3-10 (Weeks 12-18) ✅ **80% COMPLETE**
+**Epic 3 + Epic 5 (Built-in Activities) + Epic 7 (Token Streaming)**
+- ✅ Example 3: Parallel execution with file management
+- ✅ Example 4: LLM with cost tracking and retry
+- ✅ Example 5: Multi-model LLM fallback
+- ✅ Example 6: Semantic caching and RAG
+- ✅ Example 7: Iterative workflows/loops
+- ✅ Example 8: Scheduled/delayed activities
+- ✅ US-1A.9a: WebSocket Infrastructure
+- ✅ US-7.1: Token Streaming
+- 📋 Example 9: HTTP/DB advanced features (GraphQL, webhooks) - **Next**
 - 📋 Example 10: Advanced file management (3-4 days)
-- 📋 Example 9: HTTP/DB advanced features (3-4 days)
-- 📋 Example 8: Scheduled/delayed activities (2-3 days)
 
-**Total: ~32-42 days (6-8 weeks)** - See [MVP Workflows Implementation Plan](docs/implementation/mvp-workflows-implementation-plan.md)
+See [MVP Workflows Implementation Plan](docs/implementation/mvp-workflows-implementation-plan.md)
 
 ### Phase 5: Performance Benchmarking (Post-Epic 3) 📋 **DEFERRED**
 **Epic 2: Validate Architecture After YAML Implementation**
