@@ -151,6 +151,12 @@ impl ValidationErrors {
     pub fn is_empty(&self) -> bool {
         self.field_errors.is_empty()
     }
+
+    /// Check if there's an error for a specific field (useful for testing)
+    #[cfg(test)]
+    pub fn has_error(&self, field: &str) -> bool {
+        self.field_errors.contains_key(field)
+    }
 }
 
 impl Default for ValidationErrors {

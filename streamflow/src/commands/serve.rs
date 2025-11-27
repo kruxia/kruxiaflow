@@ -511,9 +511,9 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_serve_command_defaults() {
-        let cmd = ServeCommand {
+    /// Helper to create a valid ServeCommand for testing
+    fn valid_serve_command() -> ServeCommand {
+        ServeCommand {
             port: 8080,
             bind: "0.0.0.0".to_string(),
             workers: 1,
@@ -527,46 +527,211 @@ mod tests {
             shutdown_timeout: 30,
             poll_max_activities: 10,
             redis_url: "redis://127.0.0.1:6379".to_string(),
-        };
+        }
+    }
 
+    #[test]
+    fn test_serve_command_defaults() {
+        let cmd = valid_serve_command();
         assert!(cmd.validate().is_ok());
     }
 
-    #[test]
-    fn test_serve_command_invalid_workers() {
-        let cmd = ServeCommand {
-            port: 8080,
-            bind: "0.0.0.0".to_string(),
-            workers: 0,
-            orchestrator_id: "orchestrator_default".to_string(),
-            client_id: "streamflow_internal_worker".to_string(),
-            client_secret: Some("secret".to_string()),
-            oauth_private_key: Some("key".to_string()),
-            oauth_public_key: None,
-            shutdown_timeout: 30,
-            poll_max_activities: 10,
-            redis_url: "redis://127.0.0.1:6379".to_string(),
-        };
+    // =========================================================================
+    // Worker count validation tests
+    // =========================================================================
 
-        assert!(cmd.validate().is_err());
+    #[test]
+    fn test_serve_command_invalid_workers_zero() {
+        let mut cmd = valid_serve_command();
+        cmd.workers = 0;
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Worker count"));
     }
 
     #[test]
+    fn test_serve_command_invalid_workers_over_100() {
+        let mut cmd = valid_serve_command();
+        cmd.workers = 101;
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Worker count"));
+    }
+
+    #[test]
+    fn test_serve_command_valid_workers_at_boundaries() {
+        // Test minimum boundary (1)
+        let mut cmd = valid_serve_command();
+        cmd.workers = 1;
+        assert!(cmd.validate().is_ok());
+
+        // Test maximum boundary (100)
+        cmd.workers = 100;
+        assert!(cmd.validate().is_ok());
+    }
+
+    // =========================================================================
+    // Poll max activities validation tests
+    // =========================================================================
+
+    #[test]
+    fn test_serve_command_invalid_poll_max_activities_zero() {
+        let mut cmd = valid_serve_command();
+        cmd.poll_max_activities = 0;
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Max activities per poll")
+        );
+    }
+
+    #[test]
+    fn test_serve_command_invalid_poll_max_activities_over_100() {
+        let mut cmd = valid_serve_command();
+        cmd.poll_max_activities = 101;
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Max activities per poll")
+        );
+    }
+
+    #[test]
+    fn test_serve_command_valid_poll_max_activities_at_boundaries() {
+        // Test minimum boundary (1)
+        let mut cmd = valid_serve_command();
+        cmd.poll_max_activities = 1;
+        assert!(cmd.validate().is_ok());
+
+        // Test maximum boundary (100)
+        cmd.poll_max_activities = 100;
+        assert!(cmd.validate().is_ok());
+    }
+
+    // =========================================================================
+    // Client secret validation tests
+    // =========================================================================
+
+    #[test]
     fn test_serve_command_missing_secret() {
+        let mut cmd = valid_serve_command();
+        cmd.client_secret = None;
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Client secret"));
+    }
+
+    // =========================================================================
+    // OAuth private key validation tests
+    // =========================================================================
+
+    #[test]
+    fn test_serve_command_missing_oauth_private_key() {
+        let mut cmd = valid_serve_command();
+        cmd.oauth_private_key = None;
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("OAuth private key")
+        );
+    }
+
+    // =========================================================================
+    // Shutdown timeout validation tests
+    // =========================================================================
+
+    #[test]
+    fn test_serve_command_invalid_shutdown_timeout_too_low() {
+        let mut cmd = valid_serve_command();
+        cmd.shutdown_timeout = 4; // Below minimum of 5
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Shutdown timeout"));
+    }
+
+    #[test]
+    fn test_serve_command_invalid_shutdown_timeout_too_high() {
+        let mut cmd = valid_serve_command();
+        cmd.shutdown_timeout = 301; // Above maximum of 300
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Shutdown timeout"));
+    }
+
+    #[test]
+    fn test_serve_command_valid_shutdown_timeout_at_boundaries() {
+        // Test minimum boundary (5)
+        let mut cmd = valid_serve_command();
+        cmd.shutdown_timeout = 5;
+        assert!(cmd.validate().is_ok());
+
+        // Test maximum boundary (300)
+        cmd.shutdown_timeout = 300;
+        assert!(cmd.validate().is_ok());
+    }
+
+    // =========================================================================
+    // Struct tests
+    // =========================================================================
+
+    #[test]
+    fn test_serve_command_with_all_options() {
         let cmd = ServeCommand {
-            port: 8080,
-            bind: "0.0.0.0".to_string(),
-            workers: 1,
-            orchestrator_id: "orchestrator_default".to_string(),
-            client_id: "streamflow_internal_worker".to_string(),
-            poll_max_activities: 10,
-            client_secret: None,
-            oauth_private_key: Some("key".to_string()),
-            oauth_public_key: None,
-            shutdown_timeout: 30,
-            redis_url: "redis://127.0.0.1:6379".to_string(),
+            port: 9090,
+            bind: "127.0.0.1".to_string(),
+            workers: 50,
+            orchestrator_id: "custom_orchestrator".to_string(),
+            client_id: "custom_client".to_string(),
+            client_secret: Some("my_secret".to_string()),
+            oauth_private_key: Some(
+                "-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----".to_string(),
+            ),
+            oauth_public_key: Some(
+                "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----".to_string(),
+            ),
+            shutdown_timeout: 60,
+            poll_max_activities: 5,
+            redis_url: "redis://redis.example.com:6379/0".to_string(),
         };
 
-        assert!(cmd.validate().is_err());
+        assert!(cmd.validate().is_ok());
+        assert_eq!(cmd.port, 9090);
+        assert_eq!(cmd.bind, "127.0.0.1");
+        assert_eq!(cmd.workers, 50);
+        assert_eq!(cmd.orchestrator_id, "custom_orchestrator");
+        assert!(cmd.oauth_public_key.is_some());
+    }
+
+    #[test]
+    fn test_serve_command_validates_in_order() {
+        // Validation should fail on first error - test that workers is checked first
+        let mut cmd = valid_serve_command();
+        cmd.workers = 0;
+        cmd.poll_max_activities = 0;
+        cmd.client_secret = None;
+        cmd.oauth_private_key = None;
+        cmd.shutdown_timeout = 0;
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        // Should fail on workers first
+        assert!(result.unwrap_err().to_string().contains("Worker count"));
     }
 }

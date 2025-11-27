@@ -1,5 +1,6 @@
 //! Tests for DTO conversion functions
 
+use rust_decimal::Decimal;
 use std::collections::HashMap;
 use streamflow_api::dto;
 use streamflow_core::workflow;
@@ -544,4 +545,321 @@ fn test_workflow_with_multiple_activities_and_relationships() {
             round_trip.dependency_of.as_ref().map(|f| f.len())
         );
     }
+}
+
+// ============================================================================
+// Budget settings tests
+// ============================================================================
+
+#[test]
+fn test_budget_settings_core_to_dto() {
+    let core_budget = workflow::BudgetSettings {
+        limit: Decimal::new(1000, 2), // $10.00
+        action: workflow::BudgetAction::Abort,
+    };
+
+    let dto_budget: dto::BudgetSettings = core_budget.into();
+    assert_eq!(dto_budget.limit, Decimal::new(1000, 2));
+    assert!(matches!(dto_budget.action, dto::BudgetAction::Abort));
+}
+
+#[test]
+fn test_budget_settings_dto_to_core() {
+    let dto_budget = dto::BudgetSettings {
+        limit: Decimal::new(5000, 2), // $50.00
+        action: dto::BudgetAction::Continue,
+    };
+
+    let core_budget: workflow::BudgetSettings = dto_budget.into();
+    assert_eq!(core_budget.limit, Decimal::new(5000, 2));
+    assert!(matches!(
+        core_budget.action,
+        workflow::BudgetAction::Continue
+    ));
+}
+
+#[test]
+fn test_budget_action_abort_conversion() {
+    let core_abort = workflow::BudgetAction::Abort;
+    let dto_abort: dto::BudgetAction = core_abort.into();
+    assert!(matches!(dto_abort, dto::BudgetAction::Abort));
+
+    let core_back: workflow::BudgetAction = dto_abort.into();
+    assert!(matches!(core_back, workflow::BudgetAction::Abort));
+}
+
+#[test]
+fn test_budget_action_continue_conversion() {
+    let core_continue = workflow::BudgetAction::Continue;
+    let dto_continue: dto::BudgetAction = core_continue.into();
+    assert!(matches!(dto_continue, dto::BudgetAction::Continue));
+
+    let core_back: workflow::BudgetAction = dto_continue.into();
+    assert!(matches!(core_back, workflow::BudgetAction::Continue));
+}
+
+// ============================================================================
+// Output definition tests
+// ============================================================================
+
+#[test]
+fn test_activity_output_definition_core_to_dto() {
+    let core_output = workflow::ActivityOutputDefinition {
+        name: "result".to_string(),
+        output_type: workflow::OutputType::Value,
+    };
+
+    let dto_output: dto::ActivityOutputDefinition = core_output.into();
+    assert_eq!(dto_output.name, "result");
+    assert!(matches!(dto_output.output_type, dto::OutputType::Value));
+}
+
+#[test]
+fn test_activity_output_definition_dto_to_core() {
+    let dto_output = dto::ActivityOutputDefinition {
+        name: "file_output".to_string(),
+        output_type: dto::OutputType::File,
+    };
+
+    let core_output: workflow::ActivityOutputDefinition = dto_output.into();
+    assert_eq!(core_output.name, "file_output");
+    assert!(matches!(
+        core_output.output_type,
+        workflow::OutputType::File
+    ));
+}
+
+#[test]
+fn test_output_type_value_conversion() {
+    let core_value = workflow::OutputType::Value;
+    let dto_value: dto::OutputType = core_value.into();
+    assert!(matches!(dto_value, dto::OutputType::Value));
+
+    let core_back: workflow::OutputType = dto_value.into();
+    assert!(matches!(core_back, workflow::OutputType::Value));
+}
+
+#[test]
+fn test_output_type_file_conversion() {
+    let core_file = workflow::OutputType::File;
+    let dto_file: dto::OutputType = core_file.into();
+    assert!(matches!(dto_file, dto::OutputType::File));
+
+    let core_back: workflow::OutputType = dto_file.into();
+    assert!(matches!(core_back, workflow::OutputType::File));
+}
+
+#[test]
+fn test_output_type_folder_conversion() {
+    let core_folder = workflow::OutputType::Folder;
+    let dto_folder: dto::OutputType = core_folder.into();
+    assert!(matches!(dto_folder, dto::OutputType::Folder));
+
+    let core_back: workflow::OutputType = dto_folder.into();
+    assert!(matches!(core_back, workflow::OutputType::Folder));
+}
+
+// ============================================================================
+// Activity with output definitions
+// ============================================================================
+
+#[test]
+fn test_activity_with_output_definitions() {
+    let core_activity = workflow::ActivityDefinition {
+        key: "generate_report".to_string(),
+        worker: "reports".to_string(),
+        activity_name: Some("generate".to_string()),
+        parameters: None,
+        depends_on: None,
+        dependency_of: None,
+        settings: None,
+        output_definitions: Some(vec![
+            workflow::ActivityOutputDefinition {
+                name: "summary".to_string(),
+                output_type: workflow::OutputType::Value,
+            },
+            workflow::ActivityOutputDefinition {
+                name: "report_file".to_string(),
+                output_type: workflow::OutputType::File,
+            },
+        ]),
+        iteration_scoped: false,
+        iteration_limit: None,
+        is_loop_activity: false,
+    };
+
+    let dto_activity: dto::ActivityDefinition = core_activity.into();
+
+    assert!(dto_activity.output_definitions.is_some());
+    let outputs = dto_activity.output_definitions.unwrap();
+    assert_eq!(outputs.len(), 2);
+    assert_eq!(outputs[0].name, "summary");
+    assert!(matches!(outputs[0].output_type, dto::OutputType::Value));
+    assert_eq!(outputs[1].name, "report_file");
+    assert!(matches!(outputs[1].output_type, dto::OutputType::File));
+}
+
+// ============================================================================
+// Activity with budget settings
+// ============================================================================
+
+#[test]
+fn test_activity_with_budget_settings() {
+    let core_activity = workflow::ActivityDefinition {
+        key: "expensive_task".to_string(),
+        worker: "compute".to_string(),
+        activity_name: Some("process".to_string()),
+        parameters: None,
+        depends_on: None,
+        dependency_of: None,
+        settings: Some(workflow::ActivitySettings {
+            timeout_seconds: Some(600),
+            retry: None,
+            budget: Some(workflow::BudgetSettings {
+                limit: Decimal::new(10000, 2), // $100.00
+                action: workflow::BudgetAction::Abort,
+            }),
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: None,
+            scheduled_for: None,
+        }),
+        output_definitions: None,
+        iteration_scoped: false,
+        iteration_limit: None,
+        is_loop_activity: false,
+    };
+
+    let dto_activity: dto::ActivityDefinition = core_activity.into();
+
+    let settings = dto_activity.settings.unwrap();
+    assert!(settings.budget.is_some());
+    let budget = settings.budget.unwrap();
+    assert_eq!(budget.limit, Decimal::new(10000, 2));
+    assert!(matches!(budget.action, dto::BudgetAction::Abort));
+}
+
+// ============================================================================
+// Activity settings with delay and scheduled_for
+// ============================================================================
+
+#[test]
+fn test_activity_settings_with_scheduling() {
+    let core_settings = workflow::ActivitySettings {
+        timeout_seconds: None,
+        retry: None,
+        budget: None,
+        cache: false,
+        cache_ttl: None,
+        iteration_limit: None,
+        delay: Some("30s".to_string()),
+        scheduled_for: None,
+    };
+
+    let dto_settings: dto::ActivitySettings = core_settings.into();
+    assert_eq!(dto_settings.delay, Some("30s".to_string()));
+    assert!(dto_settings.scheduled_for.is_none());
+}
+
+#[test]
+fn test_activity_settings_with_absolute_schedule() {
+    let core_settings = workflow::ActivitySettings {
+        timeout_seconds: None,
+        retry: None,
+        budget: None,
+        cache: false,
+        cache_ttl: None,
+        iteration_limit: None,
+        delay: None,
+        scheduled_for: Some("2025-12-01T09:00:00Z".to_string()),
+    };
+
+    let dto_settings: dto::ActivitySettings = core_settings.into();
+    assert!(dto_settings.delay.is_none());
+    assert_eq!(
+        dto_settings.scheduled_for,
+        Some("2025-12-01T09:00:00Z".to_string())
+    );
+}
+
+// ============================================================================
+// Activity settings with caching
+// ============================================================================
+
+#[test]
+fn test_activity_settings_with_caching() {
+    let core_settings = workflow::ActivitySettings {
+        timeout_seconds: None,
+        retry: None,
+        budget: None,
+        cache: true,
+        cache_ttl: Some(3600),
+        iteration_limit: None,
+        delay: None,
+        scheduled_for: None,
+    };
+
+    let dto_settings: dto::ActivitySettings = core_settings.into();
+    assert!(dto_settings.cache);
+    assert_eq!(dto_settings.cache_ttl, Some(3600));
+}
+
+// ============================================================================
+// Back-edge relationship tests
+// ============================================================================
+
+#[test]
+fn test_activity_relationship_with_back_edge() {
+    let core_rel = workflow::ActivityRelationship {
+        activity_key: "loop_start".to_string(),
+        conditions: Some(vec!["{{result.continue}}".to_string()]),
+        is_back_edge: true,
+    };
+
+    let dto_rel: dto::ActivityRelationship = core_rel.into();
+    assert!(dto_rel.is_back_edge);
+    assert_eq!(
+        dto_rel.conditions,
+        Some(vec!["{{result.continue}}".to_string()])
+    );
+
+    // Convert back
+    let core_back: workflow::ActivityRelationship = dto_rel.into();
+    assert!(core_back.is_back_edge);
+}
+
+// ============================================================================
+// Loop activity tests
+// ============================================================================
+
+#[test]
+fn test_activity_with_loop_configuration() {
+    let core_activity = workflow::ActivityDefinition {
+        key: "iterating_task".to_string(),
+        worker: "processor".to_string(),
+        activity_name: Some("process_batch".to_string()),
+        parameters: None,
+        depends_on: Some(vec![workflow::ActivityRelationship {
+            activity_key: "iterating_task".to_string(),
+            conditions: Some(vec!["{{iterating_task.has_more}}".to_string()]),
+            is_back_edge: true,
+        }]),
+        dependency_of: None,
+        settings: None,
+        output_definitions: None,
+        iteration_scoped: true,
+        iteration_limit: Some(100),
+        is_loop_activity: true,
+    };
+
+    let dto_activity: dto::ActivityDefinition = core_activity.into();
+
+    assert!(dto_activity.iteration_scoped);
+    assert_eq!(dto_activity.iteration_limit, Some(100));
+    assert!(dto_activity.is_loop_activity);
+
+    // Check back-edge preserved
+    let deps = dto_activity.depends_on.unwrap();
+    assert!(deps[0].is_back_edge);
 }
