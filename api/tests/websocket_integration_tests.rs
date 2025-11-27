@@ -619,6 +619,354 @@ async fn test_websocket_many_concurrent_connections() {
 }
 
 // ============================================================================
+// Internal Streaming API Tests (US-7.1)
+// ============================================================================
+
+#[tokio::test]
+#[serial]
+async fn test_internal_api_publish_token() {
+    let state = setup_test_state().await;
+    let addr = start_test_server(state).await;
+    let token = get_valid_token(addr).await;
+
+    let activity_id = Uuid::now_v7();
+    let ws_url = format!(
+        "ws://{}/api/v1/activities/{}/stream?token={}",
+        addr, activity_id, token
+    );
+
+    // Connect WebSocket client
+    let (mut ws_stream, _) = connect_async(&ws_url)
+        .await
+        .expect("Failed to connect WebSocket");
+
+    // Give connection time to register
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Publish token via internal API
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!(
+            "http://{}/api/v1/activities/{}/stream/token",
+            addr, activity_id
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "text": "Hello from internal API",
+            "index": 42
+        }))
+        .send()
+        .await
+        .expect("Failed to publish token");
+
+    assert_eq!(response.status().as_u16(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["subscribers"], 1);
+
+    // Verify WebSocket received the token
+    let received = timeout(Duration::from_secs(2), ws_stream.next())
+        .await
+        .expect("Should not timeout")
+        .expect("Should receive message")
+        .expect("Message should be valid");
+
+    match received {
+        Message::Text(text) => {
+            let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(json["type"], "token");
+            assert_eq!(json["text"], "Hello from internal API");
+            assert_eq!(json["index"], 42);
+        }
+        _ => panic!("Expected text message"),
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn test_internal_api_stream_complete() {
+    let state = setup_test_state().await;
+    let addr = start_test_server(state).await;
+    let token = get_valid_token(addr).await;
+
+    let activity_id = Uuid::now_v7();
+    let ws_url = format!(
+        "ws://{}/api/v1/activities/{}/stream?token={}",
+        addr, activity_id, token
+    );
+
+    // Connect WebSocket client
+    let (mut ws_stream, _) = connect_async(&ws_url)
+        .await
+        .expect("Failed to connect WebSocket");
+
+    // Give connection time to register
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Signal completion via internal API
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!(
+            "http://{}/api/v1/activities/{}/stream/complete",
+            addr, activity_id
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "result": {
+                "content": "Final answer",
+                "model": "claude-3-5-haiku"
+            }
+        }))
+        .send()
+        .await
+        .expect("Failed to signal completion");
+
+    assert_eq!(response.status().as_u16(), 200);
+
+    // Verify WebSocket received the completion message
+    let received = timeout(Duration::from_secs(2), ws_stream.next())
+        .await
+        .expect("Should not timeout")
+        .expect("Should receive message")
+        .expect("Message should be valid");
+
+    match received {
+        Message::Text(text) => {
+            let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(json["type"], "complete");
+            assert_eq!(json["activity_id"], activity_id.to_string());
+            assert_eq!(json["result"]["content"], "Final answer");
+            assert_eq!(json["result"]["model"], "claude-3-5-haiku");
+        }
+        _ => panic!("Expected text message"),
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn test_internal_api_stream_error() {
+    let state = setup_test_state().await;
+    let addr = start_test_server(state).await;
+    let token = get_valid_token(addr).await;
+
+    let activity_id = Uuid::now_v7();
+    let ws_url = format!(
+        "ws://{}/api/v1/activities/{}/stream?token={}",
+        addr, activity_id, token
+    );
+
+    // Connect WebSocket client
+    let (mut ws_stream, _) = connect_async(&ws_url)
+        .await
+        .expect("Failed to connect WebSocket");
+
+    // Give connection time to register
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Signal error via internal API
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!(
+            "http://{}/api/v1/activities/{}/stream/error",
+            addr, activity_id
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "error": "Rate limit exceeded"
+        }))
+        .send()
+        .await
+        .expect("Failed to signal error");
+
+    assert_eq!(response.status().as_u16(), 200);
+
+    // Verify WebSocket received the error message
+    let received = timeout(Duration::from_secs(2), ws_stream.next())
+        .await
+        .expect("Should not timeout")
+        .expect("Should receive message")
+        .expect("Message should be valid");
+
+    match received {
+        Message::Text(text) => {
+            let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(json["type"], "error");
+            assert_eq!(json["activity_id"], activity_id.to_string());
+            assert_eq!(json["error"], "Rate limit exceeded");
+        }
+        _ => panic!("Expected text message"),
+    }
+}
+
+#[tokio::test]
+#[serial]
+async fn test_internal_api_subscriber_count() {
+    let state = setup_test_state().await;
+    let addr = start_test_server(state).await;
+    let token = get_valid_token(addr).await;
+
+    let activity_id = Uuid::now_v7();
+
+    // Check subscriber count with no connections
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!(
+            "http://{}/api/v1/activities/{}/stream/subscribers",
+            addr, activity_id
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .expect("Failed to get subscriber count");
+
+    assert_eq!(response.status().as_u16(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["count"], 0);
+
+    // Connect WebSocket client
+    let ws_url = format!(
+        "ws://{}/api/v1/activities/{}/stream?token={}",
+        addr, activity_id, token
+    );
+    let (_ws_stream, _) = connect_async(&ws_url)
+        .await
+        .expect("Failed to connect WebSocket");
+
+    // Give connection time to register
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Check subscriber count with one connection
+    let response = client
+        .get(format!(
+            "http://{}/api/v1/activities/{}/stream/subscribers",
+            addr, activity_id
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .expect("Failed to get subscriber count");
+
+    assert_eq!(response.status().as_u16(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["count"], 1);
+}
+
+#[tokio::test]
+#[serial]
+async fn test_internal_api_full_streaming_flow() {
+    // This test simulates the full streaming flow:
+    // 1. Worker checks for subscribers
+    // 2. Worker streams tokens
+    // 3. Worker sends completion
+    // Verifying the WebSocket client receives all messages in order
+
+    let state = setup_test_state().await;
+    let addr = start_test_server(state).await;
+    let token = get_valid_token(addr).await;
+
+    let activity_id = Uuid::now_v7();
+
+    // Connect WebSocket client first
+    let ws_url = format!(
+        "ws://{}/api/v1/activities/{}/stream?token={}",
+        addr, activity_id, token
+    );
+    let (mut ws_stream, _) = connect_async(&ws_url)
+        .await
+        .expect("Failed to connect WebSocket");
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let client = reqwest::Client::new();
+
+    // Worker checks for subscribers (two-level opt-in)
+    let response = client
+        .get(format!(
+            "http://{}/api/v1/activities/{}/stream/subscribers",
+            addr, activity_id
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .unwrap();
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["count"], 1, "Should have subscriber");
+
+    // Worker streams tokens
+    let tokens = vec!["Hello", ", ", "world", "!"];
+    for (index, text) in tokens.iter().enumerate() {
+        client
+            .post(format!(
+                "http://{}/api/v1/activities/{}/stream/token",
+                addr, activity_id
+            ))
+            .header("Authorization", format!("Bearer {}", token))
+            .json(&serde_json::json!({
+                "text": text,
+                "index": index
+            }))
+            .send()
+            .await
+            .expect("Failed to publish token");
+    }
+
+    // Worker sends completion
+    client
+        .post(format!(
+            "http://{}/api/v1/activities/{}/stream/complete",
+            addr, activity_id
+        ))
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&serde_json::json!({
+            "result": {
+                "content": "Hello, world!",
+                "provider": "anthropic",
+                "model": "claude-3-5-haiku"
+            }
+        }))
+        .send()
+        .await
+        .expect("Failed to send completion");
+
+    // Verify WebSocket received all messages in order
+    let mut received_text = String::new();
+    for expected_index in 0..tokens.len() {
+        let received = timeout(Duration::from_secs(2), ws_stream.next())
+            .await
+            .expect("Should not timeout")
+            .expect("Should receive message")
+            .expect("Message should be valid");
+
+        match received {
+            Message::Text(text) => {
+                let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+                assert_eq!(json["type"], "token");
+                assert_eq!(json["index"], expected_index);
+                received_text.push_str(json["text"].as_str().unwrap());
+            }
+            _ => panic!("Expected text message"),
+        }
+    }
+
+    assert_eq!(received_text, "Hello, world!");
+
+    // Receive completion
+    let received = timeout(Duration::from_secs(2), ws_stream.next())
+        .await
+        .expect("Should not timeout")
+        .expect("Should receive message")
+        .expect("Message should be valid");
+
+    match received {
+        Message::Text(text) => {
+            let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+            assert_eq!(json["type"], "complete");
+            assert_eq!(json["result"]["content"], "Hello, world!");
+        }
+        _ => panic!("Expected complete message"),
+    }
+}
+
+// ============================================================================
 // Message Sequence Test
 // ============================================================================
 

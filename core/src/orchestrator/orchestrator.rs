@@ -1790,6 +1790,7 @@ mod tests {
             iteration_scoped: false,
             iteration_limit: None,
             is_loop_activity: false,
+            streaming: Default::default(),
         }
     }
 

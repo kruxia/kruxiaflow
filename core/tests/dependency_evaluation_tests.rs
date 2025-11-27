@@ -69,6 +69,7 @@ fn test_find_ready_root_activities() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "root2".to_string(),
@@ -82,6 +83,7 @@ fn test_find_ready_root_activities() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
         ],
     };
@@ -116,6 +118,7 @@ fn test_find_ready_sequential_workflow() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "activity2".to_string(),
@@ -133,6 +136,7 @@ fn test_find_ready_sequential_workflow() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "activity3".to_string(),
@@ -150,6 +154,7 @@ fn test_find_ready_sequential_workflow() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
         ],
     };
@@ -248,6 +253,7 @@ fn test_find_ready_parallel_fanout() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "parallel1".to_string(),
@@ -261,6 +267,7 @@ fn test_find_ready_parallel_fanout() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "parallel2".to_string(),
@@ -274,6 +281,7 @@ fn test_find_ready_parallel_fanout() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "parallel3".to_string(),
@@ -287,6 +295,7 @@ fn test_find_ready_parallel_fanout() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
         ],
     };
@@ -332,6 +341,7 @@ fn test_find_ready_parallel_fanin() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "parallel2".to_string(),
@@ -345,6 +355,7 @@ fn test_find_ready_parallel_fanin() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "join".to_string(),
@@ -369,6 +380,7 @@ fn test_find_ready_parallel_fanin() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
         ],
     };
@@ -536,6 +548,7 @@ fn test_conditional_branching() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "approve".to_string(),
@@ -553,6 +566,7 @@ fn test_conditional_branching() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "reject".to_string(),
@@ -570,6 +584,7 @@ fn test_conditional_branching() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
         ],
     };
@@ -715,6 +730,7 @@ fn test_skip_already_scheduled_activities() {
             iteration_scoped: false,
             iteration_limit: None,
             is_loop_activity: false,
+            streaming: Default::default(),
         }],
     };
 
@@ -764,6 +780,7 @@ fn test_failed_activity_without_conditions_blocks_following() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "step2".to_string(),
@@ -781,6 +798,7 @@ fn test_failed_activity_without_conditions_blocks_following() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
         ],
     };
@@ -820,6 +838,7 @@ fn test_failed_activity_with_explicit_condition_allows_following() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "handle_success".to_string(),
@@ -837,6 +856,7 @@ fn test_failed_activity_with_explicit_condition_allows_following() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "handle_failure".to_string(),
@@ -855,6 +875,7 @@ fn test_failed_activity_with_explicit_condition_allows_following() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
         ],
     };
@@ -1048,6 +1069,7 @@ fn test_find_skipped_activities_conditional_branch_not_taken() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "path_a".to_string(),
@@ -1065,6 +1087,7 @@ fn test_find_skipped_activities_conditional_branch_not_taken() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "path_b".to_string(),
@@ -1082,6 +1105,7 @@ fn test_find_skipped_activities_conditional_branch_not_taken() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
         ],
     };
@@ -1127,6 +1151,7 @@ fn test_find_skipped_activities_upstream_failed() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "step2".to_string(),
@@ -1144,6 +1169,7 @@ fn test_find_skipped_activities_upstream_failed() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
         ],
     };
@@ -1180,6 +1206,7 @@ fn test_find_skipped_activities_already_scheduled_not_skipped() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "child".to_string(),
@@ -1197,6 +1224,7 @@ fn test_find_skipped_activities_already_scheduled_not_skipped() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
         ],
     };
@@ -1315,6 +1343,7 @@ fn test_loop_activity_not_ready_when_max_iterations_exceeded() {
             iteration_scoped: false,
             iteration_limit: Some(3), // Max 3 iterations
             is_loop_activity: true,
+            streaming: Default::default(),
         }],
     };
 
@@ -1380,6 +1409,7 @@ fn test_back_edge_first_iteration_auto_satisfied() {
             iteration_scoped: false,
             iteration_limit: Some(5),
             is_loop_activity: true,
+            streaming: Default::default(),
         }],
     };
 
@@ -1439,6 +1469,7 @@ fn test_diamond_dependency_pattern() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "B".to_string(),
@@ -1456,6 +1487,7 @@ fn test_diamond_dependency_pattern() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "C".to_string(),
@@ -1473,6 +1505,7 @@ fn test_diamond_dependency_pattern() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "D".to_string(),
@@ -1497,6 +1530,7 @@ fn test_diamond_dependency_pattern() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
         ],
     };

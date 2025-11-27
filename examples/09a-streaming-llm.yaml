@@ -1,0 +1,80 @@
+name: streaming_llm_example
+description: LLM prompt with token streaming over WebSocket
+
+# This workflow demonstrates:
+# - Token streaming for real-time LLM output
+# - WebSocket-based delivery to connected clients
+# - Two-level opt-in: activity streaming flag + WebSocket subscribers
+# - Provider fallback with streaming support
+
+# Prerequisites:
+# - ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_API_KEY environment variable
+# - API server running for WebSocket connections
+
+# Streaming Architecture:
+#
+# 1. Activity Definition: Set `streaming: true` to enable streaming
+# 2. WebSocket Connection: Client connects to /api/v1/activities/{id}/stream
+# 3. Token Delivery: Worker streams tokens as they're generated
+# 4. Fallback: If no subscribers, falls back to efficient non-streaming
+#
+# Client Connection Flow:
+#
+# 1. Submit workflow via POST /api/v1/workflows
+# 2. Get activity_id from workflow status (GET /api/v1/workflows/{id})
+# 3. Connect to WebSocket: ws://host/api/v1/activities/{activity_id}/stream?token=<jwt>
+# 4. Receive StreamMessage events:
+#    - Token: {"type": "token", "text": "Hello", "index": 0, "timestamp": "..."}
+#    - Complete: {"type": "complete", "activity_id": "...", "result": {...}}
+#    - Error: {"type": "error", "activity_id": "...", "error": "..."}
+
+# Example client (JavaScript):
+#
+# const ws = new WebSocket(
+#   `ws://localhost:8080/api/v1/activities/${activityId}/stream?token=${jwt}`
+# );
+#
+# ws.onmessage = (event) => {
+#   const msg = JSON.parse(event.data);
+#   switch (msg.type) {
+#     case 'token':
+#       process.stdout.write(msg.text); // Print tokens as they arrive
+#       break;
+#     case 'complete':
+#       console.log('\n--- Complete ---');
+#       console.log(msg.result);
+#       break;
+#     case 'error':
+#       console.error('Error:', msg.error);
+#       break;
+#   }
+# };
+
+activities:
+  - key: generate_story
+    worker: builtin
+    activity_name: llm_prompt
+    # Enable streaming for this activity
+    streaming: true
+    parameters:
+      # Provider fallback chain (all support streaming)
+      model:
+        - anthropic/claude-3-5-haiku-20241022
+        - openai/gpt-4o-mini
+        - google/gemini-1.5-flash
+      prompt: |
+        Write a short story about {{INPUT.topic}} in approximately 200 words.
+        Use vivid descriptions and engaging narrative.
+      system_prompt: You are a creative storyteller who crafts engaging narratives.
+      max_tokens: 500
+      temperature: 0.8
+    outputs:
+      - result
+    settings:
+      timeout_seconds: 120
+      retry:
+        max_attempts: 2
+        strategy: exponential
+        base_seconds: 1
+        factor: 2
+        max_seconds: 30

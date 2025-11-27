@@ -440,7 +440,11 @@ impl WorkflowDefinition {
                         (node.to_string(), neighbor.to_string(), None)
                     };
 
-                    loops.push(LoopEdge { from, to, condition });
+                    loops.push(LoopEdge {
+                        from,
+                        to,
+                        condition,
+                    });
                 }
             }
         }
@@ -629,6 +633,11 @@ pub struct ActivityDefinition {
     /// NOT specified in YAML (ignored if present)
     #[serde(default, skip_serializing_if = "is_false")]
     pub is_loop_activity: bool,
+
+    /// Token streaming configuration for LLM activities
+    /// Supports shorthand `streaming: true` or detailed `streaming: { enabled: true }`
+    #[serde(default, skip_serializing_if = "StreamingConfig::is_disabled")]
+    pub streaming: StreamingConfig,
 }
 
 /// Relationship between activities (edge in the directed graph)
@@ -874,6 +883,73 @@ pub enum BudgetAction {
 
     /// Continue with warning
     Continue,
+}
+
+/// Token streaming configuration for LLM activities
+/// Supports both shorthand `streaming: true` and detailed `streaming: { enabled: true }`
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum StreamingConfig {
+    /// Streaming disabled (default)
+    Disabled,
+    /// Shorthand: `streaming: true` or `streaming: false`
+    Simple(bool),
+    /// Detailed: `streaming: { enabled: true }`
+    Detailed(StreamingOptions),
+}
+
+impl Default for StreamingConfig {
+    fn default() -> Self {
+        StreamingConfig::Disabled
+    }
+}
+
+impl<'de> Deserialize<'de> for StreamingConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let value = serde_json::Value::deserialize(deserializer)?;
+
+        match value {
+            serde_json::Value::Bool(b) => Ok(StreamingConfig::Simple(b)),
+            serde_json::Value::Object(_) => {
+                let options: StreamingOptions =
+                    serde_json::from_value(value).map_err(D::Error::custom)?;
+                Ok(StreamingConfig::Detailed(options))
+            }
+            serde_json::Value::Null => Ok(StreamingConfig::Disabled),
+            _ => Err(D::Error::custom(
+                "streaming must be a boolean or object with 'enabled' field",
+            )),
+        }
+    }
+}
+
+impl StreamingConfig {
+    /// Check if streaming is enabled
+    pub fn is_enabled(&self) -> bool {
+        match self {
+            StreamingConfig::Disabled => false,
+            StreamingConfig::Simple(enabled) => *enabled,
+            StreamingConfig::Detailed(options) => options.enabled,
+        }
+    }
+
+    /// Check if streaming is disabled (for serde skip_serializing_if)
+    pub fn is_disabled(&self) -> bool {
+        !self.is_enabled()
+    }
+}
+
+/// Detailed streaming options
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamingOptions {
+    /// Whether streaming is enabled
+    #[serde(default)]
+    pub enabled: bool,
 }
 
 // Legacy type aliases for backward compatibility
@@ -1235,6 +1311,7 @@ mod tests {
                     iteration_scoped: false,
                     iteration_limit: None,
                     is_loop_activity: false,
+                    streaming: Default::default(),
                 },
                 ActivityDefinition {
                     key: "authorize".to_string(),
@@ -1248,6 +1325,7 @@ mod tests {
                     iteration_scoped: false,
                     iteration_limit: None,
                     is_loop_activity: false,
+                    streaming: Default::default(),
                 },
             ],
         };
@@ -1272,6 +1350,7 @@ mod tests {
                     iteration_scoped: false,
                     iteration_limit: None,
                     is_loop_activity: false,
+                    streaming: Default::default(),
                 },
                 ActivityDefinition {
                     key: "step1".to_string(), // Duplicate!
@@ -1285,6 +1364,7 @@ mod tests {
                     iteration_scoped: false,
                     iteration_limit: None,
                     is_loop_activity: false,
+                    streaming: Default::default(),
                 },
             ],
         };
@@ -1321,6 +1401,7 @@ mod tests {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             }],
         };
 
@@ -1357,6 +1438,7 @@ mod tests {
                     iteration_scoped: false,
                     iteration_limit: None,
                     is_loop_activity: false,
+                    streaming: Default::default(),
                 },
                 ActivityDefinition {
                     key: "step2".to_string(),
@@ -1374,6 +1456,7 @@ mod tests {
                     iteration_scoped: false,
                     iteration_limit: None,
                     is_loop_activity: false,
+                    streaming: Default::default(),
                 },
             ],
         };
@@ -1468,6 +1551,7 @@ mod tests {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             }],
         };
 
@@ -1518,6 +1602,7 @@ mod tests {
                     iteration_scoped: true,
                     iteration_limit: Some(10), // Has iteration_limit
                     is_loop_activity: false,
+                    streaming: Default::default(),
                 },
                 ActivityDefinition {
                     key: "evaluate".to_string(),
@@ -1535,6 +1620,7 @@ mod tests {
                     iteration_scoped: true,
                     iteration_limit: None,
                     is_loop_activity: false,
+                    streaming: Default::default(),
                 },
             ],
         };
@@ -1581,6 +1667,7 @@ mod tests {
                     iteration_scoped: true,
                     iteration_limit: None, // No iteration_limit
                     is_loop_activity: false,
+                    streaming: Default::default(),
                 },
                 ActivityDefinition {
                     key: "evaluate".to_string(),
@@ -1598,6 +1685,7 @@ mod tests {
                     iteration_scoped: true,
                     iteration_limit: None,
                     is_loop_activity: false,
+                    streaming: Default::default(),
                 },
             ],
         };
@@ -1633,6 +1721,7 @@ mod tests {
                     iteration_scoped: true,
                     iteration_limit: Some(10), // Has iteration_limit
                     is_loop_activity: false,
+                    streaming: Default::default(),
                 },
                 ActivityDefinition {
                     key: "evaluate".to_string(),
@@ -1650,6 +1739,7 @@ mod tests {
                     iteration_scoped: true,
                     iteration_limit: None,
                     is_loop_activity: false,
+                    streaming: Default::default(),
                 },
             ],
         };
@@ -1681,6 +1771,7 @@ mod tests {
                     iteration_scoped: true,
                     iteration_limit: None, // No iteration_limit
                     is_loop_activity: false,
+                    streaming: Default::default(),
                 },
                 ActivityDefinition {
                     key: "evaluate".to_string(),
@@ -1698,6 +1789,7 @@ mod tests {
                     iteration_scoped: true,
                     iteration_limit: None,
                     is_loop_activity: false,
+                    streaming: Default::default(),
                 },
             ],
         };
@@ -2140,6 +2232,7 @@ activities:
                     iteration_scoped: false,
                     iteration_limit: None,
                     is_loop_activity: false,
+                    streaming: Default::default(),
                 },
                 ActivityDefinition {
                     key: "search".to_string(),
@@ -2164,6 +2257,7 @@ activities:
                     iteration_scoped: true,
                     iteration_limit: Some(10),
                     is_loop_activity: false,
+                    streaming: Default::default(),
                 },
                 ActivityDefinition {
                     key: "evaluate".to_string(),
@@ -2181,6 +2275,7 @@ activities:
                     iteration_scoped: true,
                     iteration_limit: None,
                     is_loop_activity: false,
+                    streaming: Default::default(),
                 },
             ],
         };

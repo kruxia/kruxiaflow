@@ -33,12 +33,13 @@ use axum::{
 };
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
+use utoipa::IntoParams;
 use uuid::Uuid;
 
 use crate::{error::AppError, state::AppState, websocket::StreamMessage};
 
 /// Query parameters for WebSocket connection.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
 pub struct StreamParams {
     /// JWT Bearer token for authentication.
     /// Required since WebSocket upgrade bypasses HTTP auth middleware.
@@ -51,14 +52,26 @@ pub struct StreamParams {
 /// The connection is registered with the ConnectionManager and will receive
 /// broadcast messages for the specified activity.
 ///
-/// # Route
+/// ## WebSocket Protocol
 ///
-/// `GET /api/v1/activities/{activity_id}/stream?token=<jwt>`
-///
-/// # Errors
-///
-/// - `401 Unauthorized`: Missing or invalid token
-/// - `400 Bad Request`: Invalid activity_id format
+/// After connecting, the server sends JSON messages:
+/// - `{"type": "token", "text": "...", "index": N, "timestamp": "..."}` - Incremental output
+/// - `{"type": "complete", "activity_id": "...", "result": {...}, "timestamp": "..."}` - Success
+/// - `{"type": "error", "activity_id": "...", "error": "...", "timestamp": "..."}` - Failure
+#[utoipa::path(
+    get,
+    path = "/api/v1/activities/{activity_id}/stream",
+    tag = "Streaming",
+    params(
+        ("activity_id" = Uuid, Path, description = "Activity ID to stream"),
+        StreamParams
+    ),
+    responses(
+        (status = 101, description = "WebSocket upgrade successful"),
+        (status = 401, description = "Unauthorized - missing or invalid token"),
+        (status = 400, description = "Bad request - invalid activity_id"),
+    )
+)]
 pub async fn activity_stream_handler(
     ws: WebSocketUpgrade,
     Path(activity_id): Path<Uuid>,

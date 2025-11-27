@@ -1,7 +1,9 @@
 use super::provider::*;
 use async_trait::async_trait;
-use futures::stream::Stream;
+use bytes::Bytes;
+use futures::stream::{Stream, StreamExt};
 use reqwest::Client;
+use serde::Deserialize;
 use serde_json::json;
 use std::pin::Pin;
 
@@ -25,6 +27,104 @@ impl GoogleProvider {
             api_key,
             base_url,
         }
+    }
+}
+
+// SSE event types for Google Gemini streaming API
+#[derive(Debug, Deserialize)]
+struct GeminiStreamChunk {
+    candidates: Option<Vec<GeminiCandidate>>,
+    #[allow(dead_code)]
+    #[serde(rename = "usageMetadata")]
+    usage_metadata: Option<GeminiUsageMetadata>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeminiCandidate {
+    content: Option<GeminiContent>,
+    #[serde(rename = "finishReason")]
+    finish_reason: Option<String>,
+    #[allow(dead_code)]
+    index: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeminiContent {
+    parts: Option<Vec<GeminiPart>>,
+    #[allow(dead_code)]
+    role: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeminiPart {
+    text: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeminiUsageMetadata {
+    #[allow(dead_code)]
+    #[serde(rename = "promptTokenCount")]
+    prompt_token_count: Option<u32>,
+    #[allow(dead_code)]
+    #[serde(rename = "candidatesTokenCount")]
+    candidates_token_count: Option<u32>,
+    #[allow(dead_code)]
+    #[serde(rename = "totalTokenCount")]
+    total_token_count: Option<u32>,
+}
+
+/// Parse a single SSE line (after "data: " prefix) into a GeminiStreamChunk
+fn parse_sse_data(data: &str) -> Option<GeminiStreamChunk> {
+    let trimmed = data.trim();
+    if trimmed.is_empty() || trimmed == "[DONE]" {
+        return None;
+    }
+    serde_json::from_str(trimmed).ok()
+}
+
+/// Parse SSE events from a byte chunk, handling partial lines
+struct SseParser {
+    buffer: String,
+}
+
+impl SseParser {
+    fn new() -> Self {
+        Self {
+            buffer: String::new(),
+        }
+    }
+
+    /// Process incoming bytes and return complete events
+    fn process(&mut self, bytes: &Bytes) -> Vec<GeminiStreamChunk> {
+        let text = String::from_utf8_lossy(bytes);
+        self.buffer.push_str(&text);
+
+        let mut events = Vec::new();
+
+        // Process complete lines (Google uses NDJSON-like format with newlines)
+        while let Some(pos) = self.buffer.find("\r\n") {
+            let chunk = self.buffer[..pos].to_string();
+            self.buffer = self.buffer[pos + 2..].to_string();
+
+            // Parse format: "data: {...}" or just "{...}"
+            let data = chunk.strip_prefix("data: ").unwrap_or(&chunk);
+            if let Some(event) = parse_sse_data(data) {
+                events.push(event);
+            }
+        }
+
+        // Also check for single newlines
+        while let Some(pos) = self.buffer.find('\n') {
+            let line = self.buffer[..pos].to_string();
+            self.buffer = self.buffer[pos + 1..].to_string();
+
+            let data = line.strip_prefix("data: ").unwrap_or(&line);
+            if let Some(event) = parse_sse_data(data) {
+                events.push(event);
+            }
+        }
+
+        events
     }
 }
 
@@ -144,12 +244,159 @@ impl LLMProvider for GoogleProvider {
 
     async fn prompt_stream(
         &self,
-        _request: &PromptRequest,
+        request: &PromptRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<PromptChunk>> + Send>>> {
-        // Post-MVP: Implement streaming using Server-Sent Events (SSE)
-        Err(LLMError::ProviderError(
-            "Streaming support is post-MVP".to_string(),
-        ))
+        let mut contents = vec![];
+
+        // Add user prompt
+        contents.push(json!({
+            "role": "user",
+            "parts": [{"text": request.prompt}]
+        }));
+
+        // Build request body
+        let mut body = if let Some(system) = &request.system_prompt {
+            json!({
+                "contents": contents,
+                "systemInstruction": {
+                    "parts": [{"text": system}]
+                }
+            })
+        } else {
+            json!({
+                "contents": contents
+            })
+        };
+
+        // Add generation config
+        let mut generation_config = json!({});
+
+        if let Some(max_tokens) = request.max_tokens {
+            generation_config["maxOutputTokens"] = json!(max_tokens);
+        }
+
+        if let Some(temp) = request.temperature {
+            generation_config["temperature"] = json!(temp);
+        }
+
+        if let Some(top_p) = request.top_p {
+            generation_config["topP"] = json!(top_p);
+        }
+
+        if let Some(stops) = &request.stop_sequences {
+            generation_config["stopSequences"] = json!(stops);
+        }
+
+        if !generation_config.as_object().unwrap().is_empty() {
+            body["generationConfig"] = generation_config;
+        }
+
+        // Use streamGenerateContent endpoint for streaming
+        let url = format!(
+            "{}/v1beta/models/{}:streamGenerateContent?alt=sse",
+            self.base_url, request.model
+        );
+
+        let response = self
+            .client
+            .post(&url)
+            .header("x-goog-api-key", &self.api_key)
+            .header("content-type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(LLMError::ProviderError(error_text));
+        }
+
+        // Create a stream that parses SSE events and yields PromptChunks
+        let byte_stream = response.bytes_stream();
+
+        // State for the stream: byte_stream, parser, pending chunks, finish reason
+        let stream = futures::stream::unfold(
+            (
+                byte_stream,
+                SseParser::new(),
+                Vec::<PromptChunk>::new(),
+                None::<FinishReason>,
+            ),
+            |(mut byte_stream, mut parser, mut pending_chunks, mut finish_reason)| async move {
+                // First, yield any pending chunks
+                if !pending_chunks.is_empty() {
+                    let chunk = pending_chunks.remove(0);
+                    return Some((
+                        Ok(chunk),
+                        (byte_stream, parser, pending_chunks, finish_reason),
+                    ));
+                }
+
+                // Then fetch more data from the stream
+                loop {
+                    match byte_stream.next().await {
+                        Some(Ok(bytes)) => {
+                            let events = parser.process(&bytes);
+                            for event in events {
+                                if let Some(candidates) = &event.candidates {
+                                    if let Some(candidate) = candidates.first() {
+                                        // Extract text from content parts
+                                        if let Some(content) = &candidate.content {
+                                            if let Some(parts) = &content.parts {
+                                                for part in parts {
+                                                    if let Some(text) = &part.text {
+                                                        if !text.is_empty() {
+                                                            pending_chunks.push(PromptChunk {
+                                                                content: text.clone(),
+                                                                finish_reason: None,
+                                                            });
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        // Check for finish reason
+                                        if let Some(reason) = &candidate.finish_reason {
+                                            finish_reason = Some(match reason.as_str() {
+                                                "STOP" => FinishReason::Stop,
+                                                "MAX_TOKENS" => FinishReason::MaxTokens,
+                                                "SAFETY" => FinishReason::ContentFilter,
+                                                _ => FinishReason::Stop,
+                                            });
+
+                                            // Add final chunk with finish reason
+                                            pending_chunks.push(PromptChunk {
+                                                content: String::new(),
+                                                finish_reason: finish_reason.take(),
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+
+                            // If we have pending chunks, yield the first one
+                            if !pending_chunks.is_empty() {
+                                let chunk = pending_chunks.remove(0);
+                                return Some((
+                                    Ok(chunk),
+                                    (byte_stream, parser, pending_chunks, finish_reason),
+                                ));
+                            }
+                        }
+                        Some(Err(e)) => {
+                            return Some((
+                                Err(LLMError::RequestError(e)),
+                                (byte_stream, parser, pending_chunks, finish_reason),
+                            ));
+                        }
+                        None => return None, // Stream ended
+                    }
+                }
+            },
+        );
+
+        Ok(Box::pin(stream))
     }
 
     async fn embed(&self, request: &EmbeddingRequest) -> Result<EmbeddingResponse> {
@@ -224,7 +471,7 @@ impl LLMProvider for GoogleProvider {
 mod tests {
     use super::*;
     use serde_json::json;
-    use wiremock::matchers::{header, method, path_regex};
+    use wiremock::matchers::{header, method, path, path_regex};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
@@ -480,11 +727,87 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_streaming_not_supported() {
-        let provider = GoogleProvider::new("test-key".to_string());
+    async fn test_streaming_success() {
+        let mock_server = MockServer::start().await;
+
+        // SSE response body simulating Google Gemini streaming
+        let sse_body = r#"data: {"candidates":[{"content":{"parts":[{"text":"Hello"}],"role":"model"},"index":0}]}
+
+data: {"candidates":[{"content":{"parts":[{"text":"!"}],"role":"model"},"index":0}]}
+
+data: {"candidates":[{"content":{"parts":[{"text":""}],"role":"model"},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":2,"totalTokenCount":12}}
+
+"#;
+
+        Mock::given(method("POST"))
+            .and(path(
+                "/v1beta/models/gemini-1.5-flash:streamGenerateContent",
+            ))
+            .and(header("x-goog-api-key", "test-key"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(sse_body)
+                    .insert_header("content-type", "text/event-stream"),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let provider = GoogleProvider::with_base_url("test-key".to_string(), mock_server.uri());
+
         let request = PromptRequest {
-            model: "gemini-pro".to_string(),
-            prompt: "test".to_string(),
+            model: "gemini-1.5-flash".to_string(),
+            prompt: "Say hello".to_string(),
+            system_prompt: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            stop_sequences: None,
+        };
+
+        let stream = provider.prompt_stream(&request).await.unwrap();
+
+        // Collect all chunks from the stream
+        let chunks: Vec<_> = stream.collect().await;
+
+        // Should have received text chunks: "Hello", "!", and final chunk with finish reason
+        assert!(
+            chunks.len() >= 2,
+            "Expected at least 2 chunks, got {}",
+            chunks.len()
+        );
+
+        // First chunk should be "Hello"
+        let first = chunks[0].as_ref().unwrap();
+        assert_eq!(first.content, "Hello");
+        assert!(first.finish_reason.is_none());
+
+        // Second chunk should be "!"
+        let second = chunks[1].as_ref().unwrap();
+        assert_eq!(second.content, "!");
+        assert!(second.finish_reason.is_none());
+
+        // Last chunk should have finish reason
+        let last = chunks.last().unwrap().as_ref().unwrap();
+        assert!(matches!(last.finish_reason, Some(FinishReason::Stop)));
+    }
+
+    #[tokio::test]
+    async fn test_streaming_error() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(wiremock::matchers::path_regex(
+                "/v1beta/models/.*:streamGenerateContent",
+            ))
+            .respond_with(ResponseTemplate::new(401).set_body_string("Invalid API key"))
+            .mount(&mock_server)
+            .await;
+
+        let provider = GoogleProvider::with_base_url("invalid-key".to_string(), mock_server.uri());
+
+        let request = PromptRequest {
+            model: "gemini-1.5-flash".to_string(),
+            prompt: "Hello".to_string(),
             system_prompt: None,
             max_tokens: None,
             temperature: None,
@@ -494,8 +817,5 @@ mod tests {
 
         let result = provider.prompt_stream(&request).await;
         assert!(result.is_err());
-        if let Err(e) = result {
-            assert!(e.to_string().contains("Streaming support is post-MVP"));
-        }
     }
 }

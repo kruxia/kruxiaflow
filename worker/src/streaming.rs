@@ -304,6 +304,211 @@ impl StreamSender for CollectingStreamSender {
     }
 }
 
+/// HTTP-based stream sender that publishes tokens via the API server.
+///
+/// This implementation is used by distributed workers that don't have
+/// direct access to the WebSocket ConnectionManager.
+#[derive(Debug)]
+pub struct HttpStreamSender {
+    client: reqwest::Client,
+    api_url: String,
+    activity_id: Uuid,
+    auth_token: Option<String>,
+}
+
+impl HttpStreamSender {
+    /// Create a new HTTP stream sender.
+    ///
+    /// # Arguments
+    ///
+    /// * `api_url` - Base URL of the API server (e.g., "http://localhost:8080")
+    /// * `activity_id` - ID of the activity being executed
+    /// * `auth_token` - Optional JWT token for authentication
+    pub fn new(api_url: String, activity_id: Uuid, auth_token: Option<String>) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            api_url,
+            activity_id,
+            auth_token,
+        }
+    }
+
+    /// Check if there are any WebSocket subscribers for this activity.
+    ///
+    /// Returns `true` if there is at least one subscriber, indicating
+    /// that streaming is worth doing.
+    pub async fn has_subscribers(&self) -> Result<bool, StreamError> {
+        let url = format!(
+            "{}/api/v1/activities/{}/stream/subscribers",
+            self.api_url, self.activity_id
+        );
+
+        let mut request = self.client.get(&url);
+
+        if let Some(token) = &self.auth_token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| StreamError::SendFailed(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(StreamError::SendFailed(format!(
+                "Failed to get subscriber count: {} - {}",
+                status, body
+            )));
+        }
+
+        #[derive(serde::Deserialize)]
+        struct Response {
+            count: usize,
+        }
+
+        let result: Response = response
+            .json()
+            .await
+            .map_err(|e| StreamError::SendFailed(e.to_string()))?;
+
+        Ok(result.count > 0)
+    }
+}
+
+#[async_trait]
+impl StreamSender for HttpStreamSender {
+    async fn send_token(&self, text: &str, index: u32) -> Result<usize, StreamError> {
+        let url = format!(
+            "{}/api/v1/activities/{}/stream/token",
+            self.api_url, self.activity_id
+        );
+
+        #[derive(serde::Serialize)]
+        struct Payload {
+            text: String,
+            index: u32,
+        }
+
+        let payload = Payload {
+            text: text.to_string(),
+            index,
+        };
+
+        let mut request = self.client.post(&url).json(&payload);
+
+        if let Some(token) = &self.auth_token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| StreamError::SendFailed(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(StreamError::SendFailed(format!(
+                "Failed to publish token: {} - {}",
+                status, body
+            )));
+        }
+
+        #[derive(serde::Deserialize)]
+        struct Response {
+            subscribers: usize,
+        }
+
+        let result: Response = response
+            .json()
+            .await
+            .map_err(|e| StreamError::SendFailed(e.to_string()))?;
+
+        Ok(result.subscribers)
+    }
+
+    async fn send_complete(&self, activity_id: Uuid, result: Value) -> Result<usize, StreamError> {
+        let url = format!(
+            "{}/api/v1/activities/{}/stream/complete",
+            self.api_url, activity_id
+        );
+
+        #[derive(serde::Serialize)]
+        struct Payload {
+            result: Value,
+        }
+
+        let payload = Payload { result };
+
+        let mut request = self.client.post(&url).json(&payload);
+
+        if let Some(token) = &self.auth_token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| StreamError::SendFailed(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(StreamError::SendFailed(format!(
+                "Failed to publish completion: {} - {}",
+                status, body
+            )));
+        }
+
+        Ok(0) // Completion endpoint doesn't return subscriber count
+    }
+
+    async fn send_error(&self, activity_id: Uuid, error: &str) -> Result<usize, StreamError> {
+        let url = format!(
+            "{}/api/v1/activities/{}/stream/error",
+            self.api_url, activity_id
+        );
+
+        #[derive(serde::Serialize)]
+        struct Payload {
+            error: String,
+        }
+
+        let payload = Payload {
+            error: error.to_string(),
+        };
+
+        let mut request = self.client.post(&url).json(&payload);
+
+        if let Some(token) = &self.auth_token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| StreamError::SendFailed(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(StreamError::SendFailed(format!(
+                "Failed to publish error: {} - {}",
+                status, body
+            )));
+        }
+
+        Ok(0)
+    }
+
+    async fn close(&self) -> Result<(), StreamError> {
+        // Closing is handled by complete/error endpoints
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -20,6 +20,6 @@ pub use config::WorkerConfig;
 pub use manager::WorkerManager;
 pub use registry::{ActivityImpl, ActivityRegistry};
 pub use streaming::{
-    CollectingStreamSender, NoOpStreamSender, StreamError, StreamSender, StreamToken,
-    StreamingActivity,
+    CollectingStreamSender, HttpStreamSender, NoOpStreamSender, StreamError, StreamSender,
+    StreamToken, StreamingActivity,
 };

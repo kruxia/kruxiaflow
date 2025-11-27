@@ -45,6 +45,7 @@ fn test_workflow_definition_from_core_to_dto() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             workflow::ActivityDefinition {
                 key: "step2".to_string(),
@@ -62,6 +63,7 @@ fn test_workflow_definition_from_core_to_dto() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
         ],
     };
@@ -148,6 +150,7 @@ fn test_workflow_definition_from_dto_to_core() {
             iteration_scoped: false,
             iteration_limit: None,
             is_loop_activity: false,
+            streaming: Default::default(),
         }],
     };
 
@@ -353,6 +356,7 @@ fn test_activity_definition_with_minimal_fields() {
         iteration_scoped: false,
         iteration_limit: None,
         is_loop_activity: false,
+        streaming: Default::default(),
     };
 
     let dto_activity: dto::ActivityDefinition = core_activity.clone().into();
@@ -377,6 +381,7 @@ fn test_activity_definition_with_minimal_fields() {
         iteration_scoped: false,
         iteration_limit: None,
         is_loop_activity: false,
+        streaming: Default::default(),
     };
 
     let core_activity2: workflow::ActivityDefinition = dto_activity2.clone().into();
@@ -418,6 +423,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             workflow::ActivityDefinition {
                 key: "middle1".to_string(),
@@ -451,6 +457,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             workflow::ActivityDefinition {
                 key: "middle2".to_string(),
@@ -490,6 +497,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
             workflow::ActivityDefinition {
                 key: "end".to_string(),
@@ -514,6 +522,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: false,
+                streaming: Default::default(),
             },
         ],
     };
@@ -686,6 +695,7 @@ fn test_activity_with_output_definitions() {
         iteration_scoped: false,
         iteration_limit: None,
         is_loop_activity: false,
+        streaming: Default::default(),
     };
 
     let dto_activity: dto::ActivityDefinition = core_activity.into();
@@ -729,6 +739,7 @@ fn test_activity_with_budget_settings() {
         iteration_scoped: false,
         iteration_limit: None,
         is_loop_activity: false,
+        streaming: Default::default(),
     };
 
     let dto_activity: dto::ActivityDefinition = core_activity.into();
@@ -851,6 +862,7 @@ fn test_activity_with_loop_configuration() {
         iteration_scoped: true,
         iteration_limit: Some(100),
         is_loop_activity: true,
+        streaming: Default::default(),
     };
 
     let dto_activity: dto::ActivityDefinition = core_activity.into();

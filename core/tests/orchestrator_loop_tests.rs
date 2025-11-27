@@ -89,6 +89,7 @@ async fn test_simple_loop_workflow() {
                 iteration_scoped: true,
                 iteration_limit: Some(3),
                 is_loop_activity: true, // Precomputed during validation
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "check".to_string(),
@@ -106,6 +107,7 @@ async fn test_simple_loop_workflow() {
                 iteration_scoped: true,
                 iteration_limit: None,
                 is_loop_activity: true, // Part of loop
+                streaming: Default::default(),
             },
         ],
     };
@@ -302,6 +304,7 @@ async fn test_loop_max_iterations_enforced() {
             iteration_scoped: false,
             iteration_limit: Some(2), // Max 2 iterations
             is_loop_activity: true,
+            streaming: Default::default(),
         }],
     };
 
@@ -472,6 +475,7 @@ async fn test_iteration_counter_without_scoping() {
             iteration_scoped: false, // No iteration scoping
             iteration_limit: Some(3),
             is_loop_activity: true,
+            streaming: Default::default(),
         }],
     };
 
@@ -621,6 +625,7 @@ async fn test_iteration_budget_accumulation() {
             iteration_scoped: true,
             iteration_limit: Some(5),
             is_loop_activity: true,
+            streaming: Default::default(),
         }],
     };
 
@@ -801,6 +806,7 @@ async fn test_loop_pattern_1_fixed_iterations() {
             iteration_scoped: true,
             iteration_limit: Some(3), // Exactly 3 issues
             is_loop_activity: true,
+            streaming: Default::default(),
         }],
     };
 
@@ -944,6 +950,7 @@ async fn test_loop_pattern_2_condition_only() {
                 iteration_scoped: false, // Only need latest value
                 iteration_limit: None,   // No explicit limit (uses default 100)
                 is_loop_activity: true,
+                streaming: Default::default(),
             },
             ActivityDefinition {
                 key: "check".to_string(),
@@ -961,6 +968,7 @@ async fn test_loop_pattern_2_condition_only() {
                 iteration_scoped: false,
                 iteration_limit: None,
                 is_loop_activity: true,
+                streaming: Default::default(),
             },
         ],
     };

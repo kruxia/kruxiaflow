@@ -85,6 +85,10 @@ pub struct ActivityDefinition {
     /// Cached metadata: whether this activity is part of a loop
     #[serde(default)]
     pub is_loop_activity: bool,
+
+    /// Token streaming configuration for LLM activities
+    #[serde(default, skip_serializing_if = "StreamingConfig::is_disabled")]
+    pub streaming: StreamingConfig,
 }
 
 impl From<streamflow_core::workflow::ActivityDefinition> for ActivityDefinition {
@@ -107,6 +111,7 @@ impl From<streamflow_core::workflow::ActivityDefinition> for ActivityDefinition 
             iteration_scoped: def.iteration_scoped,
             iteration_limit: def.iteration_limit,
             is_loop_activity: def.is_loop_activity,
+            streaming: def.streaming.into(),
         }
     }
 }
@@ -131,6 +136,104 @@ impl From<ActivityDefinition> for streamflow_core::workflow::ActivityDefinition 
             iteration_scoped: def.iteration_scoped,
             iteration_limit: def.iteration_limit,
             is_loop_activity: def.is_loop_activity,
+            streaming: def.streaming.into(),
+        }
+    }
+}
+
+/// Token streaming configuration for LLM activities
+/// Supports both shorthand `streaming: true` and detailed `streaming: { enabled: true }`
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(untagged)]
+pub enum StreamingConfig {
+    /// Streaming disabled (default)
+    Disabled,
+    /// Shorthand: `streaming: true` or `streaming: false`
+    Simple(bool),
+    /// Detailed: `streaming: { enabled: true }`
+    Detailed(StreamingOptions),
+}
+
+impl Default for StreamingConfig {
+    fn default() -> Self {
+        StreamingConfig::Disabled
+    }
+}
+
+impl<'de> Deserialize<'de> for StreamingConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
+
+        let value = serde_json::Value::deserialize(deserializer)?;
+
+        match value {
+            serde_json::Value::Bool(b) => Ok(StreamingConfig::Simple(b)),
+            serde_json::Value::Object(_) => {
+                let options: StreamingOptions =
+                    serde_json::from_value(value).map_err(D::Error::custom)?;
+                Ok(StreamingConfig::Detailed(options))
+            }
+            serde_json::Value::Null => Ok(StreamingConfig::Disabled),
+            _ => Err(D::Error::custom(
+                "streaming must be a boolean or object with 'enabled' field",
+            )),
+        }
+    }
+}
+
+impl StreamingConfig {
+    /// Check if streaming is enabled
+    pub fn is_enabled(&self) -> bool {
+        match self {
+            StreamingConfig::Disabled => false,
+            StreamingConfig::Simple(enabled) => *enabled,
+            StreamingConfig::Detailed(options) => options.enabled,
+        }
+    }
+
+    /// Check if streaming is disabled (for serde skip_serializing_if)
+    pub fn is_disabled(&self) -> bool {
+        !self.is_enabled()
+    }
+}
+
+/// Detailed streaming options
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct StreamingOptions {
+    /// Whether streaming is enabled
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+impl From<streamflow_core::workflow::StreamingConfig> for StreamingConfig {
+    fn from(config: streamflow_core::workflow::StreamingConfig) -> Self {
+        match config {
+            streamflow_core::workflow::StreamingConfig::Disabled => StreamingConfig::Disabled,
+            streamflow_core::workflow::StreamingConfig::Simple(b) => StreamingConfig::Simple(b),
+            streamflow_core::workflow::StreamingConfig::Detailed(opts) => {
+                StreamingConfig::Detailed(StreamingOptions {
+                    enabled: opts.enabled,
+                })
+            }
+        }
+    }
+}
+
+impl From<StreamingConfig> for streamflow_core::workflow::StreamingConfig {
+    fn from(config: StreamingConfig) -> Self {
+        match config {
+            StreamingConfig::Disabled => streamflow_core::workflow::StreamingConfig::Disabled,
+            StreamingConfig::Simple(b) => streamflow_core::workflow::StreamingConfig::Simple(b),
+            StreamingConfig::Detailed(opts) => {
+                streamflow_core::workflow::StreamingConfig::Detailed(
+                    streamflow_core::workflow::StreamingOptions {
+                        enabled: opts.enabled,
+                    },
+                )
+            }
         }
     }
 }

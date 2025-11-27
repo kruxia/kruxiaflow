@@ -31,6 +31,7 @@ pub fn create_sequential_workflow(num_activities: usize) -> WorkflowDefinition {
             iteration_scoped: false,
             iteration_limit: None,
             is_loop_activity: false,
+            streaming: Default::default(),
         });
     }
 
@@ -64,6 +65,7 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
             iteration_scoped: false,
             iteration_limit: None,
             is_loop_activity: false,
+            streaming: Default::default(),
         },
     ];
 
@@ -89,6 +91,7 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
             iteration_scoped: false,
             iteration_limit: None,
             is_loop_activity: false,
+            streaming: Default::default(),
         });
     }
 
@@ -113,6 +116,7 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
         iteration_scoped: false,
         iteration_limit: None,
         is_loop_activity: false,
+        streaming: Default::default(),
     });
 
     WorkflowDefinition {

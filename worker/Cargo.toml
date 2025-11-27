@@ -14,8 +14,8 @@ async-trait = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
 
-# HTTP client (for HTTP activity)
-reqwest = { version = "0.12", features = ["json"] }
+# HTTP client (for HTTP activity and SSE streaming)
+reqwest = { version = "0.12", features = ["json", "stream"] }
 
 # Database client (for PostgreSQL activity)
 sqlx = { workspace = true }
