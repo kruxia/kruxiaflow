@@ -952,34 +952,34 @@ streamflow/
   - ✅ Timeout configuration (`timeout_seconds` parameter)
   - ✅ Response parsing: JSON (native), XML/HTML/text (as string), binary (via `download_to_file`)
 
-**US-5.6: Database Operations** ⏳ **50% Complete**
+**US-5.6: Database Operations** ✅ **Complete**
 - **As** a data engineer
 - **I want** built-in database connectors
 - **So that** workflows can query and update databases directly
 - **Acceptance Criteria**:
   - Activities:
     - ✅ `postgres_query` - SELECT, INSERT, UPDATE, DELETE with parameterized queries
-    - 📋 `postgres_transaction` - Multi-statement atomic transactions (~5.5 hours, shares code with postgres_query)
+    - ✅ `postgres_transaction` - Multi-statement atomic transactions with isolation levels
   - ✅ PostgreSQL native: Direct queries to same database
-  - 📋 SQL transactions: `postgres_transaction` for multi-statement atomicity
-  - ✅ Connection pooling built-in (cached by db_url)
+  - ✅ SQL transactions: `postgres_transaction` for multi-statement atomicity
+  - ✅ Connection pooling built-in (cached by db_url, shared between activities)
   - ✅ Parameter binding for SQL injection prevention
+  - ✅ RETURNING clause support for INSERT/UPDATE/DELETE
 - **Deferred to Post-MVP**: Redis and SQLite as activity I/O backends (see `docs/post-mvp.md` Story 1.14)
 - **Implementation Plan**: See `docs/implementation/US-5.6-database-operations.md`
 
-**US-5.7: Notification Activities** 
+**US-5.7: Notification Activities**
 - **As** a platform engineering lead
 - **I want** built-in notification activities
 - **So that** workflows can alert without external services
 - **Acceptance Criteria**:
-  - Activities: 
-    - [ ] `email_send` -- MVP BUILT-IN
-    - `slack_message` - POST-MVP / separate worker
-    - `teams_notify` - POST-MVP / separate worker
-    - `discord_send` - POST-MVP / separate worker
-  - Template support for messages
-  - Retry on delivery failure
-  - Rate limiting to prevent spam
+  - Activities:
+    - [ ] `email_send` - SMTP email with HTML/plain text support
+  - Template support for messages (via standard `{{}}` expressions)
+  - Retry on delivery failure (via activity retry settings)
+  - Rate limiting to prevent spam (per-domain limits)
+- **Deferred to Post-MVP**: `slack_message`, `teams_notify`, `discord_send`, `gchat_send` (see `docs/post-mvp.md` Story 1.15)
+- **Implementation Plan**: See `docs/implementation/US-5.7-notification-activities.md`
 
 **US-5.8: Edge/IoT Activities (Differentiator)** -- POST-MVP / separate worker
 - **As** an edge computing architect
