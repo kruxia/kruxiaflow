@@ -1,0 +1,297 @@
+# Example 10: Order Processing with Email Notification
+#
+# This workflow demonstrates a complete e-commerce order processing flow:
+# - HTTP API calls for inventory validation and payment processing
+# - Atomic database transaction for order recording
+# - HTML email confirmation to the customer
+#
+# What This Example Demonstrates:
+# - http_request activity with auth headers, timeouts, and retries
+# - postgres_transaction activity with multiple statements and RETURNING
+# - email_send activity with HTML content
+# - Sequential dependency chain with conditional execution
+# - Real-world e-commerce order flow
+#
+# Prerequisites:
+# - Inventory API endpoint (or mock like httpbin for testing)
+# - Payment API endpoint (or mock for testing)
+# - PostgreSQL database with orders and inventory tables
+# - SMTP server for sending confirmation emails (Mailhog for testing)
+#
+# Secrets Required:
+# - SECRET.inventory_api_key: API key for inventory service
+# - SECRET.payment_api_key: API key for payment processor
+# - SECRET.db_url: PostgreSQL connection URL
+# - SECRET.smtp_url: SMTP server URL (e.g., smtp://localhost:1025 for Mailhog)
+#
+# Database Setup:
+# CREATE TABLE orders (
+#     id SERIAL PRIMARY KEY,
+#     customer_id TEXT NOT NULL,
+#     customer_email TEXT NOT NULL,
+#     product_id TEXT NOT NULL,
+#     quantity INT NOT NULL,
+#     amount DECIMAL(10,2) NOT NULL,
+#     payment_txn_id TEXT,
+#     reservation_id TEXT,
+#     status TEXT NOT NULL DEFAULT 'pending',
+#     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+# );
+#
+# CREATE TABLE inventory (
+#     product_id TEXT PRIMARY KEY,
+#     available INT NOT NULL DEFAULT 0,
+#     reserved INT NOT NULL DEFAULT 0
+# );
+#
+# Input Schema:
+# {
+#   "customer_id": "cust_123",
+#   "customer_email": "customer@example.com",
+#   "product_id": "prod_456",
+#   "quantity": 2,
+#   "amount": 99.99,
+#   "inventory_api_url": "https://api.inventory.com",
+#   "payment_api_url": "https://api.payment.com"
+# }
+#
+# Workflow Pattern:
+# validate_inventory → reserve_inventory → process_payment → record_order → send_confirmation
+#         ↓                   ↓                  ↓                ↓               ↓
+#    (GET check)        (POST reserve)     (POST charge)   (atomic txn)     (email)
+#
+# Expected Execution Flow:
+#
+# 1. validate_inventory:
+#    - GET /check?product_id=XXX&quantity=N
+#    - Returns { "available": true/false, "stock": N }
+#    - Only proceeds if available == true
+#
+# 2. reserve_inventory (conditional on validate_inventory.available):
+#    - POST /reserve with product_id and quantity
+#    - Returns { "reservation_id": "res_XXX", "expires_at": "..." }
+#    - Holds inventory for payment processing
+#
+# 3. process_payment (depends on successful reservation):
+#    - POST /charge with amount and customer_id
+#    - Returns { "transaction_id": "txn_XXX", "status": "success" }
+#    - Charges customer's payment method
+#
+# 4. record_order (depends on successful payment):
+#    - Atomic transaction with two statements:
+#      a) INSERT into orders table, RETURNING order_id
+#      b) UPDATE inventory.reserved to decrement reserved count
+#    - Transaction ensures both succeed or both rollback
+#
+# 5. send_confirmation (depends on order recording):
+#    - HTML email with order details
+#    - Sent to customer's email address
+#    - Includes order ID, product, quantity, amount, payment ID
+#
+# Error Handling:
+# - If inventory validation fails: workflow stops (no order placed)
+# - If reservation fails: workflow stops (order not processable)
+# - If payment fails: workflow stops (no charge, inventory released)
+# - If database transaction fails: rollback (payment already charged - needs compensation)
+# - If email fails: order still valid (email can be retried manually)
+#
+# Key Features Demonstrated (from mvp-workflows-implementation-plan.md):
+# - http_request with Authorization headers and query params
+# - http_request with configurable timeout (10s, 30s)
+# - http_request with retry settings (exponential backoff)
+# - postgres_transaction with multiple statements
+# - postgres_transaction with RETURNING clause
+# - email_send with HTML body
+# - Conditional depends_on ({{validate_inventory.available == true}})
+# - Sequential workflow with error boundaries
+
+name: order_processing
+description: Process order with API calls, database transaction, and email confirmation
+
+activities:
+  # Step 1: Validate inventory availability
+  - key: validate_inventory
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: GET
+      url: "{{INPUT.inventory_api_url}}/check"
+      query:
+        product_id: "{{INPUT.product_id}}"
+        quantity: "{{INPUT.quantity}}"
+      headers:
+        Authorization: "Bearer {{SECRET.inventory_api_key}}"
+      timeout_seconds: 10
+    outputs:
+      - response
+    settings:
+      retry:
+        max_attempts: 3
+        backoff: exponential
+
+  # Step 2: Reserve inventory (only if available)
+  - key: reserve_inventory
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.inventory_api_url}}/reserve"
+      headers:
+        Authorization: "Bearer {{SECRET.inventory_api_key}}"
+        Content-Type: "application/json"
+      body:
+        product_id: "{{INPUT.product_id}}"
+        quantity: "{{INPUT.quantity}}"
+      timeout_seconds: 10
+    outputs:
+      - response
+    depends_on:
+      - activity_key: validate_inventory
+        condition: "{{validate_inventory.response.available == true}}"
+    settings:
+      retry:
+        max_attempts: 3
+        backoff: exponential
+
+  # Step 3: Process payment
+  - key: process_payment
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.payment_api_url}}/charge"
+      headers:
+        Authorization: "Bearer {{SECRET.payment_api_key}}"
+        Content-Type: "application/json"
+      body:
+        amount: "{{INPUT.amount}}"
+        customer_id: "{{INPUT.customer_id}}"
+        currency: "USD"
+        metadata:
+          product_id: "{{INPUT.product_id}}"
+          quantity: "{{INPUT.quantity}}"
+          reservation_id: "{{reserve_inventory.response.reservation_id}}"
+      timeout_seconds: 30
+    outputs:
+      - response
+    depends_on:
+      - activity_key: reserve_inventory
+    settings:
+      retry:
+        max_attempts: 2
+        backoff: exponential
+
+  # Step 4: Record order in database (atomic transaction)
+  - key: record_order
+    worker: builtin
+    activity_name: postgres_transaction
+    parameters:
+      db_url: "{{SECRET.db_url}}"
+      statements:
+        - query: |
+            INSERT INTO orders
+            (customer_id, customer_email, product_id, quantity, amount, payment_txn_id, reservation_id, status)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'confirmed')
+            RETURNING id as order_id
+          params:
+            - "{{INPUT.customer_id}}"
+            - "{{INPUT.customer_email}}"
+            - "{{INPUT.product_id}}"
+            - "{{INPUT.quantity}}"
+            - "{{INPUT.amount}}"
+            - "{{process_payment.response.transaction_id}}"
+            - "{{reserve_inventory.response.reservation_id}}"
+        - query: |
+            UPDATE inventory
+            SET reserved = reserved - $1,
+                available = available - $1
+            WHERE product_id = $2
+          params:
+            - "{{INPUT.quantity}}"
+            - "{{INPUT.product_id}}"
+    outputs:
+      - result
+    depends_on:
+      - activity_key: process_payment
+
+  # Step 5: Send confirmation email
+  - key: send_confirmation
+    worker: builtin
+    activity_name: email_send
+    parameters:
+      smtp_url: "{{SECRET.smtp_url}}"
+      from: "orders@example.com"
+      to:
+        - "{{INPUT.customer_email}}"
+      subject: "Order Confirmation - #{{record_order.result.results[0].rows[0].order_id}}"
+      html_body: |
+        <html>
+        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+          <div style="background-color: #2e7d32; color: white; padding: 20px; text-align: center;">
+            <h1 style="margin: 0;">Order Confirmed!</h1>
+          </div>
+
+          <div style="padding: 20px;">
+            <p>Dear Customer,</p>
+            <p>Thank you for your order. Here are your order details:</p>
+
+            <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+              <tr style="background-color: #f5f5f5;">
+                <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Order ID</td>
+                <td style="padding: 12px; border: 1px solid #ddd;">#{{record_order.result.results[0].rows[0].order_id}}</td>
+              </tr>
+              <tr>
+                <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Product</td>
+                <td style="padding: 12px; border: 1px solid #ddd;">{{INPUT.product_id}}</td>
+              </tr>
+              <tr style="background-color: #f5f5f5;">
+                <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Quantity</td>
+                <td style="padding: 12px; border: 1px solid #ddd;">{{INPUT.quantity}}</td>
+              </tr>
+              <tr>
+                <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Amount</td>
+                <td style="padding: 12px; border: 1px solid #ddd;">${{INPUT.amount}}</td>
+              </tr>
+              <tr style="background-color: #f5f5f5;">
+                <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Payment ID</td>
+                <td style="padding: 12px; border: 1px solid #ddd;">{{process_payment.response.transaction_id}}</td>
+              </tr>
+              <tr>
+                <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">Status</td>
+                <td style="padding: 12px; border: 1px solid #ddd; color: #2e7d32; font-weight: bold;">Confirmed</td>
+              </tr>
+            </table>
+
+            <p>Your order is being processed and you will receive shipping information soon.</p>
+
+            <p>If you have any questions about your order, please contact our support team.</p>
+
+            <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+
+            <p style="color: #666; font-size: 12px;">
+              This is an automated message from StreamFlow Order Processing.<br>
+              Order placed on {{WORKFLOW.started_at}}
+            </p>
+          </div>
+        </body>
+        </html>
+      text_body: |
+        Order Confirmed!
+
+        Thank you for your order. Here are your order details:
+
+        Order ID: #{{record_order.result.results[0].rows[0].order_id}}
+        Product: {{INPUT.product_id}}
+        Quantity: {{INPUT.quantity}}
+        Amount: ${{INPUT.amount}}
+        Payment ID: {{process_payment.response.transaction_id}}
+        Status: Confirmed
+
+        Your order is being processed and you will receive shipping information soon.
+
+        If you have any questions about your order, please contact our support team.
+
+        ---
+        This is an automated message from StreamFlow Order Processing.
+    depends_on:
+      - activity_key: record_order
