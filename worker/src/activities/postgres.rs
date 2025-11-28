@@ -130,6 +130,22 @@ enum QueryType {
     Delete,
 }
 
+/// Check if SQL contains a RETURNING clause
+/// Handles multiline queries where RETURNING may be on its own line
+fn has_returning_clause(sql_upper: &str) -> bool {
+    // Check for RETURNING followed by whitespace or end of string
+    // This handles cases like:
+    // - "... RETURNING id"
+    // - "...\nRETURNING id"
+    // - "... RETURNING *"
+    sql_upper.contains(" RETURNING ")
+        || sql_upper.contains(" RETURNING\n")
+        || sql_upper.contains("\nRETURNING ")
+        || sql_upper.contains("\nRETURNING\n")
+        || sql_upper.ends_with(" RETURNING")
+        || sql_upper.ends_with("\nRETURNING")
+}
+
 /// Determine query type from SQL statement
 fn determine_query_type(sql: &str) -> QueryType {
     let sql_upper = sql.trim_start().to_uppercase();
@@ -138,21 +154,21 @@ fn determine_query_type(sql: &str) -> QueryType {
         QueryType::Select
     } else if sql_upper.starts_with("INSERT") {
         // Check for RETURNING clause - treat as SELECT to fetch rows
-        if sql_upper.contains(" RETURNING ") || sql_upper.ends_with(" RETURNING") {
+        if has_returning_clause(&sql_upper) {
             QueryType::Select
         } else {
             QueryType::Insert
         }
     } else if sql_upper.starts_with("UPDATE") {
         // Check for RETURNING clause
-        if sql_upper.contains(" RETURNING ") || sql_upper.ends_with(" RETURNING") {
+        if has_returning_clause(&sql_upper) {
             QueryType::Select
         } else {
             QueryType::Update
         }
     } else if sql_upper.starts_with("DELETE") {
         // Check for RETURNING clause
-        if sql_upper.contains(" RETURNING ") || sql_upper.ends_with(" RETURNING") {
+        if has_returning_clause(&sql_upper) {
             QueryType::Select
         } else {
             QueryType::Delete
@@ -499,6 +515,103 @@ mod tests {
     // Helper to create a shared pool cache for tests
     fn test_pool_cache() -> PoolCache {
         new_pool_cache()
+    }
+
+    // ========================================================================
+    // Query Type Detection Tests
+    // ========================================================================
+
+    #[test]
+    fn test_has_returning_clause() {
+        // Note: has_returning_clause expects uppercase input
+        // Space before RETURNING
+        assert!(has_returning_clause(
+            &"INSERT INTO x VALUES (1) RETURNING id".to_uppercase()
+        ));
+
+        // Newline before RETURNING (multiline query)
+        assert!(has_returning_clause(
+            &"INSERT INTO x VALUES (1)\nRETURNING id".to_uppercase()
+        ));
+        assert!(has_returning_clause(
+            &"INSERT INTO x\nVALUES (1)\nRETURNING id".to_uppercase()
+        ));
+
+        // RETURNING at end
+        assert!(has_returning_clause(
+            &"INSERT INTO x VALUES (1) RETURNING".to_uppercase()
+        ));
+        assert!(has_returning_clause(
+            &"INSERT INTO x VALUES (1)\nRETURNING".to_uppercase()
+        ));
+
+        // Should NOT match - RETURNING is part of table/column name
+        assert!(!has_returning_clause(
+            &"INSERT INTO returning_table VALUES (1)".to_uppercase()
+        ));
+        assert!(!has_returning_clause(
+            &"INSERT INTO x_returning VALUES (1)".to_uppercase()
+        ));
+    }
+
+    #[test]
+    fn test_determine_query_type_insert_with_multiline_returning() {
+        // This is the exact format that was failing - multiline with RETURNING on its own line
+        let sql = r#"INSERT INTO orders
+            (customer_id, product_id, quantity)
+            VALUES ($1, $2, $3)
+            RETURNING id as order_id"#;
+
+        matches!(determine_query_type(sql), QueryType::Select);
+    }
+
+    #[test]
+    fn test_determine_query_type_basic() {
+        // SELECT
+        assert!(matches!(
+            determine_query_type("SELECT 1"),
+            QueryType::Select
+        ));
+        assert!(matches!(
+            determine_query_type("WITH cte AS (SELECT 1) SELECT * FROM cte"),
+            QueryType::Select
+        ));
+
+        // INSERT without RETURNING
+        assert!(matches!(
+            determine_query_type("INSERT INTO x VALUES (1)"),
+            QueryType::Insert
+        ));
+
+        // INSERT with RETURNING
+        assert!(matches!(
+            determine_query_type("INSERT INTO x VALUES (1) RETURNING id"),
+            QueryType::Select
+        ));
+
+        // UPDATE without RETURNING
+        assert!(matches!(
+            determine_query_type("UPDATE x SET y = 1"),
+            QueryType::Update
+        ));
+
+        // UPDATE with RETURNING
+        assert!(matches!(
+            determine_query_type("UPDATE x SET y = 1 RETURNING *"),
+            QueryType::Select
+        ));
+
+        // DELETE without RETURNING
+        assert!(matches!(
+            determine_query_type("DELETE FROM x WHERE id = 1"),
+            QueryType::Delete
+        ));
+
+        // DELETE with RETURNING
+        assert!(matches!(
+            determine_query_type("DELETE FROM x WHERE id = 1 RETURNING id"),
+            QueryType::Select
+        ));
     }
 
     // ========================================================================
