@@ -161,7 +161,7 @@ async fn test_websocket_rejects_missing_token() {
     let addr = start_test_server(state).await;
 
     let activity_id = Uuid::now_v7();
-    let url = format!("ws://{}/api/v1/activities/{}/stream", addr, activity_id);
+    let url = format!("ws://{}/api/v1/activities/{}/ws", addr, activity_id);
 
     // Attempt connection without token
     let result = connect_async(&url).await;
@@ -178,7 +178,7 @@ async fn test_websocket_rejects_invalid_token() {
 
     let activity_id = Uuid::now_v7();
     let url = format!(
-        "ws://{}/api/v1/activities/{}/stream?token=invalid_token_here",
+        "ws://{}/api/v1/activities/{}/ws?token=invalid_token_here",
         addr, activity_id
     );
 
@@ -198,7 +198,7 @@ async fn test_websocket_accepts_valid_token() {
 
     let activity_id = Uuid::now_v7();
     let url = format!(
-        "ws://{}/api/v1/activities/{}/stream?token={}",
+        "ws://{}/api/v1/activities/{}/ws?token={}",
         addr, activity_id, token
     );
 
@@ -234,7 +234,7 @@ async fn test_websocket_receives_broadcast_token() {
 
     let activity_id = Uuid::now_v7();
     let url = format!(
-        "ws://{}/api/v1/activities/{}/stream?token={}",
+        "ws://{}/api/v1/activities/{}/ws?token={}",
         addr, activity_id, token
     );
 
@@ -280,7 +280,7 @@ async fn test_websocket_receives_complete_message() {
 
     let activity_id = Uuid::now_v7();
     let url = format!(
-        "ws://{}/api/v1/activities/{}/stream?token={}",
+        "ws://{}/api/v1/activities/{}/ws?token={}",
         addr, activity_id, token
     );
 
@@ -328,7 +328,7 @@ async fn test_websocket_receives_error_message() {
 
     let activity_id = Uuid::now_v7();
     let url = format!(
-        "ws://{}/api/v1/activities/{}/stream?token={}",
+        "ws://{}/api/v1/activities/{}/ws?token={}",
         addr, activity_id, token
     );
 
@@ -377,7 +377,7 @@ async fn test_websocket_multiple_connections_same_activity() {
 
     let activity_id = Uuid::now_v7();
     let url = format!(
-        "ws://{}/api/v1/activities/{}/stream?token={}",
+        "ws://{}/api/v1/activities/{}/ws?token={}",
         addr, activity_id, token
     );
 
@@ -431,11 +431,11 @@ async fn test_websocket_different_activities_isolated() {
     let activity2 = Uuid::now_v7();
 
     let url1 = format!(
-        "ws://{}/api/v1/activities/{}/stream?token={}",
+        "ws://{}/api/v1/activities/{}/ws?token={}",
         addr, activity1, token
     );
     let url2 = format!(
-        "ws://{}/api/v1/activities/{}/stream?token={}",
+        "ws://{}/api/v1/activities/{}/ws?token={}",
         addr, activity2, token
     );
 
@@ -482,7 +482,7 @@ async fn test_websocket_close_all_connections() {
 
     let activity_id = Uuid::now_v7();
     let url = format!(
-        "ws://{}/api/v1/activities/{}/stream?token={}",
+        "ws://{}/api/v1/activities/{}/ws?token={}",
         addr, activity_id, token
     );
 
@@ -512,7 +512,7 @@ async fn test_websocket_cleanup_on_client_disconnect() {
 
     let activity_id = Uuid::now_v7();
     let url = format!(
-        "ws://{}/api/v1/activities/{}/stream?token={}",
+        "ws://{}/api/v1/activities/{}/ws?token={}",
         addr, activity_id, token
     );
 
@@ -563,7 +563,7 @@ async fn test_websocket_many_concurrent_connections() {
 
     let activity_id = Uuid::now_v7();
     let url = format!(
-        "ws://{}/api/v1/activities/{}/stream?token={}",
+        "ws://{}/api/v1/activities/{}/ws?token={}",
         addr, activity_id, token
     );
 
@@ -631,7 +631,7 @@ async fn test_internal_api_publish_token() {
 
     let activity_id = Uuid::now_v7();
     let ws_url = format!(
-        "ws://{}/api/v1/activities/{}/stream?token={}",
+        "ws://{}/api/v1/activities/{}/ws?token={}",
         addr, activity_id, token
     );
 
@@ -647,7 +647,7 @@ async fn test_internal_api_publish_token() {
     let client = reqwest::Client::new();
     let response = client
         .post(format!(
-            "http://{}/api/v1/activities/{}/stream/token",
+            "http://{}/api/v1/activities/{}/ws/token",
             addr, activity_id
         ))
         .header("Authorization", format!("Bearer {}", token))
@@ -690,7 +690,7 @@ async fn test_internal_api_stream_complete() {
 
     let activity_id = Uuid::now_v7();
     let ws_url = format!(
-        "ws://{}/api/v1/activities/{}/stream?token={}",
+        "ws://{}/api/v1/activities/{}/ws?token={}",
         addr, activity_id, token
     );
 
@@ -706,7 +706,7 @@ async fn test_internal_api_stream_complete() {
     let client = reqwest::Client::new();
     let response = client
         .post(format!(
-            "http://{}/api/v1/activities/{}/stream/complete",
+            "http://{}/api/v1/activities/{}/ws/complete",
             addr, activity_id
         ))
         .header("Authorization", format!("Bearer {}", token))
@@ -750,7 +750,7 @@ async fn test_internal_api_stream_error() {
 
     let activity_id = Uuid::now_v7();
     let ws_url = format!(
-        "ws://{}/api/v1/activities/{}/stream?token={}",
+        "ws://{}/api/v1/activities/{}/ws?token={}",
         addr, activity_id, token
     );
 
@@ -766,7 +766,7 @@ async fn test_internal_api_stream_error() {
     let client = reqwest::Client::new();
     let response = client
         .post(format!(
-            "http://{}/api/v1/activities/{}/stream/error",
+            "http://{}/api/v1/activities/{}/ws/error",
             addr, activity_id
         ))
         .header("Authorization", format!("Bearer {}", token))
@@ -810,7 +810,7 @@ async fn test_internal_api_subscriber_count() {
     let client = reqwest::Client::new();
     let response = client
         .get(format!(
-            "http://{}/api/v1/activities/{}/stream/subscribers",
+            "http://{}/api/v1/activities/{}/ws/subscribers",
             addr, activity_id
         ))
         .header("Authorization", format!("Bearer {}", token))
@@ -824,7 +824,7 @@ async fn test_internal_api_subscriber_count() {
 
     // Connect WebSocket client
     let ws_url = format!(
-        "ws://{}/api/v1/activities/{}/stream?token={}",
+        "ws://{}/api/v1/activities/{}/ws?token={}",
         addr, activity_id, token
     );
     let (_ws_stream, _) = connect_async(&ws_url)
@@ -837,7 +837,7 @@ async fn test_internal_api_subscriber_count() {
     // Check subscriber count with one connection
     let response = client
         .get(format!(
-            "http://{}/api/v1/activities/{}/stream/subscribers",
+            "http://{}/api/v1/activities/{}/ws/subscribers",
             addr, activity_id
         ))
         .header("Authorization", format!("Bearer {}", token))
@@ -867,7 +867,7 @@ async fn test_internal_api_full_streaming_flow() {
 
     // Connect WebSocket client first
     let ws_url = format!(
-        "ws://{}/api/v1/activities/{}/stream?token={}",
+        "ws://{}/api/v1/activities/{}/ws?token={}",
         addr, activity_id, token
     );
     let (mut ws_stream, _) = connect_async(&ws_url)
@@ -881,7 +881,7 @@ async fn test_internal_api_full_streaming_flow() {
     // Worker checks for subscribers (two-level opt-in)
     let response = client
         .get(format!(
-            "http://{}/api/v1/activities/{}/stream/subscribers",
+            "http://{}/api/v1/activities/{}/ws/subscribers",
             addr, activity_id
         ))
         .header("Authorization", format!("Bearer {}", token))
@@ -896,7 +896,7 @@ async fn test_internal_api_full_streaming_flow() {
     for (index, text) in tokens.iter().enumerate() {
         client
             .post(format!(
-                "http://{}/api/v1/activities/{}/stream/token",
+                "http://{}/api/v1/activities/{}/ws/token",
                 addr, activity_id
             ))
             .header("Authorization", format!("Bearer {}", token))
@@ -912,7 +912,7 @@ async fn test_internal_api_full_streaming_flow() {
     // Worker sends completion
     client
         .post(format!(
-            "http://{}/api/v1/activities/{}/stream/complete",
+            "http://{}/api/v1/activities/{}/ws/complete",
             addr, activity_id
         ))
         .header("Authorization", format!("Bearer {}", token))
@@ -980,7 +980,7 @@ async fn test_websocket_message_ordering() {
 
     let activity_id = Uuid::now_v7();
     let url = format!(
-        "ws://{}/api/v1/activities/{}/stream?token={}",
+        "ws://{}/api/v1/activities/{}/ws?token={}",
         addr, activity_id, token
     );
 

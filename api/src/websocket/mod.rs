@@ -20,7 +20,7 @@
 //!
 //! # Usage
 //!
-//! Clients connect via: `WS /api/v1/activities/{id}/stream?token=...`
+//! Clients connect via: `WS /api/v1/activities/{id}/ws?token=...`
 //!
 //! Messages are JSON-encoded [`StreamMessage`] variants:
 //! - `Token`: Incremental LLM output

@@ -14,7 +14,7 @@ description: LLM prompt with token streaming over WebSocket
 # Streaming Architecture:
 #
 # 1. Activity Definition: Set `streaming: true` to enable streaming
-# 2. WebSocket Connection: Client connects to /api/v1/activities/{id}/stream
+# 2. WebSocket Connection: Client connects to /api/v1/activities/{id}/ws
 # 3. Token Delivery: Worker streams tokens as they're generated
 # 4. Fallback: If no subscribers, falls back to efficient non-streaming
 #
@@ -22,7 +22,7 @@ description: LLM prompt with token streaming over WebSocket
 #
 # 1. Submit workflow via POST /api/v1/workflows
 # 2. Get activity_id from workflow status (GET /api/v1/workflows/{id})
-# 3. Connect to WebSocket: ws://host/api/v1/activities/{activity_id}/stream?token=<jwt>
+# 3. Connect to WebSocket: ws://host/api/v1/activities/{activity_id}/ws?token=<jwt>
 # 4. Receive StreamMessage events:
 #    - Token: {"type": "token", "text": "Hello", "index": 0, "timestamp": "..."}
 #    - Complete: {"type": "complete", "activity_id": "...", "result": {...}}
@@ -31,7 +31,7 @@ description: LLM prompt with token streaming over WebSocket
 # Example client (JavaScript):
 #
 # const ws = new WebSocket(
-#   `ws://localhost:8080/api/v1/activities/${activityId}/stream?token=${jwt}`
+#   `ws://localhost:8080/api/v1/activities/${activityId}/ws?token=${jwt}`
 # );
 #
 # ws.onmessage = (event) => {

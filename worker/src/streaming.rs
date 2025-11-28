@@ -339,7 +339,7 @@ impl HttpStreamSender {
     /// that streaming is worth doing.
     pub async fn has_subscribers(&self) -> Result<bool, StreamError> {
         let url = format!(
-            "{}/api/v1/activities/{}/stream/subscribers",
+            "{}/api/v1/activities/{}/ws/subscribers",
             self.api_url, self.activity_id
         );
 
@@ -381,7 +381,7 @@ impl HttpStreamSender {
 impl StreamSender for HttpStreamSender {
     async fn send_token(&self, text: &str, index: u32) -> Result<usize, StreamError> {
         let url = format!(
-            "{}/api/v1/activities/{}/stream/token",
+            "{}/api/v1/activities/{}/ws/token",
             self.api_url, self.activity_id
         );
 
@@ -431,7 +431,7 @@ impl StreamSender for HttpStreamSender {
 
     async fn send_complete(&self, activity_id: Uuid, result: Value) -> Result<usize, StreamError> {
         let url = format!(
-            "{}/api/v1/activities/{}/stream/complete",
+            "{}/api/v1/activities/{}/ws/complete",
             self.api_url, activity_id
         );
 
@@ -467,7 +467,7 @@ impl StreamSender for HttpStreamSender {
 
     async fn send_error(&self, activity_id: Uuid, error: &str) -> Result<usize, StreamError> {
         let url = format!(
-            "{}/api/v1/activities/{}/stream/error",
+            "{}/api/v1/activities/{}/ws/error",
             self.api_url, activity_id
         );
 

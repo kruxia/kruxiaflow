@@ -1597,7 +1597,7 @@ activities:
 Build WebSocket infrastructure to support real-time token streaming from LLM activities. This provides the foundation for US-7.1 token streaming.
 
 #### Acceptance Criteria
-- ✅ WebSocket endpoint: `WS /api/v1/activities/{id}/stream`
+- ✅ WebSocket endpoint: `WS /api/v1/activities/{id}/ws`
 - ✅ Authentication: Bearer token in query parameter or initial message
 - ✅ Connection management: Handle 1,000+ concurrent connections
 - ✅ Message format: JSON messages over WebSocket (`{type: "token", ...}`)
@@ -1736,7 +1736,7 @@ activities:
 **Client Connection Flow**:
 1. Submit workflow via `POST /api/v1/workflows`
 2. Get activity_id from workflow status (`GET /api/v1/workflows/{id}`)
-3. Connect to WebSocket: `ws://host/api/v1/activities/{activity_id}/stream?token=<jwt>`
+3. Connect to WebSocket: `ws://host/api/v1/activities/{activity_id}/ws?token=<jwt>`
 4. Receive `StreamMessage` events: `token`, `complete`, `error`
 
 #### Example 9b: Selective Streaming (`examples/09b-streaming-research.yaml`)
@@ -1812,7 +1812,7 @@ activities:
 │         │ register/broadcast           │ tokens                  │
 │         │                              ▼                         │
 │  ┌──────┴──────────────────────────────────────────────────┐    │
-│  │ WS /api/v1/activities/{id}/stream                       │    │
+│  │ WS /api/v1/activities/{id}/ws                       │    │
 │  └─────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
          ▲                              │

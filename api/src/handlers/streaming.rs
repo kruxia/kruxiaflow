@@ -32,7 +32,7 @@ pub struct StreamTokenPayload {
 /// Returns the number of subscribers that received the token.
 #[utoipa::path(
     post,
-    path = "/api/v1/activities/{activity_id}/stream/token",
+    path = "/api/v1/activities/{activity_id}/ws/token",
     tag = "Streaming",
     params(
         ("activity_id" = Uuid, Path, description = "Activity ID to stream token for")
@@ -87,7 +87,7 @@ pub struct StreamCompletePayload {
 /// closes all WebSocket connections for the activity.
 #[utoipa::path(
     post,
-    path = "/api/v1/activities/{activity_id}/stream/complete",
+    path = "/api/v1/activities/{activity_id}/ws/complete",
     tag = "Streaming",
     params(
         ("activity_id" = Uuid, Path, description = "Activity ID to complete")
@@ -145,7 +145,7 @@ pub struct StreamErrorPayload {
 /// closes all WebSocket connections for the activity.
 #[utoipa::path(
     post,
-    path = "/api/v1/activities/{activity_id}/stream/error",
+    path = "/api/v1/activities/{activity_id}/ws/error",
     tag = "Streaming",
     params(
         ("activity_id" = Uuid, Path, description = "Activity ID that encountered an error")
@@ -204,7 +204,7 @@ pub struct PublishResponse {
 /// (two-level opt-in: activity config + subscribers present).
 #[utoipa::path(
     get,
-    path = "/api/v1/activities/{activity_id}/stream/subscribers",
+    path = "/api/v1/activities/{activity_id}/ws/subscribers",
     tag = "Streaming",
     params(
         ("activity_id" = Uuid, Path, description = "Activity ID to check subscribers for")
