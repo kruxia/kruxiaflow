@@ -38,6 +38,19 @@ services:
       timeout: 3s
       retries: 5
 
+  # Mailhog for email testing (US-5.7a email_send activity)
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: streamflow-mailhog
+    ports:
+      - "1025:1025"   # SMTP server
+      - "8025:8025"   # Web UI for viewing emails
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "1025"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   # streamflow serve in deploy mode
   streamflow:
     build:

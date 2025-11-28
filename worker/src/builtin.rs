@@ -3,8 +3,8 @@
 /// This module provides default registration for all built-in activities.
 ///
 use crate::activities::{
-    EchoActivity, EmbeddingActivity, HttpRequestActivity, LLMPromptActivity, PostgresQueryActivity,
-    PostgresTransactionActivity, new_pool_cache,
+    EchoActivity, EmailSendActivity, EmbeddingActivity, HttpRequestActivity, LLMPromptActivity,
+    PostgresQueryActivity, PostgresTransactionActivity, new_pool_cache,
 };
 use crate::registry::ActivityRegistry;
 use std::sync::Arc;
@@ -19,6 +19,7 @@ use streamflow_core::cache::CacheService;
 /// - `builtin.postgres_transaction` - PostgreSQL transaction activity
 /// - `builtin.llm_prompt` - LLM prompt completion activity
 /// - `builtin.embedding` - LLM embedding generation activity
+/// - `builtin.email_send` - Email send activity via SMTP
 ///
 /// # Arguments
 ///
@@ -55,6 +56,9 @@ pub fn register_builtin_activities(cache_service: Arc<dyn CacheService>) -> Acti
     registry.register(Arc::new(LLMPromptActivity::new()));
     registry.register(Arc::new(EmbeddingActivity::new()));
 
+    // Register email activity
+    registry.register(Arc::new(EmailSendActivity::new()));
+
     // Future built-in activities will be registered here:
     // registry.register(Arc::new(S3OperationActivity::new()));
 
@@ -79,8 +83,9 @@ mod tests {
         assert!(activity_types.contains(&"builtin.postgres_transaction".to_string()));
         assert!(activity_types.contains(&"builtin.llm_prompt".to_string()));
         assert!(activity_types.contains(&"builtin.embedding".to_string()));
+        assert!(activity_types.contains(&"builtin.email_send".to_string()));
 
-        // Should have exactly 6 activities
-        assert_eq!(activity_types.len(), 6);
+        // Should have exactly 7 activities
+        assert_eq!(activity_types.len(), 7);
     }
 }

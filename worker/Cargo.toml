@@ -20,6 +20,11 @@ reqwest = { version = "0.12", features = ["json", "stream"] }
 # Database client (for PostgreSQL activity)
 sqlx = { workspace = true }
 
+# Email client (for email activity)
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder"] }
+url = "2.5"
+urlencoding = "2.1"
+
 # UUID and time
 uuid = { workspace = true }
 chrono = { workspace = true }
