@@ -12,6 +12,7 @@ pub mod streaming;
 
 pub use activities::{
     EchoActivity, EmbeddingActivity, HttpRequestActivity, LLMPromptActivity, PostgresQueryActivity,
+    new_pool_cache,
 };
 pub use activity_result::ActivityResult;
 pub use builtin::register_builtin_activities;

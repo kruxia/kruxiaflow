@@ -3074,7 +3074,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "streamflow"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "anyhow",
  "axum",
@@ -3104,7 +3104,7 @@ dependencies = [
 
 [[package]]
 name = "streamflow-api"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3137,7 +3137,7 @@ dependencies = [
 
 [[package]]
 name = "streamflow-core"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3167,7 +3167,7 @@ dependencies = [
 
 [[package]]
 name = "streamflow-dashboard"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "anyhow",
  "axum",
@@ -3183,7 +3183,7 @@ dependencies = [
 
 [[package]]
 name = "streamflow-oauth"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3203,7 +3203,7 @@ dependencies = [
 
 [[package]]
 name = "streamflow-profiling"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "bcrypt",
  "chrono",
@@ -3219,7 +3219,7 @@ dependencies = [
 
 [[package]]
 name = "streamflow-worker"
-version = "0.2.8"
+version = "0.2.9"
 dependencies = [
  "anyhow",
  "async-trait",

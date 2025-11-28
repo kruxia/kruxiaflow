@@ -4,6 +4,7 @@
 ///
 use crate::activities::{
     EchoActivity, EmbeddingActivity, HttpRequestActivity, LLMPromptActivity, PostgresQueryActivity,
+    PostgresTransactionActivity, new_pool_cache,
 };
 use crate::registry::ActivityRegistry;
 use std::sync::Arc;
@@ -15,6 +16,7 @@ use streamflow_core::cache::CacheService;
 /// - `builtin.echo` - Echo activity (for testing)
 /// - `builtin.http_request` - HTTP request activity
 /// - `builtin.postgres_query` - PostgreSQL query activity
+/// - `builtin.postgres_transaction` - PostgreSQL transaction activity
 /// - `builtin.llm_prompt` - LLM prompt completion activity
 /// - `builtin.embedding` - LLM embedding generation activity
 ///
@@ -42,8 +44,12 @@ pub fn register_builtin_activities(cache_service: Arc<dyn CacheService>) -> Acti
     // Register HTTP request activity
     registry.register(Arc::new(HttpRequestActivity::new()));
 
-    // Register PostgreSQL query activity
-    registry.register(Arc::new(PostgresQueryActivity::new()));
+    // Create shared PostgreSQL connection pool cache
+    let pg_pool_cache = new_pool_cache();
+
+    // Register PostgreSQL activities (share pool cache)
+    registry.register(Arc::new(PostgresQueryActivity::new(pg_pool_cache.clone())));
+    registry.register(Arc::new(PostgresTransactionActivity::new(pg_pool_cache)));
 
     // Register LLM activities
     registry.register(Arc::new(LLMPromptActivity::new()));
@@ -70,10 +76,11 @@ mod tests {
         assert!(activity_types.contains(&"builtin.echo".to_string()));
         assert!(activity_types.contains(&"builtin.http_request".to_string()));
         assert!(activity_types.contains(&"builtin.postgres_query".to_string()));
+        assert!(activity_types.contains(&"builtin.postgres_transaction".to_string()));
         assert!(activity_types.contains(&"builtin.llm_prompt".to_string()));
         assert!(activity_types.contains(&"builtin.embedding".to_string()));
 
-        // Should have exactly 5 activities
-        assert_eq!(activity_types.len(), 5);
+        // Should have exactly 6 activities
+        assert_eq!(activity_types.len(), 6);
     }
 }
