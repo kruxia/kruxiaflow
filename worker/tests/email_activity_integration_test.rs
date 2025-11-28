@@ -129,8 +129,7 @@ async fn test_email_send_plain_text() {
         "from": "sender@example.com",
         "to": ["recipient@example.com"],
         "subject": "Test Plain Text Email",
-        "body": "This is a plain text email body.",
-        "content_type": "text/plain"
+        "text_body": "This is a plain text email body."
     });
 
     let result = activity.execute(params).await.unwrap();
@@ -171,8 +170,7 @@ async fn test_email_send_html() {
         "from": "sender@example.com",
         "to": ["recipient@example.com"],
         "subject": "Test HTML Email",
-        "body": "<html><body><h1>Hello</h1><p>This is an HTML email.</p></body></html>",
-        "content_type": "text/html"
+        "html_body": "<html><body><h1>Hello</h1><p>This is an HTML email.</p></body></html>"
     });
 
     let result = activity.execute(params).await.unwrap();
@@ -209,7 +207,7 @@ async fn test_email_send_multiple_recipients() {
         "from": "sender@example.com",
         "to": ["recipient1@example.com", "recipient2@example.com"],
         "subject": "Test Multiple Recipients",
-        "body": "Email to multiple recipients."
+        "text_body": "Email to multiple recipients."
     });
 
     let result = activity.execute(params).await.unwrap();
@@ -247,7 +245,7 @@ async fn test_email_send_with_cc_and_bcc() {
         "cc": ["cc@example.com"],
         "bcc": ["bcc@example.com"],
         "subject": "Test CC and BCC",
-        "body": "Email with CC and BCC recipients."
+        "text_body": "Email with CC and BCC recipients."
     });
 
     let result = activity.execute(params).await.unwrap();
@@ -283,7 +281,7 @@ async fn test_email_send_with_reply_to() {
         "to": ["recipient@example.com"],
         "reply_to": "reply@example.com",
         "subject": "Test Reply-To",
-        "body": "Email with Reply-To header."
+        "text_body": "Email with Reply-To header."
     });
 
     let result = activity.execute(params).await.unwrap();
@@ -307,7 +305,7 @@ async fn test_email_send_empty_recipients_fails() {
         "from": "sender@example.com",
         "to": [],
         "subject": "Test Empty Recipients",
-        "body": "This should fail."
+        "text_body": "This should fail."
     });
 
     let result = activity.execute(params).await;
@@ -330,7 +328,7 @@ async fn test_email_send_invalid_from_address_fails() {
         "from": "not-an-email",
         "to": ["recipient@example.com"],
         "subject": "Test Invalid From",
-        "body": "This should fail."
+        "text_body": "This should fail."
     });
 
     let result = activity.execute(params).await;
@@ -348,7 +346,7 @@ async fn test_email_send_invalid_to_address_fails() {
         "from": "sender@example.com",
         "to": ["not-an-email"],
         "subject": "Test Invalid To",
-        "body": "This should fail."
+        "text_body": "This should fail."
     });
 
     let result = activity.execute(params).await;
@@ -375,7 +373,7 @@ async fn test_email_send_connection_failure() {
         "from": "sender@example.com",
         "to": ["recipient@example.com"],
         "subject": "Test Connection Failure",
-        "body": "This should fail due to connection error."
+        "text_body": "This should fail due to connection error."
     });
 
     let result = activity.execute(params).await;
@@ -392,7 +390,7 @@ async fn test_email_send_invalid_smtp_url() {
         "from": "sender@example.com",
         "to": ["recipient@example.com"],
         "subject": "Test Invalid URL",
-        "body": "This should fail."
+        "text_body": "This should fail."
     });
 
     let result = activity.execute(params).await;
@@ -410,7 +408,7 @@ async fn test_email_send_wrong_scheme() {
         "from": "sender@example.com",
         "to": ["recipient@example.com"],
         "subject": "Test Wrong Scheme",
-        "body": "This should fail."
+        "text_body": "This should fail."
     });
 
     let result = activity.execute(params).await;
@@ -435,13 +433,13 @@ async fn test_email_send_default_content_type() {
 
     let activity = EmailSendActivity::new();
 
-    // Don't specify content_type - should default to text/plain
+    // Use text_body - should be sent as text/plain
     let params = json!({
         "smtp_url": mailhog_smtp_url(),
         "from": "sender@example.com",
         "to": ["recipient@example.com"],
         "subject": "Test Default Content Type",
-        "body": "This should be plain text by default."
+        "text_body": "This should be plain text by default."
     });
 
     let result = activity.execute(params).await.unwrap();

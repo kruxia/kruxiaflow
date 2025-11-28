@@ -229,7 +229,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Idempotency: Activities can only be completed/failed once (409 Conflict if already
     done or timed out / reassigned)
 
-**US-1A.7.5: Convert Monetary Values to Decimal Type** 🎯 **Pre-Production (Required for Financial Accuracy)**
+**US-1A.7.5: Convert Monetary Values to Decimal Type** ✅ **Complete**
 - **As** a platform engineering lead
 - **I want** all monetary values (cost_usd) to use decimal types instead of floating-point
 - **So that** we have exact precision for financial data and avoid rounding errors

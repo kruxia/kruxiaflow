@@ -1,11 +1,13 @@
 # MVP Workflows Implementation Plan
 
-**Version**: 0.2.9
-**Date**: 2025-11-26
-**Status**: Core Complete - Example 10 + US-5.7 Next (Examples 1-9 ✅, US-5.6 ✅, US-7.1 ✅)
+**Version**: 0.3.0
+**Date**: 2025-11-27
+**Status**: ✅ **MVP COMPLETE** - All Examples (1-10) and Core Activities Implemented
 **Test Coverage**: 90.56% (target >90% achieved)
 
 **Recent Updates**:
+- US-5.7a (Email Send) ✅ Complete - SMTP email activity with HTML/text support, TLS modes
+- Example 10 (Order Processing) ✅ Complete - E-commerce workflow with HTTP, transactions, email
 - US-5.6 (Database Operations) ✅ Complete - postgres_query and postgres_transaction with connection pooling
 - Example 9 (Token Streaming) ✅ Complete - Two-workflow series (09a, 09b)
 - US-7.1 (Token Streaming) ✅ Complete - WebSocket-based real-time LLM streaming
@@ -18,9 +20,7 @@
 - US-5.3 (Semantic Caching) ✅ Complete - 100% production ready
 - US-5.1 (Multi-Provider LLM) ✅ Phases 1-5 Complete
 
-**Next Priority**: US-5.7a (email_send activity) → Example 10 (Order Processing with Email Notification)
-
-**MVP Completion**: After US-5.7a + Example 10, the orchestrator and built-in worker are feature-complete.
+**MVP Status**: The orchestrator and built-in worker with all core activities are feature-complete. All 10 examples implemented and tested.
 
 ---
 
@@ -64,6 +64,7 @@ examples/
 ├── 08c-delayed-reminders.yaml          # 8c: Cascading delays (✅ COMPLETE)
 ├── 09a-streaming-llm.yaml              # 9a: Basic LLM token streaming (✅ COMPLETE)
 ├── 09b-streaming-research.yaml         # 9b: Selective streaming workflow (✅ COMPLETE)
+├── 10-order-processing.yaml            # 10: Order processing with email (✅ COMPLETE)
 └── README.md                           # Index of examples with descriptions
 ```
 
@@ -1838,14 +1839,13 @@ activities:
 
 ---
 
-### Example 10: Order Processing with Email Notification 📋 **Next Priority**
-**Duration**: 3-4 days
+### Example 10: Order Processing with Email Notification ✅ **COMPLETE**
+**Duration**: 3-4 days (✅ **COMPLETED** 2025-11-27)
 **Epic 3**: (No new YAML features)
-**Epic 5**: US-5.5 (HTTP ✅), US-5.6 (Database ✅), US-5.7a (email_send 📋)
-**Dependencies**: US-5.7a (email_send activity) must be implemented first
-**Status**: 📋 **NEXT** - Order processing workflow demonstrating HTTP, postgres_transaction, and email_send
+**Epic 5**: US-5.5 (HTTP ✅), US-5.6 (Database ✅), US-5.7a (email_send ✅)
+**Status**: ✅ **COMPLETE** - Order processing workflow demonstrating HTTP, postgres_transaction, and email_send
 
-**Note**: This example completes the MVP. After Example 10 + US-5.7a, the orchestrator and built-in worker with activities are feature-complete.
+**Note**: This example completes the MVP. The orchestrator and built-in worker with all core activities are now feature-complete.
 
 #### Example Workflow: Order Processing with Email Confirmation
 ```yaml
@@ -1986,7 +1986,7 @@ activities:
 #### Built-in Activities Demonstrated
 - ✅ `http_request` - HTTP requests with auth headers, query params, timeouts
 - ✅ `postgres_transaction` - Multi-statement atomic transaction with RETURNING
-- 📋 `email_send` - SMTP email with HTML content (US-5.7a)
+- ✅ `email_send` - SMTP email with HTML/text content (US-5.7a)
 
 #### Implementation Tasks
 
@@ -2007,11 +2007,25 @@ activities:
 3. Verify email delivery via mailhog in test environment
 
 #### Success Criteria
-- [ ] `email_send` activity sends HTML/plain text emails via SMTP
-- [ ] Rate limiting prevents spam (configurable per-domain limits)
-- [ ] Retry behavior correctly classifies transient vs permanent errors
-- [ ] Example 10 workflow executes end-to-end
-- [ ] Order confirmation email received with correct order details
+- [x] `email_send` activity sends HTML/plain text emails via SMTP
+- [ ] Rate limiting prevents spam (configurable per-domain limits) - deferred to post-MVP
+- [x] Retry behavior correctly classifies transient vs permanent errors
+- [x] Example 10 workflow executes end-to-end
+- [x] Order confirmation email received with correct order details
+
+#### Implementation Notes (Completed 2025-11-27)
+- Created `examples/10-order-processing.yaml` demonstrating:
+  - HTTP requests with authorization headers (mock endpoints)
+  - `postgres_transaction` with multiple statements and RETURNING clause
+  - `email_send` with HTML body via Mailhog SMTP
+  - Sequential dependency chain for order processing
+- Created `api/tests/example_10_e2e_test.rs` with:
+  - Full E2E test using mock HTTP endpoints and test database
+  - Verification of database state (orders and inventory tables)
+  - Email delivery verification via Mailhog API
+- Fixed bug in `postgres_transaction` RETURNING clause detection:
+  - Multiline queries with RETURNING on separate line were not detected
+  - Added `has_returning_clause()` helper to handle newlines before RETURNING
 
 #### MVP Completion Note
 After Example 10 is complete, the following MVP components are feature-complete:
