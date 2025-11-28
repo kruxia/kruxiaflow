@@ -112,7 +112,7 @@ flowchart TB
 - `POST /api/v1/activities/{id}/complete` - Report activity completion
 - `POST /api/v1/activities/{id}/fail` - Report activity failure
 - `POST /api/v1/activities/{id}/heartbeat` - Long-running activity heartbeat
-- `WS /api/v1/activities/{id}/stream` - Token streaming for AI activities
+- `WS /api/v1/activities/{id}/ws` - Token streaming for AI activities
 
 *Artifact Management*:
 - `POST /api/v1/workflows/{workflow_id}/artifacts` - Upload artifact

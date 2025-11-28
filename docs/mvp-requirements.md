@@ -268,7 +268,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 - **I want** WebSocket infrastructure to support token-by-token streaming from LLM activities
 - **So that** users see real-time responses (ChatGPT-style UX) in AI workflows
 - **Acceptance Criteria**:
-  - ✅ WebSocket endpoint: `WS /api/v1/activities/{id}/stream`
+  - ✅ WebSocket endpoint: `WS /api/v1/activities/{id}/ws`
   - ✅ Authentication: Bearer token in query parameter or initial message
   - ✅ Connection management: Handle 1,000+ concurrent connections
   - ✅ Message format: `{type: "token", text: "hello", index: 0}` or `{type: "complete", ...}`
@@ -285,9 +285,9 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 - **I want** real-time workflow execution updates via WebSocket
 - **So that** my UI can show live progress without polling
 - **Acceptance Criteria**:
-  - Subscribe to all workflows: `WS /api/v1/ws/workflow_events`
-  - Subscribe to 1 or more workflows: `WS /api/v1/ws/workflow_events?workflow_id=id1,id2...`
-  - Subscribe to specific events: `WS /api/v1/ws/workflow_events?event_type=WorkflowCreated,...`
+  - Subscribe to all workflows: `GET /api/v1/workflow_events/ws`
+  - Subscribe to 1 or more workflows: `GET /api/v1/workflow_events/ws?workflow_id=id1,id2...`
+  - Subscribe to specific events: `GET /api/v1/workflow_events/ws?event_type=WorkflowCreated,...`
   - Stream events (PascalCase): `WorkflowCreated`, `ActivityScheduled`,
     `ActivityCompleted`, `WorkflowCompleted`, `ActivityFailed`, `WorkflowFailed`
   - Event payload: `{event_type, workflow_id, activity_key, timestamp, payload}`

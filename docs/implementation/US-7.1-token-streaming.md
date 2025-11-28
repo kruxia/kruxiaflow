@@ -86,7 +86,7 @@ sequenceDiagram
     participant ConnMgr as ConnectionManager
 
     Note over Client,API: 1. Client establishes WebSocket (US-1A.9a)
-    Client->>API: WS /api/v1/activities/{id}/stream
+    Client->>API: WS /api/v1/activities/{id}/ws
     API->>ConnMgr: Register connection
 
     Note over Worker,LLM: 2. Worker executes LLM activity with streaming
@@ -881,7 +881,7 @@ Pass ConnectionManager to worker:
 // Option 2: Worker has direct access to ConnectionManager (shared state)
 
 // For MVP, use Option 1: Worker publishes via API endpoint
-// POST /api/v1/activities/{id}/stream/token
+// POST /api/v1/activities/{id}/ws/token
 // This keeps built-in worker consistent with external workers
 
 pub async fn publish_stream_token(
@@ -891,7 +891,7 @@ pub async fn publish_stream_token(
 ) -> Result<(), reqwest::Error> {
     let client = reqwest::Client::new();
     client
-        .post(format!("{}/api/v1/activities/{}/stream/token", api_url, activity_id))
+        .post(format!("{}/api/v1/activities/{}/ws/token", api_url, activity_id))
         .json(&serde_json::json!({
             "text": token.text,
             "index": token.index,
@@ -908,7 +908,7 @@ Internal API endpoint for worker to publish tokens:
 
 ```rust
 /// Endpoint for worker to publish streaming tokens
-/// POST /api/v1/activities/{id}/stream/token
+/// POST /api/v1/activities/{id}/ws/token
 pub async fn publish_stream_token(
     Path(activity_id): Path<Uuid>,
     State(state): State<Arc<AppState>>,
@@ -961,7 +961,7 @@ Add streaming example variant of Example 6:
 # This is an explicit opt-in to avoid streaming overhead for activities that don't need it.
 #
 # WebSocket connection:
-# ws://localhost:8080/api/v1/activities/{activity_id}/stream?token=YOUR_TOKEN
+# ws://localhost:8080/api/v1/activities/{activity_id}/ws?token=YOUR_TOKEN
 #
 # Message format:
 # {"type": "token", "text": "Hello", "index": 0, "timestamp": "2025-11-21T..."}
@@ -1019,7 +1019,7 @@ class StreamFlowStreamingClient {
 
   // Subscribe to activity streaming
   async streamActivity(activityId, onToken, onComplete, onError) {
-    const wsUrl = `${this.apiUrl.replace('http', 'ws')}/api/v1/activities/${activityId}/stream?token=${this.token}`;
+    const wsUrl = `${this.apiUrl.replace('http', 'ws')}/api/v1/activities/${activityId}/ws?token=${this.token}`;
 
     const ws = new WebSocket(wsUrl);
 
@@ -1088,7 +1088,7 @@ class StreamFlowStreamingClient:
 
     async def stream_activity(self, activity_id: str, on_token, on_complete, on_error):
         """Subscribe to activity streaming"""
-        ws_url = f"{self.api_url.replace('http', 'ws')}/api/v1/activities/{activity_id}/stream?token={self.token}"
+        ws_url = f"{self.api_url.replace('http', 'ws')}/api/v1/activities/{activity_id}/ws?token={self.token}"
 
         try:
             async with websockets.connect(ws_url) as ws:
@@ -1170,7 +1170,7 @@ Streaming is **disabled by default** to avoid overhead for activities that don't
 3. **Connect WebSocket** before activity executes to stream tokens:
    ```javascript
    const ws = new WebSocket(
-     'ws://localhost:8080/api/v1/activities/{activity_id}/stream?token=YOUR_TOKEN'
+     'ws://localhost:8080/api/v1/activities/{activity_id}/ws?token=YOUR_TOKEN'
    );
    ```
 
@@ -1216,7 +1216,7 @@ async fn test_llm_activity_with_streaming() {
 
     // 3. Connect WebSocket before activity executes
     let ws_url = format!(
-        "ws://localhost/api/v1/activities/{}/stream?token={}",
+        "ws://localhost/api/v1/activities/{}/ws?token={}",
         activity_id, token
     );
     let (mut ws, _) = tokio_tungstenite::connect_async(&ws_url).await.unwrap();
@@ -1267,7 +1267,7 @@ async fn test_streaming_with_multiple_subscribers() {
     let mut clients = Vec::new();
     for _ in 0..10 {
         let ws_url = format!(
-            "ws://localhost/api/v1/activities/{}/stream?token={}",
+            "ws://localhost/api/v1/activities/{}/ws?token={}",
             activity_id, token
         );
         let (ws, _) = tokio_tungstenite::connect_async(&ws_url).await.unwrap();
@@ -1324,7 +1324,7 @@ async fn test_streaming_disabled_by_default() {
 
     // Connect WebSocket subscriber
     let ws_url = format!(
-        "ws://localhost/api/v1/activities/{}/stream?token={}",
+        "ws://localhost/api/v1/activities/{}/ws?token={}",
         activity_id, token
     );
     let (mut ws, _) = tokio_tungstenite::connect_async(&ws_url).await.unwrap();
@@ -1365,7 +1365,7 @@ async fn test_streaming_error_handling() {
     let activity_id = get_first_activity_id(&app, workflow_id, &token).await;
 
     let ws_url = format!(
-        "ws://localhost/api/v1/activities/{}/stream?token={}",
+        "ws://localhost/api/v1/activities/{}/ws?token={}",
         activity_id, token
     );
     let (mut ws, _) = tokio_tungstenite::connect_async(&ws_url).await.unwrap();

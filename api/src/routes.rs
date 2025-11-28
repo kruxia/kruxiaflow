@@ -21,7 +21,7 @@ async fn fallback_404() -> impl IntoResponse {
 /// - GET /health/ready - Readiness probe
 /// - GET /api/v1/info - Service information
 /// - POST /api/v1/oauth/token - OAuth 2.0 token issuance
-/// - GET /api/v1/activities/{id}/stream - WebSocket for activity streaming (auth via query param)
+/// - GET /api/v1/activities/{id}/ws - WebSocket for activity streaming (auth via query param)
 ///
 /// These routes are accessible without HTTP header authentication.
 ///
@@ -39,7 +39,7 @@ pub fn public_routes() -> Router<AppState> {
         .route("/api/v1/oauth/token", post(handlers::token_handler))
         // WebSocket endpoint - auth handled in handler via query param
         .route(
-            "/api/v1/activities/:activity_id/stream",
+            "/api/v1/activities/:activity_id/ws",
             get(handlers::activity_stream_handler),
         )
 }
@@ -122,19 +122,19 @@ pub fn protected_routes() -> Router<AppState> {
         )
         // Streaming APIs (for workers to publish tokens)
         .route(
-            "/api/v1/activities/:activity_id/stream/token",
+            "/api/v1/activities/:activity_id/ws/token",
             post(handlers::publish_stream_token),
         )
         .route(
-            "/api/v1/activities/:activity_id/stream/complete",
+            "/api/v1/activities/:activity_id/ws/complete",
             post(handlers::publish_stream_complete),
         )
         .route(
-            "/api/v1/activities/:activity_id/stream/error",
+            "/api/v1/activities/:activity_id/ws/error",
             post(handlers::publish_stream_error),
         )
         .route(
-            "/api/v1/activities/:activity_id/stream/subscribers",
+            "/api/v1/activities/:activity_id/ws/subscribers",
             get(handlers::get_subscriber_count),
         )
 }

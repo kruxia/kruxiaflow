@@ -5,7 +5,7 @@
 //!
 //! # Endpoint
 //!
-//! `GET /api/v1/activities/{activity_id}/stream?token=<jwt>`
+//! `GET /api/v1/activities/{activity_id}/ws?token=<jwt>`
 //!
 //! # Authentication
 //!
@@ -60,7 +60,7 @@ pub struct StreamParams {
 /// - `{"type": "error", "activity_id": "...", "error": "...", "timestamp": "..."}` - Failure
 #[utoipa::path(
     get,
-    path = "/api/v1/activities/{activity_id}/stream",
+    path = "/api/v1/activities/{activity_id}/ws",
     tag = "Streaming",
     params(
         ("activity_id" = Uuid, Path, description = "Activity ID to stream"),
