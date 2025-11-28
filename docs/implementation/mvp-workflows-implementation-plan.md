@@ -1,11 +1,13 @@
 # MVP Workflows Implementation Plan
 
-**Version**: 0.2.8
+**Version**: 0.2.9
 **Date**: 2025-11-26
-**Status**: Core Complete - Examples 9-10 Next (Examples 1-8 ✅, US-1A.9a ✅, US-7.1 ✅)
+**Status**: Core Complete - Example 10 + US-5.7 Next (Examples 1-9 ✅, US-5.6 ✅, US-7.1 ✅)
 **Test Coverage**: 90.56% (target >90% achieved)
 
 **Recent Updates**:
+- US-5.6 (Database Operations) ✅ Complete - postgres_query and postgres_transaction with connection pooling
+- Example 9 (Token Streaming) ✅ Complete - Two-workflow series (09a, 09b)
 - US-7.1 (Token Streaming) ✅ Complete - WebSocket-based real-time LLM streaming
 - US-1A.9a (WebSocket Infrastructure) ✅ Complete - Foundation for token streaming
 - Example 8 (Activity Scheduling and Delays) ✅ Complete - Three-workflow series (08a, 08b, 08c)
@@ -16,7 +18,9 @@
 - US-5.3 (Semantic Caching) ✅ Complete - 100% production ready
 - US-5.1 (Multi-Provider LLM) ✅ Phases 1-5 Complete
 
-**Next Priority**: Examples 9-10 (Advanced HTTP/GraphQL, additional database operations)
+**Next Priority**: US-5.7a (email_send activity) → Example 10 (Order Processing with Email Notification)
+
+**MVP Completion**: After US-5.7a + Example 10, the orchestrator and built-in worker are feature-complete.
 
 ---
 
@@ -58,6 +62,8 @@ examples/
 ├── 08a-rate-limited-api-calls.yaml     # 8a: Rate limiting with delay (✅ COMPLETE)
 ├── 08b-scheduled-daily-report.yaml     # 8b: Absolute scheduling with scheduled_for (✅ COMPLETE)
 ├── 08c-delayed-reminders.yaml          # 8c: Cascading delays (✅ COMPLETE)
+├── 09a-streaming-llm.yaml              # 9a: Basic LLM token streaming (✅ COMPLETE)
+├── 09b-streaming-research.yaml         # 9b: Selective streaming workflow (✅ COMPLETE)
 └── README.md                           # Index of examples with descriptions
 ```
 
@@ -1584,7 +1590,7 @@ activities:
 ### US-1A.9a: WebSocket Infrastructure for Token Streaming
 **Duration**: ~15 hours (2 days)
 **Epic**: Epic 1A (API Server)
-**Status**: 📋 Next Priority
+**Status**: ✅ **COMPLETE**
 
 #### Overview
 Build WebSocket infrastructure to support real-time token streaming from LLM activities. This provides the foundation for US-7.1 token streaming.
@@ -1634,8 +1640,8 @@ See `docs/implementation/US-1A.9a-websocket-infrastructure.md` for detailed impl
 ### US-7.1: Token Streaming for Real-Time UX
 **Duration**: ~20-30 hours (3-4 days)
 **Epic**: Epic 7 (AI-Native Features)
-**Status**: 📋 Depends on US-1A.9a
-**Dependencies**: US-1A.9a must be complete first
+**Status**: ✅ **COMPLETE**
+**Dependencies**: US-1A.9a (Complete)
 
 #### Overview
 Implement token-by-token streaming from LLM activities (Anthropic, OpenAI, Google) to WebSocket clients, enabling ChatGPT-style real-time UX in workflows.
@@ -1689,10 +1695,11 @@ See `docs/implementation/US-7.1-token-streaming.md` for detailed implementation 
 
 ---
 
-### Example 9: Token Streaming
+### Example 9: Token Streaming ✅ **COMPLETE**
 **Duration**: Included in US-1A.9a + US-7.1 above
 **Epic 3**: US-3.8 (Streaming Activity Flag)
 **Epic 7**: US-7.1 (Token Streaming)
+**Status**: ✅ **COMPLETE** - Two-workflow series (09a, 09b) implemented
 
 #### Example 9a: Basic LLM Streaming (`examples/09a-streaming-llm.yaml`)
 
@@ -1831,15 +1838,19 @@ activities:
 
 ---
 
-### Example 10: Additional HTTP and Database Features
+### Example 10: Order Processing with Email Notification 📋 **Next Priority**
 **Duration**: 3-4 days
 **Epic 3**: (No new YAML features)
-**Epic 5**: US-5.5 (HTTP - Complete), US-5.6 (Database - Complete)
+**Epic 5**: US-5.5 (HTTP ✅), US-5.6 (Database ✅), US-5.7a (email_send 📋)
+**Dependencies**: US-5.7a (email_send activity) must be implemented first
+**Status**: 📋 **NEXT** - Order processing workflow demonstrating HTTP, postgres_transaction, and email_send
 
-#### Example Workflow: API Integration with Transaction
+**Note**: This example completes the MVP. After Example 10 + US-5.7a, the orchestrator and built-in worker with activities are feature-complete.
+
+#### Example Workflow: Order Processing with Email Confirmation
 ```yaml
 name: order_processing
-description: Process order with API calls and database transaction
+description: Process order with API calls, database transaction, and email confirmation
 
 activities:
   validate_inventory:
@@ -1898,12 +1909,13 @@ activities:
   record_order:
     activity: postgres_transaction
     parameters:
+      db_url: "{{SECRET.db_url}}"
       statements:
         - query: |
             INSERT INTO orders
             (customer_id, product_id, quantity, amount, payment_txn_id, created_at)
             VALUES ($1, $2, $3, $4, $5, NOW())
-            RETURNING order_id
+            RETURNING id as order_id
           params:
             - "{{INPUT.customer_id}}"
             - "{{INPUT.product_id}}"
@@ -1923,55 +1935,99 @@ activities:
       - process_payment
 
   send_confirmation:
-    activity: http_request
+    activity: email_send
     parameters:
-      method: POST
-      url: "{{INPUT.notification_webhook}}"
-      body:
-        order_id: "{{record_order.order_id}}"
-        customer_id: "{{INPUT.customer_id}}"
-        status: "confirmed"
+      smtp_url: "{{SECRET.smtp_url}}"
+      from: "orders@example.com"
+      to:
+        - "{{INPUT.customer_email}}"
+      subject: "Order Confirmation - #{{record_order.result.results[0].rows[0].order_id}}"
+      content_type: "text/html"
+      body: |
+        <html>
+        <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #2e7d32;">Order Confirmed!</h2>
+          <p>Thank you for your order. Here are your order details:</p>
+
+          <table style="width: 100%; border-collapse: collapse; margin: 20px 0;">
+            <tr style="background-color: #f5f5f5;">
+              <td style="padding: 10px; border: 1px solid #ddd;"><strong>Order ID</strong></td>
+              <td style="padding: 10px; border: 1px solid #ddd;">#{{record_order.result.results[0].rows[0].order_id}}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border: 1px solid #ddd;"><strong>Product</strong></td>
+              <td style="padding: 10px; border: 1px solid #ddd;">{{INPUT.product_id}}</td>
+            </tr>
+            <tr style="background-color: #f5f5f5;">
+              <td style="padding: 10px; border: 1px solid #ddd;"><strong>Quantity</strong></td>
+              <td style="padding: 10px; border: 1px solid #ddd;">{{INPUT.quantity}}</td>
+            </tr>
+            <tr>
+              <td style="padding: 10px; border: 1px solid #ddd;"><strong>Amount</strong></td>
+              <td style="padding: 10px; border: 1px solid #ddd;">${{INPUT.amount}}</td>
+            </tr>
+            <tr style="background-color: #f5f5f5;">
+              <td style="padding: 10px; border: 1px solid #ddd;"><strong>Payment ID</strong></td>
+              <td style="padding: 10px; border: 1px solid #ddd;">{{process_payment.transaction_id}}</td>
+            </tr>
+          </table>
+
+          <p>If you have any questions, please contact our support team.</p>
+
+          <p style="color: #666; font-size: 12px; margin-top: 30px;">
+            This is an automated message from StreamFlow Order Processing.
+          </p>
+        </body>
+        </html>
     depends_on:
       - record_order
 ```
 
-#### Built-in Activities Implemented
-- ✅ `http_request` - Generic HTTP request (any method)
-- ✅ HTTP authentication patterns:
-  - Bearer token: `Authorization: Bearer {{SECRET.token}}`
-  - Basic auth: `Authorization: Basic <base64(user:pass)>`
-  - API key header: `X-API-Key: {{SECRET.api_key}}`
-  - Custom auth headers
-- ✅ `postgres_transaction` - Multi-statement transaction
-- ✅ `postgres_query` - Execute SQL queries (SELECT, INSERT, UPDATE, DELETE)
+#### Built-in Activities Demonstrated
+- ✅ `http_request` - HTTP requests with auth headers, query params, timeouts
+- ✅ `postgres_transaction` - Multi-statement atomic transaction with RETURNING
+- 📋 `email_send` - SMTP email with HTML content (US-5.7a)
 
 #### Implementation Tasks
-1. HTTP activity enhancements
-   - Generic request method (GET, POST, PUT, DELETE, PATCH)
-   - GraphQL query execution
-   - Full header customization (all HTTP activities)
-   - Basic auth helper (optional: base64 encoding of user:pass)
-   - OAuth 2.0 authentication flow (token exchange)
-   - Request/response logging
-2. PostgreSQL query activity
-   - Support for SELECT, INSERT, UPDATE, DELETE
-   - RETURNING clause support for INSERT/UPDATE/DELETE
-   - Returns result rows for SELECT, metadata for INSERT/UPDATE/DELETE
-3. PostgreSQL transaction support
-   - Multi-statement transactions (BEGIN, COMMIT, ROLLBACK)
-   - RETURNING clause support
-   - Transaction rollback on error
-4. SQLite activity executor
-5. Redis activity executor (get, set, delete, expire)
-6. Connection pooling for databases
-7. End-to-end test: Transaction rollback on error, HTTP auth methods
+
+**Phase 1: US-5.7a - email_send Activity** (Dependency)
+1. Add `lettre` crate to worker/Cargo.toml
+2. Create `worker/src/activities/email.rs` with:
+   - `SmtpConfig::from_url()` - Parse SMTP connection URL
+   - `RateLimiter` - Per-domain rate limiting
+   - `EmailExecutor` - SMTP client wrapper
+   - `EmailSendActivity` - ActivityImpl implementation
+3. Register `email_send` in builtin activities
+4. Unit tests for SMTP URL parsing, rate limiter
+5. Integration test with mailhog
+
+**Phase 2: Example 10 Workflow**
+1. Create `examples/10-order-processing.yaml`
+2. Integration test with mock HTTP endpoints and test database
+3. Verify email delivery via mailhog in test environment
 
 #### Success Criteria
-- ✅ HTTP supports all major methods and auth types
-- ✅ GraphQL queries execute correctly
-- ✅ PostgreSQL transactions commit/rollback atomically
-- ✅ SQLite and Redis activities work
-- ✅ Connection pooling reduces overhead
+- [ ] `email_send` activity sends HTML/plain text emails via SMTP
+- [ ] Rate limiting prevents spam (configurable per-domain limits)
+- [ ] Retry behavior correctly classifies transient vs permanent errors
+- [ ] Example 10 workflow executes end-to-end
+- [ ] Order confirmation email received with correct order details
+
+#### MVP Completion Note
+After Example 10 is complete, the following MVP components are feature-complete:
+- ✅ Event-driven orchestrator with dependency evaluation
+- ✅ Built-in worker with activity execution
+- ✅ Complete built-in activity library:
+  - `echo` (testing)
+  - `http_request` (HTTP operations)
+  - `postgres_query` (database queries)
+  - `postgres_transaction` (atomic transactions)
+  - `llm_prompt` (AI/LLM integration)
+  - `embedding` (vector embeddings)
+  - `email_send` (notifications)
+- ✅ YAML workflow definition language with all planned features
+- ✅ Token streaming for LLM activities
+- ✅ Semantic caching for AI workloads
 
 ---
 
@@ -2476,7 +2532,7 @@ Activities:
   - SELECT: Returns result rows
   - INSERT/UPDATE/DELETE: Returns affected row count and RETURNING clause values
   - Supports parameterized queries for SQL injection prevention
-- `postgres_transaction` - Multi-statement atomic transaction
+- ✅ `postgres_transaction` - Multi-statement atomic transaction
   - Multiple SQL statements executed atomically
   - Automatic rollback on error
   - RETURNING clause support
@@ -2495,14 +2551,14 @@ Activities:
 - `gcs_get` / `gcs_put` / `gcs_list` / `gcs_delete` - Google Cloud Storage
 - `azure_blob_get` / `azure_blob_put` / `azure_blob_list` / `azure_blob_delete` - Azure Blob Storage
 
-### Scripting Activities
-- `python_script` - Execute Python script with file inputs/outputs
+### Notification Activities
+- [ ] `email_send` - MVP
+- `slack_send` (Post-MVP)
+- `discord_send` (Post-MVP)
+- `teams_send` (Post-MVP)
 
-### Notification Activities (Post-MVP)
-- `email_send`
-- `slack_send`
-- `discord_send`
-- `teams_send`
+### Scripting Activities (Post-MVP external worker)
+- `python_script` - Execute Python script with file inputs/outputs
 
 ### Edge/IoT Activities (Post-MVP)
 - `gpio_read` 

@@ -6,4 +6,4 @@ mod postgres;
 pub use echo::EchoActivity;
 pub use http::HttpRequestActivity;
 pub use llm::{EmbeddingActivity, LLMPromptActivity};
-pub use postgres::PostgresQueryActivity;
+pub use postgres::{PostgresQueryActivity, PostgresTransactionActivity, new_pool_cache};

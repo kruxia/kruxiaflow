@@ -2,17 +2,19 @@
 
 **Version**: 0.2.0
 **Date**: November 26, 2025
-**Status**: In Development - Core Complete, Examples 9-10 Next
+**Status**: In Development - Core Complete, US-5.7a + Example 10 → MVP Feature-Complete
 - **Epic 1**: ✅ Complete (Event-Driven Orchestration)
 - **Epic 1A**: ✅ Complete (API Server - 8/9 stories complete, including US-1A.9a WebSocket)
 - **Epic 1B**: ✅ Complete (Built-in Worker)
 - **Epic 1C**: ⏳ Partial (StreamFlow Binary - US-1C.1, US-1C.2, US-1C.7 complete)
-- ✅ **Epic 2**: ✅ Complete (Performance Benchmarking - US-2.1, US-2.2 complete)
-- **Epic 3**: ✅ 80% Complete (YAML Workflows - Examples 1-8 ✅, US-3.4, US-3.5, US-3.7 ✅)
-- **Epic 5**: ⏳ 70% Complete (Built-In Activities - US-5.1, US-5.3, US-5.4, US-5.5, US-5.6 partial)
+- **Epic 2**: ✅ Complete (Performance Benchmarking - US-2.1, US-2.2 complete)
+- **Epic 3**: ✅ 90% Complete (YAML Workflows - Examples 1-9 ✅, Example 10 📋)
+- **Epic 5**: ⏳ 90% Complete (Built-In Activities - US-5.1 ✅, US-5.3 ✅, US-5.4 ✅, US-5.5 ✅, US-5.6 ✅, US-5.7a 📋)
 - **Epic 7**: ✅ US-7.1 Complete (Token Streaming via WebSocket)
+
+**Next**: US-5.7a (email_send) → Example 10 (Order Processing) → MVP orchestrator/worker feature-complete
 **Target Release**: Q1 2026 with full AI-native feature set
-**Test Coverage**: 81.96% (target >90%)
+**Test Coverage**: 82.20% (target >90%)
 
 ---
 
@@ -940,7 +942,7 @@ streamflow/
   - Media processing: `upload` outputs video file → `transcode` consumes video, outputs multiple formats → `distribute` consumes transcoded files
   - Data science: `prepare_data` outputs training dataset → `train_model` consumes dataset, outputs model file → `evaluate` consumes model
 
-**US-5.5: HTTP/REST Operations** ✅ Complete
+**US-5.5: HTTP/REST Operations** ✅ **Complete**
 - **As** a data engineer
 - **I want** built-in HTTP activities without external dependencies
 - **So that** I can call APIs in workflows without custom code
@@ -972,14 +974,17 @@ streamflow/
 - **As** a platform engineering lead
 - **I want** built-in notification activities
 - **So that** workflows can alert without external services
+
+**US-5.7a: Email Notification** 📋 **Next Priority**
 - **Acceptance Criteria**:
   - Activities:
-    - [ ] `email_send` - SMTP email with HTML/plain text support
+    - 📋 `email_send` - SMTP email with HTML/plain text support
   - Template support for messages (via standard `{{}}` expressions)
   - Retry on delivery failure (via activity retry settings)
   - Rate limiting to prevent spam (per-domain limits)
+- **Note**: US-5.7a + Example 10 completes the MVP orchestrator and built-in worker
+- **Implementation Plan**: See `docs/implementation/US-5.7a-email-send.md`
 - **Deferred to Post-MVP**: `slack_message`, `teams_notify`, `discord_send`, `gchat_send` (see `docs/post-mvp.md` Story 1.15)
-- **Implementation Plan**: See `docs/implementation/US-5.7-notification-activities.md`
 
 **US-5.8: Edge/IoT Activities (Differentiator)** -- POST-MVP / separate worker
 - **As** an edge computing architect

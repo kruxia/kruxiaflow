@@ -1,10 +1,9 @@
 # US-5.6: Database Operations Implementation Plan
 
-**Version**: 1.1
+**Version**: 1.2
 **Date**: 2025-11-26
-**Status**: 50% Complete (`postgres_query` ✅, `postgres_transaction` 📋 Pending)
+**Status**: ✅ Complete (`postgres_query` ✅, `postgres_transaction` ✅)
 **Epic**: 5 - Built-In Activity Library
-**Estimated Remaining**: ~5.5 hours
 
 ---
 
@@ -22,11 +21,14 @@ This story implements built-in database connector activities that enable workflo
 | Criterion                                    | Status |
 |----------------------------------------------|--------|
 | `postgres_query` activity                    | ✅     |
-| `postgres_transaction` activity              | 📋     |
+| `postgres_transaction` activity              | ✅     |
 | PostgreSQL native: Direct queries            | ✅     |
-| SQL transactions: Multi-statement atomicity  | 📋     |
+| SQL transactions: Multi-statement atomicity  | ✅     |
 | Connection pooling built-in                  | ✅     |
 | Parameter binding for SQL injection prevention | ✅   |
+| Shared pool cache between activities         | ✅     |
+| Isolation level configuration                | ✅     |
+| RETURNING clause support                     | ✅     |
 
 **Deferred to Post-MVP**: Redis and SQLite as activity I/O backends (see `docs/post-mvp.md` Story 1.14)
 
@@ -122,7 +124,7 @@ For INSERT/UPDATE/DELETE queries:
 
 ---
 
-## Activity 2: `postgres_transaction` 📋 PENDING
+## Activity 2: `postgres_transaction` ✅ COMPLETE
 
 ### Description
 

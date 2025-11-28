@@ -140,7 +140,7 @@ StreamFlow is a high-performance workflow orchestration engine designed for edge
   - Automatic lifecycle management
   - Cross-cutting capability for all activities
 - ⏳ **US-5.5**: HTTP/REST Operations (http_request complete, webhook/GraphQL pending)
-- ⏳ **[US-5.6: Database Operations](docs/implementation/US-5.6-database-operations.md)** (postgres_query ✅, postgres_transaction pending)
+- ✅ **[US-5.6: Database Operations](docs/implementation/US-5.6-database-operations.md)** - postgres_query and postgres_transaction complete
 
 ### Current Focus 🎯
 
