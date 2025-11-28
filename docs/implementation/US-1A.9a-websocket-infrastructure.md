@@ -17,7 +17,7 @@
 
 ### Acceptance Criteria
 
-- ✅ WebSocket endpoint: `WS /api/v1/activities/{id}/stream`
+- ✅ WebSocket endpoint: `WS /api/v1/activities/{id}/ws`
 - ✅ Authentication: Bearer token in query parameter or initial message
 - ✅ Connection management: Handle 1,000+ concurrent connections
 - ✅ Message format: JSON messages over WebSocket (`{type: "token", ...}`)
@@ -39,7 +39,7 @@ sequenceDiagram
     participant Worker as Worker/Activity
     participant LLM as LLM Provider
 
-    Client->>API: WS /api/v1/activities/{id}/stream?token=...
+    Client->>API: WS /api/v1/activities/{id}/ws?token=...
     API->>API: Authenticate Bearer token
     API->>ConnMgr: Register connection for activity_id
     API-->>Client: WebSocket established
@@ -379,7 +379,7 @@ pub struct WebSocketParams {
 }
 
 /// WebSocket endpoint for activity streaming
-/// GET /api/v1/activities/{activity_id}/stream?token=xxx
+/// GET /api/v1/activities/{activity_id}/ws?token=xxx
 pub async fn activity_stream_handler(
     ws: WebSocketUpgrade,
     Path(activity_id): Path<Uuid>,
@@ -463,7 +463,7 @@ pub mod websocket;
 // In router setup:
 let app = Router::new()
     // ... existing routes ...
-    .route("/api/v1/activities/:activity_id/stream", get(handlers::websocket::activity_stream_handler))
+    .route("/api/v1/activities/:activity_id/ws", get(handlers::websocket::activity_stream_handler))
     .with_state(state);
 ```
 
@@ -575,7 +575,7 @@ async fn test_websocket_authentication_required() {
     let client = TestClient::new(app);
 
     let activity_id = Uuid::new_v4();
-    let url = format!("ws://localhost/api/v1/activities/{}/stream", activity_id);
+    let url = format!("ws://localhost/api/v1/activities/{}/ws", activity_id);
 
     // Without token should fail
     let result = connect_async(&url).await;
@@ -590,7 +590,7 @@ async fn test_websocket_connection_and_broadcast() {
 
     let activity_id = Uuid::new_v4();
     let url = format!(
-        "ws://localhost/api/v1/activities/{}/stream?token={}",
+        "ws://localhost/api/v1/activities/{}/ws?token={}",
         activity_id, token
     );
 
@@ -626,7 +626,7 @@ async fn test_concurrent_connections() {
     let mut connections = Vec::new();
     for _ in 0..1000 {
         let url = format!(
-            "ws://localhost/api/v1/activities/{}/stream?token={}",
+            "ws://localhost/api/v1/activities/{}/ws?token={}",
             activity_id, token
         );
         let (ws_stream, _) = connect_async(&url).await.expect("Failed to connect");
@@ -802,7 +802,7 @@ tracing = "0.1"
 ### API Endpoint
 
 ```
-GET /api/v1/activities/{activity_id}/stream?token=<jwt>
+GET /api/v1/activities/{activity_id}/ws?token=<jwt>
 ```
 
 Upgrades to WebSocket. Authentication via query parameter (required for browser compatibility).
