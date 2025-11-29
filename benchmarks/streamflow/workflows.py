@@ -9,15 +9,14 @@ def create_sequential_workflow(num_activities: int) -> dict:
         activity = {
             "key": f"activity_{i}",
             "worker": "builtin",
-            "name": "echo",
+            "activity_name": "echo",
             "parameters": {},
         }
 
-        # Add 'following' relationship (except for last activity)
+        # Add 'dependency_of' relationship (except for last activity)
         if i < num_activities - 1:
-            activity["following"] = [{
+            activity["dependency_of"] = [{
                 "activity_key": f"activity_{i + 1}",
-                "conditions": None,
             }]
 
         activities.append(activity)
@@ -35,10 +34,10 @@ def create_parallel_workflow(num_parallel: int) -> dict:
         {
             "key": "start",
             "worker": "builtin",
-            "name": "echo",
+            "activity_name": "echo",
             "parameters": {},
-            "following": [
-                {"activity_key": f"parallel_{i}", "conditions": None}
+            "dependency_of": [
+                {"activity_key": f"parallel_{i}"}
                 for i in range(num_parallel)
             ],
         }
@@ -49,20 +48,20 @@ def create_parallel_workflow(num_parallel: int) -> dict:
         activities.append({
             "key": f"parallel_{i}",
             "worker": "builtin",
-            "name": "echo",
+            "activity_name": "echo",
             "parameters": {},
-            "preceding": [{"activity_key": "start", "conditions": None}],
-            "following": [{"activity_key": "end", "conditions": None}],
+            "depends_on": [{"activity_key": "start"}],
+            "dependency_of": [{"activity_key": "end"}],
         })
 
     # End activity (fan-in)
     activities.append({
         "key": "end",
         "worker": "builtin",
-        "name": "echo",
+        "activity_name": "echo",
         "parameters": {},
-        "preceding": [
-            {"activity_key": f"parallel_{i}", "conditions": None}
+        "depends_on": [
+            {"activity_key": f"parallel_{i}"}
             for i in range(num_parallel)
         ],
     })

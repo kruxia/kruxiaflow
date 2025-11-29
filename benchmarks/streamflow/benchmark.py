@@ -22,6 +22,13 @@ class BenchmarkMetrics:
     latency_p95_ms: float
     latency_p99_ms: float
     success_rate: float
+    timestamp: str = ""  # ISO 8601 timestamp when benchmark was run
+    # Resource usage metrics
+    container_count: int = 0
+    peak_cpu_percent: float = 0.0
+    avg_cpu_percent: float = 0.0
+    peak_memory_mb: float = 0.0
+    avg_memory_mb: float = 0.0
 
 
 class StreamFlowBenchmark:
