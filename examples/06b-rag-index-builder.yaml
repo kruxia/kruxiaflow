@@ -42,7 +42,7 @@
 # - Input: Array of text chunks (up to 2048 per batch for OpenAI)
 # - Output: Array of 1536-dimensional vectors (one per chunk)
 # - Cost: ~$0.00002 per 1K tokens (extremely cheap!)
-# - The embedding_generate activity handles batching automatically
+# - The embedding activity handles batching automatically
 #
 # Workflow Pattern:
 # generate_embeddings → [store_chunk_1, store_chunk_2, store_chunk_3] → confirm_indexing
@@ -85,7 +85,7 @@
 # - For exact search or small datasets (<10K vectors), use brute force
 #
 # Key Features Demonstrated (from mvp-workflows-implementation-plan.md lines 1057-1070):
-# ✅ embedding_generate activity (US-5.1)
+# ✅ embedding activity (US-5.1)
 # ✅ Array template expressions: Access array elements {{generate_embeddings.embeddings.embeddings[0]}}
 # ✅ Vector type support in PostgreSQL: $2::vector casting
 # ✅ JSONB metadata storage
@@ -99,7 +99,7 @@ description: Build a vector search index by embedding document chunks and storin
 activities:
   # Step 1: Generate embeddings for all document chunks in batch
   - key: generate_embeddings
-    activity_name: embedding_generate
+    activity_name: embedding
     parameters:
       provider: openai
       model: text-embedding-3-small  # 1536 dimensions, $0.00002 per 1K tokens
