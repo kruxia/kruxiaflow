@@ -14,28 +14,26 @@ class TemporalBenchmark:
     def __init__(
         self,
         host: str = "temporal:7233",
-        worker: str = "builtin",
         task_queue: str = "benchmark-queue",
     ):
         self.host = host
-        self.worker = worker
         self.task_queue = task_queue
         self.client: Client | None = None
-        self.worker: Worker | None = None
+        self.worker_instance: Worker | None = None
         self.worker_task: asyncio.Task | None = None
 
     async def setup(self) -> None:
         """Connect to Temporal and start worker"""
-        self.client = await Client.connect(self.host, worker=self.worker)
+        self.client = await Client.connect(self.host)
 
         # Start worker
-        self.worker = Worker(
+        self.worker_instance = Worker(
             self.client,
             task_queue=self.task_queue,
             workflows=[SequentialBench5, SequentialBench3, ParallelBench10],
             activities=[echo_activity],
         )
-        self.worker_task = asyncio.create_task(self.worker.run())
+        self.worker_task = asyncio.create_task(self.worker_instance.run())
 
         # Give worker time to start
         await asyncio.sleep(1.0)

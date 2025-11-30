@@ -1,14 +1,18 @@
-"""Airflow DAG definitions for benchmarking"""
+"""Airflow 3 DAG definitions for benchmarking"""
 
-from datetime import datetime
+import pendulum
 from airflow import DAG
-from operators import EchoOperator
+from airflow.operators.python import PythonOperator
+
+
+def echo_task(**context):
+    """Simple echo task that returns its input"""
+    return context.get("params", {})
 
 
 default_args = {
     "owner": "benchmark",
     "depends_on_past": False,
-    "start_date": datetime(2024, 1, 1),
     "email_on_failure": False,
     "email_on_retry": False,
     "retries": 0,
@@ -19,15 +23,17 @@ default_args = {
 with DAG(
     dag_id="sequential_bench_5",
     default_args=default_args,
-    schedule_interval=None,
+    start_date=pendulum.datetime(2024, 1, 1, tz="UTC"),
+    schedule=None,
     catchup=False,
     max_active_runs=1000,  # Allow many concurrent runs for benchmarking
 ) as sequential_bench_5:
     tasks = []
     for i in range(5):
-        task = EchoOperator(
+        task = PythonOperator(
             task_id=f"echo_{i}",
-            input_data={"activity": i},
+            python_callable=echo_task,
+            params={"activity": i},
         )
         if tasks:
             tasks[-1] >> task
@@ -38,15 +44,17 @@ with DAG(
 with DAG(
     dag_id="sequential_bench_3",
     default_args=default_args,
-    schedule_interval=None,
+    start_date=pendulum.datetime(2024, 1, 1, tz="UTC"),
+    schedule=None,
     catchup=False,
     max_active_runs=1000,  # Allow many concurrent runs for benchmarking
 ) as sequential_bench_3:
     tasks = []
     for i in range(3):
-        task = EchoOperator(
+        task = PythonOperator(
             task_id=f"echo_{i}",
-            input_data={"activity": i},
+            python_callable=echo_task,
+            params={"activity": i},
         )
         if tasks:
             tasks[-1] >> task
@@ -57,27 +65,31 @@ with DAG(
 with DAG(
     dag_id="parallel_bench_10",
     default_args=default_args,
-    schedule_interval=None,
+    start_date=pendulum.datetime(2024, 1, 1, tz="UTC"),
+    schedule=None,
     catchup=False,
     max_active_runs=1000,  # Allow many concurrent runs for benchmarking
 ) as parallel_bench_10:
-    start = EchoOperator(
+    start = PythonOperator(
         task_id="start",
-        input_data={"stage": "start"},
+        python_callable=echo_task,
+        params={"stage": "start"},
     )
 
     parallel_tasks = []
     for i in range(10):
-        task = EchoOperator(
+        task = PythonOperator(
             task_id=f"parallel_{i}",
-            input_data={"activity": i},
+            python_callable=echo_task,
+            params={"activity": i},
         )
         start >> task
         parallel_tasks.append(task)
 
-    end = EchoOperator(
+    end = PythonOperator(
         task_id="end",
-        input_data={"stage": "end"},
+        python_callable=echo_task,
+        params={"stage": "end"},
     )
 
     for task in parallel_tasks:

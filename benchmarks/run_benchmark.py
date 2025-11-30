@@ -4,11 +4,13 @@
 import asyncio
 import json
 import click
+from datetime import datetime, timezone
 from pathlib import Path
 from streamflow.benchmark import StreamFlowBenchmark
 from temporal.benchmark import TemporalBenchmark
 from temporal.workflows import SequentialBench5, SequentialBench3, ParallelBench10
 from shared.report import generate_html_report
+from shared.resource_monitor import ResourceMonitor
 
 
 @click.group()
@@ -18,45 +20,81 @@ def cli():
 
 
 @cli.command()
-@click.option("--platform", type=click.Choice(["streamflow", "temporal", "airflow", "all"]), default="all", help="Platform to benchmark")
+@click.option("--platform", "-p", type=click.Choice(["streamflow", "temporal", "airflow"]), multiple=True, help="Platform(s) to benchmark (can specify multiple)")
 @click.option("--output-dir", type=click.Path(), default="results", help="Output directory for results")
-def run(platform: str, output_dir: str):
+def run(platform: tuple[str, ...], output_dir: str):
     """Run benchmarks"""
-    asyncio.run(run_benchmarks(platform, output_dir))
+    # Default to all platforms if none specified
+    platforms = list(platform) if platform else ["streamflow", "temporal", "airflow"]
+    asyncio.run(run_benchmarks(platforms, output_dir))
 
 
-async def run_benchmarks(platform: str, output_dir: str):
+async def run_benchmarks(platforms: list[str], output_dir: str):
     """Run benchmark suite"""
     results_dir = Path(output_dir)
     results_dir.mkdir(exist_ok=True)
 
+    # Generate timestamp for this benchmark run
+    run_timestamp = datetime.now(timezone.utc)
+    timestamp_iso = run_timestamp.isoformat()
+    timestamp_file = run_timestamp.strftime("%Y%m%d-%H%M%S")
+
+    # Paths for incremental saves
+    json_path = results_dir / f"results-{timestamp_file}.json"
+    html_path = results_dir / f"comparison-{timestamp_file}.html"
+
     all_results = []
+    errors = []
 
-    if platform in ["streamflow", "all"]:
-        streamflow_results = await run_streamflow_benchmarks()
-        all_results.extend(streamflow_results)
+    def save_results():
+        """Save results incrementally"""
+        if all_results:
+            with open(json_path, "w") as f:
+                json.dump([vars(r) for r in all_results], f, indent=2)
+            generate_html_report(all_results, html_path, timestamp_iso)
 
-    if platform in ["temporal", "all"]:
-        temporal_results = await run_temporal_benchmarks()
-        all_results.extend(temporal_results)
+    if "streamflow" in platforms:
+        try:
+            streamflow_results = await run_streamflow_benchmarks(timestamp_iso)
+            all_results.extend(streamflow_results)
+            save_results()
+            click.echo(f"  💾 Incremental save: {json_path}")
+        except Exception as e:
+            click.secho(f"❌ StreamFlow benchmarks failed: {e}", fg="red")
+            errors.append(("streamflow", str(e)))
 
-    # if platform in ["airflow", "all"]:
-    #     airflow_results = await run_airflow_benchmarks()
-    #     all_results.extend(airflow_results)
+    if "temporal" in platforms:
+        try:
+            temporal_results = await run_temporal_benchmarks(timestamp_iso)
+            all_results.extend(temporal_results)
+            save_results()
+            click.echo(f"  💾 Incremental save: {json_path}")
+        except Exception as e:
+            click.secho(f"❌ Temporal benchmarks failed: {e}", fg="red")
+            errors.append(("temporal", str(e)))
 
-    # Save JSON results
-    json_path = results_dir / "results.json"
-    with open(json_path, "w") as f:
-        json.dump([vars(r) for r in all_results], f, indent=2)
-    click.echo(f"\n✅ Results saved to: {json_path}")
+    if "airflow" in platforms:
+        try:
+            airflow_results = await run_airflow_benchmarks(timestamp_iso)
+            all_results.extend(airflow_results)
+            save_results()
+            click.echo(f"  💾 Incremental save: {json_path}")
+        except Exception as e:
+            click.secho(f"❌ Airflow benchmarks failed: {e}", fg="red")
+            errors.append(("airflow", str(e)))
 
-    # Generate HTML report
-    html_path = results_dir / "comparison.html"
-    generate_html_report(all_results, html_path)
-    click.echo(f"✅ HTML report saved to: {html_path}")
+    # Final output
+    if all_results:
+        click.echo(f"\n✅ Results saved to: {json_path}")
+        click.echo(f"✅ HTML report saved to: {html_path}")
+        print_summary(all_results)
+    else:
+        click.secho("\n❌ No benchmark results collected", fg="red")
 
-    # Print summary
-    print_summary(all_results)
+    if errors:
+        click.echo("\nPlatform errors:")
+        for platform, error in errors:
+            click.secho(f"  • {platform}: {error}", fg="red")
 
 
 @cli.command()
@@ -103,7 +141,7 @@ def check():
 
     # Check Airflow
     try:
-        response = httpx.get("http://airflow-webserver:8081/health", timeout=5.0, auth=("admin", "admin"))
+        response = httpx.get("http://airflow-api-server:8080/api/v2/monitor/health", timeout=5.0)
         if response.status_code == 200:
             click.secho("✅ Airflow is accessible", fg="green")
         else:
@@ -169,7 +207,7 @@ def print_summary(all_results):
         click.secho(f"Speedup vs Airflow: {speedup:.1f}x", fg="green" if speedup >= 10 else "yellow", bold=True)
 
 
-async def run_streamflow_benchmarks():
+async def run_streamflow_benchmarks(timestamp: str):
     """Run StreamFlow benchmark scenarios"""
     print("=" * 60)
     print("Running StreamFlow Benchmarks")
@@ -178,46 +216,75 @@ async def run_streamflow_benchmarks():
     benchmark = StreamFlowBenchmark()
     await benchmark.setup()
 
+    # Initialize resource monitor
+    monitor = ResourceMonitor("StreamFlow")
+    monitor.connect()
+
     results = []
 
     # Sequential-5
     print("\n[1/3] Sequential-5: 100 workflows, 10 concurrent...")
+    await monitor.start()
     result = await benchmark.run_scenario(
         "Sequential-5",
         "sequential_bench_5",
         num_workflows=100,
         max_concurrent=10,
     )
+    resource_stats = await monitor.stop()
+    result.timestamp = timestamp
+    result.container_count = resource_stats.container_count
+    result.peak_cpu_percent = resource_stats.peak_cpu_percent
+    result.avg_cpu_percent = resource_stats.avg_cpu_percent
+    result.peak_memory_mb = resource_stats.peak_memory_mb
+    result.avg_memory_mb = resource_stats.avg_memory_mb
     print_result(result)
     results.append(result)
 
     # Parallel-10
     print("\n[2/3] Parallel-10: 50 workflows, 10 concurrent...")
+    await monitor.start()
     result = await benchmark.run_scenario(
         "Parallel-10",
         "parallel_bench_10",
         num_workflows=50,
         max_concurrent=10,
     )
+    resource_stats = await monitor.stop()
+    result.timestamp = timestamp
+    result.container_count = resource_stats.container_count
+    result.peak_cpu_percent = resource_stats.peak_cpu_percent
+    result.avg_cpu_percent = resource_stats.avg_cpu_percent
+    result.peak_memory_mb = resource_stats.peak_memory_mb
+    result.avg_memory_mb = resource_stats.avg_memory_mb
     print_result(result)
     results.append(result)
 
     # High-Concurrency-3
     print("\n[3/3] High-Concurrency-3: 300 workflows, 100 concurrent...")
+    await monitor.start()
     result = await benchmark.run_scenario(
         "High-Concurrency-3",
         "sequential_bench_3",
         num_workflows=300,
         max_concurrent=100,
     )
+    resource_stats = await monitor.stop()
+    result.timestamp = timestamp
+    result.container_count = resource_stats.container_count
+    result.peak_cpu_percent = resource_stats.peak_cpu_percent
+    result.avg_cpu_percent = resource_stats.avg_cpu_percent
+    result.peak_memory_mb = resource_stats.peak_memory_mb
+    result.avg_memory_mb = resource_stats.avg_memory_mb
     print_result(result)
     results.append(result)
 
+    monitor.close()
     await benchmark.cleanup()
     return results
 
 
-async def run_temporal_benchmarks():
+async def run_temporal_benchmarks(timestamp: str):
     """Run Temporal benchmark scenarios"""
     print("\n" + "=" * 60)
     print("Running Temporal Benchmarks")
@@ -226,48 +293,77 @@ async def run_temporal_benchmarks():
     benchmark = TemporalBenchmark()
     await benchmark.setup()
 
+    # Initialize resource monitor
+    monitor = ResourceMonitor("Temporal")
+    monitor.connect()
+
     results = []
 
     # Sequential-5
     print("\n[1/3] Sequential-5: 100 workflows, 10 concurrent...")
+    await monitor.start()
     result = await benchmark.run_scenario(
         "Sequential-5",
         SequentialBench5,
         num_workflows=100,
         max_concurrent=10,
     )
+    resource_stats = await monitor.stop()
+    result.timestamp = timestamp
+    result.container_count = resource_stats.container_count
+    result.peak_cpu_percent = resource_stats.peak_cpu_percent
+    result.avg_cpu_percent = resource_stats.avg_cpu_percent
+    result.peak_memory_mb = resource_stats.peak_memory_mb
+    result.avg_memory_mb = resource_stats.avg_memory_mb
     print_result(result)
     results.append(result)
 
     # Parallel-10
     print("\n[2/3] Parallel-10: 50 workflows, 10 concurrent...")
+    await monitor.start()
     result = await benchmark.run_scenario(
         "Parallel-10",
         ParallelBench10,
         num_workflows=50,
         max_concurrent=10,
     )
+    resource_stats = await monitor.stop()
+    result.timestamp = timestamp
+    result.container_count = resource_stats.container_count
+    result.peak_cpu_percent = resource_stats.peak_cpu_percent
+    result.avg_cpu_percent = resource_stats.avg_cpu_percent
+    result.peak_memory_mb = resource_stats.peak_memory_mb
+    result.avg_memory_mb = resource_stats.avg_memory_mb
     print_result(result)
     results.append(result)
 
     # High-Concurrency-3
     print("\n[3/3] High-Concurrency-3: 300 workflows, 100 concurrent...")
+    await monitor.start()
     result = await benchmark.run_scenario(
         "High-Concurrency-3",
         SequentialBench3,
         num_workflows=300,
         max_concurrent=100,
     )
+    resource_stats = await monitor.stop()
+    result.timestamp = timestamp
+    result.container_count = resource_stats.container_count
+    result.peak_cpu_percent = resource_stats.peak_cpu_percent
+    result.avg_cpu_percent = resource_stats.avg_cpu_percent
+    result.peak_memory_mb = resource_stats.peak_memory_mb
+    result.avg_memory_mb = resource_stats.avg_memory_mb
     print_result(result)
     results.append(result)
 
+    monitor.close()
     await benchmark.cleanup()
     return results
 
 
-async def run_airflow_benchmarks():
+async def run_airflow_benchmarks(timestamp: str):
     """Run Airflow benchmark scenarios"""
-    from airflow.benchmark import AirflowBenchmark
+    from airflow_bench.benchmark import AirflowBenchmark
 
     print("\n" + "=" * 60)
     print("Running Airflow Benchmarks")
@@ -276,41 +372,70 @@ async def run_airflow_benchmarks():
     benchmark = AirflowBenchmark()
     await benchmark.setup()
 
+    # Initialize resource monitor
+    monitor = ResourceMonitor("Airflow")
+    monitor.connect()
+
     results = []
 
     # Sequential-5
     print("\n[1/3] Sequential-5: 100 workflows, 10 concurrent...")
+    await monitor.start()
     result = await benchmark.run_scenario(
         "Sequential-5",
         "sequential_bench_5",
         num_workflows=100,
         max_concurrent=10,
     )
+    resource_stats = await monitor.stop()
+    result.timestamp = timestamp
+    result.container_count = resource_stats.container_count
+    result.peak_cpu_percent = resource_stats.peak_cpu_percent
+    result.avg_cpu_percent = resource_stats.avg_cpu_percent
+    result.peak_memory_mb = resource_stats.peak_memory_mb
+    result.avg_memory_mb = resource_stats.avg_memory_mb
     print_result(result)
     results.append(result)
 
     # Parallel-10
     print("\n[2/3] Parallel-10: 50 workflows, 10 concurrent...")
+    await monitor.start()
     result = await benchmark.run_scenario(
         "Parallel-10",
         "parallel_bench_10",
         num_workflows=50,
         max_concurrent=10,
     )
+    resource_stats = await monitor.stop()
+    result.timestamp = timestamp
+    result.container_count = resource_stats.container_count
+    result.peak_cpu_percent = resource_stats.peak_cpu_percent
+    result.avg_cpu_percent = resource_stats.avg_cpu_percent
+    result.peak_memory_mb = resource_stats.peak_memory_mb
+    result.avg_memory_mb = resource_stats.avg_memory_mb
     print_result(result)
     results.append(result)
 
     # High-Concurrency-3
     print("\n[3/3] High-Concurrency-3: 300 workflows, 100 concurrent...")
+    await monitor.start()
     result = await benchmark.run_scenario(
         "High-Concurrency-3",
         "sequential_bench_3",
         num_workflows=300,
         max_concurrent=100,
     )
+    resource_stats = await monitor.stop()
+    result.timestamp = timestamp
+    result.container_count = resource_stats.container_count
+    result.peak_cpu_percent = resource_stats.peak_cpu_percent
+    result.avg_cpu_percent = resource_stats.avg_cpu_percent
+    result.peak_memory_mb = resource_stats.peak_memory_mb
+    result.avg_memory_mb = resource_stats.avg_memory_mb
     print_result(result)
     results.append(result)
 
+    monitor.close()
     await benchmark.cleanup()
     return results
 
@@ -321,6 +446,8 @@ def print_result(result):
     print(f"  P50 Latency: {result.latency_p50_ms:.1f} ms")
     print(f"  P99 Latency: {result.latency_p99_ms:.1f} ms")
     print(f"  Success Rate: {result.success_rate:.1f}%")
+    if result.container_count > 0:
+        print(f"  Containers: {result.container_count}, Peak CPU: {result.peak_cpu_percent:.1f}%, Avg Memory: {result.avg_memory_mb:.1f} MB")
 
 
 if __name__ == "__main__":
