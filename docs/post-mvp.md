@@ -1874,6 +1874,98 @@ class TestPaymentWorkflow(WorkflowTest):
 
 ---
 
+### Story 4.9: SQLite Support as Artifact-Based Activities
+
+**Priority**: P3 (Lower - Specialized use cases)
+
+**As** a workflow developer
+**I want** to work with SQLite databases in my workflows
+**So that** I can process, transform, and analyze data stored in SQLite files
+
+**Challenge**: SQLite is file-based, not server-based, which creates a fundamental mismatch with StreamFlow's distributed worker architecture:
+- Workers may run on different machines
+- No server/client architecture to connect to
+- Concurrent access requires file system coordination
+
+**Approach**: Treat SQLite databases as **artifacts** that flow through workflows rather than as shared database connections:
+
+1. **SQLite as Input Artifact**: Activity downloads SQLite file from WorkflowStorage, operates on it locally
+2. **SQLite as Output Artifact**: Activity uploads modified SQLite file back to WorkflowStorage
+3. **Sequential Access**: Workflow design ensures only one activity operates on a given SQLite file at a time
+
+**Why NOT a `sqlite_query` activity**:
+- Unlike `database_query` (PostgreSQL, MySQL), there's no server to connect to
+- Connection pooling and caching don't apply
+- File must be local to the worker executing the query
+
+**Proposed Activities**:
+
+```yaml
+# Create a new SQLite database
+- key: create_db
+  worker: builtin
+  name: sqlite_create
+  parameters:
+    schema: |
+      CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+      CREATE TABLE orders (id INTEGER PRIMARY KEY, user_id INTEGER);
+  outputs:
+    database: "{{sqlite_artifact}}"  # Artifact reference
+
+# Execute queries on an existing SQLite database
+- key: process_data
+  worker: builtin
+  name: sqlite_execute
+  parameters:
+    database: "{{create_db.outputs.database}}"
+    queries:
+      - "INSERT INTO users (name) VALUES ('Alice')"
+      - "INSERT INTO users (name) VALUES ('Bob')"
+  depends_on: [create_db]
+  outputs:
+    database: "{{sqlite_artifact}}"
+
+# Query and return results
+- key: get_results
+  worker: builtin
+  name: sqlite_query
+  parameters:
+    database: "{{process_data.outputs.database}}"
+    query: "SELECT * FROM users"
+  depends_on: [process_data]
+  outputs:
+    rows: "{{query_results}}"
+```
+
+**Alternative Approaches Considered**:
+
+| Approach                      | Pros                               | Cons                                               |
+|-------------------------------|------------------------------------|----------------------------------------------------|
+| **Artifact-based (chosen)**   | Aligns with SQLite design, simple  | Sequential access only, file transfer overhead     |
+| Worker-local SQLite           | Fast local access                  | Can't share data between activities                |
+| Shared filesystem (NFS/EFS)   | Appears like local file            | Performance issues, locking contention, fragile    |
+| rqlite/LiteFS                 | Server-like API                    | Additional infrastructure, defeats SQLite simplicity|
+
+**Use Cases**:
+- Data transformation pipelines (ingest CSV → SQLite → process → export)
+- Offline analytics processing
+- Report generation workflows
+- ETL workflows with intermediate storage
+- Testing/dev workflows with embedded data
+
+**Benefits**:
+- Works with SQLite's design (single-writer, file-based)
+- No additional infrastructure required
+- Leverages existing WorkflowStorage for artifact persistence
+- Clear ownership semantics (one activity at a time)
+
+**Trade-offs**:
+- File transfer overhead for each activity (mitigated by WorkflowStorage caching)
+- No concurrent access patterns
+- Requires careful workflow design for data dependencies
+
+---
+
 ## Epic 5: Enterprise Operations
 
 **Goal**: Enable StreamFlow to run reliably in production with monitoring, high availability, and disaster recovery.

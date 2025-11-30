@@ -1,4 +1,4 @@
-# StreamFlow v0.2 Product Requirements Document
+2025-11-29# StreamFlow MVP Product Requirements Document
 
 **Version**: 0.2.0
 **Date**: November 26, 2025
@@ -406,19 +406,11 @@ The built-in worker is implemented as an HTTP client to the API server rather th
   - Configuration logging: Print effective configuration on startup (redact secrets)
 - **Deferral Rationale**: Basic configuration via environment variables and CLI flags already exists. Enhanced configuration management can be added after Epic 2 based on operational insights.
 
-**US-1C.5: Database Migration Management** 📋 **Post-Epic 2 (Deferred)**
+**US-1C.5: Database Migration Management** ❌ REMOVED
 - **As** a platform engineering lead
 - **I want** to manage database migrations via CLI
 - **So that** I can control schema updates independently of service startup
-- **Acceptance Criteria**:
-  - `streamflow migrate` - Run pending migrations (uses sqlx migrate)
-  - `streamflow migrate --status` - Show migration status
-  - `streamflow migrate --revert` - Revert last migration (with confirmation)
-  - Migration directory: Embedded in binary or external path via `--migrations-dir`
-  - Migration history: Track applied migrations in database
-  - Idempotent: Safe to run multiple times
-  - Automatic migration on `streamflow serve` (optional via `--auto-migrate` flag)
-- **Deferral Rationale**: Can use `sqlx migrate` directly for Epic 2. CLI wrapper provides convenience but is not essential for benchmarking.
+- REMOVED: We can just ship the sqlx binary and not incorporate it in the streamflow binary.
 
 **US-1C.6: Health Checks and Service Monitoring** 📋 **Post-Epic 2 (Deferred)**
 - **As** a platform engineering lead
@@ -496,7 +488,7 @@ streamflow/
 
 ### User Stories
 
-**U✅ S-2.1: Automated Performance Test Suite** ✅ **COMPLETE**
+**US-2.1: Automated Performance Test Suite** ✅ **COMPLETE**
 - **As** a platform engineering lead
 - **I want** continuous performance benchmarking from day one
 - **So that** we detect regressions early and stay on performance track
@@ -573,8 +565,6 @@ streamflow/
 
 ---
 
-# StreamFlow v0.3 Product Requirements Document
-
 ## Epic 3: YAML Workflow Definition Language
 
 **Business Objective**: Enable 70-80% of workflows to be expressed declaratively for non-developers and rapid prototyping
@@ -583,7 +573,7 @@ streamflow/
 
 ### User Stories
 
-**US-3.1: Declarative Sequential Workflows**
+**US-3.1: Declarative Sequential Workflows** ✅ Complete
 - **As** an AI startup engineer
 - **I want** to define workflows in simple YAML without programming
 - **So that** I can rapidly prototype and iterate on AI pipelines
@@ -595,7 +585,7 @@ streamflow/
   - Outputs declared per activity
 - **Example**: Payment processing workflow (validation → authorization → capture)
 
-**US-3.2: Conditional Branching**
+**US-3.2: Conditional Branching** ✅ Complete
 - **As** an AI researcher
 - **I want** workflows to branch based on activity outputs
 - **So that** I can implement decision logic (success/failure paths)
@@ -606,7 +596,7 @@ streamflow/
   - Multiple edges from single activity with conditions
   - Example: Route to different paths based on `{{validate.valid}} == true`
 
-**US-3.3: Parallel Execution (Fan-Out/Fan-In)**
+**US-3.3: Parallel Execution (Fan-Out/Fan-In)** ✅ Complete
 - **As** a data engineer
 - **I want** to execute multiple activities in parallel and aggregate results
 - **So that** I can maximize throughput for independent operations
@@ -618,7 +608,7 @@ streamflow/
   - Static parallel: Fixed number of activities
   - Dynamic parallel: Runtime-determined count via `parallel_count`
 
-**US-3.4: Iterative Workflows (Loops)**
+**US-3.4: Iterative Workflows (Loops)** ✅ Complete
 - **As** an AI startup engineer
 - **I want** workflows to loop until a condition is met and access results from all iterations
 - **So that** I can implement agentic research patterns (evaluate → search more if needed, building on previous findings)
@@ -869,7 +859,7 @@ streamflow/
   - ✅ Real-time cost tracking in PostgreSQL
   - ✅ Budget exceeded action: `abort` or `alert`
   - ✅ Token counting and cost calculation
-  - ✅ Embedding generation: `embedding_generate` activity (OpenAI, Google, Ollama)
+  - ✅ Embedding generation: `embedding` activity (OpenAI, Google, Ollama)
   - 🔮 Post-MVP: AWS Bedrock, Azure OpenAI, token streaming
 - **Implementation**: See `docs/implementation/US-5.1-multi-provider-llm.md` (Phases 1-5 Complete)
 - **Note**: Merged with US-5.2 (AI Cost Tracking) for integrated implementation
@@ -975,7 +965,7 @@ streamflow/
 - **I want** built-in notification activities
 - **So that** workflows can alert without external services
 
-**US-5.7a: Email Notification** 📋 **Next Priority**
+**US-5.7a: Email Notification** ✅ **Complete**
 - **Acceptance Criteria**:
   - Activities:
     - 📋 `email_send` - SMTP email with HTML/plain text support
@@ -1120,7 +1110,7 @@ streamflow/
 - **I want** built-in vector search without external vector database
 - **So that** I can implement RAG workflows in single binary
 - **Acceptance Criteria**:
-  - Activities: `vector_search`, `embedding_generate`, `rag_retrieve`
+  - Activities: `vector_search`, `embedding`, `rag_retrieve`
   - PostgreSQL pgvector extension for vector storage
   - SQLite VSS for edge deployment (no external DB)
   - Document chunking and retrieval built-in
@@ -1534,7 +1524,6 @@ streamflow/
    - 📋 **Post-Epic 2 (Deferred)**:
      - Individual service launchers - US-1C.3
      - Configuration management - US-1C.4
-     - Database migration CLI - US-1C.5
      - Health checks and service monitoring - US-1C.6
 
 2. **Performance Validation** (Epic 2):
@@ -1744,7 +1733,6 @@ flowchart TB
         1A9[US-1A.9<br/>WebSocket<br/>15h]
         1C3[US-1C.3<br/>Individual Launchers<br/>5h]
         1C4[US-1C.4<br/>Config Mgmt<br/>4h]
-        1C5[US-1C.5<br/>Migration CLI<br/>3h]
         1C6[US-1C.6<br/>Monitoring<br/>5h]
     end
 
@@ -1843,7 +1831,7 @@ flowchart TB
   - US-7.1: Token streaming for LLM activities ✅ Complete
   - Critical AI-native differentiator for Q1 2026 launch
 - ✅ **Example 9**: Token streaming examples.
-- 📋 **Example 10**: HTTP/DB advanced features (3-4 days) - **AFTER TOKEN STREAMING**
+- ✅ **Example 10**: HTTP/DB advanced features (3-4 days) (completed 2025-11-27)
 - 📋 **Example 11**: Advanced file management (3-4 days) - **AFTER TOKEN STREAMING**
 
 **Phase 5: Epic 2 Performance Benchmarking** 📋 **DEFERRED**
@@ -1855,12 +1843,12 @@ flowchart TB
 - Performance dashboard and monitoring (US-2.5)
 - **Target**: Prove >1,000 workflows/sec vs competitors' 35-100/sec
 
-**Phase 6: Complete Epic 1A/1C (Post-Epic 3)** 📋 **DEFERRED**
+**Phase 6: Complete Epic 1A/1C (Post-Epic 3)** 📋
 - 📋 **US-1A.8**: Activity Results and Output Retrieval (~8 hours)
 - 📋 **US-1A.9**: WebSocket Streaming for Real-Time Updates (~15 hours)
 - 📋 **US-1C.3**: Individual Service Launchers (~5 hours)
 - ✅ **US-1C.4**: Configuration Management
-- 📋 **US-1C.5**: Database Migration Management (~3 hours)
+- ~~📋 **US-1C.5**: Release Dockerfile (~0.5 hours)~~ 
 - 📋 **US-1C.6**: Health Checks and Service Monitoring (~5 hours)
 
 **Total Phase 6: ~40 hours (5 days)**

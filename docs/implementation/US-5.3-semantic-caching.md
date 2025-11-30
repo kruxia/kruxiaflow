@@ -90,7 +90,7 @@
 **Architectural Decision**: Caching is implemented at the **ActivityRegistry execution layer** (`worker/src/registry.rs`), not in individual activity implementations. This provides:
 
 ✅ **Universal caching** for ALL activity types:
-- LLM activities (`llm_prompt`, `llm_embedding`)
+- LLM activities (`llm_prompt`, `embedding`)
 - HTTP activities (`http_request`)
 - PostgreSQL activities (`postgres_query`)
 - Custom external activities

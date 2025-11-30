@@ -885,7 +885,7 @@ description: Build a vector search index by embedding document chunks and storin
 activities:
   # Generate embeddings for document chunks
   generate_embeddings:
-    activity: embedding_generate
+    activity: embedding
     worker: ai
     parameters:
       provider: openai
@@ -983,7 +983,7 @@ description: Answer questions using RAG (Retrieval-Augmented Generation) with em
 activities:
   # Step 1: Generate embedding for user question
   embed_question:
-    activity: embedding_generate
+    activity: embedding
     worker: ai
     parameters:
       provider: openai
@@ -1093,7 +1093,7 @@ activities:
 - ✅ Vector type support in PostgreSQL queries: `$1::vector` casting
 
 #### Built-in Activities Implemented
-- ✅ `embedding_generate` - Generate text embeddings using OpenAI
+- ✅ `embedding` - Generate text embeddings using OpenAI
 - ✅ Caching layer for LLM activities
 - ✅ Redis-backed cache (optional dependency)
 - ✅ Cache key generation from parameters
@@ -1102,7 +1102,7 @@ activities:
 #### Implementation Tasks
 
 **Embedding Generation (RAG Foundation)**:
-1. Implement `embedding_generate` activity (from US-5.1 implementation plan)
+1. Implement `embedding` activity (from US-5.1 implementation plan)
    - OpenAI embeddings API integration
    - Batch embedding support (array of inputs)
    - Cost tracking for embedding generation
@@ -1135,7 +1135,7 @@ activities:
 #### Success Criteria
 
 **Embedding Generation and RAG**:
-- ✅ `embedding_generate` activity generates embeddings for text arrays
+- ✅ `embedding` activity generates embeddings for text arrays
 - ✅ Embeddings stored correctly in PostgreSQL with pgvector
 - ✅ Vector similarity search returns relevant chunks
 - ✅ RAG indexing workflow completes successfully

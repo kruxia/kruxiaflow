@@ -19,7 +19,7 @@
 - API endpoints (LLM catalog, cost tracking)
 - Workflow budget settings in WorkflowDefinition
 - All 4 LLM provider implementations (Anthropic, OpenAI, Google, Ollama)
-- LLM activities (llm_prompt, embedding_generate) with fallback chain support
+- LLM activities (llm_prompt, embedding) with fallback chain support
 - Budget-aware orchestrator parameter enrichment
 - Worker-side budget enforcement in fallback chain
 - Cost tracking after activity completion
@@ -47,7 +47,7 @@
 - ✅ Built-in model providers: Anthropic (Claude), OpenAI (GPT-4), Google Gemini, Ollama (self-hosted)
 - ✅ `llm_prompt` activity with automatic model fallback
 - ✅ Model fallback chain: Try Anthropic → OpenAI → Gemini → Ollama
-- ✅ Embedding generation: `embedding_generate` activity (OpenAI, Google, Ollama)
+- ✅ Embedding generation: `embedding` activity (OpenAI, Google, Ollama)
 - ✅ Database-backed model catalog with pricing information
 - ✅ Self-hosted support via Ollama (free, no API costs)
 

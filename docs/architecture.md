@@ -1,8 +1,7 @@
 # StreamFlow Architecture
 
-**Version**: 0.2 MVP
-**Last Updated**: 2025-11-19
-**Status**: Epic 1 Complete - Epic 3 Examples 1-4 Complete
+**Version**: 0.3 MVP
+**Last Updated**: 2025-11-27
 
 ---
 
@@ -112,7 +111,7 @@ flowchart TB
 - `POST /api/v1/activities/{id}/complete` - Report activity completion
 - `POST /api/v1/activities/{id}/fail` - Report activity failure
 - `POST /api/v1/activities/{id}/heartbeat` - Long-running activity heartbeat
-- `WS /api/v1/activities/{id}/ws` - Token streaming for AI activities
+- `WS /api/v1/ws/activities/{id}` - Token streaming for LLM activities
 
 *Artifact Management*:
 - `POST /api/v1/workflows/{workflow_id}/artifacts` - Upload artifact
@@ -120,6 +119,38 @@ flowchart TB
 - `HEAD /api/v1/workflows/{workflow_id}/artifacts/{key}` - Get artifact metadata
 - `DELETE /api/v1/workflows/{workflow_id}/artifacts/{key}` - Delete artifact
 - `GET /api/v1/workflows/{workflow_id}/artifacts` - List workflow artifacts
+
+**WebSocket Token Streaming**:
+
+LLM activities with `streaming: true` support real-time token delivery via WebSocket:
+
+```
+WS /api/v1/ws/activities/{activity_id}?token=<jwt>
+```
+
+**Client Connection Flow**:
+1. Submit workflow via `POST /api/v1/workflows`
+2. Get activity_id from workflow status (`GET /api/v1/workflows/{id}`)
+3. Connect to WebSocket before activity starts executing
+4. Receive StreamMessage events as tokens are generated
+
+**StreamMessage Types**:
+```json
+// Token event (sent for each generated token)
+{"type": "token", "text": "Hello", "index": 0, "timestamp": "2025-01-15T10:30:00Z"}
+
+// Complete event (sent when generation finishes)
+{"type": "complete", "activity_id": "...", "result": {...}}
+
+// Error event (sent on failure)
+{"type": "error", "activity_id": "...", "error": "Rate limit exceeded"}
+```
+
+**Two-Level Opt-In**:
+1. Activity must declare `streaming: true` in workflow definition
+2. Client must connect to WebSocket before activity executes
+
+If no WebSocket subscribers are connected, the activity falls back to efficient non-streaming mode (single API call, returns complete response).
 
 **Authentication Flow**:
 
@@ -404,6 +435,181 @@ class StreamFlowWorker:
         """Implement your activity logic here"""
         raise NotImplementedError()
 ```
+
+### 4. Built-in Activities
+
+StreamFlow includes several built-in activities that cover common workflow patterns. All built-in activities are executed by the built-in worker with `worker: builtin`.
+
+#### http_request
+
+HTTP requests with full control over method, headers, query parameters, body, and timeout.
+
+```yaml
+- key: call_api
+  worker: builtin
+  activity_name: http_request
+  parameters:
+    method: POST
+    url: "{{INPUT.api_url}}"
+    headers:
+      Authorization: "Bearer {{SECRET.api_key}}"
+      Content-Type: "application/json"
+    query:
+      page: "1"
+    body:
+      data: "{{INPUT.payload}}"
+    timeout_seconds: 30
+  outputs:
+    - response
+  settings:
+    retry:
+      max_attempts: 3
+      strategy: exponential
+```
+
+**Features**:
+- All HTTP methods (GET, POST, PUT, DELETE, PATCH)
+- Custom headers and query parameters
+- JSON body serialization
+- File upload via multipart/form-data
+- File download with `type: file` output declaration
+- Configurable timeout
+
+#### postgres_query
+
+Single PostgreSQL query with parameterized values.
+
+```yaml
+- key: fetch_user
+  worker: builtin
+  activity_name: postgres_query
+  parameters:
+    query: "SELECT * FROM users WHERE id = $1"
+    params:
+      - "{{INPUT.user_id}}"
+  outputs:
+    - result
+```
+
+**Features**:
+- Parameterized queries (prevents SQL injection)
+- RETURNING clause support
+- JSON result serialization
+
+#### postgres_transaction
+
+Atomic multi-statement transactions with automatic rollback on failure.
+
+```yaml
+- key: record_order
+  worker: builtin
+  activity_name: postgres_transaction
+  parameters:
+    db_url: "{{SECRET.db_url}}"
+    statements:
+      - query: |
+          INSERT INTO orders (customer_id, amount)
+          VALUES ($1, $2) RETURNING id
+        params:
+          - "{{INPUT.customer_id}}"
+          - "{{INPUT.amount}}"
+      - query: |
+          UPDATE inventory SET quantity = quantity - $1
+          WHERE product_id = $2
+        params:
+          - "{{INPUT.quantity}}"
+          - "{{INPUT.product_id}}"
+  outputs:
+    - result
+```
+
+**Features**:
+- Multiple statements in single transaction
+- Automatic rollback on any statement failure
+- RETURNING clause support with result access via `result.results[0].rows[0].column_name`
+- Connection pooling
+
+#### llm_prompt
+
+LLM completions with multi-model fallback, budget awareness, and optional streaming.
+
+```yaml
+- key: generate_response
+  worker: builtin
+  activity_name: llm_prompt
+  streaming: true  # Enable WebSocket token streaming
+  parameters:
+    model:
+      - anthropic/claude-sonnet-4-5-20250929   # Primary
+      - openai/gpt-4o                           # Fallback 1
+      - google/gemini-1.5-pro                   # Fallback 2
+    prompt: "{{INPUT.question}}"
+    system_prompt: "You are a helpful assistant."
+    max_tokens: 1000
+    temperature: 0.7
+  outputs:
+    - result
+  settings:
+    budget:
+      limit_usd: 0.50
+      action: abort
+    retry:
+      max_attempts: 3
+      strategy: exponential
+```
+
+**Features**:
+- Multi-model fallback chains (tries each model in order until success)
+- Budget-aware model selection (skips expensive models when cost exceeds budget)
+- Token streaming via WebSocket (`WS /api/v1/ws/activities/{id}`)
+- Cost tracking per request (`result.cost_usd`, `result.usage.total_tokens`)
+- Provider metadata (`result.provider`, `result.model`)
+- Supported providers: Anthropic, OpenAI, Google
+
+**Output Structure**:
+```json
+{
+  "content": "The LLM response text",
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-5-20250929",
+  "cost_usd": 0.0153,
+  "usage": {
+    "prompt_tokens": 100,
+    "output_tokens": 500,
+    "total_tokens": 600
+  }
+}
+```
+
+#### email_send
+
+HTML/text email via SMTP.
+
+```yaml
+- key: send_notification
+  worker: builtin
+  activity_name: email_send
+  parameters:
+    smtp_url: "{{SECRET.smtp_url}}"
+    from: "noreply@example.com"
+    to:
+      - "{{INPUT.recipient_email}}"
+    subject: "Order Confirmation"
+    html_body: |
+      <h1>Thank you for your order!</h1>
+      <p>Order ID: {{record_order.result.results[0].rows[0].order_id}}</p>
+    text_body: |
+      Thank you for your order!
+      Order ID: {{record_order.result.results[0].rows[0].order_id}}
+  outputs:
+    - result
+```
+
+**Features**:
+- HTML and plain text body support
+- Multiple recipients (to, cc, bcc)
+- SMTP URL configuration (supports authentication)
+- Template variable substitution in body
 
 ---
 
@@ -1121,6 +1327,93 @@ settings:
     enable_heartbeat: true
     heartbeat_interval: 30
 ```
+
+### Iterative Workflows (Loops)
+
+StreamFlow supports iterative workflows through back-edges in the dependency graph. When an activity depends on a later activity in the workflow, it creates a loop that executes until an exit condition is met.
+
+```yaml
+# Example: Research loop that iterates until sufficient data is gathered
+activities:
+  - key: perform_search
+    activity_name: llm_prompt
+    iteration_scoped: true    # Store results from each iteration as array
+    iteration_limit: 5        # Safety bound: max 5 iterations
+    parameters:
+      prompt: "Research topic: {{INPUT.topic}}. Previous findings: {{perform_search.findings | json}}"
+    depends_on:
+      - initialize
+      - activity_key: evaluate
+        conditions:
+          - "{{evaluate.result.content | contains(substring='CONTINUE')}}"
+
+  - key: evaluate
+    activity_name: llm_prompt
+    iteration_scoped: true
+    parameters:
+      prompt: "Evaluate if research is sufficient. Respond CONTINUE or SUFFICIENT."
+    depends_on:
+      - perform_search
+
+  - key: compile_report
+    depends_on:
+      - activity_key: evaluate
+        conditions:
+          - "{{evaluate.result.content | contains(substring='SUFFICIENT')}}"
+```
+
+**Loop Features**:
+
+- **Back-edge detection**: Loops are detected when an activity depends on another activity that appears later in execution order
+- **Iteration-scoped storage**: Activities with `iteration_scoped: true` store results as arrays, with each iteration appending to the array
+- **Iteration limits**: `iteration_limit` prevents infinite loops by enforcing a maximum number of iterations
+- **Conditional exit**: Loop exits when the back-edge condition evaluates to false
+
+**Iteration Context Variables**:
+
+- `{{ACTIVITY.iteration}}` - Current iteration number (0-indexed)
+- `{{ACTIVITY.accumulated_cost_usd}}` - Total cost accumulated across all iterations (for LLM activities)
+- `{{ACTIVITY.remaining_budget_usd}}` - Remaining budget after current iteration
+
+**Array Filters for Iteration Results**:
+
+- `{{activity_key.output | last}}` - Get the most recent iteration's result
+- `{{activity_key.output | length}}` - Get the number of iterations completed
+- `{{activity_key.output | json}}` - Serialize all iteration results to JSON
+
+**Loop Exit Scenarios**:
+1. **Normal exit**: Back-edge condition evaluates to false
+2. **Iteration limit**: Maximum iterations reached
+3. **Budget exceeded**: Total cost exceeds budget limit
+4. **Activity failure**: Any activity in the loop fails
+
+### Scheduled and Delayed Activities
+
+Activities can be scheduled for future execution using delays or absolute timestamps.
+
+**Relative Delay** (for rate limiting):
+```yaml
+- key: call_api
+  activity_name: http_request
+  parameters:
+    url: "https://api.example.com/data"
+  settings:
+    delay: "5s"  # Wait 5 seconds after dependencies are met
+  depends_on:
+    - previous_call
+```
+
+**Absolute Scheduling** (for scheduled jobs):
+```yaml
+- key: daily_report
+  activity_name: http_request
+  parameters:
+    url: "{{INPUT.report_url}}"
+  settings:
+    scheduled_for: "{{INPUT.run_at}}"  # ISO 8601 timestamp
+```
+
+**Delay Format**: Supports human-readable durations: `"5s"`, `"30m"`, `"2h"`, `"1d"`
 
 ### Workflow State Management
 
@@ -2565,8 +2858,6 @@ See [Performance Testing Guide](performance-testing.md) for details on running a
 
 ### YAML DSL (Primary)
 
-**Status**: ✅ Implemented (Examples 1-2 Complete)
-
 Declarative workflow definitions covering 70-80% of use cases. Activities are defined with their `depends_on` and/or `dependency_of` relationships to form a directed graph:
 
 ```yaml
@@ -2600,22 +2891,40 @@ activities:
       - authorize_card
 ```
 
-**Implemented Features** (Examples 1-3):
+**Implemented Features**:
 - Sequential workflows with `depends_on`
-- Template expressions: `{{INPUT.*}}`, `{{activity_key.output}}`, `{{SECRET.*}}`, `{{WORKFLOW.*}}`
+- Template expressions: `{{INPUT.*}}`, `{{activity_key.output}}`, `{{SECRET.*}}`, `{{WORKFLOW.*}}`, `{{ACTIVITY.*}}`
 - Conditional execution with MiniJinja expressions
 - Parallel execution with fan-out/fan-in patterns
 - File outputs and `{{FILE.*}}` references
-- HTTP activity with custom headers, query parameters, and file upload/download
-- PostgreSQL activity with parameterized queries
 - Flexible condition syntax: single `condition` or array `conditions`
-- User-friendly alias: `depends_on` (in addition to `depends_on`)
 
-**Planned Features** (Examples 4-10):
-- Iterative workflows with loops
-- Activity settings (retry, timeout, budget)
-- LLM activities with cost tracking
-- Semantic caching
+**Built-in Activities**:
+- `http_request`: HTTP requests with headers, query params, body, timeout, and file upload/download
+- `postgres_query`: Single PostgreSQL query with parameterized values and RETURNING support
+- `postgres_transaction`: Atomic multi-statement transactions with rollback on failure
+- `llm_prompt`: LLM completions with multi-model fallback, budget awareness, and streaming
+- `email_send`: HTML/text email via SMTP with attachments support
+
+**Activity Settings**:
+- `retry`: Configurable retry with exponential backoff (`max_attempts`, `strategy`, `base_seconds`, `factor`, `max_seconds`)
+- `timeout_seconds`: Activity execution timeout
+- `budget`: Cost limits for LLM activities (`limit_usd`, `action: abort`)
+- `delay`: Delayed execution for rate limiting (e.g., `"5s"`)
+- `scheduled_for`: Absolute scheduling timestamp
+
+**Iterative Workflows (Loops)**:
+- Loop detection via back-edges in dependency graph
+- `iteration_scoped: true` for array storage of results across iterations
+- `iteration_limit` to prevent infinite loops
+- Iteration context: `{{ACTIVITY.iteration}}`, `{{ACTIVITY.accumulated_cost_usd}}`, `{{ACTIVITY.remaining_budget_usd}}`
+- Array filters: `| last`, `| length`, `| json`
+
+**LLM Token Streaming**:
+- `streaming: true` flag on activities to enable real-time token delivery
+- WebSocket endpoint: `WS /api/v1/ws/activities/{id}?token=<jwt>`
+- StreamMessage types: `token`, `complete`, `error`
+- Automatic fallback to non-streaming when no WebSocket subscribers
 
 ### Programmatic (Python/JavaScript/Rust)
 

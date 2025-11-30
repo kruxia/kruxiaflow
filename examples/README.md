@@ -432,7 +432,7 @@ streamflow run examples/06b-rag-index-builder.yaml \
 **Total time**: ~1-2 seconds
 
 **Features demonstrated:**
-- ✅ embedding_generate activity (US-5.1)
+- ✅ embedding activity (US-5.1)
 - ✅ Batch embedding processing
 - ✅ Array template expressions: {{generate_embeddings.embeddings.embeddings[0]}}
 - ✅ Vector type support: $2::vector casting in PostgreSQL
@@ -500,7 +500,7 @@ streamflow run examples/06c-rag-query.yaml \
 
 **Features demonstrated:**
 - ✅ Complete RAG workflow pattern
-- ✅ embedding_generate for question embedding
+- ✅ embedding for question embedding
 - ✅ pgvector similarity search: embedding <=> $1::vector
 - ✅ MiniJinja loops in prompts: {% for chunk in search_similar_chunks.result.rows %}
 - ✅ Template expressions for complex data access (chunk.content, chunk.metadata.source)
