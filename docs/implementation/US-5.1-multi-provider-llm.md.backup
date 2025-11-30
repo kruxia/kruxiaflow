@@ -24,7 +24,7 @@
 - ✅ Built-in model providers: Anthropic (Claude), OpenAI (GPT-4), Google Gemini, Ollama (self-hosted)
 - ✅ `llm_prompt` activity with automatic model fallback
 - ✅ Model fallback chain: Try Anthropic → OpenAI → Gemini → Ollama
-- ✅ Embedding generation: `embedding_generate` activity (OpenAI, Google, Ollama)
+- ✅ Embedding generation: `embedding` activity (OpenAI, Google, Ollama)
 - ✅ Cost tracking for cloud providers (Anthropic, OpenAI, Google)
 - ✅ Self-hosted support via Ollama (free, no API costs)
 
@@ -2311,7 +2311,7 @@ impl crate::registry::ActivityImpl for EmbeddingActivity {
     }
 
     fn name(&self) -> &str {
-        "embedding_generate"
+        "embedding"
     }
 
     fn worker(&self) -> &str {

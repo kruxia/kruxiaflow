@@ -115,7 +115,7 @@
 # - Consider reranking retrieved chunks for better relevance
 #
 # Key Features Demonstrated (from mvp-workflows-implementation-plan.md lines 1057-1063):
-# ✅ embedding_generate activity for question embedding
+# ✅ embedding activity for question embedding
 # ✅ Vector similarity search: embedding <=> $1::vector (pgvector)
 # ✅ MiniJinja loops in LLM prompts: {% for chunk in search_similar_chunks.rows %}
 # ✅ Array template expressions for accessing query results
@@ -129,7 +129,7 @@ description: Answer questions using RAG (Retrieval-Augmented Generation) with em
 activities:
   # Step 1: Generate embedding for user question
   - key: embed_question
-    activity_name: embedding_generate
+    activity_name: embedding
     parameters:
       provider: openai
       model: text-embedding-3-small  # Same model as indexing (06b)
