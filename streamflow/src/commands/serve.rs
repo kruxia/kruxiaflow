@@ -308,8 +308,40 @@ async fn spawn_workers(
     Ok(handles)
 }
 
+/// Load a secret from environment, supporting Docker secrets pattern.
+/// Checks for `{name}_FILE` first (reads file contents), then falls back to `{name}` direct value.
+fn load_secret(name: &str) -> Option<String> {
+    // First check for _FILE variant (Docker secrets pattern)
+    let file_var = format!("{}_FILE", name);
+    if let Ok(file_path) = std::env::var(&file_var) {
+        match std::fs::read_to_string(&file_path) {
+            Ok(contents) => {
+                tracing::debug!("Loaded {} from file: {}", name, file_path);
+                return Some(contents.trim().to_string());
+            }
+            Err(e) => {
+                tracing::warn!("Failed to read {} from {}: {}", file_var, file_path, e);
+            }
+        }
+    }
+
+    // Fall back to direct environment variable
+    std::env::var(name).ok()
+}
+
 /// Execute serve command
-pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
+pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> {
+    // Load secrets from files if _FILE variants are set (Docker secrets pattern)
+    if cmd.oauth_private_key.is_none() {
+        cmd.oauth_private_key = load_secret("STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM");
+    }
+    if cmd.oauth_public_key.is_none() {
+        cmd.oauth_public_key = load_secret("STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM");
+    }
+    if cmd.client_secret.is_none() {
+        cmd.client_secret = load_secret("STREAMFLOW_CLIENT_SECRET");
+    }
+
     // Validate configuration
     cmd.validate()?;
 
