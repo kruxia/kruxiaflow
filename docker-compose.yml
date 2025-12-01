@@ -45,14 +45,16 @@ services:
     ports:
       - "1025:1025"   # SMTP server
       - "8025:8025"   # Web UI for viewing emails
+    profiles: 
+      - develop
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "1025"]
       interval: 5s
       timeout: 3s
       retries: 5
 
-  # streamflow serve in deploy mode
-  streamflow:
+  # streamflow serve in develop mode
+  streamflow-develop:
     build:
       context: .
       dockerfile: Dockerfile
@@ -132,9 +134,91 @@ services:
       - cargo_git_cache:/opt/.cargo/git
       - cargo_target_cache:/opt/target
 
+  # Init container - runs migrations, seeds OAuth, generates secrets
+  # Runs once before streamflow-deploy starts
+  streamflow-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - deploy
+    environment:
+      DATABASE_URL: postgres://streamflow:streamflow_dev@postgres:5432/streamflow
+      STREAMFLOW_CLIENT_ID: streamflow-dev-client
+      STREAMFLOW_CLIENT_SECRET: a_zBZWlw8IsQaQm5C2xJPMgunAj4jkjzp4iTafATVcD8RU02yNEYqwCdLsoXIe8g
+    volumes:
+      - streamflow_secrets:/secrets
+    command: >
+      sh -c '
+        set -e
+        echo "StreamFlow Init: Starting..."
+
+        # Generate RSA keys if not present
+        if [ ! -f /secrets/private.pem ]; then
+          echo "Generating RSA key pair..."
+          openssl genrsa -out /secrets/private.pem 2048
+          openssl rsa -in /secrets/private.pem -pubout -out /secrets/public.pem
+          chmod 600 /secrets/private.pem
+          chmod 644 /secrets/public.pem
+        else
+          echo "RSA keys already exist, skipping generation"
+        fi
+
+        # Run database migrations
+        echo "Running database migrations..."
+        cd /opt && sqlx migrate run
+
+        # Seed OAuth client
+        echo "Seeding OAuth client..."
+        STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM=$$(cat /secrets/private.pem) seed-oauth-client
+
+        echo "StreamFlow Init: Complete"
+      '
+
+  # Production-like deploy using distroless image
+  streamflow-deploy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: deploy
+    depends_on:
+      streamflow-init:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    profiles:
+      - deploy
+    environment:
+      DATABASE_URL: postgres://streamflow:streamflow_dev@postgres:5432/streamflow
+      STREAMFLOW_CLIENT_ID: ${STREAMFLOW_CLIENT_ID:-streamflow-deploy-client}
+      STREAMFLOW_CLIENT_SECRET: ${STREAMFLOW_CLIENT_SECRET:-ni93k3Mrgm0A2eGC_qh-ykGpVLDNZhKGaHsEiH-WnoZEKSptS0w0uA6iC8gnYitE}
+      STREAMFLOW_OAUTH_TOKEN_AUDIENCE: ${STREAMFLOW_OAUTH_TOKEN_AUDIENCE:-streamflow-deploy-audience}
+      STREAMFLOW_OAUTH_TOKEN_ISSUER: http://localhost:8080
+      STREAMFLOW_WORKER_COUNT: "20"
+      STREAMFLOW_POLL_MAX_ACTIVITIES: "1"
+      # File-based secrets (Docker secrets pattern)
+      STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM_FILE: /secrets/private.pem
+      STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM_FILE: /secrets/public.pem
+      # Cache configuration
+      STREAMFLOW_CACHE_PROVIDER: ${STREAMFLOW_CACHE_PROVIDER:-redis}
+      STREAMFLOW_REDIS_URL: redis://redis:6379
+      # Logging configuration
+      STREAMFLOW_LOG_LEVEL: ${STREAMFLOW_LOG_LEVEL:-info}
+    volumes:
+      - streamflow_secrets:/secrets:ro
+
 volumes:
   postgres_data:
   redis_data:
   cargo_cache:
   cargo_git_cache:
   cargo_target_cache:
+  streamflow_secrets:
