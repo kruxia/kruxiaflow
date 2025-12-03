@@ -507,6 +507,10 @@ openssl rsa -in private.pem -pubout -out public.pem
 ## Documentation
 
 ### Core Documentation
+- **[Glossary](docs/glossary.md)** - Comprehensive terminology reference
+  - Key concepts and definitions
+  - Component relationships diagram
+  - Workflow and activity lifecycle states
 - **[MVP Requirements](docs/mvp-requirements.md)** - Complete product requirements document
   - Epic definitions and user stories
   - Implementation roadmap and phases
