@@ -784,7 +784,8 @@ WHERE workflow_id = '<workflow-id>';
 
 ## See Also
 
+- [Glossary](./glossary.md) - Key terminology and definitions
 - [Architecture Documentation](./architecture.md)
 - [US-3.4 Implementation Plan](./implementation/US-3.4-iterative-workflows.md)
-- [Example 6: Agentic Research](../examples/06-agentic-research.yaml)
+- [Example 7: Agentic Research](../examples/07a-agentic-research-simple.yaml)
 - [YAML Syntax Reference](./yaml-syntax.md)
