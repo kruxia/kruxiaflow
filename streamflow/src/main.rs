@@ -186,9 +186,36 @@ EXIT CODES:\n  \
   1: Service is unhealthy or unreachable"
     )]
     Health(commands::health::HealthCommand),
-    // Future commands (Epic 1C):
-    // Orchestrator(commands::orchestrator::OrchestratorCommand),
-    // Worker(commands::worker::WorkerCommand),
+
+    /// Launch orchestrator only (for distributed deployment)
+    #[command(
+        about = "Launch orchestrator service for distributed deployment",
+        long_about = "Launch the orchestrator service independently\n\n\
+The orchestrator polls for workflow events and schedules activities.\n\
+Use this for distributed deployments where services run on separate hosts.\n\n\
+EXAMPLES:\n  \
+  streamflow orchestrator\n  \
+  streamflow orchestrator --consumer-id orch_prod_1\n\n\
+REQUIRES:\n  \
+  - DATABASE_URL: PostgreSQL connection string"
+    )]
+    Orchestrator(commands::orchestrator::OrchestratorCommand),
+
+    /// Launch worker only (for distributed deployment)
+    #[command(
+        about = "Launch worker service for distributed deployment",
+        long_about = "Launch the built-in worker service independently\n\n\
+Workers poll the API server for activities and execute them.\n\
+Use this for distributed deployments or to scale workers.\n\n\
+EXAMPLES:\n  \
+  streamflow worker --api-url http://api.example.com:8080\n  \
+  streamflow worker --workers 20 --worker-id worker_payments_1\n\n\
+REQUIRES:\n  \
+  - STREAMFLOW_API_URL: API server URL\n  \
+  - STREAMFLOW_CLIENT_SECRET: OAuth client secret\n  \
+  - DATABASE_URL: For artifact storage access"
+    )]
+    Worker(commands::worker::WorkerCommand),
 }
 
 #[tokio::main]
@@ -227,5 +254,9 @@ async fn main() -> Result<()> {
             commands::seed_client::execute(cmd, database_url.unwrap()).await
         }
         Commands::Health(cmd) => commands::health::execute(cmd).await,
+        Commands::Orchestrator(cmd) => {
+            commands::orchestrator::execute(cmd, database_url.unwrap()).await
+        }
+        Commands::Worker(cmd) => commands::worker::execute(cmd, database_url.unwrap()).await,
     }
 }

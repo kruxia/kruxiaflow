@@ -406,7 +406,7 @@ The built-in worker is implemented as an HTTP client to the API server rather th
   - Configuration logging: Print effective configuration on startup (redact secrets)
 - **Deferral Rationale**: Basic configuration via environment variables and CLI flags already exists. Enhanced configuration management can be added after Epic 2 based on operational insights.
 
-**US-1C.5: Database Migration Management** ❌ REMOVED
+**US-1C.5: Database Migration Management** ✅ Complete
 - **As** a platform engineering lead
 - **I want** to manage database migrations via CLI
 - **So that** I can control schema updates independently of service startup

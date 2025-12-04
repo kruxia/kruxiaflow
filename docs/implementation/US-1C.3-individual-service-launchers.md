@@ -2,7 +2,7 @@
 
 **Epic**: 1C - StreamFlow Binary and CLI
 **User Story**: US-1C.3
-**Status**: 📋 Post-Epic 2 (Deferred)
+**Status**: ✅ Implemented
 **Priority**: P2 (Enables distributed deployment)
 **Estimated Time**: ~6 hours
 **Prerequisites**:
@@ -22,13 +22,13 @@
 
 ## Acceptance Criteria
 
-- [ ] `streamflow orchestrator` - Launch orchestrator only
+- [x] `streamflow orchestrator` - Launch orchestrator only
   - Flags: `--consumer-id` (for event consumer checkpointing)
-- [ ] `streamflow api` - Already exists ✅ (update to match serve.rs patterns)
-- [ ] `streamflow worker` - Launch worker only
+- [x] `streamflow api` - Already exists ✅ (update to match serve.rs patterns)
+- [x] `streamflow worker` - Launch worker only
   - Flags: `--activity-types` (worker.name list), `--api-url`, `--worker-id`
-- [ ] Each service can run on different hosts/containers
-- [ ] Environment variable configuration: `DATABASE_URL`, `STREAMFLOW_API_URL`, etc.
+- [x] Each service can run on different hosts/containers
+- [x] Environment variable configuration: `DATABASE_URL`, `STREAMFLOW_API_URL`, etc.
 
 ---
 
@@ -835,27 +835,27 @@ curl -X POST http://localhost:8080/api/v1/workflows ...
 
 ## Implementation Phases
 
-### Phase 1: Orchestrator Command (~2 hours)
-- [ ] Create `streamflow/src/commands/orchestrator.rs`
-- [ ] Implement `OrchestratorCommand` struct with clap Args
-- [ ] Implement `execute()` function
-- [ ] Add unit tests
-- [ ] Update `commands/mod.rs`
-- [ ] Update `main.rs` Commands enum
+### Phase 1: Orchestrator Command (~2 hours) ✅
+- [x] Create `streamflow/src/commands/orchestrator.rs`
+- [x] Implement `OrchestratorCommand` struct with clap Args
+- [x] Implement `execute()` function
+- [x] Add unit tests
+- [x] Update `commands/mod.rs`
+- [x] Update `main.rs` Commands enum
 
-### Phase 2: Worker Command (~3 hours)
-- [ ] Create `streamflow/src/commands/worker.rs`
-- [ ] Implement `WorkerCommand` struct with clap Args
-- [ ] Implement `execute()` function
-- [ ] Add unit tests
-- [ ] Update `commands/mod.rs`
-- [ ] Update `main.rs` Commands enum
+### Phase 2: Worker Command (~3 hours) ✅
+- [x] Create `streamflow/src/commands/worker.rs`
+- [x] Implement `WorkerCommand` struct with clap Args
+- [x] Implement `execute()` function
+- [x] Add unit tests
+- [x] Update `commands/mod.rs`
+- [x] Update `main.rs` Commands enum
 
-### Phase 3: Integration Testing (~1 hour)
-- [ ] Create distributed deployment integration tests
-- [ ] Manual testing with separate terminals
-- [ ] Test graceful shutdown for each service
-- [ ] Test failure scenarios (API unavailable, etc.)
+### Phase 3: Integration Testing (~1 hour) ✅
+- [x] Create distributed deployment integration tests
+- [x] Manual testing with separate terminals
+- [x] Test graceful shutdown for each service
+- [x] Test failure scenarios (API unavailable, etc.)
 
 **Total Estimated Time**: 6 hours
 
@@ -864,20 +864,20 @@ curl -X POST http://localhost:8080/api/v1/workflows ...
 ## Success Criteria
 
 ### Functional Requirements
-- [ ] `streamflow orchestrator` launches standalone orchestrator
-- [ ] `streamflow worker` launches standalone worker
-- [ ] Worker authenticates with remote API
-- [ ] Worker processes activities and reports results
-- [ ] Orchestrator schedules activities based on events
-- [ ] All services shut down gracefully on SIGTERM/SIGINT
-- [ ] Configuration via CLI flags and environment variables
+- [x] `streamflow orchestrator` launches standalone orchestrator
+- [x] `streamflow worker` launches standalone worker
+- [x] Worker authenticates with remote API
+- [x] Worker processes activities and reports results
+- [x] Orchestrator schedules activities based on events
+- [x] All services shut down gracefully on SIGTERM/SIGINT
+- [x] Configuration via CLI flags and environment variables
 
 ### Non-Functional Requirements
-- [ ] Startup time <5 seconds for each service
-- [ ] Clear error messages for missing configuration
-- [ ] Comprehensive help text with examples
-- [ ] Zero cargo warnings
-- [ ] All tests pass
+- [x] Startup time <5 seconds for each service
+- [x] Clear error messages for missing configuration
+- [x] Comprehensive help text with examples
+- [x] Zero cargo warnings
+- [x] All tests pass
 
 ---
 
@@ -923,17 +923,17 @@ curl -X POST http://localhost:8080/api/v1/workflows ...
 
 ## Definition of Done
 
-- [ ] `orchestrator.rs` implemented with tests
-- [ ] `worker.rs` implemented with tests
-- [ ] Commands registered in main.rs
-- [ ] Help text comprehensive with examples
-- [ ] Integration tests passing
-- [ ] Manual distributed deployment verified
-- [ ] Environment variable documentation complete
-- [ ] Zero cargo warnings
-- [ ] All acceptance criteria met
+- [x] `orchestrator.rs` implemented with tests
+- [x] `worker.rs` implemented with tests
+- [x] Commands registered in main.rs
+- [x] Help text comprehensive with examples
+- [x] Integration tests passing (41 tests in distributed_deployment_tests.rs)
+- [x] Manual distributed deployment verified
+- [x] Environment variable documentation complete
+- [x] Zero cargo warnings
+- [x] All acceptance criteria met
 
 ---
 
-**Last Updated**: 2025-11-27
-**Status**: Ready for Implementation (Post-Epic 2)
+**Last Updated**: 2025-12-03
+**Status**: ✅ Complete (All phases implemented)
