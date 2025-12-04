@@ -36,8 +36,8 @@ sqlx migrate run
 echo "Building StreamFlow profiling binary..."
 cargo build --profile profiling --features profiling
 
-# Seed the oauth client for profiling
-target/profiling/seed-oauth-client
+# Seed the oauth client for profiling (idempotent - skips if exists)
+target/profiling/streamflow seed-client
 
 # Start memory monitoring in background
 MONITOR_OUTPUT="$PROFILE_DIR/memory_usage.csv"

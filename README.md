@@ -5,7 +5,7 @@
 A lightweight, high-performance workflow engine designed for AI applications. Track every token, cache intelligently, and never exceed your LLM budget.
 
 ```
-7.4MB binary | PostgreSQL-only | 24x faster than Airflow | 20x less memory
+7.5MB binary | 63MB image | PostgreSQL-only | 24x faster than Airflow | 20x less memory
 ```
 
 ## Quick Start
@@ -53,8 +53,8 @@ StreamFlow combines durable execution with AI-native features:
 | Semantic caching         | **Yes**    | No       | No      | Partial   |
 | Multi-provider LLM       | **Yes**    | No       | No      | Yes       |
 | Token streaming          | **Yes**    | No       | No      | Yes       |
-| Single binary            | **7.4MB**  | ~200MB   | ~500MB+ | N/A       |
-| Docker image             | **185MB**  | ~500MB   | ~1GB+   | N/A       |
+| Single binary            | **7.5MB**  | ~200MB   | ~500MB+ | N/A       |
+| Docker image             | **63MB**   | ~500MB   | ~1GB+   | N/A       |
 | Peak memory              | **380MB**  | ~380MB   | ~7.6GB  | N/A       |
 | Throughput (wf/sec)      | **32**     | 27       | 1.3     | N/A       |
 
@@ -156,7 +156,7 @@ StreamFlow is a single Rust binary with PostgreSQL as the only required dependen
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     StreamFlow (7.4MB binary)                   │
+│                     StreamFlow (7.5MB binary)                   │
 ├─────────────────────────────────────────────────────────────────┤
 │  API Server  │  Orchestrator  │  Worker Pool  │  Cost Tracker   │
 └──────────────┴────────────────┴───────────────┴─────────────────┘
@@ -182,8 +182,8 @@ Benchmarked against industry-standard workflow engines (November 2025):
 | Throughput (wf/sec) | **32**     | 27       | 1.3       |
 | P99 Latency         | **0.7-2s** | 0.7-3s   | 9-106s    |
 | Peak Memory         | **380MB**  | 380MB    | 7.6GB     |
-| Binary Size         | **7.4MB**  | ~200MB   | ~500MB+   |
-| Docker Image        | **185MB**  | ~500MB   | ~1GB+     |
+| Binary Size         | **7.5MB**  | ~200MB   | ~500MB+   |
+| Docker Image        | **63MB**   | ~500MB   | ~1GB+     |
 
 *StreamFlow: 24x faster than Airflow, 20x less memory*
 

@@ -27,9 +27,5 @@ serial_test = { workspace = true }
 # StreamFlow dependencies (for workflow definitions only, not direct DB access)
 streamflow-core = { path = "../core" }
 
-# Database (for seed-oauth-client binary only)
-sqlx = { workspace = true }
-bcrypt = { workspace = true }
-
 [dev-dependencies]
 # None needed - all tests are in main src/

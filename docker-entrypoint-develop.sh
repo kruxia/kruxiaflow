@@ -29,8 +29,8 @@ sqlx migrate run
 echo "Building StreamFlow (debug mode)..."
 cargo build
 
-# Seed the oauth client
-/opt/target/debug/seed-oauth-client
+# Seed the oauth client (idempotent - skips if exists)
+/opt/target/debug/streamflow seed-client
 
 # -- TODO: Replace homemade memory monitoring with proper prometheus monitoring setup --
 

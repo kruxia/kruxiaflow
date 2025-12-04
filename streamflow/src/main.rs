@@ -170,6 +170,22 @@ EXAMPLES:\n  \
   streamflow seed-client --force                      # Re-seed even if exists"
     )]
     SeedClient(commands::seed_client::SeedClientCommand),
+
+    /// Check service health (for container health checks)
+    #[command(
+        about = "Check if the service is healthy (for Docker/Kubernetes health probes)",
+        long_about = "Check if the StreamFlow service is healthy\n\n\
+Performs an HTTP GET request to the health endpoint and exits with code 0 if healthy, \
+1 if unhealthy. Designed for container health checks without requiring shell access.\n\n\
+EXAMPLES:\n  \
+  streamflow health                                    # Check localhost:8080/health\n  \
+  streamflow health --url http://host:9090/health      # Check custom URL\n  \
+  streamflow health --timeout 10                       # 10 second timeout\n\n\
+EXIT CODES:\n  \
+  0: Service is healthy (200 OK response)\n  \
+  1: Service is unhealthy or unreachable"
+    )]
+    Health(commands::health::HealthCommand),
     // Future commands (Epic 1C):
     // Orchestrator(commands::orchestrator::OrchestratorCommand),
     // Worker(commands::worker::WorkerCommand),
@@ -186,7 +202,7 @@ async fn main() -> Result<()> {
 
     // Validate database_url for commands that need it
     let database_url = match &cli.command {
-        Commands::Version(_) => None,
+        Commands::Version(_) | Commands::Health(_) => None,
         _ => {
             let url = cli.database_url.ok_or_else(|| {
                 anyhow::anyhow!(
@@ -210,5 +226,6 @@ async fn main() -> Result<()> {
         Commands::SeedClient(cmd) => {
             commands::seed_client::execute(cmd, database_url.unwrap()).await
         }
+        Commands::Health(cmd) => commands::health::execute(cmd).await,
     }
 }

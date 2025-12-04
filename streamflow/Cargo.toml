@@ -54,6 +54,9 @@ tokio-util = { workspace = true }
 # Password hashing
 bcrypt = { workspace = true }
 
+# HTTP client (for health check command)
+reqwest = { workspace = true }
+
 [dev-dependencies]
 serial_test = { workspace = true }
 

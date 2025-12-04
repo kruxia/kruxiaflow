@@ -103,8 +103,8 @@ docker exec streamflow-postgres psql -U streamflow -c "CREATE DATABASE streamflo
 # Run migrations in Docker
 docker-compose run --rm profiling sh -c "cd /opt && sqlx migrate run --source migrations --database-url postgres://streamflow:streamflow_dev@postgres:5432/streamflow_profiling"
 
-# Seed OAuth client
-docker-compose run --rm profiling sh -c "cd /opt && cargo run --package streamflow-profiling --bin seed-oauth-client"
+# Seed OAuth client (idempotent - skips if exists)
+docker-compose run --rm profiling sh -c "cd /opt && cargo run --package streamflow --bin streamflow -- seed-client"
 
 echo -e "${GREEN}Database ready${NC}"
 echo ""

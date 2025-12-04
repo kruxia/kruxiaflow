@@ -61,7 +61,7 @@ jobs:
         run: sqlx migrate run
 
       - name: Seed OAuth client for profiling
-        run: cargo run --package streamflow-profiling --bin seed-oauth-client
+        run: cargo run --package streamflow --bin streamflow -- seed-client
         env:
           STREAMFLOW_CLIENT_ID: streamflow-ci-client
           STREAMFLOW_CLIENT_SECRET: ${{ secrets.PROFILING_CLIENT_SECRET || 'profiling-client-secret-for-ci' }}

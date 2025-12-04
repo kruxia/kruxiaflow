@@ -3216,6 +3216,7 @@ dependencies = [
  "axum",
  "bcrypt",
  "clap",
+ "reqwest",
  "rust_decimal",
  "serde",
  "serde_json",
@@ -3341,13 +3342,11 @@ dependencies = [
 name = "streamflow-profiling"
 version = "0.3.0"
 dependencies = [
- "bcrypt",
  "chrono",
  "reqwest",
  "serde",
  "serde_json",
  "serial_test",
- "sqlx",
  "streamflow-core",
  "tokio",
  "uuid",
