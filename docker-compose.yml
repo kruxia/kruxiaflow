@@ -1,11 +1,49 @@
+# StreamFlow Docker Compose Configuration
+#
+# Profiles:
+#   - develop: Development with hot reload and source mounting
+#   - profiling: Memory profiling with jemalloc
+#   - deploy: Production deployment with prebuilt image
+#
+# Quick Start (development):
+#   ./dev up                           # Auto-initializes on first run
+#
+# Quick Start (production-like):
+#   ./scripts/init.sh                  # One-time: generate secrets
+#   docker compose --profile deploy up
+#
+# Required environment variables (see .env.example):
+#   - POSTGRES_PASSWORD: Database password
+#   - STREAMFLOW_CLIENT_ID: OAuth client ID
+#   - STREAMFLOW_CLIENT_SECRET: OAuth client secret
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 10s
+
+networks:
+  frontend:
+    name: streamflow-frontend
+  backend:
+    name: streamflow-backend
+    internal: true
+
 services:
   postgres:
-    image: postgres:18
+    image: postgres:18.1-bookworm
     container_name: streamflow-postgres
     environment:
-      POSTGRES_USER: streamflow
-      POSTGRES_PASSWORD: streamflow_dev
-      POSTGRES_DB: streamflow
+      POSTGRES_USER: ${POSTGRES_USER:-streamflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-streamflow}
     command:
       - "postgres"
       - "-c"
@@ -15,45 +53,97 @@ services:
       - "-c"
       - "log_min_duration_statement=100"
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-127.0.0.1:5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
+    networks:
+      - backend
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U streamflow"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
+      <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-streamflow}"]
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+    labels:
+      com.streamflow.service: "database"
+      com.streamflow.component: "postgres"
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     container_name: streamflow-redis
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-127.0.0.1:6379}:6379"
     volumes:
       - redis_data:/data
+    networks:
+      - backend
     command: redis-server --appendonly yes
     healthcheck:
+      <<: *healthcheck-defaults
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    labels:
+      com.streamflow.service: "cache"
+      com.streamflow.component: "redis"
+    security_opt:
+      - no-new-privileges:true
 
   # Mailhog for email testing (US-5.7a email_send activity)
   mailhog:
-    image: mailhog/mailhog:latest
+    image: mailhog/mailhog:v1.0.1
     container_name: streamflow-mailhog
     ports:
-      - "1025:1025"   # SMTP server
-      - "8025:8025"   # Web UI for viewing emails
-    profiles: 
+      - "127.0.0.1:1025:1025"   # SMTP server
+      - "127.0.0.1:8025:8025"   # Web UI for viewing emails
+    networks:
+      - backend
+      - frontend
+    profiles:
       - develop
-    healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "1025"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+    # healthcheck:
+    #   <<: *healthcheck-defaults
+    #   # Use HTTP API instead of SMTP to avoid noisy session logs
+    #   test: ["CMD", "wget", "-q", "--spider", "http://localhost:8025/api/v2/messages?limit=1"]
+    restart: unless-stopped
+    # Suppress logs - mailhog is a dev tool, check UI at http://localhost:8025
+    logging:
+      driver: "none"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    labels:
+      com.streamflow.service: "email"
+      com.streamflow.component: "mailhog"
+      com.streamflow.profile: "develop"
 
-  # streamflow serve in develop mode
+  # StreamFlow API server in develop mode
   streamflow-develop:
     build:
       context: .
@@ -65,26 +155,53 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "${STREAMFLOW_PORT:-127.0.0.1:8080}:8080"
+    networks:
+      - frontend
+      - backend
     profiles:
       - develop
+    init: true
+    stop_grace_period: 30s
     environment:
-      # Database connection (benchmark database)
-      DATABASE_URL: postgres://streamflow:streamflow_dev@postgres:5432/streamflow
+      # Database connection
+      DATABASE_URL: postgres://${POSTGRES_USER:-streamflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-streamflow}
       # Rust build settings
       CARGO_HOME: /opt/.cargo
       CARGO_TARGET_DIR: /opt/target
-      STREAMFLOW_CLIENT_ID: streamflow-dev-client
-      STREAMFLOW_CLIENT_SECRET: a_zBZWlw8IsQaQm5C2xJPMgunAj4jkjzp4iTafATVcD8RU02yNEYqwCdLsoXIe8g
-      STREAMFLOW_OAUTH_TOKEN_ISSUER: http://localhost:8080
-      STREAMFLOW_OAUTH_TOKEN_AUDIENCE: streamflow-dev-audience
-      STREAMFLOW_WORKER_COUNT: "20"
-      STREAMFLOW_POLL_MAX_ACTIVITIES: "1"
+      # OAuth configuration (required)
+      STREAMFLOW_CLIENT_ID: ${STREAMFLOW_CLIENT_ID:?STREAMFLOW_CLIENT_ID is required}
+      STREAMFLOW_CLIENT_SECRET: ${STREAMFLOW_CLIENT_SECRET:?STREAMFLOW_CLIENT_SECRET is required}
+      STREAMFLOW_OAUTH_TOKEN_ISSUER: ${STREAMFLOW_OAUTH_TOKEN_ISSUER:-http://localhost:8080}
+      STREAMFLOW_OAUTH_TOKEN_AUDIENCE: ${STREAMFLOW_OAUTH_TOKEN_AUDIENCE:-streamflow-api}
+      # Worker configuration
+      STREAMFLOW_WORKER_COUNT: ${STREAMFLOW_WORKER_COUNT:-20}
+      STREAMFLOW_POLL_MAX_ACTIVITIES: ${STREAMFLOW_POLL_MAX_ACTIVITIES:-1}
       # Cache configuration
       STREAMFLOW_CACHE_PROVIDER: ${STREAMFLOW_CACHE_PROVIDER:-redis}
       STREAMFLOW_REDIS_URL: redis://redis:6379
-      # Logging configuration (can be overridden from host environment)
+      # Logging configuration
       STREAMFLOW_LOG_LEVEL: ${STREAMFLOW_LOG_LEVEL:-info}
+    # No health check for develop - Rust build during startup takes several minutes
+    # Use ./dev logs -f to monitor startup progress
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    labels:
+      com.streamflow.service: "api"
+      com.streamflow.component: "streamflow"
+      com.streamflow.profile: "develop"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     volumes:
       # Mount source code
       - ./:/opt/
@@ -93,7 +210,7 @@ services:
       - cargo_git_cache:/opt/.cargo/git
       - cargo_target_cache:/opt/target
 
-  # streamflow serve in profiling mode. saves jemalloc profiles and memory tracking to /opt/var/
+  # StreamFlow profiling mode - saves jemalloc profiles and memory tracking to /opt/var/
   streamflow-profiling:
     build:
       context: .
@@ -105,27 +222,56 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "${STREAMFLOW_PORT:-127.0.0.1:8080}:8080"
+    networks:
+      - frontend
+      - backend
     profiles:
       - profiling
+    init: true
+    stop_grace_period: 30s
     environment:
-      # Database connection (benchmark database)
-      DATABASE_URL: postgres://streamflow:streamflow_dev@postgres:5432/streamflow_profiling
-      DATABASE_ADMIN_URL: postgres://streamflow:streamflow_dev@postgres:5432/streamflow
+      # Database connection (separate database for profiling)
+      DATABASE_URL: postgres://${POSTGRES_USER:-streamflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/streamflow_profiling
+      DATABASE_ADMIN_URL: postgres://${POSTGRES_USER:-streamflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-streamflow}
       # Rust build settings
       CARGO_HOME: /opt/.cargo
       CARGO_TARGET_DIR: /opt/target
-      STREAMFLOW_CLIENT_ID: streamflow-dev-client
-      STREAMFLOW_CLIENT_SECRET: a_zBZWlw8IsQaQm5C2xJPMgunAj4jkjzp4iTafATVcD8RU02yNEYqwCdLsoXIe8g
-      STREAMFLOW_OAUTH_TOKEN_ISSUER: http://localhost:8080
-      STREAMFLOW_OAUTH_TOKEN_AUDIENCE: streamflow-dev-audience
+      # OAuth configuration (required)
+      STREAMFLOW_CLIENT_ID: ${STREAMFLOW_CLIENT_ID:?STREAMFLOW_CLIENT_ID is required}
+      STREAMFLOW_CLIENT_SECRET: ${STREAMFLOW_CLIENT_SECRET:?STREAMFLOW_CLIENT_SECRET is required}
+      STREAMFLOW_OAUTH_TOKEN_ISSUER: ${STREAMFLOW_OAUTH_TOKEN_ISSUER:-http://localhost:8080}
+      STREAMFLOW_OAUTH_TOKEN_AUDIENCE: ${STREAMFLOW_OAUTH_TOKEN_AUDIENCE:-streamflow-api}
+      # Profiling uses minimal workers
       STREAMFLOW_WORKER_COUNT: "1"
       STREAMFLOW_POLL_MAX_ACTIVITIES: "1"
       # Cache configuration
       STREAMFLOW_CACHE_PROVIDER: ${STREAMFLOW_CACHE_PROVIDER:-redis}
       STREAMFLOW_REDIS_URL: redis://redis:6379
-      # Logging configuration (can be overridden from host environment)
+      # Logging configuration
       STREAMFLOW_LOG_LEVEL: ${STREAMFLOW_LOG_LEVEL:-info}
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      start_period: 120s
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 512M
+    labels:
+      com.streamflow.service: "api"
+      com.streamflow.component: "streamflow"
+      com.streamflow.profile: "profiling"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     volumes:
       # Mount source code
       - ./:/opt/
@@ -134,91 +280,89 @@ services:
       - cargo_git_cache:/opt/.cargo/git
       - cargo_target_cache:/opt/target
 
-  # Init container - runs migrations, seeds OAuth, generates secrets
-  # Runs once before streamflow-deploy starts
-  streamflow-init:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: init
-    depends_on:
-      postgres:
-        condition: service_healthy
-    profiles:
-      - deploy
-    environment:
-      DATABASE_URL: postgres://streamflow:streamflow_dev@postgres:5432/streamflow
-      STREAMFLOW_CLIENT_ID: streamflow-dev-client
-      STREAMFLOW_CLIENT_SECRET: a_zBZWlw8IsQaQm5C2xJPMgunAj4jkjzp4iTafATVcD8RU02yNEYqwCdLsoXIe8g
-    volumes:
-      - streamflow_secrets:/secrets
-    command: >
-      sh -c '
-        set -e
-        echo "StreamFlow Init: Starting..."
-
-        # Generate RSA keys if not present
-        if [ ! -f /secrets/private.pem ]; then
-          echo "Generating RSA key pair..."
-          openssl genrsa -out /secrets/private.pem 2048
-          openssl rsa -in /secrets/private.pem -pubout -out /secrets/public.pem
-          chmod 600 /secrets/private.pem
-          chmod 644 /secrets/public.pem
-        else
-          echo "RSA keys already exist, skipping generation"
-        fi
-
-        # Run database migrations
-        echo "Running database migrations..."
-        cd /opt && sqlx migrate run
-
-        # Seed OAuth client
-        echo "Seeding OAuth client..."
-        STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM=$$(cat /secrets/private.pem) seed-oauth-client
-
-        echo "StreamFlow Init: Complete"
-      '
-
-  # Production-like deploy using distroless image
+  # Production deployment
+  # Uses kruxia/streamflow from Docker Hub if available, builds locally otherwise
+  # Run scripts/init.sh first to generate secrets
   streamflow-deploy:
+    image: kruxia/streamflow:latest
     build:
       context: .
       dockerfile: Dockerfile
       target: deploy
     depends_on:
-      streamflow-init:
-        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "${STREAMFLOW_PORT:-8080}:8080"
+    networks:
+      - frontend
+      - backend
     profiles:
       - deploy
+    init: true
+    stop_grace_period: 30s
     environment:
-      DATABASE_URL: postgres://streamflow:streamflow_dev@postgres:5432/streamflow
-      STREAMFLOW_CLIENT_ID: ${STREAMFLOW_CLIENT_ID:-streamflow-deploy-client}
-      STREAMFLOW_CLIENT_SECRET: ${STREAMFLOW_CLIENT_SECRET:-ni93k3Mrgm0A2eGC_qh-ykGpVLDNZhKGaHsEiH-WnoZEKSptS0w0uA6iC8gnYitE}
-      STREAMFLOW_OAUTH_TOKEN_AUDIENCE: ${STREAMFLOW_OAUTH_TOKEN_AUDIENCE:-streamflow-deploy-audience}
-      STREAMFLOW_OAUTH_TOKEN_ISSUER: http://localhost:8080
-      STREAMFLOW_WORKER_COUNT: "20"
-      STREAMFLOW_POLL_MAX_ACTIVITIES: "1"
-      # File-based secrets (Docker secrets pattern)
-      STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM_FILE: /secrets/private.pem
-      STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM_FILE: /secrets/public.pem
+      DATABASE_URL: postgres://${POSTGRES_USER:-streamflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-streamflow}
+      # OAuth configuration (required)
+      STREAMFLOW_CLIENT_ID: ${STREAMFLOW_CLIENT_ID:?STREAMFLOW_CLIENT_ID is required}
+      STREAMFLOW_CLIENT_SECRET: ${STREAMFLOW_CLIENT_SECRET:?STREAMFLOW_CLIENT_SECRET is required}
+      STREAMFLOW_OAUTH_TOKEN_ISSUER: ${STREAMFLOW_OAUTH_TOKEN_ISSUER:-http://localhost:8080}
+      STREAMFLOW_OAUTH_TOKEN_AUDIENCE: ${STREAMFLOW_OAUTH_TOKEN_AUDIENCE:-streamflow-api}
+      # Worker configuration
+      STREAMFLOW_WORKER_COUNT: ${STREAMFLOW_WORKER_COUNT:-20}
+      STREAMFLOW_POLL_MAX_ACTIVITIES: ${STREAMFLOW_POLL_MAX_ACTIVITIES:-1}
       # Cache configuration
       STREAMFLOW_CACHE_PROVIDER: ${STREAMFLOW_CACHE_PROVIDER:-redis}
       STREAMFLOW_REDIS_URL: redis://redis:6379
       # Logging configuration
       STREAMFLOW_LOG_LEVEL: ${STREAMFLOW_LOG_LEVEL:-info}
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      start_period: 30s
+    restart: unless-stopped
+    logging: *default-logging
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    labels:
+      com.streamflow.service: "api"
+      com.streamflow.component: "streamflow"
+      com.streamflow.profile: "deploy"
+    security_opt:
+      - no-new-privileges:true
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     volumes:
-      - streamflow_secrets:/secrets:ro
+      - ./dev-keys:/secrets:ro
 
 volumes:
   postgres_data:
+    name: streamflow-postgres-data
+    labels:
+      com.streamflow.volume: "database"
   redis_data:
+    name: streamflow-redis-data
+    labels:
+      com.streamflow.volume: "cache"
   cargo_cache:
+    name: streamflow-cargo-cache
+    labels:
+      com.streamflow.volume: "build-cache"
   cargo_git_cache:
+    name: streamflow-cargo-git
+    labels:
+      com.streamflow.volume: "build-cache"
   cargo_target_cache:
-  streamflow_secrets:
+    name: streamflow-cargo-target
+    labels:
+      com.streamflow.volume: "build-cache"

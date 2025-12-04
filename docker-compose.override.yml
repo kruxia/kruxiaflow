@@ -1,0 +1,30 @@
+# Development overrides - automatically loaded by docker compose
+#
+# This file provides sensible defaults for local development.
+# It is NOT suitable for production use.
+#
+# To use production settings, explicitly specify the base file only:
+#   docker compose -f docker-compose.yml --profile deploy up
+#
+# For development, this file is auto-loaded:
+#   docker compose --profile develop up
+
+services:
+  # Expose PostgreSQL on all interfaces for local tooling access
+  postgres:
+    ports:
+      - "5432:5432"
+
+  # Expose Redis on all interfaces for local tooling access
+  redis:
+    ports:
+      - "6379:6379"
+
+  # Expose StreamFlow on all interfaces for local testing
+  streamflow-develop:
+    ports:
+      - "8080:8080"
+
+  streamflow-profiling:
+    ports:
+      - "8080:8080"

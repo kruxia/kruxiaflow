@@ -2410,6 +2410,58 @@ for chunk in large_dataset.chunks() {
 
 ---
 
+### Story 5.9: CLI Health Command for Container Health Checks
+
+**Priority**: P2 (Medium - Deployment polish)
+
+**As** a DevOps engineer deploying StreamFlow in Docker/Kubernetes
+**I want** a `streamflow health` CLI subcommand
+**So that** I can use Docker HEALTHCHECK with distroless images (no curl/wget)
+
+**Background**:
+Distroless container images provide enhanced security by removing shells and utilities, but this breaks standard `curl`-based health checks. The production `streamflow-deploy` service needs a built-in health check mechanism.
+
+**Scope**:
+- Add `health` subcommand to the streamflow CLI
+- Check local `/health` endpoint (default: http://127.0.0.1:8080/health)
+- Exit code 0 on success, 1 on failure
+- Optional `--url` flag for custom endpoint
+- Optional `--timeout` flag (default: 5s)
+- Minimal dependencies (reuse existing HTTP client)
+
+**Usage**:
+```bash
+# Basic health check (uses default localhost:8080)
+streamflow health
+
+# Custom endpoint
+streamflow health --url http://localhost:9090/health
+
+# With timeout
+streamflow health --timeout 10s
+```
+
+**Docker Compose Integration**:
+```yaml
+healthcheck:
+  test: ["CMD", "/streamflow", "health"]
+  interval: 10s
+  timeout: 5s
+  retries: 5
+```
+
+**Benefits**:
+- Enables Docker health checks on distroless images
+- Works with Kubernetes liveness/readiness probes
+- No external dependencies (curl, wget, etc.)
+- Consistent health check behavior across environments
+
+**Trade-offs**:
+- Adds small binary size (~few KB for HTTP client reuse)
+- Slight startup overhead (minimal - single HTTP request)
+
+---
+
 ## Epic 6: Advanced Workflow Features
 
 **Goal**: Enable sophisticated workflow patterns beyond basic sequential/parallel execution.

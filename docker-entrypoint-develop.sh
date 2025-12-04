@@ -24,11 +24,13 @@ done
 # Run database migrations
 sqlx migrate run
 
-# Build the (development) binary
-cargo build --release
+# Build in debug mode for development (release LTO needs 6GB+ RAM)
+# Use ./dev up --profile deploy for optimized production builds
+echo "Building StreamFlow (debug mode)..."
+cargo build
 
-# Seed the oauth client for profiling
-/opt/target/release/seed-oauth-client
+# Seed the oauth client
+/opt/target/debug/seed-oauth-client
 
 # -- TODO: Replace homemade memory monitoring with proper prometheus monitoring setup --
 
@@ -63,7 +65,7 @@ echo "Starting StreamFlow server with memory monitoring..."
 echo "Memory usage will be logged to: $MONITOR_OUTPUT"
 
 # Start server in background so we can monitor it
-/opt/target/release/streamflow serve "$@" &
+/opt/target/debug/streamflow serve "$@" &
 SERVER_PID=$!
 
 echo "StreamFlow server started (PID: $SERVER_PID)"
