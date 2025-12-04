@@ -57,7 +57,6 @@ This plan coordinates StreamFlow's development roadmap with go-to-market activit
 ```
 - Dockerfile (multi-stage, <50MB image)
 - docker-compose.yml (StreamFlow + PostgreSQL)
-- docker/init-db.sql (pgvector setup)
 - .dockerignore
 ```
 
