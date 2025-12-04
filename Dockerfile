@@ -28,32 +28,30 @@ ARG SQLX_OFFLINE=true
 COPY ./ ./
 RUN cargo build --release
 
-# == INIT ==
-# Init container for migrations, seeding, and secret generation
-# Used by docker-compose to prepare the environment before starting streamflow
-FROM debian:bookworm-slim AS init
+# == DEPLOY ==
+# Production image with management tools (sqlx, seed-oauth-client)
+# Uses debian-slim for shell access needed by migrations and management
+FROM debian:bookworm-slim AS deploy
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    openssl \
     ca-certificates \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt
 
-# Copy migration and seeding tools
-COPY --from=build /usr/local/cargo/bin/sqlx /usr/local/bin/sqlx
+# Copy binaries and tools
+COPY --from=build /opt/target/release/streamflow /usr/local/bin/streamflow
 COPY --from=build /opt/target/release/seed-oauth-client /usr/local/bin/seed-oauth-client
+COPY --from=build /usr/local/cargo/bin/sqlx /usr/local/bin/sqlx
 COPY migrations /opt/migrations
 
-# == DEPLOY ==
-# Minimal distroless image - no shell, just the binary
-FROM gcr.io/distroless/cc-debian12 AS deploy
-
-# Copy only the streamflow binary
-COPY --from=build /opt/target/release/streamflow /streamflow
+# Copy entrypoint script
+COPY docker-entrypoint-deploy.sh /opt/docker-entrypoint-deploy.sh
+RUN chmod +x /opt/docker-entrypoint-deploy.sh
 
 EXPOSE 8080
-ENTRYPOINT ["/streamflow"]
+ENTRYPOINT ["/opt/docker-entrypoint-deploy.sh"]
 CMD ["serve"]
 
 # == PROFILING ==

@@ -1,2 +1,47 @@
-target
+# Build artifacts
+target/
+debug/
 
+# Environment files (may contain secrets)
+.env
+.env.*
+!.env.example
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Documentation (not needed in image)
+docs/
+*.md
+!README.md
+
+# Development files
+dev-keys/
+var/
+coverage/
+*.profraw
+*.profdata
+*.lcov
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Benchmarks (separate build)
+benchmarks/
+
+# Rust
+**/*.rs.bk
+*.pdb
+**/mutants.out*/
+.cargo/.global-cache
+.cargo/.package-cache
+.cargo/.package-cache-mutate
