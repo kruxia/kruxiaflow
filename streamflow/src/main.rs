@@ -144,10 +144,21 @@ EXAMPLES:\n  \
   streamflow seed-llm /path/to/custom_models.yaml"
     )]
     SeedLlm(commands::seed_llm::SeedLlmCommand),
+
+    /// Database migration management
+    #[command(
+        about = "Run database migrations",
+        long_about = "Manage database migrations with embedded SQL files\n\n\
+Migrations are embedded at compile time and can be run, previewed, or status-checked.\n\n\
+EXAMPLES:\n  \
+  streamflow migrate              # Run pending migrations\n  \
+  streamflow migrate --status     # Show migration status\n  \
+  streamflow migrate --dry-run    # Preview without applying"
+    )]
+    Migrate(commands::migrate::MigrateCommand),
     // Future commands (Epic 1C):
     // Orchestrator(commands::orchestrator::OrchestratorCommand),
     // Worker(commands::worker::WorkerCommand),
-    // Migrate(commands::migrate::MigrateCommand),
 }
 
 #[tokio::main]
@@ -181,5 +192,6 @@ async fn main() -> Result<()> {
         Commands::Serve(cmd) => commands::serve::execute(cmd, database_url.unwrap()).await,
         Commands::Version(cmd) => commands::version::execute(cmd),
         Commands::SeedLlm(cmd) => commands::seed_llm::execute(cmd, database_url.unwrap()).await,
+        Commands::Migrate(cmd) => commands::migrate::execute(cmd, database_url.unwrap()).await,
     }
 }

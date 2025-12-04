@@ -607,13 +607,13 @@ If issues arise:
 ## Implementation Checklist
 
 ### Task 1: Migrate Subcommand
-- [ ] Create `streamflow/src/commands/migrate.rs`
-- [ ] Implement `sqlx::migrate!()` embedding
-- [ ] Add `--status` flag
-- [ ] Add `--dry-run` flag
-- [ ] Update `commands/mod.rs`
-- [ ] Update `main.rs` Commands enum
-- [ ] Test migration execution
+- [x] Create `streamflow/src/commands/migrate.rs`
+- [x] Implement `sqlx::migrate!()` embedding
+- [x] Add `--status` flag
+- [x] Add `--dry-run` flag
+- [x] Update `commands/mod.rs`
+- [x] Update `main.rs` Commands enum
+- [x] Test migration execution (unit tests + CLI integration tests)
 
 ### Task 2: Seed Client Subcommand
 - [ ] Create `streamflow/src/commands/seed_client.rs`

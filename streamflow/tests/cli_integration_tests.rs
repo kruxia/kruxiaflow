@@ -167,3 +167,75 @@ fn test_api_bind_flag() {
 
     assert!(output.status.success());
 }
+
+// =========================================================================
+// Migrate command tests
+// =========================================================================
+
+#[test]
+fn test_migrate_command_help() {
+    // Test that 'migrate --help' shows migrate-specific help
+    let output = run_streamflow(&["migrate", "--help"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success());
+    assert!(stdout.contains("migration"));
+    assert!(stdout.contains("--status"));
+    assert!(stdout.contains("--dry-run"));
+}
+
+#[test]
+fn test_migrate_command_missing_database_url() {
+    // Test that migrate command fails without database URL
+    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+        .arg("migrate")
+        .env_remove("DATABASE_URL")
+        .output()
+        .expect("Failed to execute streamflow binary");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(stderr.contains("Database URL is required"));
+}
+
+#[test]
+fn test_migrate_status_flag_accepted() {
+    // Test that --status flag is accepted (will fail on connection, but parsing works)
+    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+        .arg("migrate")
+        .arg("--status")
+        .arg("--help")
+        .output()
+        .expect("Failed to execute streamflow binary");
+
+    // --help should succeed even with --status
+    assert!(output.status.success());
+}
+
+#[test]
+fn test_migrate_dry_run_flag_accepted() {
+    // Test that --dry-run flag is accepted (will fail on connection, but parsing works)
+    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+        .arg("migrate")
+        .arg("--dry-run")
+        .arg("--help")
+        .output()
+        .expect("Failed to execute streamflow binary");
+
+    // --help should succeed even with --dry-run
+    assert!(output.status.success());
+}
+
+#[test]
+fn test_migrate_with_database_url_flag() {
+    // Test that --database-url flag works with migrate command
+    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+        .arg("--database-url")
+        .arg("postgres://localhost/test")
+        .arg("migrate")
+        .arg("--help")
+        .output()
+        .expect("Failed to execute streamflow binary");
+
+    assert!(output.status.success());
+}
