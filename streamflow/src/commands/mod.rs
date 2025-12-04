@@ -5,5 +5,6 @@ pub mod orchestrator;
 pub mod seed_client;
 pub mod seed_llm;
 pub mod serve;
+pub mod status;
 pub mod version;
 pub mod worker;
