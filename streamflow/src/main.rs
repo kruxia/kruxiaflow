@@ -156,6 +156,20 @@ EXAMPLES:\n  \
   streamflow migrate --dry-run    # Preview without applying"
     )]
     Migrate(commands::migrate::MigrateCommand),
+
+    /// Seed OAuth client credentials
+    #[command(
+        name = "seed-client",
+        about = "Seed OAuth client credentials in database",
+        long_about = "Seed OAuth client credentials for authentication\n\n\
+By default, skips seeding if the client already exists (idempotent).\n\
+Use --force to delete and re-create an existing client.\n\n\
+EXAMPLES:\n  \
+  streamflow seed-client                              # Seed with env vars\n  \
+  streamflow seed-client --client-id my-app           # Override client ID\n  \
+  streamflow seed-client --force                      # Re-seed even if exists"
+    )]
+    SeedClient(commands::seed_client::SeedClientCommand),
     // Future commands (Epic 1C):
     // Orchestrator(commands::orchestrator::OrchestratorCommand),
     // Worker(commands::worker::WorkerCommand),
@@ -193,5 +207,8 @@ async fn main() -> Result<()> {
         Commands::Version(cmd) => commands::version::execute(cmd),
         Commands::SeedLlm(cmd) => commands::seed_llm::execute(cmd, database_url.unwrap()).await,
         Commands::Migrate(cmd) => commands::migrate::execute(cmd, database_url.unwrap()).await,
+        Commands::SeedClient(cmd) => {
+            commands::seed_client::execute(cmd, database_url.unwrap()).await
+        }
     }
 }

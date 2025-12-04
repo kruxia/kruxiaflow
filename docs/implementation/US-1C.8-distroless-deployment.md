@@ -616,14 +616,14 @@ If issues arise:
 - [x] Test migration execution (unit tests + CLI integration tests)
 
 ### Task 2: Seed Client Subcommand
-- [ ] Create `streamflow/src/commands/seed_client.rs`
-- [ ] Move bcrypt logic from bin file
-- [ ] Default to skip if client exists (idempotent)
-- [ ] Add `--force` flag to re-seed even if exists
-- [ ] Add CLI argument overrides
-- [ ] Update `commands/mod.rs`
-- [ ] Update `main.rs` Commands enum
-- [ ] Test client seeding
+- [x] Create `streamflow/src/commands/seed_client.rs`
+- [x] Move bcrypt logic from bin file
+- [x] Default to skip if client exists (idempotent)
+- [x] Add `--force` flag to re-seed even if exists
+- [x] Add CLI argument overrides
+- [x] Update `commands/mod.rs`
+- [x] Update `main.rs` Commands enum
+- [x] Test client seeding (unit tests + CLI integration tests)
 
 ### Task 3: Serve --init Flag
 - [ ] Add `--init` flag to ServeCommand

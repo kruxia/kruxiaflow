@@ -239,3 +239,90 @@ fn test_migrate_with_database_url_flag() {
 
     assert!(output.status.success());
 }
+
+// =========================================================================
+// Seed-client command tests
+// =========================================================================
+
+#[test]
+fn test_seed_client_command_help() {
+    // Test that 'seed-client --help' shows seed-client-specific help
+    let output = run_streamflow(&["seed-client", "--help"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success());
+    assert!(stdout.contains("OAuth"));
+    assert!(stdout.contains("--client-id"));
+    assert!(stdout.contains("--client-secret"));
+    assert!(stdout.contains("--force"));
+}
+
+#[test]
+fn test_seed_client_command_missing_database_url() {
+    // Test that seed-client command fails without database URL
+    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+        .arg("seed-client")
+        .env_remove("DATABASE_URL")
+        .env_remove("STREAMFLOW_CLIENT_SECRET")
+        .output()
+        .expect("Failed to execute streamflow binary");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success());
+    assert!(stderr.contains("Database URL is required"));
+}
+
+#[test]
+fn test_seed_client_force_flag_accepted() {
+    // Test that --force flag is accepted
+    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+        .arg("seed-client")
+        .arg("--force")
+        .arg("--help")
+        .output()
+        .expect("Failed to execute streamflow binary");
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn test_seed_client_client_id_flag_accepted() {
+    // Test that --client-id flag is accepted
+    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+        .arg("seed-client")
+        .arg("--client-id")
+        .arg("my-custom-client")
+        .arg("--help")
+        .output()
+        .expect("Failed to execute streamflow binary");
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn test_seed_client_client_secret_flag_accepted() {
+    // Test that --client-secret flag is accepted
+    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+        .arg("seed-client")
+        .arg("--client-secret")
+        .arg("my-secret")
+        .arg("--help")
+        .output()
+        .expect("Failed to execute streamflow binary");
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn test_seed_client_with_database_url_flag() {
+    // Test that --database-url flag works with seed-client command
+    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+        .arg("--database-url")
+        .arg("postgres://localhost/test")
+        .arg("seed-client")
+        .arg("--help")
+        .output()
+        .expect("Failed to execute streamflow binary");
+
+    assert!(output.status.success());
+}

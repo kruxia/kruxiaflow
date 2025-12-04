@@ -158,7 +158,7 @@ if [ "$SKIP_DB_SETUP" = false ]; then
 
     # Database configuration
     DB_USER="streamflow"
-    DB_PASSWORD="streamflow_dev"
+    DB_PASSWORD="${POSTGRES_PASSWORD:-streamflow_dev}"
     DB_HOST="127.0.0.1"
     DB_PORT="5432"
     DB_NAME="streamflow_test"
@@ -292,33 +292,15 @@ if [ "$COVERAGE" = true ]; then
 
 else
     # Regular test execution without coverage
-    CMD="cargo test"
+    # Note: --doc cannot be combined with --lib/--bins/--tests, so we run them separately
 
-    # Add test type
-    case $TEST_TYPE in
-        unit)
-            CMD="$CMD --lib"
-            ;;
-        integration)
-            CMD="$CMD --tests"
-            ;;
-        doc)
-            CMD="$CMD --doc"
-            ;;
-        all)
-            # Use explicit flags to exclude benchmarks (they don't accept --test-threads)
-            CMD="$CMD --workspace --lib --bins --tests --doc"
-            ;;
-    esac
-
-    # Add package filter if specified
+    # Build common flags
+    COMMON_FLAGS=""
     if [ -n "$PACKAGE" ]; then
-        CMD="$CMD --package $PACKAGE"
+        COMMON_FLAGS="$COMMON_FLAGS --package $PACKAGE"
     fi
-
-    # Add verbose flag
     if [ -n "$VERBOSE" ]; then
-        CMD="$CMD --verbose"
+        COMMON_FLAGS="$COMMON_FLAGS --verbose"
     fi
 
     # Test arguments
@@ -326,15 +308,67 @@ else
     if [ -n "$NOCAPTURE" ]; then
         TEST_ARGS="$TEST_ARGS --nocapture"
     fi
-    CMD="$CMD -- $TEST_ARGS"
 
-    if eval "$CMD"; then
-        echo ""
-        echo -e "${GREEN}✅ All tests passed!${NC}"
-        exit 0
-    else
-        echo ""
-        echo -e "${RED}❌ Tests failed${NC}"
-        exit 1
-    fi
+    case $TEST_TYPE in
+        unit)
+            CMD="cargo test --lib $COMMON_FLAGS -- $TEST_ARGS"
+            if eval "$CMD"; then
+                echo ""
+                echo -e "${GREEN}✅ All tests passed!${NC}"
+                exit 0
+            else
+                echo ""
+                echo -e "${RED}❌ Tests failed${NC}"
+                exit 1
+            fi
+            ;;
+        integration)
+            CMD="cargo test --tests $COMMON_FLAGS -- $TEST_ARGS"
+            if eval "$CMD"; then
+                echo ""
+                echo -e "${GREEN}✅ All tests passed!${NC}"
+                exit 0
+            else
+                echo ""
+                echo -e "${RED}❌ Tests failed${NC}"
+                exit 1
+            fi
+            ;;
+        doc)
+            CMD="cargo test --doc $COMMON_FLAGS -- $TEST_ARGS"
+            if eval "$CMD"; then
+                echo ""
+                echo -e "${GREEN}✅ All tests passed!${NC}"
+                exit 0
+            else
+                echo ""
+                echo -e "${RED}❌ Tests failed${NC}"
+                exit 1
+            fi
+            ;;
+        all)
+            # Run lib/bins/tests first (excludes benchmarks which don't accept --test-threads)
+            echo -e "${BLUE}Running unit and integration tests...${NC}"
+            CMD="cargo test --workspace --lib --bins --tests $COMMON_FLAGS -- $TEST_ARGS"
+            if ! eval "$CMD"; then
+                echo ""
+                echo -e "${RED}❌ Tests failed${NC}"
+                exit 1
+            fi
+
+            # Run doc tests separately (--doc cannot be combined with other target flags)
+            echo ""
+            echo -e "${BLUE}Running documentation tests...${NC}"
+            CMD="cargo test --workspace --doc $COMMON_FLAGS -- $TEST_ARGS"
+            if ! eval "$CMD"; then
+                echo ""
+                echo -e "${RED}❌ Documentation tests failed${NC}"
+                exit 1
+            fi
+
+            echo ""
+            echo -e "${GREEN}✅ All tests passed!${NC}"
+            exit 0
+            ;;
+    esac
 fi
