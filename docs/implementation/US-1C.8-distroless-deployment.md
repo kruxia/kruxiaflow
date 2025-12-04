@@ -39,7 +39,7 @@ The current deploy image uses `debian:bookworm-slim` (~80MB) with:
 - [ ] Single `streamflow` binary contains all functionality
 - [ ] `streamflow migrate` subcommand runs embedded migrations
 - [ ] `streamflow seed-client` subcommand seeds OAuth client
-- [ ] `streamflow serve --init` performs startup sequence (wait for DB, migrate, seed, serve)
+- [ ] `streamflow serve --migrate --seed-client` performs startup sequence (wait for DB, migrate, seed, serve)
 - [ ] Deploy image uses `gcr.io/distroless/static-debian12:nonroot`
 - [ ] Image size < 30MB
 - [ ] No shell required at runtime
@@ -87,7 +87,7 @@ flowchart TB
             SF["streamflow"]
             Migrate["migrate subcommand"]
             SeedCmd["seed-client subcommand"]
-            Init["serve --init flag"]
+            Init["--migrate --seed-client"]
         end
 
         EmbeddedMigrations["Embedded migrations"]
@@ -171,16 +171,16 @@ streamflow seed-client --force                   # Re-seed even if client exists
 
 ---
 
-### Task 3: Add `--init` Flag to `serve` Command (3 hours)
+### Task 3: Add `--migrate` and `--seed-client` Flags to `serve` Command (3 hours)
 
 **File**: `streamflow/src/commands/serve.rs` (modify)
 
-**Objective**: Replace shell entrypoint logic with Rust code.
+**Objective**: Replace shell entrypoint logic with Rust code using granular startup flags.
 
 **Implementation Notes**:
 
 The shell entrypoint performs:
-1. Load RSA keys from files (if not in env vars)
+1. Load RSA keys from files (if not in env vars) - already handled by serve command
 2. Wait for PostgreSQL to be ready
 3. Run migrations
 4. Seed OAuth client
@@ -188,42 +188,48 @@ The shell entrypoint performs:
 
 **Flag Behavior**:
 ```
-streamflow serve              # Just start server (assume DB ready)
-streamflow serve --init       # Full initialization sequence then serve
+streamflow serve                              # Just start server (assume DB ready)
+streamflow serve --migrate                    # Run migrations then serve
+streamflow serve --seed-client                # Seed OAuth client then serve
+streamflow serve --migrate --seed-client      # Full initialization then serve
+streamflow serve --db-connect-timeout 120     # Custom timeout for DB connection
 ```
 
 **Key Implementation Details**:
 
-1. **Key Loading**: Already handled by config module, may need file fallback
-2. **Wait for Postgres**: Implement retry loop with `sqlx::PgPool::connect()`
-3. **Run Migrations**: Call migrate command logic internally
-4. **Seed OAuth**: Call seed-client logic internally (idempotent - skip if exists)
+1. **Key Loading**: Already handled by config module with `_FILE` fallback for Docker secrets
+2. **Wait for Postgres**: Implement retry loop with exponential backoff (`wait_for_postgres()`)
+3. **Run Migrations**: Call `migrate::run_migrations()` internally when `--migrate` is set
+4. **Seed OAuth**: Call `seed_client::seed_oauth_client()` when `--seed-client` is set (idempotent - skip if exists)
 5. **Start Server**: Existing serve logic
 
 **Startup Sequence**:
 ```rust
-if args.init {
-    // 1) Wait for PostgreSQL (retry with backoff)
-    wait_for_postgres(&database_url).await?;
+if cmd.migrate || cmd.seed_client {
+    // Wait for PostgreSQL with retry (exponential backoff)
+    let init_pool = wait_for_postgres(&database_url, cmd.db_connect_timeout).await?;
 
-    // 2) Run migrations
-    run_migrations(&database_url).await?;
-
-    // 3) Seed OAuth client (idempotent)
-    if should_seed_client() {
-        seed_oauth_client(&database_url).await?;
+    if cmd.migrate {
+        migrate::run_migrations(&init_pool).await?;
     }
+
+    if cmd.seed_client {
+        seed_client::seed_oauth_client(&init_pool, &client_id, &client_secret, false).await?;
+    }
+
+    init_pool.close().await;
 }
 
-// 4) Start server
+// Start server with normal pool configuration
 start_server(args).await
 ```
 
 **Changes Required**:
-1. Add `--init` flag to `ServeCommand` struct
-2. Implement `wait_for_postgres()` with configurable timeout
-3. Add internal calls to migrate and seed logic
-4. Handle key file loading in config if not already present
+1. Add `--migrate` flag to `ServeCommand` struct
+2. Add `--seed-client` flag to `ServeCommand` struct
+3. Add `--db-connect-timeout` flag with default 60 seconds
+4. Implement `wait_for_postgres()` with exponential backoff
+5. Add internal calls to migrate and seed logic
 
 ---
 
@@ -254,7 +260,7 @@ EXPOSE 8080
 
 # Direct binary execution (no shell)
 ENTRYPOINT ["/streamflow"]
-CMD ["serve", "--init"]
+CMD ["serve", "--migrate", "--seed-client"]
 ```
 
 **Static Linking Considerations**:
@@ -376,7 +382,7 @@ streamflow/
 │   └── commands/
 │       ├── mod.rs
 │       ├── api.rs
-│       ├── serve.rs                 # MODIFIED: --init flag
+│       ├── serve.rs                 # MODIFIED: --migrate, --seed-client flags
 │       ├── version.rs
 │       ├── seed_llm.rs
 │       ├── migrate.rs               # NEW: embedded migrations
@@ -406,10 +412,12 @@ COMMANDS:
     health        Check service health (for container health checks)
 
 SERVE OPTIONS:
-    --init        Run full initialization (wait for DB, migrate, seed) before serving
-    --port        API server port (default: 8080)
-    --bind        Bind address (default: 0.0.0.0)
-    --workers     Number of built-in workers (default: 4)
+    --migrate              Run database migrations before serving
+    --seed-client          Seed OAuth client before serving (idempotent)
+    --db-connect-timeout   Timeout for initial DB connection in seconds (default: 60)
+    --port                 API server port (default: 8080)
+    --bind                 Bind address (default: 0.0.0.0)
+    --workers              Number of built-in workers (default: 4)
 
 MIGRATE OPTIONS:
     --status      Show migration status without running
@@ -454,7 +462,7 @@ HEALTH OPTIONS:
    docker-compose up -d postgres
 
    # Run streamflow with --init
-   docker-compose run streamflow serve --init &
+   docker-compose run streamflow serve --migrate --seed-client &
 
    # Verify migrations applied
    docker-compose exec postgres psql -c "SELECT * FROM _sqlx_migrations"
@@ -545,9 +553,10 @@ COPY --from=build /opt/target/release/streamflow /streamflow
 EXPOSE 8080
 
 # Direct binary execution - no shell needed
-# --init flag: wait for postgres, run migrations, seed OAuth client
+# --migrate: wait for postgres, run migrations
+# --seed-client: seed OAuth client (idempotent)
 ENTRYPOINT ["/streamflow"]
-CMD ["serve", "--init"]
+CMD ["serve", "--migrate", "--seed-client"]
 
 # == PROFILING ==
 FROM rust:1.90-bookworm AS profiling
@@ -625,12 +634,15 @@ If issues arise:
 - [x] Update `main.rs` Commands enum
 - [x] Test client seeding (unit tests + CLI integration tests)
 
-### Task 3: Serve --init Flag
-- [ ] Add `--init` flag to ServeCommand
-- [ ] Implement `wait_for_postgres()` with retry
-- [ ] Call migrate logic internally
-- [ ] Call seed-client logic internally
-- [ ] Test full init sequence
+### Task 3: Serve --migrate and --seed-client Flags
+- [x] Add `--migrate` flag to ServeCommand
+- [x] Add `--seed-client` flag to ServeCommand
+- [x] Add `--db-connect-timeout` flag
+- [x] Implement `wait_for_postgres()` with exponential backoff retry
+- [x] Call migrate logic internally when --migrate is set
+- [x] Call seed-client logic internally when --seed-client is set (idempotent)
+- [x] Add unit tests and CLI integration tests
+- [ ] Test full startup sequence in Docker
 
 ### Task 4: Health Subcommand
 - [ ] Create `streamflow/src/commands/health.rs`

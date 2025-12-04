@@ -326,3 +326,75 @@ fn test_seed_client_with_database_url_flag() {
 
     assert!(output.status.success());
 }
+
+// =========================================================================
+// Serve command startup flag tests
+// =========================================================================
+
+#[test]
+fn test_serve_migrate_flag_accepted() {
+    // Test that --migrate flag is accepted
+    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+        .arg("serve")
+        .arg("--migrate")
+        .arg("--help")
+        .output()
+        .expect("Failed to execute streamflow binary");
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn test_serve_seed_client_flag_accepted() {
+    // Test that --seed-client flag is accepted
+    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+        .arg("serve")
+        .arg("--seed-client")
+        .arg("--help")
+        .output()
+        .expect("Failed to execute streamflow binary");
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn test_serve_db_connect_timeout_flag_accepted() {
+    // Test that --db-connect-timeout flag is accepted
+    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+        .arg("serve")
+        .arg("--db-connect-timeout")
+        .arg("120")
+        .arg("--help")
+        .output()
+        .expect("Failed to execute streamflow binary");
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn test_serve_combined_startup_flags() {
+    // Test that --migrate and --seed-client can be combined
+    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+        .arg("serve")
+        .arg("--migrate")
+        .arg("--seed-client")
+        .arg("--db-connect-timeout")
+        .arg("90")
+        .arg("--help")
+        .output()
+        .expect("Failed to execute streamflow binary");
+
+    assert!(output.status.success());
+}
+
+#[test]
+fn test_serve_help_shows_startup_flags() {
+    // Test that serve --help shows the startup flags
+    let output = run_streamflow(&["serve", "--help"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success());
+    assert!(stdout.contains("--migrate"));
+    assert!(stdout.contains("--seed-client"));
+    assert!(stdout.contains("--db-connect-timeout"));
+}
