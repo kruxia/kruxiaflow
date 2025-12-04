@@ -273,10 +273,12 @@ See [Post-MVP Roadmap](docs/post-mvp.md) for details.
 
 - **GitHub Issues**: [Report bugs and request features](https://github.com/kruxia/streamflow/issues)
 - **Discussions**: [Ask questions and share ideas](https://github.com/kruxia/streamflow/discussions)
+- **Code of Conduct**: [Community guidelines](CODE_OF_CONDUCT.md)
+- **Security**: [Report vulnerabilities](SECURITY.md)
 
 ## Contributing
 
-Contributions are welcome! Please read our contributing guidelines before submitting PRs.
+Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting PRs.
 
 ```bash
 # Fork and clone
@@ -290,6 +292,8 @@ git checkout -b feature/your-feature
 
 # Submit a PR
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed development setup and guidelines.
 
 ## License
 
