@@ -147,14 +147,14 @@ pub async fn run_migrations(pool: &PgPool) -> Result<()> {
     Ok(())
 }
 
-/// Get the embedded migrator (for testing and introspection)
-pub fn migrator() -> &'static Migrator {
-    &MIGRATOR
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Get the embedded migrator (for testing)
+    fn migrator() -> &'static Migrator {
+        &MIGRATOR
+    }
 
     #[test]
     fn test_migrate_command_defaults() {
