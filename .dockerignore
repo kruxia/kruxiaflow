@@ -35,9 +35,6 @@ coverage/
 # Benchmarks (separate image)
 benchmarks/
 
-# Dashboard (frontend, separate build)
-dashboard/
-
 # Config (local dev only)
 config/
 
