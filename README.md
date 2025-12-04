@@ -1,5 +1,10 @@
 # StreamFlow
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Rust](https://img.shields.io/badge/rust-1.90%2B-orange.svg)](https://www.rust-lang.org/)
+[![Docker](https://img.shields.io/docker/v/kruxia/streamflow?label=docker&color=2496ED)](https://hub.docker.com/r/kruxia/streamflow)
+[![Docker Image Size](https://img.shields.io/docker/image-size/kruxia/streamflow/latest?label=image%20size)](https://hub.docker.com/r/kruxia/streamflow)
+
 **AI-Native durable Workflow Orchestration with Built-in Cost Control**
 
 A lightweight, high-performance workflow engine designed for AI applications. Track every token, cache intelligently, and never exceed your LLM budget.

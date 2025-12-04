@@ -1,0 +1,33 @@
+[book]
+title = "StreamFlow Documentation"
+authors = ["Kruxia"]
+description = "AI-Native Workflow Orchestration with Built-in Cost Control"
+language = "en"
+src = "docs"
+
+[build]
+build-dir = "book"
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "ayu"
+git-repository-url = "https://github.com/kruxia/streamflow"
+edit-url-template = "https://github.com/kruxia/streamflow/edit/main/{path}"
+site-url = "/streamflow/"
+cname = ""
+additional-js = ["mermaid.min.js", "mermaid-init.js"]
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.search]
+enable = true
+limit-results = 20
+use-hierarchical-urls = true
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
+
+[output.html.playground]
+editable = false
