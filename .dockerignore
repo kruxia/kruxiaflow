@@ -1,17 +1,19 @@
 # Build artifacts
 target/
-debug/
 
-# Environment files (may contain secrets)
+# Environment and secrets
 .env
 .env.*
 !.env.example
+.envrc
+dev-keys/
 
 # Git
 .git/
 .gitignore
+.github/
 
-# IDE
+# IDE and editor
 .idea/
 .vscode/
 *.swp
@@ -19,26 +21,31 @@ debug/
 
 # Documentation (not needed in image)
 docs/
+notes/
 *.md
 !README.md
 
-# Development files
-dev-keys/
-var/
+# Development and testing
 coverage/
 *.profraw
 *.profdata
 *.lcov
 *.log
 
+# Benchmarks (separate image)
+benchmarks/
+
+# Dashboard (frontend, separate build)
+dashboard/
+
+# Config (local dev only)
+config/
+
 # OS files
 .DS_Store
 Thumbs.db
 
-# Benchmarks (separate build)
-benchmarks/
-
-# Rust
+# Rust artifacts
 **/*.rs.bk
 *.pdb
 **/mutants.out*/

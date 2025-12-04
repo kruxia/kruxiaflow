@@ -10,15 +10,19 @@
 #   docker compose --profile develop up
 
 services:
-  # Expose PostgreSQL on all interfaces for local tooling access
+  # Connect to frontend network since backend is internal-only
+  # Port binding comes from base file (use POSTGRES_PORT env var to override)
   postgres:
-    ports:
-      - "5432:5432"
+    networks:
+      - backend
+      - frontend
 
-  # Expose Redis on all interfaces for local tooling access
+  # Connect to frontend network since backend is internal-only
+  # Port binding comes from base file (use REDIS_PORT env var to override)
   redis:
-    ports:
-      - "6379:6379"
+    networks:
+      - backend
+      - frontend
 
   # Expose StreamFlow on all interfaces for local testing
   streamflow-develop:
