@@ -58,3 +58,31 @@ pub struct ServiceInfo {
     /// Enabled features
     pub features: Vec<String>,
 }
+
+/// Connection pool metrics response
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct PoolMetricsResponse {
+    /// Total connections in the pool
+    #[schema(example = 10)]
+    pub size: u32,
+
+    /// Idle connections available
+    #[schema(example = 5)]
+    pub idle: u32,
+
+    /// Active connections in use
+    #[schema(example = 5)]
+    pub active: u32,
+
+    /// Maximum configured connections
+    #[schema(example = 20)]
+    pub max_connections: u32,
+
+    /// Pool utilization percentage
+    #[schema(example = 50.0)]
+    pub utilization_percent: f64,
+
+    /// Pool health status
+    #[schema(example = "healthy")]
+    pub status: &'static str,
+}

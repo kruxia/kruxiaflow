@@ -1,6 +1,7 @@
 use crate::health::{
-    HealthCheckStatus, LivenessResponse, ReadinessResponse, ServiceInfo,
+    HealthCheckStatus, LivenessResponse, PoolMetricsResponse, ReadinessResponse, ServiceInfo,
     check_activity_queue_health, check_database_health, check_event_source_health,
+    get_pool_metrics,
 };
 use crate::state::AppState;
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
@@ -156,6 +157,30 @@ pub async fn service_info_handler(State(app_state): State<AppState>) -> impl Int
             features: app_state.features.clone(),
         }),
     )
+}
+
+/// Connection pool metrics handler
+///
+/// Returns current connection pool statistics for performance monitoring.
+/// Useful for profiling and capacity planning.
+///
+/// # Response
+/// - 200 OK always
+/// - Response body includes pool size, active/idle connections, and utilization
+///
+/// # Performance
+/// Target: <1ms P99 latency (no database query required)
+#[utoipa::path(
+    get,
+    path = "/health/pool",
+    tag = "Health",
+    responses(
+        (status = 200, description = "Connection pool metrics", body = PoolMetricsResponse)
+    )
+)]
+pub async fn pool_metrics_handler(State(app_state): State<AppState>) -> impl IntoResponse {
+    let metrics = get_pool_metrics(&app_state.db_pool);
+    (StatusCode::OK, Json(metrics))
 }
 
 #[cfg(test)]

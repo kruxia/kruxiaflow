@@ -30,13 +30,9 @@ CREATE TABLE workflow_events (
     UNIQUE(workflow_id, event_type, activity_key)
 );
 
--- Index for workflow history queries
-CREATE INDEX idx_events_workflow_id
-ON workflow_events(workflow_id, id DESC);
-
--- Index for event type filtering
-CREATE INDEX idx_events_type
-ON workflow_events(event_type, id DESC);
+-- Removed indexes (profiling showed 0 scans, wasting ~8MB):
+--   - idx_events_workflow_id (workflow_id, id DESC) - workflow history queries not used
+--   - idx_events_type (event_type, id DESC) - event type filtering not used
 
 -- Create workflow_definitions table first (referenced by workflows)
 CREATE TABLE workflow_definitions (
@@ -74,9 +70,8 @@ ON workflows(definition_name, status, created_at DESC);
 CREATE INDEX idx_workflows_status
 ON workflows(status, updated_at DESC);
 
--- Index for workflow definition lookups
-CREATE INDEX idx_workflows_definition_id
-ON workflows(workflow_definition_id);
+-- Note: idx_workflows_definition_id removed (profiling showed 0 scans)
+-- Foreign key lookups use the primary key on workflow_definitions
 
 -- Create event consumer positions table (durable checkpointing)
 CREATE TABLE workflow_event_consumers (

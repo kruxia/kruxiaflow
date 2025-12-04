@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT pg_stat_statements_reset()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pg_stat_statements_reset",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9af941fb93ab682d26593073c6a0a1efd4b506b127e53eecbc9133f566214bab"
+}

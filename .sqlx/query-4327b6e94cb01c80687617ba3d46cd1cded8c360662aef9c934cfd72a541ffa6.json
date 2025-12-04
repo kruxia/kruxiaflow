@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            blocked_pid,\n            blocked_user::text,\n            blocking_pid,\n            blocking_user::text,\n            blocked_statement,\n            blocking_statement\n        FROM v_lock_contention\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "blocked_pid",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 1,
+        "name": "blocked_user",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "blocking_pid",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "blocking_user",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "blocked_statement",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "blocking_statement",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true,
+      null,
+      true,
+      null,
+      true,
+      true
+    ]
+  },
+  "hash": "4327b6e94cb01c80687617ba3d46cd1cded8c360662aef9c934cfd72a541ffa6"
+}

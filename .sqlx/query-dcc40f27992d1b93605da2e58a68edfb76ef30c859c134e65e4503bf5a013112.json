@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            schemaname::text,\n            tablename::text,\n            indexname::text,\n            index_size\n        FROM v_unused_indexes\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "schemaname",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "tablename",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "indexname",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "index_size",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      true
+    ]
+  },
+  "hash": "dcc40f27992d1b93605da2e58a68edfb76ef30c859c134e65e4503bf5a013112"
+}

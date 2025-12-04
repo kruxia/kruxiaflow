@@ -11,7 +11,7 @@ pub mod workflows;
 
 pub use cache::{invalidate_cache_key, invalidate_cache_pattern};
 pub use cost::{get_cost_analytics, get_workflow_cost, get_workflow_cost_history};
-pub use health::{liveness_handler, readiness_handler, service_info_handler};
+pub use health::{liveness_handler, pool_metrics_handler, readiness_handler, service_info_handler};
 pub use llm_catalog::{list_providers, search_models};
 pub use oauth::token_handler;
 pub use streaming::{
