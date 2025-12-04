@@ -2,7 +2,7 @@
 
 **Epic**: 1C - StreamFlow Binary and CLI
 **User Story**: US-1C.6
-**Status**: 📋 Post-Epic 2 (Deferred)
+**Status**: ✅ Implemented
 **Priority**: P2 (Operational tooling)
 **Estimated Time**: ~4 hours
 **Prerequisites**:
@@ -21,13 +21,13 @@
 
 ## Acceptance Criteria
 
-- [ ] `streamflow health` - Check if all services are healthy
+- [x] `streamflow health` - Check if all services are healthy
   - Checks: Database connectivity, API server reachability, orchestrator running
   - Exit code: 0 (healthy), 1 (unhealthy)
-- [ ] `streamflow status` - Show detailed service status
+- [x] `streamflow status` - Show detailed service status
   - Output: Service names, health status, uptime, version
-- [ ] Health check timeout: Configurable (default 5s)
-- [ ] Output formats: Human-readable text or JSON (via `--format json`)
+- [x] Health check timeout: Configurable (default 5s)
+- [x] Output formats: Human-readable text or JSON (via `--format json`)
 
 ---
 
@@ -995,28 +995,28 @@ fi
 
 ## Implementation Phases
 
-### Phase 1: Health Command (~2 hours)
-- [ ] Create `streamflow/src/commands/health.rs`
-- [ ] Implement database health check
-- [ ] Implement API health check
-- [ ] Implement orchestrator health check
-- [ ] Implement text and JSON output
-- [ ] Add unit tests
-- [ ] Update `commands/mod.rs` and `main.rs`
+### Phase 1: Health Command (~2 hours) ✅
+- [x] Create `streamflow/src/commands/health.rs`
+- [x] Implement database health check
+- [x] Implement API health check
+- [x] Implement orchestrator health check
+- [x] Implement text and JSON output
+- [x] Add unit tests
+- [x] Update `commands/mod.rs` and `main.rs`
 
-### Phase 2: Status Command (~1.5 hours)
-- [ ] Create `streamflow/src/commands/status.rs`
-- [ ] Implement API status query
-- [ ] Implement database status query
-- [ ] Implement text and JSON output
-- [ ] Add unit tests
-- [ ] Update `commands/mod.rs` and `main.rs`
+### Phase 2: Status Command (~1.5 hours) ✅
+- [x] Create `streamflow/src/commands/status.rs`
+- [x] Implement API status query
+- [x] Implement database status query
+- [x] Implement text and JSON output
+- [x] Add unit tests
+- [x] Update `commands/mod.rs` and `main.rs`
 
-### Phase 3: Testing and Polish (~0.5 hours)
-- [ ] Integration tests
-- [ ] Manual testing
-- [ ] Help text refinement
-- [ ] Documentation
+### Phase 3: Testing and Polish (~0.5 hours) ✅
+- [x] Integration tests (manual)
+- [x] Manual testing
+- [x] Help text refinement
+- [x] Documentation
 
 **Total Estimated Time**: 4 hours
 
@@ -1025,21 +1025,21 @@ fi
 ## Success Criteria
 
 ### Functional Requirements
-- [ ] `streamflow health` checks all services
-- [ ] `streamflow health --service X` checks specific service
-- [ ] `streamflow health --format json` outputs JSON
-- [ ] Exit code 0 when healthy, 1 when unhealthy
-- [ ] `streamflow status` shows detailed status
-- [ ] `streamflow status --format json` outputs JSON
-- [ ] Configurable timeout (default 5s)
+- [x] `streamflow health` checks all services
+- [x] `streamflow health --service X` checks specific service
+- [x] `streamflow health --format json` outputs JSON
+- [x] Exit code 0 when healthy, 1 when unhealthy
+- [x] `streamflow status` shows detailed status
+- [x] `streamflow status --format json` outputs JSON
+- [x] Configurable timeout (default 5s)
 
 ### Non-Functional Requirements
-- [ ] Parallel health checks (no serial delays)
-- [ ] Clear, formatted output
-- [ ] Helpful error messages
-- [ ] Works without database URL for API-only checks
-- [ ] Zero cargo warnings
-- [ ] All tests pass
+- [x] Parallel health checks (no serial delays)
+- [x] Clear, formatted output
+- [x] Helpful error messages
+- [x] Works without database URL for API-only checks
+- [x] Zero cargo warnings
+- [x] All tests pass
 
 ---
 
@@ -1097,20 +1097,20 @@ fi
 
 ## Definition of Done
 
-- [ ] `health.rs` implemented with all checks
-- [ ] `status.rs` implemented with status queries
-- [ ] Commands registered in main.rs
-- [ ] Text and JSON output formats
-- [ ] Exit codes for scripting
-- [ ] Configurable timeout
-- [ ] Help text comprehensive with examples
-- [ ] Unit tests passing
-- [ ] Integration tests passing
-- [ ] Manual testing complete
-- [ ] Zero cargo warnings
-- [ ] All acceptance criteria met
+- [x] `health.rs` implemented with all checks
+- [x] `status.rs` implemented with status queries
+- [x] Commands registered in main.rs
+- [x] Text and JSON output formats
+- [x] Exit codes for scripting
+- [x] Configurable timeout
+- [x] Help text comprehensive with examples
+- [x] Unit tests passing
+- [x] Integration tests passing (manual)
+- [x] Manual testing complete
+- [x] Zero cargo warnings
+- [x] All acceptance criteria met
 
 ---
 
-**Last Updated**: 2025-11-27
-**Status**: Ready for Implementation (Post-Epic 2)
+**Last Updated**: 2025-12-04
+**Status**: ✅ Implemented

@@ -171,21 +171,34 @@ EXAMPLES:\n  \
     )]
     SeedClient(commands::seed_client::SeedClientCommand),
 
-    /// Check service health (for container health checks)
+    /// Check service health
     #[command(
-        about = "Check if the service is healthy (for Docker/Kubernetes health probes)",
-        long_about = "Check if the StreamFlow service is healthy\n\n\
-Performs an HTTP GET request to the health endpoint and exits with code 0 if healthy, \
-1 if unhealthy. Designed for container health checks without requiring shell access.\n\n\
+        about = "Check health of StreamFlow services",
+        long_about = "Check health of StreamFlow services\n\n\
+Performs health checks on database, API server, and orchestrator.\n\
+Exit code: 0 (healthy), 1 (unhealthy).\n\n\
 EXAMPLES:\n  \
-  streamflow health                                    # Check localhost:8080/health\n  \
-  streamflow health --url http://host:9090/health      # Check custom URL\n  \
-  streamflow health --timeout 10                       # 10 second timeout\n\n\
-EXIT CODES:\n  \
-  0: Service is healthy (200 OK response)\n  \
-  1: Service is unhealthy or unreachable"
+  streamflow health                    # Check all services\n  \
+  streamflow health --service api      # Check API only\n  \
+  streamflow health --format json      # JSON output\n  \
+  streamflow health --timeout 10       # 10 second timeout\n\n\
+USE IN SCRIPTS:\n  \
+  if streamflow health; then\n  \
+    echo 'StreamFlow is healthy'\n  \
+  fi"
     )]
     Health(commands::health::HealthCommand),
+
+    /// Show detailed service status
+    #[command(
+        about = "Show detailed status of StreamFlow services",
+        long_about = "Show detailed status of StreamFlow services\n\n\
+Displays version, uptime, and configuration for all services.\n\n\
+EXAMPLES:\n  \
+  streamflow status                # Show status\n  \
+  streamflow status --format json  # JSON output"
+    )]
+    Status(commands::status::StatusCommand),
 
     /// Launch orchestrator only (for distributed deployment)
     #[command(
@@ -228,8 +241,9 @@ async fn main() -> Result<()> {
     }
 
     // Validate database_url for commands that need it
+    // Health and Status only use the API server (no direct database access)
     let database_url = match &cli.command {
-        Commands::Version(_) | Commands::Health(_) => None,
+        Commands::Version(_) | Commands::Health(_) | Commands::Status(_) => None,
         _ => {
             let url = cli.database_url.ok_or_else(|| {
                 anyhow::anyhow!(
@@ -254,6 +268,7 @@ async fn main() -> Result<()> {
             commands::seed_client::execute(cmd, database_url.unwrap()).await
         }
         Commands::Health(cmd) => commands::health::execute(cmd).await,
+        Commands::Status(cmd) => commands::status::execute(cmd).await,
         Commands::Orchestrator(cmd) => {
             commands::orchestrator::execute(cmd, database_url.unwrap()).await
         }

@@ -229,7 +229,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
   - Idempotency: Activities can only be completed/failed once (409 Conflict if already
     done or timed out / reassigned)
 
-**US-1A.7.5: Convert Monetary Values to Decimal Type** ✅ **Complete**
+**US-1A.7.5: Convert Monetary Values to Decimal Type** ✅ Complete
 - **As** a platform engineering lead
 - **I want** all monetary values (cost_usd) to use decimal types instead of floating-point
 - **So that** we have exact precision for financial data and avoid rounding errors
@@ -263,7 +263,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
     - Output format: JSON with activity outputs accessible by key
 - **Deferral Rationale**: US-1A.6 status query includes outputs in `state_data`. Dedicated output retrieval endpoints can be added after Epic 2 performance validation.
 
-**US-1A.9a: WebSocket Infrastructure for Token Streaming** ✅ **COMPLETE**
+**US-1A.9a: WebSocket Infrastructure for Token Streaming** ✅ Complete
 - **As** an AI startup engineer
 - **I want** WebSocket infrastructure to support token-by-token streaming from LLM activities
 - **So that** users see real-time responses (ChatGPT-style UX) in AI workflows
@@ -365,7 +365,7 @@ The built-in worker is implemented as an HTTP client to the API server rather th
   - Binary size: <15MB release build
   - Version information: `streamflow --version` shows semantic version and build info
 
-**US-1C.2: Service Launcher - All-in-One Mode** ✅ **COMPLETE**
+**US-1C.2: Service Launcher - All-in-One Mode** ✅ Complete
 - **As** a developer
 - **I want** to launch all services together with one command
 - **So that** I can quickly start StreamFlow for development or single-node deployment
@@ -379,7 +379,7 @@ The built-in worker is implemented as an HTTP client to the API server rather th
   - All services share same database connection pool
 - **Implementation**: `streamflow serve` command in `streamflow/src/commands/serve.rs`. See `docs/implementation/US-1C.2-all-in-one-launcher.md` for details.
 
-**US-1C.3: Service Launcher - Individual Services** 📋 **Post-Epic 2 (Deferred)**
+**US-1C.3: Service Launcher - Individual Services** ✅ Complete
 - **As** a platform engineering lead
 - **I want** to launch services independently for distributed deployment
 - **So that** I can scale orchestrator, API, and workers separately
@@ -412,7 +412,7 @@ The built-in worker is implemented as an HTTP client to the API server rather th
 - **So that** I can control schema updates independently of service startup
 - REMOVED: We can just ship the sqlx binary and not incorporate it in the streamflow binary.
 
-**US-1C.6: Health Checks and Service Monitoring** 📋 **Post-Epic 2 (Deferred)**
+**US-1C.6: Health Checks and Service Monitoring** ✅ Complete
 - **As** a platform engineering lead
 - **I want** CLI commands to check service health and status
 - **So that** I can monitor StreamFlow in production
@@ -426,7 +426,7 @@ The built-in worker is implemented as an HTTP client to the API server rather th
   - Output formats: Human-readable text or JSON (via `--format json`)
 - **Deferral Rationale**: Basic health endpoints from US-1A.1 are sufficient for Epic 2. Enhanced CLI monitoring tools can be informed by Epic 2 metrics requirements.
 
-**US-1C.7: Graceful Shutdown and Signal Handling** ✅ **COMPLETE**
+**US-1C.7: Graceful Shutdown and Signal Handling** ✅ Complete
 - **As** a platform engineering lead
 - **I want** services to shut down gracefully on SIGTERM/SIGINT
 - **So that** workflows and activities complete without data loss
@@ -488,7 +488,7 @@ streamflow/
 
 ### User Stories
 
-**US-2.1: Automated Performance Test Suite** ✅ **COMPLETE**
+**US-2.1: Automated Performance Test Suite** ✅ Complete
 - **As** a platform engineering lead
 - **I want** continuous performance benchmarking from day one
 - **So that** we detect regressions early and stay on performance track
@@ -501,7 +501,7 @@ streamflow/
   - **Programmatic workflows**: Use Rust WorkflowDefinition structs, not YAML
   - **Early Baseline**: Establish performance floor after Epic 1 implementation
 
-**US-2.2: Competitor Comparison Benchmarks** ✅ **COMPLETE**
+**US-2.2: Competitor Comparison Benchmarks** ✅ Complete
 - **As** a platform engineering lead
 - **I want** reproducible benchmarks vs Temporal, Airflow, Conductor
 - **So that** I can prove 10x performance to leadership and validate our architecture early
@@ -932,7 +932,7 @@ streamflow/
   - Media processing: `upload` outputs video file → `transcode` consumes video, outputs multiple formats → `distribute` consumes transcoded files
   - Data science: `prepare_data` outputs training dataset → `train_model` consumes dataset, outputs model file → `evaluate` consumes model
 
-**US-5.5: HTTP/REST Operations** ✅ **Complete**
+**US-5.5: HTTP/REST Operations** ✅ Complete
 - **As** a data engineer
 - **I want** built-in HTTP activities without external dependencies
 - **So that** I can call APIs in workflows without custom code
@@ -944,7 +944,7 @@ streamflow/
   - ✅ Timeout configuration (`timeout_seconds` parameter)
   - ✅ Response parsing: JSON (native), XML/HTML/text (as string), binary (via `download_to_file`)
 
-**US-5.6: Database Operations** ✅ **Complete**
+**US-5.6: Database Operations** ✅ Complete
 - **As** a data engineer
 - **I want** built-in database connectors
 - **So that** workflows can query and update databases directly
@@ -965,7 +965,7 @@ streamflow/
 - **I want** built-in notification activities
 - **So that** workflows can alert without external services
 
-**US-5.7a: Email Notification** ✅ **Complete**
+**US-5.7a: Email Notification** ✅ Complete
 - **Acceptance Criteria**:
   - Activities:
     - 📋 `email_send` - SMTP email with HTML/plain text support
@@ -1064,7 +1064,7 @@ streamflow/
 
 ### User Stories
 
-**US-7.1: Token Streaming for Real-Time UX** ✅ **COMPLETE**
+**US-7.1: Token Streaming for Real-Time UX** ✅ Complete
 - **As** an AI startup engineer
 - **I want** token-by-token streaming from LLM activities
 - **So that** users see responses in real-time (ChatGPT-style)
@@ -1506,7 +1506,7 @@ streamflow/
      - Activity results and output retrieval - US-1A.8
      - WebSocket streaming for real-time updates - US-1A.9
 
-1B. **Built-in Worker** (Epic 1B): ✅ **Complete**
+1B. **Built-in Worker** (Epic 1B): ✅ Complete
    - ✅ Worker polling with concurrency safety (US-1B.1)
    - ✅ Built-in worker uses API server (same code path as external workers)
    - ✅ JWT authentication and token management
@@ -1753,25 +1753,25 @@ flowchart TB
     E2 --> 1C6
 ```
 
-**Phase 1: Foundation (Weeks 1-4)** ✅ **Complete**
+**Phase 1: Foundation (Weeks 1-4)** ✅ Complete
 - ✅ Event-driven orchestrator with activity queue (Epic 1)
 - ✅ Sequential and parallel execution with ordering guarantees
 - ✅ PostgreSQL backend (events, queue, storage, auth)
 - ✅ Performance baseline: 100+ workflows/sec
 
-**Phase 2A: API Server (Weeks 5-6)** ✅ **Complete**
+**Phase 2A: API Server (Weeks 5-6)** ✅ Complete
 - ✅ Workflow definition management (US-1A.4)
 - ✅ Workflow submission API (US-1A.5)
 - ✅ Authentication/authorization with JWT (US-1A.3)
 - ✅ Health checks and service discovery (US-1A.1)
 - ✅ Error handling and API contracts (US-1A.2)
 
-**Phase 2B: Built-in Worker (Week 7)** ✅ **Complete**
+**Phase 2B: Built-in Worker (Week 7)** ✅ Complete
 - ✅ Built-in Worker implementation (Epic 1B)
 - ✅ Worker authentication via JWT
 - ✅ Activity execution and result reporting via API
 
-**Phase 2C: Pre-Epic 2 Requirements (Weeks 8-9)** ✅ **COMPLETE**
+**Phase 2C: Pre-Epic 2 Requirements (Weeks 8-9)** ✅ Complete
 - ✅ **US-1A.6**: Workflow Status and Query API (11 hours)
   - GET /api/v1/workflows/{id}
   - GET /api/v1/workflows/{id}/activities
@@ -1794,7 +1794,7 @@ flowchart TB
 
 **Completed: 41 hours | Epic 1 Complete**
 
-**Phase 3: YAML Workflows - Examples 1-2 (Weeks 10-11)** ✅ **COMPLETE**
+**Phase 3: YAML Workflows - Examples 1-2 (Weeks 10-11)** ✅ Complete
 - ✅ **Example 1**: Sequential workflow with HTTP activity
   - YAML parser and workflow definition
   - Template expression engine ({{INPUT.*}}, {{activity.output}}, {{SECRET.*}})
