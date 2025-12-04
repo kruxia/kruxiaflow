@@ -32,6 +32,9 @@ dev-keys/
 test.log
 typescript
 
+# mdBook output
+book/
+
 # Coverage reports
 coverage/
 *.profraw
