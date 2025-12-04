@@ -16,6 +16,8 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use super::{migrate, seed_client};
+
 /// Serve command - Launch all services together
 #[derive(Args)]
 pub struct ServeCommand {
@@ -141,6 +143,42 @@ Default: redis://127.0.0.1:6379\n\
 Example: --redis-url redis://localhost:6379/0"
     )]
     pub redis_url: String,
+
+    /// Run database migrations before starting
+    #[arg(
+        long,
+        env = "STREAMFLOW_MIGRATE",
+        help = "Run database migrations before starting server",
+        long_help = "Run pending database migrations before starting the server.\n\
+Useful for container deployments where migrations should run at startup.\n\n\
+Example: streamflow serve --migrate"
+    )]
+    pub migrate: bool,
+
+    /// Seed OAuth client before starting
+    #[arg(
+        long,
+        env = "STREAMFLOW_SEED_CLIENT",
+        help = "Seed OAuth client credentials before starting server",
+        long_help = "Seed OAuth client credentials before starting the server.\n\
+Skips seeding if the client already exists (idempotent).\n\
+Requires STREAMFLOW_CLIENT_ID and STREAMFLOW_CLIENT_SECRET.\n\n\
+Example: streamflow serve --seed-client"
+    )]
+    pub seed_client: bool,
+
+    /// Database connection timeout for --migrate/--seed-client (seconds)
+    #[arg(
+        long,
+        env = "STREAMFLOW_DB_CONNECT_TIMEOUT",
+        default_value = "60",
+        help = "Timeout for initial database connection (seconds)",
+        long_help = "Maximum time to wait for database to become available.\n\
+Used with --migrate or --seed-client for container startup.\n\n\
+Default: 60 seconds\n\
+Example: --db-connect-timeout 120"
+    )]
+    pub db_connect_timeout: u64,
 }
 
 impl ServeCommand {
@@ -329,6 +367,50 @@ fn load_secret(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
+/// Wait for PostgreSQL to become available with exponential backoff.
+/// Used for container startup when database may not be ready immediately.
+async fn wait_for_postgres(database_url: &str, timeout_secs: u64) -> Result<PgPool> {
+    let start = std::time::Instant::now();
+    let timeout = Duration::from_secs(timeout_secs);
+    let mut backoff = Duration::from_millis(100);
+    let max_backoff = Duration::from_secs(5);
+
+    tracing::info!(
+        timeout_secs = timeout_secs,
+        "Waiting for PostgreSQL to become available..."
+    );
+
+    loop {
+        match PgPool::connect(database_url).await {
+            Ok(pool) => {
+                tracing::info!(
+                    elapsed_ms = start.elapsed().as_millis(),
+                    "PostgreSQL connection established"
+                );
+                return Ok(pool);
+            }
+            Err(e) => {
+                if start.elapsed() >= timeout {
+                    return Err(anyhow::anyhow!(
+                        "Timed out waiting for PostgreSQL after {} seconds: {}",
+                        timeout_secs,
+                        e
+                    ));
+                }
+
+                tracing::debug!(
+                    error = %e,
+                    retry_in_ms = backoff.as_millis(),
+                    "PostgreSQL not ready, retrying..."
+                );
+
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(max_backoff);
+            }
+        }
+    }
+}
+
 /// Execute serve command
 pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> {
     // Load secrets from files if _FILE variants are set (Docker secrets pattern)
@@ -340,6 +422,35 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     }
     if cmd.client_secret.is_none() {
         cmd.client_secret = load_secret("STREAMFLOW_CLIENT_SECRET");
+    }
+
+    // Run startup tasks if requested (--migrate or --seed-client)
+    if cmd.migrate || cmd.seed_client {
+        // Wait for database with retry (for container startup scenarios)
+        let init_pool = wait_for_postgres(&database_url, cmd.db_connect_timeout).await?;
+
+        // Run migrations if requested
+        if cmd.migrate {
+            tracing::info!("Running database migrations...");
+            migrate::run_migrations(&init_pool).await?;
+        }
+
+        // Seed OAuth client if requested
+        if cmd.seed_client {
+            tracing::info!("Seeding OAuth client...");
+            let client_id = &cmd.client_id;
+            let client_secret = cmd.client_secret.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Client secret required for --seed-client (--client-secret or STREAMFLOW_CLIENT_SECRET)"
+                )
+            })?;
+
+            // Check if client exists and seed if not (idempotent)
+            seed_client::seed_oauth_client(&init_pool, client_id, client_secret, false).await?;
+        }
+
+        // Close the init pool - main server will create its own
+        init_pool.close().await;
     }
 
     // Validate configuration
@@ -559,6 +670,9 @@ mod tests {
             shutdown_timeout: 30,
             poll_max_activities: 10,
             redis_url: "redis://127.0.0.1:6379".to_string(),
+            migrate: false,
+            seed_client: false,
+            db_connect_timeout: 60,
         }
     }
 
@@ -741,9 +855,15 @@ mod tests {
             shutdown_timeout: 60,
             poll_max_activities: 5,
             redis_url: "redis://redis.example.com:6379/0".to_string(),
+            migrate: true,
+            seed_client: true,
+            db_connect_timeout: 120,
         };
 
         assert!(cmd.validate().is_ok());
+        assert!(cmd.migrate);
+        assert!(cmd.seed_client);
+        assert_eq!(cmd.db_connect_timeout, 120);
         assert_eq!(cmd.port, 9090);
         assert_eq!(cmd.bind, "127.0.0.1");
         assert_eq!(cmd.workers, 50);
