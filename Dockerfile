@@ -29,30 +29,21 @@ COPY ./ ./
 RUN cargo build --release
 
 # == DEPLOY ==
-# Production image with management tools (sqlx, seed-oauth-client)
-# Uses debian-slim for shell access needed by migrations and management
-FROM debian:bookworm-slim AS deploy
+# Minimal production image - distroless with single binary
+# Migrations are embedded at compile time, no shell or external tools needed
+# Uses cc variant for glibc compatibility (static-debian12 for pure static builds)
+FROM gcr.io/distroless/cc-debian12:nonroot AS deploy
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /opt
-
-# Copy binaries and tools
-COPY --from=build /opt/target/release/streamflow /usr/local/bin/streamflow
-COPY --from=build /opt/target/release/seed-oauth-client /usr/local/bin/seed-oauth-client
-COPY --from=build /usr/local/cargo/bin/sqlx /usr/local/bin/sqlx
-COPY migrations /opt/migrations
-
-# Copy entrypoint script
-COPY docker-entrypoint-deploy.sh /opt/docker-entrypoint-deploy.sh
-RUN chmod +x /opt/docker-entrypoint-deploy.sh
+# Copy single binary (migrations embedded at compile time)
+COPY --from=build /opt/target/release/streamflow /streamflow
 
 EXPOSE 8080
-ENTRYPOINT ["/opt/docker-entrypoint-deploy.sh"]
-CMD ["serve"]
+
+# Direct binary execution - no shell needed
+# --migrate: wait for postgres, run migrations
+# --seed-client: seed OAuth client (idempotent - skip if exists)
+ENTRYPOINT ["/streamflow"]
+CMD ["serve", "--migrate", "--seed-client"]
 
 # == PROFILING ==
 # Profiling environment for StreamFlow

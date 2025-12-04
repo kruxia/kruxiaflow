@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Args;
-use sqlx::migrate::Migrator;
 use sqlx::PgPool;
+use sqlx::migrate::Migrator;
 
 /// Embedded migrations from ../migrations directory
 static MIGRATOR: Migrator = sqlx::migrate!("../migrations");
@@ -54,12 +54,11 @@ async fn show_status(pool: &PgPool) -> Result<()> {
     println!();
 
     // Get applied migrations from database
-    let applied = sqlx::query_scalar::<_, i64>(
-        "SELECT version FROM _sqlx_migrations ORDER BY version",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default();
+    let applied =
+        sqlx::query_scalar::<_, i64>("SELECT version FROM _sqlx_migrations ORDER BY version")
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
 
     let applied_set: std::collections::HashSet<i64> = applied.into_iter().collect();
 
@@ -83,7 +82,10 @@ async fn show_status(pool: &PgPool) -> Result<()> {
     }
 
     println!();
-    println!("Total: {} applied, {} pending", applied_count, pending_count);
+    println!(
+        "Total: {} applied, {} pending",
+        applied_count, pending_count
+    );
 
     if pending_count > 0 {
         println!();
@@ -100,12 +102,11 @@ async fn show_dry_run(pool: &PgPool) -> Result<()> {
     println!();
 
     // Get applied migrations from database
-    let applied = sqlx::query_scalar::<_, i64>(
-        "SELECT version FROM _sqlx_migrations ORDER BY version",
-    )
-    .fetch_all(pool)
-    .await
-    .unwrap_or_default();
+    let applied =
+        sqlx::query_scalar::<_, i64>("SELECT version FROM _sqlx_migrations ORDER BY version")
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
 
     let applied_set: std::collections::HashSet<i64> = applied.into_iter().collect();
 

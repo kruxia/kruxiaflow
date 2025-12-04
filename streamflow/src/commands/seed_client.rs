@@ -46,9 +46,7 @@ pub async fn execute(cmd: SeedClientCommand, database_url: String) -> Result<()>
         .client_secret
         .or_else(|| load_secret("STREAMFLOW_CLIENT_SECRET"))
         .ok_or_else(|| {
-            anyhow::anyhow!(
-                "Client secret required (--client-secret or STREAMFLOW_CLIENT_SECRET)"
-            )
+            anyhow::anyhow!("Client secret required (--client-secret or STREAMFLOW_CLIENT_SECRET)")
         })?;
 
     // Connect to database
@@ -56,16 +54,7 @@ pub async fn execute(cmd: SeedClientCommand, database_url: String) -> Result<()>
         .await
         .map_err(|e| anyhow::anyhow!("Failed to connect to database: {}", e))?;
 
-    // Check if client already exists
-    let existing = check_client_exists(&pool, &cmd.client_id).await?;
-
-    if existing && !cmd.force {
-        println!("OAuth client '{}' already exists, skipping.", cmd.client_id);
-        println!("Use --force to delete and re-create.");
-        return Ok(());
-    }
-
-    // Seed the client
+    // Seed the client (idempotent - skips if exists unless --force)
     seed_oauth_client(&pool, &cmd.client_id, &client_secret, cmd.force).await
 }
 
@@ -91,37 +80,46 @@ fn load_secret(name: &str) -> Option<String> {
 
 /// Check if OAuth client already exists
 async fn check_client_exists(pool: &PgPool, client_id: &str) -> Result<bool> {
-    let result = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM oauth_clients WHERE client_id = $1",
-    )
-    .bind(client_id)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| anyhow::anyhow!("Failed to check for existing client: {}", e))?;
+    let result =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM oauth_clients WHERE client_id = $1")
+            .bind(client_id)
+            .fetch_one(pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to check for existing client: {}", e))?;
 
     Ok(result > 0)
 }
 
 /// Seed OAuth client in database
+///
+/// When `force=false`, skips seeding if client already exists (idempotent).
+/// When `force=true`, deletes existing client and re-creates it.
 pub async fn seed_oauth_client(
     pool: &PgPool,
     client_id: &str,
     client_secret: &str,
     force: bool,
 ) -> Result<()> {
-    println!("Seeding OAuth Client");
-    println!("====================");
-    println!("Client ID: {}", client_id);
-    println!();
+    // Check if client already exists
+    let existing = check_client_exists(pool, client_id).await?;
+
+    if existing && !force {
+        tracing::info!(
+            client_id = client_id,
+            "OAuth client already exists, skipping"
+        );
+        return Ok(());
+    }
+
+    tracing::info!(client_id = client_id, "Seeding OAuth client");
 
     // Generate bcrypt hash
-    println!("Generating bcrypt hash...");
     let client_secret_hash = bcrypt::hash(client_secret, 12)
         .map_err(|e| anyhow::anyhow!("Failed to hash client secret: {}", e))?;
 
-    if force {
-        // Delete existing client if it exists
-        println!("Removing existing client if present...");
+    if force && existing {
+        // Delete existing client
+        tracing::info!(client_id = client_id, "Removing existing client (--force)");
         sqlx::query("DELETE FROM oauth_clients WHERE client_id = $1")
             .bind(client_id)
             .execute(pool)
@@ -130,7 +128,6 @@ pub async fn seed_oauth_client(
     }
 
     // Insert new client
-    println!("Inserting OAuth client...");
     sqlx::query(
         r#"
         INSERT INTO oauth_clients (
@@ -153,8 +150,7 @@ pub async fn seed_oauth_client(
     .await
     .map_err(|e| anyhow::anyhow!("Failed to insert OAuth client: {}", e))?;
 
-    println!();
-    println!("OAuth client '{}' seeded successfully!", client_id);
+    tracing::info!(client_id = client_id, "OAuth client seeded successfully");
 
     Ok(())
 }

@@ -320,7 +320,8 @@ services:
       STREAMFLOW_LOG_LEVEL: ${STREAMFLOW_LOG_LEVEL:-info}
     healthcheck:
       <<: *healthcheck-defaults
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      # Use built-in health command (no shell/curl needed in distroless)
+      test: ["CMD", "/streamflow", "health", "--timeout", "5"]
       start_period: 30s
     restart: unless-stopped
     logging: *default-logging
