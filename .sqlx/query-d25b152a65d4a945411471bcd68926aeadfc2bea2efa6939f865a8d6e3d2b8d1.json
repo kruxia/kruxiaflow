@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)\n        SELECT id, workflow_id, event_type, activity_key, payload, timestamp, iteration\n        FROM workflow_events\n        WHERE id > COALESCE(\n            (SELECT last_event_id FROM workflow_event_consumers WHERE consumer_id = 'explain_test'),\n            '00000000-0000-0000-0000-000000000000'::uuid\n        )\n        ORDER BY id ASC\n        LIMIT 100\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "QUERY PLAN",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d25b152a65d4a945411471bcd68926aeadfc2bea2efa6939f865a8d6e3d2b8d1"
+}

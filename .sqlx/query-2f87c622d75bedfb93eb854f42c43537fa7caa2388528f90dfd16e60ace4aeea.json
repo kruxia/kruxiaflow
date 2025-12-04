@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            query_preview,\n            calls,\n            total_time_ms::float8 as \"total_time_ms: f64\",\n            avg_time_ms::float8 as \"avg_time_ms: f64\",\n            max_time_ms::float8 as \"max_time_ms: f64\",\n            rows,\n            pct_total::float8 as \"pct_total: f64\"\n        FROM v_slow_queries\n        WHERE avg_time_ms::float8 >= $1 OR $1 = 0\n        LIMIT $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "query_preview",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "calls",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "total_time_ms: f64",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 3,
+        "name": "avg_time_ms: f64",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 4,
+        "name": "max_time_ms: f64",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 5,
+        "name": "rows",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "pct_total: f64",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Float8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      null,
+      null,
+      null,
+      true,
+      null
+    ]
+  },
+  "hash": "2f87c622d75bedfb93eb854f42c43537fa7caa2388528f90dfd16e60ace4aeea"
+}

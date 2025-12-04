@@ -41,18 +41,28 @@ impl EventSource for PostgresEventSource {
 
     /// Poll for new events since last consumed position
     /// - Returns up to 100 events per poll
-    /// - Uses LEFT JOIN to get checkpoint in single query
+    /// - Uses scalar subquery for consumer position (enables Index Range Scan)
     /// - If no checkpoint exists (first poll), returns events from beginning
+    ///
+    /// Performance: The scalar subquery is evaluated ONCE and the result is used
+    /// as a constant in the Index Condition, allowing PostgreSQL to use efficient
+    /// Index Range Scan on idx_events_consumer_poll covering index.
+    ///
+    /// The nil UUID fallback (when no checkpoint exists) works because UUIDv7s are
+    /// time-ordered and all come after the nil UUID lexicographically.
     #[tracing::instrument(skip(self), level = "debug")]
     async fn poll(&self, consumer_id: &str) -> Result<Vec<WorkflowEvent>> {
         let events = sqlx::query_as!(
             WorkflowEvent,
             r#"
-            SELECT e.id, e.workflow_id, e.event_type as "event_type: WorkflowEventType", e.activity_key, e.payload, e.timestamp, e.iteration
-            FROM workflow_events e
-            LEFT JOIN workflow_event_consumers c ON c.consumer_id = $1
-            WHERE c.last_event_id IS NULL OR e.id > c.last_event_id
-            ORDER BY e.id ASC
+            SELECT id, workflow_id, event_type as "event_type: WorkflowEventType",
+                   activity_key, payload, timestamp, iteration
+            FROM workflow_events
+            WHERE id > COALESCE(
+                (SELECT last_event_id FROM workflow_event_consumers WHERE consumer_id = $1),
+                '00000000-0000-0000-0000-000000000000'::uuid
+            )
+            ORDER BY id ASC
             LIMIT 100
             "#,
             consumer_id

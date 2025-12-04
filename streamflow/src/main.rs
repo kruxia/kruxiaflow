@@ -229,6 +229,24 @@ REQUIRES:\n  \
   - DATABASE_URL: For artifact storage access"
     )]
     Worker(commands::worker::WorkerCommand),
+
+    /// PostgreSQL performance profiling
+    #[command(
+        about = "Profile PostgreSQL query performance",
+        long_about = "Profile PostgreSQL query performance\n\n\
+Queries pg_stat_statements and system views to analyze database performance.\n\
+Shows slow queries, index usage, table statistics, and lock contention.\n\n\
+EXAMPLES:\n  \
+  streamflow profile                    # Full profiling report\n  \
+  streamflow profile --explain          # Include EXPLAIN ANALYZE\n  \
+  streamflow profile --reset            # Reset query statistics\n  \
+  streamflow profile --format json      # JSON output\n  \
+  streamflow profile -v                 # Verbose with table stats\n\n\
+REQUIRES:\n  \
+  - DATABASE_URL: PostgreSQL connection string\n  \
+  - pg_stat_statements extension (for query stats)"
+    )]
+    Profile(commands::profile::ProfileCommand),
 }
 
 #[tokio::main]
@@ -273,5 +291,6 @@ async fn main() -> Result<()> {
             commands::orchestrator::execute(cmd, database_url.unwrap()).await
         }
         Commands::Worker(cmd) => commands::worker::execute(cmd, database_url.unwrap()).await,
+        Commands::Profile(cmd) => commands::profile::execute(cmd, database_url.unwrap()).await,
     }
 }

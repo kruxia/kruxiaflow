@@ -1,0 +1,80 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            schemaname::text,\n            tablename::text,\n            seq_scan,\n            seq_tup_read,\n            idx_scan,\n            idx_tup_fetch,\n            inserts,\n            updates,\n            deletes,\n            live_rows,\n            dead_rows\n        FROM v_table_stats\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "schemaname",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "tablename",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "seq_scan",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "seq_tup_read",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "idx_scan",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "idx_tup_fetch",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "inserts",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "updates",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "deletes",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "live_rows",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 10,
+        "name": "dead_rows",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "597f6fe0a645707e4b16aae7adee331421372aafdf931a2aab7a43bcf84ba106"
+}

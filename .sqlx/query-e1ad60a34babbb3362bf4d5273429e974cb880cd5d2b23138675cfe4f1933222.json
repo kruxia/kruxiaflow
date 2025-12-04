@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)\n        SELECT id, definition_name, status, activities, state_data, input\n        FROM workflows\n        LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "QUERY PLAN",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e1ad60a34babbb3362bf4d5273429e974cb880cd5d2b23138675cfe4f1933222"
+}

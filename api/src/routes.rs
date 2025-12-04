@@ -19,6 +19,7 @@ async fn fallback_404() -> impl IntoResponse {
 /// Routes:
 /// - GET /health - Liveness probe
 /// - GET /health/ready - Readiness probe
+/// - GET /health/pool - Connection pool metrics
 /// - GET /api/v1/info - Service information
 /// - POST /api/v1/oauth/token - OAuth 2.0 token issuance
 /// - GET /api/v1/activities/{id}/ws - WebSocket for activity streaming (auth via query param)
@@ -35,6 +36,7 @@ pub fn public_routes() -> Router<AppState> {
     Router::new()
         .route("/health", get(handlers::liveness_handler))
         .route("/health/ready", get(handlers::readiness_handler))
+        .route("/health/pool", get(handlers::pool_metrics_handler))
         .route("/api/v1/info", get(handlers::service_info_handler))
         .route("/api/v1/oauth/token", post(handlers::token_handler))
         // WebSocket endpoint - auth handled in handler via query param

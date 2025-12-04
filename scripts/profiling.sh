@@ -467,6 +467,56 @@ else
     echo -e "${YELLOW}Note: No results.json generated (tests may have failed or been skipped)${NC}"
 fi
 
+# Run streamflow profile command for comprehensive database profiling
+echo ""
+echo -e "${YELLOW}Running database performance profiling...${NC}"
+
+# Build the streamflow binary if needed (use release for accuracy)
+if cargo build --package streamflow --release 2>/dev/null; then
+    STREAMFLOW_BIN="${PROJECT_DIR}/target/release/streamflow"
+
+    # Generate JSON profile with EXPLAIN ANALYZE
+    # Note: stderr goes to log file, only stdout (JSON) goes to output file
+    echo -e "${BLUE}Generating JSON profile with execution plans...${NC}"
+    if $STREAMFLOW_BIN profile --explain --format json > "$OUTPUT_DIR/db_profile.json" 2>"$OUTPUT_DIR/db_profile_errors.log"; then
+        # Validate JSON output (remove any non-JSON lines that might have leaked)
+        if python3 -c "import json; json.load(open('$OUTPUT_DIR/db_profile.json'))" 2>/dev/null; then
+            echo -e "${GREEN}Database profile (JSON) saved to: $OUTPUT_DIR/db_profile.json${NC}"
+            rm -f "$OUTPUT_DIR/db_profile_errors.log"
+        else
+            echo -e "${YELLOW}Note: JSON output contains invalid data, attempting to fix...${NC}"
+            # Extract just the JSON object (skip any log lines before the opening brace)
+            sed -n '/^{/,$p' "$OUTPUT_DIR/db_profile.json" > "$OUTPUT_DIR/db_profile_fixed.json"
+            if python3 -c "import json; json.load(open('$OUTPUT_DIR/db_profile_fixed.json'))" 2>/dev/null; then
+                mv "$OUTPUT_DIR/db_profile_fixed.json" "$OUTPUT_DIR/db_profile.json"
+                echo -e "${GREEN}Database profile (JSON) fixed and saved to: $OUTPUT_DIR/db_profile.json${NC}"
+            else
+                echo -e "${YELLOW}Note: Could not produce valid JSON output${NC}"
+                rm -f "$OUTPUT_DIR/db_profile_fixed.json"
+            fi
+        fi
+    else
+        echo -e "${YELLOW}Note: Database profiling failed (views may not exist yet)${NC}"
+        echo "Run 'sqlx migrate run' to create profiling views"
+        [ -f "$OUTPUT_DIR/db_profile_errors.log" ] && cat "$OUTPUT_DIR/db_profile_errors.log"
+    fi
+
+    # Generate text profile with verbose output and EXPLAIN ANALYZE
+    echo -e "${BLUE}Generating text profile with execution plans...${NC}"
+    if $STREAMFLOW_BIN profile --explain -v > "$OUTPUT_DIR/db_profile.txt" 2>&1; then
+        echo -e "${GREEN}Database profile (text) saved to: $OUTPUT_DIR/db_profile.txt${NC}"
+
+        # Display summary of slow queries
+        echo ""
+        echo -e "${YELLOW}Slow Query Summary:${NC}"
+        head -40 "$OUTPUT_DIR/db_profile.txt" | grep -A 20 "Slow Queries" || true
+    else
+        echo -e "${YELLOW}Note: Database profiling failed${NC}"
+    fi
+else
+    echo -e "${YELLOW}Note: Could not build streamflow binary for profiling${NC}"
+fi
+
 # Compare with baseline if requested
 if [ -n "$COMPARE_BASELINE" ]; then
     echo ""
@@ -508,8 +558,15 @@ if [ "$PROFILING_SUCCESS" = true ]; then
     echo ""
     echo "Profiling Results:"
     echo "  results.json - Performance metrics (throughput, latency, etc.)"
-    echo "  queries.txt - PostgreSQL query statistics"
+    echo "  queries.txt - PostgreSQL query statistics (pg_stat_statements)"
     echo "  profiling-output.txt - Full test output"
+
+    if [ -f "$OUTPUT_DIR/db_profile.json" ]; then
+        echo ""
+        echo "Database Profiling:"
+        echo "  db_profile.json - Comprehensive DB profile (JSON)"
+        echo "  db_profile.txt - Comprehensive DB profile with EXPLAIN plans"
+    fi
 
     if [ -f "$OUTPUT_DIR/memory_usage.csv" ]; then
         echo ""

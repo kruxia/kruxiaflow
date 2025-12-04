@@ -1,4 +1,5 @@
 use super::error::{HealthCheckError, Result};
+use super::responses::PoolMetricsResponse;
 use sqlx::PgPool;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -76,6 +77,47 @@ pub async fn check_activity_queue_health(pool: &PgPool) -> Result<()> {
         Ok(Ok(_)) => Ok(()),
         Ok(Err(e)) => Err(HealthCheckError::QueueError(e.to_string())),
         Err(_) => Err(HealthCheckError::QueueError("timeout".to_string())),
+    }
+}
+
+/// Get connection pool metrics
+///
+/// Returns current connection pool statistics including size, active/idle connections,
+/// and utilization percentage.
+///
+/// # Arguments
+/// * `pool` - PostgreSQL connection pool
+///
+/// # Returns
+/// * `PoolMetricsResponse` with current pool statistics
+pub fn get_pool_metrics(pool: &PgPool) -> PoolMetricsResponse {
+    let size = pool.size();
+    let idle = pool.num_idle() as u32;
+    let active = size - idle;
+    let max_connections = pool.options().get_max_connections();
+
+    let utilization_percent = if max_connections > 0 {
+        (active as f64 / max_connections as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    // Determine health status based on utilization
+    let status = if utilization_percent > 90.0 {
+        "critical"
+    } else if utilization_percent > 80.0 {
+        "warning"
+    } else {
+        "healthy"
+    };
+
+    PoolMetricsResponse {
+        size,
+        idle,
+        active,
+        max_connections,
+        utilization_percent,
+        status,
     }
 }
 

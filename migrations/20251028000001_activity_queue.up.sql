@@ -43,6 +43,5 @@ CREATE INDEX idx_queue_timeout_check
 ON activity_queue(status, claimed_at)
 WHERE status = 'running';
 
--- Index for workflow queries
-CREATE INDEX idx_queue_workflow
-ON activity_queue(workflow_id, created_at DESC);
+-- Note: idx_queue_workflow removed (profiling showed 0 scans, wasting ~1MB)
+-- Workflow activity lookups use the unique constraint on (workflow_id, activity_key)
