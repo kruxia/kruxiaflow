@@ -780,66 +780,15 @@ streamflow/
 
 ## Epic 4: Programmatic Workflow Definition (Python/JavaScript)
 
-**Business Objective**: Provide a more convenient and less verbose way to define workflows in the host language, enabling workflow definitions to be co-located with custom activity implementations. Programmatic definitions compile to JSON before execution, providing the same runtime performance and capabilities as hand-written JSON or YAML.
+**Status**: ⏩ **Moved to Post-MVP** - See `docs/post-mvp.md` Epic 4: Developer Experience
 
-### User Stories
+**Business Objective**: Provide a more convenient and less verbose way to define workflows in the host language, enabling workflow definitions to be co-located with custom activity implementations. Programmatic definitions compile to YAML before execution, providing the same runtime performance and capabilities as hand-written YAML.
 
-**US-4.1: Python Builder API with Fluent Interface**
-- **As** an AI startup engineer (Python background)
-- **I want** to define workflows programmatically in Python
-- **So that** I can use loops, conditionals, and type checking at definition time
-- **Acceptance Criteria**:
-  - Fluent API: `Activity().with_parameters().when().after()`
-  - Type hints for IDE autocomplete
-  - Definition-time Python execution (not runtime)
-  - Compilation to YAML at deployment: `workflow.deploy()`
-  - Generated YAML validated before deployment
-  - Same runtime performance as hand-written YAML
-- **Key Innovation**: Python runs at DEPLOYMENT time, not runtime
-
-**US-4.2: Dynamic Activity Generation**
-- **As** an AI researcher
-- **I want** to generate N parallel activities based on configuration
-- **So that** I can implement dynamic research plans (generate 10 search activities)
-- **Acceptance Criteria**:
-  - Python loops at definition time create activities
-  - Example: `[Activity(f"search_{i}") for i in range(10)]`
-  - Conditionally include activities: `if config["require_review"]: add review activity`
-  - All activities compiled to static YAML
-  - No Python runtime dependency during execution
-
-**US-4.3: JavaScript/TypeScript Builder API**
-- **As** a platform engineering lead (TypeScript codebase)
-- **I want** to define workflows in TypeScript with full type safety
-- **So that** workflows integrate with our existing TypeScript services
-- **Acceptance Criteria**:
-  - Same API surface as Python builder
-  - TypeScript interfaces for input/output types
-  - Compilation to YAML at deployment
-  - <100ms compilation time
-  - Node.js SDK for testing and deployment
-
-**US-4.4: Reusable Workflow Components**
-- **As** an AI startup engineer
-- **I want** to create reusable workflow components
-- **So that** I don't repeat common patterns (LLM fallback chains)
-- **Acceptance Criteria**:
-  - Functions returning `ActivityGroup`
-  - Example: `create_llm_fallback_chain(name, prompt, budget)`
-  - Component inserts multiple activities with fallback logic
-  - Parameterized components for flexibility
-  - Library of common patterns (retry, fallback, circuit breaker)
-
-**US-4.5: Workflow Compilation Pipeline**
-- **As** a platform engineering lead
-- **I want** CI/CD integration for workflow validation
-- **So that** we catch errors before production deployment
-- **Acceptance Criteria**:
-  - CLI command: `streamflow compile workflow.py --output workflow.yaml`
-  - Validation during compilation: edges valid, no cycles
-  - Error messages reference source code line numbers
-  - `streamflow deploy workflow.py --environment production`
-  - Registry stores compiled YAML with version tracking
+**Consolidated Stories in post-mvp.md**:
+- Story 4.1: Python SDK for Workflow Definitions (includes US-4.1, US-4.2, US-4.4)
+- Story 4.2: TypeScript SDK for Workflow Definitions (US-4.3)
+- Story 4.6: CLI and Workflow Compilation Pipeline (US-4.5)
+- Story 4.7: Activity Development Kit (custom activities in Python/TS/Rust workers)
 
 ---
 

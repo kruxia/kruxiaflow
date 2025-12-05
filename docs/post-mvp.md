@@ -1601,24 +1601,44 @@ USING (tenant_id = current_setting('app.tenant_id')::UUID);
 
 ## Epic 4: Developer Experience
 
-**Goal**: Improve developer experience with better tools, SDKs, and workflow definition capabilities.
+**Goal**: Provide a more convenient and less verbose way to define workflows in the host language, enabling workflow definitions to be co-located with custom activity implementations. Programmatic definitions compile to YAML before execution, providing the same runtime performance and capabilities as hand-written YAML. Also improve developer experience with better tools, SDKs, and workflow definition capabilities.
+
+**Source**: Consolidated from mvp-requirements.md Epic 4 (US-4.1 through US-4.5) and post-mvp planning.
 
 ### Story 4.1: Python SDK for Workflow Definitions
 
 **Priority**: P1 (High - Python is primary AI/ML language)
 
-**As** a Python developer
+**As** an AI startup engineer (Python background)
 **I want** to define workflows programmatically in Python
-**So that** I get type safety, IDE autocomplete, and reusable components
+**So that** I can use loops, conditionals, type checking, and reusable components at definition time
+
+**Key Innovation**: Python runs at DEPLOYMENT time, not runtime. No Python runtime dependency during workflow execution.
 
 **Scope**:
-- Python library for workflow definitions
-- Compile to YAML at deployment time
-- Type hints for parameters and outputs
-- Validation at definition time
+- Fluent API: `Activity().with_parameters().when().after()`
+- Type hints for IDE autocomplete
+- Definition-time Python execution (not runtime)
+- Compilation to YAML at deployment: `workflow.deploy()`
+- Generated YAML validated before deployment
+- Same runtime performance as hand-written YAML
 - Unit testing support for workflow logic
 - Integration with popular IDEs (VSCode, PyCharm)
 - Documentation and examples
+
+**Dynamic Activity Generation** (from MVP US-4.2):
+- Python loops at definition time create activities
+- Example: `[Activity(f"search_{i}") for i in range(10)]`
+- Conditionally include activities: `if config["require_review"]: add review activity`
+- All activities compiled to static YAML
+- No Python runtime dependency during execution
+
+**Reusable Workflow Components** (from MVP US-4.4):
+- Functions returning `ActivityGroup`
+- Example: `create_llm_fallback_chain(name, prompt, budget)`
+- Component inserts multiple activities with fallback logic
+- Parameterized components for flexibility
+- Library of common patterns (retry, fallback, circuit breaker)
 
 **Architecture Reference**: `docs/architecture.md` (Programmatic workflow definitions)
 
@@ -1645,11 +1665,33 @@ workflow.add_activities(validate, authorize)
 workflow.compile()  # Generates YAML
 ```
 
+**Dynamic Generation Example**:
+```python
+# Generate N parallel search activities based on configuration
+search_activities = [
+    Activity(f"search_{i}", worker="research", name="web_search")
+    for i in range(config["num_searches"])
+]
+
+# Conditionally include review step
+if config["require_review"]:
+    workflow.add_activity(review_activity)
+
+# Reusable component
+fallback_chain = create_llm_fallback_chain(
+    name="summarize",
+    prompt="Summarize the following...",
+    budget=5.00
+)
+workflow.add_activities(fallback_chain)
+```
+
 **Benefits**:
 - Type safety (catch errors early)
 - IDE support (autocomplete, refactoring)
 - Reusable components (workflow libraries)
 - Better testing (unit test workflow logic)
+- Dynamic workflow generation based on configuration
 
 ---
 
@@ -1657,13 +1699,16 @@ workflow.compile()  # Generates YAML
 
 **Priority**: P2 (Medium - JavaScript/TypeScript common)
 
-**As** a TypeScript developer
-**I want** to define workflows programmatically in TypeScript
-**So that** I get type safety in my Node.js projects
+**As** a platform engineering lead (TypeScript codebase)
+**I want** to define workflows in TypeScript with full type safety
+**So that** workflows integrate with our existing TypeScript services
 
 **Scope**:
-- Similar to Python SDK but for TypeScript
-- Compile to YAML at build time
+- Same API surface as Python builder
+- TypeScript interfaces for input/output types
+- Compilation to YAML at deployment
+- <100ms compilation time
+- Node.js SDK for testing and deployment
 - Type definitions for activities
 - Integration with popular frameworks (Express, NestJS)
 
@@ -1758,17 +1803,25 @@ conditions:
 
 ---
 
-### Story 4.6: CLI for Workflow Management
+### Story 4.6: CLI and Workflow Compilation Pipeline
 
 **Priority**: P2 (Medium - Developer productivity)
 
-**As** a developer
-**I want** a CLI tool for StreamFlow operations
-**So that** I can manage workflows, view logs, and debug from the terminal
+**As** a platform engineering lead
+**I want** CLI commands for workflow compilation, validation, and deployment
+**So that** we catch errors before production deployment and can manage workflows from the terminal
 
-**Scope**:
-- `streamflow` CLI tool
-- Commands:
+**Current CLI** (already implemented with clap in `streamflow/src/main.rs`):
+- `streamflow serve` - Launch all services
+- `streamflow api` / `orchestrator` / `worker` - Individual service launchers
+- `streamflow health` / `status` - Service monitoring
+- `streamflow migrate` - Database migrations
+- `streamflow seed-llm` / `seed-client` - Seeding commands
+- `streamflow version` - Version info
+
+**Scope** (new commands to add):
+  - `streamflow compile workflow.py --output workflow.yaml` - Compile Python/TS to YAML
+  - `streamflow deploy workflow.py --environment production` - Compile and deploy
   - `streamflow workflow deploy <file>` - Deploy workflow definition
   - `streamflow workflow list` - List deployed workflows
   - `streamflow workflow run <name>` - Start workflow instance
@@ -1780,11 +1833,18 @@ conditions:
 - Shell completion (bash, zsh, fish)
 - JSON output mode for scripting
 
+**Compilation Pipeline** (from MVP US-4.5):
+- Validation during compilation: edges valid, no cycles
+- Error messages reference source code line numbers
+- Registry stores compiled YAML with version tracking
+- CI/CD integration: compile step in pipeline validates before deploy
+
 **Benefits**:
 - Developer productivity
 - Scriptable operations (CI/CD)
 - Quick debugging and troubleshooting
 - Better DX vs raw HTTP APIs
+- Catch workflow errors before production
 
 ---
 
