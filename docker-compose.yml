@@ -47,6 +47,8 @@ services:
     command:
       - "postgres"
       - "-c"
+      - "max_connections=300"
+      - "-c"
       - "shared_preload_libraries=pg_stat_statements"
       - "-c"
       - "pg_stat_statements.track=all"
@@ -68,11 +70,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '1'
-          memory: 512M
+          cpus: '2'
+          memory: 2G
         reservations:
-          cpus: '0.25'
-          memory: 512M
+          cpus: '0.5'
+          memory: 1G
     labels:
       com.streamflow.service: "database"
       com.streamflow.component: "postgres"

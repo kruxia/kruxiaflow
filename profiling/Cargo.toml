@@ -24,8 +24,18 @@ chrono = { workspace = true }
 # Testing
 serial_test = { workspace = true }
 
+# System resource monitoring
+sysinfo = "0.32"
+
+# CLI argument parsing
+clap = { workspace = true }
+
 # StreamFlow dependencies (for workflow definitions only, not direct DB access)
 streamflow-core = { path = "../core" }
+
+[[bin]]
+name = "stress-test"
+path = "src/bin/stress-test.rs"
 
 [dev-dependencies]
 # None needed - all tests are in main src/
