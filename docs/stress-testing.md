@@ -277,6 +277,52 @@ If the test runner runs out of memory:
 2. Reduce `--step-size`
 3. Run on a machine with more RAM
 
+## Baseline Results (December 2025)
+
+### Tested Configuration
+
+| Component            | Configuration                    |
+|----------------------|----------------------------------|
+| PostgreSQL           | max_connections=300, 2GB RAM     |
+| API Server Pool      | max=200, min=20, timeout=10s     |
+| Workers              | 20 workers, poll batch=1         |
+| Client Poll Interval | 200ms                            |
+
+### Capacity Findings
+
+| Concurrent Workflows | Throughput  | Success Rate | P99 Latency |
+|----------------------|-------------|--------------|-------------|
+| 100                  | 49 wf/sec   | 100%         | 2,660ms     |
+| 200                  | 48 wf/sec   | 100%         | 4,224ms     |
+| 300                  | ~25 wf/sec  | 98.7%        | 11,000ms+   |
+
+**Recommended Operating Limit**: 200 concurrent workflows (~48 wf/sec, 2,880 wf/min)
+
+### Optimization Findings
+
+| Change                     | Impact                              |
+|----------------------------|-------------------------------------|
+| Client poll 50ms → 200ms   | **+32% throughput** (recommended)   |
+| Workers 20 → 30            | -10% throughput (not recommended)   |
+| Poll batch 1 → 10          | -65% at high load (not recommended) |
+| PostgreSQL memory tuning   | No measurable improvement           |
+
+### Bottleneck Analysis
+
+The primary bottleneck is **query volume**, not query performance:
+- Individual queries execute in <1ms
+- 90% of activity polls return empty (no work available)
+- Status polling from clients creates high query load
+- Connection pool saturates before CPU/memory limits
+
+### Scaling Recommendations
+
+For capacity beyond 200 concurrent workflows:
+1. **Replace status polling with WebSocket/SSE push**
+2. **Add Redis for activity queue** (reduces DB polling)
+3. **Use PgBouncer** for connection pooling
+4. **Horizontal scaling** with multiple API instances
+
 ## Related Documentation
 
 - [Performance Testing Guide](./performance/README.md)

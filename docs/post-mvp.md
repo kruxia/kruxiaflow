@@ -2522,6 +2522,47 @@ healthcheck:
 
 ---
 
+### Story 5.10: WebSocket Streaming for Workflow Events
+
+**Priority**: P2 (Medium - Enhanced observability)
+
+**Source**: Moved from mvp-requirements.md US-1A.9b
+
+**As** an AI startup engineer
+**I want** real-time workflow execution updates via WebSocket
+**So that** my UI can show live progress without polling
+
+**Scope**:
+- Subscribe to all workflows: `GET /api/v1/workflow_events/ws`
+- Subscribe to specific workflows: `GET /api/v1/workflow_events/ws?workflow_id=id1,id2...`
+- Subscribe to specific event types: `GET /api/v1/workflow_events/ws?event_type=WorkflowCreated,...`
+- Stream events (PascalCase): `WorkflowCreated`, `ActivityScheduled`, `ActivityCompleted`, `WorkflowCompleted`, `ActivityFailed`, `WorkflowFailed`
+- Event payload: `{event_type, workflow_id, activity_key, timestamp, payload}`
+- Authentication: Bearer token in query parameter or initial message
+- Automatic reconnection support with last event ID for replay (`?event_id=...`)
+
+**Serialization Format**: All event types use **PascalCase** (matches PostgreSQL enum and Rust enum variants)
+
+**Relationship to US-1A.9a**: US-1A.9a (token streaming) is implemented for MVP as a core differentiator. This story (general workflow event streaming) extends the WebSocket infrastructure to support broader workflow observability.
+
+**Benefits**:
+- Real-time UI updates without polling overhead
+- Lower latency for workflow status updates
+- Better user experience for long-running workflows
+- Reduced API server load (no repeated polling)
+
+**Trade-offs**:
+- Requires WebSocket connection management on client side
+- More complex client implementation than REST polling
+- Connection state management for reconnection scenarios
+
+**Implementation Notes**:
+- Leverages WebSocket infrastructure from US-1A.9a
+- Uses existing `workflow_events` table as event source
+- See `docs/implementation/US-1A.9b-websocket-workflow-events.md` for implementation plan
+
+---
+
 ## Epic 6: Advanced Workflow Features
 
 **Goal**: Enable sophisticated workflow patterns beyond basic sequential/parallel execution.

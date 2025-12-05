@@ -7,7 +7,7 @@
 - **Epic 1A**: ✅ Complete (API Server - 8/9 stories complete, including US-1A.9a WebSocket)
 - **Epic 1B**: ✅ Complete (Built-in Worker)
 - **Epic 1C**: ⏳ Partial (StreamFlow Binary - US-1C.1, US-1C.2, US-1C.7 complete)
-- **Epic 2**: ✅ Complete (Performance Benchmarking - US-2.1, US-2.2, US-2.3 complete)
+- **Epic 2**: ✅ Complete (Performance Benchmarking - US-2.1, US-2.2, US-2.3, US-2.4 complete)
 - **Epic 6**: ⏳ Partial (PostgreSQL Optimization - US-6.1 ✅, US-6.4 partial via US-2.3)
 - **Epic 3**: ✅ 90% Complete (YAML Workflows - Examples 1-9 ✅, Example 10 📋)
 - **Epic 5**: ⏳ 90% Complete (Built-In Activities - US-5.1 ✅, US-5.3 ✅, US-5.4 ✅, US-5.5 ✅, US-5.6 ✅, US-5.7a 📋)
@@ -281,21 +281,9 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 - **Strategic Rationale**: Token streaming is a core differentiator and requirement for AI-native positioning. Required for production AI workflows with user-facing UX. Delivers on Executive Summary promise of "token streaming" as AI-native feature.
 - **Implementation Plan**: See `docs/implementation/US-1A.9a-websocket-infrastructure.md`
 
-**US-1A.9b: WebSocket Streaming for Workflow Events** 📋 **Post-MVP (Deferred)**
-- **As** an AI startup engineer
-- **I want** real-time workflow execution updates via WebSocket
-- **So that** my UI can show live progress without polling
-- **Acceptance Criteria**:
-  - Subscribe to all workflows: `GET /api/v1/workflow_events/ws`
-  - Subscribe to 1 or more workflows: `GET /api/v1/workflow_events/ws?workflow_id=id1,id2...`
-  - Subscribe to specific events: `GET /api/v1/workflow_events/ws?event_type=WorkflowCreated,...`
-  - Stream events (PascalCase): `WorkflowCreated`, `ActivityScheduled`,
-    `ActivityCompleted`, `WorkflowCompleted`, `ActivityFailed`, `WorkflowFailed`
-  - Event payload: `{event_type, workflow_id, activity_key, timestamp, payload}`
-  - Authentication: Bearer token in query parameter or initial message
-  - Automatic reconnection support with last event ID for replay (`?event_id=...`)
-- **Serialization Format**: All event types use **PascalCase** (matches PostgreSQL enum and Rust enum variants)
-- **Deferral Rationale**: US-1A.9a (token streaming) takes priority for MVP as a core differentiator. General workflow event streaming (US-1A.9b) can be added post-MVP. Polling via US-1A.6 is sufficient for basic workflow monitoring.
+**US-1A.9b: WebSocket Streaming for Workflow Events** ⏩ **Moved to Post-MVP**
+- See `docs/post-mvp.md` Story 5.10: WebSocket Streaming for Workflow Events
+- **Rationale**: US-1A.9a (token streaming) takes priority for MVP as a core differentiator. Polling via US-1A.6 is sufficient for basic workflow monitoring.
 
 ---
 
@@ -536,17 +524,23 @@ streamflow/
 - **Implementation**: `streamflow profile` CLI command with `--explain` flag, profiling views in PostgreSQL, integrated with `scripts/profiling.sh`. See `docs/implementation/US-2.3-postgresql-performance-profiling.md`.
 - **Key Optimization Applied**: Event poll query optimization reduced DB time from 73.7% to 1.8% (97.6% reduction). Changed LEFT JOIN pattern to scalar subquery, enabling Index Range Scan. Tuples read reduced from 127M to 62K (2,050x improvement).
 
-**US-2.4: Stress Testing and Capacity Planning**
+**US-2.4: Stress Testing and Capacity Planning** ✅ Complete
 - **As** a platform engineering lead
 - **I want** early stress test results showing breaking points
 - **So that** I understand system limits before adding more features
 - **Acceptance Criteria**:
-  - Stress test: Ramp to 10,000 concurrent workflows
-  - Identify bottlenecks: Database, CPU, memory, network
-  - Capacity recommendations: "N orchestrator + M workers handles P,000 workflows/min"
-  - Failure modes: Graceful degradation, not crashes
-  - Load test tool provided
-  - Document baseline capacity for future comparison
+  - ✅ Stress test: Ramping load tests implemented (100 → 10,000 concurrent)
+  - ✅ Identify bottlenecks: Query volume and connection pool saturation identified as primary bottlenecks
+  - ✅ Capacity recommendations: 200 concurrent workflows at ~48 wf/sec (2,880 wf/min) with PostgreSQL
+  - ✅ Failure modes: Graceful degradation confirmed (timeouts, not crashes)
+  - ✅ Load test tool: `./scripts/stress-test.sh` with --quick/--standard/--full presets
+  - ✅ Document baseline: See `docs/implementation/US-2.4-stress-testing-capacity-planning.md`
+- **Implementation**: Stress test framework in `profiling/src/stress.rs`, resource monitoring in `profiling/src/monitor.rs`, bottleneck detection in `profiling/src/bottleneck.rs`. CLI binary `stress-test` with configurable parameters.
+- **Key Results**:
+  - **Capacity**: 200 concurrent workflows, 48 wf/sec sustained, 100% success rate
+  - **Breaking Point**: 300 concurrent (P99 latency exceeds threshold)
+  - **Bottleneck**: Query volume (90% empty activity polls, frequent status polling)
+  - **Optimization**: 200ms client poll interval provides +32% throughput vs 50ms
 
 **US-2.5: Grafana Performance Dashboard**
 - **As** a platform engineering lead
