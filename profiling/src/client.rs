@@ -170,7 +170,7 @@ impl StreamFlowClient {
         timeout: Duration,
     ) -> Result<WorkflowStatusResponse, Box<dyn std::error::Error>> {
         let start = std::time::Instant::now();
-        let poll_interval = Duration::from_millis(100);
+        let poll_interval = Duration::from_millis(200);
 
         loop {
             if start.elapsed() > timeout {
