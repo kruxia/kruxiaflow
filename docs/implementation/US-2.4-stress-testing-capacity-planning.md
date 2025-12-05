@@ -900,3 +900,70 @@ Results are saved to `var/stress-test-YYYYMMDD-HHMMSS/`:
 - `stress-test-results.json` - Complete results in JSON
 - `stress-test-summary.md` - Human-readable summary
 - `bottleneck-report.md` - Bottleneck analysis and recommendations
+
+---
+
+## Stress Test Results (December 2025)
+
+### Configuration Tested
+
+| Component            | Configuration                    |
+|----------------------|----------------------------------|
+| PostgreSQL           | max_connections=300, 2GB RAM, 2 CPU |
+| API Server Pool      | max=200, min=20, timeout=10s     |
+| Orchestrator Pool    | max=50, min=10, timeout=10s      |
+| Workers              | 20 workers, poll batch=1         |
+| Client Poll Interval | 200ms (optimal after testing)    |
+
+### Capacity Results
+
+| Concurrent Workflows | Throughput  | Success Rate | P99 Latency |
+|----------------------|-------------|--------------|-------------|
+| 100                  | 49 wf/sec   | 100%         | 2,660ms     |
+| 200                  | 48 wf/sec   | 100%         | 4,224ms     |
+| 300                  | ~25 wf/sec  | 98.7%        | 11,000ms+   |
+
+**Breaking Point**: 300 concurrent workflows (latency threshold exceeded)
+
+### Key Findings
+
+#### What Helped
+- **Client poll interval 200ms**: +32% throughput vs 50ms baseline
+- **PostgreSQL max_connections=300-500**: Prevents pool exhaustion
+- **Connection pool tuning**: API 200 max, Orchestrator 50 max
+
+#### What Didn't Help
+- **More workers (20→30→50)**: -10% throughput due to DB contention
+- **Batch polling (1→10)**: -65% throughput at high load
+- **PostgreSQL memory tuning**: No measurable improvement
+
+#### Root Cause Analysis
+Individual queries are fast (<1ms mean), but bottleneck is **query volume**:
+- 116k status checks for 1.2k workflows (client polling)
+- 64k poll attempts for 6k activities (90% empty polls)
+- Connection pool saturation under high concurrency
+
+### Capacity Recommendations
+
+| Target Capacity      | Configuration                          |
+|----------------------|----------------------------------------|
+| 100 concurrent wfs   | Default config, 20 workers             |
+| 200 concurrent wfs   | 200ms client poll, 200 API pool        |
+| 500+ concurrent wfs  | Requires architectural changes (below) |
+
+### Scaling Beyond 200 Concurrent
+
+To significantly increase capacity beyond current limits:
+
+1. **SSE/WebSocket for status** - Replace client polling with server push
+2. **Longer worker poll intervals** - Reduce empty polls with adaptive backoff
+3. **Redis activity queue** - Higher throughput for activity polling
+4. **PgBouncer** - Connection pooling at proxy level
+5. **Horizontal scaling** - Multiple API/orchestrator instances
+
+### Graceful Degradation
+
+✅ **Confirmed**: System degrades gracefully under overload
+- No crashes or data corruption
+- Errors are timeouts/503s, not panics
+- System recovers after load reduction
