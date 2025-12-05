@@ -49,9 +49,9 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
     // Initialize database connection pool
     tracing::info!("Connecting to database...");
     let db_pool = PgPoolOptions::new()
-        .max_connections(100) // Increased from 10 to support high concurrency
-        .min_connections(10)
-        .acquire_timeout(Duration::from_secs(5))
+        .max_connections(200)
+        .min_connections(20)
+        .acquire_timeout(Duration::from_secs(10))
         .connect(&config.database_url)
         .await
         .context("Failed to connect to database")?;

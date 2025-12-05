@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -11,6 +11,8 @@ pub struct StreamFlowClient {
     client: Client,
     base_url: String,
     access_token: Arc<RwLock<Option<String>>>,
+    /// Mutex to prevent thundering herd on token fetch
+    token_fetch_lock: Arc<Mutex<()>>,
     client_id: String,
     client_secret: String,
 }
@@ -54,13 +56,25 @@ impl StreamFlowClient {
             client,
             base_url,
             access_token: Arc::new(RwLock::new(None)),
+            token_fetch_lock: Arc::new(Mutex::new(())),
             client_id,
             client_secret,
         }
     }
 
-    async fn get_access_token(&self) -> Result<String, reqwest::Error> {
-        // Check if we already have a token
+    /// Pre-fetch and cache the OAuth token before starting load test.
+    /// This prevents thundering herd when many concurrent requests start.
+    pub async fn prefetch_token(&self) -> Result<(), reqwest::Error> {
+        self.fetch_token_internal().await?;
+        Ok(())
+    }
+
+    /// Internal method to fetch token with mutex protection against thundering herd
+    async fn fetch_token_internal(&self) -> Result<String, reqwest::Error> {
+        // Acquire mutex to prevent concurrent fetches
+        let _guard = self.token_fetch_lock.lock().await;
+
+        // Double-check: another thread may have fetched while we waited
         {
             let token = self.access_token.read().await;
             if let Some(t) = token.as_ref() {
@@ -91,6 +105,19 @@ impl StreamFlowClient {
         }
 
         Ok(token_data.access_token)
+    }
+
+    async fn get_access_token(&self) -> Result<String, reqwest::Error> {
+        // Fast path: check if we already have a token
+        {
+            let token = self.access_token.read().await;
+            if let Some(t) = token.as_ref() {
+                return Ok(t.clone());
+            }
+        }
+
+        // Slow path: fetch token with mutex protection
+        self.fetch_token_internal().await
     }
 
     /// Create a new workflow via HTTP API
@@ -143,7 +170,7 @@ impl StreamFlowClient {
         timeout: Duration,
     ) -> Result<WorkflowStatusResponse, Box<dyn std::error::Error>> {
         let start = std::time::Instant::now();
-        let poll_interval = Duration::from_millis(50);
+        let poll_interval = Duration::from_millis(100);
 
         loop {
             if start.elapsed() > timeout {

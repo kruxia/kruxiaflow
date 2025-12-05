@@ -78,9 +78,9 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
     // Connect to database
     tracing::info!("Connecting to database...");
     let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(20)
-        .min_connections(5)
-        .acquire_timeout(Duration::from_secs(5))
+        .max_connections(50)
+        .min_connections(10)
+        .acquire_timeout(Duration::from_secs(10))
         .connect(&database_url)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to connect to database: {}", e))?;
