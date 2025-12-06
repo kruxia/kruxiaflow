@@ -3,6 +3,7 @@ pub mod cost;
 pub mod health;
 pub mod llm_catalog;
 pub mod oauth;
+pub mod outputs;
 pub mod streaming;
 pub mod websocket;
 pub mod workers;
@@ -14,6 +15,7 @@ pub use cost::{get_cost_analytics, get_workflow_cost, get_workflow_cost_history}
 pub use health::{liveness_handler, pool_metrics_handler, readiness_handler, service_info_handler};
 pub use llm_catalog::{list_providers, search_models};
 pub use oauth::token_handler;
+pub use outputs::{download_activity_file, get_activity_output, get_workflow_output};
 pub use streaming::{
     get_subscriber_count, publish_stream_complete, publish_stream_error, publish_stream_token,
 };

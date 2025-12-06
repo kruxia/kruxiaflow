@@ -8,7 +8,7 @@
 
 ## Status
 
-📋 **Implementation Plan** - Ready for implementation
+✅ **Implemented** - 2025-12-05
 
 ## Background
 
@@ -410,3 +410,72 @@ pub async fn download_activity_file(
 - Routes & Documentation: 1 hour
 - Integration Tests: 2-3 hours
 - **Total: 7-10 hours**
+
+## Implementation Notes
+
+### Files Created
+
+- `core/src/workflow/output_query_service.rs` - Core query service with:
+  - `OutputQueryService` - Main service class
+  - `ActivityOutputResult` - Activity output with cost and file info
+  - `WorkflowOutputResult` - Full workflow output with all activities
+  - `FileInfo` - File metadata with download URL
+  - `OutputQueryError` - Error types for output retrieval
+  - Terminal activity detection via dependency analysis
+  - Per-activity cost aggregation from `activity_costs` table
+
+- `api/src/dto/output.rs` - API response types with OpenAPI schemas:
+  - `GetActivityOutputResponse`
+  - `GetWorkflowOutputResponse`
+  - `ActivityOutputSummary`
+  - `FileInfo`
+
+- `api/src/handlers/outputs.rs` - Handler functions:
+  - `get_activity_output` - GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/output
+  - `get_workflow_output` - GET /api/v1/workflows/{workflow_id}/output
+  - `download_activity_file` - GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/files/{filename}
+
+### Files Modified
+
+- `core/src/workflow/mod.rs` - Added exports for new types
+- `api/src/dto/mod.rs` - Added output module export
+- `api/src/handlers/mod.rs` - Added output handlers export
+- `api/src/routes.rs` - Added new routes to protected routes
+- `api/src/openapi.rs` - Added OpenAPI documentation and schemas
+
+### Key Implementation Decisions
+
+1. **Terminal Activity Detection**: Terminal activities (those whose outputs are "final workflow outputs") are detected by analyzing which activities have no dependents in the workflow graph.
+
+2. **File Streaming**: Uses `WorkflowStorage::download_file` which returns an async stream for memory-efficient large file handling.
+
+3. **Cost Aggregation**: Activity costs are fetched from the `activity_costs` table and aggregated per activity, supporting multiple cost records per activity (e.g., retries).
+
+4. **Error Handling**: Returns 400 Bad Request when activity/workflow is not completed (not 404), since the resource exists but isn't ready yet.
+
+### Tests
+
+**Unit Tests** (`core/src/workflow/output_query_service.rs`):
+- `test_find_terminal_activities_single_activity`
+- `test_find_terminal_activities_linear_chain`
+- `test_find_terminal_activities_fan_out`
+- `test_find_terminal_activities_fan_in`
+- `test_find_terminal_activities_diamond_pattern`
+- `test_find_terminal_activities_multiple_independent_chains`
+- `test_find_terminal_activities_empty_depends_on`
+- `test_find_terminal_activities_invalid_json`
+- `test_file_info_from_metadata`
+
+**Integration Tests** (`api/tests/output_retrieval_tests.rs`):
+- `test_get_activity_output_success`
+- `test_get_activity_output_not_completed`
+- `test_get_activity_output_workflow_not_found`
+- `test_get_activity_output_activity_not_found`
+- `test_get_activity_output_requires_authentication`
+- `test_get_workflow_output_success`
+- `test_get_workflow_output_not_completed`
+- `test_get_workflow_output_not_found`
+- `test_get_workflow_output_requires_authentication`
+- `test_download_file_not_found`
+- `test_download_file_requires_authentication`
+- `test_output_retrieval_end_to_end`

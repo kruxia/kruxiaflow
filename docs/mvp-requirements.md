@@ -251,7 +251,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 - **Scope**: Affects only cost tracking fields (currently only in worker activity APIs). Localized change to a few files before production deployment.
 - **Performance**: Negligible impact - cost tracking is not in hot path, and Decimal arithmetic overhead is acceptable for financial accuracy.
 
-**US-1A.8: Activity Results and Output Retrieval** 📋 **Post-Epic 2 (Deferred)**
+**US-1A.8: Activity Results and Output Retrieval** ✅ Complete
 - **As** an AI researcher
 - **I want** to retrieve activity outputs and workflow results via API
 - **So that** I can access computation results for downstream processing
@@ -542,7 +542,7 @@ streamflow/
   - **Bottleneck**: Query volume (90% empty activity polls, frequent status polling)
   - **Optimization**: 200ms client poll interval provides +32% throughput vs 50ms
 
-**US-2.5: Grafana Performance Dashboard**
+**US-2.5: Grafana Performance Dashboard** [TODO]
 - **As** a platform engineering lead
 - **I want** real-time performance metrics via Grafana
 - **So that** we catch performance issues immediately during feature development
@@ -685,13 +685,12 @@ streamflow/
     - Show final workflow state
     - Report total cost and execution time
     - Support for testing workflows in `examples/` directory
-  - **Visualization CLI**: `streamflow visualize workflow.yaml --format png|mermaid`
+  - **Visualization CLI**: `streamflow visualize workflow.yaml --format png|svg|mermaid`
     - Parse workflow into graph structure
     - Generate Mermaid diagram syntax
     - Optionally render to PNG/SVG (via mermaid CLI or graphviz)
     - Show activity dependencies clearly
     - Highlight conditional edges and loops
-  - **Activity Type Registry**:
 
 **US-3.7: Activity Scheduling and Delays** ✅ Complete
 - **As** a workflow developer
