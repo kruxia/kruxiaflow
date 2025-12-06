@@ -1,0 +1,54 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                w.id,\n                w.status AS \"status: String\",\n                w.activities->>$2 AS activity_data,\n                COALESCE(\n                    (SELECT SUM(cost_usd)\n                     FROM activity_costs\n                     WHERE workflow_id = $1 AND activity_key = $2),\n                    0.0\n                ) AS \"cost_usd!\"\n            FROM workflows w\n            WHERE w.id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "status: String",
+        "type_info": {
+          "Custom": {
+            "name": "workflow_status",
+            "kind": {
+              "Enum": [
+                "created",
+                "running",
+                "completed",
+                "failed",
+                "paused"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "activity_data",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "cost_usd!",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "296a87ebd8409980bde3529650f34ddd0b97083eb64b520b977609dc511b5b2b"
+}

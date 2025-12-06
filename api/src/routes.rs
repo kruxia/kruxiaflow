@@ -55,6 +55,9 @@ pub fn public_routes() -> Router<AppState> {
 /// - POST /api/v1/workflows - Submit workflow
 /// - GET /api/v1/workflows - List workflows with filters
 /// - GET /api/v1/workflows/{id} - Get workflow by ID
+/// - GET /api/v1/workflows/{workflow_id}/output - Get workflow output
+/// - GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/output - Get activity output
+/// - GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/files/{filename} - Download file
 /// - POST /api/v1/workers/poll - Poll for activities
 /// - POST /api/v1/activities/{activity_id}/heartbeat - Send heartbeat
 /// - POST /api/v1/activities/{activity_id}/complete - Complete activity
@@ -99,6 +102,19 @@ pub fn protected_routes() -> Router<AppState> {
             get(handlers::get_workflow_cost_history),
         )
         .route("/api/v1/cost/analytics", get(handlers::get_cost_analytics))
+        // Output Retrieval APIs
+        .route(
+            "/api/v1/workflows/:workflow_id/output",
+            get(handlers::get_workflow_output),
+        )
+        .route(
+            "/api/v1/workflows/:workflow_id/activities/:activity_key/output",
+            get(handlers::get_activity_output),
+        )
+        .route(
+            "/api/v1/workflows/:workflow_id/activities/:activity_key/files/:filename",
+            get(handlers::download_activity_file),
+        )
         // LLM Provider Catalog
         .route("/api/v1/llm/providers", get(handlers::list_providers))
         .route("/api/v1/llm/models/search", post(handlers::search_models))

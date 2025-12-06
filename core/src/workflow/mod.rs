@@ -1,4 +1,5 @@
 pub mod definition;
+pub mod output_query_service;
 pub mod outputs;
 pub mod query_service;
 pub mod repository;
@@ -9,6 +10,11 @@ pub use definition::{
     ActivityDefinition, ActivityRelationship, ActivitySettings, BackoffStrategy, BudgetAction,
     BudgetSettings, RetryPolicy, RetrySettings, StreamingConfig, StreamingOptions, ValidationError,
     ValidationErrors, WorkflowDefinition, WorkflowSettings, apply_duration, parse_scheduled_for,
+};
+
+pub use output_query_service::{
+    ActivityOutputResult, ActivityOutputSummary, FileInfo, OutputQueryError, OutputQueryResult,
+    OutputQueryService, WorkflowOutputResult,
 };
 
 pub use outputs::{ActivityOutput, ActivityOutputDefinition, OutputType};

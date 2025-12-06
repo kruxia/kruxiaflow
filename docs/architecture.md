@@ -105,6 +105,11 @@ flowchart TB
 - `POST /api/v1/workflows` - Start new workflow
 - `GET /api/v1/workflows/{id}` - Query workflow status
 
+*Output Retrieval*:
+- `GET /api/v1/workflows/{workflow_id}/output` - Get workflow output (all activity outputs for completed workflow)
+- `GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/output` - Get activity output (for completed activity)
+- `GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/files/{filename}` - Download activity file
+
 *Activity Worker Endpoints*:
 - `GET /api/v1/activities/poll` - Poll for pending activities (long-polling supported)
 - `POST /api/v1/activities/{id}/start` - Claim activity (optional explicit claim)
