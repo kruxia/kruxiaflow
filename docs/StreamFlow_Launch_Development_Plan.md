@@ -861,6 +861,8 @@ Afternoon:
 ```
 [x] README overhaul
 [x] Dockerfile + docker-compose
+[x] GitHub repo polish (badges, CONTRIBUTING.md, issue templates)
+[x] Documentation site (mdBook + GitHub Pages)
 [x] Install script
 [ ] streamflow validate command
 [ ] streamflow costs command
@@ -868,7 +870,6 @@ Afternoon:
 [ ] YAML Reference docs
 [ ] Activity Reference docs
 [ ] RAG example (Example 11)
-[ ] Documentation site
 ```
 
 ### Differentiation (Weeks 4-6)
