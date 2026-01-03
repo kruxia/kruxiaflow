@@ -174,7 +174,7 @@ Kruxia Flow is a single Rust binary with PostgreSQL as the only required depende
                     └───────────────────┘
 ```
 
-- **Event-driven**: No polling loops, reactive scheduling
+- **Event-driven**: Publish-subscribe architecture with exactly-once guarantees
 - **PostgreSQL-only**: No Kafka, Cassandra, or Elasticsearch required
 - **Pluggable**: Swap in Kafka, Redis, S3 when you need scale [POST-MVP]
 
@@ -192,7 +192,7 @@ Benchmarked against industry-standard workflow engines (November 2025):
 
 *Kruxia Flow: 24x faster than Airflow, 20x less memory*
 
-Benchmark methodology: Identical echo workflows (sequential, parallel, high-concurrency), Docker Compose environment, same hardware. See `benchmarks/` for reproducible tests.
+Benchmark methodology: Identical echo workflows (sequential, parallel, high-concurrency), Docker Compose environment, same hardware. See [`benchmarks/`](benchmarks/) for reproducible tests.
 
 ## Documentation
 
