@@ -8,7 +8,7 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use streamflow_oauth::Claims;
+use kruxiaflow_oauth::Claims;
 
 /// Extract Bearer token from Authorization header
 ///

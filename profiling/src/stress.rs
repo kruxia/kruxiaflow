@@ -1,4 +1,4 @@
-//! Stress testing types and utilities for StreamFlow.
+//! Stress testing types and utilities for Kruxia Flow.
 //!
 //! This module provides types and functions for running ramping stress tests
 //! that gradually increase load to identify system breaking points.

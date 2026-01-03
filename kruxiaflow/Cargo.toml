@@ -1,12 +1,12 @@
 [package]
-name = "streamflow"
+name = "kruxiaflow"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "streamflow"
+name = "kruxiaflow"
 path = "src/main.rs"
 
 [dependencies]
@@ -31,10 +31,10 @@ serde_yaml = { workspace = true }
 rust_decimal = { workspace = true }
 
 # Internal dependencies
-streamflow-api = { path = "../api" }
-streamflow-core = { path = "../core", features = [] }
-streamflow-oauth = { path = "../oauth" }
-streamflow-worker = { path = "../worker", features = [] }
+kruxiaflow-api = { path = "../api" }
+kruxiaflow-core = { path = "../core", features = [] }
+kruxiaflow-oauth = { path = "../oauth" }
+kruxiaflow-worker = { path = "../worker", features = [] }
 
 # Database
 sqlx = { workspace = true }
@@ -67,5 +67,5 @@ serial_test = { workspace = true }
 tikv-jemallocator = { version = "0.6", optional=true, features=["profiling"] }
 
 [features]
-profiling = ["tikv-jemallocator", "streamflow-core/profiling", "streamflow-worker/profiling"]
-redis-cache = ["streamflow-core/redis-cache"]
+profiling = ["tikv-jemallocator", "kruxiaflow-core/profiling", "kruxiaflow-worker/profiling"]
+redis-cache = ["kruxiaflow-core/redis-cache"]

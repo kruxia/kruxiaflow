@@ -4,7 +4,7 @@ use crate::poller::WorkerPoller;
 use crate::registry::ActivityRegistry;
 use anyhow::Result;
 use std::sync::Arc;
-use streamflow_core::storage::WorkflowStorage;
+use kruxiaflow_core::storage::WorkflowStorage;
 use tokio::task::JoinHandle;
 
 /// Worker manager

@@ -31,8 +31,8 @@
 #
 # Optional Redis Setup (for production caching):
 # docker run -d -p 6379:6379 redis:7-alpine
-# export STREAMFLOW_CACHE_PROVIDER=redis
-# export STREAMFLOW_REDIS_URL=redis://localhost:6379
+# export KRUXIAFLOW_CACHE_PROVIDER=redis
+# export KRUXIAFLOW_REDIS_URL=redis://localhost:6379
 #
 # How Semantic Caching Works:
 # - First request: LLM call costs ~$0.001, result cached for 1 hour

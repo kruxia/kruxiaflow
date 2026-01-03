@@ -500,19 +500,19 @@ use crate::error::{ApiErrorResponse, ApiError, ErrorCode};
 use crate::health::{LivenessResponse, ReadinessResponse, ServiceInfo};
 use utoipa::{OpenApi, ToSchema};
 
-/// OpenAPI specification for StreamFlow API
+/// OpenAPI specification for Kruxia Flow API
 ///
 /// This struct defines the complete API documentation using utoipa macros.
 /// Schemas are automatically generated from Rust types at compile time.
 #[derive(OpenApi)]
 #[openapi(
     info(
-        title = "StreamFlow API",
+        title = "Kruxia Flow API",
         version = "0.2.0",
         description = "High-performance workflow orchestration platform for AI-native workloads",
         contact(
-            name = "StreamFlow Team",
-            email = "support@streamflow.dev",
+            name = "Kruxia Flow Team",
+            email = "support@kruxiaflow.dev",
         )
     ),
     servers(
@@ -1202,11 +1202,11 @@ No new configuration required for MVP. All middleware uses sensible defaults.
 **Future Configuration** (post-MVP):
 ```bash
 # CORS configuration
-STREAMFLOW_CORS_ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com
-STREAMFLOW_CORS_MAX_AGE=3600
+KRUXIAFLOW_CORS_ALLOWED_ORIGINS=https://app.example.com,https://admin.example.com
+KRUXIAFLOW_CORS_MAX_AGE=3600
 
 # Request ID configuration
-STREAMFLOW_REQUEST_ID_HEADER=X-Request-ID
+KRUXIAFLOW_REQUEST_ID_HEADER=X-Request-ID
 ```
 
 ---
@@ -1224,7 +1224,7 @@ The OpenAPI specification serves as the primary API documentation. Additional do
 Example `docs/error-codes.md`:
 
 ```markdown
-# StreamFlow API Error Codes
+# Kruxia Flow API Error Codes
 
 All API errors follow the standard format:
 

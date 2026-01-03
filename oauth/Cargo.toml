@@ -1,10 +1,10 @@
 [package]
-name = "streamflow-oauth"
+name = "kruxiaflow-oauth"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "OAuth 2.0 authentication service for StreamFlow"
+description = "OAuth 2.0 authentication service for Kruxia Flow"
 
 [dependencies]
 # Workspace dependencies

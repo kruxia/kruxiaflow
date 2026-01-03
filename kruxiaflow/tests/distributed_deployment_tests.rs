@@ -10,13 +10,13 @@ use std::time::Duration;
 #[cfg(unix)]
 use std::os::unix::process::ExitStatusExt;
 
-/// Helper to run the streamflow binary with arguments
-fn run_streamflow(args: &[&str]) -> Output {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_streamflow"));
+/// Helper to run the kruxiaflow binary with arguments
+fn run_kruxiaflow(args: &[&str]) -> Output {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"));
     for arg in args {
         cmd.arg(arg);
     }
-    cmd.output().expect("Failed to execute streamflow binary")
+    cmd.output().expect("Failed to execute kruxiaflow binary")
 }
 
 // =========================================================================
@@ -25,7 +25,7 @@ fn run_streamflow(args: &[&str]) -> Output {
 
 #[test]
 fn test_orchestrator_command_help() {
-    let output = run_streamflow(&["orchestrator", "--help"]);
+    let output = run_kruxiaflow(&["orchestrator", "--help"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(output.status.success());
@@ -38,11 +38,11 @@ fn test_orchestrator_command_help() {
 
 #[test]
 fn test_orchestrator_command_missing_database_url() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("orchestrator")
         .env_remove("DATABASE_URL")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success());
@@ -51,46 +51,46 @@ fn test_orchestrator_command_missing_database_url() {
 
 #[test]
 fn test_orchestrator_consumer_id_flag_accepted() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("orchestrator")
         .arg("--consumer-id")
         .arg("orch_test_1")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
 
 #[test]
 fn test_orchestrator_poll_interval_flag_accepted() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("orchestrator")
         .arg("--poll-interval")
         .arg("50")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
 
 #[test]
 fn test_orchestrator_shutdown_timeout_flag_accepted() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("orchestrator")
         .arg("--shutdown-timeout")
         .arg("60")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
 
 #[test]
 fn test_orchestrator_with_all_flags() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("--database-url")
         .arg("postgres://localhost/test")
         .arg("orchestrator")
@@ -102,7 +102,7 @@ fn test_orchestrator_with_all_flags() {
         .arg("45")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
@@ -113,7 +113,7 @@ fn test_orchestrator_with_all_flags() {
 
 #[test]
 fn test_worker_command_help() {
-    let output = run_streamflow(&["worker", "--help"]);
+    let output = run_kruxiaflow(&["worker", "--help"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(output.status.success());
@@ -128,12 +128,12 @@ fn test_worker_command_help() {
 
 #[test]
 fn test_worker_command_missing_database_url() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("worker")
         .env_remove("DATABASE_URL")
-        .env_remove("STREAMFLOW_CLIENT_SECRET")
+        .env_remove("KRUXIAFLOW_CLIENT_SECRET")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success());
@@ -142,150 +142,150 @@ fn test_worker_command_missing_database_url() {
 
 #[test]
 fn test_worker_api_url_flag_accepted() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("worker")
         .arg("--api-url")
         .arg("http://api.example.com:8080")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
 
 #[test]
 fn test_worker_worker_id_flag_accepted() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("worker")
         .arg("--worker-id")
         .arg("worker_payments_1")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
 
 #[test]
 fn test_worker_workers_flag_accepted() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("worker")
         .arg("--workers")
         .arg("20")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
 
 #[test]
 fn test_worker_activity_types_flag_accepted() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("worker")
         .arg("--activity-types")
         .arg("builtin.echo,builtin.http_request")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
 
 #[test]
 fn test_worker_poll_max_activities_flag_accepted() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("worker")
         .arg("--poll-max-activities")
         .arg("5")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
 
 #[test]
 fn test_worker_poll_interval_flag_accepted() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("worker")
         .arg("--poll-interval")
         .arg("200")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
 
 #[test]
 fn test_worker_activity_timeout_flag_accepted() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("worker")
         .arg("--activity-timeout")
         .arg("600")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
 
 #[test]
 fn test_worker_heartbeat_interval_flag_accepted() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("worker")
         .arg("--heartbeat-interval")
         .arg("60")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
 
 #[test]
 fn test_worker_client_id_flag_accepted() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("worker")
         .arg("--client-id")
         .arg("my_custom_client")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
 
 #[test]
 fn test_worker_client_secret_flag_accepted() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("worker")
         .arg("--client-secret")
         .arg("my_secret")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
 
 #[test]
 fn test_worker_shutdown_timeout_flag_accepted() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("worker")
         .arg("--shutdown-timeout")
         .arg("60")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
 
 #[test]
 fn test_worker_with_all_flags() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("--database-url")
         .arg("postgres://localhost/test")
         .arg("worker")
@@ -313,7 +313,7 @@ fn test_worker_with_all_flags() {
         .arg("60")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
@@ -324,46 +324,46 @@ fn test_worker_with_all_flags() {
 
 #[test]
 fn test_orchestrator_consumer_id_from_env() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
-        .env("STREAMFLOW_ORCHESTRATOR_CONSUMER_ID", "orch_env_1")
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
+        .env("KRUXIAFLOW_ORCHESTRATOR_CONSUMER_ID", "orch_env_1")
         .arg("orchestrator")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
     // The help output shows the env var is recognized
-    assert!(stdout.contains("STREAMFLOW_ORCHESTRATOR_CONSUMER_ID"));
+    assert!(stdout.contains("KRUXIAFLOW_ORCHESTRATOR_CONSUMER_ID"));
 }
 
 #[test]
 fn test_worker_api_url_from_env() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
-        .env("STREAMFLOW_API_URL", "http://env-api.example.com:9090")
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
+        .env("KRUXIAFLOW_API_URL", "http://env-api.example.com:9090")
         .arg("worker")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
     // The help output shows the env var is recognized
-    assert!(stdout.contains("STREAMFLOW_API_URL"));
+    assert!(stdout.contains("KRUXIAFLOW_API_URL"));
 }
 
 #[test]
 fn test_worker_client_secret_from_env() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
-        .env("STREAMFLOW_CLIENT_SECRET", "env_secret_value")
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
+        .env("KRUXIAFLOW_CLIENT_SECRET", "env_secret_value")
         .arg("worker")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(output.status.success());
-    assert!(stdout.contains("STREAMFLOW_CLIENT_SECRET"));
+    assert!(stdout.contains("KRUXIAFLOW_CLIENT_SECRET"));
 }
 
 // =========================================================================
@@ -372,29 +372,29 @@ fn test_worker_client_secret_from_env() {
 
 #[test]
 fn test_orchestrator_help_shows_examples() {
-    let output = run_streamflow(&["orchestrator", "--help"]);
+    let output = run_kruxiaflow(&["orchestrator", "--help"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(output.status.success());
     // Should show example usage
-    assert!(stdout.contains("streamflow orchestrator"));
+    assert!(stdout.contains("kruxiaflow orchestrator"));
     assert!(stdout.contains("orch_prod"));
 }
 
 #[test]
 fn test_worker_help_shows_examples() {
-    let output = run_streamflow(&["worker", "--help"]);
+    let output = run_kruxiaflow(&["worker", "--help"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(output.status.success());
     // Should show example usage
-    assert!(stdout.contains("streamflow worker"));
+    assert!(stdout.contains("kruxiaflow worker"));
     assert!(stdout.contains("api.example.com"));
 }
 
 #[test]
 fn test_main_help_shows_orchestrator_and_worker() {
-    let output = run_streamflow(&["--help"]);
+    let output = run_kruxiaflow(&["--help"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     assert!(output.status.success());
@@ -411,7 +411,7 @@ fn test_main_help_shows_orchestrator_and_worker() {
 fn test_orchestrator_invalid_poll_interval_zero() {
     // When using --help with an invalid value, clap still accepts it
     // To test actual validation, we need to try to run the command
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("--database-url")
         .arg("postgres://localhost/test")
         .arg("orchestrator")
@@ -419,7 +419,7 @@ fn test_orchestrator_invalid_poll_interval_zero() {
         .arg("0")
         .env_remove("DATABASE_URL")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     // Command will fail because it can't connect to database before validating,
     // but the test verifies the flag is parsed
@@ -429,7 +429,7 @@ fn test_orchestrator_invalid_poll_interval_zero() {
 
 #[test]
 fn test_worker_invalid_workers_zero() {
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("--database-url")
         .arg("postgres://localhost/test")
         .arg("worker")
@@ -439,7 +439,7 @@ fn test_worker_invalid_workers_zero() {
         .arg("test")
         .env_remove("DATABASE_URL")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     // Command will fail, demonstrating the flag is recognized
     assert!(!output.status.success());
@@ -452,13 +452,13 @@ fn test_worker_invalid_workers_zero() {
 #[test]
 fn test_worker_short_workers_flag() {
     // -w is the short form of --workers
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("worker")
         .arg("-w")
         .arg("8")
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
@@ -470,23 +470,23 @@ fn test_worker_short_workers_flag() {
 #[test]
 fn test_orchestrator_shutdown_timeout_boundary_valid() {
     // Test valid shutdown timeout at boundaries (5-300)
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("orchestrator")
         .arg("--shutdown-timeout")
         .arg("5") // Minimum valid
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("orchestrator")
         .arg("--shutdown-timeout")
         .arg("300") // Maximum valid
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
@@ -494,23 +494,23 @@ fn test_orchestrator_shutdown_timeout_boundary_valid() {
 #[test]
 fn test_worker_shutdown_timeout_boundary_valid() {
     // Test valid shutdown timeout at boundaries (5-300)
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("worker")
         .arg("--shutdown-timeout")
         .arg("5") // Minimum valid
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("worker")
         .arg("--shutdown-timeout")
         .arg("300") // Maximum valid
         .arg("--help")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     assert!(output.status.success());
 }
@@ -520,7 +520,7 @@ fn test_worker_shutdown_timeout_boundary_valid() {
 fn test_orchestrator_process_can_be_killed() {
     // Start orchestrator with an invalid database URL so it will fail to connect
     // This tests that the process can be properly terminated
-    let mut child = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("--database-url")
         .arg("postgres://invalid:invalid@127.0.0.1:9999/nonexistent")
         .arg("orchestrator")
@@ -551,7 +551,7 @@ fn test_orchestrator_process_can_be_killed() {
 #[cfg(unix)]
 fn test_worker_process_can_be_killed() {
     // Start worker with an invalid database URL
-    let mut child = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("--database-url")
         .arg("postgres://invalid:invalid@127.0.0.1:9999/nonexistent")
         .arg("worker")
@@ -587,13 +587,13 @@ fn test_worker_process_can_be_killed() {
 #[test]
 fn test_orchestrator_fails_with_invalid_database() {
     // Orchestrator should fail quickly when database is unreachable
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("--database-url")
         .arg("postgres://invalid:invalid@127.0.0.1:9999/nonexistent")
         .arg("orchestrator")
         .env_remove("DATABASE_URL")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
 
@@ -613,7 +613,7 @@ fn test_orchestrator_fails_with_invalid_database() {
 #[test]
 fn test_worker_fails_with_invalid_database() {
     // Worker needs database for artifact storage
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("--database-url")
         .arg("postgres://invalid:invalid@127.0.0.1:9999/nonexistent")
         .arg("worker")
@@ -623,7 +623,7 @@ fn test_worker_fails_with_invalid_database() {
         .arg("test_secret")
         .env_remove("DATABASE_URL")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
 
@@ -643,15 +643,15 @@ fn test_worker_fails_with_invalid_database() {
 #[test]
 fn test_worker_fails_without_client_secret() {
     // Worker requires client secret for authentication
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("--database-url")
         .arg("postgres://localhost/test")
         .arg("worker")
         .arg("--api-url")
         .arg("http://127.0.0.1:8080")
-        .env_remove("STREAMFLOW_CLIENT_SECRET")
+        .env_remove("KRUXIAFLOW_CLIENT_SECRET")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
 
@@ -666,7 +666,7 @@ fn test_worker_fails_without_client_secret() {
 #[test]
 fn test_worker_fails_with_empty_api_url() {
     // Worker should validate API URL is not empty
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("--database-url")
         .arg("postgres://localhost/test")
         .arg("worker")
@@ -676,7 +676,7 @@ fn test_worker_fails_with_empty_api_url() {
         .arg("test_secret")
         .env_remove("DATABASE_URL")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
 
@@ -691,7 +691,7 @@ fn test_worker_fails_with_empty_api_url() {
 #[test]
 fn test_orchestrator_invalid_poll_interval_too_high() {
     // Poll interval must be <= 10000ms
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("--database-url")
         .arg("postgres://localhost/test")
         .arg("orchestrator")
@@ -699,7 +699,7 @@ fn test_orchestrator_invalid_poll_interval_too_high() {
         .arg("10001")
         .env_remove("DATABASE_URL")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
 
@@ -714,7 +714,7 @@ fn test_orchestrator_invalid_poll_interval_too_high() {
 #[test]
 fn test_worker_invalid_workers_too_high() {
     // Worker count must be <= 100
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("--database-url")
         .arg("postgres://localhost/test")
         .arg("worker")
@@ -724,7 +724,7 @@ fn test_worker_invalid_workers_too_high() {
         .arg("test_secret")
         .env_remove("DATABASE_URL")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
 
@@ -739,7 +739,7 @@ fn test_worker_invalid_workers_too_high() {
 #[test]
 fn test_orchestrator_shutdown_timeout_too_low() {
     // Shutdown timeout must be >= 5
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("--database-url")
         .arg("postgres://localhost/test")
         .arg("orchestrator")
@@ -747,7 +747,7 @@ fn test_orchestrator_shutdown_timeout_too_low() {
         .arg("4")
         .env_remove("DATABASE_URL")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
 
@@ -762,7 +762,7 @@ fn test_orchestrator_shutdown_timeout_too_low() {
 #[test]
 fn test_worker_shutdown_timeout_too_high() {
     // Shutdown timeout must be <= 300
-    let output = Command::new(env!("CARGO_BIN_EXE_streamflow"))
+    let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("--database-url")
         .arg("postgres://localhost/test")
         .arg("worker")
@@ -772,7 +772,7 @@ fn test_worker_shutdown_timeout_too_high() {
         .arg("test_secret")
         .env_remove("DATABASE_URL")
         .output()
-        .expect("Failed to execute streamflow binary");
+        .expect("Failed to execute kruxiaflow binary");
 
     let stderr = String::from_utf8_lossy(&output.stderr);
 

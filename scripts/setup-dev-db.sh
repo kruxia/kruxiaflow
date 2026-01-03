@@ -7,7 +7,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-echo -e "${YELLOW}StreamFlow Development Database Setup${NC}"
+echo -e "${YELLOW}Kruxia Flow Development Database Setup${NC}"
 echo "========================================"
 
 # Start PostgreSQL via docker-compose
@@ -16,18 +16,18 @@ docker-compose up -d postgres
 
 # Wait for PostgreSQL to be ready
 echo "Waiting for PostgreSQL to be ready..."
-until docker exec streamflow-postgres pg_isready -U streamflow > /dev/null 2>&1; do
+until docker exec kruxiaflow-postgres pg_isready -U kruxiaflow > /dev/null 2>&1; do
   sleep 1
 done
 
 echo -e "${GREEN}PostgreSQL is ready!${NC}"
 
 # Database configuration
-DB_USER="streamflow"
-DB_PASSWORD="streamflow_dev"
+DB_USER="kruxiaflow"
+DB_PASSWORD="kruxiaflow_dev"
 DB_HOST="127.0.0.1"
 DB_PORT="5433"
-DB_NAME="streamflow"
+DB_NAME="kruxiaflow"
 
 # Set DATABASE_URL for migrations
 export DATABASE_URL="postgres://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}"

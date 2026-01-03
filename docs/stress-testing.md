@@ -1,4 +1,4 @@
-# StreamFlow Stress Testing Guide
+# Kruxia Flow Stress Testing Guide
 
 This guide explains how to run stress tests to identify system breaking points and determine capacity limits.
 
@@ -15,17 +15,17 @@ Stress testing helps you understand:
 
 ### Prerequisites
 
-1. StreamFlow server running
+1. Kruxia Flow server running
 2. PostgreSQL database with migrations applied
 3. OAuth credentials configured
 
 ```bash
 # Set credentials
-export STREAMFLOW_CLIENT_ID="your-client-id"
-export STREAMFLOW_CLIENT_SECRET="your-client-secret"
+export KRUXIAFLOW_CLIENT_ID="your-client-id"
+export KRUXIAFLOW_CLIENT_SECRET="your-client-secret"
 
 # Start server if not running
-streamflow serve --port 8080
+kruxiaflow serve --port 8080
 ```
 
 ### Run a Quick Stress Test
@@ -92,7 +92,7 @@ streamflow serve --port 8080
 For more control, use the stress-test binary directly:
 
 ```bash
-cargo run --package streamflow-profiling --bin stress-test --release -- \
+cargo run --package kruxiaflow-profiling --bin stress-test --release -- \
   --initial-concurrent 100 \
   --peak-concurrent 5000 \
   --step-size 250 \
@@ -169,16 +169,16 @@ For integration with CI or scripting:
 
 ```bash
 # Run all stress tests
-cargo test --package streamflow-profiling --test stress_tests -- --ignored --nocapture
+cargo test --package kruxiaflow-profiling --test stress_tests -- --ignored --nocapture
 
 # Run specific test
-cargo test --package streamflow-profiling --test stress_tests test_stress_quick -- --ignored --nocapture
+cargo test --package kruxiaflow-profiling --test stress_tests test_stress_quick -- --ignored --nocapture
 
 # Run graceful degradation test
-cargo test --package streamflow-profiling --test stress_tests test_graceful_degradation -- --ignored --nocapture
+cargo test --package kruxiaflow-profiling --test stress_tests test_graceful_degradation -- --ignored --nocapture
 
 # Run recovery test
-cargo test --package streamflow-profiling --test stress_tests test_recovery_after_overload -- --ignored --nocapture
+cargo test --package kruxiaflow-profiling --test stress_tests test_recovery_after_overload -- --ignored --nocapture
 ```
 
 ## Graceful Degradation Testing
@@ -186,7 +186,7 @@ cargo test --package streamflow-profiling --test stress_tests test_recovery_afte
 To verify the system degrades gracefully under extreme load:
 
 ```bash
-cargo test --package streamflow-profiling --test stress_tests test_graceful_degradation -- --ignored --nocapture
+cargo test --package kruxiaflow-profiling --test stress_tests test_graceful_degradation -- --ignored --nocapture
 ```
 
 This test:
@@ -200,7 +200,7 @@ This test:
 To verify the system recovers after overload:
 
 ```bash
-cargo test --package streamflow-profiling --test stress_tests test_recovery_after_overload -- --ignored --nocapture
+cargo test --package kruxiaflow-profiling --test stress_tests test_recovery_after_overload -- --ignored --nocapture
 ```
 
 This test:
@@ -236,31 +236,31 @@ This test:
 ### Server Not Accessible
 
 ```
-Error: StreamFlow server not accessible at http://localhost:8080
+Error: Kruxia Flow server not accessible at http://localhost:8080
 ```
 
 Start the server:
 ```bash
-streamflow serve --port 8080
+kruxiaflow serve --port 8080
 ```
 
 ### Credential Errors
 
 ```
-Error: STREAMFLOW_CLIENT_ID environment variable not set
+Error: KRUXIAFLOW_CLIENT_ID environment variable not set
 ```
 
 Set OAuth credentials:
 ```bash
-export STREAMFLOW_CLIENT_ID="your-client-id"
-export STREAMFLOW_CLIENT_SECRET="your-client-secret"
+export KRUXIAFLOW_CLIENT_ID="your-client-id"
+export KRUXIAFLOW_CLIENT_SECRET="your-client-secret"
 ```
 
 ### Workflow Definition Not Found
 
 Register workflow definitions:
 ```bash
-cargo run --package streamflow-profiling --bin register-workflows
+cargo run --package kruxiaflow-profiling --bin register-workflows
 ```
 
 ### Test Hangs

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use streamflow_core::workflow::definition::{
+use kruxiaflow_core::workflow::definition::{
     ActivityDefinition, ActivityRelationship, WorkflowDefinition,
 };
 

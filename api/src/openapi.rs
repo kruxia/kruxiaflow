@@ -28,7 +28,7 @@ use crate::handlers::workflows::{
 use crate::health::{LivenessResponse, ReadinessResponse, ServiceInfo};
 use utoipa::OpenApi;
 
-/// OpenAPI specification for StreamFlow API
+/// OpenAPI specification for Kruxia Flow API
 ///
 /// This struct defines the complete API documentation using utoipa macros.
 /// Schemas are automatically generated from Rust types at compile time.
@@ -37,7 +37,7 @@ use utoipa::OpenApi;
 #[derive(OpenApi)]
 #[openapi(
     info(
-        title = "StreamFlow API",
+        title = "Kruxia Flow API",
         version = env!("CARGO_PKG_VERSION"),
         description = env!("CARGO_PKG_DESCRIPTION"),
         contact(

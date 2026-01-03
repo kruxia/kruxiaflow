@@ -187,10 +187,10 @@ tikv-jemallocator = "0.5"
 
 # Run with profiling
 MALLOC_CONF="prof:true,prof_prefix:jeprof.out" \
-  ./target/release/streamflow serve
+  ./target/release/kruxiaflow serve
 
 # After test, analyze
-jeprof --show_bytes ./target/release/streamflow jeprof.out.*.heap
+jeprof --show_bytes ./target/release/kruxiaflow jeprof.out.*.heap
 ```
 
 ### 2. Heaptrack (macOS/Linux)
@@ -199,10 +199,10 @@ jeprof --show_bytes ./target/release/streamflow jeprof.out.*.heap
 brew install heaptrack  # macOS
 
 # Profile
-heaptrack ./target/release/streamflow serve
+heaptrack ./target/release/kruxiaflow serve
 
 # Analyze
-heaptrack_gui heaptrack.streamflow.*.gz
+heaptrack_gui heaptrack.kruxiaflow.*.gz
 ```
 
 ### 3. Tokio Console

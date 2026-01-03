@@ -1,9 +1,9 @@
-# StreamFlow
+# Kruxia Flow
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.90%2B-orange.svg)](https://www.rust-lang.org/)
-[![Docker](https://img.shields.io/docker/v/kruxia/streamflow?label=docker&color=2496ED)](https://hub.docker.com/r/kruxia/streamflow)
-[![Docker Image Size](https://img.shields.io/docker/image-size/kruxia/streamflow/latest?label=image%20size)](https://hub.docker.com/r/kruxia/streamflow)
+[![Docker](https://img.shields.io/docker/v/kruxia/kruxiaflow?label=docker&color=2496ED)](https://hub.docker.com/r/kruxia/kruxiaflow)
+[![Docker Image Size](https://img.shields.io/docker/image-size/kruxia/kruxiaflow/latest?label=image%20size)](https://hub.docker.com/r/kruxia/kruxiaflow)
 
 **AI-Native durable Workflow Orchestration with Built-in Cost Control**
 
@@ -15,12 +15,12 @@ A lightweight, high-performance workflow engine designed for AI applications. Tr
 
 ## Quick Start
 
-Get StreamFlow running in 60 seconds:
+Get Kruxia Flow running in 60 seconds:
 
 ```bash
 # Clone and start
-git clone https://github.com/kruxia/streamflow.git
-cd streamflow
+git clone https://github.com/kruxia/kruxiaflow.git
+cd kruxiaflow
 ./dev up -d
 ./dev logs -f
 
@@ -34,9 +34,9 @@ curl http://localhost:8080/health
 open http://localhost:8080/api/v1/docs
 ```
 
-That's it. StreamFlow is running with PostgreSQL and Redis, ready to execute workflows.
+That's it. Kruxia Flow is running with PostgreSQL and Redis, ready to execute workflows.
 
-## Why StreamFlow?
+## Why Kruxia Flow?
 
 ### The Problem
 
@@ -48,9 +48,9 @@ LLM costs spiral out of control. You're running AI workflows with no visibility 
 
 ### The Solution
 
-StreamFlow combines durable execution with AI-native features:
+Kruxia Flow combines durable execution with AI-native features:
 
-| Feature                  | StreamFlow | Temporal | Airflow | LangChain |
+| Feature                  | Kruxia Flow | Temporal | Airflow | LangChain |
 |--------------------------|:----------:|:--------:|:-------:|:---------:|
 | Durable execution        | **Yes**    | Yes      | Yes     | No        |
 | LLM cost tracking        | **Yes**    | No       | No      | No        |
@@ -129,7 +129,7 @@ Native support for all major providers:
 
 ## Examples
 
-StreamFlow includes 10 production-ready example workflows:
+Kruxia Flow includes 10 production-ready example workflows:
 
 | #  | Example                     | Concepts Demonstrated                              |
 |----|-----------------------------|----------------------------------------------------|
@@ -157,11 +157,11 @@ StreamFlow includes 10 production-ready example workflows:
 
 ## Architecture
 
-StreamFlow is a single Rust binary with PostgreSQL as the only required dependency:
+Kruxia Flow is a single Rust binary with PostgreSQL as the only required dependency:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     StreamFlow (7.5MB binary)                   │
+│                     Kruxia Flow (7.5MB binary)                   │
 ├─────────────────────────────────────────────────────────────────┤
 │  API Server  │  Orchestrator  │  Worker Pool  │  Cost Tracker   │
 └──────────────┴────────────────┴───────────────┴─────────────────┘
@@ -182,7 +182,7 @@ StreamFlow is a single Rust binary with PostgreSQL as the only required dependen
 
 Benchmarked against industry-standard workflow engines (November 2025):
 
-| Metric              | StreamFlow | Temporal | Airflow   |
+| Metric              | Kruxia Flow | Temporal | Airflow   |
 |---------------------|------------|----------|-----------|
 | Throughput (wf/sec) | **32**     | 27       | 1.3       |
 | P99 Latency         | **0.7-2s** | 0.7-3s   | 9-106s    |
@@ -190,7 +190,7 @@ Benchmarked against industry-standard workflow engines (November 2025):
 | Binary Size         | **7.5MB**  | ~200MB   | ~500MB+   |
 | Docker Image        | **63MB**   | ~500MB   | ~1GB+     |
 
-*StreamFlow: 24x faster than Airflow, 20x less memory*
+*Kruxia Flow: 24x faster than Airflow, 20x less memory*
 
 Benchmark methodology: Identical echo workflows (sequential, parallel, high-concurrency), Docker Compose environment, same hardware. See `benchmarks/` for reproducible tests.
 
@@ -242,13 +242,13 @@ cargo install sqlx-cli --no-default-features --features postgres
 docker run -d --name pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:18
 
 # Run migrations
-export DATABASE_URL='postgres://postgres:dev@localhost:5432/streamflow'
+export DATABASE_URL='postgres://postgres:dev@localhost:5432/kruxiaflow'
 sqlx database create
 sqlx migrate run
 
 # Build and run
 cargo build --release
-./target/release/streamflow serve
+./target/release/kruxiaflow serve
 ```
 
 ## Roadmap
@@ -262,7 +262,7 @@ cargo build --release
 - Token streaming
 
 ### Next
-- Python SDK (`pip install streamflow`)
+- Python SDK (`pip install kruxiaflow`)
 - Web dashboard for cost visualization
 - Airflow migration guide
 - Kubernetes Helm chart
@@ -276,8 +276,8 @@ See [Post-MVP Roadmap](docs/post-mvp.md) for details.
 
 ## Community
 
-- **GitHub Issues**: [Report bugs and request features](https://github.com/kruxia/streamflow/issues)
-- **Discussions**: [Ask questions and share ideas](https://github.com/kruxia/streamflow/discussions)
+- **GitHub Issues**: [Report bugs and request features](https://github.com/kruxia/kruxiaflow/issues)
+- **Discussions**: [Ask questions and share ideas](https://github.com/kruxia/kruxiaflow/discussions)
 - **Code of Conduct**: [Community guidelines](CODE_OF_CONDUCT.md)
 - **Security**: [Report vulnerabilities](SECURITY.md)
 
@@ -287,7 +287,7 @@ Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTIN
 
 ```bash
 # Fork and clone
-git clone https://github.com/YOUR_USERNAME/streamflow.git
+git clone https://github.com/YOUR_USERNAME/kruxiaflow.git
 
 # Create a branch
 git checkout -b feature/your-feature
@@ -306,4 +306,4 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 ---
 
-**StreamFlow** - AI-native durable workflow orchestration with built-in cost control.
+**Kruxia Flow** - AI-native durable workflow orchestration with built-in cost control.

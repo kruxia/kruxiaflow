@@ -1,10 +1,10 @@
 [package]
-name = "streamflow-worker"
+name = "kruxiaflow-worker"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Built-in activity worker for StreamFlow"
+description = "Built-in activity worker for Kruxia Flow"
 
 [dependencies]
 # Async runtime
@@ -42,7 +42,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 
 # Internal dependencies
-streamflow-core = { path = "../core", features = ["redis-cache"] }
+kruxiaflow-core = { path = "../core", features = ["redis-cache"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
@@ -51,9 +51,9 @@ serial_test = { workspace = true }
 axum = { workspace = true }
 axum-test = "15.0"
 sqlx = { workspace = true }
-streamflow-api = { path = "../api" }
-streamflow-core = { path = "../core" }
-streamflow-oauth = { path = "../oauth" }
+kruxiaflow-api = { path = "../api" }
+kruxiaflow-core = { path = "../core" }
+kruxiaflow-oauth = { path = "../oauth" }
 bcrypt = { workspace = true }
 wiremock = "0.6"
 rust_decimal_macros = "1.36"
@@ -63,4 +63,4 @@ rust_decimal_macros = "1.36"
 # This feature gates expensive tracing instrumentation
 profiling = []
 # Enable Redis caching support (for tests and production)
-redis-cache = ["streamflow-core/redis-cache"]
+redis-cache = ["kruxiaflow-core/redis-cache"]

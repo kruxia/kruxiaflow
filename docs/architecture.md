@@ -1,4 +1,4 @@
-# StreamFlow Architecture
+# Kruxia Flow Architecture
 
 **Version**: 0.3 MVP
 **Last Updated**: 2025-11-27
@@ -20,7 +20,7 @@
 
 ## System Overview
 
-StreamFlow is a lightweight, high-performance workflow orchestration platform designed for edge-to-cloud deployment. The system is built as a single binary that includes three independently launchable services: API server, workflow orchestrator, and built-in activity worker.
+Kruxia Flow is a lightweight, high-performance workflow orchestration platform designed for edge-to-cloud deployment. The system is built as a single binary that includes three independently launchable services: API server, workflow orchestrator, and built-in activity worker.
 
 ### Core Value Proposition
 
@@ -34,7 +34,7 @@ StreamFlow is a lightweight, high-performance workflow orchestration platform de
 
 ```mermaid
 flowchart TB
-    subgraph Binary["StreamFlow Binary (Single 10MB Executable)"]
+    subgraph Binary["Kruxia Flow Binary (Single 10MB Executable)"]
         API[API Server<br/>HTTP/WS]
         Orch[Orchestrator<br/>Event-Driven]
         Worker[Built-in Worker]
@@ -271,7 +271,7 @@ The built-in worker is implemented as an HTTP client to the API server rather th
 
 ❌ **Trade-offs**:
 - **HTTP overhead**: ~1-2ms serialization and localhost network latency per activity operation
-- **Startup dependencies**: API server must be running before built-in worker can start (managed by `streamflow serve` startup order)
+- **Startup dependencies**: API server must be running before built-in worker can start (managed by `kruxiaflow serve` startup order)
 - **Extra HTTP client**: Worker needs reqwest/http client dependency (~200KB binary size increase)
 - **Token management**: Built-in worker must manage JWT refresh and retry logic
 
@@ -443,7 +443,7 @@ class StreamFlowWorker:
 
 ### 4. Built-in Activities
 
-StreamFlow includes several built-in activities that cover common workflow patterns. All built-in activities are executed by the built-in worker with `worker: builtin`.
+Kruxia Flow includes several built-in activities that cover common workflow patterns. All built-in activities are executed by the built-in worker with `worker: builtin`.
 
 #### http_request
 
@@ -622,7 +622,7 @@ HTML/text email via SMTP.
 
 ### PostgreSQL Schema
 
-StreamFlow uses PostgreSQL 18+ as the single source of truth for all state.
+Kruxia Flow uses PostgreSQL 18+ as the single source of truth for all state.
 
 #### Core Tables
 
@@ -783,7 +783,7 @@ S3-compatible (Post-MVP):
   Actual storage: S3 object at key wf_123abc/input_data.csv
 
 Filesystem (Post-MVP):
-  storage_path: "fs:/var/lib/streamflow/artifacts/wf_123abc/input_data.csv"
+  storage_path: "fs:/var/lib/kruxiaflow/artifacts/wf_123abc/input_data.csv"
   Actual storage: File on local filesystem
 ```
 
@@ -856,20 +856,20 @@ Downstream activities reference artifacts using special template syntax:
 
 ```bash
 # MVP: PostgreSQL Large Objects (default)
-STREAMFLOW_STORAGE_PROVIDER=postgresql
+KRUXIAFLOW_STORAGE_PROVIDER=postgresql
 
 # Post-MVP: S3-compatible storage
-STREAMFLOW_STORAGE_PROVIDER=s3
-STREAMFLOW_STORAGE_S3_BUCKET=streamflow-artifacts
-STREAMFLOW_STORAGE_S3_ENDPOINT=https://s3.amazonaws.com
-STREAMFLOW_STORAGE_S3_REGION=us-east-1
+KRUXIAFLOW_STORAGE_PROVIDER=s3
+KRUXIAFLOW_STORAGE_S3_BUCKET=kruxiaflow-artifacts
+KRUXIAFLOW_STORAGE_S3_ENDPOINT=https://s3.amazonaws.com
+KRUXIAFLOW_STORAGE_S3_REGION=us-east-1
 
 # Post-MVP: Local filesystem
-STREAMFLOW_STORAGE_PROVIDER=filesystem
-STREAMFLOW_STORAGE_FILESYSTEM_PATH=/var/lib/streamflow/artifacts
+KRUXIAFLOW_STORAGE_PROVIDER=filesystem
+KRUXIAFLOW_STORAGE_FILESYSTEM_PATH=/var/lib/kruxiaflow/artifacts
 
 # Default retention (all providers)
-STREAMFLOW_ARTIFACT_RETENTION_DAYS=7
+KRUXIAFLOW_ARTIFACT_RETENTION_DAYS=7
 ```
 
 **Storage Backend Comparison**:
@@ -982,7 +982,7 @@ In this example:
 
 ### File Management (Example 3 Implementation)
 
-StreamFlow provides comprehensive file management capabilities for handling large files and binary data in workflows. Files are stored separately from JSON state using the WorkflowStorage interface.
+Kruxia Flow provides comprehensive file management capabilities for handling large files and binary data in workflows. Files are stored separately from JSON state using the WorkflowStorage interface.
 
 **File Output Declaration**:
 ```yaml
@@ -1335,7 +1335,7 @@ settings:
 
 ### Iterative Workflows (Loops)
 
-StreamFlow supports iterative workflows through back-edges in the dependency graph. When an activity depends on a later activity in the workflow, it creates a loop that executes until an exit condition is met.
+Kruxia Flow supports iterative workflows through back-edges in the dependency graph. When an activity depends on a later activity in the workflow, it creates a loop that executes until an exit condition is met.
 
 ```yaml
 # Example: Research loop that iterates until sufficient data is gathered
@@ -1535,22 +1535,22 @@ pub struct TokenResponse {
 Configuration:
 ```bash
 # MVP: Custom auth provider (PostgreSQL backend)
-STREAMFLOW_OAUTH_PROVIDER=custom
-STREAMFLOW_OAUTH_JWT_SECRET=your-secret-key-here
-STREAMFLOW_OAUTH_JWT_ISSUER=streamflow
-STREAMFLOW_OAUTH_JWT_AUDIENCE=streamflow-api
-STREAMFLOW_OAUTH_TOKEN_TTL=3600  # 1 hour
+KRUXIAFLOW_OAUTH_PROVIDER=custom
+KRUXIAFLOW_OAUTH_JWT_SECRET=your-secret-key-here
+KRUXIAFLOW_OAUTH_JWT_ISSUER=kruxiaflow
+KRUXIAFLOW_OAUTH_JWT_AUDIENCE=kruxiaflow-api
+KRUXIAFLOW_OAUTH_TOKEN_TTL=3600  # 1 hour
 
 # Post-MVP: External identity providers
-STREAMFLOW_OAUTH_PROVIDER=auth0
-STREAMFLOW_OAUTH_DOMAIN=example.auth0.com
-STREAMFLOW_OAUTH_CLIENT_ID=worker_app
-STREAMFLOW_OAUTH_CLIENT_SECRET=secret_xyz
+KRUXIAFLOW_OAUTH_PROVIDER=auth0
+KRUXIAFLOW_OAUTH_DOMAIN=example.auth0.com
+KRUXIAFLOW_OAUTH_CLIENT_ID=worker_app
+KRUXIAFLOW_OAUTH_CLIENT_SECRET=secret_xyz
 ```
 
 #### Postgres OAuth Provider Implementation (MVP)
 
-For MVP, StreamFlow includes a built-in Postgres OAuth Provider that uses PostgreSQL as the backend, eliminating external identity provider dependencies.
+For MVP, Kruxia Flow includes a built-in Postgres OAuth Provider that uses PostgreSQL as the backend, eliminating external identity provider dependencies.
 
 **Database Schema**:
 
@@ -1818,7 +1818,7 @@ impl AuthenticationService for PostgresAuthService {
 **Initial Setup / Bootstrap**:
 
 ```rust
-// CLI command: streamflow admin create-client
+// CLI command: kruxiaflow admin create-client
 pub async fn create_client(pool: &PgPool, name: &str) -> Result<(String, String)> {
     use bcrypt::hash;
     use uuid::Uuid;
@@ -1846,7 +1846,7 @@ pub async fn create_client(pool: &PgPool, name: &str) -> Result<(String, String)
     Ok((client_id, client_secret))
 }
 
-// CLI command: streamflow admin create-user
+// CLI command: kruxiaflow admin create-user
 pub async fn create_user(
     pool: &PgPool,
     username: &str,
@@ -1881,21 +1881,21 @@ pub async fn create_user(
 
 ```bash
 # Create initial admin client for built-in worker
-streamflow admin create-client "Built-in Worker"
+kruxiaflow admin create-client "Built-in Worker"
 # Output: client_abc123 / secret_xyz789
 
 # Create user account for testing/admin
-streamflow admin create-user --username admin --email admin@example.com
+kruxiaflow admin create-user --username admin --email admin@example.com
 # Prompts for password
 
 # List clients
-streamflow admin list-clients
+kruxiaflow admin list-clients
 
 # Revoke client
-streamflow admin revoke-client client_abc123
+kruxiaflow admin revoke-client client_abc123
 
 # Reset user password
-streamflow admin reset-password --username admin
+kruxiaflow admin reset-password --username admin
 ```
 
 **JWT Claims Structure**:
@@ -1904,8 +1904,8 @@ streamflow admin reset-password --username admin
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,           // Subject (user_id or client_id)
-    pub iss: String,           // Issuer (streamflow)
-    pub aud: String,           // Audience (streamflow-api)
+    pub iss: String,           // Issuer (kruxiaflow)
+    pub aud: String,           // Audience (kruxiaflow-api)
     pub exp: i64,              // Expiration time
     pub iat: i64,              // Issued at
     pub client_id: Option<String>,  // For client_credentials flow
@@ -1930,8 +1930,8 @@ pub struct Claims {
 When scaling to enterprise, can switch to Auth0/Okta:
 ```bash
 # Switch from custom to Auth0
-STREAMFLOW_OAUTH_PROVIDER=auth0
-STREAMFLOW_OAUTH_DOMAIN=company.auth0.com
+KRUXIAFLOW_OAUTH_PROVIDER=auth0
+KRUXIAFLOW_OAUTH_DOMAIN=company.auth0.com
 ```
 
 The same AuthenticationService interface ensures no code changes required in core services.
@@ -2088,12 +2088,12 @@ pub struct RabbitMqQueue {
 Configuration example:
 ```bash
 # MVP (default)
-STREAMFLOW_QUEUE_PROVIDER=postgresql
+KRUXIAFLOW_QUEUE_PROVIDER=postgresql
 
 # Post-MVP: AWS SQS
-STREAMFLOW_QUEUE_PROVIDER=sqs
-STREAMFLOW_QUEUE_SQS_URL=https://sqs.us-east-1.amazonaws.com/123456/streamflow-activities
-STREAMFLOW_QUEUE_SQS_REGION=us-east-1
+KRUXIAFLOW_QUEUE_PROVIDER=sqs
+KRUXIAFLOW_QUEUE_SQS_URL=https://sqs.us-east-1.amazonaws.com/123456/kruxiaflow-activities
+KRUXIAFLOW_QUEUE_SQS_REGION=us-east-1
 ```
 
 ### Event Source Interface (Publish/Subscribe)
@@ -2243,9 +2243,9 @@ impl AdaptiveBackoff {
 
 ```bash
 # Event polling configuration
-STREAMFLOW_EVENT_POLL_INTERVAL_MIN=10ms   # Minimum interval when busy
-STREAMFLOW_EVENT_POLL_INTERVAL_MAX=5s     # Maximum interval when quiet
-STREAMFLOW_EVENT_BACKOFF_MULTIPLIER=1.5   # Backoff growth rate
+KRUXIAFLOW_EVENT_POLL_INTERVAL_MIN=10ms   # Minimum interval when busy
+KRUXIAFLOW_EVENT_POLL_INTERVAL_MAX=5s     # Maximum interval when quiet
+KRUXIAFLOW_EVENT_BACKOFF_MULTIPLIER=1.5   # Backoff growth rate
 ```
 
 **Why Polling (Not LISTEN/NOTIFY)**:
@@ -2357,22 +2357,22 @@ Best for: Low latency (<1ms), simple ops, smaller scale (<50k events/sec)
 
 ```bash
 # MVP (default)
-STREAMFLOW_EVENT_SOURCE=postgresql-polling
+KRUXIAFLOW_EVENT_SOURCE=postgresql-polling
 
 # Post-MVP: Kafka
-STREAMFLOW_EVENT_SOURCE=kafka
-STREAMFLOW_KAFKA_BROKERS=localhost:9092
-STREAMFLOW_KAFKA_TOPIC=streamflow-events
+KRUXIAFLOW_EVENT_SOURCE=kafka
+KRUXIAFLOW_KAFKA_BROKERS=localhost:9092
+KRUXIAFLOW_KAFKA_TOPIC=kruxiaflow-events
 
 # Post-MVP: Redpanda (Kafka-compatible, simpler)
-STREAMFLOW_EVENT_SOURCE=kafka
-STREAMFLOW_KAFKA_BROKERS=redpanda:9092
-STREAMFLOW_KAFKA_TOPIC=streamflow-events
+KRUXIAFLOW_EVENT_SOURCE=kafka
+KRUXIAFLOW_KAFKA_BROKERS=redpanda:9092
+KRUXIAFLOW_KAFKA_TOPIC=kruxiaflow-events
 
 # Post-MVP: NATS JetStream
-STREAMFLOW_EVENT_SOURCE=nats
-STREAMFLOW_NATS_URL=nats://localhost:4222
-STREAMFLOW_NATS_STREAM=STREAMFLOW_EVENTS
+KRUXIAFLOW_EVENT_SOURCE=nats
+KRUXIAFLOW_NATS_URL=nats://localhost:4222
+KRUXIAFLOW_NATS_STREAM=KRUXIAFLOW_EVENTS
 ```
 
 For MVP, polling with adaptive backoff provides guaranteed delivery with acceptable latency and minimal complexity. Event streaming services can be added post-MVP when throughput or latency requirements exceed PostgreSQL's capabilities.
@@ -2479,7 +2479,7 @@ pub struct S3Storage {
 
 ### Service Interface Summary
 
-StreamFlow uses four pluggable service interfaces to wrap infrastructure dependencies:
+Kruxia Flow uses four pluggable service interfaces to wrap infrastructure dependencies:
 
 
 | Interface                | Purpose                                       | MVP Implementation                                  | Post-MVP Options                 |
@@ -2528,11 +2528,11 @@ pub struct StreamFlowServices {
 **Simple configuration switch**:
 ```bash
 # MVP (default)
-STREAMFLOW_OAUTH_PROVIDER=custom
+KRUXIAFLOW_OAUTH_PROVIDER=custom
 
 # Enterprise (just change one env var)
-STREAMFLOW_OAUTH_PROVIDER=auth0
-STREAMFLOW_OAUTH_DOMAIN=company.auth0.com
+KRUXIAFLOW_OAUTH_PROVIDER=auth0
+KRUXIAFLOW_OAUTH_DOMAIN=company.auth0.com
 ```
 
 ### Service Configuration
@@ -2542,14 +2542,14 @@ Services are configured entirely through environment variables and command-line 
 Command-line takes precedence over environment:
 ```bash
 # Environment
-export STREAMFLOW_OAUTH_PROVIDER=auth0
-export DATABASE_URL=postgres://localhost/streamflow
-export STREAMFLOW_STORAGE_PROVIDER=postgresql
+export KRUXIAFLOW_OAUTH_PROVIDER=auth0
+export DATABASE_URL=postgres://localhost/kruxiaflow
+export KRUXIAFLOW_STORAGE_PROVIDER=postgresql
 
 # Command-line override
-streamflow serve \
+kruxiaflow serve \
   --auth-provider=okta \
-  --database-url=postgres://prod/streamflow \
+  --database-url=postgres://prod/kruxiaflow \
   --storage-provider=s3
 ```
 
@@ -2563,19 +2563,19 @@ The main binary includes three services launchable from different subcommands:
 
 ```bash
 # Launch API server only
-streamflow api --port=8080
+kruxiaflow api --port=8080
 
 # Launch orchestrator only
-streamflow orchestrator
+kruxiaflow orchestrator
 
 # Launch built-in worker only
-streamflow worker
+kruxiaflow worker
 
 # Launch all three together
-streamflow serve
+kruxiaflow serve
 ```
 
-When launched together with `streamflow serve`, services run on separate independent threads, each capable of running multiple instances:
+When launched together with `kruxiaflow serve`, services run on separate independent threads, each capable of running multiple instances:
 
 ```rust
 #[tokio::main]
@@ -2599,26 +2599,26 @@ Each service supports running multiple instances:
 **API Server**: Axum handles multiple instances transparently via Tokio async runtime
 ```bash
 # Single binary, multiple API instances on different ports
-streamflow api --port=8080 --instances=4
+kruxiaflow api --port=8080 --instances=4
 ```
 
 **Orchestrator**: Multiple instances consume from partitioned event stream
 ```bash
 # Multiple orchestrator instances for parallel processing
-streamflow orchestrator --instances=3
+kruxiaflow orchestrator --instances=3
 ```
 
 **Worker**: Multiple workers poll queue with `FOR UPDATE SKIP LOCKED` for safe concurrency
 ```bash
 # Scale workers for parallel activity execution
-streamflow worker --instances=10
+kruxiaflow worker --instances=10
 ```
 
 ### Deployment Topologies
 
 **1. All-in-One (Development/Edge)**
 ```bash
-streamflow serve
+kruxiaflow serve
 ```
 Single process, all services in one binary. Suitable for:
 - Development environments
@@ -2628,13 +2628,13 @@ Single process, all services in one binary. Suitable for:
 **2. Separated Services (Production)**
 ```bash
 # Machine 1: API servers (scale horizontally)
-streamflow api --instances=4
+kruxiaflow api --instances=4
 
 # Machine 2: Orchestrators (scale horizontally)
-streamflow orchestrator --instances=2
+kruxiaflow orchestrator --instances=2
 
 # Machine 3: Workers (scale horizontally)
-streamflow worker --instances=10
+kruxiaflow worker --instances=10
 ```
 
 **3. Kubernetes Deployment**
@@ -2642,40 +2642,40 @@ streamflow worker --instances=10
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: streamflow-api
+  name: kruxiaflow-api
 spec:
   replicas: 3
   template:
     spec:
       containers:
-      - name: streamflow
-        image: streamflow:latest
+      - name: kruxiaflow
+        image: kruxiaflow:latest
         args: ["api", "--port=8080"]
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: streamflow-orchestrator
+  name: kruxiaflow-orchestrator
 spec:
   replicas: 2
   template:
     spec:
       containers:
-      - name: streamflow
-        image: streamflow:latest
+      - name: kruxiaflow
+        image: kruxiaflow:latest
         args: ["orchestrator"]
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: streamflow-worker
+  name: kruxiaflow-worker
 spec:
   replicas: 5
   template:
     spec:
       containers:
-      - name: streamflow
-        image: streamflow:latest
+      - name: kruxiaflow
+        image: kruxiaflow:latest
         args: ["worker"]
 ```
 
@@ -2796,7 +2796,7 @@ Migrations are embedded in the binary and run automatically on startup.
 
 | Platform     | Workflows/sec | Start Latency | Architecture                      |
 |--------------|---------------|---------------|-----------------------------------|
-| **StreamFlow** | **>1,000**  | **<10ms**     | Single binary                     |
+| **Kruxia Flow** | **>1,000**  | **<10ms**     | Single binary                     |
 | Temporal     | 35-100        | 50-200ms      | 4+ services, 2GB+ RAM             |
 | Conductor    | 35-100        | 50-150ms      | 4+ services, 1GB+ RAM             |
 | Airflow      | ~10-50        | 100-500ms     | 6+ services, 1GB+ RAM             |
@@ -2812,7 +2812,7 @@ Migrations are embedded in the binary and run automatically on startup.
 
 ### Performance Benchmarking
 
-StreamFlow includes comprehensive performance testing infrastructure to ensure we meet throughput and latency targets.
+Kruxia Flow includes comprehensive performance testing infrastructure to ensure we meet throughput and latency targets.
 
 **Benchmark Types**:
 
@@ -2935,7 +2935,7 @@ activities:
 
 For complex workflows requiring type safety and reusable components:
 ```python
-from streamflow import Workflow, Activity
+from kruxiaflow import Workflow, Activity
 
 workflow = Workflow("payment_processing")
 validate = Activity("validate_payment", worker="payments")
@@ -2951,7 +2951,7 @@ workflow.add_activities(validate, authorize)
 
 ## Summary
 
-StreamFlow's architecture is designed for:
+Kruxia Flow's architecture is designed for:
 
 1. **Operational Simplicity**: Single binary, PostgreSQL-first, minimal dependencies
 2. **High Performance**: Event-driven orchestration, compiled workflows, optimized queries
@@ -2966,4 +2966,4 @@ The system achieves these goals through careful architectural choices:
 - Stateless services for horizontal scaling
 - Compile-time optimization (sqlx query validation, Rust performance)
 
-This architecture positions StreamFlow as the highest-performance, most operationally simple workflow orchestration platform for both traditional and AI-native workloads.
+This architecture positions Kruxia Flow as the highest-performance, most operationally simple workflow orchestration platform for both traditional and AI-native workloads.

@@ -26,7 +26,7 @@ use sha2::{Digest, Sha256};
 ///
 /// ```
 /// use serde_json::json;
-/// use streamflow_core::cache::key_generator::generate_cache_key;
+/// use kruxiaflow_core::cache::key_generator::generate_cache_key;
 ///
 /// let params = json!({
 ///     "prompt": "Hello world",

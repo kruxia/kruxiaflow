@@ -1,5 +1,5 @@
 [package]
-name = "streamflow-core"
+name = "kruxiaflow-core"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

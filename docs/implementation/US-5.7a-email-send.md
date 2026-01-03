@@ -506,7 +506,7 @@ pub fn register_builtin_activities(cache_service: Arc<dyn CacheService>) -> Acti
 
 | Variable                        | Default | Description             |
 |---------------------------------|---------|-------------------------|
-| `STREAMFLOW_EMAIL_TIMEOUT_SECS` | 30      | SMTP connection timeout |
+| `KRUXIAFLOW_EMAIL_TIMEOUT_SECS` | 30      | SMTP connection timeout |
 
 ---
 

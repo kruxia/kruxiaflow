@@ -1,6 +1,6 @@
 # Implementation Plan: US-1C.2 All-in-One Service Launcher
 
-**Epic**: 1C - StreamFlow Binary and CLI
+**Epic**: 1C - Kruxia Flow Binary and CLI
 **User Story**: US-1C.2
 **Status**: ✅ Completed
 **Priority**: P0 (Pre-Epic 2 - Required for Benchmarking)
@@ -17,13 +17,13 @@
 
 **As** a developer
 **I want** to launch all services together with one command
-**So that** I can quickly start StreamFlow for development or single-node deployment
+**So that** I can quickly start Kruxia Flow for development or single-node deployment
 
 ---
 
 ## Acceptance Criteria
 
-- [x] ✅ `streamflow serve` launches orchestrator + API server + built-in worker(s)
+- [x] ✅ `kruxiaflow serve` launches orchestrator + API server + built-in worker(s)
 - [x] ✅ Configuration: `--port` (API port, default 8080), `--workers` (worker count, default 1)
 - [x] ✅ Service startup order: Database connectivity check → Orchestrator → API server → Workers
 - [x] ✅ Health checks: Wait for each service to be ready before starting next
@@ -35,7 +35,7 @@
 
 ## Rationale
 
-The all-in-one launcher provides the simplest deployment model for development, testing, and single-node production deployments. It combines all StreamFlow services into a single process, eliminating the need for:
+The all-in-one launcher provides the simplest deployment model for development, testing, and single-node production deployments. It combines all Kruxia Flow services into a single process, eliminating the need for:
 
 - External orchestrator deployment
 - External worker deployment
@@ -64,7 +64,7 @@ The all-in-one launcher provides the simplest deployment model for development, 
 
 ```mermaid
 flowchart TB
-    Start([streamflow serve]) --> ParseConfig[Parse CLI Arguments]
+    Start([kruxiaflow serve]) --> ParseConfig[Parse CLI Arguments]
     ParseConfig --> InitLog[Initialize Logging]
     InitLog --> CheckDB{Database<br/>Connection<br/>Check}
     CheckDB -->|Failed| Exit1[Exit with Error]
@@ -106,7 +106,7 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    subgraph Process["Single Process: streamflow serve"]
+    subgraph Process["Single Process: kruxiaflow serve"]
         subgraph Main["Main Task"]
             CLI[CLI Parser]
             Config[Configuration]
@@ -225,7 +225,7 @@ sequenceDiagram
 
 ### Component 1: Serve Command Configuration
 
-**Location**: `streamflow/src/commands/serve.rs` (new file)
+**Location**: `kruxiaflow/src/commands/serve.rs` (new file)
 
 **Responsibilities**:
 1. Parse CLI arguments for serve command
@@ -245,7 +245,7 @@ pub struct ServeCommand {
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_API_PORT",
+        env = "KRUXIAFLOW_API_PORT",
         default_value = "8080",
         help = "Port to bind API server to",
         long_help = "Port to bind API server to\n\n\
@@ -258,7 +258,7 @@ Example: --port 9090"
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_API_BIND",
+        env = "KRUXIAFLOW_API_BIND",
         default_value = "0.0.0.0",
         help = "Address to bind API server to",
         long_help = "Address to bind API server to\n\n\
@@ -273,7 +273,7 @@ Example: --bind 127.0.0.1"
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_WORKER_COUNT",
+        env = "KRUXIAFLOW_WORKER_COUNT",
         default_value = "1",
         help = "Number of concurrent worker tasks",
         long_help = "Number of concurrent worker tasks to spawn\n\n\
@@ -286,7 +286,7 @@ Example: --workers 4"
     /// Orchestrator consumer ID (for event polling checkpoint)
     #[arg(
         long,
-        env = "STREAMFLOW_ORCHESTRATOR_CONSUMER_ID",
+        env = "KRUXIAFLOW_ORCHESTRATOR_CONSUMER_ID",
         default_value = "orchestrator_default",
         help = "Orchestrator consumer ID for event checkpointing"
     )]
@@ -295,8 +295,8 @@ Example: --workers 4"
     /// Worker client ID for OAuth
     #[arg(
         long,
-        env = "STREAMFLOW_CLIENT_ID",
-        default_value = "streamflow_internal_worker",
+        env = "KRUXIAFLOW_CLIENT_ID",
+        default_value = "kruxiaflow_internal_worker",
         help = "OAuth client ID for internal workers"
     )]
     pub client_id: String,
@@ -304,7 +304,7 @@ Example: --workers 4"
     /// Worker client secret for OAuth
     #[arg(
         long,
-        env = "STREAMFLOW_CLIENT_SECRET",
+        env = "KRUXIAFLOW_CLIENT_SECRET",
         help = "OAuth client secret for internal workers (required)"
     )]
     pub client_secret: Option<String>,
@@ -312,7 +312,7 @@ Example: --workers 4"
     /// OAuth RSA private key (PEM format)
     #[arg(
         long,
-        env = "STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM",
+        env = "KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM",
         help = "RSA private key for JWT signing (required)"
     )]
     pub oauth_private_key: Option<String>,
@@ -327,13 +327,13 @@ impl ServeCommand {
 
         if self.client_secret.is_none() {
             anyhow::bail!(
-                "Client secret required (--client-secret or STREAMFLOW_CLIENT_SECRET)"
+                "Client secret required (--client-secret or KRUXIAFLOW_CLIENT_SECRET)"
             );
         }
 
         if self.oauth_private_key.is_none() {
             anyhow::bail!(
-                "OAuth private key required (--oauth-private-key or STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM)"
+                "OAuth private key required (--oauth-private-key or KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM)"
             );
         }
 
@@ -352,14 +352,14 @@ impl ServeCommand {
 
 ### Component 2: Service Spawning Functions
 
-**Location**: `streamflow/src/commands/serve.rs` (continued)
+**Location**: `kruxiaflow/src/commands/serve.rs` (continued)
 
 **Implementation**:
 
 ```rust
-use streamflow_api::{create_app, AppState};
-use streamflow_core::orchestrator::Orchestrator;
-use streamflow_worker::{ActivityRegistry, WorkerConfig, WorkerManager};
+use kruxiaflow_api::{create_app, AppState};
+use kruxiaflow_core::orchestrator::Orchestrator;
+use kruxiaflow_worker::{ActivityRegistry, WorkerConfig, WorkerManager};
 use sqlx::PgPool;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -472,7 +472,7 @@ async fn spawn_workers(
 
     // Create activity registry with built-in activities
     let mut registry = ActivityRegistry::new();
-    registry.register(Arc::new(streamflow_worker::activities::EchoActivity));
+    registry.register(Arc::new(kruxiaflow_worker::activities::EchoActivity));
 
     // TODO: Register more built-in activities here
     // registry.register(Arc::new(HttpRequestActivity));
@@ -514,7 +514,7 @@ async fn spawn_workers(
 
 ### Component 3: Main Serve Execution
 
-**Location**: `streamflow/src/commands/serve.rs` (continued)
+**Location**: `kruxiaflow/src/commands/serve.rs` (continued)
 
 **Implementation**:
 
@@ -530,7 +530,7 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
         port = cmd.port,
         bind = %cmd.bind,
         workers = cmd.workers,
-        "Starting StreamFlow all-in-one mode"
+        "Starting Kruxia Flow all-in-one mode"
     );
 
     // 1. Test database connection
@@ -574,7 +574,7 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
     tracing::info!("All services started successfully");
     tracing::info!(
         api_url = %api_url,
-        "StreamFlow is ready - API available at {}",
+        "Kruxia Flow is ready - API available at {}",
         api_url
     );
 
@@ -630,7 +630,7 @@ mod tests {
             bind: "0.0.0.0".to_string(),
             workers: 1,
             orchestrator_id: "orchestrator_default".to_string(),
-            client_id: "streamflow_internal_worker".to_string(),
+            client_id: "kruxiaflow_internal_worker".to_string(),
             client_secret: Some("secret".to_string()),
             oauth_private_key: Some("-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----".to_string()),
         };
@@ -645,7 +645,7 @@ mod tests {
             bind: "0.0.0.0".to_string(),
             workers: 0,
             orchestrator_id: "orchestrator_default".to_string(),
-            client_id: "streamflow_internal_worker".to_string(),
+            client_id: "kruxiaflow_internal_worker".to_string(),
             client_secret: Some("secret".to_string()),
             oauth_private_key: Some("key".to_string()),
         };
@@ -660,7 +660,7 @@ mod tests {
             bind: "0.0.0.0".to_string(),
             workers: 1,
             orchestrator_id: "orchestrator_default".to_string(),
-            client_id: "streamflow_internal_worker".to_string(),
+            client_id: "kruxiaflow_internal_worker".to_string(),
             client_secret: None,
             oauth_private_key: Some("key".to_string()),
         };
@@ -681,7 +681,7 @@ mod tests {
 
 ### Component 4: Update Main Binary
 
-**Location**: `streamflow/src/main.rs`
+**Location**: `kruxiaflow/src/main.rs`
 
 **Changes**:
 
@@ -699,20 +699,20 @@ enum Commands {
 The API server provides RESTful endpoints for workflow management, \
 authentication, and monitoring.\n\n\
 EXAMPLES:\n  \
-  streamflow api\n  \
-  streamflow api --port 9090 --bind 127.0.0.1"
+  kruxiaflow api\n  \
+  kruxiaflow api --port 9090 --bind 127.0.0.1"
     )]
     Api(commands::api::ApiCommand),
 
     /// Launch all services together
     #[command(
         about = "Launch orchestrator, API server, and workers together",
-        long_about = "Launch all StreamFlow services in a single process\n\n\
+        long_about = "Launch all Kruxia Flow services in a single process\n\n\
 This is the recommended mode for development, testing, and single-node production.\n\n\
 EXAMPLES:\n  \
-  streamflow serve\n  \
-  streamflow serve --port 8080 --workers 4\n  \
-  streamflow serve --bind 127.0.0.1 --workers 2\n\n\
+  kruxiaflow serve\n  \
+  kruxiaflow serve --port 8080 --workers 4\n  \
+  kruxiaflow serve --bind 127.0.0.1 --workers 2\n\n\
 SERVICES STARTED:\n  \
   - Orchestrator: Evaluates workflows and schedules activities\n  \
   - API Server: HTTP/REST endpoints\n  \
@@ -724,10 +724,10 @@ SERVICES STARTED:\n  \
     #[command(
         about = "Display version and build information",
         long_about = "Display version and build information\n\n\
-Shows StreamFlow version, build timestamp, git commit, and platform details.\n\n\
+Shows Kruxia Flow version, build timestamp, git commit, and platform details.\n\n\
 EXAMPLES:\n  \
-  streamflow version\n  \
-  streamflow version --format json"
+  kruxiaflow version\n  \
+  kruxiaflow version --format json"
     )]
     Version(commands::version::VersionCommand),
 }
@@ -771,7 +771,7 @@ async fn main() -> Result<()> {
 
 ### Component 5: Update Commands Module
 
-**Location**: `streamflow/src/commands/mod.rs`
+**Location**: `kruxiaflow/src/commands/mod.rs`
 
 ```rust
 pub mod api;
@@ -783,7 +783,7 @@ pub mod version;
 
 ### Component 6: Signal Handling Utility
 
-**Location**: `streamflow/src/signals.rs` (update if needed)
+**Location**: `kruxiaflow/src/signals.rs` (update if needed)
 
 **Ensure it exists with this implementation**:
 
@@ -828,7 +828,7 @@ pub async fn setup_signal_handlers() {
 
 ### Unit Tests
 
-**File**: `streamflow/src/commands/serve_test.rs`
+**File**: `kruxiaflow/src/commands/serve_test.rs`
 
 ```rust
 #[cfg(test)]
@@ -868,7 +868,7 @@ mod tests {
 
 ### Integration Tests
 
-**File**: `streamflow/tests/serve_integration_test.rs` (new)
+**File**: `kruxiaflow/tests/serve_integration_test.rs` (new)
 
 ```rust
 use serial_test::serial;
@@ -880,16 +880,16 @@ use tokio::process::Command;
 async fn test_serve_starts_all_services() {
     // Setup: Ensure database is running
     let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow_test".to_string());
+        .unwrap_or_else(|_| "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow_test".to_string());
 
-    // Start streamflow serve in background
+    // Start kruxiaflow serve in background
     let mut child = Command::new("cargo")
         .args(&["run", "--release", "--", "serve", "--port", "18080", "--workers", "2"])
         .env("DATABASE_URL", database_url)
-        .env("STREAMFLOW_CLIENT_SECRET", "test_secret")
-        .env("STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM", include_str!("../../tests/fixtures/test_private_key.pem"))
+        .env("KRUXIAFLOW_CLIENT_SECRET", "test_secret")
+        .env("KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM", include_str!("../../tests/fixtures/test_private_key.pem"))
         .spawn()
-        .expect("Failed to start streamflow serve");
+        .expect("Failed to start kruxiaflow serve");
 
     // Wait for services to start
     tokio::time::sleep(Duration::from_secs(5)).await;
@@ -932,26 +932,26 @@ async fn test_serve_graceful_shutdown() {
 cargo build --release
 
 # 2. Setup environment
-export DATABASE_URL='postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow'
-export STREAMFLOW_CLIENT_SECRET='dev_secret_123'
-export STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="$(cat path/to/private.pem)"
+export DATABASE_URL='postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow'
+export KRUXIAFLOW_CLIENT_SECRET='dev_secret_123'
+export KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="$(cat path/to/private.pem)"
 
 # 3. Run serve command
-./target/release/streamflow serve
+./target/release/kruxiaflow serve
 
 # Expected output:
-# 2025-11-08T12:00:00Z  INFO streamflow::commands::serve: Starting StreamFlow all-in-one mode port=8080 bind="0.0.0.0" workers=1
-# 2025-11-08T12:00:00Z  INFO streamflow::commands::serve: Testing database connection...
-# 2025-11-08T12:00:00Z  INFO streamflow::commands::serve: Database connection successful
-# 2025-11-08T12:00:00Z  INFO streamflow::commands::serve: Starting orchestrator consumer_id="orchestrator_default"
-# 2025-11-08T12:00:00Z  INFO streamflow::commands::serve: Orchestrator ready
-# 2025-11-08T12:00:00Z  INFO streamflow::commands::serve: Starting API server addr=0.0.0.0:8080
-# 2025-11-08T12:00:00Z  INFO streamflow::commands::serve: API server listening addr=0.0.0.0:8080
-# 2025-11-08T12:00:00Z  INFO streamflow::commands::serve: API server ready
-# 2025-11-08T12:00:00Z  INFO streamflow::commands::serve: Starting workers count=1 api_url="http://0.0.0.0:8080"
-# 2025-11-08T12:00:00Z  INFO streamflow::commands::serve: Workers ready count=1
-# 2025-11-08T12:00:00Z  INFO streamflow::commands::serve: All services started successfully
-# 2025-11-08T12:00:00Z  INFO streamflow::commands::serve: StreamFlow is ready - API available at http://0.0.0.0:8080 api_url="http://0.0.0.0:8080"
+# 2025-11-08T12:00:00Z  INFO kruxiaflow::commands::serve: Starting Kruxia Flow all-in-one mode port=8080 bind="0.0.0.0" workers=1
+# 2025-11-08T12:00:00Z  INFO kruxiaflow::commands::serve: Testing database connection...
+# 2025-11-08T12:00:00Z  INFO kruxiaflow::commands::serve: Database connection successful
+# 2025-11-08T12:00:00Z  INFO kruxiaflow::commands::serve: Starting orchestrator consumer_id="orchestrator_default"
+# 2025-11-08T12:00:00Z  INFO kruxiaflow::commands::serve: Orchestrator ready
+# 2025-11-08T12:00:00Z  INFO kruxiaflow::commands::serve: Starting API server addr=0.0.0.0:8080
+# 2025-11-08T12:00:00Z  INFO kruxiaflow::commands::serve: API server listening addr=0.0.0.0:8080
+# 2025-11-08T12:00:00Z  INFO kruxiaflow::commands::serve: API server ready
+# 2025-11-08T12:00:00Z  INFO kruxiaflow::commands::serve: Starting workers count=1 api_url="http://0.0.0.0:8080"
+# 2025-11-08T12:00:00Z  INFO kruxiaflow::commands::serve: Workers ready count=1
+# 2025-11-08T12:00:00Z  INFO kruxiaflow::commands::serve: All services started successfully
+# 2025-11-08T12:00:00Z  INFO kruxiaflow::commands::serve: Kruxia Flow is ready - API available at http://0.0.0.0:8080 api_url="http://0.0.0.0:8080"
 
 # 4. Test API availability
 curl http://localhost:8080/health
@@ -962,23 +962,23 @@ curl http://localhost:8080/api/v1/info
 
 # 5. Test graceful shutdown (Ctrl+C)
 # Expected output:
-# 2025-11-08T12:01:00Z  INFO streamflow::signals: Received SIGINT (Ctrl+C)
-# 2025-11-08T12:01:00Z  INFO streamflow::commands::serve: Shutdown signal received, stopping services...
-# 2025-11-08T12:01:00Z  INFO streamflow::commands::serve: Stopping workers...
-# 2025-11-08T12:01:02Z  INFO streamflow::commands::serve: Workers stopped
-# 2025-11-08T12:01:02Z  INFO streamflow::commands::serve: Stopping API server...
-# 2025-11-08T12:01:02Z  INFO streamflow::commands::serve: API server stopped
-# 2025-11-08T12:01:02Z  INFO streamflow::commands::serve: Stopping orchestrator...
-# 2025-11-08T12:01:02Z  INFO streamflow::commands::serve: Orchestrator stopped
-# 2025-11-08T12:01:02Z  INFO streamflow::commands::serve: Closing database pool...
-# 2025-11-08T12:01:02Z  INFO streamflow::commands::serve: Database pool closed
-# 2025-11-08T12:01:02Z  INFO streamflow::commands::serve: Graceful shutdown complete
+# 2025-11-08T12:01:00Z  INFO kruxiaflow::signals: Received SIGINT (Ctrl+C)
+# 2025-11-08T12:01:00Z  INFO kruxiaflow::commands::serve: Shutdown signal received, stopping services...
+# 2025-11-08T12:01:00Z  INFO kruxiaflow::commands::serve: Stopping workers...
+# 2025-11-08T12:01:02Z  INFO kruxiaflow::commands::serve: Workers stopped
+# 2025-11-08T12:01:02Z  INFO kruxiaflow::commands::serve: Stopping API server...
+# 2025-11-08T12:01:02Z  INFO kruxiaflow::commands::serve: API server stopped
+# 2025-11-08T12:01:02Z  INFO kruxiaflow::commands::serve: Stopping orchestrator...
+# 2025-11-08T12:01:02Z  INFO kruxiaflow::commands::serve: Orchestrator stopped
+# 2025-11-08T12:01:02Z  INFO kruxiaflow::commands::serve: Closing database pool...
+# 2025-11-08T12:01:02Z  INFO kruxiaflow::commands::serve: Database pool closed
+# 2025-11-08T12:01:02Z  INFO kruxiaflow::commands::serve: Graceful shutdown complete
 
 # 6. Test with custom configuration
-./target/release/streamflow serve --port 9090 --workers 4 --bind 127.0.0.1
+./target/release/kruxiaflow serve --port 9090 --workers 4 --bind 127.0.0.1
 
 # 7. Test help
-./target/release/streamflow serve --help
+./target/release/kruxiaflow serve --help
 ```
 
 ---
@@ -987,7 +987,7 @@ curl http://localhost:8080/api/v1/info
 
 **No new external dependencies required** - all dependencies already in workspace:
 - `tokio` - ✅ Async runtime and task spawning
-- `axum` - ✅ API server (already in `streamflow-api`)
+- `axum` - ✅ API server (already in `kruxiaflow-api`)
 - `sqlx` - ✅ Database pool
 - `anyhow` - ✅ Error handling
 - `tracing` - ✅ Logging
@@ -1002,23 +1002,23 @@ curl http://localhost:8080/api/v1/info
 ```bash
 # Required
 DATABASE_URL                           # PostgreSQL connection string
-STREAMFLOW_CLIENT_SECRET               # OAuth client secret for internal workers
-STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM   # RSA private key for JWT signing
+KRUXIAFLOW_CLIENT_SECRET               # OAuth client secret for internal workers
+KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM   # RSA private key for JWT signing
 
 # Optional (have sensible defaults)
-STREAMFLOW_API_PORT=8080               # API server port
-STREAMFLOW_API_BIND=0.0.0.0            # API server bind address
-STREAMFLOW_WORKER_COUNT=1              # Number of worker tasks
-STREAMFLOW_ORCHESTRATOR_CONSUMER_ID=orchestrator_default  # Orchestrator ID
-STREAMFLOW_CLIENT_ID=streamflow_internal_worker           # OAuth client ID
-STREAMFLOW_LOG_LEVEL=info              # Logging level
-STREAMFLOW_LOG_FORMAT=text             # Log format (text or json)
+KRUXIAFLOW_API_PORT=8080               # API server port
+KRUXIAFLOW_API_BIND=0.0.0.0            # API server bind address
+KRUXIAFLOW_WORKER_COUNT=1              # Number of worker tasks
+KRUXIAFLOW_ORCHESTRATOR_CONSUMER_ID=orchestrator_default  # Orchestrator ID
+KRUXIAFLOW_CLIENT_ID=kruxiaflow_internal_worker           # OAuth client ID
+KRUXIAFLOW_LOG_LEVEL=info              # Logging level
+KRUXIAFLOW_LOG_FORMAT=text             # Log format (text or json)
 ```
 
 ### CLI Flags Override Environment Variables
 
 ```bash
-streamflow serve \
+kruxiaflow serve \
   --port 9090 \
   --bind 127.0.0.1 \
   --workers 4 \
@@ -1038,16 +1038,16 @@ Add section under "Quick Start":
 ```markdown
 ### Running All Services Together
 
-The quickest way to start StreamFlow is using the all-in-one launcher:
+The quickest way to start Kruxia Flow is using the all-in-one launcher:
 
 \`\`\`bash
 # Set required environment variables
-export DATABASE_URL='postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow'
-export STREAMFLOW_CLIENT_SECRET='your_secret_here'
-export STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="$(cat private.pem)"
+export DATABASE_URL='postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow'
+export KRUXIAFLOW_CLIENT_SECRET='your_secret_here'
+export KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="$(cat private.pem)"
 
 # Start all services
-./target/release/streamflow serve
+./target/release/kruxiaflow serve
 \`\`\`
 
 This single command starts:
@@ -1058,13 +1058,13 @@ This single command starts:
 For production or multi-worker setup:
 
 \`\`\`bash
-streamflow serve --port 8080 --workers 4
+kruxiaflow serve --port 8080 --workers 4
 \`\`\`
 
 For development (localhost only):
 
 \`\`\`bash
-streamflow serve --bind 127.0.0.1 --workers 2
+kruxiaflow serve --bind 127.0.0.1 --workers 2
 \`\`\`
 ```
 
@@ -1075,7 +1075,7 @@ Create `docs/guides/all-in-one-mode.md`:
 ````markdown
 # All-in-One Mode
 
-The `streamflow serve` command launches all StreamFlow services in a single process.
+The `kruxiaflow serve` command launches all Kruxia Flow services in a single process.
 
 ## When to Use
 
@@ -1099,26 +1099,26 @@ The `streamflow serve` command launches all StreamFlow services in a single proc
 export DATABASE_URL='postgres://user:pass@host:port/database'
 
 # OAuth configuration for internal workers
-export STREAMFLOW_CLIENT_SECRET='secret_value'
-export STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="$(cat /path/to/private.pem)"
+export KRUXIAFLOW_CLIENT_SECRET='secret_value'
+export KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="$(cat /path/to/private.pem)"
 ```
 
 ### Optional Configuration
 
 ```bash
 # API server
-export STREAMFLOW_API_PORT=8080
-export STREAMFLOW_API_BIND=0.0.0.0
+export KRUXIAFLOW_API_PORT=8080
+export KRUXIAFLOW_API_BIND=0.0.0.0
 
 # Workers
-export STREAMFLOW_WORKER_COUNT=1
+export KRUXIAFLOW_WORKER_COUNT=1
 
 # Orchestrator
-export STREAMFLOW_ORCHESTRATOR_CONSUMER_ID=orchestrator_default
+export KRUXIAFLOW_ORCHESTRATOR_CONSUMER_ID=orchestrator_default
 
 # Logging
-export STREAMFLOW_LOG_LEVEL=info
-export STREAMFLOW_LOG_FORMAT=text
+export KRUXIAFLOW_LOG_LEVEL=info
+export KRUXIAFLOW_LOG_FORMAT=text
 ```
 
 ## Startup Sequence
@@ -1161,12 +1161,12 @@ curl http://localhost:8080/api/v1/info
 
 ### "Client secret required"
 
-- Set STREAMFLOW_CLIENT_SECRET environment variable
+- Set KRUXIAFLOW_CLIENT_SECRET environment variable
 - Or pass via CLI: `--client-secret your_secret`
 
 ### "Port already in use"
 
-- Change port: `streamflow serve --port 9090`
+- Change port: `kruxiaflow serve --port 9090`
 - Or stop the process using port 8080
 
 ### "Orchestrator failed to start"
@@ -1183,7 +1183,7 @@ curl http://localhost:8080/api/v1/info
 
 ### Functional Requirements
 
-- [ ] `streamflow serve` starts all three services (orchestrator, API, workers)
+- [ ] `kruxiaflow serve` starts all three services (orchestrator, API, workers)
 - [ ] Database connection validated before starting services
 - [ ] Services start in correct order with health checks
 - [ ] All services share single database connection pool
@@ -1208,7 +1208,7 @@ curl http://localhost:8080/api/v1/info
 ## Implementation Phases
 
 ### Phase 1: Command Structure and Configuration (2 hours)
-- [ ] Create `streamflow/src/commands/serve.rs`
+- [ ] Create `kruxiaflow/src/commands/serve.rs`
 - [ ] Implement `ServeCommand` struct with clap Args
 - [ ] Implement `validate()` method
 - [ ] Add to `commands/mod.rs`
@@ -1327,7 +1327,7 @@ curl http://localhost:8080/api/v1/info
 
 ## Definition of Done
 
-- [x] ✅ `streamflow/src/commands/serve.rs` implemented
+- [x] ✅ `kruxiaflow/src/commands/serve.rs` implemented
 - [x] ✅ `ServeCommand` with CLI arguments and validation
 - [x] ✅ `spawn_orchestrator()` function working
 - [x] ✅ `spawn_api_server()` function working
@@ -1353,7 +1353,7 @@ curl http://localhost:8080/api/v1/info
 
 ### What Was Implemented
 
-1. **`streamflow/src/commands/serve.rs`** (417 lines)
+1. **`kruxiaflow/src/commands/serve.rs`** (417 lines)
    - Complete `ServeCommand` struct with all CLI parameters
    - Validation logic for configuration
    - `spawn_orchestrator()` - Spawns orchestrator in background task
@@ -1363,9 +1363,9 @@ curl http://localhost:8080/api/v1/info
    - Unit tests for configuration validation
 
 2. **Updated Files**:
-   - `streamflow/Cargo.toml` - Added `streamflow-worker` and `uuid` dependencies
-   - `streamflow/src/commands/mod.rs` - Added `serve` module
-   - `streamflow/src/main.rs` - Added `Serve` command variant and routing
+   - `kruxiaflow/Cargo.toml` - Added `kruxiaflow-worker` and `uuid` dependencies
+   - `kruxiaflow/src/commands/mod.rs` - Added `serve` module
+   - `kruxiaflow/src/main.rs` - Added `Serve` command variant and routing
 
 3. **Key Features Delivered**:
    - All services run in single process with coordinated startup
@@ -1384,7 +1384,7 @@ curl http://localhost:8080/api/v1/info
 
 ### Deviations from Plan
 
-1. **API Differences**: Implementation adapted to actual StreamFlow API:
+1. **API Differences**: Implementation adapted to actual Kruxia Flow API:
    - Used `app_router()` instead of non-existent `create_app()`
    - Used `run_orchestrator()` function instead of `Orchestrator` struct
    - Created `AuthConfig` with full configuration instead of just passing private key

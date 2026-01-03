@@ -1802,7 +1802,7 @@ Workflow definitions are deployed separately from workflow execution. This allow
 
 ### Version Format
 
-StreamFlow uses automatic timestamp-based versioning:
+Kruxia Flow uses automatic timestamp-based versioning:
 
 **Timestamp Versioning**:
 - Format: `YYYYmmdd.HHMMSS.uuuuuu` (e.g., `20250105.143022.123456`)

@@ -1834,21 +1834,21 @@ US-1.2 has dependencies on other components for complete end-to-end testing:
 
 ```bash
 # Event polling configuration
-STREAMFLOW_EVENT_POLL_INTERVAL_MIN=10ms   # Minimum interval when busy
-STREAMFLOW_EVENT_POLL_INTERVAL_MAX=5s     # Maximum interval when quiet
-STREAMFLOW_EVENT_BACKOFF_MULTIPLIER=1.5   # Backoff growth rate
+KRUXIAFLOW_EVENT_POLL_INTERVAL_MIN=10ms   # Minimum interval when busy
+KRUXIAFLOW_EVENT_POLL_INTERVAL_MAX=5s     # Maximum interval when quiet
+KRUXIAFLOW_EVENT_BACKOFF_MULTIPLIER=1.5   # Backoff growth rate
 
 # Orchestrator configuration
-STREAMFLOW_ORCHESTRATOR_BATCH_SIZE=100    # Max events per poll
-STREAMFLOW_ORCHESTRATOR_WORKERS=1         # Number of orchestrator instances
-STREAMFLOW_ORCHESTRATOR_TIMEOUT=30s       # Evaluation timeout
+KRUXIAFLOW_ORCHESTRATOR_BATCH_SIZE=100    # Max events per poll
+KRUXIAFLOW_ORCHESTRATOR_WORKERS=1         # Number of orchestrator instances
+KRUXIAFLOW_ORCHESTRATOR_TIMEOUT=30s       # Evaluation timeout
 
 # Database configuration
-DATABASE_URL=postgres://localhost/streamflow
-STREAMFLOW_DATABASE_MAX_CONNECTIONS=20
+DATABASE_URL=postgres://localhost/kruxiaflow
+KRUXIAFLOW_DATABASE_MAX_CONNECTIONS=20
 
 # Logging
-STREAMFLOW_LOG_LEVEL=info                 # debug, info, warn, error
+KRUXIAFLOW_LOG_LEVEL=info                 # debug, info, warn, error
 ```
 
 ### Compile-Time Configuration

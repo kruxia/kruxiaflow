@@ -2,7 +2,7 @@
 //! Unit tests for AdaptiveBackoff
 
 use std::time::Duration;
-use streamflow_core::orchestrator::backoff::AdaptiveBackoff;
+use kruxiaflow_core::orchestrator::backoff::AdaptiveBackoff;
 
 #[test]
 fn test_backoff_starts_at_min() {

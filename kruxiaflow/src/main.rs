@@ -20,25 +20,25 @@ static GLOBAL: Jemalloc = Jemalloc;
 #[allow(non_upper_case_globals)]
 pub static _rjem_malloc_conf: &[u8] = b"prof:true\0";
 
-/// StreamFlow - High-performance workflow orchestration
+/// Kruxia Flow - High-performance workflow orchestration
 #[derive(Parser)]
 #[command(
-    name = "streamflow",
+    name = "kruxiaflow",
     version,
-    about = "StreamFlow workflow orchestration platform",
-    long_about = "StreamFlow is a lightweight, high-performance workflow orchestration \
+    about = "Kruxia Flow workflow orchestration platform",
+    long_about = "Kruxia Flow is a lightweight, high-performance workflow orchestration \
 platform designed for edge-to-cloud deployment. Built as a single binary \
 with PostgreSQL as the only required dependency.\n\n\
 EXAMPLES:\n  \
-  streamflow api --port 8080\n  \
-  streamflow version --format json\n  \
-  streamflow --help\n\n\
+  kruxiaflow api --port 8080\n  \
+  kruxiaflow version --format json\n  \
+  kruxiaflow --help\n\n\
 ENVIRONMENT VARIABLES:\n  \
   DATABASE_URL               PostgreSQL connection string (required for most commands)\n  \
-  STREAMFLOW_LOG_LEVEL       Logging verbosity (default: info)\n  \
-  STREAMFLOW_LOG_FORMAT      Log output format (default: text)\n  \
-  STREAMFLOW_API_PORT        API server port (default: 8080)\n  \
-  STREAMFLOW_API_BIND        API server bind address (default: 0.0.0.0)"
+  KRUXIAFLOW_LOG_LEVEL       Logging verbosity (default: info)\n  \
+  KRUXIAFLOW_LOG_FORMAT      Log output format (default: text)\n  \
+  KRUXIAFLOW_API_PORT        API server port (default: 8080)\n  \
+  KRUXIAFLOW_API_BIND        API server bind address (default: 0.0.0.0)"
 )]
 struct Cli {
     /// Database connection URL
@@ -48,7 +48,7 @@ struct Cli {
         global = true,
         help = "PostgreSQL connection URL (postgres://user:pass@host:port/db)",
         long_help = "PostgreSQL connection URL\n\n\
-Example: postgres://user:pass@localhost:5432/streamflow\n\
+Example: postgres://user:pass@localhost:5432/kruxiaflow\n\
 Required for all commands except 'version'"
     )]
     database_url: Option<String>,
@@ -56,7 +56,7 @@ Required for all commands except 'version'"
     /// Log level
     #[arg(
         long,
-        env = "STREAMFLOW_LOG_LEVEL",
+        env = "KRUXIAFLOW_LOG_LEVEL",
         default_value = "info",
         global = true,
         help = "Log level (trace, debug, info, warn, error)",
@@ -70,7 +70,7 @@ Example: --log-level debug"
     /// Log format
     #[arg(
         long,
-        env = "STREAMFLOW_LOG_FORMAT",
+        env = "KRUXIAFLOW_LOG_FORMAT",
         default_value = "text",
         global = true,
         help = "Log format (text, json)",
@@ -94,9 +94,9 @@ enum Commands {
 The API server provides RESTful endpoints for workflow management, \
 authentication, and monitoring.\n\n\
 EXAMPLES:\n  \
-  streamflow api\n  \
-  streamflow api --port 9090 --bind 127.0.0.1\n  \
-  DATABASE_URL=postgres://localhost/db streamflow api\n\n\
+  kruxiaflow api\n  \
+  kruxiaflow api --port 9090 --bind 127.0.0.1\n  \
+  DATABASE_URL=postgres://localhost/db kruxiaflow api\n\n\
 ENDPOINTS:\n  \
   GET  /health              - Liveness probe\n  \
   GET  /health/ready        - Readiness probe\n  \
@@ -109,12 +109,12 @@ ENDPOINTS:\n  \
     /// Launch all services together
     #[command(
         about = "Launch orchestrator, API server, and workers together",
-        long_about = "Launch all StreamFlow services in a single process\n\n\
+        long_about = "Launch all Kruxia Flow services in a single process\n\n\
 This is the recommended mode for development, testing, and single-node production.\n\n\
 EXAMPLES:\n  \
-  streamflow serve\n  \
-  streamflow serve --port 8080 --workers 4\n  \
-  streamflow serve --bind 127.0.0.1 --workers 2\n\n\
+  kruxiaflow serve\n  \
+  kruxiaflow serve --port 8080 --workers 4\n  \
+  kruxiaflow serve --bind 127.0.0.1 --workers 2\n\n\
 SERVICES STARTED:\n  \
   - Orchestrator: Evaluates workflows and schedules activities\n  \
   - API Server: HTTP/REST endpoints\n  \
@@ -126,10 +126,10 @@ SERVICES STARTED:\n  \
     #[command(
         about = "Display version and build information",
         long_about = "Display version and build information\n\n\
-Shows StreamFlow version, build timestamp, git commit, and platform details.\n\n\
+Shows Kruxia Flow version, build timestamp, git commit, and platform details.\n\n\
 EXAMPLES:\n  \
-  streamflow version\n  \
-  streamflow version --format json"
+  kruxiaflow version\n  \
+  kruxiaflow version --format json"
     )]
     Version(commands::version::VersionCommand),
 
@@ -140,8 +140,8 @@ EXAMPLES:\n  \
 Loads provider and model information into the database from a YAML configuration file.\n\
 Supports upsert - updates existing providers/models with new pricing.\n\n\
 EXAMPLES:\n  \
-  streamflow seed-llm config/llm_models.yaml\n  \
-  streamflow seed-llm /path/to/custom_models.yaml"
+  kruxiaflow seed-llm config/llm_models.yaml\n  \
+  kruxiaflow seed-llm /path/to/custom_models.yaml"
     )]
     SeedLlm(commands::seed_llm::SeedLlmCommand),
 
@@ -151,9 +151,9 @@ EXAMPLES:\n  \
         long_about = "Manage database migrations with embedded SQL files\n\n\
 Migrations are embedded at compile time and can be run, previewed, or status-checked.\n\n\
 EXAMPLES:\n  \
-  streamflow migrate              # Run pending migrations\n  \
-  streamflow migrate --status     # Show migration status\n  \
-  streamflow migrate --dry-run    # Preview without applying"
+  kruxiaflow migrate              # Run pending migrations\n  \
+  kruxiaflow migrate --status     # Show migration status\n  \
+  kruxiaflow migrate --dry-run    # Preview without applying"
     )]
     Migrate(commands::migrate::MigrateCommand),
 
@@ -165,38 +165,38 @@ EXAMPLES:\n  \
 By default, skips seeding if the client already exists (idempotent).\n\
 Use --force to delete and re-create an existing client.\n\n\
 EXAMPLES:\n  \
-  streamflow seed-client                              # Seed with env vars\n  \
-  streamflow seed-client --client-id my-app           # Override client ID\n  \
-  streamflow seed-client --force                      # Re-seed even if exists"
+  kruxiaflow seed-client                              # Seed with env vars\n  \
+  kruxiaflow seed-client --client-id my-app           # Override client ID\n  \
+  kruxiaflow seed-client --force                      # Re-seed even if exists"
     )]
     SeedClient(commands::seed_client::SeedClientCommand),
 
     /// Check service health
     #[command(
-        about = "Check health of StreamFlow services",
-        long_about = "Check health of StreamFlow services\n\n\
+        about = "Check health of Kruxia Flow services",
+        long_about = "Check health of Kruxia Flow services\n\n\
 Performs health checks on database, API server, and orchestrator.\n\
 Exit code: 0 (healthy), 1 (unhealthy).\n\n\
 EXAMPLES:\n  \
-  streamflow health                    # Check all services\n  \
-  streamflow health --service api      # Check API only\n  \
-  streamflow health --format json      # JSON output\n  \
-  streamflow health --timeout 10       # 10 second timeout\n\n\
+  kruxiaflow health                    # Check all services\n  \
+  kruxiaflow health --service api      # Check API only\n  \
+  kruxiaflow health --format json      # JSON output\n  \
+  kruxiaflow health --timeout 10       # 10 second timeout\n\n\
 USE IN SCRIPTS:\n  \
-  if streamflow health; then\n  \
-    echo 'StreamFlow is healthy'\n  \
+  if kruxiaflow health; then\n  \
+    echo 'Kruxia Flow is healthy'\n  \
   fi"
     )]
     Health(commands::health::HealthCommand),
 
     /// Show detailed service status
     #[command(
-        about = "Show detailed status of StreamFlow services",
-        long_about = "Show detailed status of StreamFlow services\n\n\
+        about = "Show detailed status of Kruxia Flow services",
+        long_about = "Show detailed status of Kruxia Flow services\n\n\
 Displays version, uptime, and configuration for all services.\n\n\
 EXAMPLES:\n  \
-  streamflow status                # Show status\n  \
-  streamflow status --format json  # JSON output"
+  kruxiaflow status                # Show status\n  \
+  kruxiaflow status --format json  # JSON output"
     )]
     Status(commands::status::StatusCommand),
 
@@ -207,8 +207,8 @@ EXAMPLES:\n  \
 The orchestrator polls for workflow events and schedules activities.\n\
 Use this for distributed deployments where services run on separate hosts.\n\n\
 EXAMPLES:\n  \
-  streamflow orchestrator\n  \
-  streamflow orchestrator --consumer-id orch_prod_1\n\n\
+  kruxiaflow orchestrator\n  \
+  kruxiaflow orchestrator --consumer-id orch_prod_1\n\n\
 REQUIRES:\n  \
   - DATABASE_URL: PostgreSQL connection string"
     )]
@@ -221,11 +221,11 @@ REQUIRES:\n  \
 Workers poll the API server for activities and execute them.\n\
 Use this for distributed deployments or to scale workers.\n\n\
 EXAMPLES:\n  \
-  streamflow worker --api-url http://api.example.com:8080\n  \
-  streamflow worker --workers 20 --worker-id worker_payments_1\n\n\
+  kruxiaflow worker --api-url http://api.example.com:8080\n  \
+  kruxiaflow worker --workers 20 --worker-id worker_payments_1\n\n\
 REQUIRES:\n  \
-  - STREAMFLOW_API_URL: API server URL\n  \
-  - STREAMFLOW_CLIENT_SECRET: OAuth client secret\n  \
+  - KRUXIAFLOW_API_URL: API server URL\n  \
+  - KRUXIAFLOW_CLIENT_SECRET: OAuth client secret\n  \
   - DATABASE_URL: For artifact storage access"
     )]
     Worker(commands::worker::WorkerCommand),
@@ -237,11 +237,11 @@ REQUIRES:\n  \
 Queries pg_stat_statements and system views to analyze database performance.\n\
 Shows slow queries, index usage, table statistics, and lock contention.\n\n\
 EXAMPLES:\n  \
-  streamflow profile                    # Full profiling report\n  \
-  streamflow profile --explain          # Include EXPLAIN ANALYZE\n  \
-  streamflow profile --reset            # Reset query statistics\n  \
-  streamflow profile --format json      # JSON output\n  \
-  streamflow profile -v                 # Verbose with table stats\n\n\
+  kruxiaflow profile                    # Full profiling report\n  \
+  kruxiaflow profile --explain          # Include EXPLAIN ANALYZE\n  \
+  kruxiaflow profile --reset            # Reset query statistics\n  \
+  kruxiaflow profile --format json      # JSON output\n  \
+  kruxiaflow profile -v                 # Verbose with table stats\n\n\
 REQUIRES:\n  \
   - DATABASE_URL: PostgreSQL connection string\n  \
   - pg_stat_statements extension (for query stats)"

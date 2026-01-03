@@ -11,12 +11,12 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  DATABASE_URL: postgres://streamflow:streamflow@localhost/streamflow_bench
-  STREAMFLOW_BASE_URL: http://localhost:8080
+  DATABASE_URL: postgres://kruxiaflow:kruxiaflow@localhost/kruxiaflow_bench
+  KRUXIAFLOW_BASE_URL: http://localhost:8080
   # OAuth configuration for CI
-  STREAMFLOW_CLIENT_ID: streamflow-ci-client
-  STREAMFLOW_OAUTH_TOKEN_ISSUER: http://localhost:8080
-  STREAMFLOW_OAUTH_TOKEN_AUDIENCE: streamflow-profiling
+  KRUXIAFLOW_CLIENT_ID: kruxiaflow-ci-client
+  KRUXIAFLOW_OAUTH_TOKEN_ISSUER: http://localhost:8080
+  KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE: kruxiaflow-profiling
 
 jobs:
   profiling:
@@ -27,9 +27,9 @@ jobs:
       postgres:
         image: postgres:18
         env:
-          POSTGRES_USER: streamflow
-          POSTGRES_PASSWORD: streamflow
-          POSTGRES_DB: streamflow_bench
+          POSTGRES_USER: kruxiaflow
+          POSTGRES_PASSWORD: kruxiaflow
+          POSTGRES_DB: kruxiaflow_bench
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -61,17 +61,17 @@ jobs:
         run: sqlx migrate run
 
       - name: Seed OAuth client for profiling
-        run: cargo run --package streamflow --bin streamflow -- seed-client
+        run: cargo run --package kruxiaflow --bin kruxiaflow -- seed-client
         env:
-          STREAMFLOW_CLIENT_ID: streamflow-ci-client
-          STREAMFLOW_CLIENT_SECRET: ${{ secrets.PROFILING_CLIENT_SECRET || 'profiling-client-secret-for-ci' }}
+          KRUXIAFLOW_CLIENT_ID: kruxiaflow-ci-client
+          KRUXIAFLOW_CLIENT_SECRET: ${{ secrets.PROFILING_CLIENT_SECRET || 'profiling-client-secret-for-ci' }}
 
-      - name: Build StreamFlow
-        run: cargo build --release --bin streamflow
+      - name: Build Kruxia Flow
+        run: cargo build --release --bin kruxiaflow
 
-      - name: Start StreamFlow server in background
+      - name: Start Kruxia Flow server in background
         run: |
-          ./target/release/streamflow serve --port 8080 &
+          ./target/release/kruxiaflow serve --port 8080 &
           sleep 5
           # Wait for server to be ready
           timeout 30 bash -c 'until curl -f http://localhost:8080/health; do sleep 1; done'
@@ -83,7 +83,7 @@ jobs:
 
       - name: Run HTTP API load tests
         run: |
-          cargo test --package streamflow-profiling --release -- --nocapture --test-threads=1 | tee load-test-output.txt
+          cargo test --package kruxiaflow-profiling --release -- --nocapture --test-threads=1 | tee load-test-output.txt
 
       - name: Parse profiling results
         id: parse_results

@@ -47,7 +47,7 @@ impl SmtpConfig {
     ///
     /// # Examples
     /// ```
-    /// # use streamflow_worker::activities::email::SmtpConfig;
+    /// # use kruxiaflow_worker::activities::email::SmtpConfig;
     /// let config = SmtpConfig::from_url("smtp://localhost:25").unwrap();
     /// assert_eq!(config.host, "localhost");
     /// assert_eq!(config.port, 25);
@@ -293,7 +293,7 @@ impl EmailExecutor {
         }
 
         // Connection timeout (from env or default 30s)
-        let timeout_secs = std::env::var("STREAMFLOW_EMAIL_TIMEOUT_SECS")
+        let timeout_secs = std::env::var("KRUXIAFLOW_EMAIL_TIMEOUT_SECS")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(30);

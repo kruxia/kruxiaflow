@@ -1,14 +1,14 @@
 use serde_json::json;
 use serial_test::serial;
 use sqlx::PgPool;
-use streamflow_core::events::{
+use kruxiaflow_core::events::{
     EventSource, NewWorkflowEvent, PostgresEventSource, WorkflowEventType,
 };
 use uuid::Uuid;
 
 async fn setup_test_db() -> PgPool {
     let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://localhost/streamflow_test".to_string());
+        .unwrap_or_else(|_| "postgres://localhost/kruxiaflow_test".to_string());
 
     let pool = PgPool::connect(&database_url)
         .await

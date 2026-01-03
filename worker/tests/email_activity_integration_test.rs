@@ -11,8 +11,8 @@
 use serde::Deserialize;
 use serde_json::json;
 use serial_test::serial;
-use streamflow_worker::ActivityImpl;
-use streamflow_worker::EmailSendActivity;
+use kruxiaflow_worker::ActivityImpl;
+use kruxiaflow_worker::EmailSendActivity;
 
 /// Mailhog SMTP URL for testing
 fn mailhog_smtp_url() -> String {

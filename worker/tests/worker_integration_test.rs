@@ -3,18 +3,18 @@ use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
-use streamflow_api::{routes::app_router, state::AppState};
-use streamflow_core::events::PostgresEventSource;
-use streamflow_core::queue::{Activity, ActivityQueue as _, PostgresQueue, QueueConfig};
-use streamflow_oauth::{AuthConfig, PostgresAuthService};
-use streamflow_worker::{ActivityRegistry, EchoActivity, WorkerConfig, WorkerManager};
+use kruxiaflow_api::{routes::app_router, state::AppState};
+use kruxiaflow_core::events::PostgresEventSource;
+use kruxiaflow_core::queue::{Activity, ActivityQueue as _, PostgresQueue, QueueConfig};
+use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
+use kruxiaflow_worker::{ActivityRegistry, EchoActivity, WorkerConfig, WorkerManager};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 /// Helper to create test database pool
 async fn setup_test_pool() -> PgPool {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
     });
 
     PgPool::connect(&database_url)
@@ -62,8 +62,8 @@ async fn create_real_server() -> (String, PgPool, tokio::task::JoinHandle<()>) {
 
     let activity_queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
-    let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
-    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    let workflow_storage = Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone()));
+    let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
     let shutdown_token = CancellationToken::new();
 
     let state = AppState::new(
@@ -153,10 +153,10 @@ async fn test_worker_poll_and_execute_echo() {
     };
 
     // Create worker with EchoActivity
-    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
     let mut registry = ActivityRegistry::new(cache_service);
     registry.register(Arc::new(EchoActivity));
-    let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
+    let workflow_storage = Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone()));
     let manager = WorkerManager::new(config, registry, workflow_storage);
 
     // Start worker
@@ -222,10 +222,10 @@ async fn test_worker_concurrency() {
     };
 
     // Create worker with EchoActivity
-    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
     let mut registry = ActivityRegistry::new(cache_service);
     registry.register(Arc::new(EchoActivity));
-    let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
+    let workflow_storage = Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone()));
     let manager = WorkerManager::new(config, registry, workflow_storage);
 
     // Start worker
@@ -276,10 +276,10 @@ async fn test_worker_authentication_failure() {
     };
 
     // Create worker with EchoActivity
-    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
     let mut registry = ActivityRegistry::new(cache_service);
     registry.register(Arc::new(EchoActivity));
-    let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
+    let workflow_storage = Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone()));
     let manager = WorkerManager::new(config, registry, workflow_storage);
 
     // Start worker - it should fail to authenticate but not crash

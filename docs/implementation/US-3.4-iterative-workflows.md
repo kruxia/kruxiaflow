@@ -1230,7 +1230,7 @@ activities:
           - "{{check_subscription.active | last == true}}"
 
 # Example 4: Custom default via environment variable
-# STREAMFLOW_DEFAULT_MAX_ITERATIONS=1000
+# KRUXIAFLOW_DEFAULT_MAX_ITERATIONS=1000
 # This changes the default for all Pattern 2 loops
 ```
 

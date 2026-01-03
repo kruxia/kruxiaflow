@@ -1,10 +1,10 @@
-//! Stress tests for StreamFlow.
+//! Stress tests for Kruxia Flow.
 //!
 //! These tests run ramping stress tests to identify system breaking points
 //! and validate graceful degradation behavior.
 //!
 //! Run with:
-//!   cargo test --package streamflow-profiling --test stress_tests -- --ignored --nocapture
+//!   cargo test --package kruxiaflow-profiling --test stress_tests -- --ignored --nocapture
 
 use serial_test::serial;
 use std::env;
@@ -13,21 +13,21 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use streamflow_profiling::bottleneck::BottleneckAnalyzer;
-use streamflow_profiling::client::StreamFlowClient;
-use streamflow_profiling::monitor::{ResourceAnalysis, ResourceMonitor};
-use streamflow_profiling::stress::{StressTestConfig, run_stress_test};
+use kruxiaflow_profiling::bottleneck::BottleneckAnalyzer;
+use kruxiaflow_profiling::client::StreamFlowClient;
+use kruxiaflow_profiling::monitor::{ResourceAnalysis, ResourceMonitor};
+use kruxiaflow_profiling::stress::{StressTestConfig, run_stress_test};
 
 /// Create authenticated client from environment variables
 fn create_client() -> StreamFlowClient {
     let base_url =
-        env::var("STREAMFLOW_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+        env::var("KRUXIAFLOW_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
 
-    let client_id = env::var("STREAMFLOW_CLIENT_ID")
-        .expect("STREAMFLOW_CLIENT_ID environment variable must be set");
+    let client_id = env::var("KRUXIAFLOW_CLIENT_ID")
+        .expect("KRUXIAFLOW_CLIENT_ID environment variable must be set");
 
-    let client_secret = env::var("STREAMFLOW_CLIENT_SECRET")
-        .expect("STREAMFLOW_CLIENT_SECRET environment variable must be set");
+    let client_secret = env::var("KRUXIAFLOW_CLIENT_SECRET")
+        .expect("KRUXIAFLOW_CLIENT_SECRET environment variable must be set");
 
     StreamFlowClient::new(base_url, client_id, client_secret)
 }
@@ -44,8 +44,8 @@ fn get_output_dir() -> PathBuf {
 
 /// Save stress test results to the output directory
 fn save_results(
-    results: &streamflow_profiling::stress::StressTestResults,
-    report: &streamflow_profiling::bottleneck::BottleneckReport,
+    results: &kruxiaflow_profiling::stress::StressTestResults,
+    report: &kruxiaflow_profiling::bottleneck::BottleneckReport,
     output_dir: &PathBuf,
 ) {
     if let Err(e) = fs::create_dir_all(output_dir) {
@@ -73,7 +73,7 @@ fn save_results(
 /// Quick stress test: 100 -> 1,000 concurrent workflows
 #[tokio::test]
 #[serial]
-#[ignore] // Run explicitly with: cargo test --package streamflow-profiling --test stress_tests -- --ignored
+#[ignore] // Run explicitly with: cargo test --package kruxiaflow-profiling --test stress_tests -- --ignored
 async fn test_stress_quick() {
     let client = create_client();
     let config = StressTestConfig::quick();

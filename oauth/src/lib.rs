@@ -1,5 +1,5 @@
 // oauth/src/lib.rs
-//! OAuth 2.0 authentication service for StreamFlow
+//! OAuth 2.0 authentication service for Kruxia Flow
 //!
 //! This module provides OAuth 2.0 compliant authentication services with
 //! RSA256 signed JWT tokens.
@@ -156,8 +156,8 @@ impl Default for AuthConfig {
         Self {
             rsa_private_key_pem: String::new(), // Must be provided
             rsa_public_key_pem: None,
-            jwt_issuer: "streamflow".to_string(),
-            jwt_audience: "streamflow-api".to_string(),
+            jwt_issuer: "kruxiaflow".to_string(),
+            jwt_audience: "kruxiaflow-api".to_string(),
             token_ttl: 86400, // 24 hours
         }
     }

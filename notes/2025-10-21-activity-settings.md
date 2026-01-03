@@ -2,7 +2,7 @@
 
 # Activity Settings
 
-The StreamFlow codebase supports these settings for each activity step:
+The Kruxia Flow codebase supports these settings for each activity step:
 
 1. retry_policy (Basic Retry)
 

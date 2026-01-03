@@ -1,37 +1,37 @@
 services:
-  # StreamFlow stack
-  streamflow-postgres:
+  # Kruxia Flow stack
+  kruxiaflow-postgres:
     image: postgres:18
     environment:
-      POSTGRES_USER: streamflow
-      POSTGRES_PASSWORD: streamflow
-      POSTGRES_DB: streamflow
+      POSTGRES_USER: kruxiaflow
+      POSTGRES_PASSWORD: kruxiaflow
+      POSTGRES_DB: kruxiaflow
     volumes:
-      - streamflow_pg_data:/var/lib/postgresql
+      - kruxiaflow_pg_data:/var/lib/postgresql
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U streamflow" ]
+      test: [ "CMD-SHELL", "pg_isready -U kruxiaflow" ]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  streamflow:
-    image: streamflow:latest
+  kruxiaflow:
+    image: kruxiaflow:latest
     build:
       context: ..
       dockerfile: Dockerfile
       target: deploy
     environment:
       RUST_LOG: info
-      DATABASE_URL: postgres://streamflow:streamflow@streamflow-postgres:5432/streamflow
-      STREAMFLOW_CLIENT_ID: benchmark
-      STREAMFLOW_CLIENT_SECRET: benchmark_secret
-      STREAMFLOW_OAUTH_TOKEN_ISSUER: http://localhost:8080
-      STREAMFLOW_OAUTH_TOKEN_AUDIENCE: streamflow-dev-audience
-      STREAMFLOW_WORKER_COUNT: "1" # default = 4
-      STREAMFLOW_POLL_MAX_ACTIVITIES: "1" # default
-      STREAMFLOW_LOG_LEVEL: info
+      DATABASE_URL: postgres://kruxiaflow:kruxiaflow@kruxiaflow-postgres:5432/kruxiaflow
+      KRUXIAFLOW_CLIENT_ID: benchmark
+      KRUXIAFLOW_CLIENT_SECRET: benchmark_secret
+      KRUXIAFLOW_OAUTH_TOKEN_ISSUER: http://localhost:8080
+      KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE: kruxiaflow-dev-audience
+      KRUXIAFLOW_WORKER_COUNT: "1" # default = 4
+      KRUXIAFLOW_POLL_MAX_ACTIVITIES: "1" # default
+      KRUXIAFLOW_LOG_LEVEL: info
     depends_on:
-      - streamflow-postgres
+      - kruxiaflow-postgres
     command: [ "serve" ]
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
@@ -223,7 +223,7 @@ services:
       context: .
       dockerfile: Dockerfile.benchmark
     depends_on:
-      streamflow:
+      kruxiaflow:
         condition: service_healthy
       temporal:
         condition: service_healthy
@@ -241,6 +241,6 @@ services:
     command: [ "python", "run_benchmark.py", "run" ]
 
 volumes:
-  streamflow_pg_data:
+  kruxiaflow_pg_data:
   temporal_pg_data:
   airflow_pg_data:

@@ -174,7 +174,7 @@ tracing::trace!(
 ```
 
 **Expected Impact**:
-- Easy debugging with `RUST_LOG=streamflow=debug` or `trace`
+- Easy debugging with `RUST_LOG=kruxiaflow=debug` or `trace`
 - Clear visibility into orchestration flow
 - Identify bottlenecks and stuck activities quickly
 

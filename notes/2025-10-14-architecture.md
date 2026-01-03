@@ -2,7 +2,7 @@
 
 # Architecture
 
-The StreamFlow system has the following parts:
+The Kruxia Flow system has the following parts:
 
 - Server:
     - API that is used to kick-off workflows and to query the status of things.

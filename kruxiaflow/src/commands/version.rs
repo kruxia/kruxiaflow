@@ -51,7 +51,7 @@ pub fn execute(cmd: VersionCommand) -> Result<()> {
         }
         "detail" => {
             // Text format
-            println!("StreamFlow {}", version_info.version);
+            println!("Kruxia Flow {}", version_info.version);
             println!("Build timestamp: {}", version_info.build_timestamp);
             println!("Git commit: {}", version_info.git_commit);
             if version_info.git_branch != "unknown" {
@@ -63,7 +63,7 @@ pub fn execute(cmd: VersionCommand) -> Result<()> {
         _ => {
             // Default to simple text format
             println!(
-                "StreamFlow {} ({})",
+                "Kruxia Flow {} ({})",
                 version_info.version, version_info.build_timestamp
             );
         }

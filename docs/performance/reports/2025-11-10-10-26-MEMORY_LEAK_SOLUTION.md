@@ -23,7 +23,7 @@ Identified and fixed memory leak caused by `tracing_subscriber::registry()` accu
 - Analyzed with `jeprof` to identify allocation sites
 - Found 89.9% of heap from `tracing::span::Span::new`
 
-**Key Finding**: The `registry()` stores all span metadata indefinitely for distributed tracing features StreamFlow doesn't use.
+**Key Finding**: The `registry()` stores all span metadata indefinitely for distributed tracing features Kruxia Flow doesn't use.
 
 **Documents**:
 - `var/benchmark-20251110-091325/MEMORY_LEAK_ROOT_CAUSE.md`
@@ -31,7 +31,7 @@ Identified and fixed memory leak caused by `tracing_subscriber::registry()` accu
 
 ### 2. Code Changes ✅
 
-**File Modified**: `streamflow/src/logging.rs` (lines 17-75)
+**File Modified**: `kruxiaflow/src/logging.rs` (lines 17-75)
 
 **Changes**:
 1. Removed `tracing_subscriber::registry()` and layering
@@ -78,20 +78,20 @@ Memory at TRACE level (5-minute test, expected):
 ### Step 1: Rebuild Container
 
 ```bash
-docker compose build streamflow-profiling
-docker compose up streamflow-profiling -d
+docker compose build kruxiaflow-profiling
+docker compose up kruxiaflow-profiling -d
 ```
 
 ### Step 2: Run Benchmark with TRACE Level
 
 ```bash
 # Set TRACE level to verify fix works at highest volume
-export STREAMFLOW_LOG_LEVEL=trace
+export KRUXIAFLOW_LOG_LEVEL=trace
 
 # Set credentials
-export STREAMFLOW_CLIENT_ID=streamflow-dev-client
-export STREAMFLOW_CLIENT_SECRET=a_zBZWlw8IsQaQm5C2xJPMgunAj4jkjzp4iTafATVcD8RU02yNEYqwCdLsoXIe8g
-export DATABASE_URL=postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamflow_profiling
+export KRUXIAFLOW_CLIENT_ID=kruxiaflow-dev-client
+export KRUXIAFLOW_CLIENT_SECRET=a_zBZWlw8IsQaQm5C2xJPMgunAj4jkjzp4iTafATVcD8RU02yNEYqwCdLsoXIe8g
+export DATABASE_URL=postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow_profiling
 
 # Run 5-minute sustained test
 ./scripts/profiling.sh --test test_sustained_throughput --level trace
@@ -104,7 +104,7 @@ export DATABASE_URL=postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamfl
 OUTPUT_DIR=$(ls -td var/benchmark-* | head -1)
 
 # Verify log level was TRACE
-docker compose logs streamflow-profiling | grep "Logging initialized"
+docker compose logs kruxiaflow-profiling | grep "Logging initialized"
 # Should show: level=trace, verbose_tracing=true, memory_safe=true
 
 # Check memory analysis
@@ -125,7 +125,7 @@ cat $OUTPUT_DIR/memory_analysis.txt | grep "Growth rate"
 
 ```bash
 # Check what accumulated in database during test
-docker exec streamflow-postgres psql -U streamflow -d streamflow_profiling -c "
+docker exec kruxiaflow-postgres psql -U kruxiaflow -d kruxiaflow_profiling -c "
 SELECT
     'workflows' as table_name,
     COUNT(*) as rows,
@@ -164,7 +164,7 @@ FROM activity_queue;
 Everything works exactly the same:
 ```bash
 # Default configuration
-STREAMFLOW_LOG_LEVEL=info
+KRUXIAFLOW_LOG_LEVEL=info
 # Or not set (defaults to info)
 
 # Memory: ~2 MB baseline (was ~3 MB)
@@ -177,10 +177,10 @@ STREAMFLOW_LOG_LEVEL=info
 Can now run TRACE indefinitely:
 ```bash
 # Before fix: Memory leak, must restart after profiling
-STREAMFLOW_LOG_LEVEL=trace  # ❌ 0.444 MB/sec leak
+KRUXIAFLOW_LOG_LEVEL=trace  # ❌ 0.444 MB/sec leak
 
 # After fix: Stable memory, can run indefinitely
-STREAMFLOW_LOG_LEVEL=trace  # ✅ 0.05 MB/sec (stable)
+KRUXIAFLOW_LOG_LEVEL=trace  # ✅ 0.05 MB/sec (stable)
 ```
 
 ### Log Output - Minor Change ⚠️
@@ -197,7 +197,7 @@ INFO orchestrator{consumer_id=orchestrator}: Processing event
   workflow_id: abc123
 ```
 
-**Impact**: None for StreamFlow's use case. We don't rely on parent span context in logs.
+**Impact**: None for Kruxia Flow's use case. We don't rely on parent span context in logs.
 
 ---
 
@@ -207,13 +207,13 @@ If verification fails, rollback is simple:
 
 ```bash
 # Revert logging.rs changes
-git checkout streamflow/src/logging.rs
+git checkout kruxiaflow/src/logging.rs
 
 # Rebuild
-docker compose build streamflow-profiling
+docker compose build kruxiaflow-profiling
 
 # Use INFO level (avoids memory leak)
-export STREAMFLOW_LOG_LEVEL=info
+export KRUXIAFLOW_LOG_LEVEL=info
 ```
 
 ---

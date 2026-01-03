@@ -1,11 +1,11 @@
 [project]
-name = "streamflow-benchmarks"
+name = "kruxiaflow-benchmarks"
 version = "0.3.0"
-description = "Cross-platform workflow engine benchmarks: StreamFlow vs Temporal vs Airflow"
+description = "Cross-platform workflow engine benchmarks: Kruxia Flow vs Temporal vs Airflow"
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.1.0",           # CLI framework
-    "httpx>=0.27.0",          # Async HTTP client (for StreamFlow)
+    "httpx>=0.27.0",          # Async HTTP client (for Kruxia Flow)
     "temporalio>=1.7.0",      # Temporal Python SDK
     "apache-airflow>=3.0.0",  # Airflow 3 for DAG definitions and API client
     "jinja2>=3.1.0",          # HTML report templates

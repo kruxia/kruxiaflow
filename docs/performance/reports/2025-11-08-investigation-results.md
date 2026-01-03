@@ -191,10 +191,10 @@ tikv-jemallocator = "0.5"
 ```bash
 # Fix in scripts/monitor_performance.sh line ~115
 # Change from:
-WHERE datname = 'streamflow_profiling' AND pid != pg_backend_pid()
+WHERE datname = 'kruxiaflow_profiling' AND pid != pg_backend_pid()
 
 # To:
-WHERE datname = 'streamflow_profiling' AND pid <> pg_backend_pid()
+WHERE datname = 'kruxiaflow_profiling' AND pid <> pg_backend_pid()
 ```
 
 **Also fix**: Consumer position query escaping

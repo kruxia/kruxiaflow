@@ -1,8 +1,8 @@
-# StreamFlow
+# Kruxia Flow
 
 **AI-Native Workflow Orchestration with Built-in Cost Control**
 
-StreamFlow is a lightweight, high-performance workflow engine designed for AI applications. Track every token, cache intelligently, and never exceed your LLM budget.
+Kruxia Flow is a lightweight, high-performance workflow engine designed for AI applications. Track every token, cache intelligently, and never exceed your LLM budget.
 
 ## Key Features
 
@@ -12,9 +12,9 @@ StreamFlow is a lightweight, high-performance workflow engine designed for AI ap
 - **Semantic Caching** - Save 50-80% on LLM costs by caching similar queries
 - **Multi-Provider LLM** - Native support for Anthropic, OpenAI, Google, Ollama
 
-## Why StreamFlow?
+## Why Kruxia Flow?
 
-| Feature              | StreamFlow | Temporal | Airflow | LangChain |
+| Feature              | Kruxia Flow | Temporal | Airflow | LangChain |
 |----------------------|:----------:|:--------:|:-------:|:---------:|
 | Durable execution    | **Yes**    | Yes      | Yes     | No        |
 | LLM cost tracking    | **Yes**    | No       | No      | No        |
@@ -27,4 +27,4 @@ StreamFlow is a lightweight, high-performance workflow engine designed for AI ap
 
 - [Quick Start](quickstart.md) - Get running in 60 seconds
 - [Architecture](architecture.md) - System design overview
-- [GitHub Repository](https://github.com/kruxia/streamflow)
+- [GitHub Repository](https://github.com/kruxia/kruxiaflow)

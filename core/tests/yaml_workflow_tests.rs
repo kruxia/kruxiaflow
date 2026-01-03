@@ -1,4 +1,4 @@
-use streamflow_core::WorkflowDefinition;
+use kruxiaflow_core::WorkflowDefinition;
 
 #[test]
 fn test_parse_yaml_workflow() {
@@ -12,7 +12,7 @@ activities:
       method: GET
       url: "https://api.weather.gov/gridpoints/TOP/31,80/forecast"
       headers:
-        User-Agent: "StreamFlow/0.2"
+        User-Agent: "Kruxia Flow/0.2"
     dependency_of:
       - activity_key: send_notification
 

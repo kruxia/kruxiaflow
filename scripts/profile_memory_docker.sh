@@ -53,7 +53,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-echo -e "${YELLOW}StreamFlow Docker Memory Profiling${NC}"
+echo -e "${YELLOW}Kruxia Flow Docker Memory Profiling${NC}"
 echo "=========================================="
 echo ""
 
@@ -71,7 +71,7 @@ if ! docker info > /dev/null 2>&1; then
 fi
 
 # Build profiling image if requested or if it doesn't exist
-if [ "$BUILD" = true ] || ! docker images | grep -q streamflow-profiling; then
+if [ "$BUILD" = true ] || ! docker images | grep -q kruxiaflow-profiling; then
     echo -e "${YELLOW}Building profiling Docker image...${NC}"
     docker-compose build profiling
     echo -e "${GREEN}Image built successfully${NC}"
@@ -79,13 +79,13 @@ if [ "$BUILD" = true ] || ! docker images | grep -q streamflow-profiling; then
 fi
 
 # Start PostgreSQL if not already running
-if ! docker ps | grep -q streamflow-postgres; then
+if ! docker ps | grep -q kruxiaflow-postgres; then
     echo -e "${YELLOW}Starting PostgreSQL...${NC}"
     docker-compose up -d postgres
 
     # Wait for postgres to be healthy
     echo "Waiting for PostgreSQL to be ready..."
-    timeout 30 sh -c 'until docker exec streamflow-postgres pg_isready -U streamflow > /dev/null 2>&1; do sleep 1; done' || {
+    timeout 30 sh -c 'until docker exec kruxiaflow-postgres pg_isready -U kruxiaflow > /dev/null 2>&1; do sleep 1; done' || {
         echo -e "${RED}Error: PostgreSQL failed to start${NC}"
         exit 1
     }
@@ -97,14 +97,14 @@ fi
 echo -e "${YELLOW}Setting up profiling database...${NC}"
 
 # Create benchmark database
-docker exec streamflow-postgres psql -U streamflow -c "DROP DATABASE IF EXISTS streamflow_profiling;" 2>/dev/null || true
-docker exec streamflow-postgres psql -U streamflow -c "CREATE DATABASE streamflow_profiling;" 2>/dev/null || true
+docker exec kruxiaflow-postgres psql -U kruxiaflow -c "DROP DATABASE IF EXISTS kruxiaflow_profiling;" 2>/dev/null || true
+docker exec kruxiaflow-postgres psql -U kruxiaflow -c "CREATE DATABASE kruxiaflow_profiling;" 2>/dev/null || true
 
 # Run migrations in Docker
-docker-compose run --rm profiling sh -c "cd /opt && sqlx migrate run --source migrations --database-url postgres://streamflow:streamflow_dev@postgres:5432/streamflow_profiling"
+docker-compose run --rm profiling sh -c "cd /opt && sqlx migrate run --source migrations --database-url postgres://kruxiaflow:kruxiaflow_dev@postgres:5432/kruxiaflow_profiling"
 
 # Seed OAuth client (idempotent - skips if exists)
-docker-compose run --rm profiling sh -c "cd /opt && cargo run --package streamflow --bin streamflow -- seed-client"
+docker-compose run --rm profiling sh -c "cd /opt && cargo run --package kruxiaflow --bin kruxiaflow -- seed-client"
 
 echo -e "${GREEN}Database ready${NC}"
 echo ""
@@ -117,7 +117,7 @@ if [ "$RUN_BASH" = true ]; then
 else
     echo -e "${YELLOW}Running memory profiling in Docker container...${NC}"
     echo "This will:"
-    echo "  1. Build StreamFlow with jemalloc profiling (inside Linux container)"
+    echo "  1. Build Kruxia Flow with jemalloc profiling (inside Linux container)"
     echo "  2. Run sustained throughput benchmark"
     echo "  3. Analyze heap dumps with full symbol resolution"
     echo ""

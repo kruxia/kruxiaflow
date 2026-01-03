@@ -6,8 +6,8 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use streamflow_core::cache::{CacheService, CachedResult, key_generator};
-use streamflow_core::workflow::{ActivityOutput, ActivitySettings};
+use kruxiaflow_core::cache::{CacheService, CachedResult, key_generator};
+use kruxiaflow_core::workflow::{ActivityOutput, ActivitySettings};
 
 use crate::activity_result::ActivityResult;
 

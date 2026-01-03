@@ -1,10 +1,10 @@
 [package]
-name = "streamflow-profiling"
+name = "kruxiaflow-profiling"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Internal performance profiling suite for StreamFlow"
+description = "Internal performance profiling suite for Kruxia Flow"
 
 [dependencies]
 # HTTP client for API calls
@@ -30,8 +30,8 @@ sysinfo = "0.32"
 # CLI argument parsing
 clap = { workspace = true }
 
-# StreamFlow dependencies (for workflow definitions only, not direct DB access)
-streamflow-core = { path = "../core" }
+# Kruxia Flow dependencies (for workflow definitions only, not direct DB access)
+kruxiaflow-core = { path = "../core" }
 
 [[bin]]
 name = "stress-test"

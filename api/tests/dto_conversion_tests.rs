@@ -2,8 +2,8 @@
 
 use rust_decimal::Decimal;
 use std::collections::HashMap;
-use streamflow_api::dto;
-use streamflow_core::workflow;
+use kruxiaflow_api::dto;
+use kruxiaflow_core::workflow;
 
 #[test]
 fn test_workflow_definition_from_core_to_dto() {

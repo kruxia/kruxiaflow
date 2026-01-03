@@ -18,12 +18,12 @@ use tokio::sync::Mutex;
 /// # Configuration
 ///
 /// - Redis URL: `redis://localhost:6379` or `redis://user:pass@host:port/db`
-/// - Key prefix: For namespace isolation (default: `streamflow:cache:`)
+/// - Key prefix: For namespace isolation (default: `kruxiaflow:cache:`)
 ///
 /// # Examples
 ///
 /// ```no_run
-/// use streamflow_core::cache::{RedisCache, CacheService};
+/// use kruxiaflow_core::cache::{RedisCache, CacheService};
 ///
 /// #[tokio::main]
 /// async fn main() -> anyhow::Result<()> {
@@ -59,7 +59,7 @@ impl RedisCache {
         Ok(Self {
             client,
             connection: Arc::new(Mutex::new(None)),
-            key_prefix: key_prefix.unwrap_or_else(|| "streamflow:cache:".to_string()),
+            key_prefix: key_prefix.unwrap_or_else(|| "kruxiaflow:cache:".to_string()),
         })
     }
 

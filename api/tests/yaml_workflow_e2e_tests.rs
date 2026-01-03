@@ -11,12 +11,12 @@ use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
-use streamflow_api::{AppState, app_router};
-use streamflow_core::events::PostgresEventSource;
-use streamflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
-use streamflow_core::{OrchestratorConfig, run_orchestrator};
-use streamflow_oauth::{AuthConfig, PostgresAuthService};
-use streamflow_worker::{
+use kruxiaflow_api::{AppState, app_router};
+use kruxiaflow_core::events::PostgresEventSource;
+use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
+use kruxiaflow_core::{OrchestratorConfig, run_orchestrator};
+use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
+use kruxiaflow_worker::{
     ActivityRegistry, HttpRequestActivity, PostgresQueryActivity, WorkerConfig, WorkerManager,
     new_pool_cache,
 };
@@ -26,7 +26,7 @@ use uuid::Uuid;
 /// Helper to create test database pool
 async fn setup_test_pool() -> PgPool {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
     });
 
     PgPool::connect(&database_url)
@@ -106,11 +106,11 @@ async fn test_yaml_workflow_end_to_end_with_healthcheck() {
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
-    let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
+    let workflow_storage = Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone()));
     let shutdown_token = CancellationToken::new();
 
     // Start API server
-    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
     let state = AppState::new(
         pool.clone(),
         Arc::new(auth_service),
@@ -160,7 +160,7 @@ async fn test_yaml_workflow_end_to_end_with_healthcheck() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Start worker with HTTP activity
-    let mut registry = ActivityRegistry::new(Arc::new(streamflow_core::NoOpCache::new()));
+    let mut registry = ActivityRegistry::new(Arc::new(kruxiaflow_core::NoOpCache::new()));
     registry.register(Arc::new(HttpRequestActivity::new()));
 
     let worker_config = WorkerConfig {
@@ -431,11 +431,11 @@ async fn test_conditional_branching_workflow() {
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
-    let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
+    let workflow_storage = Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone()));
     let shutdown_token = CancellationToken::new();
 
     // Start API server
-    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
     let state = AppState::new(
         pool.clone(),
         Arc::new(auth_service),
@@ -485,7 +485,7 @@ async fn test_conditional_branching_workflow() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Start worker with HTTP and PostgreSQL activities
-    let mut registry = ActivityRegistry::new(Arc::new(streamflow_core::NoOpCache::new()));
+    let mut registry = ActivityRegistry::new(Arc::new(kruxiaflow_core::NoOpCache::new()));
     registry.register(Arc::new(HttpRequestActivity::new()));
     registry.register(Arc::new(PostgresQueryActivity::new(new_pool_cache())));
 
@@ -510,7 +510,7 @@ async fn test_conditional_branching_workflow() {
 
     // Get database URL for workflow
     let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
     });
 
     // Create YAML workflow with one conditional dependency

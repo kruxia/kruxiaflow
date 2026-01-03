@@ -13,9 +13,9 @@ pub struct StatusCommand {
     /// API server URL
     #[arg(
         long,
-        env = "STREAMFLOW_API_URL",
+        env = "KRUXIAFLOW_API_URL",
         default_value = "http://127.0.0.1:8080",
-        help = "StreamFlow API server URL"
+        help = "Kruxia Flow API server URL"
     )]
     pub api_url: String,
 
@@ -23,7 +23,7 @@ pub struct StatusCommand {
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_STATUS_TIMEOUT",
+        env = "KRUXIAFLOW_STATUS_TIMEOUT",
         default_value = "10",
         help = "Timeout for status queries in seconds"
     )]
@@ -33,7 +33,7 @@ pub struct StatusCommand {
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_OUTPUT_FORMAT",
+        env = "KRUXIAFLOW_OUTPUT_FORMAT",
         default_value = "text",
         help = "Output format (text, json)"
     )]
@@ -148,7 +148,7 @@ async fn get_api_status(
 
 /// Print text status
 fn print_text_status(report: &StatusReport) {
-    println!("StreamFlow Status");
+    println!("Kruxia Flow Status");
     println!("{:=<60}", "");
 
     // Services table

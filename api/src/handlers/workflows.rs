@@ -7,11 +7,11 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use streamflow_core::workflow::{
+use kruxiaflow_core::workflow::{
     WorkflowFilters, WorkflowQueryError, WorkflowQueryService, WorkflowService,
     WorkflowServiceError,
 };
-use streamflow_core::{WorkflowActivityStatus, WorkflowStatus};
+use kruxiaflow_core::{WorkflowActivityStatus, WorkflowStatus};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 

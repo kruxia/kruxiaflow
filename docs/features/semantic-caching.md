@@ -1,6 +1,6 @@
 # Semantic Caching for Activity Results
 
-StreamFlow provides automatic result caching for activities to reduce costs and improve performance. When enabled, activity results are cached and reused for subsequent executions with identical parameters.
+Kruxia Flow provides automatic result caching for activities to reduce costs and improve performance. When enabled, activity results are cached and reused for subsequent executions with identical parameters.
 
 ## Benefits
 
@@ -37,23 +37,23 @@ Configure caching via environment variables:
 
 ```bash
 # Enable Redis caching
-export STREAMFLOW_CACHE_PROVIDER=redis
-export STREAMFLOW_REDIS_URL=redis://localhost:6379
-export STREAMFLOW_REDIS_KEY_PREFIX=streamflow:cache:
+export KRUXIAFLOW_CACHE_PROVIDER=redis
+export KRUXIAFLOW_REDIS_URL=redis://localhost:6379
+export KRUXIAFLOW_REDIS_KEY_PREFIX=kruxiaflow:cache:
 
-# Start StreamFlow
-streamflow serve
+# Start Kruxia Flow
+kruxiaflow serve
 ```
 
 **Configuration Options:**
 
 | Variable                        | Default                | Description                                    |
 |---------------------------------|------------------------|------------------------------------------------|
-| `STREAMFLOW_CACHE_PROVIDER`     | `noop`                 | Cache provider: `redis` or `noop` (disabled)   |
-| `STREAMFLOW_REDIS_URL`          | `redis://localhost:6379` | Redis connection URL                         |
-| `STREAMFLOW_REDIS_KEY_PREFIX`   | `streamflow:cache:`    | Redis key prefix for namespace isolation       |
+| `KRUXIAFLOW_CACHE_PROVIDER`     | `noop`                 | Cache provider: `redis` or `noop` (disabled)   |
+| `KRUXIAFLOW_REDIS_URL`          | `redis://localhost:6379` | Redis connection URL                         |
+| `KRUXIAFLOW_REDIS_KEY_PREFIX`   | `kruxiaflow:cache:`    | Redis key prefix for namespace isolation       |
 
-**Without Redis**: StreamFlow runs normally with caching disabled (uses `NoOpCache` fallback). Workflows execute without errors.
+**Without Redis**: Kruxia Flow runs normally with caching disabled (uses `NoOpCache` fallback). Workflows execute without errors.
 
 ## Usage
 
@@ -206,7 +206,7 @@ curl http://localhost:8080/api/v1/workflows/wf_123 \
 
 ## Cache Invalidation
 
-StreamFlow provides two methods for cache invalidation:
+Kruxia Flow provides two methods for cache invalidation:
 
 ### Option 1: Invalidate by Specific Cache Key
 
@@ -448,8 +448,8 @@ flowchart TB
 {prefix}{activity.worker}.{activity.name}:{hash}
 
 Examples:
-streamflow:cache:builtin.llm_prompt:a3f8d9c2e1b4567890abcdef12345678...
-streamflow:cache:builtin.http_request:b7e4a1d8f3c6421098fedcba98765432...
+kruxiaflow:cache:builtin.llm_prompt:a3f8d9c2e1b4567890abcdef12345678...
+kruxiaflow:cache:builtin.http_request:b7e4a1d8f3c6421098fedcba98765432...
 ```
 
 **TTL Management:**
@@ -555,8 +555,8 @@ Track these metrics to optimize caching:
 redis-cli ping
 
 # Verify environment variables
-echo $STREAMFLOW_CACHE_PROVIDER
-echo $STREAMFLOW_REDIS_URL
+echo $KRUXIAFLOW_CACHE_PROVIDER
+echo $KRUXIAFLOW_REDIS_URL
 
 # Check activity settings in workflow YAML
 grep -A 2 "settings:" workflow.yaml
@@ -637,6 +637,6 @@ This feature is planned for post-MVP but not currently available.
 ## Feedback and Support
 
 If you encounter issues or have suggestions for improving semantic caching:
-- Open an issue on GitHub: [StreamFlow Issues](https://github.com/your-org/streamflow/issues)
+- Open an issue on GitHub: [Kruxia Flow Issues](https://github.com/your-org/kruxiaflow/issues)
 - Check the troubleshooting section above
 - Review the implementation plan: `docs/implementation/US-5.3-semantic-caching.md`

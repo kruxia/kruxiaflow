@@ -4,8 +4,8 @@ use futures::StreamExt;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use streamflow_core::storage::WorkflowStorage;
-use streamflow_core::{ActivityOutput, ActivityOutputDefinition, OutputType};
+use kruxiaflow_core::storage::WorkflowStorage;
+use kruxiaflow_core::{ActivityOutput, ActivityOutputDefinition, OutputType};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
@@ -36,7 +36,7 @@ impl FileExecutor {
     ) -> Result<Self> {
         // Create temp directory for this activity
         let temp_dir = std::env::temp_dir()
-            .join("streamflow")
+            .join("kruxiaflow")
             .join(workflow_id.to_string())
             .join(&activity_key);
 
@@ -237,11 +237,11 @@ pub async fn create_output_file(path: &Path, content: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
     use sqlx::PgPool;
-    use streamflow_core::storage::PostgresStorage;
+    use kruxiaflow_core::storage::PostgresStorage;
 
     async fn setup_test_storage() -> Arc<dyn WorkflowStorage> {
         let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamflow".to_string()
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
         });
 
         let pool = PgPool::connect(&database_url)

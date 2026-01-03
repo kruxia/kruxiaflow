@@ -1,25 +1,25 @@
 /// Utility to register benchmark workflow definitions via API
 ///
 /// Usage:
-///   cargo run --package streamflow-profiling --bin register-workflows
+///   cargo run --package kruxiaflow-profiling --bin register-workflows
 ///
 /// Requires environment variables:
-///   - STREAMFLOW_BASE_URL: API base URL (default: http://localhost:8080)
-///   - STREAMFLOW_CLIENT_ID: OAuth client ID
-///   - STREAMFLOW_CLIENT_SECRET: OAuth client secret
+///   - KRUXIAFLOW_BASE_URL: API base URL (default: http://localhost:8080)
+///   - KRUXIAFLOW_CLIENT_ID: OAuth client ID
+///   - KRUXIAFLOW_CLIENT_SECRET: OAuth client secret
 use reqwest::Client;
 use std::env;
-use streamflow_profiling::{create_parallel_workflow, create_sequential_workflow};
+use kruxiaflow_profiling::{create_parallel_workflow, create_sequential_workflow};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let base_url =
-        env::var("STREAMFLOW_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+        env::var("KRUXIAFLOW_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
 
-    let client_id = env::var("STREAMFLOW_CLIENT_ID").expect("STREAMFLOW_CLIENT_ID must be set");
+    let client_id = env::var("KRUXIAFLOW_CLIENT_ID").expect("KRUXIAFLOW_CLIENT_ID must be set");
 
     let client_secret =
-        env::var("STREAMFLOW_CLIENT_SECRET").expect("STREAMFLOW_CLIENT_SECRET must be set");
+        env::var("KRUXIAFLOW_CLIENT_SECRET").expect("KRUXIAFLOW_CLIENT_SECRET must be set");
 
     println!("Registering Benchmark Workflow Definitions");
     println!("=========================================");
@@ -86,7 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
     println!("You can now run the benchmarks:");
     println!(
-        "  cargo test --package streamflow-profiling --release --test load_tests -- --nocapture"
+        "  cargo test --package kruxiaflow-profiling --release --test load_tests -- --nocapture"
     );
 
     Ok(())

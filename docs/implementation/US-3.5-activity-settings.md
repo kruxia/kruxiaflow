@@ -399,7 +399,7 @@ impl ActivityState {
 **New Handler**: `handle_activity_failed`
 
 ```rust
-use streamflow_core::workflow::activity_settings::ActivitySettings;
+use kruxiaflow_core::workflow::activity_settings::ActivitySettings;
 use chrono::Duration;
 
 impl EventProcessor {

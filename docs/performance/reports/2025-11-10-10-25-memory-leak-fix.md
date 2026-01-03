@@ -22,13 +22,13 @@ The registry keeps span data indefinitely for:
 - Multi-layer span processing
 - Deferred span export
 
-StreamFlow doesn't use these features, so the data just accumulates.
+Kruxia Flow doesn't use these features, so the data just accumulates.
 
 ---
 
 ## Solution Implemented
 
-Replaced `registry()` + `.with(fmt::layer())` with direct `fmt::Subscriber` in `streamflow/src/logging.rs`.
+Replaced `registry()` + `.with(fmt::layer())` with direct `fmt::Subscriber` in `kruxiaflow/src/logging.rs`.
 
 ### Before (with registry)
 
@@ -114,7 +114,7 @@ INFO orchestrator{consumer_id=orchestrator}: Processing event
   workflow_id: abc123
 ```
 
-The parent span context is not included, but we don't need it for StreamFlow's logging use case.
+The parent span context is not included, but we don't need it for Kruxia Flow's logging use case.
 
 ---
 
@@ -123,14 +123,14 @@ The parent span context is not included, but we don't need it for StreamFlow's l
 ### Test 1: Compilation
 
 ```bash
-cargo check --package streamflow
+cargo check --package kruxiaflow
 # Result: ✅ Compiles without warnings
 ```
 
 ### Test 2: Unit Tests
 
 ```bash
-cargo test --package streamflow --lib logging
+cargo test --package kruxiaflow --lib logging
 # Result: ✅ All tests pass
 ```
 
@@ -157,11 +157,11 @@ After (fmt::Subscriber):
 Run verification:
 ```bash
 # Rebuild container with fix
-docker compose build streamflow-profiling
-docker compose up streamflow-profiling -d
+docker compose build kruxiaflow-profiling
+docker compose up kruxiaflow-profiling -d
 
 # Run 5-minute benchmark with TRACE level
-export STREAMFLOW_LOG_LEVEL=trace
+export KRUXIAFLOW_LOG_LEVEL=trace
 ./scripts/profiling.sh --test test_sustained_throughput --level trace
 
 # Check memory analysis
@@ -208,7 +208,7 @@ async fn process_workflow_event(&mut self, event: WorkflowEvent) -> Result<()> {
 ### For Operations
 
 No deployment changes needed:
-- Same environment variables (`STREAMFLOW_LOG_LEVEL`, `RUST_LOG`)
+- Same environment variables (`KRUXIAFLOW_LOG_LEVEL`, `RUST_LOG`)
 - Same log output format
 - Same log levels supported
 
@@ -248,7 +248,7 @@ struct LruRegistry {
 - **Root cause analysis**: `var/benchmark-20251110-091325/MEMORY_LEAK_ROOT_CAUSE.md`
 - **Registry behavior**: `var/benchmark-20251110-091325/TRACING_REGISTRY_ANALYSIS.md`
 - **Heap dump analysis**: jemalloc `jeprof.out.64.45.i45.heap`
-- **Code changes**: `streamflow/src/logging.rs` (lines 17-75)
+- **Code changes**: `kruxiaflow/src/logging.rs` (lines 17-75)
 
 ---
 

@@ -37,21 +37,21 @@ impl PoolConfig {
     /// Load pool config from environment variables with sensible defaults
     fn from_env() -> Self {
         Self {
-            max_connections: std::env::var("STREAMFLOW_POSTGRES_POOL_MAX_CONNECTIONS")
+            max_connections: std::env::var("KRUXIAFLOW_POSTGRES_POOL_MAX_CONNECTIONS")
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(5),
-            min_connections: std::env::var("STREAMFLOW_POSTGRES_POOL_MIN_CONNECTIONS")
+            min_connections: std::env::var("KRUXIAFLOW_POSTGRES_POOL_MIN_CONNECTIONS")
                 .ok()
                 .and_then(|s| s.parse().ok()),
-            acquire_timeout_secs: std::env::var("STREAMFLOW_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECS")
+            acquire_timeout_secs: std::env::var("KRUXIAFLOW_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECS")
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(30),
-            max_lifetime_secs: std::env::var("STREAMFLOW_POSTGRES_POOL_MAX_LIFETIME_SECS")
+            max_lifetime_secs: std::env::var("KRUXIAFLOW_POSTGRES_POOL_MAX_LIFETIME_SECS")
                 .ok()
                 .and_then(|s| s.parse().ok()),
-            idle_timeout_secs: std::env::var("STREAMFLOW_POSTGRES_POOL_IDLE_TIMEOUT_SECS")
+            idle_timeout_secs: std::env::var("KRUXIAFLOW_POSTGRES_POOL_IDLE_TIMEOUT_SECS")
                 .ok()
                 .and_then(|s| s.parse().ok()),
         }
@@ -508,7 +508,7 @@ mod tests {
     // Helper to get test database URL
     fn test_db_url() -> String {
         std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
         })
     }
 

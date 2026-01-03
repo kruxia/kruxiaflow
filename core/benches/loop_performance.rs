@@ -2,7 +2,7 @@
 // Validates that loop detection uses O(1) metadata lookups vs O(V+E) graph traversal
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use streamflow_core::workflow::{ActivityDefinition, ActivityRelationship, WorkflowDefinition};
+use kruxiaflow_core::workflow::{ActivityDefinition, ActivityRelationship, WorkflowDefinition};
 
 /// Create a workflow with N activities in a simple loop
 fn create_loop_workflow(num_activities: usize) -> WorkflowDefinition {

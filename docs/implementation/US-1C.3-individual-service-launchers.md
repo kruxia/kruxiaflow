@@ -1,6 +1,6 @@
 # Implementation Plan: US-1C.3 Individual Service Launchers
 
-**Epic**: 1C - StreamFlow Binary and CLI
+**Epic**: 1C - Kruxia Flow Binary and CLI
 **User Story**: US-1C.3
 **Status**: ✅ Implemented
 **Priority**: P2 (Enables distributed deployment)
@@ -22,19 +22,19 @@
 
 ## Acceptance Criteria
 
-- [x] `streamflow orchestrator` - Launch orchestrator only
+- [x] `kruxiaflow orchestrator` - Launch orchestrator only
   - Flags: `--consumer-id` (for event consumer checkpointing)
-- [x] `streamflow api` - Already exists ✅ (update to match serve.rs patterns)
-- [x] `streamflow worker` - Launch worker only
+- [x] `kruxiaflow api` - Already exists ✅ (update to match serve.rs patterns)
+- [x] `kruxiaflow worker` - Launch worker only
   - Flags: `--activity-types` (worker.name list), `--api-url`, `--worker-id`
 - [x] Each service can run on different hosts/containers
-- [x] Environment variable configuration: `DATABASE_URL`, `STREAMFLOW_API_URL`, etc.
+- [x] Environment variable configuration: `DATABASE_URL`, `KRUXIAFLOW_API_URL`, etc.
 
 ---
 
 ## Rationale
 
-While `streamflow serve` provides an all-in-one deployment model ideal for development and single-node production, distributed deployments require the ability to:
+While `kruxiaflow serve` provides an all-in-one deployment model ideal for development and single-node production, distributed deployments require the ability to:
 
 1. **Scale independently**: Run multiple orchestrators for HA, scale workers based on queue depth
 2. **Deploy on different hosts**: API on edge, workers on compute clusters, orchestrator near database
@@ -52,25 +52,25 @@ While `streamflow serve` provides an all-in-one deployment model ideal for devel
 ```mermaid
 flowchart TB
     subgraph Host1["API Host (Edge)"]
-        API1[streamflow api<br/>--port 8080]
-        API2[streamflow api<br/>--port 8081]
+        API1[kruxiaflow api<br/>--port 8080]
+        API2[kruxiaflow api<br/>--port 8081]
     end
 
     subgraph Host2["Orchestrator Host (Near DB)"]
-        Orch1[streamflow orchestrator<br/>--consumer-id orch_1]
-        Orch2[streamflow orchestrator<br/>--consumer-id orch_2]
+        Orch1[kruxiaflow orchestrator<br/>--consumer-id orch_1]
+        Orch2[kruxiaflow orchestrator<br/>--consumer-id orch_2]
     end
 
     subgraph Host3["Worker Host 1 (Compute)"]
-        W1[streamflow worker<br/>--worker-id w1<br/>--workers 4]
+        W1[kruxiaflow worker<br/>--worker-id w1<br/>--workers 4]
     end
 
     subgraph Host4["Worker Host 2 (Compute)"]
-        W2[streamflow worker<br/>--worker-id w2<br/>--workers 4]
+        W2[kruxiaflow worker<br/>--worker-id w2<br/>--workers 4]
     end
 
     subgraph DB["PostgreSQL"]
-        PG[(streamflow)]
+        PG[(kruxiaflow)]
     end
 
     API1 --> PG
@@ -126,7 +126,7 @@ sequenceDiagram
 
 ### Component 1: Orchestrator Command
 
-**Location**: `streamflow/src/commands/orchestrator.rs` (new file)
+**Location**: `kruxiaflow/src/commands/orchestrator.rs` (new file)
 
 **Responsibilities**:
 1. Launch orchestrator as standalone service
@@ -141,7 +141,7 @@ use clap::Args;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
-use streamflow_core::{
+use kruxiaflow_core::{
     ActivityQueue, EventSource, OrchestratorConfig, PostgresEventSource,
     PostgresQueue, QueueConfig, run_orchestrator,
 };
@@ -153,7 +153,7 @@ pub struct OrchestratorCommand {
     /// Orchestrator consumer ID (for event polling checkpoint)
     #[arg(
         long,
-        env = "STREAMFLOW_ORCHESTRATOR_CONSUMER_ID",
+        env = "KRUXIAFLOW_ORCHESTRATOR_CONSUMER_ID",
         default_value = "orchestrator_default",
         help = "Unique consumer ID for event checkpointing",
         long_help = "Unique consumer ID for event checkpointing\n\n\
@@ -167,7 +167,7 @@ Example: --consumer-id orch_prod_1"
     /// Event polling interval in milliseconds
     #[arg(
         long,
-        env = "STREAMFLOW_ORCHESTRATOR_POLL_INTERVAL",
+        env = "KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL",
         default_value = "10",
         help = "Event polling interval in milliseconds",
         long_help = "How often the orchestrator polls for new workflow events\n\n\
@@ -180,7 +180,7 @@ Example: --poll-interval 50"
     /// Shutdown timeout in seconds
     #[arg(
         long,
-        env = "STREAMFLOW_SHUTDOWN_TIMEOUT",
+        env = "KRUXIAFLOW_SHUTDOWN_TIMEOUT",
         default_value = "30",
         help = "Graceful shutdown timeout in seconds"
     )]
@@ -208,7 +208,7 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
     tracing::info!(
         consumer_id = %cmd.consumer_id,
         poll_interval_ms = cmd.poll_interval,
-        "Starting StreamFlow orchestrator"
+        "Starting Kruxia Flow orchestrator"
     );
 
     // Create shutdown coordinator
@@ -322,7 +322,7 @@ mod tests {
 
 ### Component 2: Worker Command
 
-**Location**: `streamflow/src/commands/worker.rs` (new file)
+**Location**: `kruxiaflow/src/commands/worker.rs` (new file)
 
 **Responsibilities**:
 1. Launch built-in worker as standalone service
@@ -336,7 +336,7 @@ use anyhow::Result;
 use clap::Args;
 use std::sync::Arc;
 use std::time::Duration;
-use streamflow_worker::{WorkerConfig, WorkerManager};
+use kruxiaflow_worker::{WorkerConfig, WorkerManager};
 use uuid::Uuid;
 
 /// Worker command - Launch worker service only
@@ -345,21 +345,21 @@ pub struct WorkerCommand {
     /// API server URL to connect to
     #[arg(
         long,
-        env = "STREAMFLOW_API_URL",
+        env = "KRUXIAFLOW_API_URL",
         default_value = "http://127.0.0.1:8080",
-        help = "StreamFlow API server URL",
-        long_help = "StreamFlow API server URL for activity polling\n\n\
+        help = "Kruxia Flow API server URL",
+        long_help = "Kruxia Flow API server URL for activity polling\n\n\
 Workers connect to the API server to poll for activities,\n\
 report heartbeats, and submit results.\n\n\
 Default: http://127.0.0.1:8080\n\
-Example: --api-url https://streamflow.example.com"
+Example: --api-url https://kruxiaflow.example.com"
     )]
     pub api_url: String,
 
     /// Worker ID (auto-generated if not provided)
     #[arg(
         long,
-        env = "STREAMFLOW_WORKER_ID",
+        env = "KRUXIAFLOW_WORKER_ID",
         help = "Unique worker identifier",
         long_help = "Unique worker identifier\n\n\
 If not provided, a UUID v7 is auto-generated.\n\
@@ -372,7 +372,7 @@ Example: --worker-id worker_payments_1"
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_WORKER_COUNT",
+        env = "KRUXIAFLOW_WORKER_COUNT",
         default_value = "4",
         help = "Number of concurrent worker tasks",
         long_help = "Number of concurrent worker tasks\n\n\
@@ -387,7 +387,7 @@ Example: --workers 20"
     /// Activity types to handle (comma-separated)
     #[arg(
         long,
-        env = "STREAMFLOW_WORKER_ACTIVITY_TYPES",
+        env = "KRUXIAFLOW_WORKER_ACTIVITY_TYPES",
         help = "Activity types to handle (comma-separated, default: all built-in)",
         long_help = "Activity types this worker handles\n\n\
 If not specified, handles all built-in activity types.\n\
@@ -399,7 +399,7 @@ Example: --activity-types echo,http_request,llm_complete"
     /// Maximum activities per poll
     #[arg(
         long,
-        env = "STREAMFLOW_POLL_MAX_ACTIVITIES",
+        env = "KRUXIAFLOW_POLL_MAX_ACTIVITIES",
         default_value = "1",
         help = "Maximum activities to claim per poll",
         long_help = "Maximum number of activities each worker claims per poll\n\n\
@@ -414,7 +414,7 @@ Example: --poll-max-activities 5"
     /// Poll interval in milliseconds
     #[arg(
         long,
-        env = "STREAMFLOW_POLL_INTERVAL",
+        env = "KRUXIAFLOW_POLL_INTERVAL",
         default_value = "100",
         help = "Activity poll interval in milliseconds"
     )]
@@ -423,7 +423,7 @@ Example: --poll-max-activities 5"
     /// Activity execution timeout in seconds
     #[arg(
         long,
-        env = "STREAMFLOW_ACTIVITY_TIMEOUT",
+        env = "KRUXIAFLOW_ACTIVITY_TIMEOUT",
         default_value = "300",
         help = "Activity execution timeout in seconds"
     )]
@@ -432,7 +432,7 @@ Example: --poll-max-activities 5"
     /// Heartbeat interval in seconds
     #[arg(
         long,
-        env = "STREAMFLOW_HEARTBEAT_INTERVAL",
+        env = "KRUXIAFLOW_HEARTBEAT_INTERVAL",
         default_value = "30",
         help = "Heartbeat interval for long-running activities"
     )]
@@ -441,8 +441,8 @@ Example: --poll-max-activities 5"
     /// OAuth client ID
     #[arg(
         long,
-        env = "STREAMFLOW_CLIENT_ID",
-        default_value = "streamflow_worker",
+        env = "KRUXIAFLOW_CLIENT_ID",
+        default_value = "kruxiaflow_worker",
         help = "OAuth client ID for API authentication"
     )]
     pub client_id: String,
@@ -450,7 +450,7 @@ Example: --poll-max-activities 5"
     /// OAuth client secret
     #[arg(
         long,
-        env = "STREAMFLOW_CLIENT_SECRET",
+        env = "KRUXIAFLOW_CLIENT_SECRET",
         help = "OAuth client secret for API authentication (required)"
     )]
     pub client_secret: Option<String>,
@@ -458,7 +458,7 @@ Example: --poll-max-activities 5"
     /// Redis URL for caching
     #[arg(
         long,
-        env = "STREAMFLOW_REDIS_URL",
+        env = "KRUXIAFLOW_REDIS_URL",
         default_value = "redis://127.0.0.1:6379",
         help = "Redis URL for activity result caching"
     )]
@@ -477,7 +477,7 @@ impl WorkerCommand {
 
         if self.client_secret.is_none() {
             anyhow::bail!(
-                "Client secret required (--client-secret or STREAMFLOW_CLIENT_SECRET)"
+                "Client secret required (--client-secret or KRUXIAFLOW_CLIENT_SECRET)"
             );
         }
 
@@ -501,7 +501,7 @@ pub async fn execute(cmd: WorkerCommand, database_url: String) -> Result<()> {
         worker_id = %worker_id,
         api_url = %cmd.api_url,
         workers = cmd.workers,
-        "Starting StreamFlow worker"
+        "Starting Kruxia Flow worker"
     );
 
     // Connect to database for workflow storage access
@@ -517,8 +517,8 @@ pub async fn execute(cmd: WorkerCommand, database_url: String) -> Result<()> {
     tracing::info!("Database connection established");
 
     // Create workflow storage for artifact access
-    let workflow_storage: Arc<dyn streamflow_core::WorkflowStorage> =
-        Arc::new(streamflow_core::PostgresStorage::new(pool.clone()));
+    let workflow_storage: Arc<dyn kruxiaflow_core::WorkflowStorage> =
+        Arc::new(kruxiaflow_core::PostgresStorage::new(pool.clone()));
 
     // Create cache service
     let cache_config = crate::config::CacheConfig::new();
@@ -529,7 +529,7 @@ pub async fn execute(cmd: WorkerCommand, database_url: String) -> Result<()> {
     let registry = if let Some(ref types_str) = cmd.activity_types {
         // Filter registry to only specified types
         let requested_types: Vec<&str> = types_str.split(',').map(|s| s.trim()).collect();
-        let full_registry = streamflow_worker::register_builtin_activities(cache_service);
+        let full_registry = kruxiaflow_worker::register_builtin_activities(cache_service);
 
         // Log which types are available vs requested
         let available_types = full_registry.activity_types();
@@ -540,10 +540,10 @@ pub async fn execute(cmd: WorkerCommand, database_url: String) -> Result<()> {
         );
 
         // For MVP, use full registry (filtering can be added later)
-        // TODO: Implement registry filtering in streamflow_worker
+        // TODO: Implement registry filtering in kruxiaflow_worker
         full_registry
     } else {
-        streamflow_worker::register_builtin_activities(cache_service)
+        kruxiaflow_worker::register_builtin_activities(cache_service)
     };
 
     tracing::info!(
@@ -608,7 +608,7 @@ mod tests {
             poll_interval: 100,
             activity_timeout: 300,
             heartbeat_interval: 30,
-            client_id: "streamflow_worker".to_string(),
+            client_id: "kruxiaflow_worker".to_string(),
             client_secret: Some("secret".to_string()),
             redis_url: "redis://127.0.0.1:6379".to_string(),
         }
@@ -650,7 +650,7 @@ mod tests {
 
 ### Component 3: Update Main Binary
 
-**Location**: `streamflow/src/main.rs`
+**Location**: `kruxiaflow/src/main.rs`
 
 **Changes**:
 
@@ -675,8 +675,8 @@ enum Commands {
 The orchestrator polls for workflow events and schedules activities.\n\
 Use this for distributed deployments where services run on separate hosts.\n\n\
 EXAMPLES:\n  \
-  streamflow orchestrator\n  \
-  streamflow orchestrator --consumer-id orch_prod_1\n\n\
+  kruxiaflow orchestrator\n  \
+  kruxiaflow orchestrator --consumer-id orch_prod_1\n\n\
 REQUIRES:\n  \
   - DATABASE_URL: PostgreSQL connection string"
     )]
@@ -689,11 +689,11 @@ REQUIRES:\n  \
 Workers poll the API server for activities and execute them.\n\
 Use this for distributed deployments or to scale workers.\n\n\
 EXAMPLES:\n  \
-  streamflow worker --api-url http://api.example.com:8080\n  \
-  streamflow worker --workers 20 --worker-id worker_payments_1\n\n\
+  kruxiaflow worker --api-url http://api.example.com:8080\n  \
+  kruxiaflow worker --workers 20 --worker-id worker_payments_1\n\n\
 REQUIRES:\n  \
-  - STREAMFLOW_API_URL: API server URL\n  \
-  - STREAMFLOW_CLIENT_SECRET: OAuth client secret\n  \
+  - KRUXIAFLOW_API_URL: API server URL\n  \
+  - KRUXIAFLOW_CLIENT_SECRET: OAuth client secret\n  \
   - DATABASE_URL: For artifact storage access"
     )]
     Worker(commands::worker::WorkerCommand),
@@ -720,7 +720,7 @@ match cli.command {
 
 ### Component 4: Update Commands Module
 
-**Location**: `streamflow/src/commands/mod.rs`
+**Location**: `kruxiaflow/src/commands/mod.rs`
 
 ```rust
 pub mod api;
@@ -740,30 +740,30 @@ pub mod worker;        // NEW
 | Variable                              | Default              | Description                          |
 | ------------------------------------- | -------------------- | ------------------------------------ |
 | `DATABASE_URL`                        | (required)           | PostgreSQL connection string         |
-| `STREAMFLOW_ORCHESTRATOR_CONSUMER_ID` | `orchestrator_default` | Unique consumer ID for checkpointing |
-| `STREAMFLOW_ORCHESTRATOR_POLL_INTERVAL` | `10`               | Event polling interval (ms)          |
-| `STREAMFLOW_SHUTDOWN_TIMEOUT`         | `30`                 | Graceful shutdown timeout (seconds)  |
-| `STREAMFLOW_LOG_LEVEL`                | `info`               | Log level                            |
-| `STREAMFLOW_LOG_FORMAT`               | `text`               | Log format (text/json)               |
+| `KRUXIAFLOW_ORCHESTRATOR_CONSUMER_ID` | `orchestrator_default` | Unique consumer ID for checkpointing |
+| `KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL` | `10`               | Event polling interval (ms)          |
+| `KRUXIAFLOW_SHUTDOWN_TIMEOUT`         | `30`                 | Graceful shutdown timeout (seconds)  |
+| `KRUXIAFLOW_LOG_LEVEL`                | `info`               | Log level                            |
+| `KRUXIAFLOW_LOG_FORMAT`               | `text`               | Log format (text/json)               |
 
 ### Worker Environment Variables
 
 | Variable                         | Default                     | Description                       |
 | -------------------------------- | --------------------------- | --------------------------------- |
 | `DATABASE_URL`                   | (required)                  | PostgreSQL connection string      |
-| `STREAMFLOW_API_URL`             | `http://127.0.0.1:8080`     | API server URL                    |
-| `STREAMFLOW_WORKER_ID`           | (auto-generated)            | Unique worker identifier          |
-| `STREAMFLOW_WORKER_COUNT`        | `4`                         | Number of concurrent tasks        |
-| `STREAMFLOW_WORKER_ACTIVITY_TYPES` | (all built-in)            | Activity types to handle          |
-| `STREAMFLOW_POLL_MAX_ACTIVITIES` | `1`                         | Max activities per poll           |
-| `STREAMFLOW_POLL_INTERVAL`       | `100`                       | Poll interval (ms)                |
-| `STREAMFLOW_ACTIVITY_TIMEOUT`    | `300`                       | Activity timeout (seconds)        |
-| `STREAMFLOW_HEARTBEAT_INTERVAL`  | `30`                        | Heartbeat interval (seconds)      |
-| `STREAMFLOW_CLIENT_ID`           | `streamflow_worker`         | OAuth client ID                   |
-| `STREAMFLOW_CLIENT_SECRET`       | (required)                  | OAuth client secret               |
-| `STREAMFLOW_REDIS_URL`           | `redis://127.0.0.1:6379`    | Redis URL for caching             |
-| `STREAMFLOW_LOG_LEVEL`           | `info`                      | Log level                         |
-| `STREAMFLOW_LOG_FORMAT`          | `text`                      | Log format (text/json)            |
+| `KRUXIAFLOW_API_URL`             | `http://127.0.0.1:8080`     | API server URL                    |
+| `KRUXIAFLOW_WORKER_ID`           | (auto-generated)            | Unique worker identifier          |
+| `KRUXIAFLOW_WORKER_COUNT`        | `4`                         | Number of concurrent tasks        |
+| `KRUXIAFLOW_WORKER_ACTIVITY_TYPES` | (all built-in)            | Activity types to handle          |
+| `KRUXIAFLOW_POLL_MAX_ACTIVITIES` | `1`                         | Max activities per poll           |
+| `KRUXIAFLOW_POLL_INTERVAL`       | `100`                       | Poll interval (ms)                |
+| `KRUXIAFLOW_ACTIVITY_TIMEOUT`    | `300`                       | Activity timeout (seconds)        |
+| `KRUXIAFLOW_HEARTBEAT_INTERVAL`  | `30`                        | Heartbeat interval (seconds)      |
+| `KRUXIAFLOW_CLIENT_ID`           | `kruxiaflow_worker`         | OAuth client ID                   |
+| `KRUXIAFLOW_CLIENT_SECRET`       | (required)                  | OAuth client secret               |
+| `KRUXIAFLOW_REDIS_URL`           | `redis://127.0.0.1:6379`    | Redis URL for caching             |
+| `KRUXIAFLOW_LOG_LEVEL`           | `info`                      | Log level                         |
+| `KRUXIAFLOW_LOG_FORMAT`          | `text`                      | Log format (text/json)            |
 
 ---
 
@@ -778,7 +778,7 @@ Each command module includes unit tests for:
 
 ### Integration Tests
 
-**File**: `streamflow/tests/distributed_deployment_test.rs` (new)
+**File**: `kruxiaflow/tests/distributed_deployment_test.rs` (new)
 
 ```rust
 #[tokio::test]
@@ -812,17 +812,17 @@ async fn test_distributed_workflow_execution() {
 ```bash
 # Terminal 1: Start orchestrator
 export DATABASE_URL='postgres://...'
-./target/release/streamflow orchestrator --consumer-id orch_1
+./target/release/kruxiaflow orchestrator --consumer-id orch_1
 
 # Terminal 2: Start API server
 export DATABASE_URL='postgres://...'
-export STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="$(cat private.pem)"
-./target/release/streamflow api --port 8080
+export KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="$(cat private.pem)"
+./target/release/kruxiaflow api --port 8080
 
 # Terminal 3: Start worker
 export DATABASE_URL='postgres://...'
-export STREAMFLOW_CLIENT_SECRET='secret'
-./target/release/streamflow worker \
+export KRUXIAFLOW_CLIENT_SECRET='secret'
+./target/release/kruxiaflow worker \
   --api-url http://127.0.0.1:8080 \
   --workers 4 \
   --worker-id worker_1
@@ -836,7 +836,7 @@ curl -X POST http://localhost:8080/api/v1/workflows ...
 ## Implementation Phases
 
 ### Phase 1: Orchestrator Command (~2 hours) ✅
-- [x] Create `streamflow/src/commands/orchestrator.rs`
+- [x] Create `kruxiaflow/src/commands/orchestrator.rs`
 - [x] Implement `OrchestratorCommand` struct with clap Args
 - [x] Implement `execute()` function
 - [x] Add unit tests
@@ -844,7 +844,7 @@ curl -X POST http://localhost:8080/api/v1/workflows ...
 - [x] Update `main.rs` Commands enum
 
 ### Phase 2: Worker Command (~3 hours) ✅
-- [x] Create `streamflow/src/commands/worker.rs`
+- [x] Create `kruxiaflow/src/commands/worker.rs`
 - [x] Implement `WorkerCommand` struct with clap Args
 - [x] Implement `execute()` function
 - [x] Add unit tests
@@ -864,8 +864,8 @@ curl -X POST http://localhost:8080/api/v1/workflows ...
 ## Success Criteria
 
 ### Functional Requirements
-- [x] `streamflow orchestrator` launches standalone orchestrator
-- [x] `streamflow worker` launches standalone worker
+- [x] `kruxiaflow orchestrator` launches standalone orchestrator
+- [x] `kruxiaflow worker` launches standalone worker
 - [x] Worker authenticates with remote API
 - [x] Worker processes activities and reports results
 - [x] Orchestrator schedules activities based on events

@@ -201,27 +201,27 @@ impl WorkerConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
         let mut config = Self::default();
 
-        if let Ok(url) = std::env::var("STREAMFLOW_API_URL") {
+        if let Ok(url) = std::env::var("KRUXIAFLOW_API_URL") {
             config.api_url = url;
         }
 
-        if let Ok(id) = std::env::var("STREAMFLOW_WORKER_ID") {
+        if let Ok(id) = std::env::var("KRUXIAFLOW_WORKER_ID") {
             config.worker_id = id;
         }
 
-        if let Ok(types) = std::env::var("STREAMFLOW_ACTIVITY_TYPES") {
+        if let Ok(types) = std::env::var("KRUXIAFLOW_ACTIVITY_TYPES") {
             config.activity_types = types.split(',').map(|s| s.trim().to_string()).collect();
         }
 
-        if let Ok(concurrency) = std::env::var("STREAMFLOW_WORKER_CONCURRENCY") {
+        if let Ok(concurrency) = std::env::var("KRUXIAFLOW_WORKER_CONCURRENCY") {
             config.concurrency = concurrency.parse().map_err(|_| ConfigError::InvalidConcurrency)?;
         }
 
-        if let Ok(client_id) = std::env::var("STREAMFLOW_CLIENT_ID") {
+        if let Ok(client_id) = std::env::var("KRUXIAFLOW_CLIENT_ID") {
             config.client_id = client_id;
         }
 
-        if let Ok(client_secret) = std::env::var("STREAMFLOW_CLIENT_SECRET") {
+        if let Ok(client_secret) = std::env::var("KRUXIAFLOW_CLIENT_SECRET") {
             config.client_secret = client_secret;
         }
 
@@ -264,7 +264,7 @@ pub enum ConfigError {
     #[error("Invalid concurrency value (must be > 0)")]
     InvalidConcurrency,
 
-    #[error("Missing client secret (STREAMFLOW_CLIENT_SECRET required)")]
+    #[error("Missing client secret (KRUXIAFLOW_CLIENT_SECRET required)")]
     MissingClientSecret,
 }
 ```
@@ -1077,12 +1077,12 @@ pub use registry::{ActivityImpl, ActivityRegistry};
 
 ```toml
 [package]
-name = "streamflow-worker"
+name = "kruxiaflow-worker"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Built-in activity worker for StreamFlow"
+description = "Built-in activity worker for Kruxia Flow"
 
 [dependencies]
 # Async runtime
@@ -1121,7 +1121,7 @@ members = [
     "oauth",
     "activity",
     "dashboard",
-    "streamflow",
+    "kruxiaflow",
     "worker",  # Add this
 ]
 ```
@@ -1198,7 +1198,7 @@ mod tests {
 
 ```rust
 use serial_test::serial;
-use streamflow_worker::{ActivityRegistry, EchoActivity, WorkerConfig, WorkerManager};
+use kruxiaflow_worker::{ActivityRegistry, EchoActivity, WorkerConfig, WorkerManager};
 use std::sync::Arc;
 
 #[tokio::test]
@@ -1253,20 +1253,20 @@ async fn test_worker_failure_handling() {
 
 ```bash
 # API server URL
-STREAMFLOW_API_URL=http://localhost:8080
+KRUXIAFLOW_API_URL=http://localhost:8080
 
 # Worker identification
-STREAMFLOW_WORKER_ID=worker_payments_01
+KRUXIAFLOW_WORKER_ID=worker_payments_01
 
 # Activity types (comma-separated)
-STREAMFLOW_ACTIVITY_TYPES=payments.authorize,payments.capture
+KRUXIAFLOW_ACTIVITY_TYPES=payments.authorize,payments.capture
 
 # Worker concurrency
-STREAMFLOW_WORKER_CONCURRENCY=4
+KRUXIAFLOW_WORKER_CONCURRENCY=4
 
 # OAuth credentials
-STREAMFLOW_CLIENT_ID=worker_client
-STREAMFLOW_CLIENT_SECRET=secret123
+KRUXIAFLOW_CLIENT_ID=worker_client
+KRUXIAFLOW_CLIENT_SECRET=secret123
 ```
 
 ---
@@ -1398,24 +1398,24 @@ Create `docs/guides/worker-guide.md`:
 
 ## Running the Built-in Worker
 
-The built-in worker executes activities for StreamFlow workflows.
+The built-in worker executes activities for Kruxia Flow workflows.
 
 ### Configuration
 
 Configure via environment variables:
 
 \`\`\`bash
-export STREAMFLOW_API_URL=http://localhost:8080
-export STREAMFLOW_WORKER_ID=worker_01
-export STREAMFLOW_ACTIVITY_TYPES=payments.authorize,payments.capture
-export STREAMFLOW_CLIENT_ID=worker_client
-export STREAMFLOW_CLIENT_SECRET=secret123
+export KRUXIAFLOW_API_URL=http://localhost:8080
+export KRUXIAFLOW_WORKER_ID=worker_01
+export KRUXIAFLOW_ACTIVITY_TYPES=payments.authorize,payments.capture
+export KRUXIAFLOW_CLIENT_ID=worker_client
+export KRUXIAFLOW_CLIENT_SECRET=secret123
 \`\`\`
 
 ### Starting the Worker
 
 \`\`\`bash
-streamflow worker
+kruxiaflow worker
 \`\`\`
 
 ## Implementing Custom Activities

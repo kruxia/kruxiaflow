@@ -14,7 +14,7 @@ pub struct MigrateCommand {
         long,
         help = "Show migration status without running migrations",
         long_help = "Display the status of all migrations (applied/pending) without executing any.\n\n\
-Example: streamflow migrate --status"
+Example: kruxiaflow migrate --status"
     )]
     pub status: bool,
 
@@ -23,7 +23,7 @@ Example: streamflow migrate --status"
         long,
         help = "Preview migrations that would be applied",
         long_help = "Show which migrations would be applied without actually running them.\n\n\
-Example: streamflow migrate --dry-run"
+Example: kruxiaflow migrate --dry-run"
     )]
     pub dry_run: bool,
 }
@@ -89,7 +89,7 @@ async fn show_status(pool: &PgPool) -> Result<()> {
 
     if pending_count > 0 {
         println!();
-        println!("Run 'streamflow migrate' to apply pending migrations.");
+        println!("Run 'kruxiaflow migrate' to apply pending migrations.");
     }
 
     Ok(())
@@ -129,7 +129,7 @@ async fn show_dry_run(pool: &PgPool) -> Result<()> {
         println!();
         println!("{} migration(s) would be applied.", pending_count);
         println!();
-        println!("Run 'streamflow migrate' to apply these migrations.");
+        println!("Run 'kruxiaflow migrate' to apply these migrations.");
     }
 
     Ok(())

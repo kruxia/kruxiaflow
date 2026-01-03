@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Performance Monitoring Script for StreamFlow
+# Performance Monitoring Script for Kruxia Flow
 #
 # Monitors critical metrics during benchmark execution:
 # 1. Memory usage (heap growth)
@@ -13,7 +13,7 @@
 #   ./scripts/monitor_performance.sh [OPTIONS]
 #
 # Options:
-#   --server-pid PID        PID of StreamFlow server to monitor
+#   --server-pid PID        PID of Kruxia Flow server to monitor
 #   --db-url URL            PostgreSQL connection URL
 #   --duration SECONDS      How long to monitor (default: 60)
 #   --interval SECONDS      Sampling interval (default: 2)
@@ -24,7 +24,7 @@ set -e
 
 # Default options
 SERVER_PID=""
-DB_URL="${DATABASE_URL:-postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamflow_profiling}"
+DB_URL="${DATABASE_URL:-postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow_profiling}"
 DURATION=60
 INTERVAL=2
 OUTPUT_DIR="."
@@ -121,7 +121,7 @@ while [ $(date +%s) -lt $END_TIME ]; do
             COUNT(*) FILTER (WHERE state = 'idle in transaction') as idle_in_tx,
             COUNT(*) FILTER (WHERE wait_event IS NOT NULL) as waiting
         FROM pg_stat_activity
-        WHERE datname = 'streamflow_profiling'
+        WHERE datname = 'kruxiaflow_profiling'
             AND pid <> pg_backend_pid();
     " 2>/dev/null || echo "0|0|0|0|0")
 
@@ -154,7 +154,7 @@ while [ $(date +%s) -lt $END_TIME ]; do
     # 5. System stats (database size, event count, etc.)
     SYSTEM_STATS=$(psql "$DB_URL" -t -c "
         SELECT
-            ROUND(pg_database_size('streamflow_profiling') / 1024.0 / 1024.0, 2) as db_size_mb,
+            ROUND(pg_database_size('kruxiaflow_profiling') / 1024.0 / 1024.0, 2) as db_size_mb,
             (SELECT COUNT(*) FROM workflow_events) as event_count,
             (SELECT COUNT(*) FROM workflows) as workflow_count,
             (SELECT COUNT(*) FROM activity_queue WHERE status = 'pending') as queue_size;

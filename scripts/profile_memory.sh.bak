@@ -2,7 +2,7 @@
 #
 # Memory Profiling Script using jemalloc
 #
-# This script builds StreamFlow with jemalloc profiling enabled and runs
+# This script builds Kruxia Flow with jemalloc profiling enabled and runs
 # the sustained throughput benchmark to capture heap allocation profiles.
 #
 # Usage:
@@ -57,7 +57,7 @@ done
 # Create output directory
 mkdir -p "$OUTPUT_DIR"
 
-echo -e "${YELLOW}StreamFlow Memory Profiling${NC}"
+echo -e "${YELLOW}Kruxia Flow Memory Profiling${NC}"
 echo "======================================"
 echo -e "${BLUE}Output directory: $OUTPUT_DIR${NC}"
 echo -e "${BLUE}Test duration: ${DURATION}s${NC}"
@@ -72,7 +72,7 @@ if ! command -v jeprof &> /dev/null; then
     exit 1
 fi
 
-echo -e "${YELLOW}Building StreamFlow with jemalloc profiling...${NC}"
+echo -e "${YELLOW}Building Kruxia Flow with jemalloc profiling...${NC}"
 cargo build --profile profiling --features profiling
 
 echo -e "${GREEN}Build complete${NC}"
@@ -81,7 +81,7 @@ echo ""
 # Configure jemalloc profiling
 export _RJEM_MALLOC_CONF="prof:true,prof_prefix:${OUTPUT_DIR}/jeprof.out,lg_prof_interval:30,lg_prof_sample:19"
 
-echo -e "${YELLOW}Starting StreamFlow server with profiling enabled...${NC}"
+echo -e "${YELLOW}Starting Kruxia Flow server with profiling enabled...${NC}"
 echo "_RJEM_MALLOC_CONF=$_RJEM_MALLOC_CONF"
 echo ""
 
@@ -117,7 +117,7 @@ echo ""
 
 # Generate text report
 echo -e "${BLUE}Generating allocation report...${NC}"
-jeprof --show_bytes --text ${PROJECT_DIR}/target/profiling/streamflow "$FINAL_DUMP" > "${OUTPUT_DIR}/allocation_report.txt"
+jeprof --show_bytes --text ${PROJECT_DIR}/target/profiling/kruxiaflow "$FINAL_DUMP" > "${OUTPUT_DIR}/allocation_report.txt"
 
 echo -e "${GREEN}Allocation report saved: ${OUTPUT_DIR}/allocation_report.txt${NC}"
 echo ""
@@ -131,7 +131,7 @@ echo ""
 # Generate PDF if possible
 if command -v dot &> /dev/null; then
     echo -e "${BLUE}Generating call graph PDF...${NC}"
-    jeprof --show_bytes --pdf ${PROJECT_DIR}/target/profiling/streamflow "$FINAL_DUMP" > "${OUTPUT_DIR}/call_graph.pdf"
+    jeprof --show_bytes --pdf ${PROJECT_DIR}/target/profiling/kruxiaflow "$FINAL_DUMP" > "${OUTPUT_DIR}/call_graph.pdf"
     echo -e "${GREEN}Call graph saved: ${OUTPUT_DIR}/call_graph.pdf${NC}"
 else
     echo -e "${YELLOW}Skipping PDF generation (graphviz not installed)${NC}"
@@ -141,7 +141,7 @@ fi
 # Generate SVG flamegraph if possible
 if command -v dot &> /dev/null; then
     echo -e "${BLUE}Generating flamegraph SVG...${NC}"
-    jeprof --show_bytes --svg ${PROJECT_DIR}/target/profiling/streamflow "$FINAL_DUMP" > "${OUTPUT_DIR}/flamegraph.svg"
+    jeprof --show_bytes --svg ${PROJECT_DIR}/target/profiling/kruxiaflow "$FINAL_DUMP" > "${OUTPUT_DIR}/flamegraph.svg"
     echo -e "${GREEN}Flamegraph saved: ${OUTPUT_DIR}/flamegraph.svg${NC}"
     echo ""
     echo "Open with: open ${OUTPUT_DIR}/flamegraph.svg"

@@ -13,12 +13,12 @@ use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
-use streamflow_api::{AppState, app_router};
-use streamflow_core::events::PostgresEventSource;
-use streamflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
-use streamflow_core::{OrchestratorConfig, run_orchestrator};
-use streamflow_oauth::{AuthConfig, PostgresAuthService};
-use streamflow_worker::{
+use kruxiaflow_api::{AppState, app_router};
+use kruxiaflow_core::events::PostgresEventSource;
+use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
+use kruxiaflow_core::{OrchestratorConfig, run_orchestrator};
+use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
+use kruxiaflow_worker::{
     ActivityRegistry, EmailSendActivity, HttpRequestActivity, PostgresQueryActivity, WorkerConfig,
     WorkerManager, activities::PostgresTransactionActivity, new_pool_cache,
 };
@@ -28,7 +28,7 @@ use uuid::Uuid;
 /// Helper to create test database pool
 async fn setup_test_pool() -> PgPool {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
     });
 
     PgPool::connect(&database_url)
@@ -236,7 +236,7 @@ async fn test_example_10_order_processing_with_email() {
 
     // Get database URL for workflow
     let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
     });
 
     // Create auth service
@@ -258,11 +258,11 @@ async fn test_example_10_order_processing_with_email() {
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
-    let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
+    let workflow_storage = Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone()));
     let shutdown_token = CancellationToken::new();
 
-    // Start StreamFlow API server
-    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    // Start Kruxia Flow API server
+    let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
     let state = AppState::new(
         pool.clone(),
         Arc::new(auth_service),
@@ -311,7 +311,7 @@ async fn test_example_10_order_processing_with_email() {
 
     // Start worker with all required activities
     let postgres_pool_cache = new_pool_cache();
-    let mut registry = ActivityRegistry::new(Arc::new(streamflow_core::NoOpCache::new()));
+    let mut registry = ActivityRegistry::new(Arc::new(kruxiaflow_core::NoOpCache::new()));
     registry.register(Arc::new(HttpRequestActivity::new()));
     registry.register(Arc::new(PostgresQueryActivity::new(
         postgres_pool_cache.clone(),
@@ -432,7 +432,7 @@ activities:
     activity_name: email_send
     parameters:
       smtp_url: "smtp://127.0.0.1:1025"
-      from: "orders@streamflow-test.com"
+      from: "orders@kruxiaflow-test.com"
       to:
         - "{{{{INPUT.customer_email}}}}"
       subject: "Order Confirmation - #{{{{record_order.result.results[0].rows[0].order_id}}}}"
@@ -691,7 +691,7 @@ activities:
 #[tokio::test]
 #[serial]
 async fn test_example_10_verify_workflow_definition() {
-    use streamflow_core::workflow::definition::WorkflowDefinition;
+    use kruxiaflow_core::workflow::definition::WorkflowDefinition;
 
     let workflow_yaml = include_str!("../../examples/10-order-processing.yaml");
     let workflow_def =

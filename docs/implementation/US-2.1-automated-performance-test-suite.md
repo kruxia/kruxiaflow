@@ -53,7 +53,7 @@ flowchart TB
         HttpClient[HTTP Client<br/>reqwest]
     end
 
-    subgraph "StreamFlow (Under Test)"
+    subgraph "Kruxia Flow (Under Test)"
         API[API Server :8080]
         Orch[Orchestrator]
         Worker[Worker Pool]
@@ -120,7 +120,7 @@ members = [
 
 ```toml
 [package]
-name = "streamflow-profiling"
+name = "kruxiaflow-profiling"
 version = "0.1.0"
 edition = "2021"
 
@@ -142,8 +142,8 @@ chrono = { version = "0.4", features = ["serde"] }
 # Testing
 serial_test = "3"
 
-# StreamFlow dependencies (for workflow definitions only, not direct DB access)
-streamflow-core = { path = "../core" }
+# Kruxia Flow dependencies (for workflow definitions only, not direct DB access)
+kruxiaflow-core = { path = "../core" }
 
 [dev-dependencies]
 # None needed - all tests are in main src/
@@ -167,7 +167,7 @@ benchmark/
 
 **File**: `benchmark/src/client.rs`
 
-**Purpose**: Wrapper around reqwest for StreamFlow API calls.
+**Purpose**: Wrapper around reqwest for Kruxia Flow API calls.
 
 ```rust
 use reqwest::Client;
@@ -283,7 +283,7 @@ impl StreamFlowClient {
 
 **Purpose**: End-to-end workflow throughput and latency measurements via HTTP API only.
 
-**Key Principle**: Test StreamFlow the same way we'll test Temporal - through production API interfaces.
+**Key Principle**: Test Kruxia Flow the same way we'll test Temporal - through production API interfaces.
 
 #### 2.1 Workflow Scenario Definitions
 
@@ -291,7 +291,7 @@ impl StreamFlowClient {
 
 ```rust
 use serde_json::{json, Value};
-use streamflow_core::workflow::*; // Only for WorkflowDefinition structs
+use kruxiaflow_core::workflow::*; // Only for WorkflowDefinition structs
 use uuid::Uuid;
 
 /// Create a sequential workflow definition
@@ -504,7 +504,7 @@ fn percentile(sorted_values: &[u64], p: f64) -> u64 {
 #[tokio::test]
 #[serial]
 async fn test_sequential_workflow_load() {
-    // StreamFlow must be running on localhost:8080
+    // Kruxia Flow must be running on localhost:8080
     let client = StreamFlowClient::new("http://localhost:8080".to_string());
 
     // NOTE: Workflow definitions must be registered beforehand via API or database
@@ -801,7 +801,7 @@ impl BenchmarkResults {
 
 **Key changes from original plan**:
 - No Criterion benchmarks (deferred to US-2.X)
-- Start StreamFlow server before running benchmarks
+- Start Kruxia Flow server before running benchmarks
 - Run benchmarks from separate `benchmark` crate via HTTP API
 
 #### 3.1 Benchmark Workflow
@@ -822,8 +822,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  DATABASE_URL: postgres://streamflow:streamflow@localhost/streamflow_bench
-  STREAMFLOW_BASE_URL: http://localhost:8080
+  DATABASE_URL: postgres://kruxiaflow:kruxiaflow@localhost/kruxiaflow_bench
+  KRUXIAFLOW_BASE_URL: http://localhost:8080
 
 jobs:
   benchmark:
@@ -834,9 +834,9 @@ jobs:
       postgres:
         image: postgres:18
         env:
-          POSTGRES_USER: streamflow
-          POSTGRES_PASSWORD: streamflow
-          POSTGRES_DB: streamflow_bench
+          POSTGRES_USER: kruxiaflow
+          POSTGRES_PASSWORD: kruxiaflow
+          POSTGRES_DB: kruxiaflow_bench
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -867,12 +867,12 @@ jobs:
       - name: Run database migrations
         run: sqlx migrate run
 
-      - name: Build StreamFlow
-        run: cargo build --release --bin streamflow
+      - name: Build Kruxia Flow
+        run: cargo build --release --bin kruxiaflow
 
-      - name: Start StreamFlow server in background
+      - name: Start Kruxia Flow server in background
         run: |
-          ./target/release/streamflow serve --port 8080 &
+          ./target/release/kruxiaflow serve --port 8080 &
           sleep 5
           # Wait for server to be ready
           timeout 30 bash -c 'until curl -f http://localhost:8080/health; do sleep 1; done'
@@ -884,7 +884,7 @@ jobs:
 
       - name: Run HTTP API load tests
         run: |
-          cargo test --package streamflow-profiling --release -- --nocapture --test-threads=1 | tee load-test-output.txt
+          cargo test --package kruxiaflow-profiling --release -- --nocapture --test-threads=1 | tee load-test-output.txt
 
       - name: Parse benchmark results
         id: parse_results
@@ -1185,7 +1185,7 @@ HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>StreamFlow Performance Report</title>
+    <title>Kruxia Flow Performance Report</title>
     <style>
         body {{ font-family: Arial, sans-serif; margin: 20px; }}
         h1 {{ color: #333; }}
@@ -1199,7 +1199,7 @@ HTML_TEMPLATE = """
     </style>
 </head>
 <body>
-    <h1>StreamFlow Performance Report</h1>
+    <h1>Kruxia Flow Performance Report</h1>
     <p><strong>Timestamp:</strong> {timestamp}</p>
     <p><strong>Git SHA:</strong> {git_sha}</p>
 
@@ -1303,13 +1303,13 @@ if __name__ == '__main__':
 **File**: `docs/performance-testing.md`
 
 ```markdown
-# StreamFlow Performance Testing Guide
+# Kruxia Flow Performance Testing Guide
 
 This guide explains how to run performance benchmarks and interpret results.
 
 ## Overview
 
-StreamFlow includes two types of performance tests:
+Kruxia Flow includes two types of performance tests:
 
 1. **Micro-benchmarks** (Criterion.rs): Fast benchmarks measuring component overhead
 2. **Load tests**: End-to-end workflow throughput and latency measurements
@@ -1319,20 +1319,20 @@ StreamFlow includes two types of performance tests:
 ### Prerequisites
 
 - PostgreSQL 18+ running locally
-- Database: `streamflow_bench`
-- Environment variable: `DATABASE_URL=postgres://localhost/streamflow_bench`
+- Database: `kruxiaflow_bench`
+- Environment variable: `DATABASE_URL=postgres://localhost/kruxiaflow_bench`
 
 ### Run Criterion Benchmarks
 
 ```bash
 # Run all benchmarks
-cargo bench --package streamflow-core
+cargo bench --package kruxiaflow-core
 
 # Run specific benchmark group
-cargo bench --package streamflow-core --bench workflow_benchmarks -- workflow_evaluation
+cargo bench --package kruxiaflow-core --bench workflow_benchmarks -- workflow_evaluation
 
 # Generate HTML reports (in target/criterion/)
-cargo bench --package streamflow-core
+cargo bench --package kruxiaflow-core
 open target/criterion/report/index.html
 ```
 
@@ -1340,10 +1340,10 @@ open target/criterion/report/index.html
 
 ```bash
 # Run all load tests
-cargo test --package streamflow-core --test performance_load_tests --release -- --nocapture
+cargo test --package kruxiaflow-core --test performance_load_tests --release -- --nocapture
 
 # Run specific scenario
-cargo test --package streamflow-core --test performance_load_tests --release test_sequential_workflow_load -- --nocapture
+cargo test --package kruxiaflow-core --test performance_load_tests --release test_sequential_workflow_load -- --nocapture
 ```
 
 ## CI Integration
@@ -1470,7 +1470,7 @@ async fn test_new_scenario() {
 ## References
 
 - [Criterion.rs User Guide](https://bheisler.github.io/criterion.rs/book/)
-- [StreamFlow Architecture](architecture.md)
+- [Kruxia Flow Architecture](architecture.md)
 - [Epic 2: Performance Benchmarking](mvp-requirements.md#epic-2-performance-benchmarking-and-validation)
 ```
 
@@ -1481,7 +1481,7 @@ async fn test_new_scenario() {
 ```markdown
 ## Performance Benchmarking
 
-StreamFlow includes comprehensive performance testing infrastructure to ensure we meet throughput and latency targets.
+Kruxia Flow includes comprehensive performance testing infrastructure to ensure we meet throughput and latency targets.
 
 ### Benchmark Types
 
@@ -1547,7 +1547,7 @@ See [Performance Testing Guide](performance-testing.md) for details.
 - [ ] Create `benchmark/src/scenarios.rs` - Workflow scenario definitions
 - [ ] Create `benchmark/src/metrics.rs` - Metrics collection structs
 - [ ] Create `benchmark/src/lib.rs` - Library exports
-- [ ] Verify crate compiles: `cargo build --package streamflow-profiling`
+- [ ] Verify crate compiles: `cargo build --package kruxiaflow-profiling`
 
 ### Phase 2: HTTP API Load Tests (6 hours)
 - [ ] Create `benchmark/src/tests/load_tests.rs`
@@ -1559,13 +1559,13 @@ See [Performance Testing Guide](performance-testing.md) for details.
 - [ ] Add test: `test_high_concurrency_load` (5000 workflows, 100 concurrent)
 - [ ] Add test: `test_sustained_throughput` (60 second sustained load)
 - [ ] Implement metrics reporting (throughput, latency percentiles, success rate)
-- [ ] Verify tests run locally with StreamFlow server running
+- [ ] Verify tests run locally with Kruxia Flow server running
 
 ### Phase 3: CI Integration (3-4 hours)
 - [ ] Create `.github/workflows/benchmarks.yml`
 - [ ] Configure PostgreSQL service in GitHub Actions
-- [ ] Add step: Build StreamFlow server
-- [ ] Add step: Start StreamFlow server in background
+- [ ] Add step: Build Kruxia Flow server
+- [ ] Add step: Start Kruxia Flow server in background
 - [ ] Add step: Wait for server health check
 - [ ] Add step: Register benchmark workflow definitions
 - [ ] Add step: Run HTTP API load tests from benchmark crate
@@ -1596,10 +1596,10 @@ See [Performance Testing Guide](performance-testing.md) for details.
 - [ ] Review and polish documentation
 
 ### Phase 5: Validation (1 hour)
-- [ ] Run StreamFlow server locally
+- [ ] Run Kruxia Flow server locally
 - [ ] Run benchmark tests locally and verify results
 - [ ] Verify CI pipeline executes successfully on test PR
-- [ ] Verify StreamFlow server starts correctly in CI
+- [ ] Verify Kruxia Flow server starts correctly in CI
 - [ ] Verify regression detection works
 - [ ] Verify HTML report generation with scenarios
 - [ ] Verify PR comments appear correctly
@@ -1622,13 +1622,13 @@ See [Performance Testing Guide](performance-testing.md) for details.
 **Note**: Criterion removed - deferred to US-2.X (micro-benchmark optimization tool)
 
 ### Infrastructure
-- PostgreSQL 18+ (database: `streamflow_bench`)
-- StreamFlow server running on localhost:8080 (for benchmarks)
+- PostgreSQL 18+ (database: `kruxiaflow_bench`)
+- Kruxia Flow server running on localhost:8080 (for benchmarks)
 - GitHub Actions with Ubuntu runner
 - Python 3.x for analysis scripts
 
 ### Internal Dependencies
-- Completed US-1C.2 (All-in-One Service Launcher) - for running StreamFlow server
+- Completed US-1C.2 (All-in-One Service Launcher) - for running Kruxia Flow server
 - Completed US-1A.6 (Workflow Status Query) - for HTTP API status checks
 - Completed Epic 1B (Built-in Worker) - for end-to-end workflow execution
 - HTTP API endpoints: `POST /api/v1/workflows`, `GET /api/v1/workflows/{id}`
@@ -1665,7 +1665,7 @@ See [Performance Testing Guide](performance-testing.md) for details.
 
 ## Risks and Mitigations
 
-### Risk: StreamFlow Server Startup Failures in CI
+### Risk: Kruxia Flow Server Startup Failures in CI
 **Mitigation**:
 - Health check endpoint (`/health`) with timeout
 - Verify server logs if startup fails
@@ -1688,8 +1688,8 @@ See [Performance Testing Guide](performance-testing.md) for details.
 
 ### Risk: Test Database Bloat
 **Mitigation**:
-- StreamFlow server manages workflow lifecycle
-- Database cleanup handled by StreamFlow
+- Kruxia Flow server manages workflow lifecycle
+- Database cleanup handled by Kruxia Flow
 - Monitor database size in CI logs
 
 ### Risk: Baseline Drift
@@ -1729,6 +1729,6 @@ See [Performance Testing Guide](performance-testing.md) for details.
 
 - [reqwest HTTP Client](https://docs.rs/reqwest/)
 - [GitHub Actions: PostgreSQL Service](https://docs.github.com/en/actions/using-containerized-services/creating-postgresql-service-containers)
-- [StreamFlow Architecture](architecture.md)
+- [Kruxia Flow Architecture](architecture.md)
 - [MVP Requirements - Epic 2](mvp-requirements.md#epic-2-performance-benchmarking-and-validation)
 - [Temporal Benchmarking](https://temporal.io/blog/performance-benchmarking) (for comparison methodology)

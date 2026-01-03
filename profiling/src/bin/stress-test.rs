@@ -1,4 +1,4 @@
-//! StreamFlow Stress Test CLI
+//! Kruxia Flow Stress Test CLI
 //!
 //! Runs ramping stress tests to identify system breaking points and capacity limits.
 //!
@@ -16,13 +16,13 @@ use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use streamflow_profiling::client::StreamFlowClient;
-use streamflow_profiling::monitor::{ResourceAnalysis, ResourceMonitor};
-use streamflow_profiling::stress::{StressTestConfig, run_stress_test};
+use kruxiaflow_profiling::client::StreamFlowClient;
+use kruxiaflow_profiling::monitor::{ResourceAnalysis, ResourceMonitor};
+use kruxiaflow_profiling::stress::{StressTestConfig, run_stress_test};
 
 #[derive(Parser, Debug)]
 #[command(name = "stress-test")]
-#[command(about = "StreamFlow Stress Test - Identify system breaking points and capacity limits")]
+#[command(about = "Kruxia Flow Stress Test - Identify system breaking points and capacity limits")]
 #[command(version)]
 struct Args {
     /// Run quick stress test (100 -> 1,000 concurrent)
@@ -92,13 +92,13 @@ struct Args {
 
 fn create_client() -> StreamFlowClient {
     let base_url =
-        env::var("STREAMFLOW_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+        env::var("KRUXIAFLOW_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
 
-    let client_id = env::var("STREAMFLOW_CLIENT_ID")
-        .expect("STREAMFLOW_CLIENT_ID environment variable must be set");
+    let client_id = env::var("KRUXIAFLOW_CLIENT_ID")
+        .expect("KRUXIAFLOW_CLIENT_ID environment variable must be set");
 
-    let client_secret = env::var("STREAMFLOW_CLIENT_SECRET")
-        .expect("STREAMFLOW_CLIENT_SECRET environment variable must be set");
+    let client_secret = env::var("KRUXIAFLOW_CLIENT_SECRET")
+        .expect("KRUXIAFLOW_CLIENT_SECRET environment variable must be set");
 
     StreamFlowClient::new(base_url, client_id, client_secret)
 }
@@ -134,12 +134,12 @@ async fn main() {
     let args = Args::parse();
 
     println!("\n{}", "=".repeat(70));
-    println!("StreamFlow Stress Test");
+    println!("Kruxia Flow Stress Test");
     println!("{}\n", "=".repeat(70));
 
     // Verify server is accessible
     let base_url =
-        env::var("STREAMFLOW_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+        env::var("KRUXIAFLOW_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
     println!("Checking server at {}...", base_url);
 
     let health_url = format!("{}/health", base_url);
@@ -153,8 +153,8 @@ async fn main() {
         }
         Err(e) => {
             eprintln!("Failed to connect to server: {}", e);
-            eprintln!("\nMake sure the StreamFlow server is running:");
-            eprintln!("  streamflow serve --port 8080");
+            eprintln!("\nMake sure the Kruxia Flow server is running:");
+            eprintln!("  kruxiaflow serve --port 8080");
             std::process::exit(1);
         }
     }
@@ -243,7 +243,7 @@ async fn main() {
     }
 }
 
-fn generate_markdown_summary(results: &streamflow_profiling::stress::StressTestResults) -> String {
+fn generate_markdown_summary(results: &kruxiaflow_profiling::stress::StressTestResults) -> String {
     let mut md = String::new();
 
     md.push_str("# Stress Test Results\n\n");

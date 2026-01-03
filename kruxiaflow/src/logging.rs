@@ -10,8 +10,8 @@ fn should_enable_verbose_tracing(log_level: &str) -> bool {
     // This handles both simple levels (e.g., "debug") and complex filters (e.g., "debug,sqlx=warn")
     log_level.to_lowercase().starts_with("debug")
         || log_level.to_lowercase().starts_with("trace")
-        || log_level.to_lowercase().contains("streamflow=debug")
-        || log_level.to_lowercase().contains("streamflow=trace")
+        || log_level.to_lowercase().contains("kruxiaflow=debug")
+        || log_level.to_lowercase().contains("kruxiaflow=trace")
 }
 
 /// Initialize logging based on level and format
@@ -174,18 +174,18 @@ mod tests {
     }
 
     #[test]
-    fn test_should_enable_verbose_tracing_for_streamflow_debug() {
-        assert!(should_enable_verbose_tracing("info,streamflow=debug"));
+    fn test_should_enable_verbose_tracing_for_kruxiaflow_debug() {
+        assert!(should_enable_verbose_tracing("info,kruxiaflow=debug"));
         assert!(should_enable_verbose_tracing(
-            "warn,streamflow=debug,sqlx=error"
+            "warn,kruxiaflow=debug,sqlx=error"
         ));
     }
 
     #[test]
-    fn test_should_enable_verbose_tracing_for_streamflow_trace() {
-        assert!(should_enable_verbose_tracing("info,streamflow=trace"));
+    fn test_should_enable_verbose_tracing_for_kruxiaflow_trace() {
+        assert!(should_enable_verbose_tracing("info,kruxiaflow=trace"));
         assert!(should_enable_verbose_tracing(
-            "error,streamflow=trace,sqlx=warn"
+            "error,kruxiaflow=trace,sqlx=warn"
         ));
     }
 
@@ -210,11 +210,11 @@ mod tests {
     }
 
     #[test]
-    fn test_should_disable_verbose_tracing_for_streamflow_info() {
-        // streamflow=info should NOT enable verbose tracing
-        assert!(!should_enable_verbose_tracing("streamflow=info"));
+    fn test_should_disable_verbose_tracing_for_kruxiaflow_info() {
+        // kruxiaflow=info should NOT enable verbose tracing
+        assert!(!should_enable_verbose_tracing("kruxiaflow=info"));
         assert!(!should_enable_verbose_tracing(
-            "info,streamflow=info,sqlx=warn"
+            "info,kruxiaflow=info,sqlx=warn"
         ));
     }
 }

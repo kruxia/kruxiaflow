@@ -1,11 +1,11 @@
 use crate::websocket::ConnectionManager;
 use sqlx::PgPool;
 use std::sync::Arc;
-use streamflow_core::cache::CacheService;
-use streamflow_core::events::EventSource;
-use streamflow_core::queue::ActivityQueue;
-use streamflow_core::storage::WorkflowStorage;
-use streamflow_oauth::AuthenticationService;
+use kruxiaflow_core::cache::CacheService;
+use kruxiaflow_core::events::EventSource;
+use kruxiaflow_core::queue::ActivityQueue;
+use kruxiaflow_core::storage::WorkflowStorage;
+use kruxiaflow_oauth::AuthenticationService;
 use tokio_util::sync::CancellationToken;
 
 /// Build metadata captured at compile time
@@ -176,11 +176,11 @@ pub mod tests {
     use futures::stream::{self, Stream};
     use sqlx::PgPool;
     use std::pin::Pin;
-    use streamflow_core::cache::{CacheService, CachedResult};
-    use streamflow_core::events::{EventError, NewWorkflowEvent, WorkflowEvent};
-    use streamflow_core::queue::{Activity, ActivityResult, QueuedActivity};
-    use streamflow_core::storage::{FileMetadata, StorageError};
-    use streamflow_oauth::{AuthResponse, AuthResult, AuthenticationService, Claims, JwtKey};
+    use kruxiaflow_core::cache::{CacheService, CachedResult};
+    use kruxiaflow_core::events::{EventError, NewWorkflowEvent, WorkflowEvent};
+    use kruxiaflow_core::queue::{Activity, ActivityResult, QueuedActivity};
+    use kruxiaflow_core::storage::{FileMetadata, StorageError};
+    use kruxiaflow_oauth::{AuthResponse, AuthResult, AuthenticationService, Claims, JwtKey};
     use tokio_util::bytes::Bytes;
     use uuid::Uuid;
 
@@ -202,7 +202,7 @@ pub mod tests {
             &self,
             _workflow_id: Uuid,
             _activities: Vec<Activity>,
-        ) -> streamflow_core::queue::Result<()> {
+        ) -> kruxiaflow_core::queue::Result<()> {
             Ok(())
         }
 
@@ -211,15 +211,15 @@ pub mod tests {
             _worker_id: &str,
             _namespace: &str,
             _name: &str,
-        ) -> streamflow_core::queue::Result<Option<QueuedActivity>> {
+        ) -> kruxiaflow_core::queue::Result<Option<QueuedActivity>> {
             Ok(None)
         }
 
         async fn get_activity_summary(
             &self,
             _activity_id: Uuid,
-        ) -> streamflow_core::queue::Result<streamflow_core::queue::ActivitySummary> {
-            Ok(streamflow_core::queue::ActivitySummary {
+        ) -> kruxiaflow_core::queue::Result<kruxiaflow_core::queue::ActivitySummary> {
+            Ok(kruxiaflow_core::queue::ActivitySummary {
                 workflow_id: Uuid::now_v7(),
                 activity_key: "mock_activity".to_string(),
                 iteration: None,
@@ -231,7 +231,7 @@ pub mod tests {
             _activity_id: Uuid,
             _worker_id: &str,
             _result: ActivityResult,
-        ) -> streamflow_core::queue::Result<()> {
+        ) -> kruxiaflow_core::queue::Result<()> {
             Ok(())
         }
 
@@ -241,7 +241,7 @@ pub mod tests {
             _worker_id: &str,
             _retryable: bool,
             _result: ActivityResult,
-        ) -> streamflow_core::queue::Result<bool> {
+        ) -> kruxiaflow_core::queue::Result<bool> {
             Ok(false)
         }
 
@@ -249,7 +249,7 @@ pub mod tests {
             &self,
             _activity_id: Uuid,
             _worker_id: &str,
-        ) -> streamflow_core::queue::Result<()> {
+        ) -> kruxiaflow_core::queue::Result<()> {
             Ok(())
         }
     }
@@ -440,7 +440,7 @@ pub mod tests {
 
     async fn mock_pool() -> PgPool {
         let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamflow".to_string()
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
         });
         PgPool::connect(&database_url)
             .await
@@ -679,11 +679,11 @@ pub mod tests {
 
         // This should use the default URL
         let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
         });
         assert_eq!(
             database_url,
-            "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow"
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow"
         );
     }
 }

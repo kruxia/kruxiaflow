@@ -1,4 +1,4 @@
-# StreamFlow v0.2: Compiled Workflow Representation
+# Kruxia Flow v0.2: Compiled Workflow Representation
 
 **Date**: October 25, 2025  
 **Type**: Performance Optimization  
@@ -610,7 +610,7 @@ Throughput:
 - Worker must maintain state
 - Latency: 10-50ms per decision
 
-**StreamFlow (compiled)**:
+**Kruxia Flow (compiled)**:
 - Decision logic in orchestrator (Rust)
 - No RPC needed
 - State in bitmask (compact)
@@ -626,7 +626,7 @@ Throughput:
 - No compilation or optimization
 - Latency: 50-500ms per task schedule
 
-**StreamFlow (compiled)**:
+**Kruxia Flow (compiled)**:
 - Pre-compiled dependency graph
 - Bitmask-based evaluation
 - Zero parsing overhead
@@ -642,7 +642,7 @@ Throughput:
 - Database query per evaluation
 - Latency: 5-20ms per task schedule
 
-**StreamFlow (compiled)**:
+**Kruxia Flow (compiled)**:
 - Rust-based evaluation
 - Binary compiled format
 - In-memory cached
@@ -664,4 +664,4 @@ The **Compiled Workflow Representation** is a game-changing optimization that:
 ✅ **Scales to large workflows** (bitmask efficiency)  
 ✅ **Phased implementation** (can ship without it, optimize later)  
 
-This optimization, combined with StreamFlow's event-driven architecture and Rust implementation, positions StreamFlow as the **highest-performance workflow orchestration platform** on the market—10-1000x faster than any competitor for the orchestration hot path.
+This optimization, combined with Kruxia Flow's event-driven architecture and Rust implementation, positions Kruxia Flow as the **highest-performance workflow orchestration platform** on the market—10-1000x faster than any competitor for the orchestration hot path.

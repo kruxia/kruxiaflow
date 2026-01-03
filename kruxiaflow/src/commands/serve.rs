@@ -4,13 +4,13 @@ use sqlx::PgPool;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use streamflow_api::{AppState, app_router};
-use streamflow_core::{
+use kruxiaflow_api::{AppState, app_router};
+use kruxiaflow_core::{
     ActivityQueue, CacheService, EventSource, OrchestratorConfig, PostgresEventSource,
     PostgresQueue, QueueConfig, RedisCache, orchestrator::OrchestratorError, run_orchestrator,
 };
-use streamflow_oauth::{AuthConfig, PostgresAuthService};
-use streamflow_worker::{WorkerConfig, WorkerManager};
+use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
+use kruxiaflow_worker::{WorkerConfig, WorkerManager};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
@@ -25,7 +25,7 @@ pub struct ServeCommand {
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_API_PORT",
+        env = "KRUXIAFLOW_API_PORT",
         default_value = "8080",
         help = "Port to bind API server to",
         long_help = "Port to bind API server to\n\n\
@@ -38,7 +38,7 @@ Example: --port 9090"
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_API_BIND",
+        env = "KRUXIAFLOW_API_BIND",
         default_value = "0.0.0.0",
         help = "Address to bind API server to",
         long_help = "Address to bind API server to\n\n\
@@ -53,7 +53,7 @@ Example: --bind 127.0.0.1"
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_WORKER_COUNT",
+        env = "KRUXIAFLOW_WORKER_COUNT",
         default_value = "4",
         help = "Number of concurrent worker tasks",
         long_help = "Number of concurrent worker tasks to spawn\n\n\
@@ -66,7 +66,7 @@ Example: --workers 20"
     /// Orchestrator consumer ID (for event polling checkpoint)
     #[arg(
         long,
-        env = "STREAMFLOW_ORCHESTRATOR_CONSUMER_ID",
+        env = "KRUXIAFLOW_ORCHESTRATOR_CONSUMER_ID",
         default_value = "orchestrator_default",
         help = "Orchestrator consumer ID for event checkpointing"
     )]
@@ -75,8 +75,8 @@ Example: --workers 20"
     /// Worker client ID for OAuth
     #[arg(
         long,
-        env = "STREAMFLOW_CLIENT_ID",
-        default_value = "streamflow_internal_worker",
+        env = "KRUXIAFLOW_CLIENT_ID",
+        default_value = "kruxiaflow_internal_worker",
         help = "OAuth client ID for internal workers"
     )]
     pub client_id: String,
@@ -84,7 +84,7 @@ Example: --workers 20"
     /// Worker client secret for OAuth
     #[arg(
         long,
-        env = "STREAMFLOW_CLIENT_SECRET",
+        env = "KRUXIAFLOW_CLIENT_SECRET",
         help = "OAuth client secret for internal workers (required)"
     )]
     pub client_secret: Option<String>,
@@ -92,7 +92,7 @@ Example: --workers 20"
     /// OAuth RSA private key (PEM format)
     #[arg(
         long,
-        env = "STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM",
+        env = "KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM",
         help = "RSA private key for JWT signing (required)"
     )]
     pub oauth_private_key: Option<String>,
@@ -100,7 +100,7 @@ Example: --workers 20"
     /// OAuth RSA public key (PEM format)
     #[arg(
         long,
-        env = "STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM",
+        env = "KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM",
         help = "RSA public key for JWT validation (optional, derived from private key if not provided)"
     )]
     pub oauth_public_key: Option<String>,
@@ -108,7 +108,7 @@ Example: --workers 20"
     /// Shutdown timeout in seconds
     #[arg(
         long,
-        env = "STREAMFLOW_SHUTDOWN_TIMEOUT",
+        env = "KRUXIAFLOW_SHUTDOWN_TIMEOUT",
         default_value = "30",
         help = "Graceful shutdown timeout in seconds",
         long_help = "Time to wait for in-flight activities to complete during shutdown\n\n\
@@ -121,7 +121,7 @@ Example: --shutdown-timeout 60"
     /// Maximum activities per worker poll
     #[arg(
         long,
-        env = "STREAMFLOW_POLL_MAX_ACTIVITIES",
+        env = "KRUXIAFLOW_POLL_MAX_ACTIVITIES",
         default_value = "1",
         help = "Maximum number of activities each worker claims per poll",
         long_help = "Maximum number of activities each worker claims per poll\n\n\
@@ -135,7 +135,7 @@ Example: --poll-max-activities 10"
     /// Redis connection URL for caching
     #[arg(
         long,
-        env = "STREAMFLOW_REDIS_URL",
+        env = "KRUXIAFLOW_REDIS_URL",
         default_value = "redis://127.0.0.1:6379",
         help = "Redis connection URL for caching",
         long_help = "Redis connection URL for activity result caching\n\n\
@@ -147,30 +147,30 @@ Example: --redis-url redis://localhost:6379/0"
     /// Run database migrations before starting
     #[arg(
         long,
-        env = "STREAMFLOW_MIGRATE",
+        env = "KRUXIAFLOW_MIGRATE",
         help = "Run database migrations before starting server",
         long_help = "Run pending database migrations before starting the server.\n\
 Useful for container deployments where migrations should run at startup.\n\n\
-Example: streamflow serve --migrate"
+Example: kruxiaflow serve --migrate"
     )]
     pub migrate: bool,
 
     /// Seed OAuth client before starting
     #[arg(
         long,
-        env = "STREAMFLOW_SEED_CLIENT",
+        env = "KRUXIAFLOW_SEED_CLIENT",
         help = "Seed OAuth client credentials before starting server",
         long_help = "Seed OAuth client credentials before starting the server.\n\
 Skips seeding if the client already exists (idempotent).\n\
-Requires STREAMFLOW_CLIENT_ID and STREAMFLOW_CLIENT_SECRET.\n\n\
-Example: streamflow serve --seed-client"
+Requires KRUXIAFLOW_CLIENT_ID and KRUXIAFLOW_CLIENT_SECRET.\n\n\
+Example: kruxiaflow serve --seed-client"
     )]
     pub seed_client: bool,
 
     /// Database connection timeout for --migrate/--seed-client (seconds)
     #[arg(
         long,
-        env = "STREAMFLOW_DB_CONNECT_TIMEOUT",
+        env = "KRUXIAFLOW_DB_CONNECT_TIMEOUT",
         default_value = "60",
         help = "Timeout for initial database connection (seconds)",
         long_help = "Maximum time to wait for database to become available.\n\
@@ -193,12 +193,12 @@ impl ServeCommand {
         }
 
         if self.client_secret.is_none() {
-            anyhow::bail!("Client secret required (--client-secret or STREAMFLOW_CLIENT_SECRET)");
+            anyhow::bail!("Client secret required (--client-secret or KRUXIAFLOW_CLIENT_SECRET)");
         }
 
         if self.oauth_private_key.is_none() {
             anyhow::bail!(
-                "OAuth private key required (--oauth-private-key or STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM)"
+                "OAuth private key required (--oauth-private-key or KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM)"
             );
         }
 
@@ -306,7 +306,7 @@ async fn spawn_workers(
     api_url: String,
     client_id: String,
     client_secret: String,
-    workflow_storage: Arc<dyn streamflow_core::WorkflowStorage>,
+    workflow_storage: Arc<dyn kruxiaflow_core::WorkflowStorage>,
 ) -> Result<Vec<JoinHandle<()>>> {
     tracing::info!(
         count = worker_count,
@@ -320,7 +320,7 @@ async fn spawn_workers(
     let cache_service = cache_config.create_cache_service();
 
     // Create activity registry with all built-in activities pre-registered
-    let registry = streamflow_worker::register_builtin_activities(cache_service);
+    let registry = kruxiaflow_worker::register_builtin_activities(cache_service);
 
     let config = WorkerConfig {
         api_url: api_url.clone(),
@@ -415,13 +415,13 @@ async fn wait_for_postgres(database_url: &str, timeout_secs: u64) -> Result<PgPo
 pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> {
     // Load secrets from files if _FILE variants are set (Docker secrets pattern)
     if cmd.oauth_private_key.is_none() {
-        cmd.oauth_private_key = load_secret("STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM");
+        cmd.oauth_private_key = load_secret("KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM");
     }
     if cmd.oauth_public_key.is_none() {
-        cmd.oauth_public_key = load_secret("STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM");
+        cmd.oauth_public_key = load_secret("KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM");
     }
     if cmd.client_secret.is_none() {
-        cmd.client_secret = load_secret("STREAMFLOW_CLIENT_SECRET");
+        cmd.client_secret = load_secret("KRUXIAFLOW_CLIENT_SECRET");
     }
 
     // Run startup tasks if requested (--migrate or --seed-client)
@@ -441,7 +441,7 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
             let client_id = &cmd.client_id;
             let client_secret = cmd.client_secret.as_ref().ok_or_else(|| {
                 anyhow::anyhow!(
-                    "Client secret required for --seed-client (--client-secret or STREAMFLOW_CLIENT_SECRET)"
+                    "Client secret required for --seed-client (--client-secret or KRUXIAFLOW_CLIENT_SECRET)"
                 )
             })?;
 
@@ -461,7 +461,7 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         bind = %cmd.bind,
         workers = cmd.workers,
         shutdown_timeout = cmd.shutdown_timeout,
-        "Starting StreamFlow all-in-one mode"
+        "Starting Kruxia Flow all-in-one mode"
     );
 
     // Create shutdown coordinator
@@ -492,8 +492,8 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     let auth_config = AuthConfig {
         rsa_private_key_pem: cmd.oauth_private_key.as_ref().unwrap().clone(),
         rsa_public_key_pem: cmd.oauth_public_key.clone(),
-        jwt_issuer: "streamflow".to_string(),
-        jwt_audience: "streamflow-api".to_string(),
+        jwt_issuer: "kruxiaflow".to_string(),
+        jwt_audience: "kruxiaflow-api".to_string(),
         token_ttl: 86400, // 24 hours
     };
 
@@ -508,8 +508,8 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
 
     // Create workflow storage
-    let workflow_storage: Arc<dyn streamflow_core::WorkflowStorage> =
-        Arc::new(streamflow_core::PostgresStorage::new(pool.clone()));
+    let workflow_storage: Arc<dyn kruxiaflow_core::WorkflowStorage> =
+        Arc::new(kruxiaflow_core::PostgresStorage::new(pool.clone()));
 
     // Create cache service
     let cache_service: Arc<dyn CacheService> = Arc::new(
@@ -558,7 +558,7 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     tracing::info!("All services started successfully");
     tracing::info!(
         api_url = %api_url,
-        "StreamFlow is ready - API available at {}",
+        "Kruxia Flow is ready - API available at {}",
         api_url
     );
 
@@ -661,7 +661,7 @@ mod tests {
             bind: "0.0.0.0".to_string(),
             workers: 1,
             orchestrator_id: "orchestrator_default".to_string(),
-            client_id: "streamflow_internal_worker".to_string(),
+            client_id: "kruxiaflow_internal_worker".to_string(),
             client_secret: Some("secret".to_string()),
             oauth_private_key: Some(
                 "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----".to_string(),

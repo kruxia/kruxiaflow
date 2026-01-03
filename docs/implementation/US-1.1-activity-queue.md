@@ -808,19 +808,19 @@ activities:
 
 ```bash
 # Queue polling configuration
-STREAMFLOW_QUEUE_POLL_INTERVAL=100ms      # Worker poll frequency
-STREAMFLOW_QUEUE_BATCH_SIZE=100           # Max activities per claim
+KRUXIAFLOW_QUEUE_POLL_INTERVAL=100ms      # Worker poll frequency
+KRUXIAFLOW_QUEUE_BATCH_SIZE=100           # Max activities per claim
 
 # Timeout and retry configuration
-STREAMFLOW_QUEUE_DEFAULT_TIMEOUT=60s      # Default activity timeout (if not in settings)
-STREAMFLOW_QUEUE_DEFAULT_MAX_RETRIES=3    # Default max retry attempts
+KRUXIAFLOW_QUEUE_DEFAULT_TIMEOUT=60s      # Default activity timeout (if not in settings)
+KRUXIAFLOW_QUEUE_DEFAULT_MAX_RETRIES=3    # Default max retry attempts
 
 # Cleanup configuration
-STREAMFLOW_QUEUE_CLEANUP_INTERVAL=60s     # How often to run failed activity cleanup
-STREAMFLOW_QUEUE_VACUUM_INTERVAL=5m       # VACUUM frequency
+KRUXIAFLOW_QUEUE_CLEANUP_INTERVAL=60s     # How often to run failed activity cleanup
+KRUXIAFLOW_QUEUE_VACUUM_INTERVAL=5m       # VACUUM frequency
 
 # Performance tuning
-STREAMFLOW_QUEUE_MAX_CONNECTIONS=20       # Connection pool size
+KRUXIAFLOW_QUEUE_MAX_CONNECTIONS=20       # Connection pool size
 ```
 
 ### Compile-Time Configuration

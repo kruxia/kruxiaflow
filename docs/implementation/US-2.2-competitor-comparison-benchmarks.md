@@ -5,7 +5,7 @@
 **Status**: ✅ IMPLEMENTED
 **Actual Effort**: ~2 hours (implementation only, testing deferred)
 **Priority**: P0 (Required for Epic 2 validation)
-**Architecture**: Python client benchmarks, StreamFlow vs Temporal vs Airflow
+**Architecture**: Python client benchmarks, Kruxia Flow vs Temporal vs Airflow
 
 ---
 
@@ -22,14 +22,14 @@
 - [ ] Docker Compose setup for reproducibility
 - [ ] Published methodology: Open-source on GitHub
 - [ ] Results: HTML report with charts
-- [ ] Target proof: StreamFlow >1,000 wf/sec vs Temporal 35-100 wf/sec vs Airflow 10-50 wf/sec
+- [ ] Target proof: Kruxia Flow >1,000 wf/sec vs Temporal 35-100 wf/sec vs Airflow 10-50 wf/sec
 - [ ] Critical: Run after Epic 1 to validate event-driven architecture
 
 ---
 
 ## Current State Analysis
 
-### StreamFlow Benchmark Structure (Current)
+### Kruxia Flow Benchmark Structure (Current)
 - **Rust-based**: `benchmark/` crate with load tests in Rust
 - **Shell script orchestration**: `scripts/profiling.sh` drives the benchmark suite
 - **Memory profiling**: `scripts/profile_memory.sh` for memory analysis
@@ -42,7 +42,7 @@
   - High concurrency (3 activities, 300 workflows, 100 concurrent)
   - Sustained throughput (120 seconds, 20 concurrent)
 
-### StreamFlow v0.1 Approach
+### Kruxia Flow v0.1 Approach
 - **Python-based**: Unified benchmark suite at `benchmarks/`
 - **Platform abstraction**: Common interface for all platforms
 - **Consistent methodology**: Same workflows, same metrics, same reporting
@@ -81,22 +81,22 @@
 
 This implementation creates a **Python-based unified benchmark suite** that:
 
-1. Runs identical workflows on StreamFlow and competitor platforms
+1. Runs identical workflows on Kruxia Flow and competitor platforms
 2. Uses Docker Compose for reproducible environments
 3. Collects consistent metrics across all platforms
 4. Generates comparative HTML reports with charts
-5. Normalizes the StreamFlow benchmarking approach for future maintainability
+5. Normalizes the Kruxia Flow benchmarking approach for future maintainability
 
 ### Key Design Decisions
 
 **Architecture Principles**:
 1. ✅ **Separate concerns**: Keep Rust benchmarks as internal profiling tool
-2. ✅ **Apples-to-apples**: Python HTTP clients for both StreamFlow and Temporal
-3. ✅ **Minimal dependencies**: Only `httpx` required for StreamFlow benchmarks
+2. ✅ **Apples-to-apples**: Python HTTP clients for both Kruxia Flow and Temporal
+3. ✅ **Minimal dependencies**: Only `httpx` required for Kruxia Flow benchmarks
 4. ✅ **Simple workflow definitions**: Python dicts/lists (JSON-serializable)
 5. ✅ **In-cluster execution**: Benchmark runners in Docker containers
 6. ✅ **Sequential execution**: One platform at a time (no cross-contamination)
-7. ✅ **Comprehensive scope**: StreamFlow vs Temporal vs Airflow (covers different market segments)
+7. ✅ **Comprehensive scope**: Kruxia Flow vs Temporal vs Airflow (covers different market segments)
 8. ⚠️ **Deferred metrics**: Skip system monitoring for MVP (add later for all platforms)
 
 **Why This Approach**:
@@ -111,13 +111,13 @@ This implementation creates a **Python-based unified benchmark suite** that:
 ```mermaid
 flowchart TB
     subgraph "Benchmark Runners (Python in Docker)"
-        SF_Bench[StreamFlow Benchmark<br/>httpx HTTP client<br/>Python dicts for workflows]
+        SF_Bench[Kruxia Flow Benchmark<br/>httpx HTTP client<br/>Python dicts for workflows]
         Temp_Bench[Temporal Benchmark<br/>temporalio SDK<br/>Python workflow classes]
         AF_Bench[Airflow Benchmark<br/>apache-airflow client<br/>Python DAG definitions]
     end
 
-    subgraph "Platform: StreamFlow"
-        SF_Binary[streamflow binary<br/>--release build]
+    subgraph "Platform: Kruxia Flow"
+        SF_Binary[kruxiaflow binary<br/>--release build]
         SF_API[API Server :8080]
         SF_Orch[Orchestrator]
         SF_Worker[Built-in Worker]
@@ -166,7 +166,7 @@ flowchart TB
     Metrics --> JSON
     Metrics --> HTML
 
-    note1[Note: Benchmarks run sequentially<br/>1: StreamFlow<br/>2: Temporal<br/>3: Airflow<br/>No cross-contamination]
+    note1[Note: Benchmarks run sequentially<br/>1: Kruxia Flow<br/>2: Temporal<br/>3: Airflow<br/>No cross-contamination]
 ```
 
 ### Workflow Scenarios
@@ -176,7 +176,7 @@ flowchart TB
 - **Parallel-10**: 10 echo activities in parallel with fan-out/fan-in (50 workflows)
 - **High-Concurrency-3**: 3 echo activities, 300 workflows, 100 concurrent
 
-**Rationale**: Match existing StreamFlow internal benchmarks for direct comparison.
+**Rationale**: Match existing Kruxia Flow internal benchmarks for direct comparison.
 
 **Post-MVP**: Additional workflow types can be added after Epic 2 validation.
 
@@ -192,8 +192,8 @@ Create simplified `benchmarks/` at repository root:
 benchmarks/
 ├── README.md                    # Usage and methodology
 ├── pyproject.toml               # Python package configuration
-├── streamflow/
-│   ├── benchmark.py            # StreamFlow HTTP client benchmark
+├── kruxiaflow/
+│   ├── benchmark.py            # Kruxia Flow HTTP client benchmark
 │   └── workflows.py            # Workflow definitions (Python dicts)
 ├── temporal/
 │   ├── benchmark.py            # Temporal SDK benchmark
@@ -219,13 +219,13 @@ benchmarks/
 
 ```toml
 [project]
-name = "streamflow-benchmarks"
+name = "kruxiaflow-benchmarks"
 version = "0.2.0"
-description = "Cross-platform workflow engine benchmarks: StreamFlow vs Temporal vs Airflow"
+description = "Cross-platform workflow engine benchmarks: Kruxia Flow vs Temporal vs Airflow"
 requires-python = ">=3.11"
 dependencies = [
     "click>=8.1.0",           # CLI framework (makes CLI much easier)
-    "httpx>=0.27.0",          # Async HTTP client (for StreamFlow)
+    "httpx>=0.27.0",          # Async HTTP client (for Kruxia Flow)
     "temporalio>=1.7.0",      # Temporal Python SDK (realistic platform usage)
     "apache-airflow>=2.9.0",  # Airflow for DAG definitions and API client
     "apache-airflow-providers-http>=4.0.0",  # HTTP provider for Airflow
@@ -242,18 +242,18 @@ build-backend = "setuptools.build_meta"
 
 **Rationale**:
 - **Click**: Simplifies CLI argument parsing and command structure
-- **httpx**: Async HTTP client for StreamFlow (apples-to-apples comparison)
+- **httpx**: Async HTTP client for Kruxia Flow (apples-to-apples comparison)
 - **temporalio**: Official SDK representing realistic Temporal usage
 - **apache-airflow**: Core library for DAG definitions and API client
 - **jinja2**: Template-based HTML report generation
 - **No heavy analytics**: pandas, plotly, pydantic deferred (use Python dicts)
 
-### 3. StreamFlow Workflow Definitions (1 hour)
+### 3. Kruxia Flow Workflow Definitions (1 hour)
 
-**File**: `benchmarks/streamflow/workflows.py`
+**File**: `benchmarks/kruxiaflow/workflows.py`
 
 ```python
-"""StreamFlow workflow definitions as Python dicts (JSON-serializable)"""
+"""Kruxia Flow workflow definitions as Python dicts (JSON-serializable)"""
 
 
 def create_sequential_workflow(num_activities: int) -> dict:
@@ -333,12 +333,12 @@ SEQUENTIAL_5 = create_sequential_workflow(5)
 SEQUENTIAL_3 = create_sequential_workflow(3)
 PARALLEL_10 = create_parallel_workflow(10)
 ```
-### 4. StreamFlow Benchmark Runner (2-3 hours)
+### 4. Kruxia Flow Benchmark Runner (2-3 hours)
 
-**File**: `benchmarks/streamflow/benchmark.py`
+**File**: `benchmarks/kruxiaflow/benchmark.py`
 
 ```python
-"""StreamFlow benchmark using HTTP API (httpx client)"""
+"""Kruxia Flow benchmark using HTTP API (httpx client)"""
 
 import asyncio
 import httpx
@@ -365,11 +365,11 @@ class BenchmarkMetrics:
 
 
 class StreamFlowBenchmark:
-    """Benchmark runner for StreamFlow via HTTP API"""
+    """Benchmark runner for Kruxia Flow via HTTP API"""
 
     def __init__(
         self,
-        base_url: str = "http://streamflow:8080",
+        base_url: str = "http://kruxiaflow:8080",
         client_id: str = "benchmark",
         client_secret: str = "benchmark_secret",
     ):
@@ -478,7 +478,7 @@ class StreamFlowBenchmark:
         latencies.sort()
 
         return BenchmarkMetrics(
-            platform="StreamFlow",
+            platform="Kruxia Flow",
             scenario=scenario_name,
             total_workflows=num_workflows,
             successful=successful,
@@ -512,7 +512,7 @@ from temporalio import activity
 
 @activity.defn
 async def echo_activity(input_data: dict) -> dict:
-    """Simple echo activity matching StreamFlow's echo"""
+    """Simple echo activity matching Kruxia Flow's echo"""
     return input_data
 ```
 
@@ -679,7 +679,7 @@ class TemporalBenchmark:
         max_concurrent: int,
     ) -> "BenchmarkMetrics":
         """Run a benchmark scenario"""
-        from streamflow.benchmark import BenchmarkMetrics, percentile
+        from kruxiaflow.benchmark import BenchmarkMetrics, percentile
 
         semaphore = asyncio.Semaphore(max_concurrent)
         results: list[tuple[bool, float]] = []
@@ -947,7 +947,7 @@ class AirflowBenchmark:
         max_concurrent: int,
     ) -> "BenchmarkMetrics":
         """Run a benchmark scenario"""
-        from streamflow.benchmark import BenchmarkMetrics, percentile
+        from kruxiaflow.benchmark import BenchmarkMetrics, percentile
 
         semaphore = asyncio.Semaphore(max_concurrent)
         results: list[tuple[bool, float]] = []
@@ -998,7 +998,7 @@ def generate_html_report(results: list, output_path: Path) -> None:
     html = """<!DOCTYPE html>
 <html>
 <head>
-    <title>StreamFlow vs Temporal Benchmark</title>
+    <title>Kruxia Flow vs Temporal Benchmark</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 40px; }
         h1 { color: #333; }
@@ -1010,7 +1010,7 @@ def generate_html_report(results: list, output_path: Path) -> None:
     </style>
 </head>
 <body>
-    <h1>StreamFlow vs Temporal Benchmark Results</h1>
+    <h1>Kruxia Flow vs Temporal Benchmark Results</h1>
     <p>Methodology: Same echo workflows, same hardware, sequential execution</p>
 
     <h2>Results Summary</h2>
@@ -1027,7 +1027,7 @@ def generate_html_report(results: list, output_path: Path) -> None:
 """
 
     for result in results:
-        row_class = "winner" if result.platform == "StreamFlow" and result.throughput_wf_per_sec > 1000 else ""
+        row_class = "winner" if result.platform == "Kruxia Flow" and result.throughput_wf_per_sec > 1000 else ""
         html += f"""        <tr class="{row_class}">
             <td>{result.platform}</td>
             <td>{result.scenario}</td>
@@ -1046,7 +1046,7 @@ def generate_html_report(results: list, output_path: Path) -> None:
 """
 
     # Calculate comparative metrics
-    sf_results = [r for r in results if r.platform == "StreamFlow"]
+    sf_results = [r for r in results if r.platform == "Kruxia Flow"]
     temp_results = [r for r in results if r.platform == "Temporal"]
 
     if sf_results and temp_results:
@@ -1054,9 +1054,9 @@ def generate_html_report(results: list, output_path: Path) -> None:
         temp_avg = sum(r.throughput_wf_per_sec for r in temp_results) / len(temp_results)
         speedup = sf_avg / temp_avg if temp_avg > 0 else 0
 
-        html += f"""        <li>StreamFlow average throughput: {sf_avg:.2f} workflows/sec</li>
+        html += f"""        <li>Kruxia Flow average throughput: {sf_avg:.2f} workflows/sec</li>
         <li>Temporal average throughput: {temp_avg:.2f} workflows/sec</li>
-        <li><strong>StreamFlow is {speedup:.1f}x faster than Temporal</strong></li>
+        <li><strong>Kruxia Flow is {speedup:.1f}x faster than Temporal</strong></li>
 """
 
     html += """    </ul>
@@ -1086,7 +1086,7 @@ import asyncio
 import json
 import click
 from pathlib import Path
-from streamflow.benchmark import StreamFlowBenchmark
+from kruxiaflow.benchmark import StreamFlowBenchmark
 from temporal.benchmark import TemporalBenchmark
 from temporal.workflows import SequentialBench5, SequentialBench3, ParallelBench10
 from shared.report import generate_html_report
@@ -1094,12 +1094,12 @@ from shared.report import generate_html_report
 
 @click.group()
 def cli():
-    """StreamFlow vs Temporal Benchmark Suite"""
+    """Kruxia Flow vs Temporal Benchmark Suite"""
     pass
 
 
 @cli.command()
-@click.option("--platform", type=click.Choice(["streamflow", "temporal", "airflow", "all"]), default="all", help="Platform to benchmark")
+@click.option("--platform", type=click.Choice(["kruxiaflow", "temporal", "airflow", "all"]), default="all", help="Platform to benchmark")
 @click.option("--output-dir", type=click.Path(), default="results", help="Output directory for results")
 def run(platform: str, output_dir: str):
     """Run benchmarks"""
@@ -1113,9 +1113,9 @@ async def run_benchmarks(platform: str, output_dir: str):
 
     all_results = []
 
-    if platform in ["streamflow", "all"]:
-        streamflow_results = await run_streamflow_benchmarks()
-        all_results.extend(streamflow_results)
+    if platform in ["kruxiaflow", "all"]:
+        kruxiaflow_results = await run_kruxiaflow_benchmarks()
+        all_results.extend(kruxiaflow_results)
 
     if platform in ["temporal", "all"]:
         temporal_results = await run_temporal_benchmarks()
@@ -1153,7 +1153,7 @@ def report(results_path: str):
         data = json.load(f)
 
     # Reconstruct BenchmarkMetrics objects
-    from streamflow.benchmark import BenchmarkMetrics
+    from kruxiaflow.benchmark import BenchmarkMetrics
     results = [BenchmarkMetrics(**item) for item in data]
 
     output_dir = results_file.parent
@@ -1169,15 +1169,15 @@ def check():
 
     click.echo("Checking platform availability...")
 
-    # Check StreamFlow
+    # Check Kruxia Flow
     try:
-        response = httpx.get("http://streamflow:8080/health", timeout=5.0)
+        response = httpx.get("http://kruxiaflow:8080/health", timeout=5.0)
         if response.status_code == 200:
-            click.secho("✅ StreamFlow is accessible", fg="green")
+            click.secho("✅ Kruxia Flow is accessible", fg="green")
         else:
-            click.secho(f"⚠️  StreamFlow returned status {response.status_code}", fg="yellow")
+            click.secho(f"⚠️  Kruxia Flow returned status {response.status_code}", fg="yellow")
     except Exception as e:
-        click.secho(f"❌ StreamFlow not accessible: {e}", fg="red")
+        click.secho(f"❌ Kruxia Flow not accessible: {e}", fg="red")
 
     # Check Temporal
     # Note: Temporal doesn't have a simple HTTP health endpoint
@@ -1208,40 +1208,40 @@ def print_summary(all_results):
     click.secho("Summary", bold=True)
     click.echo("=" * 60)
 
-    streamflow_results = [r for r in all_results if r.platform == "StreamFlow"]
+    kruxiaflow_results = [r for r in all_results if r.platform == "Kruxia Flow"]
     temporal_results = [r for r in all_results if r.platform == "Temporal"]
 
-    if streamflow_results:
-        sf_avg = sum(r.throughput_wf_per_sec for r in streamflow_results) / len(streamflow_results)
-        click.echo(f"StreamFlow avg throughput: {sf_avg:.2f} wf/sec")
+    if kruxiaflow_results:
+        sf_avg = sum(r.throughput_wf_per_sec for r in kruxiaflow_results) / len(kruxiaflow_results)
+        click.echo(f"Kruxia Flow avg throughput: {sf_avg:.2f} wf/sec")
 
         if sf_avg >= 1000:
-            click.secho("🎉 StreamFlow target achieved: >1,000 wf/sec!", fg="green", bold=True)
+            click.secho("🎉 Kruxia Flow target achieved: >1,000 wf/sec!", fg="green", bold=True)
         else:
-            click.secho(f"⚠️  StreamFlow below target: {sf_avg:.2f}/1000 wf/sec", fg="yellow")
+            click.secho(f"⚠️  Kruxia Flow below target: {sf_avg:.2f}/1000 wf/sec", fg="yellow")
 
     if temporal_results:
         temp_avg = sum(r.throughput_wf_per_sec for r in temporal_results) / len(temporal_results)
         click.echo(f"Temporal avg throughput: {temp_avg:.2f} wf/sec")
 
-    if streamflow_results and temporal_results:
-        sf_avg = sum(r.throughput_wf_per_sec for r in streamflow_results) / len(streamflow_results)
+    if kruxiaflow_results and temporal_results:
+        sf_avg = sum(r.throughput_wf_per_sec for r in kruxiaflow_results) / len(kruxiaflow_results)
         temp_avg = sum(r.throughput_wf_per_sec for r in temporal_results) / len(temporal_results)
         speedup = sf_avg / temp_avg if temp_avg > 0 else 0
         click.secho(f"Speedup vs Temporal: {speedup:.1f}x", fg="green" if speedup >= 10 else "yellow", bold=True)
 
     airflow_results = [r for r in all_results if r.platform == "Airflow"]
-    if streamflow_results and airflow_results:
-        sf_avg = sum(r.throughput_wf_per_sec for r in streamflow_results) / len(streamflow_results)
+    if kruxiaflow_results and airflow_results:
+        sf_avg = sum(r.throughput_wf_per_sec for r in kruxiaflow_results) / len(kruxiaflow_results)
         af_avg = sum(r.throughput_wf_per_sec for r in airflow_results) / len(airflow_results)
         speedup = sf_avg / af_avg if af_avg > 0 else 0
         click.secho(f"Speedup vs Airflow: {speedup:.1f}x", fg="green" if speedup >= 10 else "yellow", bold=True)
 
 
-async def run_streamflow_benchmarks():
-    """Run StreamFlow benchmark scenarios"""
+async def run_kruxiaflow_benchmarks():
+    """Run Kruxia Flow benchmark scenarios"""
     print("=" * 60)
-    print("Running StreamFlow Benchmarks")
+    print("Running Kruxia Flow Benchmarks")
     print("=" * 60)
 
     benchmark = StreamFlowBenchmark()
@@ -1398,10 +1398,10 @@ async def main():
     results_dir.mkdir(exist_ok=True)
 
     # Run benchmarks sequentially
-    streamflow_results = await run_streamflow_benchmarks()
+    kruxiaflow_results = await run_kruxiaflow_benchmarks()
     temporal_results = await run_temporal_benchmarks()
 
-    all_results = streamflow_results + temporal_results
+    all_results = kruxiaflow_results + temporal_results
 
     # Save JSON results
     json_path = results_dir / "results.json"
@@ -1418,18 +1418,18 @@ async def main():
     print("\n" + "=" * 60)
     print("Summary")
     print("=" * 60)
-    sf_avg = sum(r.throughput_wf_per_sec for r in streamflow_results) / len(streamflow_results)
+    sf_avg = sum(r.throughput_wf_per_sec for r in kruxiaflow_results) / len(kruxiaflow_results)
     temp_avg = sum(r.throughput_wf_per_sec for r in temporal_results) / len(temporal_results)
     speedup = sf_avg / temp_avg if temp_avg > 0 else 0
 
-    print(f"StreamFlow avg throughput: {sf_avg:.2f} wf/sec")
+    print(f"Kruxia Flow avg throughput: {sf_avg:.2f} wf/sec")
     print(f"Temporal avg throughput: {temp_avg:.2f} wf/sec")
     print(f"Speedup: {speedup:.1f}x")
 
     if sf_avg >= 1000:
-        print("\n🎉 StreamFlow target achieved: >1,000 wf/sec!")
+        print("\n🎉 Kruxia Flow target achieved: >1,000 wf/sec!")
     else:
-        print(f"\n⚠️  StreamFlow below target: {sf_avg:.2f}/1000 wf/sec")
+        print(f"\n⚠️  Kruxia Flow below target: {sf_avg:.2f}/1000 wf/sec")
 
 
 if __name__ == "__main__":
@@ -1444,33 +1444,33 @@ if __name__ == "__main__":
 version: '3.8'
 
 services:
-  # StreamFlow stack
-  streamflow-postgres:
+  # Kruxia Flow stack
+  kruxiaflow-postgres:
     image: postgres:18
     environment:
-      POSTGRES_USER: streamflow
-      POSTGRES_PASSWORD: streamflow
-      POSTGRES_DB: streamflow_bench
+      POSTGRES_USER: kruxiaflow
+      POSTGRES_PASSWORD: kruxiaflow
+      POSTGRES_DB: kruxiaflow_bench
     volumes:
-      - streamflow_pg_data:/var/lib/postgresql/data
+      - kruxiaflow_pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U streamflow"]
+      test: ["CMD-SHELL", "pg_isready -U kruxiaflow"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  streamflow:
-    image: streamflow:latest
+  kruxiaflow:
+    image: kruxiaflow:latest
     build:
       context: ..
       dockerfile: Dockerfile
     environment:
-      DATABASE_URL: postgres://streamflow:streamflow@streamflow-postgres:5432/streamflow_bench
-      STREAMFLOW_CLIENT_ID: benchmark
-      STREAMFLOW_CLIENT_SECRET: benchmark_secret
+      DATABASE_URL: postgres://kruxiaflow:kruxiaflow@kruxiaflow-postgres:5432/kruxiaflow_bench
+      KRUXIAFLOW_CLIENT_ID: benchmark
+      KRUXIAFLOW_CLIENT_SECRET: benchmark_secret
       RUST_LOG: info
     depends_on:
-      streamflow-postgres:
+      kruxiaflow-postgres:
         condition: service_healthy
     command: ["serve"]
     healthcheck:
@@ -1604,7 +1604,7 @@ services:
       context: .
       dockerfile: Dockerfile.benchmark
     depends_on:
-      streamflow:
+      kruxiaflow:
         condition: service_healthy
       temporal:
         condition: service_healthy
@@ -1615,7 +1615,7 @@ services:
     command: ["python", "run_benchmark.py", "run"]
 
 volumes:
-  streamflow_pg_data:
+  kruxiaflow_pg_data:
   temporal_pg_data:
   airflow_pg_data:
 ```
@@ -1643,9 +1643,9 @@ CMD ["python", "run_benchmark.py", "run"]
 **File**: `benchmarks/README.md`
 
 ```markdown
-# StreamFlow vs Temporal Benchmark Suite
+# Kruxia Flow vs Temporal Benchmark Suite
 
-Reproducible benchmarks comparing StreamFlow and Temporal workflow engines.
+Reproducible benchmarks comparing Kruxia Flow and Temporal workflow engines.
 
 ## Methodology
 
@@ -1672,7 +1672,7 @@ docker-compose up --build
 pip install -e .
 
 # Start platforms
-docker-compose up -d streamflow temporal
+docker-compose up -d kruxiaflow temporal
 
 # Check platforms are accessible
 python run_benchmark.py check
@@ -1681,7 +1681,7 @@ python run_benchmark.py check
 python run_benchmark.py run
 
 # Run specific platform only
-python run_benchmark.py run --platform streamflow
+python run_benchmark.py run --platform kruxiaflow
 python run_benchmark.py run --platform temporal
 python run_benchmark.py run --platform airflow
 
@@ -1700,7 +1700,7 @@ docker-compose down
 
 ## Expected Results
 
-- **StreamFlow**: >1,000 workflows/sec average
+- **Kruxia Flow**: >1,000 workflows/sec average
 - **Temporal**: 35-100 workflows/sec (based on published benchmarks)
 - **Airflow**: 10-50 workflows/sec (batch-oriented, not optimized for throughput)
 - **Speedup**: 10x+ vs Temporal, 20x+ vs Airflow
@@ -1720,19 +1720,19 @@ docker-compose down
 
 ## License
 
-MIT (matches StreamFlow license)
+MIT (matches Kruxia Flow license)
 ```
 
 ---
 
 ## Implementation Phases
 
-### Phase 1: StreamFlow Foundation (COMPLETED)
+### Phase 1: Kruxia Flow Foundation (COMPLETED)
 1. ✅ Directory structure and dependencies
-2. ✅ StreamFlow workflow definitions (Python dicts)
-3. ✅ StreamFlow benchmark runner (httpx)
+2. ✅ Kruxia Flow workflow definitions (Python dicts)
+3. ✅ Kruxia Flow benchmark runner (httpx)
 4. ✅ Basic metrics collection
-5. ⏸️ Test against local StreamFlow instance (deferred to testing phase)
+5. ⏸️ Test against local Kruxia Flow instance (deferred to testing phase)
 
 ### Phase 2: Temporal Integration (COMPLETED)
 6. ✅ Temporal workflow definitions (SDK classes)
@@ -1760,8 +1760,8 @@ MIT (matches StreamFlow license)
 **Implementation Status**: Code complete, testing deferred
 **Files Created**:
 - `benchmarks/pyproject.toml`
-- `benchmarks/streamflow/workflows.py`
-- `benchmarks/streamflow/benchmark.py`
+- `benchmarks/kruxiaflow/workflows.py`
+- `benchmarks/kruxiaflow/benchmark.py`
 - `benchmarks/temporal/activities.py`
 - `benchmarks/temporal/workflows.py`
 - `benchmarks/temporal/benchmark.py`
@@ -1785,14 +1785,14 @@ MIT (matches StreamFlow license)
 - Report generation
 
 ### Integration Tests
-1. **StreamFlow**: Start local instance, run single workflow, verify completion
+1. **Kruxia Flow**: Start local instance, run single workflow, verify completion
 2. **Temporal**: Start local instance, run single workflow, verify completion
 3. **Full Suite**: Run docker-compose, verify both platforms complete successfully
 
 ### Manual Validation
 1. Run benchmarks locally
 2. Verify HTML report renders correctly
-3. Validate metrics against internal StreamFlow benchmarks
+3. Validate metrics against internal Kruxia Flow benchmarks
 4. Confirm >1,000 wf/sec target achieved
 
 ---
@@ -1800,7 +1800,7 @@ MIT (matches StreamFlow license)
 ## Success Criteria
 
 1. ✅ Reproducible benchmarks running in Docker Compose (code complete)
-2. ⏸️ StreamFlow achieving >1,000 wf/sec (needs testing to validate)
+2. ⏸️ Kruxia Flow achieving >1,000 wf/sec (needs testing to validate)
 3. ⏸️ Temporal baseline established (<100 wf/sec expected) (needs testing)
 4. ✅ HTML report clearly shows 10x+ advantage (report generator implemented)
 5. ✅ Methodology documented and transparent
@@ -1811,7 +1811,7 @@ MIT (matches StreamFlow license)
 ## Deliverables
 
 1. `benchmarks/` directory with:
-   - StreamFlow benchmark runner (HTTP client)
+   - Kruxia Flow benchmark runner (HTTP client)
    - Temporal benchmark runner (SDK client)
    - Shared metrics and reporting
    - Docker Compose configuration

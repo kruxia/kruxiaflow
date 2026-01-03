@@ -3,7 +3,7 @@ use crate::middleware::auth::ValidatedClaims;
 use axum::{Extension, Json, extract::Path};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use streamflow_core::activity::{ActivityWorkerError, ActivityWorkerService};
+use kruxiaflow_core::activity::{ActivityWorkerError, ActivityWorkerService};
 use utoipa::ToSchema;
 use uuid::Uuid;
 

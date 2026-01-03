@@ -1,6 +1,6 @@
 # US-1C.1: Main Binary and CLI Framework
 
-**Epic**: 1C - StreamFlow Binary and CLI
+**Epic**: 1C - Kruxia Flow Binary and CLI
 **Status**: ✅ **COMPLETE**
 **Foundation**: ✅ Complete (via US-1A.1.5)
 **Current Binary Size**: 4.5MB (well under 15MB target ✅)
@@ -11,13 +11,13 @@
 
 **As** a platform engineering lead
 **I want** a single binary with subcommands to launch different services
-**So that** I can deploy StreamFlow with minimal dependencies
+**So that** I can deploy Kruxia Flow with minimal dependencies
 
 ---
 
 ## Acceptance Criteria
 
-- [x] Main crate `streamflow` that depends on `core`, `api`, and `worker` crates
+- [x] Main crate `kruxiaflow` that depends on `core`, `api`, and `worker` crates
 - [x] CLI framework (clap) with subcommands for different services
 - [x] Subcommands implemented for US-1C.1:
   - [x] `api` - Launch API server only (✅ US-1A.1.5)
@@ -29,7 +29,7 @@
 - [x] Global flags: `--database-url`, `--log-level`, `--log-format`
 - [x] Help text and examples for each subcommand
 - [x] Binary size: <15MB release build (actual: 4MB ✅)
-- [x] Version information: `streamflow version` shows semantic version and build info
+- [x] Version information: `kruxiaflow version` shows semantic version and build info
 
 ---
 
@@ -39,24 +39,24 @@
 
 The foundation of the CLI framework is already in place:
 
-1. **Main binary crate** (`streamflow/`)
-   - Location: `streamflow/src/main.rs`
+1. **Main binary crate** (`kruxiaflow/`)
+   - Location: `kruxiaflow/src/main.rs`
    - Dependencies: `core`, `api`, `oauth` crates
    - CLI framework using `clap` with derive macros
 
 2. **Global flags** working correctly:
    - `--database-url` (env: `DATABASE_URL`) - Required for most commands
-   - `--log-level` (env: `STREAMFLOW_LOG_LEVEL`) - Default: `info`
-   - `--log-format` (env: `STREAMFLOW_LOG_FORMAT`) - Default: `text`, options: `json`
+   - `--log-level` (env: `KRUXIAFLOW_LOG_LEVEL`) - Default: `info`
+   - `--log-format` (env: `KRUXIAFLOW_LOG_FORMAT`) - Default: `text`, options: `json`
 
 3. **Infrastructure modules**:
-   - `streamflow/src/config.rs` - Configuration management with precedence
-   - `streamflow/src/logging.rs` - Structured logging setup
-   - `streamflow/src/signals.rs` - SIGTERM/SIGINT handling
-   - `streamflow/src/commands/mod.rs` - Command module structure
-   - `streamflow/src/commands/api.rs` - API server command implementation
+   - `kruxiaflow/src/config.rs` - Configuration management with precedence
+   - `kruxiaflow/src/logging.rs` - Structured logging setup
+   - `kruxiaflow/src/signals.rs` - SIGTERM/SIGINT handling
+   - `kruxiaflow/src/commands/mod.rs` - Command module structure
+   - `kruxiaflow/src/commands/api.rs` - API server command implementation
 
-4. **Working command**: `streamflow api`
+4. **Working command**: `kruxiaflow api`
    - Fully functional with configuration precedence (CLI > Env > Defaults)
    - Database connection pooling
    - OAuth 2.0 JWT authentication setup
@@ -69,12 +69,12 @@ The foundation of the CLI framework is already in place:
 All four tasks completed:
 
 1. **Build Script for Metadata** ✅
-   - Created `streamflow/build.rs` using `api/build.rs` pattern
+   - Created `kruxiaflow/build.rs` using `api/build.rs` pattern
    - Uses `BUILD_*` environment variables
    - Captures timestamp, git commit, branch
 
 2. **Version Subcommand** ✅
-   - Implemented `streamflow version` command
+   - Implemented `kruxiaflow version` command
    - Supports text and JSON output formats
    - Displays version, build info, platform details
 
@@ -101,7 +101,7 @@ All four tasks completed:
 
 ### Task 1: Build Script for Metadata Capture (~1 hour)
 
-**File**: `streamflow/build.rs` (new)
+**File**: `kruxiaflow/build.rs` (new)
 
 **Objective**: Capture build-time metadata (git commit, timestamp, branch) using the same pattern as `api/build.rs`.
 
@@ -205,7 +205,7 @@ cargo build --release
 
 ### Task 2: Version Subcommand (~2 hours)
 
-**File**: `streamflow/src/commands/version.rs` (new)
+**File**: `kruxiaflow/src/commands/version.rs` (new)
 
 **Objective**: Implement version command with text and JSON output formats.
 
@@ -265,7 +265,7 @@ pub fn execute(cmd: VersionCommand) -> Result<()> {
         }
         _ => {
             // Text format
-            println!("StreamFlow {}", version_info.version);
+            println!("Kruxia Flow {}", version_info.version);
             println!("Build timestamp: {}", version_info.build_timestamp);
             println!("Git commit: {}", version_info.git_commit);
             if version_info.git_branch != "unknown" {
@@ -316,7 +316,7 @@ mod tests {
 }
 ```
 
-**Changes to streamflow/Cargo.toml**:
+**Changes to kruxiaflow/Cargo.toml**:
 ```toml
 [dependencies]
 # Add serde for JSON serialization (may already be in workspace)
@@ -324,13 +324,13 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 ```
 
-**Changes to streamflow/src/commands/mod.rs**:
+**Changes to kruxiaflow/src/commands/mod.rs**:
 ```rust
 pub mod api;
 pub mod version;  // NEW
 ```
 
-**Changes to streamflow/src/main.rs**:
+**Changes to kruxiaflow/src/main.rs**:
 
 1. Update Commands enum:
 ```rust
@@ -366,7 +366,7 @@ async fn main() -> Result<()> {
 
 **Example Output (Text)**:
 ```
-StreamFlow 0.2.0
+Kruxia Flow 0.2.0
 Build timestamp: 2025-11-07T10:30:00Z
 Git commit: 406bc2d
 Git branch: epic-1A-api
@@ -392,13 +392,13 @@ Platform: x86_64-darwin
 cargo build --release
 
 # Test text format (default)
-./target/release/streamflow version
+./target/release/kruxiaflow version
 
 # Test JSON format
-./target/release/streamflow version --format json
+./target/release/kruxiaflow version --format json
 
 # Test short version flag
-./target/release/streamflow --version
+./target/release/kruxiaflow --version
 ```
 
 ---
@@ -406,32 +406,32 @@ cargo build --release
 ### Task 3: Enhanced Help Text (~2 hours)
 
 **Files to Update**:
-- `streamflow/src/main.rs` - Main CLI help
-- `streamflow/src/commands/api.rs` - API command help
-- `streamflow/src/commands/version.rs` - Version command help
+- `kruxiaflow/src/main.rs` - Main CLI help
+- `kruxiaflow/src/commands/api.rs` - API command help
+- `kruxiaflow/src/commands/version.rs` - Version command help
 
 **Update main.rs Cli struct**:
 
 ```rust
-/// StreamFlow - High-performance workflow orchestration
+/// Kruxia Flow - High-performance workflow orchestration
 #[derive(Parser)]
 #[command(
-    name = "streamflow",
+    name = "kruxiaflow",
     version,
-    about = "StreamFlow workflow orchestration platform",
-    long_about = "StreamFlow is a lightweight, high-performance workflow orchestration \
+    about = "Kruxia Flow workflow orchestration platform",
+    long_about = "Kruxia Flow is a lightweight, high-performance workflow orchestration \
 platform designed for edge-to-cloud deployment. Built as a single binary \
 with PostgreSQL as the only required dependency.\n\n\
 EXAMPLES:\n  \
-  streamflow api --port 8080\n  \
-  streamflow version --format json\n  \
-  streamflow --help\n\n\
+  kruxiaflow api --port 8080\n  \
+  kruxiaflow version --format json\n  \
+  kruxiaflow --help\n\n\
 ENVIRONMENT VARIABLES:\n  \
   DATABASE_URL               PostgreSQL connection string (required for most commands)\n  \
-  STREAMFLOW_LOG_LEVEL       Logging verbosity (default: info)\n  \
-  STREAMFLOW_LOG_FORMAT      Log output format (default: text)\n  \
-  STREAMFLOW_API_PORT        API server port (default: 8080)\n  \
-  STREAMFLOW_API_BIND        API server bind address (default: 0.0.0.0)"
+  KRUXIAFLOW_LOG_LEVEL       Logging verbosity (default: info)\n  \
+  KRUXIAFLOW_LOG_FORMAT      Log output format (default: text)\n  \
+  KRUXIAFLOW_API_PORT        API server port (default: 8080)\n  \
+  KRUXIAFLOW_API_BIND        API server bind address (default: 0.0.0.0)"
 )]
 struct Cli {
     /// Database connection URL
@@ -441,7 +441,7 @@ struct Cli {
         global = true,
         help = "PostgreSQL connection URL (postgres://user:pass@host:port/db)",
         long_help = "PostgreSQL connection URL\n\n\
-Example: postgres://user:pass@localhost:5432/streamflow\n\
+Example: postgres://user:pass@localhost:5432/kruxiaflow\n\
 Required for all commands except 'version'"
     )]
     database_url: Option<String>,
@@ -449,7 +449,7 @@ Required for all commands except 'version'"
     /// Log level
     #[arg(
         long,
-        env = "STREAMFLOW_LOG_LEVEL",
+        env = "KRUXIAFLOW_LOG_LEVEL",
         default_value = "info",
         global = true,
         help = "Log level (trace, debug, info, warn, error)",
@@ -463,7 +463,7 @@ Example: --log-level debug"
     /// Log format
     #[arg(
         long,
-        env = "STREAMFLOW_LOG_FORMAT",
+        env = "KRUXIAFLOW_LOG_FORMAT",
         default_value = "text",
         global = true,
         help = "Log format (text, json)",
@@ -491,9 +491,9 @@ enum Commands {
 The API server provides RESTful endpoints for workflow management, \
 authentication, and monitoring.\n\n\
 EXAMPLES:\n  \
-  streamflow api\n  \
-  streamflow api --port 9090 --bind 127.0.0.1\n  \
-  DATABASE_URL=postgres://localhost/db streamflow api\n\n\
+  kruxiaflow api\n  \
+  kruxiaflow api --port 9090 --bind 127.0.0.1\n  \
+  DATABASE_URL=postgres://localhost/db kruxiaflow api\n\n\
 ENDPOINTS:\n  \
   GET  /health              - Liveness probe\n  \
   GET  /health/ready        - Readiness probe\n  \
@@ -507,10 +507,10 @@ ENDPOINTS:\n  \
     #[command(
         about = "Display version and build information",
         long_about = "Display version and build information\n\n\
-Shows StreamFlow version, build timestamp, git commit, and platform details.\n\n\
+Shows Kruxia Flow version, build timestamp, git commit, and platform details.\n\n\
 EXAMPLES:\n  \
-  streamflow version\n  \
-  streamflow version --format json"
+  kruxiaflow version\n  \
+  kruxiaflow version --format json"
     )]
     Version(commands::version::VersionCommand),
 }
@@ -525,7 +525,7 @@ pub struct ApiCommand {
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_API_PORT",
+        env = "KRUXIAFLOW_API_PORT",
         help = "Port to bind API server to",
         long_help = "Port to bind API server to\n\n\
 Default: 8080\n\
@@ -537,7 +537,7 @@ Example: --port 9090"
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_API_BIND",
+        env = "KRUXIAFLOW_API_BIND",
         help = "Address to bind API server to (e.g., 0.0.0.0, 127.0.0.1)",
         long_help = "Address to bind API server to\n\n\
 Options:\n  \
@@ -552,13 +552,13 @@ Example: --bind 127.0.0.1"
 **Testing**:
 ```bash
 # Test main help
-./target/release/streamflow --help
+./target/release/kruxiaflow --help
 
 # Test api command help
-./target/release/streamflow api --help
+./target/release/kruxiaflow api --help
 
 # Test version command help
-./target/release/streamflow version --help
+./target/release/kruxiaflow version --help
 
 # Verify examples and environment variables are documented
 ```
@@ -573,11 +573,11 @@ Example: --bind 127.0.0.1"
 
 ```bash
 #!/bin/bash
-# Check StreamFlow binary size against 15MB target
+# Check Kruxia Flow binary size against 15MB target
 
 set -e
 
-BINARY_PATH="${1:-target/release/streamflow}"
+BINARY_PATH="${1:-target/release/kruxiaflow}"
 TARGET_SIZE_MB=15
 
 if [ ! -f "$BINARY_PATH" ]; then
@@ -632,7 +632,7 @@ cargo build --release
 ./scripts/check-binary-size.sh
 
 # Expected output:
-# Binary: target/release/streamflow
+# Binary: target/release/kruxiaflow
 # Size: 4MB (4608KB)
 # Target: <15MB
 # ✅ PASS: Binary size is within target
@@ -644,7 +644,7 @@ cargo build --release
 
 **Current (after US-1A.1.5)**:
 ```
-streamflow/
+kruxiaflow/
 ├── Cargo.toml
 └── src/
     ├── main.rs
@@ -658,7 +658,7 @@ streamflow/
 
 **After This Story (US-1C.1)**:
 ```
-streamflow/
+kruxiaflow/
 ├── Cargo.toml
 ├── build.rs                    # NEW: Build metadata
 └── src/
@@ -674,7 +674,7 @@ streamflow/
 
 **Future (US-1C.2, US-1C.3)**:
 ```
-streamflow/
+kruxiaflow/
 └── src/
     └── commands/
         ├── mod.rs
@@ -692,7 +692,7 @@ streamflow/
 
 ### Unit Tests
 
-**Version Command** (`streamflow/src/commands/version.rs`):
+**Version Command** (`kruxiaflow/src/commands/version.rs`):
 - Test version info creation
 - Test JSON serialization
 - Test text output format
@@ -701,10 +701,10 @@ streamflow/
 **Run Tests**:
 ```bash
 # Test version command
-cargo test -p streamflow version
+cargo test -p kruxiaflow version
 
-# All streamflow tests
-cargo test -p streamflow
+# All kruxiaflow tests
+cargo test -p kruxiaflow
 ```
 
 ### Integration Tests
@@ -715,14 +715,14 @@ cargo test -p streamflow
 cargo build --release
 
 # Test version commands
-./target/release/streamflow --version
-./target/release/streamflow version
-./target/release/streamflow version --format json
+./target/release/kruxiaflow --version
+./target/release/kruxiaflow version
+./target/release/kruxiaflow version --format json
 
 # Test help commands
-./target/release/streamflow --help
-./target/release/streamflow api --help
-./target/release/streamflow version --help
+./target/release/kruxiaflow --help
+./target/release/kruxiaflow api --help
+./target/release/kruxiaflow version --help
 
 # Test binary size
 ./scripts/check-binary-size.sh
@@ -732,11 +732,11 @@ cargo build --release
 
 1. **Version Output (Text)**:
    ```bash
-   ./target/release/streamflow version
+   ./target/release/kruxiaflow version
    ```
    Expected:
    ```
-   StreamFlow 0.2.0
+   Kruxia Flow 0.2.0
    Build timestamp: 2025-11-07T...
    Git commit: 406bc2d
    Git branch: epic-1A-api
@@ -746,7 +746,7 @@ cargo build --release
 
 2. **Version Output (JSON)**:
    ```bash
-   ./target/release/streamflow version --format json
+   ./target/release/kruxiaflow version --format json
    ```
    Expected: Valid JSON with all fields
 
@@ -763,7 +763,7 @@ cargo build --release
 ## Dependencies
 
 **No new external dependencies needed**:
-- `clap` - ✅ Already in streamflow/Cargo.toml
+- `clap` - ✅ Already in kruxiaflow/Cargo.toml
 - `serde` / `serde_json` - ✅ Already in workspace
 - `build.rs` uses standard library only
 
@@ -774,10 +774,10 @@ cargo build --release
 ### Functional Requirements
 
 - [x] CLI framework with subcommands (via US-1A.1.5)
-- [x] `streamflow version` displays version in text format
-- [x] `streamflow version --format json` outputs valid JSON
-- [x] `streamflow --version` shows short version string
-- [x] `streamflow api` launches API server (via US-1A.1.5)
+- [x] `kruxiaflow version` displays version in text format
+- [x] `kruxiaflow version --format json` outputs valid JSON
+- [x] `kruxiaflow --version` shows short version string
+- [x] `kruxiaflow api` launches API server (via US-1A.1.5)
 - [x] Help text includes examples and environment variables
 - [x] Binary size <15MB in release mode (actual: 4MB)
 
@@ -793,14 +793,14 @@ cargo build --release
 ## Implementation Checklist
 
 ### Task 1: Build Metadata ✅
-- [x] Create `streamflow/build.rs` (based on `api/build.rs`)
-- [x] Use `BUILD_*` environment variables (not `STREAMFLOW_*`)
+- [x] Create `kruxiaflow/build.rs` (based on `api/build.rs`)
+- [x] Use `BUILD_*` environment variables (not `KRUXIAFLOW_*`)
 - [x] Test build script captures git metadata
 - [x] Verify graceful handling of missing git
 - [x] Test rebuild triggers on git changes
 
 ### Task 2: Version Command ✅
-- [x] Create `streamflow/src/commands/version.rs`
+- [x] Create `kruxiaflow/src/commands/version.rs`
 - [x] Add `serde`/`serde_json` to dependencies
 - [x] Implement `VersionCommand` with text/json
 - [x] Add unit tests
@@ -843,7 +843,7 @@ These will be added in future stories:
 ```rust
 #[derive(Args)]
 pub struct OrchestratorCommand {
-    #[arg(long, env = "STREAMFLOW_ORCHESTRATOR_CONSUMER_ID")]
+    #[arg(long, env = "KRUXIAFLOW_ORCHESTRATOR_CONSUMER_ID")]
     consumer_id: Option<String>,
 }
 ```
@@ -852,13 +852,13 @@ pub struct OrchestratorCommand {
 ```rust
 #[derive(Args)]
 pub struct WorkerCommand {
-    #[arg(long, env = "STREAMFLOW_WORKER_ACTIVITY_TYPES")]
+    #[arg(long, env = "KRUXIAFLOW_WORKER_ACTIVITY_TYPES")]
     activity_types: Vec<String>,
 
-    #[arg(long, env = "STREAMFLOW_API_URL")]
+    #[arg(long, env = "KRUXIAFLOW_API_URL")]
     api_url: String,
 
-    #[arg(long, env = "STREAMFLOW_WORKER_ID")]
+    #[arg(long, env = "KRUXIAFLOW_WORKER_ID")]
     worker_id: Option<String>,
 }
 ```

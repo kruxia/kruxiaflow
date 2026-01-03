@@ -1,18 +1,18 @@
 #!/bin/bash
-# Docker entrypoint script for StreamFlow profiling container
+# Docker entrypoint script for Kruxia Flow profiling container
 
 # Load auth environment variables
-if [ -z "$STREAMFLOW_CLIENT_ID" ] || [ -z "$STREAMFLOW_CLIENT_SECRET" ]; then
-    echo "Error: STREAMFLOW_CLIENT_ID and STREAMFLOW_CLIENT_SECRET must be set in the environment."
+if [ -z "$KRUXIAFLOW_CLIENT_ID" ] || [ -z "$KRUXIAFLOW_CLIENT_SECRET" ]; then
+    echo "Error: KRUXIAFLOW_CLIENT_ID and KRUXIAFLOW_CLIENT_SECRET must be set in the environment."
     exit 1
 fi
 
 # Load private and public keys if they haven't been provided (this is a development
 # and testing container!)
-if [ -z "$STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM" ] || [ -z "$STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM" ]; then
+if [ -z "$KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM" ] || [ -z "$KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM" ]; then
     echo "Loading development OAuth RSA key pair from ./dev-keys for development/testing..."
-    export STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM=$(cat dev-keys/private.pem | tr -d '\n')
-    export STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM=$(cat dev-keys/public.pem | tr -d '\n')
+    export KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM=$(cat dev-keys/private.pem | tr -d '\n')
+    export KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM=$(cat dev-keys/public.pem | tr -d '\n')
 fi
 
 # Set up profiling environment variables
@@ -27,17 +27,17 @@ until psql ${DATABASE_ADMIN_URL} -c "select 1" > /dev/null 2>&1; do
 done
 
 # Create benchmark database if it doesn't exist
-psql ${DATABASE_ADMIN_URL} -c "CREATE DATABASE streamflow_profiling" >/dev/null 2>&1
+psql ${DATABASE_ADMIN_URL} -c "CREATE DATABASE kruxiaflow_profiling" >/dev/null 2>&1
 
 # Run database migrations
 sqlx migrate run
 
 # Build the profiling binary
-echo "Building StreamFlow profiling binary..."
+echo "Building Kruxia Flow profiling binary..."
 cargo build --profile profiling --features profiling
 
 # Seed the oauth client for profiling (idempotent - skips if exists)
-target/profiling/streamflow seed-client
+target/profiling/kruxiaflow seed-client
 
 # Start memory monitoring in background
 MONITOR_OUTPUT="$PROFILE_DIR/memory_usage.csv"
@@ -64,14 +64,14 @@ monitor_memory() {
     done
 }
 
-echo "Starting StreamFlow server with memory monitoring..."
+echo "Starting Kruxia Flow server with memory monitoring..."
 echo "Memory usage will be logged to: $MONITOR_OUTPUT"
 
 # Start server in background so we can monitor it
-target/profiling/streamflow serve "$@" &
+target/profiling/kruxiaflow serve "$@" &
 SERVER_PID=$!
 
-echo "StreamFlow server started (PID: $SERVER_PID)"
+echo "Kruxia Flow server started (PID: $SERVER_PID)"
 
 # Start monitoring in background
 monitor_memory $SERVER_PID &
@@ -84,5 +84,5 @@ SERVER_EXIT_CODE=$?
 # Stop monitoring
 kill $MONITOR_PID 2>/dev/null || true
 
-echo "StreamFlow server exited with code: $SERVER_EXIT_CODE"
+echo "Kruxia Flow server exited with code: $SERVER_EXIT_CODE"
 exit $SERVER_EXIT_CODE

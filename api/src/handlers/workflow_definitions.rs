@@ -7,7 +7,7 @@ use axum::{
     http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
-use streamflow_core::workflow::{RepositoryError, WorkflowDefinitionRepository};
+use kruxiaflow_core::workflow::{RepositoryError, WorkflowDefinitionRepository};
 use utoipa::ToSchema;
 
 /// Deploy workflow definition request (accepts both JSON and YAML)
@@ -130,7 +130,7 @@ pub async fn deploy_workflow_definition(
 
     // Parse as YAML (this handles both JSON and YAML since JSON is valid YAML)
     let definition =
-        streamflow_core::workflow::WorkflowDefinition::from_yaml(&body).map_err(|e| {
+        kruxiaflow_core::workflow::WorkflowDefinition::from_yaml(&body).map_err(|e| {
             tracing::warn!("Workflow parsing/validation failed: {:?}", e);
             AppError::ValidationError(ValidationErrors::from_workflow_validation(e))
         })?;

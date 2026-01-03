@@ -886,7 +886,7 @@ Following the extractor pattern from US-1A.5/US-1A.6, handlers extract ActivityW
 **Implementation**:
 
 ```rust
-use streamflow_core::activity::ActivityWorkerService;
+use kruxiaflow_core::activity::ActivityWorkerService;
 
 /// Poll for activities
 ///
@@ -1250,8 +1250,8 @@ Following the same pattern as WorkflowService and WorkflowQueryService extractor
 **Implementation**:
 
 ```rust
-use streamflow_core::activity::ActivityWorkerService;
-use streamflow_core::queue::{PostgresQueue, QueueConfig};
+use kruxiaflow_core::activity::ActivityWorkerService;
+use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use std::sync::Arc;
 
 /// Axum extractor for ActivityWorkerService
@@ -1833,8 +1833,8 @@ No new environment variables required. Uses existing `DATABASE_URL`.
 
 For MVP, timeout handling is simple (activities not heartbeat within timeout are released).
 Post-MVP: Add configuration for:
-- `STREAMFLOW_ACTIVITY_DEFAULT_TIMEOUT` - Default timeout in seconds
-- `STREAMFLOW_ACTIVITY_HEARTBEAT_INTERVAL` - Recommended heartbeat interval
+- `KRUXIAFLOW_ACTIVITY_DEFAULT_TIMEOUT` - Default timeout in seconds
+- `KRUXIAFLOW_ACTIVITY_HEARTBEAT_INTERVAL` - Recommended heartbeat interval
 
 ---
 

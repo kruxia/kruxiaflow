@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# StreamFlow Test Runner
+# Kruxia Flow Test Runner
 #
 # Usage:
 #   ./scripts/test.sh [OPTIONS]
@@ -23,7 +23,7 @@
 #   ./scripts/test.sh                           # Run all tests
 #   ./scripts/test.sh --coverage                # Run with coverage
 #   ./scripts/test.sh --coverage-html           # Generate HTML report
-#   ./scripts/test.sh -p streamflow-api         # Test only API crate
+#   ./scripts/test.sh -p kruxiaflow-api         # Test only API crate
 #   ./scripts/test.sh --unit                    # Unit tests only
 #   ./scripts/test.sh --skip-db-setup           # Skip DB setup
 #
@@ -32,9 +32,9 @@
 #   - profiling/src/bin/*           Profiling binaries
 #   - profiling/src/client.rs       Profiling HTTP client
 #   - profiling/src/metrics.rs      Profiling metrics utilities
-#   - streamflow/src/bin/seed-*     Database seeding scripts
-#   - streamflow/src/commands/seed_llm.rs  LLM seeding command
-#   - streamflow/src/llm_catalog.rs LLM catalog for seeding
+#   - kruxiaflow/src/bin/seed-*     Database seeding scripts
+#   - kruxiaflow/src/commands/seed_llm.rs  LLM seeding command
+#   - kruxiaflow/src/llm_catalog.rs LLM catalog for seeding
 
 set -e
 
@@ -135,13 +135,13 @@ if [ "$INSTALL_COVERAGE" = true ]; then
     exit 0
 fi
 
-echo -e "${YELLOW}StreamFlow Test Runner${NC}"
+echo -e "${YELLOW}Kruxia Flow Test Runner${NC}"
 echo "========================================"
 
 # Database setup (unless skipped)
 if [ "$SKIP_DB_SETUP" = false ]; then
     # Check if PostgreSQL container is running
-    if ! docker ps | grep -q streamflow-postgres; then
+    if ! docker ps | grep -q kruxiaflow-postgres; then
         echo -e "${YELLOW}Starting PostgreSQL container...${NC}"
         docker-compose up -d postgres
         echo "Waiting for PostgreSQL to be ready..."
@@ -149,7 +149,7 @@ if [ "$SKIP_DB_SETUP" = false ]; then
     fi
 
     # Wait for PostgreSQL to be ready
-    until docker exec streamflow-postgres pg_isready -U streamflow > /dev/null 2>&1; do
+    until docker exec kruxiaflow-postgres pg_isready -U kruxiaflow > /dev/null 2>&1; do
         echo "Waiting for PostgreSQL..."
         sleep 1
     done
@@ -157,24 +157,24 @@ if [ "$SKIP_DB_SETUP" = false ]; then
     echo -e "${GREEN}PostgreSQL is ready${NC}"
 
     # Database configuration
-    DB_USER="streamflow"
-    DB_PASSWORD="${POSTGRES_PASSWORD:-streamflow_dev}"
+    DB_USER="kruxiaflow"
+    DB_PASSWORD="${POSTGRES_PASSWORD:-kruxiaflow_dev}"
     DB_HOST="127.0.0.1"
     DB_PORT="5432"
-    DB_NAME="streamflow_test"
+    DB_NAME="kruxiaflow_test"
 
     # Drop and recreate test database
     echo -e "${YELLOW}Setting up test database...${NC}"
 
     # Terminate any existing connections to the test database
-    docker exec streamflow-postgres psql -U ${DB_USER} -c "
+    docker exec kruxiaflow-postgres psql -U ${DB_USER} -c "
     SELECT pg_terminate_backend(pid)
     FROM pg_stat_activity
     WHERE datname = '${DB_NAME}' AND pid <> pg_backend_pid();" 2>/dev/null || true
 
     # Drop and recreate database
-    docker exec streamflow-postgres psql -U ${DB_USER} -c "DROP DATABASE IF EXISTS ${DB_NAME};" 2>/dev/null || true
-    docker exec streamflow-postgres psql -U ${DB_USER} -c "CREATE DATABASE ${DB_NAME};"
+    docker exec kruxiaflow-postgres psql -U ${DB_USER} -c "DROP DATABASE IF EXISTS ${DB_NAME};" 2>/dev/null || true
+    docker exec kruxiaflow-postgres psql -U ${DB_USER} -c "CREATE DATABASE ${DB_NAME};"
 
     echo -e "${GREEN}Test database created${NC}"
 
@@ -230,7 +230,7 @@ if [ "$COVERAGE" = true ]; then
     # Exclude profiling and seed scripts from coverage reports
     # These are development/tooling files that don't need test coverage
     # Combined into single regex: profiling tools OR seed scripts
-    CMD="$CMD --ignore-filename-regex '(profiling/src/(bin/|client\\.rs|metrics\\.rs)|streamflow/src/(bin/seed|commands/seed_llm\\.rs|llm_catalog\\.rs))'"
+    CMD="$CMD --ignore-filename-regex '(profiling/src/(bin/|client\\.rs|metrics\\.rs)|kruxiaflow/src/(bin/seed|commands/seed_llm\\.rs|llm_catalog\\.rs))'"
 
     # Add package filter if specified
     if [ -n "$PACKAGE" ]; then

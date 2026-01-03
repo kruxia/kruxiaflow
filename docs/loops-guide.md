@@ -1,9 +1,9 @@
-# StreamFlow Loops Guide
+# Kruxia Flow Loops Guide
 
 **Version**: MVP (US-3.4)
 **Last Updated**: 2025-11-21
 
-This guide covers iterative workflows (loops) in StreamFlow, including patterns, best practices, and common pitfalls.
+This guide covers iterative workflows (loops) in Kruxia Flow, including patterns, best practices, and common pitfalls.
 
 ---
 
@@ -22,7 +22,7 @@ This guide covers iterative workflows (loops) in StreamFlow, including patterns,
 
 ## Overview
 
-Loops in StreamFlow are created by adding a back-edge in the workflow dependency graph: a `depends_on` relationship from a later activity back to an earlier activity. This allows activities to re-execute until a condition is met or an iteration limit is reached.
+Loops in Kruxia Flow are created by adding a back-edge in the workflow dependency graph: a `depends_on` relationship from a later activity back to an earlier activity. This allows activities to re-execute until a condition is met or an iteration limit is reached.
 
 ### Key Concepts
 
@@ -45,7 +45,7 @@ Loops are detected during workflow validation (at registration time):
 
 ## Loop Patterns
 
-StreamFlow supports three loop patterns, each with different exit strategies:
+Kruxia Flow supports three loop patterns, each with different exit strategies:
 
 ### Pattern 1: Fixed Iterations Only
 
@@ -304,10 +304,10 @@ Budget limits apply to the **total accumulated cost across all iterations**, not
       action: abort
 ```
 
-**Iteration 0**: Cost $1.50, Accumulated: $1.50 ✓ (passes)
-**Iteration 1**: Cost $1.50, Accumulated: $3.00 ✓ (passes)
-**Iteration 2**: Cost $1.50, Accumulated: $4.50 ✓ (passes)
-**Iteration 3**: Cost $1.50, Accumulated: $6.00 ✗ (exceeds $5 limit → fails)
+- **Iteration 0**: Cost $1.50, Accumulated: $1.50 ✅️ (passes)
+- **Iteration 1**: Cost $1.50, Accumulated: $3.00 ✅️ (passes)
+- **Iteration 2**: Cost $1.50, Accumulated: $4.50 ✅️ (passes)
+- **Iteration 3**: Cost $1.50, Accumulated: $6.00 ❌ (exceeds $5 limit → fails)
 
 ### Budget Actions
 
@@ -361,7 +361,7 @@ Loop stops at whichever limit is reached first.
     - activity_key: loop_forever  # Infinite loop!
 ```
 
-✓ **Good** (Pattern 3 - condition + limit):
+✅️ **Good** (Pattern 3 - condition + limit):
 ```yaml
 - key: safe_loop
   iteration_limit: 10  # Safety bound
@@ -373,7 +373,7 @@ Loop stops at whichever limit is reached first.
 
 ### 2. Use Descriptive Iteration Counters
 
-✓ **Good** (user-friendly numbering):
+✅️ **Good** (user-friendly numbering):
 ```yaml
 parameters:
   issue_number: "{{ACTIVITY.iteration + 1}}"  # 1, 2, 3 (not 0, 1, 2)
@@ -406,7 +406,7 @@ conditions:
   - "{{check.done == false}}"  # May not work - comparing array to bool
 ```
 
-✓ **Good** (using `| last` filter):
+✅️ **Good** (using `| last` filter):
 ```yaml
 conditions:
   - "{{check.done | last == false}}"  # Compare latest value to bool
@@ -437,7 +437,7 @@ conditions:
   - "{{evaluate.sufficient == true}}"  # Comparing array to bool
 ```
 
-✓ **Correct**:
+✅️ **Correct**:
 ```yaml
 conditions:
   - "{{evaluate.sufficient | last == true}}"  # Compare latest value
@@ -456,7 +456,7 @@ settings:
     limit: 5.00  # Will only complete 2 iterations ($2 + $2 = $4 ≤ $5)
 ```
 
-✓ **Correct understanding**:
+✅️ **Correct understanding**:
 ```yaml
 # Each iteration costs $2, need 10 iterations
 iteration_limit: 10
@@ -480,9 +480,9 @@ settings:
 
 - key: report
   parameters:
-    all_searches: "{{search.results}}"      # ✓ Array
-    latest_eval: "{{evaluate.decision}}"    # ✓ Single value
-    # NOT: "{{evaluate.decision | last}}"   # ✗ Not an array!
+    all_searches: "{{search.results}}"      # ✅️ Array
+    latest_eval: "{{evaluate.decision}}"    # ✅️ Single value
+    # NOT: "{{evaluate.decision | last}}"   # ❌ Not an array!
 ```
 
 ### Pitfall 4: No Safety Bound (Pattern 2 Only)
@@ -501,7 +501,7 @@ settings:
   # Loop stops at 100, potentially incomplete!
 ```
 
-✓ **Safer** (explicit limit):
+✅️ **Safer** (explicit limit):
 ```yaml
 - key: long_running_loop
   iteration_limit: 1000  # Explicit high limit for expected behavior
@@ -524,7 +524,7 @@ settings:
   depends_on: [A]  # But also needs A first - DEADLOCK!
 ```
 
-✓ **Correct** (explicit back-edge):
+✅️ **Correct** (explicit back-edge):
 ```yaml
 - key: A
   depends_on:
@@ -675,7 +675,7 @@ activities:
 
 ### Validation Overhead: O(1) Lookups
 
-StreamFlow uses precomputed metadata for loop detection:
+Kruxia Flow uses precomputed metadata for loop detection:
 
 **Validation Time** (once, at workflow registration):
 - Topological sort to detect back-edges: O(V+E)
@@ -707,7 +707,7 @@ Loops do not degrade orchestrator performance:
 
 ### Running Performance Benchmarks
 
-StreamFlow includes a benchmark suite to validate loop performance characteristics:
+Kruxia Flow includes a benchmark suite to validate loop performance characteristics:
 
 ```bash
 # Run the loop performance benchmark
@@ -735,7 +735,7 @@ cargo bench --bench loop_performance
 ### Enable Detailed Logging
 
 ```bash
-RUST_LOG=streamflow_core::orchestrator=debug,streamflow_core::workflow=debug
+RUST_LOG=kruxiaflow_core::orchestrator=debug,kruxiaflow_core::workflow=debug
 ```
 
 ### Check Iteration State

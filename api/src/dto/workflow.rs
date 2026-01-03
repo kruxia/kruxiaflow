@@ -22,8 +22,8 @@ pub struct WorkflowDefinition {
     pub activities: Vec<ActivityDefinition>,
 }
 
-impl From<streamflow_core::workflow::WorkflowDefinition> for WorkflowDefinition {
-    fn from(def: streamflow_core::workflow::WorkflowDefinition) -> Self {
+impl From<kruxiaflow_core::workflow::WorkflowDefinition> for WorkflowDefinition {
+    fn from(def: kruxiaflow_core::workflow::WorkflowDefinition) -> Self {
         Self {
             name: def.name,
             activities: def.activities.into_iter().map(Into::into).collect(),
@@ -31,7 +31,7 @@ impl From<streamflow_core::workflow::WorkflowDefinition> for WorkflowDefinition 
     }
 }
 
-impl From<WorkflowDefinition> for streamflow_core::workflow::WorkflowDefinition {
+impl From<WorkflowDefinition> for kruxiaflow_core::workflow::WorkflowDefinition {
     fn from(def: WorkflowDefinition) -> Self {
         Self {
             name: def.name,
@@ -91,8 +91,8 @@ pub struct ActivityDefinition {
     pub streaming: StreamingConfig,
 }
 
-impl From<streamflow_core::workflow::ActivityDefinition> for ActivityDefinition {
-    fn from(def: streamflow_core::workflow::ActivityDefinition) -> Self {
+impl From<kruxiaflow_core::workflow::ActivityDefinition> for ActivityDefinition {
+    fn from(def: kruxiaflow_core::workflow::ActivityDefinition) -> Self {
         Self {
             key: def.key,
             worker: def.worker,
@@ -116,7 +116,7 @@ impl From<streamflow_core::workflow::ActivityDefinition> for ActivityDefinition 
     }
 }
 
-impl From<ActivityDefinition> for streamflow_core::workflow::ActivityDefinition {
+impl From<ActivityDefinition> for kruxiaflow_core::workflow::ActivityDefinition {
     fn from(def: ActivityDefinition) -> Self {
         Self {
             key: def.key,
@@ -208,12 +208,12 @@ pub struct StreamingOptions {
     pub enabled: bool,
 }
 
-impl From<streamflow_core::workflow::StreamingConfig> for StreamingConfig {
-    fn from(config: streamflow_core::workflow::StreamingConfig) -> Self {
+impl From<kruxiaflow_core::workflow::StreamingConfig> for StreamingConfig {
+    fn from(config: kruxiaflow_core::workflow::StreamingConfig) -> Self {
         match config {
-            streamflow_core::workflow::StreamingConfig::Disabled => StreamingConfig::Disabled,
-            streamflow_core::workflow::StreamingConfig::Simple(b) => StreamingConfig::Simple(b),
-            streamflow_core::workflow::StreamingConfig::Detailed(opts) => {
+            kruxiaflow_core::workflow::StreamingConfig::Disabled => StreamingConfig::Disabled,
+            kruxiaflow_core::workflow::StreamingConfig::Simple(b) => StreamingConfig::Simple(b),
+            kruxiaflow_core::workflow::StreamingConfig::Detailed(opts) => {
                 StreamingConfig::Detailed(StreamingOptions {
                     enabled: opts.enabled,
                 })
@@ -222,14 +222,14 @@ impl From<streamflow_core::workflow::StreamingConfig> for StreamingConfig {
     }
 }
 
-impl From<StreamingConfig> for streamflow_core::workflow::StreamingConfig {
+impl From<StreamingConfig> for kruxiaflow_core::workflow::StreamingConfig {
     fn from(config: StreamingConfig) -> Self {
         match config {
-            StreamingConfig::Disabled => streamflow_core::workflow::StreamingConfig::Disabled,
-            StreamingConfig::Simple(b) => streamflow_core::workflow::StreamingConfig::Simple(b),
+            StreamingConfig::Disabled => kruxiaflow_core::workflow::StreamingConfig::Disabled,
+            StreamingConfig::Simple(b) => kruxiaflow_core::workflow::StreamingConfig::Simple(b),
             StreamingConfig::Detailed(opts) => {
-                streamflow_core::workflow::StreamingConfig::Detailed(
-                    streamflow_core::workflow::StreamingOptions {
+                kruxiaflow_core::workflow::StreamingConfig::Detailed(
+                    kruxiaflow_core::workflow::StreamingOptions {
                         enabled: opts.enabled,
                     },
                 )
@@ -253,8 +253,8 @@ pub struct ActivityRelationship {
     pub is_back_edge: bool,
 }
 
-impl From<streamflow_core::workflow::ActivityRelationship> for ActivityRelationship {
-    fn from(rel: streamflow_core::workflow::ActivityRelationship) -> Self {
+impl From<kruxiaflow_core::workflow::ActivityRelationship> for ActivityRelationship {
+    fn from(rel: kruxiaflow_core::workflow::ActivityRelationship) -> Self {
         Self {
             activity_key: rel.activity_key,
             conditions: rel.conditions,
@@ -263,7 +263,7 @@ impl From<streamflow_core::workflow::ActivityRelationship> for ActivityRelations
     }
 }
 
-impl From<ActivityRelationship> for streamflow_core::workflow::ActivityRelationship {
+impl From<ActivityRelationship> for kruxiaflow_core::workflow::ActivityRelationship {
     fn from(rel: ActivityRelationship) -> Self {
         Self {
             activity_key: rel.activity_key,
@@ -334,8 +334,8 @@ pub enum BudgetAction {
     Continue,
 }
 
-impl From<streamflow_core::workflow::BudgetSettings> for BudgetSettings {
-    fn from(settings: streamflow_core::workflow::BudgetSettings) -> Self {
+impl From<kruxiaflow_core::workflow::BudgetSettings> for BudgetSettings {
+    fn from(settings: kruxiaflow_core::workflow::BudgetSettings) -> Self {
         Self {
             limit: settings.limit,
             action: settings.action.into(),
@@ -343,7 +343,7 @@ impl From<streamflow_core::workflow::BudgetSettings> for BudgetSettings {
     }
 }
 
-impl From<BudgetSettings> for streamflow_core::workflow::BudgetSettings {
+impl From<BudgetSettings> for kruxiaflow_core::workflow::BudgetSettings {
     fn from(settings: BudgetSettings) -> Self {
         Self {
             limit: settings.limit,
@@ -352,16 +352,16 @@ impl From<BudgetSettings> for streamflow_core::workflow::BudgetSettings {
     }
 }
 
-impl From<streamflow_core::workflow::BudgetAction> for BudgetAction {
-    fn from(action: streamflow_core::workflow::BudgetAction) -> Self {
+impl From<kruxiaflow_core::workflow::BudgetAction> for BudgetAction {
+    fn from(action: kruxiaflow_core::workflow::BudgetAction) -> Self {
         match action {
-            streamflow_core::workflow::BudgetAction::Abort => Self::Abort,
-            streamflow_core::workflow::BudgetAction::Continue => Self::Continue,
+            kruxiaflow_core::workflow::BudgetAction::Abort => Self::Abort,
+            kruxiaflow_core::workflow::BudgetAction::Continue => Self::Continue,
         }
     }
 }
 
-impl From<BudgetAction> for streamflow_core::workflow::BudgetAction {
+impl From<BudgetAction> for kruxiaflow_core::workflow::BudgetAction {
     fn from(action: BudgetAction) -> Self {
         match action {
             BudgetAction::Abort => Self::Abort,
@@ -370,8 +370,8 @@ impl From<BudgetAction> for streamflow_core::workflow::BudgetAction {
     }
 }
 
-impl From<streamflow_core::workflow::ActivitySettings> for ActivitySettings {
-    fn from(settings: streamflow_core::workflow::ActivitySettings) -> Self {
+impl From<kruxiaflow_core::workflow::ActivitySettings> for ActivitySettings {
+    fn from(settings: kruxiaflow_core::workflow::ActivitySettings) -> Self {
         Self {
             timeout_seconds: settings.timeout_seconds,
             retry: settings.retry.map(Into::into),
@@ -385,7 +385,7 @@ impl From<streamflow_core::workflow::ActivitySettings> for ActivitySettings {
     }
 }
 
-impl From<ActivitySettings> for streamflow_core::workflow::ActivitySettings {
+impl From<ActivitySettings> for kruxiaflow_core::workflow::ActivitySettings {
     fn from(settings: ActivitySettings) -> Self {
         Self {
             timeout_seconds: settings.timeout_seconds,
@@ -439,8 +439,8 @@ fn default_max_seconds() -> u64 {
     300
 }
 
-impl From<streamflow_core::workflow::RetryPolicy> for RetrySettings {
-    fn from(settings: streamflow_core::workflow::RetryPolicy) -> Self {
+impl From<kruxiaflow_core::workflow::RetryPolicy> for RetrySettings {
+    fn from(settings: kruxiaflow_core::workflow::RetryPolicy) -> Self {
         Self {
             max_attempts: settings.max_attempts,
             strategy: settings.strategy.into(),
@@ -451,7 +451,7 @@ impl From<streamflow_core::workflow::RetryPolicy> for RetrySettings {
     }
 }
 
-impl From<RetrySettings> for streamflow_core::workflow::RetryPolicy {
+impl From<RetrySettings> for kruxiaflow_core::workflow::RetryPolicy {
     fn from(settings: RetrySettings) -> Self {
         Self {
             max_attempts: settings.max_attempts,
@@ -473,16 +473,16 @@ pub enum BackoffStrategy {
     Exponential,
 }
 
-impl From<streamflow_core::workflow::BackoffStrategy> for BackoffStrategy {
-    fn from(strategy: streamflow_core::workflow::BackoffStrategy) -> Self {
+impl From<kruxiaflow_core::workflow::BackoffStrategy> for BackoffStrategy {
+    fn from(strategy: kruxiaflow_core::workflow::BackoffStrategy) -> Self {
         match strategy {
-            streamflow_core::workflow::BackoffStrategy::Fixed => Self::Fixed,
-            streamflow_core::workflow::BackoffStrategy::Exponential => Self::Exponential,
+            kruxiaflow_core::workflow::BackoffStrategy::Fixed => Self::Fixed,
+            kruxiaflow_core::workflow::BackoffStrategy::Exponential => Self::Exponential,
         }
     }
 }
 
-impl From<BackoffStrategy> for streamflow_core::workflow::BackoffStrategy {
+impl From<BackoffStrategy> for kruxiaflow_core::workflow::BackoffStrategy {
     fn from(strategy: BackoffStrategy) -> Self {
         match strategy {
             BackoffStrategy::Fixed => Self::Fixed,
@@ -503,8 +503,8 @@ pub struct ActivityOutputDefinition {
     pub output_type: OutputType,
 }
 
-impl From<streamflow_core::workflow::ActivityOutputDefinition> for ActivityOutputDefinition {
-    fn from(output: streamflow_core::workflow::ActivityOutputDefinition) -> Self {
+impl From<kruxiaflow_core::workflow::ActivityOutputDefinition> for ActivityOutputDefinition {
+    fn from(output: kruxiaflow_core::workflow::ActivityOutputDefinition) -> Self {
         Self {
             name: output.name,
             output_type: output.output_type.into(),
@@ -512,7 +512,7 @@ impl From<streamflow_core::workflow::ActivityOutputDefinition> for ActivityOutpu
     }
 }
 
-impl From<ActivityOutputDefinition> for streamflow_core::workflow::ActivityOutputDefinition {
+impl From<ActivityOutputDefinition> for kruxiaflow_core::workflow::ActivityOutputDefinition {
     fn from(output: ActivityOutputDefinition) -> Self {
         Self {
             name: output.name,
@@ -536,17 +536,17 @@ pub enum OutputType {
     Folder,
 }
 
-impl From<streamflow_core::workflow::OutputType> for OutputType {
-    fn from(output_type: streamflow_core::workflow::OutputType) -> Self {
+impl From<kruxiaflow_core::workflow::OutputType> for OutputType {
+    fn from(output_type: kruxiaflow_core::workflow::OutputType) -> Self {
         match output_type {
-            streamflow_core::workflow::OutputType::Value => Self::Value,
-            streamflow_core::workflow::OutputType::File => Self::File,
-            streamflow_core::workflow::OutputType::Folder => Self::Folder,
+            kruxiaflow_core::workflow::OutputType::Value => Self::Value,
+            kruxiaflow_core::workflow::OutputType::File => Self::File,
+            kruxiaflow_core::workflow::OutputType::Folder => Self::Folder,
         }
     }
 }
 
-impl From<OutputType> for streamflow_core::workflow::OutputType {
+impl From<OutputType> for kruxiaflow_core::workflow::OutputType {
     fn from(output_type: OutputType) -> Self {
         match output_type {
             OutputType::Value => Self::Value,

@@ -14,7 +14,7 @@
 
 ✅ **Complete (Phases 1-5)**:
 - Database schema (llm_providers, llm_models, activity_costs tables)
-- Seed data loader (`streamflow seed-llm` command)
+- Seed data loader (`kruxiaflow seed-llm` command)
 - Core services (CostCalculator, CostTracker)
 - API endpoints (LLM catalog, cost tracking)
 - Workflow budget settings in WorkflowDefinition
@@ -1519,7 +1519,7 @@ use axum::{
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 use rust_decimal::Decimal;
-use streamflow_core::cost::tracker::CostTracker;
+use kruxiaflow_core::cost::tracker::CostTracker;
 
 #[derive(Debug, Serialize)]
 pub struct WorkflowCostSummary {
@@ -2124,7 +2124,7 @@ services:
     ports:
       - "11434:11434"
 
-  streamflow-worker:
+  kruxiaflow-worker:
     environment:
       - OLLAMA_BASE_URL=http://ollama:11434
 ```
@@ -2141,7 +2141,7 @@ spec:
   ports:
     - port: 11434
 ---
-# StreamFlow worker config:
+# Kruxia Flow worker config:
 # OLLAMA_BASE_URL=http://ollama.default.svc.cluster.local:11434
 ```
 
@@ -2150,7 +2150,7 @@ spec:
 - Set `OLLAMA_BASE_URL=http://ollama-server.example.com:11434`
 - **Optional Authentication**: Ollama supports authentication via `OLLAMA_API_KEY` (v0.2.0+)
   - Set on Ollama server: `OLLAMA_API_KEY=your-secret-key`
-  - Set in StreamFlow worker: `OLLAMA_API_KEY=your-secret-key`
+  - Set in Kruxia Flow worker: `OLLAMA_API_KEY=your-secret-key`
   - If not set, assumes trusted network (local/internal deployments)
 
 ### Recommended Ollama Models for CPU-Only Deployments
@@ -2626,8 +2626,8 @@ let cost: Decimal = sqlx::query_scalar(
 
 **Seed Data**:
 - [x] llm_models.yaml created with all provider pricing - config/llm_models.yaml
-- [x] Seed loader (llm_catalog.rs) implemented - streamflow/src/llm_catalog.rs
-- [x] CLI command works: `streamflow seed-llm config/llm_models.yaml` - streamflow/src/commands/seed_llm.rs
+- [x] Seed loader (llm_catalog.rs) implemented - kruxiaflow/src/llm_catalog.rs
+- [x] CLI command works: `kruxiaflow seed-llm config/llm_models.yaml` - kruxiaflow/src/commands/seed_llm.rs
 - [x] Upsert logic handles duplicates correctly
 
 **Core Services**:

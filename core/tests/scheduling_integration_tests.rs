@@ -3,18 +3,18 @@ use serde_json::json;
 use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
-use streamflow_core::events::{
+use kruxiaflow_core::events::{
     ActivityDefinition, DependencyEdge, EventSource, NewWorkflowEvent, PostgresEventSource,
     WorkflowDefinition, WorkflowEventType,
 };
-use streamflow_core::orchestrator::OrchestratorConfig;
-use streamflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
-use streamflow_core::workflow::ActivitySettings;
+use kruxiaflow_core::orchestrator::OrchestratorConfig;
+use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
+use kruxiaflow_core::workflow::ActivitySettings;
 use uuid::Uuid;
 
 async fn setup_test_db() -> PgPool {
     let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://localhost/streamflow_test".to_string());
+        .unwrap_or_else(|_| "postgres://localhost/kruxiaflow_test".to_string());
 
     let pool = PgPool::connect(&database_url)
         .await
@@ -133,7 +133,7 @@ async fn test_delayed_activity_execution() {
         .expect("Failed to poll");
 
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -243,7 +243,7 @@ async fn test_scheduled_activity_execution() {
         .expect("Failed to poll");
 
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -325,7 +325,7 @@ async fn test_immediate_activity_unaffected() {
         .expect("Failed to poll");
 
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -416,7 +416,7 @@ async fn test_worker_respects_scheduled_for() {
         .expect("Failed to poll");
 
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -557,7 +557,7 @@ async fn test_multiple_delayed_activities() {
         .expect("Failed to poll");
 
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -612,7 +612,7 @@ async fn test_multiple_delayed_activities() {
         .expect("Failed to poll");
 
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -699,7 +699,7 @@ async fn test_delay_with_all_duration_units() {
 
     let events = event_source.poll("test_orch").await.unwrap();
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,

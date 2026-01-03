@@ -1,18 +1,18 @@
 #!/bin/bash
-# Docker entrypoint script for StreamFlow deployment container
+# Docker entrypoint script for Kruxia Flow deployment container
 
 # Load auth environment variables
-if [ -z "$STREAMFLOW_CLIENT_ID" ] || [ -z "$STREAMFLOW_CLIENT_SECRET" ]; then
-    echo "Error: STREAMFLOW_CLIENT_ID and STREAMFLOW_CLIENT_SECRET must be set in the environment."
+if [ -z "$KRUXIAFLOW_CLIENT_ID" ] || [ -z "$KRUXIAFLOW_CLIENT_SECRET" ]; then
+    echo "Error: KRUXIAFLOW_CLIENT_ID and KRUXIAFLOW_CLIENT_SECRET must be set in the environment."
     exit 1
 fi
 
 # Load private and public keys if they haven't been provided (this is a development
 # and testing container!)
-if [ -z "$STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM" ] || [ -z "$STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM" ]; then
+if [ -z "$KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM" ] || [ -z "$KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM" ]; then
     echo "Loading development OAuth RSA key pair from ./dev-keys for development/testing..."
-    export STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM=$(cat dev-keys/private.pem | tr -d '\n')
-    export STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM=$(cat dev-keys/public.pem | tr -d '\n')
+    export KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM=$(cat dev-keys/private.pem | tr -d '\n')
+    export KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM=$(cat dev-keys/public.pem | tr -d '\n')
 fi
 
 # Wait for PostgreSQL to be ready
@@ -26,11 +26,11 @@ sqlx migrate run
 
 # Build in debug mode for development (release LTO needs 6GB+ RAM)
 # Use ./dev up --profile deploy for optimized production builds
-echo "Building StreamFlow (debug mode)..."
+echo "Building Kruxia Flow (debug mode)..."
 cargo build
 
 # Seed the oauth client (idempotent - skips if exists)
-/opt/target/debug/streamflow seed-client
+/opt/target/debug/kruxiaflow seed-client
 
 # -- TODO: Replace homemade memory monitoring with proper prometheus monitoring setup --
 
@@ -61,14 +61,14 @@ monitor_memory() {
     done
 }
 
-echo "Starting StreamFlow server with memory monitoring..."
+echo "Starting Kruxia Flow server with memory monitoring..."
 echo "Memory usage will be logged to: $MONITOR_OUTPUT"
 
 # Start server in background so we can monitor it
-/opt/target/debug/streamflow serve "$@" &
+/opt/target/debug/kruxiaflow serve "$@" &
 SERVER_PID=$!
 
-echo "StreamFlow server started (PID: $SERVER_PID)"
+echo "Kruxia Flow server started (PID: $SERVER_PID)"
 
 # Start monitoring in background
 monitor_memory $SERVER_PID &
@@ -81,5 +81,5 @@ SERVER_EXIT_CODE=$?
 # Stop monitoring
 kill $MONITOR_PID 2>/dev/null || true
 
-echo "StreamFlow server exited with code: $SERVER_EXIT_CODE"
+echo "Kruxia Flow server exited with code: $SERVER_EXIT_CODE"
 exit $SERVER_EXIT_CODE

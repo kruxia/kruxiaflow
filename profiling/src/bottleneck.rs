@@ -297,7 +297,7 @@ impl BottleneckAnalyzer {
                         db.active_connections,
                         db.max_connections
                     ),
-                    action: "Increase max_connections in PostgreSQL config and connection pool size in StreamFlow".to_string(),
+                    action: "Increase max_connections in PostgreSQL config and connection pool size in Kruxia Flow".to_string(),
                     expected_impact: "Higher concurrent workflow capacity".to_string(),
                 });
             }

@@ -50,7 +50,7 @@ impl HttpExecutor {
         if !has_user_agent {
             request = request.header(
                 "User-Agent",
-                "StreamFlow/0.2 (https://github.com/kruxia/streamflow)",
+                "Kruxia Flow/0.2 (https://github.com/kruxia/kruxiaflow)",
             );
         }
 
@@ -237,7 +237,7 @@ impl ActivityImpl for HttpRequestActivity {
 
         // Extract temp directory if provided (internal parameter injected by worker)
         let temp_dir = parameters
-            .get("_streamflow_temp_dir")
+            .get("_kruxiaflow_temp_dir")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
@@ -363,7 +363,7 @@ impl ActivityImpl for HttpRequestActivity {
 // ============================================================================
 
 // Note: HTTP activity tests are in tests/http_activity_integration_test.rs
-// These integration tests use the local StreamFlow API server instead of
+// These integration tests use the local Kruxia Flow API server instead of
 // external services to ensure reliable, isolated testing.
 
 #[cfg(test)]

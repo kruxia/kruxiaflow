@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Suggest a new feature for StreamFlow
+about: Suggest a new feature for Kruxia Flow
 title: '[FEATURE] '
 labels: enhancement
 assignees: ''
@@ -29,6 +29,6 @@ Any alternative solutions or features you've considered.
 
 ## Additional Context
 
-- Does this align with StreamFlow's goals (AI-native workflow orchestration, cost control)?
+- Does this align with Kruxia Flow's goals (AI-native workflow orchestration, cost control)?
 - Are there similar features in other tools we could learn from?
 - Any implementation considerations?

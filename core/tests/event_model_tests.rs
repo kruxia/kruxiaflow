@@ -3,7 +3,7 @@
 
 use chrono::Utc;
 use serde_json::json;
-use streamflow_core::events::models::*;
+use kruxiaflow_core::events::models::*;
 use uuid::Uuid;
 
 // Helper to create a test UUID

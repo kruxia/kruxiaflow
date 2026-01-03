@@ -1,6 +1,6 @@
 # Implementation Plan: US-1C.7 Graceful Shutdown and Signal Handling
 
-**Epic**: 1C - StreamFlow Binary and CLI
+**Epic**: 1C - Kruxia Flow Binary and CLI
 **User Story**: US-1C.7
 **Status**: ✅ COMPLETED
 **Priority**: P0 (Pre-Epic 2 - Required for Test Reliability)
@@ -24,17 +24,17 @@
 
 ### What's Already Implemented
 
-From analysis of `streamflow/src/commands/serve.rs` and `streamflow/src/signals.rs`:
+From analysis of `kruxiaflow/src/commands/serve.rs` and `kruxiaflow/src/signals.rs`:
 
 1. **Signal Handling Infrastructure** ✅ COMPLETE
-   - `streamflow/src/signals.rs` provides:
+   - `kruxiaflow/src/signals.rs` provides:
      - `wait_for_shutdown()` - Returns future that completes on SIGTERM/SIGINT
      - `shutdown_signal()` - Alias for use with tokio::select!
      - Full test coverage for signal handling
      - Works on both Unix (SIGTERM, SIGINT) and non-Unix platforms
 
 2. **Serve Command Integration** ✅ COMPLETE
-   - `streamflow/src/commands/serve.rs` (lines 336-374):
+   - `kruxiaflow/src/commands/serve.rs` (lines 336-374):
      - Signal handler integrated at line 336: `let shutdown_signal = crate::signals::wait_for_shutdown();`
      - Shutdown sequence implemented (lines 339-372):
        1. Workers stopped first (abort + 2 second drain)
@@ -44,7 +44,7 @@ From analysis of `streamflow/src/commands/serve.rs` and `streamflow/src/signals.
      - Graceful shutdown logging at each step
 
 3. **Dependencies** ✅ COMPLETE
-   - `streamflow/Cargo.toml` has signal handling dependencies:
+   - `kruxiaflow/Cargo.toml` has signal handling dependencies:
      - `signal-hook = "0.3"`
      - `signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }`
      - `tokio-stream = "0.1"`
@@ -99,7 +99,7 @@ From mvp-requirements.md US-1C.7:
 
 All acceptance criteria have been met. Implementation completed as part of US-1C.2 (All-in-One Launcher).
 
-**Key Implementation Details** (see `streamflow/src/commands/serve.rs`):
+**Key Implementation Details** (see `kruxiaflow/src/commands/serve.rs`):
 
 1. **Signal Handling** (lines 422-428):
    - Uses `crate::signals::wait_for_shutdown()` to detect SIGTERM/SIGINT
@@ -232,7 +232,7 @@ sequenceDiagram
 
 ### Component 1: Shutdown Coordinator
 
-**Location**: `streamflow/src/commands/serve.rs`
+**Location**: `kruxiaflow/src/commands/serve.rs`
 
 **Changes Needed**:
 
@@ -253,7 +253,7 @@ pub struct ServeCommand {
     /// Shutdown timeout in seconds
     #[arg(
         long,
-        env = "STREAMFLOW_SHUTDOWN_TIMEOUT",
+        env = "KRUXIAFLOW_SHUTDOWN_TIMEOUT",
         default_value = "30",
         help = "Graceful shutdown timeout in seconds",
         long_help = "Time to wait for in-flight activities to complete during shutdown\n\n\
@@ -281,7 +281,7 @@ impl ServeCommand {
 
 ### Component 2: API Server Graceful Shutdown
 
-**Location**: `streamflow/src/commands/serve.rs` - Update `spawn_api_server()`
+**Location**: `kruxiaflow/src/commands/serve.rs` - Update `spawn_api_server()`
 
 **Current Code** (lines 162-208):
 ```rust
@@ -362,7 +362,7 @@ async fn spawn_api_server(
 
 **Additional**: Add shutdown state to AppState for 503 responses
 
-**Location**: `streamflow-api/src/lib.rs`
+**Location**: `kruxiaflow-api/src/lib.rs`
 
 ```rust
 use tokio_util::sync::CancellationToken;
@@ -401,7 +401,7 @@ impl AppState {
 
 **Add shutdown middleware** to return 503 during shutdown:
 
-**Location**: `streamflow-api/src/middleware.rs` (new file)
+**Location**: `kruxiaflow-api/src/middleware.rs` (new file)
 
 ```rust
 use axum::{
@@ -441,7 +441,7 @@ pub async fn shutdown_check(
 
 **Update router** to include shutdown middleware:
 
-**Location**: `streamflow-api/src/routes.rs`
+**Location**: `kruxiaflow-api/src/routes.rs`
 
 ```rust
 use crate::middleware::shutdown_check;
@@ -482,7 +482,7 @@ pub fn app_router(state: AppState) -> Router {
 
 ### Component 3: Worker Graceful Shutdown
 
-**Location**: `streamflow-worker/src/manager.rs`
+**Location**: `kruxiaflow-worker/src/manager.rs`
 
 **Changes Needed**:
 
@@ -530,7 +530,7 @@ async fn spawn_workers(
 
     // Create activity registry with built-in activities
     let mut registry = ActivityRegistry::new();
-    registry.register(Arc::new(streamflow_worker::activities::EchoActivity));
+    registry.register(Arc::new(kruxiaflow_worker::activities::EchoActivity));
 
     let config = WorkerConfig {
         api_url: api_url.clone(),
@@ -561,7 +561,7 @@ async fn spawn_workers(
 
 ### Component 4: Orchestrator Graceful Shutdown
 
-**Location**: `streamflow-core/src/orchestrator.rs`
+**Location**: `kruxiaflow-core/src/orchestrator.rs`
 
 **Changes Needed**:
 
@@ -629,7 +629,7 @@ async fn spawn_orchestrator(
 
 ### Component 5: Updated Main Execution with Coordinated Shutdown
 
-**Location**: `streamflow/src/commands/serve.rs` - Update `execute()`
+**Location**: `kruxiaflow/src/commands/serve.rs` - Update `execute()`
 
 **Updated Implementation**:
 
@@ -643,7 +643,7 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
         bind = %cmd.bind,
         workers = cmd.workers,
         shutdown_timeout = cmd.shutdown_timeout,
-        "Starting StreamFlow all-in-one mode"
+        "Starting Kruxia Flow all-in-one mode"
     );
 
     // Create shutdown coordinator
@@ -668,8 +668,8 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
     let auth_config = AuthConfig {
         rsa_private_key_pem: cmd.oauth_private_key.as_ref().unwrap().clone(),
         rsa_public_key_pem: cmd.oauth_public_key.clone(),
-        jwt_issuer: "streamflow".to_string(),
-        jwt_audience: "streamflow-api".to_string(),
+        jwt_issuer: "kruxiaflow".to_string(),
+        jwt_audience: "kruxiaflow-api".to_string(),
         token_ttl: 86400, // 24 hours
     };
 
@@ -726,7 +726,7 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
     tracing::info!("All services started successfully");
     tracing::info!(
         api_url = %api_url,
-        "StreamFlow is ready - API available at {}",
+        "Kruxia Flow is ready - API available at {}",
         api_url
     );
 
@@ -798,7 +798,7 @@ pub async fn execute(cmd: ServeCommand, database_url: String) -> Result<()> {
 
 ### Component 6: Add tokio-util Dependency
 
-**Location**: `streamflow/Cargo.toml`
+**Location**: `kruxiaflow/Cargo.toml`
 
 **Add**:
 ```toml
@@ -807,9 +807,9 @@ tokio-util = { version = "0.7", features = ["sync"] }
 ```
 
 Also needs to be added to:
-- `streamflow-api/Cargo.toml` (for AppState)
-- `streamflow-worker/Cargo.toml` (for WorkerManager)
-- `streamflow-core/Cargo.toml` (for orchestrator)
+- `kruxiaflow-api/Cargo.toml` (for AppState)
+- `kruxiaflow-worker/Cargo.toml` (for WorkerManager)
+- `kruxiaflow-core/Cargo.toml` (for orchestrator)
 
 ---
 
@@ -817,7 +817,7 @@ Also needs to be added to:
 
 ### Unit Tests
 
-**File**: `streamflow/src/commands/serve.rs` (add to existing tests)
+**File**: `kruxiaflow/src/commands/serve.rs` (add to existing tests)
 
 ```rust
 #[cfg(test)]
@@ -852,7 +852,7 @@ mod tests {
 
 ### Integration Tests
 
-**File**: `streamflow/tests/graceful_shutdown_test.rs` (new)
+**File**: `kruxiaflow/tests/graceful_shutdown_test.rs` (new)
 
 ```rust
 use serial_test::serial;
@@ -863,16 +863,16 @@ use tokio::time::sleep;
 #[tokio::test]
 #[serial]
 async fn test_graceful_shutdown_sigterm() {
-    // Setup: Start streamflow serve
+    // Setup: Start kruxiaflow serve
     let database_url = get_test_database_url();
 
     let mut child = Command::new("cargo")
         .args(&["run", "--", "serve", "--port", "18081", "--workers", "1"])
         .env("DATABASE_URL", database_url)
-        .env("STREAMFLOW_CLIENT_SECRET", "test_secret")
-        .env("STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM", get_test_private_key())
+        .env("KRUXIAFLOW_CLIENT_SECRET", "test_secret")
+        .env("KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM", get_test_private_key())
         .spawn()
-        .expect("Failed to start streamflow serve");
+        .expect("Failed to start kruxiaflow serve");
 
     // Wait for services to start
     sleep(Duration::from_secs(3)).await;
@@ -966,17 +966,17 @@ async fn test_workers_complete_activities_during_shutdown() {
 cargo build --release
 
 # 2. Setup environment
-export DATABASE_URL='postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow'
-export STREAMFLOW_CLIENT_SECRET='dev_secret_123'
-export STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="$(cat path/to/private.pem)"
+export DATABASE_URL='postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow'
+export KRUXIAFLOW_CLIENT_SECRET='dev_secret_123'
+export KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="$(cat path/to/private.pem)"
 
 # 3. Start server
-./target/release/streamflow serve --shutdown-timeout 60
+./target/release/kruxiaflow serve --shutdown-timeout 60
 
 # Expected output:
-# INFO streamflow::commands::serve: Starting StreamFlow all-in-one mode port=8080 bind="0.0.0.0" workers=1 shutdown_timeout=60
-# INFO streamflow::commands::serve: All services started successfully
-# INFO streamflow::commands::serve: StreamFlow is ready - API available at http://0.0.0.0:8080
+# INFO kruxiaflow::commands::serve: Starting Kruxia Flow all-in-one mode port=8080 bind="0.0.0.0" workers=1 shutdown_timeout=60
+# INFO kruxiaflow::commands::serve: All services started successfully
+# INFO kruxiaflow::commands::serve: Kruxia Flow is ready - API available at http://0.0.0.0:8080
 
 # 4. In another terminal, submit a workflow (future test)
 # curl -X POST http://localhost:8080/api/v1/workflows ...
@@ -985,26 +985,26 @@ export STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="$(cat path/to/private.pem)"
 kill -TERM <pid>
 
 # Expected output:
-# INFO streamflow::signals: Received SIGTERM, initiating graceful shutdown
-# INFO streamflow::commands::serve: Shutdown signal received, initiating graceful shutdown...
-# INFO streamflow::commands::serve: Stopping workers, waiting for activities to complete... timeout_secs=60
-# INFO streamflow::commands::serve: Workers stopped gracefully
-# INFO streamflow::commands::serve: Stopping API server...
-# INFO streamflow::commands::serve: API server stopped gracefully
-# INFO streamflow::commands::serve: Stopping orchestrator...
-# INFO streamflow::commands::serve: Orchestrator stopped gracefully
-# INFO streamflow::commands::serve: Closing database pool...
-# INFO streamflow::commands::serve: Database pool closed
-# INFO streamflow::commands::serve: Graceful shutdown complete
+# INFO kruxiaflow::signals: Received SIGTERM, initiating graceful shutdown
+# INFO kruxiaflow::commands::serve: Shutdown signal received, initiating graceful shutdown...
+# INFO kruxiaflow::commands::serve: Stopping workers, waiting for activities to complete... timeout_secs=60
+# INFO kruxiaflow::commands::serve: Workers stopped gracefully
+# INFO kruxiaflow::commands::serve: Stopping API server...
+# INFO kruxiaflow::commands::serve: API server stopped gracefully
+# INFO kruxiaflow::commands::serve: Stopping orchestrator...
+# INFO kruxiaflow::commands::serve: Orchestrator stopped gracefully
+# INFO kruxiaflow::commands::serve: Closing database pool...
+# INFO kruxiaflow::commands::serve: Database pool closed
+# INFO kruxiaflow::commands::serve: Graceful shutdown complete
 
 # 6. Test shutdown timeout
-./target/release/streamflow serve --shutdown-timeout 5
+./target/release/kruxiaflow serve --shutdown-timeout 5
 # Submit long-running workflow, send SIGTERM
 # Should force shutdown after 5 seconds with warning logs
 
 # 7. Test API 503 during shutdown
 # Start server
-./target/release/streamflow serve
+./target/release/kruxiaflow serve
 
 # In another terminal, continuously check API
 while true; do curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/api/v1/info; sleep 0.1; done
@@ -1175,7 +1175,7 @@ while true; do curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8080/ap
 
 ### Current Signal Handler Implementation
 
-The `streamflow/src/signals.rs` module is well-implemented:
+The `kruxiaflow/src/signals.rs` module is well-implemented:
 - Uses `signal-hook` and `signal-hook-tokio` for async signal handling
 - Handles SIGTERM and SIGINT on Unix platforms
 - Has comprehensive test coverage

@@ -1,6 +1,6 @@
-# StreamFlow Testing Guide
+# Kruxia Flow Testing Guide
 
-This guide covers testing practices, test coverage tracking, and testing workflows for the StreamFlow project.
+This guide covers testing practices, test coverage tracking, and testing workflows for the Kruxia Flow project.
 
 ## Table of Contents
 
@@ -12,7 +12,7 @@ This guide covers testing practices, test coverage tracking, and testing workflo
 
 ## Running Tests
 
-StreamFlow uses a unified test script at `scripts/test.sh` for all testing needs.
+Kruxia Flow uses a unified test script at `scripts/test.sh` for all testing needs.
 
 ### Basic Usage
 
@@ -24,7 +24,7 @@ StreamFlow uses a unified test script at `scripts/test.sh` for all testing needs
 ./scripts/test.sh --verbose
 
 # Run tests for a specific crate
-./scripts/test.sh -p streamflow-api
+./scripts/test.sh -p kruxiaflow-api
 
 # Show all options
 ./scripts/test.sh --help
@@ -62,7 +62,7 @@ StreamFlow uses a unified test script at `scripts/test.sh` for all testing needs
 
 ## Test Coverage
 
-StreamFlow uses `cargo-llvm-cov` for accurate, cross-platform test coverage tracking.
+Kruxia Flow uses `cargo-llvm-cov` for accurate, cross-platform test coverage tracking.
 
 ### Installing Coverage Tools
 
@@ -103,10 +103,10 @@ coverage/lcov.info
 
 ```bash
 # Coverage for a specific crate
-./scripts/test.sh --coverage -p streamflow-api
+./scripts/test.sh --coverage -p kruxiaflow-api
 
 # HTML report for API crate only
-./scripts/test.sh --coverage-html -p streamflow-api
+./scripts/test.sh --coverage-html -p kruxiaflow-api
 ```
 
 ## Test Organization
@@ -114,7 +114,7 @@ coverage/lcov.info
 ### Directory Structure
 
 ```
-streamflow/
+kruxiaflow/
 ├── core/
 │   ├── src/
 │   │   └── *.rs              # Source files with inline unit tests
@@ -172,7 +172,7 @@ async fn test_feature_end_to_end() {
 
 ## Coverage Goals
 
-StreamFlow aims for high test coverage to ensure production reliability:
+Kruxia Flow aims for high test coverage to ensure production reliability:
 
 ### Target Coverage by Component
 | Component                |  Target | Current | Notes                              |
@@ -234,9 +234,9 @@ jobs:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_USER: streamflow
-          POSTGRES_PASSWORD: streamflow_dev
-          POSTGRES_DB: streamflow_test
+          POSTGRES_USER: kruxiaflow
+          POSTGRES_PASSWORD: kruxiaflow_dev
+          POSTGRES_DB: kruxiaflow_test
         ports:
           - 5433:5432
         options: >-
@@ -267,12 +267,12 @@ jobs:
       - name: Run migrations
         run: sqlx migrate run
         env:
-          DATABASE_URL: postgres://streamflow:streamflow_dev@localhost:5433/streamflow_test
+          DATABASE_URL: postgres://kruxiaflow:kruxiaflow_dev@localhost:5433/kruxiaflow_test
       
       - name: Run tests with coverage
         run: ./scripts/test.sh --coverage-ci --skip-db-setup
         env:
-          DATABASE_URL: postgres://streamflow:streamflow_dev@localhost:5433/streamflow_test
+          DATABASE_URL: postgres://kruxiaflow:kruxiaflow_dev@localhost:5433/kruxiaflow_test
       
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
@@ -378,7 +378,7 @@ The test script handles DATABASE_URL automatically.
 
 ```bash
 # Run specific crate only
-./scripts/test.sh -p streamflow-api
+./scripts/test.sh -p kruxiaflow-api
 
 # Run unit tests only (faster)
 ./scripts/test.sh --unit

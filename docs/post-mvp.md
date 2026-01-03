@@ -1,4 +1,4 @@
-# StreamFlow Post-MVP Roadmap
+# Kruxia Flow Post-MVP Roadmap
 
 **Version**: 0.2
 **Last Updated**: 2025-10-29
@@ -8,7 +8,7 @@
 
 ## Overview
 
-This document captures features, enhancements, and optimizations that are intentionally deferred beyond the MVP release. These items are organized into epics and user stories to provide a clear roadmap for StreamFlow's evolution from MVP to production-scale deployment.
+This document captures features, enhancements, and optimizations that are intentionally deferred beyond the MVP release. These items are organized into epics and user stories to provide a clear roadmap for Kruxia Flow's evolution from MVP to production-scale deployment.
 
 The MVP focuses on:
 - ✅ Single binary deployment
@@ -41,7 +41,7 @@ Post-MVP expands to:
 
 ## Epic 1: External Service Integrations
 
-**Goal**: Enable StreamFlow to integrate with external managed services for improved scalability, reliability, and operational simplicity in production environments.
+**Goal**: Enable Kruxia Flow to integrate with external managed services for improved scalability, reliability, and operational simplicity in production environments.
 
 ### Story 1.1: Refresh Token Rotation with Grace Period
 
@@ -103,7 +103,7 @@ Token Lifecycle:
 **Priority**: P1 (High - Common enterprise requirement)
 
 **As** an enterprise platform engineer
-**I want** to integrate StreamFlow with our existing identity provider (Auth0/Okta)
+**I want** to integrate Kruxia Flow with our existing identity provider (Auth0/Okta)
 **So that** users can authenticate using SSO and we can manage access centrally
 
 **Scope**:
@@ -128,11 +128,11 @@ Token Lifecycle:
 **Configuration Example**:
 ```bash
 # Switch from MVP custom auth to Auth0
-STREAMFLOW_OAUTH_PROVIDER=auth0
-STREAMFLOW_OAUTH_DOMAIN=company.auth0.com
-STREAMFLOW_OAUTH_AUDIENCE=streamflow-api
-STREAMFLOW_OAUTH_CLIENT_ID=streamflow_server
-STREAMFLOW_OAUTH_CLIENT_SECRET=...
+KRUXIAFLOW_OAUTH_PROVIDER=auth0
+KRUXIAFLOW_OAUTH_DOMAIN=company.auth0.com
+KRUXIAFLOW_OAUTH_AUDIENCE=kruxiaflow-api
+KRUXIAFLOW_OAUTH_CLIENT_ID=kruxiaflow_server
+KRUXIAFLOW_OAUTH_CLIENT_SECRET=...
 ```
 
 ---
@@ -141,7 +141,7 @@ STREAMFLOW_OAUTH_CLIENT_SECRET=...
 
 **Priority**: P1 (High - Key scalability path)
 
-**As** a platform engineer scaling StreamFlow
+**As** a platform engineer scaling Kruxia Flow
 **I want** to use Kafka/Redpanda for event streaming instead of PostgreSQL polling
 **So that** I can handle >100,000 events/sec with lower latency
 
@@ -172,10 +172,10 @@ STREAMFLOW_OAUTH_CLIENT_SECRET=...
 
 **Configuration Example**:
 ```bash
-STREAMFLOW_EVENT_SOURCE=kafka
-STREAMFLOW_KAFKA_BROKERS=kafka1:9092,kafka2:9092,kafka3:9092
-STREAMFLOW_KAFKA_TOPIC=streamflow-events
-STREAMFLOW_KAFKA_CONSUMER_GROUP=streamflow-orchestrators
+KRUXIAFLOW_EVENT_SOURCE=kafka
+KRUXIAFLOW_KAFKA_BROKERS=kafka1:9092,kafka2:9092,kafka3:9092
+KRUXIAFLOW_KAFKA_TOPIC=kruxiaflow-events
+KRUXIAFLOW_KAFKA_CONSUMER_GROUP=kruxiaflow-orchestrators
 ```
 
 ---
@@ -184,7 +184,7 @@ STREAMFLOW_KAFKA_CONSUMER_GROUP=streamflow-orchestrators
 
 **Priority**: P2 (Medium - Alternative for lower scale, simpler ops)
 
-**As** a platform engineer deploying StreamFlow at moderate scale
+**As** a platform engineer deploying Kruxia Flow at moderate scale
 **I want** to use NATS JetStream for event streaming
 **So that** I get sub-millisecond latency with simpler operations than Kafka
 
@@ -250,7 +250,7 @@ STREAMFLOW_KAFKA_CONSUMER_GROUP=streamflow-orchestrators
 
 **Priority**: P2 (Medium - Cloud-native queue for AWS deployments)
 
-**As** a platform engineer deploying StreamFlow on AWS
+**As** a platform engineer deploying Kruxia Flow on AWS
 **I want** to use AWS SQS for the activity queue
 **So that** I get a fully managed, scalable queue service
 
@@ -359,10 +359,10 @@ STREAMFLOW_KAFKA_CONSUMER_GROUP=streamflow-orchestrators
 
 **Configuration Example**:
 ```bash
-STREAMFLOW_STORAGE_PROVIDER=s3
-STREAMFLOW_STORAGE_S3_BUCKET=streamflow-artifacts
-STREAMFLOW_STORAGE_S3_ENDPOINT=https://s3.amazonaws.com
-STREAMFLOW_STORAGE_S3_REGION=us-east-1
+KRUXIAFLOW_STORAGE_PROVIDER=s3
+KRUXIAFLOW_STORAGE_S3_BUCKET=kruxiaflow-artifacts
+KRUXIAFLOW_STORAGE_S3_ENDPOINT=https://s3.amazonaws.com
+KRUXIAFLOW_STORAGE_S3_REGION=us-east-1
 ```
 
 ---
@@ -373,7 +373,7 @@ STREAMFLOW_STORAGE_S3_REGION=us-east-1
 
 **As** an edge deployment engineer
 **I want** to store workflow artifacts on the local filesystem
-**So that** I can run StreamFlow in air-gapped environments
+**So that** I can run Kruxia Flow in air-gapped environments
 
 **Scope**:
 - Implement filesystem provider for `WorkflowStorage` interface
@@ -405,7 +405,7 @@ STREAMFLOW_STORAGE_S3_REGION=us-east-1
 **So that** workflow artifacts stay in my organization's storage for compliance and cost control
 
 **Background**:
-Currently, all workflows use a single system-wide storage backend configured via environment variables. This requires copying data from user-owned buckets into StreamFlow's managed storage, which:
+Currently, all workflows use a single system-wide storage backend configured via environment variables. This requires copying data from user-owned buckets into Kruxia Flow's managed storage, which:
 - Increases storage costs (duplicate data)
 - Creates compliance issues (sensitive data must stay in specific buckets)
 - Adds latency (cross-bucket transfers)
@@ -552,8 +552,8 @@ pub struct ActivityContext {
 5. **Geographic requirements**: EU workflows use EU buckets, US workflows use US buckets
 
 **Lifecycle Considerations**:
-- **Reference-only mode**: StreamFlow doesn't manage lifecycle (user's responsibility)
-- **Managed mode**: StreamFlow can still apply retention policies to workflow artifacts
+- **Reference-only mode**: Kruxia Flow doesn't manage lifecycle (user's responsibility)
+- **Managed mode**: Kruxia Flow can still apply retention policies to workflow artifacts
 - **Storage unavailability**: Workflow fails gracefully with clear error message
 - **Credential rotation**: Support for credential updates without workflow redeployment
 
@@ -652,7 +652,7 @@ This story enhances file handling with production features deferred from the MVP
 
 **6. Presigned URLs**
 - Generate presigned URLs for direct client upload
-- Bypass StreamFlow for large file transfers
+- Bypass Kruxia Flow for large file transfers
 - Configurable expiration (1 hour - 7 days)
 - Security validation (workflow ownership)
 - Works with S3, GCS, Azure Blob
@@ -742,7 +742,7 @@ activities:
         type: value
 
   # Client uploads directly to S3/GCS using presigned URL
-  # No file passes through StreamFlow
+  # No file passes through Kruxia Flow
 ```
 
 **Benefits**:
@@ -751,7 +751,7 @@ activities:
 - **Versioning**: Debug issues, compare results, rollback
 - **Compression**: Reduce storage costs by 60-90%
 - **Encryption**: Meet compliance requirements
-- **Presigned URLs**: Reduce StreamFlow bandwidth costs
+- **Presigned URLs**: Reduce Kruxia Flow bandwidth costs
 - **CDN**: Fast global file access
 - **Large file support**: Process TB-scale datasets
 
@@ -799,7 +799,7 @@ activities:
 **Priority**: P2 (Medium - Performance optimization)
 
 **As** a workflow developer
-**I want** StreamFlow to cache activity results in Redis
+**I want** Kruxia Flow to cache activity results in Redis
 **So that** repeated executions with the same inputs are instant
 
 **Scope**:
@@ -821,9 +821,9 @@ activities:
 
 **Configuration Example**:
 ```bash
-STREAMFLOW_CACHE_PROVIDER=redis
-STREAMFLOW_REDIS_URL=redis://localhost:6379
-STREAMFLOW_CACHE_TTL_DEFAULT=3600  # 1 hour
+KRUXIAFLOW_CACHE_PROVIDER=redis
+KRUXIAFLOW_REDIS_URL=redis://localhost:6379
+KRUXIAFLOW_CACHE_TTL_DEFAULT=3600  # 1 hour
 ```
 
 ---
@@ -1041,8 +1041,8 @@ activities:
 
 **Configuration Example**:
 ```bash
-STREAMFLOW_ORCHESTRATOR_STATE_CACHE_SIZE=10000  # Cache 10k active workflows
-STREAMFLOW_ORCHESTRATOR_STATE_CACHE_TTL=300     # 5 minutes idle expiration
+KRUXIAFLOW_ORCHESTRATOR_STATE_CACHE_SIZE=10000  # Cache 10k active workflows
+KRUXIAFLOW_ORCHESTRATOR_STATE_CACHE_TTL=300     # 5 minutes idle expiration
 ```
 
 ---
@@ -1209,11 +1209,11 @@ The postgres_query built-in activity caches PostgreSQL connection pools by datab
 - ✅ System-level pool configuration via environment variables
 - ✅ Reasonable defaults (max_connections=5, acquire_timeout=30s)
 - ✅ Environment variables:
-  - `STREAMFLOW_POSTGRES_POOL_MAX_CONNECTIONS` (default: 5)
-  - `STREAMFLOW_POSTGRES_POOL_MIN_CONNECTIONS` (default: none)
-  - `STREAMFLOW_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECS` (default: 30)
-  - `STREAMFLOW_POSTGRES_POOL_MAX_LIFETIME_SECS` (default: none)
-  - `STREAMFLOW_POSTGRES_POOL_IDLE_TIMEOUT_SECS` (default: none)
+  - `KRUXIAFLOW_POSTGRES_POOL_MAX_CONNECTIONS` (default: 5)
+  - `KRUXIAFLOW_POSTGRES_POOL_MIN_CONNECTIONS` (default: none)
+  - `KRUXIAFLOW_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECS` (default: 30)
+  - `KRUXIAFLOW_POSTGRES_POOL_MAX_LIFETIME_SECS` (default: none)
+  - `KRUXIAFLOW_POSTGRES_POOL_IDLE_TIMEOUT_SECS` (default: none)
 - ❌ No cache eviction (pools live forever)
 - ❌ No cache size limits
 - ❌ No cache metrics
@@ -1228,13 +1228,13 @@ The postgres_query built-in activity caches PostgreSQL connection pools by datab
 **Configuration Example**:
 ```bash
 # PostgreSQL activity pool settings (MVP - already supported)
-STREAMFLOW_POSTGRES_POOL_MAX_CONNECTIONS=10            # Default: 5
-STREAMFLOW_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECS=60      # Default: 30
+KRUXIAFLOW_POSTGRES_POOL_MAX_CONNECTIONS=10            # Default: 5
+KRUXIAFLOW_POSTGRES_POOL_ACQUIRE_TIMEOUT_SECS=60      # Default: 30
 
 # PostgreSQL activity pool cache settings (Post-MVP)
-STREAMFLOW_POSTGRES_POOL_CACHE_MAX_SIZE=100            # Default: unlimited
-STREAMFLOW_POSTGRES_POOL_EVICTION_INTERVAL_SECS=300    # 5 minutes
-STREAMFLOW_POSTGRES_POOL_IDLE_THRESHOLD_SECS=600       # 10 minutes
+KRUXIAFLOW_POSTGRES_POOL_CACHE_MAX_SIZE=100            # Default: unlimited
+KRUXIAFLOW_POSTGRES_POOL_EVICTION_INTERVAL_SECS=300    # 5 minutes
+KRUXIAFLOW_POSTGRES_POOL_IDLE_THRESHOLD_SECS=600       # 10 minutes
 ```
 
 **Eviction Logic**:
@@ -1329,7 +1329,7 @@ pub async fn evict_idle_pools(
 **So that** critical workflows execute before background jobs
 
 **Background**:
-Currently, StreamFlow's activity queue processes activities in FIFO order (by `scheduled_for`). This means high-priority interactive workflows can be blocked behind low-priority batch jobs, causing SLA violations.
+Currently, Kruxia Flow's activity queue processes activities in FIFO order (by `scheduled_for`). This means high-priority interactive workflows can be blocked behind low-priority batch jobs, causing SLA violations.
 
 **Scope**:
 - Add `priority` field to activity_queue table
@@ -1493,14 +1493,14 @@ CREATE TABLE activity_failures (
 
 ## Epic 3: Multi-Tenancy & Authorization
 
-**Goal**: Support multiple tenants in a single StreamFlow deployment with proper isolation and access control.
+**Goal**: Support multiple tenants in a single Kruxia Flow deployment with proper isolation and access control.
 
 ### Story 3.1: Row-Level Security for Multi-Tenancy
 
 **Priority**: P1 (High - Key enterprise feature)
 
-**As** a SaaS provider using StreamFlow
-**I want** to deploy a single StreamFlow instance for all customers
+**As** a SaaS provider using Kruxia Flow
+**I want** to deploy a single Kruxia Flow instance for all customers
 **So that** I reduce operational overhead while ensuring data isolation
 
 **Scope**:
@@ -1644,7 +1644,7 @@ USING (tenant_id = current_setting('app.tenant_id')::UUID);
 
 **Example API**:
 ```python
-from streamflow import Workflow, Activity
+from kruxiaflow import Workflow, Activity
 
 workflow = Workflow("payment_processing", version="1.0")
 
@@ -1726,7 +1726,7 @@ workflow.add_activities(fallback_chain)
 - Rust library for workflow definitions
 - Proc macros for ergonomic API
 - Compile to YAML at build time
-- Integration with StreamFlow core types
+- Integration with Kruxia Flow core types
 
 ---
 
@@ -1811,25 +1811,25 @@ conditions:
 **I want** CLI commands for workflow compilation, validation, and deployment
 **So that** we catch errors before production deployment and can manage workflows from the terminal
 
-**Current CLI** (already implemented with clap in `streamflow/src/main.rs`):
-- `streamflow serve` - Launch all services
-- `streamflow api` / `orchestrator` / `worker` - Individual service launchers
-- `streamflow health` / `status` - Service monitoring
-- `streamflow migrate` - Database migrations
-- `streamflow seed-llm` / `seed-client` - Seeding commands
-- `streamflow version` - Version info
+**Current CLI** (already implemented with clap in `kruxiaflow/src/main.rs`):
+- `kruxiaflow serve` - Launch all services
+- `kruxiaflow api` / `orchestrator` / `worker` - Individual service launchers
+- `kruxiaflow health` / `status` - Service monitoring
+- `kruxiaflow migrate` - Database migrations
+- `kruxiaflow seed-llm` / `seed-client` - Seeding commands
+- `kruxiaflow version` - Version info
 
 **Scope** (new commands to add):
-  - `streamflow compile workflow.py --output workflow.yaml` - Compile Python/TS to YAML
-  - `streamflow deploy workflow.py --environment production` - Compile and deploy
-  - `streamflow workflow deploy <file>` - Deploy workflow definition
-  - `streamflow workflow list` - List deployed workflows
-  - `streamflow workflow run <name>` - Start workflow instance
-  - `streamflow workflow status <id>` - Check workflow status
-  - `streamflow workflow logs <id>` - View workflow events
-  - `streamflow activity list` - View queued activities
-  - `streamflow admin create-client` - Create worker client
-  - `streamflow admin create-user` - Create user account
+  - `kruxiaflow compile workflow.py --output workflow.yaml` - Compile Python/TS to YAML
+  - `kruxiaflow deploy workflow.py --environment production` - Compile and deploy
+  - `kruxiaflow workflow deploy <file>` - Deploy workflow definition
+  - `kruxiaflow workflow list` - List deployed workflows
+  - `kruxiaflow workflow run <name>` - Start workflow instance
+  - `kruxiaflow workflow status <id>` - Check workflow status
+  - `kruxiaflow workflow logs <id>` - View workflow events
+  - `kruxiaflow activity list` - View queued activities
+  - `kruxiaflow admin create-client` - Create worker client
+  - `kruxiaflow admin create-user` - Create user account
 - Shell completion (bash, zsh, fish)
 - JSON output mode for scripting
 
@@ -1863,12 +1863,12 @@ conditions:
 - Built-in polling loop (claim, execute, complete)
 - Built-in heartbeat management
 - Logging and metrics helpers
-- Testing utilities (mock StreamFlow API)
+- Testing utilities (mock Kruxia Flow API)
 - Documentation and examples
 
 **Example Python Activity**:
 ```python
-from streamflow.activity import Activity, activity, Input, Output
+from kruxiaflow.activity import Activity, activity, Input, Output
 
 @activity(worker="payments", name="validate_card")
 class ValidateCardActivity(Activity):
@@ -1910,7 +1910,7 @@ class ValidateCardActivity(Activity):
 
 **Example**:
 ```python
-from streamflow.testing import WorkflowTest, mock_activity
+from kruxiaflow.testing import WorkflowTest, mock_activity
 
 class TestPaymentWorkflow(WorkflowTest):
     def test_successful_payment(self):
@@ -1942,7 +1942,7 @@ class TestPaymentWorkflow(WorkflowTest):
 **I want** to work with SQLite databases in my workflows
 **So that** I can process, transform, and analyze data stored in SQLite files
 
-**Challenge**: SQLite is file-based, not server-based, which creates a fundamental mismatch with StreamFlow's distributed worker architecture:
+**Challenge**: SQLite is file-based, not server-based, which creates a fundamental mismatch with Kruxia Flow's distributed worker architecture:
 - Workers may run on different machines
 - No server/client architecture to connect to
 - Concurrent access requires file system coordination
@@ -2028,13 +2028,13 @@ class TestPaymentWorkflow(WorkflowTest):
 
 ## Epic 5: Enterprise Operations
 
-**Goal**: Enable StreamFlow to run reliably in production with monitoring, high availability, and disaster recovery.
+**Goal**: Enable Kruxia Flow to run reliably in production with monitoring, high availability, and disaster recovery.
 
 ### Story 5.1: Metrics and Monitoring
 
 **Priority**: P1 (High - Essential for production)
 
-**As** a platform engineer running StreamFlow in production
+**As** a platform engineer running Kruxia Flow in production
 **I want** comprehensive metrics exposed via Prometheus
 **So that** I can monitor system health and performance
 
@@ -2059,16 +2059,16 @@ class TestPaymentWorkflow(WorkflowTest):
 
 **Key Metrics**:
 ```
-streamflow_workflows_total{status="completed|failed"}
-streamflow_workflow_duration_seconds{quantile="0.5|0.95|0.99"}
-streamflow_activities_total{worker,name,status}
-streamflow_activity_duration_seconds{worker,name,quantile}
-streamflow_queue_depth{worker,name}
-streamflow_orchestrator_evaluation_duration_seconds{quantile}
-streamflow_db_connections{state="idle|active"}
-streamflow_activities_scheduled_total{type="immediate|delayed"}
-streamflow_activity_schedule_delay_seconds{quantile="0.5|0.95|0.99"}
-streamflow_activities_scheduled_past_total
+kruxiaflow_workflows_total{status="completed|failed"}
+kruxiaflow_workflow_duration_seconds{quantile="0.5|0.95|0.99"}
+kruxiaflow_activities_total{worker,name,status}
+kruxiaflow_activity_duration_seconds{worker,name,quantile}
+kruxiaflow_queue_depth{worker,name}
+kruxiaflow_orchestrator_evaluation_duration_seconds{quantile}
+kruxiaflow_db_connections{state="idle|active"}
+kruxiaflow_activities_scheduled_total{type="immediate|delayed"}
+kruxiaflow_activity_schedule_delay_seconds{quantile="0.5|0.95|0.99"}
+kruxiaflow_activities_scheduled_past_total
 ```
 
 **Benefits**:
@@ -2084,7 +2084,7 @@ streamflow_activities_scheduled_past_total
 **Priority**: P2 (Medium - Advanced debugging)
 
 **As** a platform engineer troubleshooting slow workflows
-**I want** distributed tracing across all StreamFlow components
+**I want** distributed tracing across all Kruxia Flow components
 **So that** I can identify performance bottlenecks
 
 **Scope**:
@@ -2151,8 +2151,8 @@ streamflow_activities_scheduled_past_total
 
 **Priority**: P1 (High - Production requirement)
 
-**As** a platform engineer running StreamFlow in production
-**I want** StreamFlow to handle component failures gracefully
+**As** a platform engineer running Kruxia Flow in production
+**I want** Kruxia Flow to handle component failures gracefully
 **So that** workflows continue executing during partial outages
 
 **Scope**:
@@ -2232,7 +2232,7 @@ PostgreSQL
 **Priority**: P2 (Medium - Operational simplicity)
 
 **As** a platform engineer
-**I want** to manage StreamFlow configuration centrally
+**I want** to manage Kruxia Flow configuration centrally
 **So that** I can update settings without redeploying
 
 **Scope**:
@@ -2264,7 +2264,7 @@ PostgreSQL
 **Priority**: P3 (Lower - Advanced testing)
 
 **As** a platform engineer validating resilience
-**I want** to inject failures into StreamFlow components
+**I want** to inject failures into Kruxia Flow components
 **So that** I can verify our system handles failures gracefully
 
 **Scope**:
@@ -2291,12 +2291,12 @@ PostgreSQL
 
 **Priority**: P1 (High - Production reliability)
 
-**As** a platform engineer running StreamFlow in production
+**As** a platform engineer running Kruxia Flow in production
 **I want** automatic detection and recovery from timed-out activities
 **So that** workflows don't hang forever when workers crash or become unresponsive
 
 **Background**:
-StreamFlow currently has heartbeat endpoints (`POST /api/v1/activities/{id}/heartbeat`) but no automatic timeout detection. When a worker crashes mid-execution or becomes unresponsive, the activity remains in "running" state indefinitely, causing workflow hangs.
+Kruxia Flow currently has heartbeat endpoints (`POST /api/v1/activities/{id}/heartbeat`) but no automatic timeout detection. When a worker crashes mid-execution or becomes unresponsive, the activity remains in "running" state indefinitely, causing workflow hangs.
 
 **Current State**:
 - ✅ Heartbeat endpoint exists for workers to extend timeouts
@@ -2412,8 +2412,8 @@ async fn detect_and_fail_expired_activities(pool: &PgPool) -> Result<i64> {
 
 **Configuration**:
 ```bash
-STREAMFLOW_TIMEOUT_CHECK_INTERVAL_SECONDS=10  # How often to check for timeouts
-STREAMFLOW_DEFAULT_ACTIVITY_TIMEOUT_SECONDS=300  # Default timeout if not specified
+KRUXIAFLOW_TIMEOUT_CHECK_INTERVAL_SECONDS=10  # How often to check for timeouts
+KRUXIAFLOW_DEFAULT_ACTIVITY_TIMEOUT_SECONDS=300  # Default timeout if not specified
 ```
 
 **Activity Settings** (YAML):
@@ -2474,15 +2474,15 @@ for chunk in large_dataset.chunks() {
 
 **Priority**: P2 (Medium - Deployment polish)
 
-**As** a DevOps engineer deploying StreamFlow in Docker/Kubernetes
-**I want** a `streamflow health` CLI subcommand
+**As** a DevOps engineer deploying Kruxia Flow in Docker/Kubernetes
+**I want** a `kruxiaflow health` CLI subcommand
 **So that** I can use Docker HEALTHCHECK with distroless images (no curl/wget)
 
 **Background**:
-Distroless container images provide enhanced security by removing shells and utilities, but this breaks standard `curl`-based health checks. The production `streamflow-deploy` service needs a built-in health check mechanism.
+Distroless container images provide enhanced security by removing shells and utilities, but this breaks standard `curl`-based health checks. The production `kruxiaflow-deploy` service needs a built-in health check mechanism.
 
 **Scope**:
-- Add `health` subcommand to the streamflow CLI
+- Add `health` subcommand to the kruxiaflow CLI
 - Check local `/health` endpoint (default: http://127.0.0.1:8080/health)
 - Exit code 0 on success, 1 on failure
 - Optional `--url` flag for custom endpoint
@@ -2492,19 +2492,19 @@ Distroless container images provide enhanced security by removing shells and uti
 **Usage**:
 ```bash
 # Basic health check (uses default localhost:8080)
-streamflow health
+kruxiaflow health
 
 # Custom endpoint
-streamflow health --url http://localhost:9090/health
+kruxiaflow health --url http://localhost:9090/health
 
 # With timeout
-streamflow health --timeout 10s
+kruxiaflow health --timeout 10s
 ```
 
 **Docker Compose Integration**:
 ```yaml
 healthcheck:
-  test: ["CMD", "/streamflow", "health"]
+  test: ["CMD", "/kruxiaflow", "health"]
   interval: 10s
   timeout: 5s
   retries: 5
@@ -2921,7 +2921,7 @@ pub async fn cancel_workflow(
 
 **Cancellation Detection** (Long-Running Activities):
 
-StreamFlow uses **heartbeat mechanism** instead of explicit cancellation checks:
+Kruxia Flow uses **heartbeat mechanism** instead of explicit cancellation checks:
 
 ```rust
 // Worker SDK (simplified - NO explicit cancellation checks needed)
@@ -2998,7 +2998,7 @@ pub async fn heartbeat_activity(
 
 **Design Decision - Why Not Explicit Cancellation Checks**:
 
-StreamFlow uses heartbeat mechanism instead of absurd's `ctx.isCancelled()` checks:
+Kruxia Flow uses heartbeat mechanism instead of absurd's `ctx.isCancelled()` checks:
 
 1. **Heartbeats already exist** - Long-running activities already send heartbeats
 2. **Simpler worker SDKs** - No need for cancellation context passing
@@ -3152,13 +3152,13 @@ activities:
 
 ## Epic 7: Scalability Enhancements
 
-**Goal**: Scale StreamFlow to handle millions of workflows per day with minimal infrastructure.
+**Goal**: Scale Kruxia Flow to handle millions of workflows per day with minimal infrastructure.
 
 ### Story 7.1: Read Replicas for Queries
 
 **Priority**: P1 (High - Offload primary database)
 
-**As** a platform engineer scaling StreamFlow
+**As** a platform engineer scaling Kruxia Flow
 **I want** to route read queries to PostgreSQL replicas
 **So that** the primary database handles only writes
 
@@ -3321,10 +3321,10 @@ Polled batch: 100 events across 20 workflows
 # 0 = disabled (maintenance mode - no workflows process)
 # 1 = sequential (current MVP behavior - one workflow at a time)
 # N = parallel (N workflows process concurrently)
-STREAMFLOW_ORCHESTRATOR_MAX_CONCURRENT=100
+KRUXIAFLOW_ORCHESTRATOR_MAX_CONCURRENT=100
 
 # Events to poll per batch (larger = better throughput)
-STREAMFLOW_ORCHESTRATOR_POLL_BATCH_SIZE=100
+KRUXIAFLOW_ORCHESTRATOR_POLL_BATCH_SIZE=100
 
 # Database connection pool must scale (2x concurrency + 40 for API/workers)
 # Example: 100 concurrent = 240 connections
@@ -3334,7 +3334,7 @@ STREAMFLOW_ORCHESTRATOR_POLL_BATCH_SIZE=100
 - **Phase 1**: Deploy with max_concurrent=1 (sequential mode - current MVP behavior)
 - **Phase 2**: Gradual increase (1 → 10 → 50 → 100) with monitoring at each step
 - **Phase 3**: Production deployment with max_concurrent=100 as default
-- **Rollback**: Set `STREAMFLOW_ORCHESTRATOR_MAX_CONCURRENT=1` to revert to sequential
+- **Rollback**: Set `KRUXIAFLOW_ORCHESTRATOR_MAX_CONCURRENT=1` to revert to sequential
 
 **Success Metrics**:
 - ✅ Throughput: >10,000 workflows/sec (10x improvement)
@@ -3364,7 +3364,7 @@ Post-MVP features are prioritized using:
 
 1. **Customer Impact**: How many customers benefit?
 2. **Architectural Dependency**: Does it block other features?
-3. **Competitive Advantage**: Does it differentiate StreamFlow?
+3. **Competitive Advantage**: Does it differentiate Kruxia Flow?
 4. **Effort**: Engineering time required (story points)
 
 **Priority Levels**:

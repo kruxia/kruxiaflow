@@ -1,5 +1,5 @@
 [book]
-title = "StreamFlow Documentation"
+title = "Kruxia Flow Documentation"
 authors = ["Kruxia"]
 description = "AI-Native Workflow Orchestration with Built-in Cost Control"
 language = "en"
@@ -11,9 +11,9 @@ build-dir = "book"
 [output.html]
 default-theme = "rust"
 preferred-dark-theme = "ayu"
-git-repository-url = "https://github.com/kruxia/streamflow"
-edit-url-template = "https://github.com/kruxia/streamflow/edit/main/{path}"
-site-url = "/streamflow/"
+git-repository-url = "https://github.com/kruxia/kruxiaflow"
+edit-url-template = "https://github.com/kruxia/kruxiaflow/edit/main/{path}"
+site-url = "/kruxiaflow/"
 cname = ""
 additional-js = ["mermaid.min.js", "mermaid-init.js"]
 

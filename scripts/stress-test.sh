@@ -1,13 +1,13 @@
 #!/bin/bash
 #
-# StreamFlow Stress Test Runner
+# Kruxia Flow Stress Test Runner
 #
 # Runs ramping stress tests to identify system breaking points and capacity limits.
 #
 # Prerequisites:
-#   - StreamFlow server running
+#   - Kruxia Flow server running
 #   - PostgreSQL database running with migrations applied
-#   - OAuth client credentials set (STREAMFLOW_CLIENT_ID, STREAMFLOW_CLIENT_SECRET)
+#   - OAuth client credentials set (KRUXIAFLOW_CLIENT_ID, KRUXIAFLOW_CLIENT_SECRET)
 #
 # Usage:
 #   ./scripts/stress-test.sh [OPTIONS]
@@ -104,44 +104,44 @@ done
 
 echo -e "${YELLOW}"
 echo "╔══════════════════════════════════════════════════════════════════╗"
-echo "║              StreamFlow Stress Test Runner                       ║"
+echo "║              Kruxia Flow Stress Test Runner                       ║"
 echo "╚══════════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
 # Check required environment variables
-if [ -z "${STREAMFLOW_CLIENT_ID:-}" ]; then
-    echo -e "${RED}Error: STREAMFLOW_CLIENT_ID environment variable not set${NC}"
+if [ -z "${KRUXIAFLOW_CLIENT_ID:-}" ]; then
+    echo -e "${RED}Error: KRUXIAFLOW_CLIENT_ID environment variable not set${NC}"
     echo "Please set OAuth client credentials in your environment"
     exit 1
 fi
 
-if [ -z "${STREAMFLOW_CLIENT_SECRET:-}" ]; then
-    echo -e "${RED}Error: STREAMFLOW_CLIENT_SECRET environment variable not set${NC}"
+if [ -z "${KRUXIAFLOW_CLIENT_SECRET:-}" ]; then
+    echo -e "${RED}Error: KRUXIAFLOW_CLIENT_SECRET environment variable not set${NC}"
     echo "Please set OAuth client credentials in your environment"
     exit 1
 fi
 
 # Check server is running
-PORT="${STREAMFLOW_PORT:-8080}"
-BASE_URL="${STREAMFLOW_BASE_URL:-http://localhost:$PORT}"
+PORT="${KRUXIAFLOW_PORT:-8080}"
+BASE_URL="${KRUXIAFLOW_BASE_URL:-http://localhost:$PORT}"
 
 echo -e "${BLUE}Checking server at ${BASE_URL}...${NC}"
 if ! curl -sf "${BASE_URL}/health" > /dev/null 2>&1; then
-    echo -e "${RED}Error: StreamFlow server not accessible at ${BASE_URL}${NC}"
+    echo -e "${RED}Error: Kruxia Flow server not accessible at ${BASE_URL}${NC}"
     echo ""
     echo "Please start the server before running stress tests:"
-    echo "  streamflow serve --port ${PORT}"
+    echo "  kruxiaflow serve --port ${PORT}"
     exit 1
 fi
 echo -e "${GREEN}Server is accessible${NC}"
 echo ""
 
 # Export base URL for stress test binary
-export STREAMFLOW_BASE_URL="${BASE_URL}"
+export KRUXIAFLOW_BASE_URL="${BASE_URL}"
 
 # Register workflow definitions if needed
 echo -e "${BLUE}Registering workflow definitions...${NC}"
-if cargo run --package streamflow-profiling --bin register-workflows --release 2>&1; then
+if cargo run --package kruxiaflow-profiling --bin register-workflows --release 2>&1; then
     echo -e "${GREEN}Workflow definitions registered${NC}"
 else
     echo -e "${YELLOW}Warning: Could not register workflow definitions${NC}"
@@ -150,7 +150,7 @@ fi
 echo ""
 
 # Build command
-CMD="cargo run --package streamflow-profiling --bin stress-test --release --"
+CMD="cargo run --package kruxiaflow-profiling --bin stress-test --release --"
 
 # Add options
 if [ -n "$MODE" ]; then
