@@ -4,7 +4,7 @@ use futures::stream::{self, StreamExt};
 use serial_test::serial;
 use sqlx::PgPool;
 use std::pin::Pin;
-use streamflow_core::storage::{PostgresStorage, StorageError, WorkflowStorage};
+use kruxiaflow_core::storage::{PostgresStorage, StorageError, WorkflowStorage};
 use uuid::Uuid;
 
 /// Helper to create a test stream from static content
@@ -34,7 +34,7 @@ fn create_chunked_stream(
 /// Helper to create test database pool
 async fn setup_test_pool() -> PgPool {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
     });
 
     let pool = PgPool::connect(&database_url)

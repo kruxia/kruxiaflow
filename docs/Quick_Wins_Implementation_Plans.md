@@ -1,11 +1,11 @@
-# StreamFlow Quick Wins: Implementation Plans
+# Kruxia Flow Quick Wins: Implementation Plans
 
 **Version**: 1.0  
 **Date**: November 27, 2025  
 **Status**: Ready for Implementation  
 **Total Estimated Effort**: 6-9 days
 
-These five items are the highest-impact, lowest-effort work to prepare StreamFlow for a successful public launch. Each plan includes acceptance criteria, file changes, and testing requirements.
+These five items are the highest-impact, lowest-effort work to prepare Kruxia Flow for a successful public launch. Each plan includes acceptance criteria, file changes, and testing requirements.
 
 ---
 
@@ -21,7 +21,7 @@ The README likely focuses on technical architecture. For launch, it needs to imm
 ### Target README Structure
 
 ```markdown
-# StreamFlow
+# Kruxia Flow
 
 **Workflow orchestration built for the AI era** — Temporal's durability in a 4.5MB binary, with native LLM cost tracking.
 
@@ -29,7 +29,7 @@ The README likely focuses on technical architecture. For launch, it needs to imm
 [![License](badge)][license]
 [![Test Coverage](badge)][coverage]
 
-## Why StreamFlow?
+## Why Kruxia Flow?
 
 - **🚀 5-Minute Setup**: Single binary, just PostgreSQL. No Kubernetes, no Kafka, no complexity.
 - **💰 Built-in LLM Cost Tracking**: Track every token, set budgets, cache repeated queries.
@@ -41,13 +41,13 @@ The README likely focuses on technical architecture. For launch, it needs to imm
 
 ### Option 1: Docker (recommended)
 ```bash
-docker run -d -p 8080:8080 streamflow/streamflow:latest
+docker run -d -p 8080:8080 kruxiaflow/kruxiaflow:latest
 ```
 
 ### Option 2: Binary Download
 ```bash
-curl -sSL https://streamflow.dev/install.sh | sh
-streamflow serve
+curl -sSL https://kruxiaflow.dev/install.sh | sh
+kruxiaflow serve
 ```
 
 ### Run Your First Workflow
@@ -132,7 +132,7 @@ parameters:
 
 ## Comparison
 
-| Feature | StreamFlow | Temporal | Airflow | LangChain |
+| Feature | Kruxia Flow | Temporal | Airflow | LangChain |
 |---------|:----------:|:--------:|:-------:|:---------:|
 | Single binary | ✅ | ❌ | ❌ | N/A |
 | Native LLM support | ✅ | ❌ | ❌ | ✅ |
@@ -143,9 +143,9 @@ parameters:
 
 ## Community
 
-- [Discord](https://discord.gg/streamflow) — Get help, share workflows
-- [GitHub Discussions](https://github.com/streamflow/streamflow/discussions) — Ideas and Q&A
-- [Twitter](https://twitter.com/streamflowdev) — Updates and tips
+- [Discord](https://discord.gg/kruxiaflow) — Get help, share workflows
+- [GitHub Discussions](https://github.com/kruxiaflow/kruxiaflow/discussions) — Ideas and Q&A
+- [Twitter](https://twitter.com/kruxiaflowdev) — Updates and tips
 
 ## License
 
@@ -156,7 +156,7 @@ Apache 2.0 — See [LICENSE](LICENSE)
 
 1. **Restructure README.md** (~3 hours)
    - [ ] Add hero section with tagline and badges
-   - [ ] Write "Why StreamFlow?" bullet points (benefit-focused)
+   - [ ] Write "Why Kruxia Flow?" bullet points (benefit-focused)
    - [ ] Create 60-second quick start section
    - [ ] Add feature highlights with YAML snippets
    - [ ] Create example workflow table linking to files
@@ -191,8 +191,8 @@ Apache 2.0 — See [LICENSE](LICENSE)
 
 ### Architecture Decision
 
-**Option A**: StreamFlow + External PostgreSQL (recommended for MVP)
-- User runs `docker-compose up` with StreamFlow + PostgreSQL containers
+**Option A**: Kruxia Flow + External PostgreSQL (recommended for MVP)
+- User runs `docker-compose up` with Kruxia Flow + PostgreSQL containers
 - Simpler, follows 12-factor app principles
 - Matches production deployment patterns
 
@@ -208,7 +208,7 @@ Apache 2.0 — See [LICENSE](LICENSE)
 #### Dockerfile
 
 ```dockerfile
-# StreamFlow Dockerfile
+# Kruxia Flow Dockerfile
 # Multi-stage build for minimal image size
 
 # Stage 1: Build (if building from source)
@@ -222,7 +222,7 @@ RUN apt-get update && apt-get install -y \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN cargo build --release --bin streamflow
+RUN cargo build --release --bin kruxiaflow
 
 # Stage 2: Runtime
 FROM debian:bookworm-slim
@@ -233,25 +233,25 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     curl \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd -r -s /bin/false streamflow
+    && useradd -r -s /bin/false kruxiaflow
 
 # Copy binary
-COPY --from=builder /app/target/release/streamflow /usr/local/bin/streamflow
+COPY --from=builder /app/target/release/kruxiaflow /usr/local/bin/kruxiaflow
 
 # Copy example workflows and config
-COPY examples/ /opt/streamflow/examples/
-COPY config/ /opt/streamflow/config/
+COPY examples/ /opt/kruxiaflow/examples/
+COPY config/ /opt/kruxiaflow/config/
 
 # Set ownership
-RUN chown -R streamflow:streamflow /opt/streamflow
+RUN chown -R kruxiaflow:kruxiaflow /opt/kruxiaflow
 
-USER streamflow
-WORKDIR /opt/streamflow
+USER kruxiaflow
+WORKDIR /opt/kruxiaflow
 
 # Environment defaults
-ENV STREAMFLOW_API_PORT=8080 \
-    STREAMFLOW_LOG_LEVEL=info \
-    STREAMFLOW_LOG_FORMAT=json
+ENV KRUXIAFLOW_API_PORT=8080 \
+    KRUXIAFLOW_LOG_LEVEL=info \
+    KRUXIAFLOW_LOG_FORMAT=json
 
 # Expose API port
 EXPOSE 8080
@@ -261,29 +261,29 @@ HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8080/health || exit 1
 
 # Default command
-ENTRYPOINT ["streamflow"]
+ENTRYPOINT ["kruxiaflow"]
 CMD ["serve"]
 ```
 
 #### docker-compose.yml
 
 ```yaml
-# StreamFlow Docker Compose
+# Kruxia Flow Docker Compose
 # Quick start: docker-compose up -d
 
 version: '3.8'
 
 services:
-  streamflow:
-    image: streamflow/streamflow:latest
+  kruxiaflow:
+    image: kruxiaflow/kruxiaflow:latest
     # Or build locally:
     # build: .
     ports:
       - "8080:8080"
     environment:
-      DATABASE_URL: postgres://streamflow:streamflow@postgres:5432/streamflow
-      STREAMFLOW_LOG_LEVEL: info
-      STREAMFLOW_LOG_FORMAT: json
+      DATABASE_URL: postgres://kruxiaflow:kruxiaflow@postgres:5432/kruxiaflow
+      KRUXIAFLOW_LOG_LEVEL: info
+      KRUXIAFLOW_LOG_FORMAT: json
       # LLM API keys (optional - only needed for LLM activities)
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
@@ -302,32 +302,32 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: streamflow
-      POSTGRES_PASSWORD: streamflow
-      POSTGRES_DB: streamflow
+      POSTGRES_USER: kruxiaflow
+      POSTGRES_PASSWORD: kruxiaflow
+      POSTGRES_DB: kruxiaflow
     volumes:
-      - streamflow_data:/var/lib/postgresql/data
+      - kruxiaflow_data:/var/lib/postgresql/data
       # Initialize with pgvector extension
       - ./docker/init-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U streamflow -d streamflow"]
+      test: ["CMD-SHELL", "pg_isready -U kruxiaflow -d kruxiaflow"]
       interval: 5s
       timeout: 5s
       retries: 5
     restart: unless-stopped
 
 volumes:
-  streamflow_data:
+  kruxiaflow_data:
 ```
 
 #### docker/init-db.sql
 
 ```sql
--- Initialize StreamFlow database with required extensions
+-- Initialize Kruxia Flow database with required extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "vector";  -- For semantic caching/RAG
 
--- Note: StreamFlow will run migrations on startup
+-- Note: Kruxia Flow will run migrations on startup
 -- This just ensures extensions are available
 ```
 
@@ -372,7 +372,7 @@ docker-compose.override.yml
    - [ ] Include example workflows in image
 
 2. **Create docker-compose.yml** (~1 hour)
-   - [ ] Configure StreamFlow + PostgreSQL services
+   - [ ] Configure Kruxia Flow + PostgreSQL services
    - [ ] Add health check dependencies
    - [ ] Configure environment variable passthrough for API keys
    - [ ] Add volume for PostgreSQL persistence
@@ -394,7 +394,7 @@ docker-compose.override.yml
 
 ### Acceptance Criteria
 
-- [ ] `docker-compose up -d` brings up working StreamFlow in <60 seconds
+- [ ] `docker-compose up -d` brings up working Kruxia Flow in <60 seconds
 - [ ] Health check endpoint works and Docker reports healthy
 - [ ] Can submit and run example workflow
 - [ ] Image size <50MB (excluding PostgreSQL)
@@ -403,11 +403,11 @@ docker-compose.override.yml
 
 ---
 
-## Quick Win #3: `streamflow costs` CLI Command
+## Quick Win #3: `kruxiaflow costs` CLI Command
 
 **Effort**: 2 days  
 **Impact**: Very High — makes cost tracking visible, proves key differentiator  
-**Files**: `streamflow/src/commands/costs.rs`, `streamflow/src/main.rs`
+**Files**: `kruxiaflow/src/commands/costs.rs`, `kruxiaflow/src/main.rs`
 
 ### Feature Overview
 
@@ -415,21 +415,21 @@ Add CLI commands to query and display LLM cost data:
 
 ```bash
 # Show costs for a specific workflow
-streamflow costs workflow <workflow_id>
+kruxiaflow costs workflow <workflow_id>
 
 # Show costs summary across all workflows
-streamflow costs summary [--since 24h] [--workflow-type <type>]
+kruxiaflow costs summary [--since 24h] [--workflow-type <type>]
 
 # Show most expensive workflows
-streamflow costs top [--limit 10] [--since 7d]
+kruxiaflow costs top [--limit 10] [--since 7d]
 
 # Export costs to CSV
-streamflow costs export [--since 30d] [--output costs.csv]
+kruxiaflow costs export [--since 30d] [--output costs.csv]
 ```
 
 ### Implementation
 
-#### New File: `streamflow/src/commands/costs.rs`
+#### New File: `kruxiaflow/src/commands/costs.rs`
 
 ```rust
 use clap::{Args, Subcommand};
@@ -699,14 +699,14 @@ async fn show_activity_breakdown(pool: &PgPool, workflow_id: &str) -> anyhow::Re
 // ... Additional implementation for summary, top, export commands
 ```
 
-#### Update: `streamflow/src/main.rs`
+#### Update: `kruxiaflow/src/main.rs`
 
 Add the costs command to the CLI:
 
 ```rust
 #[derive(Subcommand)]
 enum Commands {
-    /// Start all StreamFlow services
+    /// Start all Kruxia Flow services
     Serve(ServeArgs),
     /// Query and display cost information
     Costs(CostsCommand),
@@ -801,10 +801,10 @@ LIMIT 10;
 
 ### Acceptance Criteria
 
-- [ ] `streamflow costs workflow <id>` shows cost breakdown
-- [ ] `streamflow costs summary` shows aggregated costs
-- [ ] `streamflow costs top` shows most expensive workflows
-- [ ] `streamflow costs export` creates valid CSV
+- [ ] `kruxiaflow costs workflow <id>` shows cost breakdown
+- [ ] `kruxiaflow costs summary` shows aggregated costs
+- [ ] `kruxiaflow costs top` shows most expensive workflows
+- [ ] `kruxiaflow costs export` creates valid CSV
 - [ ] All commands support `--format json` for scripting
 - [ ] Output is visually appealing with colors/formatting
 - [ ] Works when no cost data exists (graceful empty state)
@@ -812,7 +812,7 @@ LIMIT 10;
 ### Example Output
 
 ```
-$ streamflow costs workflow abc123-def456
+$ kruxiaflow costs workflow abc123-def456
 
 📊 Workflow Cost Report
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -826,7 +826,7 @@ Status:         ✅ Completed
 💾 Cache Hits:      1 (33.3%)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-$ streamflow costs workflow abc123-def456 --detailed
+$ kruxiaflow costs workflow abc123-def456 --detailed
 
 📋 Activity Breakdown:
 ┌──────────────────┬─────────────────────────┬────────┬───────────┬───────┐
@@ -840,26 +840,26 @@ $ streamflow costs workflow abc123-def456 --detailed
 
 ---
 
-## Quick Win #4: `streamflow validate` CLI Command
+## Quick Win #4: `kruxiaflow validate` CLI Command
 
 **Effort**: 1-2 days  
 **Impact**: Medium — prevents frustrating errors, improves DX  
-**Files**: `streamflow/src/commands/validate.rs`, `core/src/workflow/validator.rs`
+**Files**: `kruxiaflow/src/commands/validate.rs`, `core/src/workflow/validator.rs`
 
 ### Feature Overview
 
 ```bash
 # Validate a single workflow file
-streamflow validate workflow.yaml
+kruxiaflow validate workflow.yaml
 
 # Validate all workflows in a directory
-streamflow validate examples/
+kruxiaflow validate examples/
 
 # Validate with verbose output
-streamflow validate workflow.yaml --verbose
+kruxiaflow validate workflow.yaml --verbose
 
 # Output as JSON (for CI integration)
-streamflow validate workflow.yaml --format json
+kruxiaflow validate workflow.yaml --format json
 ```
 
 ### Validation Checks
@@ -883,7 +883,7 @@ streamflow validate workflow.yaml --format json
 
 ### Implementation
 
-#### New File: `streamflow/src/commands/validate.rs`
+#### New File: `kruxiaflow/src/commands/validate.rs`
 
 ```rust
 use clap::Args;
@@ -1197,8 +1197,8 @@ fn print_text_results(results: &[ValidationResult], verbose: bool) {
 
 ### Acceptance Criteria
 
-- [ ] `streamflow validate workflow.yaml` validates single file
-- [ ] `streamflow validate examples/` validates directory
+- [ ] `kruxiaflow validate workflow.yaml` validates single file
+- [ ] `kruxiaflow validate examples/` validates directory
 - [ ] Clear error messages with line numbers where possible
 - [ ] Suggestions for how to fix errors
 - [ ] Exit code 0 for valid, 1 for errors
@@ -1208,7 +1208,7 @@ fn print_text_results(results: &[ValidationResult], verbose: bool) {
 ### Example Output
 
 ```
-$ streamflow validate examples/
+$ kruxiaflow validate examples/
 
 ✓ examples/01-weather-report.yaml
 ✓ examples/02-user-validation.yaml
@@ -1239,7 +1239,7 @@ Create a comprehensive RAG (Retrieval-Augmented Generation) example that showcas
 - LLM generation with retrieved context
 - **Cost optimization through caching and smart model selection**
 
-This example should be the "poster child" for StreamFlow's AI capabilities.
+This example should be the "poster child" for Kruxia Flow's AI capabilities.
 
 ### Example Workflow
 
@@ -1263,8 +1263,8 @@ This example should be the "poster child" for StreamFlow's AI capabilities.
 # - Anthropic or OpenAI API key (for generation)
 #
 # Usage:
-#   streamflow run examples/11-rag-cost-optimized.yaml \
-#     --input '{"query": "What is StreamFlow?", "collection": "docs"}'
+#   kruxiaflow run examples/11-rag-cost-optimized.yaml \
+#     --input '{"query": "What is Kruxia Flow?", "collection": "docs"}'
 
 name: rag_cost_optimized
 description: Production RAG pipeline with aggressive cost optimization
@@ -1490,7 +1490,7 @@ Add to `examples/README.md`:
 4. **Model fallback**: Start with best model, fall back to cheaper on budget constraints
 
 **Expected Savings**:
-| Scenario | Naive Cost | StreamFlow Cost | Savings |
+| Scenario | Naive Cost | Kruxia Flow Cost | Savings |
 |----------|------------|-----------------|---------|
 | Repeated query | $0.05 | $0.00 | 100% |
 | Similar query | $0.05 | $0.02 | 60% |
@@ -1506,15 +1506,15 @@ Add to `examples/README.md`:
 **Usage**:
 ```bash
 # Index some documents first (using example 06b)
-streamflow run examples/06b-rag-index-builder.yaml \
-  --input '{"chunks": ["StreamFlow is...", "Features include..."]}'
+kruxiaflow run examples/06b-rag-index-builder.yaml \
+  --input '{"chunks": ["Kruxia Flow is...", "Features include..."]}'
 
 # Query with RAG
-streamflow run examples/11-rag-cost-optimized.yaml \
-  --input '{"query": "What is StreamFlow?", "collection": "docs"}'
+kruxiaflow run examples/11-rag-cost-optimized.yaml \
+  --input '{"query": "What is Kruxia Flow?", "collection": "docs"}'
 
 # Check costs
-streamflow costs workflow <workflow_id> --detailed
+kruxiaflow costs workflow <workflow_id> --detailed
 ```
 ```
 
@@ -1564,14 +1564,14 @@ streamflow costs workflow <workflow_id> --detailed
 |---|------|--------|--------------|----------|
 | 1 | README Polish | 1 day | None | Do first |
 | 2 | Dockerfile | 1 day | None | Do first |
-| 3 | `streamflow costs` | 2 days | None | High impact |
-| 4 | `streamflow validate` | 1-2 days | None | Good DX |
+| 3 | `kruxiaflow costs` | 2 days | None | High impact |
+| 4 | `kruxiaflow validate` | 1-2 days | None | Good DX |
 | 5 | RAG Example | 1-2 days | Items 3,4 helpful | Demo value |
 
 **Recommended sequence**:
 - **Day 1-2**: README + Dockerfile (parallel tracks)
-- **Day 3-4**: `streamflow costs` command
-- **Day 5**: `streamflow validate` command  
+- **Day 3-4**: `kruxiaflow costs` command
+- **Day 5**: `kruxiaflow validate` command  
 - **Day 6**: RAG example + final testing
 
 **Total**: 6-9 days to complete all 5 quick wins

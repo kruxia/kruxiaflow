@@ -26,15 +26,15 @@ impl Default for QueueConfig {
 impl QueueConfig {
     pub fn from_env() -> Self {
         Self {
-            poll_interval: parse_duration_env("STREAMFLOW_QUEUE_POLL_INTERVAL")
+            poll_interval: parse_duration_env("KRUXIAFLOW_QUEUE_POLL_INTERVAL")
                 .unwrap_or_else(|| Duration::from_millis(100)),
-            batch_size: parse_env("STREAMFLOW_QUEUE_BATCH_SIZE").unwrap_or(100),
-            default_timeout: parse_duration_env("STREAMFLOW_QUEUE_DEFAULT_TIMEOUT")
+            batch_size: parse_env("KRUXIAFLOW_QUEUE_BATCH_SIZE").unwrap_or(100),
+            default_timeout: parse_duration_env("KRUXIAFLOW_QUEUE_DEFAULT_TIMEOUT")
                 .unwrap_or_else(|| Duration::from_secs(60)),
-            default_max_retries: parse_env("STREAMFLOW_QUEUE_DEFAULT_MAX_RETRIES").unwrap_or(3),
-            cleanup_interval: parse_duration_env("STREAMFLOW_QUEUE_CLEANUP_INTERVAL")
+            default_max_retries: parse_env("KRUXIAFLOW_QUEUE_DEFAULT_MAX_RETRIES").unwrap_or(3),
+            cleanup_interval: parse_duration_env("KRUXIAFLOW_QUEUE_CLEANUP_INTERVAL")
                 .unwrap_or_else(|| Duration::from_secs(60)),
-            vacuum_interval: parse_duration_env("STREAMFLOW_QUEUE_VACUUM_INTERVAL")
+            vacuum_interval: parse_duration_env("KRUXIAFLOW_QUEUE_VACUUM_INTERVAL")
                 .unwrap_or_else(|| Duration::from_secs(300)),
         }
     }

@@ -269,7 +269,7 @@ activities:
 - Use in-process mock HTTP server (similar to existing test pattern in `yaml_workflow_e2e_tests.rs`)
 - Launch mock server with `axum::serve` on random port in test setup
 - Mock server provides endpoints that the workflow activities call
-- StreamFlow API server also runs in-process (same pattern as existing tests)
+- Kruxia Flow API server also runs in-process (same pattern as existing tests)
 - Both servers run in the same test process, spawned as tokio tasks
 - Generate small test files (< 1KB) for fast test execution
 - Mock endpoints return synthetic responses that validate file handling
@@ -331,7 +331,7 @@ async fn test_example_03_parallel_document_processing() {
             .expect("Mock server failed");
     });
 
-    // Start StreamFlow API server
+    // Start Kruxia Flow API server
     let state = AppState::new(
         pool.clone(),
         Arc::new(auth_service),

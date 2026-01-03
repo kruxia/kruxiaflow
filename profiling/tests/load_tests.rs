@@ -7,18 +7,18 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 
-use streamflow_profiling::client::StreamFlowClient;
+use kruxiaflow_profiling::client::StreamFlowClient;
 
 /// Create authenticated client from environment variables
 fn create_client() -> StreamFlowClient {
     let base_url =
-        env::var("STREAMFLOW_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+        env::var("KRUXIAFLOW_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
 
-    let client_id = env::var("STREAMFLOW_CLIENT_ID")
-        .expect("STREAMFLOW_CLIENT_ID environment variable must be set");
+    let client_id = env::var("KRUXIAFLOW_CLIENT_ID")
+        .expect("KRUXIAFLOW_CLIENT_ID environment variable must be set");
 
-    let client_secret = env::var("STREAMFLOW_CLIENT_SECRET")
-        .expect("STREAMFLOW_CLIENT_SECRET environment variable must be set");
+    let client_secret = env::var("KRUXIAFLOW_CLIENT_SECRET")
+        .expect("KRUXIAFLOW_CLIENT_SECRET environment variable must be set");
 
     StreamFlowClient::new(base_url, client_id, client_secret)
 }
@@ -200,7 +200,7 @@ fn save_results(metrics: &PerformanceMetrics, scenario_name: &str) {
 
 #[tokio::test]
 #[serial]
-#[ignore] // Run explicitly with: cargo test --package streamflow-profiling -- --ignored
+#[ignore] // Run explicitly with: cargo test --package kruxiaflow-profiling -- --ignored
 async fn test_sequential_workflow_load() {
     let client = create_client();
     let definition_name = "sequential_bench_5";
@@ -227,7 +227,7 @@ async fn test_sequential_workflow_load() {
 
 #[tokio::test]
 #[serial]
-#[ignore] // Run explicitly with: cargo test --package streamflow-profiling -- --ignored
+#[ignore] // Run explicitly with: cargo test --package kruxiaflow-profiling -- --ignored
 async fn test_parallel_workflow_load() {
     let client = create_client();
 
@@ -255,7 +255,7 @@ async fn test_parallel_workflow_load() {
 
 #[tokio::test]
 #[serial]
-#[ignore] // Run explicitly with: cargo test --package streamflow-profiling -- --ignored
+#[ignore] // Run explicitly with: cargo test --package kruxiaflow-profiling -- --ignored
 async fn test_high_concurrency_load() {
     let client = create_client();
 
@@ -283,7 +283,7 @@ async fn test_high_concurrency_load() {
 
 #[tokio::test]
 #[serial]
-#[ignore] // Run explicitly with: cargo test --package streamflow-profiling -- --ignored
+#[ignore] // Run explicitly with: cargo test --package kruxiaflow-profiling -- --ignored
 async fn test_sustained_throughput() {
     let client = create_client();
 

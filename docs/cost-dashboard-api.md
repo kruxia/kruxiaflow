@@ -1,10 +1,10 @@
 # Cost Dashboard API Reference
 
-This document describes the StreamFlow Cost Dashboard API endpoints for tracking LLM costs, budget monitoring, and model catalog queries.
+This document describes the Kruxia Flow Cost Dashboard API endpoints for tracking LLM costs, budget monitoring, and model catalog queries.
 
 ## Overview
 
-StreamFlow provides real-time cost tracking and analytics for workflows that use LLM activities. The Cost Dashboard API enables:
+Kruxia Flow provides real-time cost tracking and analytics for workflows that use LLM activities. The Cost Dashboard API enables:
 
 1. **Model Discovery**: Query available LLM providers and models with pricing
 2. **Workflow Cost Tracking**: Monitor total costs and budget status per workflow
@@ -504,7 +504,7 @@ Caching is automatic when the same system prompt is used across multiple request
 All pricing data is stored in the `llm_models` PostgreSQL table and loaded via:
 
 ```bash
-streamflow seed-llm config/llm_models.yaml
+kruxiaflow seed-llm config/llm_models.yaml
 ```
 
 Pricing is queried at activity execution time, enabling:

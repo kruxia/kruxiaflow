@@ -1,6 +1,6 @@
-# StreamFlow Workflow Examples
+# Kruxia Flow Workflow Examples
 
-This directory contains example workflows that demonstrate StreamFlow features progressively from simple to complex.
+This directory contains example workflows that demonstrate Kruxia Flow features progressively from simple to complex.
 
 ## Available Examples
 
@@ -35,9 +35,9 @@ This workflow demonstrates a simple sequential workflow that:
 **Prerequisites:**
 - A webhook URL to receive the notification (e.g., webhook.site, requestbin.com)
 
-**Run with StreamFlow CLI:**
+**Run with Kruxia Flow CLI:**
 ```bash
-streamflow run examples/01-weather-report.yaml \
+kruxiaflow run examples/01-weather-report.yaml \
   --input webhook_url=https://webhook.site/your-unique-id
 ```
 
@@ -58,7 +58,7 @@ streamflow run examples/01-weather-report.yaml \
 
 ## Template Expression Syntax
 
-StreamFlow supports the following template expression formats:
+Kruxia Flow supports the following template expression formats:
 
 ### Input Variables
 Access workflow input parameters:
@@ -96,9 +96,9 @@ This workflow demonstrates conditional branching based on activity outputs:
 - PostgreSQL database with `valid_users` and `invalid_users` tables
 - Webhook URL to receive notifications
 
-**Run with StreamFlow CLI:**
+**Run with Kruxia Flow CLI:**
 ```bash
-streamflow run examples/02-user-validation.yaml \
+kruxiaflow run examples/02-user-validation.yaml \
   --input email=user@example.com \
   --input notification_webhook_url=https://webhook.site/your-unique-id \
   --secret db_url=postgres://user:pass@localhost:5432/dbname
@@ -122,9 +122,9 @@ This workflow demonstrates parallel execution with fan-out/fan-in patterns:
 - HTTP endpoints for document fetching, processing, aggregation, and storage
 - For testing: Use httpbin.org or local mock services
 
-**Run with StreamFlow CLI:**
+**Run with Kruxia Flow CLI:**
 ```bash
-streamflow run examples/03-document-processing.yaml \
+kruxiaflow run examples/03-document-processing.yaml \
   --input doc1_url=https://httpbin.org/base64/Q29udGVudCBmb3IgZG9jdW1lbnQgMQ== \
   --input doc2_url=https://httpbin.org/base64/Q29udGVudCBmb3IgZG9jdW1lbnQgMg== \
   --input doc3_url=https://httpbin.org/base64/Q29udGVudCBmb3IgZG9jdW1lbnQgMw== \
@@ -180,10 +180,10 @@ CREATE TABLE moderation_log (
 );
 ```
 
-**Run with StreamFlow CLI:**
+**Run with Kruxia Flow CLI:**
 ```bash
 export ANTHROPIC_API_KEY=your-api-key-here
-streamflow run examples/04-moderate-content.yaml \
+kruxiaflow run examples/04-moderate-content.yaml \
   --input user_content="Check out this amazing product!" \
   --input content_id=content_12345 \
   --secret db_url=postgres://user:pass@localhost:5432/dbname
@@ -236,14 +236,14 @@ CREATE TABLE research_log (
 );
 ```
 
-**Run with StreamFlow CLI:**
+**Run with Kruxia Flow CLI:**
 ```bash
 # Configure at least one provider (or all for full fallback chain)
 export OPENAI_API_KEY=your-openai-key       # Optional: o1-pro (will be skipped due to budget)
 export ANTHROPIC_API_KEY=your-anthropic-key # Optional: Claude Sonnet (may be skipped)
 export GOOGLE_API_KEY=your-google-key       # Recommended: Gemini Flash Lite (will fit budget)
 
-streamflow run examples/05-research-assistant.yaml \
+kruxiaflow run examples/05-research-assistant.yaml \
   --input question="What are the key differences between Rust and Go for systems programming?" \
   --secret db_url=postgres://user:pass@localhost:5432/dbname
 ```
@@ -283,7 +283,7 @@ For users who only have **one API key**, we provide single-provider variants tha
 
 ```bash
 export ANTHROPIC_API_KEY=your-key
-streamflow run examples/05a-research-assistant-anthropic.yaml \
+kruxiaflow run examples/05a-research-assistant-anthropic.yaml \
   --input question="What are the key differences between Rust and Go?" \
   --secret db_url=postgres://user:pass@localhost:5432/dbname
 ```
@@ -297,7 +297,7 @@ streamflow run examples/05a-research-assistant-anthropic.yaml \
 
 ```bash
 export OPENAI_API_KEY=your-key
-streamflow run examples/05b-research-assistant-openai.yaml \
+kruxiaflow run examples/05b-research-assistant-openai.yaml \
   --input question="What are the key differences between Rust and Go?" \
   --secret db_url=postgres://user:pass@localhost:5432/dbname
 ```
@@ -311,7 +311,7 @@ streamflow run examples/05b-research-assistant-openai.yaml \
 
 ```bash
 export GOOGLE_API_KEY=your-key
-streamflow run examples/05c-research-assistant-google.yaml \
+kruxiaflow run examples/05c-research-assistant-google.yaml \
   --input question="What are the key differences between Rust and Go?" \
   --secret db_url=postgres://user:pass@localhost:5432/dbname
 ```
@@ -345,14 +345,14 @@ CREATE TABLE faq_log (
 **Redis Setup (optional, for production):**
 ```bash
 docker run -d -p 6379:6379 redis:7-alpine
-export STREAMFLOW_CACHE_PROVIDER=redis
-export STREAMFLOW_REDIS_URL=redis://localhost:6379
+export KRUXIAFLOW_CACHE_PROVIDER=redis
+export KRUXIAFLOW_REDIS_URL=redis://localhost:6379
 ```
 
-**Run with StreamFlow CLI:**
+**Run with Kruxia Flow CLI:**
 ```bash
 export ANTHROPIC_API_KEY=your-key
-streamflow run examples/06a-faq-bot-caching.yaml \
+kruxiaflow run examples/06a-faq-bot-caching.yaml \
   --input question="What are your business hours?" \
   --secret db_url=postgres://user:pass@localhost:5432/dbname
 ```
@@ -413,10 +413,10 @@ USING ivfflat (embedding vector_cosine_ops)
 WITH (lists = 100);
 ```
 
-**Run with StreamFlow CLI:**
+**Run with Kruxia Flow CLI:**
 ```bash
 export OPENAI_API_KEY=your-key
-streamflow run examples/06b-rag-index-builder.yaml \
+kruxiaflow run examples/06b-rag-index-builder.yaml \
   --input chunks='["Rust is a systems programming language...","Rust'\''s ownership model ensures memory safety...","Cargo is Rust'\''s package manager..."]' \
   --input source="rust_documentation" \
   --input notification_webhook_url=https://webhook.site/your-id \
@@ -472,11 +472,11 @@ CREATE TABLE qa_log (
 );
 ```
 
-**Run with StreamFlow CLI:**
+**Run with Kruxia Flow CLI:**
 ```bash
 export OPENAI_API_KEY=your-key
 export ANTHROPIC_API_KEY=your-key
-streamflow run examples/06c-rag-query.yaml \
+kruxiaflow run examples/06c-rag-query.yaml \
   --input question="What is Rust's ownership model?" \
   --input response_webhook_url=https://webhook.site/your-id \
   --secret db_url=postgres://user:pass@localhost:5432/dbname
@@ -527,10 +527,10 @@ This workflow demonstrates iterative/looping workflows (US-3.4) with a simplifie
 **Prerequisites:**
 - Anthropic API key (Claude Haiku 4 and Sonnet 4.5)
 
-**Run with StreamFlow CLI:**
+**Run with Kruxia Flow CLI:**
 ```bash
 export ANTHROPIC_API_KEY=your-key
-streamflow run examples/07a-agentic-research-simple.yaml \
+kruxiaflow run examples/07a-agentic-research-simple.yaml \
   --input topic="Benefits of Rust for systems programming"
 ```
 
@@ -584,10 +584,10 @@ This workflow demonstrates the **full Example 7 specification** from the impleme
 - Search API key (SerpAPI, Brave Search, or custom search service)
 - Webhook URL to receive final results
 
-**Run with StreamFlow CLI:**
+**Run with Kruxia Flow CLI:**
 ```bash
 export ANTHROPIC_API_KEY=your-key
-streamflow run examples/07b-agentic-research-complete.yaml \
+kruxiaflow run examples/07b-agentic-research-complete.yaml \
   --input research_topic="Impact of quantum computing on cryptography" \
   --input publish_url=https://webhook.site/your-id \
   --secret search_api_key=your-search-api-key
@@ -656,9 +656,9 @@ This workflow demonstrates using `delay` to respect API rate limits by spacing o
 - API key for the API service
 - Webhook URL to receive aggregated results
 
-**Run with StreamFlow CLI:**
+**Run with Kruxia Flow CLI:**
 ```bash
-streamflow run examples/08a-rate-limited-api-calls.yaml \
+kruxiaflow run examples/08a-rate-limited-api-calls.yaml \
   --input webhook_url=https://webhook.site/your-unique-id \
   --secret api_key=your-api-key
 ```
@@ -710,10 +710,10 @@ This workflow demonstrates using `scheduled_for` to execute activities at specif
 - Anthropic API key
 - Webhook URL to receive the report
 
-**Run with StreamFlow CLI:**
+**Run with Kruxia Flow CLI:**
 ```bash
 # Schedule for a future timestamp (ISO 8601 format with timezone)
-streamflow run examples/08b-scheduled-daily-report.yaml \
+kruxiaflow run examples/08b-scheduled-daily-report.yaml \
   --input report_date="2025-12-01" \
   --input report_time="2025-12-01T09:00:00-08:00" \
   --input notification_webhook="https://webhook.site/your-unique-id" \
@@ -755,9 +755,9 @@ This workflow demonstrates cascading delays for escalating notifications.
 **Prerequisites:**
 - Webhook URLs for user, manager, and on-call notifications
 
-**Run with StreamFlow CLI:**
+**Run with Kruxia Flow CLI:**
 ```bash
-streamflow run examples/08c-delayed-reminders.yaml \
+kruxiaflow run examples/08c-delayed-reminders.yaml \
   --input task_name="Complete quarterly report" \
   --input assigned_user="alice@example.com" \
   --input user_webhook="https://webhook.site/user-id" \

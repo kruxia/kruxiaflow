@@ -12,16 +12,16 @@
 
 ```bash
 # 1. Start the profiling environment
-docker compose up streamflow-profiling -d
+docker compose up kruxiaflow-profiling -d
 
 # 2. Wait for server to be ready (watch logs)
-docker compose logs -f streamflow-profiling
-# Wait for "StreamFlow server started" message
+docker compose logs -f kruxiaflow-profiling
+# Wait for "Kruxia Flow server started" message
 
 # 3. Set OAuth credentials
-export STREAMFLOW_CLIENT_ID=streamflow-dev-client
-export STREAMFLOW_CLIENT_SECRET=a_zBZWlw8IsQaQm5C2xJPMgunAj4jkjzp4iTafATVcD8RU02yNEYqwCdLsoXIe8g
-export DATABASE_URL=postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamflow_profiling
+export KRUXIAFLOW_CLIENT_ID=kruxiaflow-dev-client
+export KRUXIAFLOW_CLIENT_SECRET=a_zBZWlw8IsQaQm5C2xJPMgunAj4jkjzp4iTafATVcD8RU02yNEYqwCdLsoXIe8g
+export DATABASE_URL=postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow_profiling
 
 # 4. Run the 5-minute sustained throughput test
 ./scripts/profiling.sh --test test_sustained_throughput
@@ -179,13 +179,13 @@ ls -lh var/memory/jeprof.out.*.heap
 FINAL_HEAP=$(ls -t var/memory/jeprof.out.*.heap | head -1)
 
 # Generate allocation report
-jeprof --show_bytes --text target/profiling/streamflow "$FINAL_HEAP" > allocation_report.txt
+jeprof --show_bytes --text target/profiling/kruxiaflow "$FINAL_HEAP" > allocation_report.txt
 
 # View top allocators
 head -30 allocation_report.txt
 
 # Generate flamegraph (requires graphviz)
-jeprof --show_bytes --svg target/profiling/streamflow "$FINAL_HEAP" > flamegraph.svg
+jeprof --show_bytes --svg target/profiling/kruxiaflow "$FINAL_HEAP" > flamegraph.svg
 open flamegraph.svg
 ```
 
@@ -224,17 +224,17 @@ grep "Growth rate" var/memory-test-run2/memory_analysis.txt
 **Solution**:
 ```bash
 # Verify profiling container is running
-docker ps | grep streamflow-profiling
+docker ps | grep kruxiaflow-profiling
 
 # Check if memory file exists
 ls -lh var/memory/memory_usage.csv
 
 # Check server logs
-docker compose logs streamflow-profiling | tail -50
+docker compose logs kruxiaflow-profiling | tail -50
 
 # Restart profiling container
 docker compose down
-docker compose up streamflow-profiling -d
+docker compose up kruxiaflow-profiling -d
 ```
 
 ### Memory File Empty
@@ -244,13 +244,13 @@ docker compose up streamflow-profiling -d
 **Solution**:
 ```bash
 # The monitor script may not have started. Check logs:
-docker compose logs streamflow-profiling | grep "memory monitoring"
+docker compose logs kruxiaflow-profiling | grep "memory monitoring"
 
-# Should see: "Starting StreamFlow server with memory monitoring..."
+# Should see: "Starting Kruxia Flow server with memory monitoring..."
 
 # If not, rebuild container:
-docker compose build streamflow-profiling
-docker compose up streamflow-profiling -d
+docker compose build kruxiaflow-profiling
+docker compose up kruxiaflow-profiling -d
 ```
 
 ### Test Times Out or Fails
@@ -268,7 +268,7 @@ docker compose up streamflow-profiling -d
 free -h
 
 # Check database status
-docker exec streamflow-postgres psql -U streamflow -d streamflow_profiling -c "SELECT 1;"
+docker exec kruxiaflow-postgres psql -U kruxiaflow -d kruxiaflow_profiling -c "SELECT 1;"
 
 # Reduce concurrency
 # Edit benchmark/tests/load_tests.rs:
@@ -305,7 +305,7 @@ export _RJEM_MALLOC_CONF="prof_active:true,prof_prefix:$PROFILE_DIR/jeprof.out,l
 export _RJEM_MALLOC_CONF="prof_active:true,prof_prefix:$PROFILE_DIR/jeprof.out,lg_prof_interval:27"
 ```
 
-Then rebuild: `docker compose build streamflow-profiling && docker compose up streamflow-profiling -d`
+Then rebuild: `docker compose build kruxiaflow-profiling && docker compose up kruxiaflow-profiling -d`
 
 ---
 

@@ -1,4 +1,4 @@
-"""StreamFlow workflow definitions as Python dicts (JSON-serializable)"""
+"""Kruxia Flow workflow definitions as Python dicts (JSON-serializable)"""
 
 
 def create_sequential_workflow(num_activities: int) -> dict:

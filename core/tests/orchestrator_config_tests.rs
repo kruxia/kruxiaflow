@@ -3,11 +3,11 @@
 
 use sqlx::PgPool;
 use std::time::Duration;
-use streamflow_core::orchestrator::config::OrchestratorConfig;
+use kruxiaflow_core::orchestrator::config::OrchestratorConfig;
 
 async fn mock_pool() -> PgPool {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
     });
     PgPool::connect(&database_url)
         .await

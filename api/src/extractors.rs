@@ -1,11 +1,11 @@
-/// Axum extractors for StreamFlow API
+/// Axum extractors for Kruxia Flow API
 ///
-/// This module provides custom extractors that integrate StreamFlow core types
+/// This module provides custom extractors that integrate Kruxia Flow core types
 /// with Axum's handler system.
 use crate::state::AppState;
 use axum::{async_trait, extract::FromRequestParts, http::request::Parts};
-use streamflow_core::activity::ActivityWorkerService;
-use streamflow_core::workflow::{
+use kruxiaflow_core::activity::ActivityWorkerService;
+use kruxiaflow_core::workflow::{
     WorkflowDefinitionRepository, WorkflowQueryService, WorkflowService,
 };
 

@@ -10,21 +10,21 @@ use serde_json::json;
 use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
-use streamflow_api::handlers::workflow_definitions::{
+use kruxiaflow_api::handlers::workflow_definitions::{
     DeployWorkflowDefinitionResponse, GetWorkflowDefinitionResponse,
     ListWorkflowDefinitionsResponse,
 };
-use streamflow_api::{AppState, AppStateBuild, app_router};
-use streamflow_core::events::PostgresEventSource;
-use streamflow_core::queue::{PostgresQueue, QueueConfig};
-use streamflow_core::storage::PostgresStorage;
-use streamflow_oauth::{AuthConfig, PostgresAuthService};
+use kruxiaflow_api::{AppState, AppStateBuild, app_router};
+use kruxiaflow_core::events::PostgresEventSource;
+use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
+use kruxiaflow_core::storage::PostgresStorage;
+use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use tokio_util::sync::CancellationToken;
 
 /// Helper to create test database pool
 async fn setup_test_pool() -> PgPool {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
     });
 
     let pool = PgPool::connect(&database_url)
@@ -79,7 +79,7 @@ async fn setup_test_state() -> AppState {
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
     let workflow_storage = Arc::new(PostgresStorage::new(pool.clone()));
-    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
 
     AppState::with_metadata(
         pool,

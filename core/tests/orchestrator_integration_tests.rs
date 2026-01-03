@@ -3,17 +3,17 @@ use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
-use streamflow_core::events::{
+use kruxiaflow_core::events::{
     ActivityDefinition, DependencyEdge, EventSource, NewWorkflowEvent, PostgresEventSource,
     WorkflowDefinition, WorkflowEventType,
 };
-use streamflow_core::orchestrator::OrchestratorConfig;
-use streamflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
+use kruxiaflow_core::orchestrator::OrchestratorConfig;
+use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
 use uuid::Uuid;
 
 async fn setup_test_db() -> PgPool {
     let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://localhost/streamflow_test".to_string());
+        .unwrap_or_else(|_| "postgres://localhost/kruxiaflow_test".to_string());
 
     let pool = PgPool::connect(&database_url)
         .await
@@ -156,7 +156,7 @@ async fn test_sequential_workflow_integration() {
     assert_eq!(events.len(), 1);
 
     // Process the WorkflowCreated event
-    streamflow_core::orchestrator::orchestrator::process_workflow_event(
+    kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
         &events[0],
         &event_source,
         &activity_queue,
@@ -203,7 +203,7 @@ async fn test_sequential_workflow_integration() {
 
     // Process ActivityCompleted event
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -340,7 +340,7 @@ async fn test_parallel_workflow_integration() {
         .expect("Failed to poll");
 
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -385,7 +385,7 @@ async fn test_parallel_workflow_integration() {
         .expect("Failed to poll");
 
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -436,7 +436,7 @@ async fn test_parallel_workflow_integration() {
         .expect("Failed to poll");
 
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -537,7 +537,7 @@ async fn test_conditional_workflow_integration() {
         .expect("Failed to poll");
 
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -570,7 +570,7 @@ async fn test_conditional_workflow_integration() {
         .expect("Failed to poll");
 
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -643,7 +643,7 @@ async fn test_workflow_completion_success() {
         .expect("Failed to poll");
 
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -676,7 +676,7 @@ async fn test_workflow_completion_success() {
         .expect("Failed to poll");
 
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -708,14 +708,14 @@ async fn test_workflow_completion_success() {
 
     // 4. Verify workflow status is Completed
     let workflow = sqlx::query!(
-        r#"SELECT status as "status: streamflow_core::events::WorkflowStatus" FROM workflows WHERE id = $1"#,
+        r#"SELECT status as "status: kruxiaflow_core::events::WorkflowStatus" FROM workflows WHERE id = $1"#,
         workflow_id
     )
     .fetch_one(&pool)
     .await
     .expect("Failed to query workflow");
 
-    use streamflow_core::events::WorkflowStatus;
+    use kruxiaflow_core::events::WorkflowStatus;
     assert_eq!(workflow.status, WorkflowStatus::Completed);
 }
 
@@ -769,7 +769,7 @@ async fn test_workflow_failure() {
         .expect("Failed to poll");
 
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -802,7 +802,7 @@ async fn test_workflow_failure() {
         .expect("Failed to poll");
 
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -838,14 +838,14 @@ async fn test_workflow_failure() {
 
     // 4. Verify workflow status is Failed
     let workflow = sqlx::query!(
-        r#"SELECT status as "status: streamflow_core::events::WorkflowStatus" FROM workflows WHERE id = $1"#,
+        r#"SELECT status as "status: kruxiaflow_core::events::WorkflowStatus" FROM workflows WHERE id = $1"#,
         workflow_id
     )
     .fetch_one(&pool)
     .await
     .expect("Failed to query workflow");
 
-    use streamflow_core::events::WorkflowStatus;
+    use kruxiaflow_core::events::WorkflowStatus;
     assert_eq!(workflow.status, WorkflowStatus::Failed);
 }
 
@@ -923,7 +923,7 @@ async fn test_workflow_completion_with_multiple_activities() {
 
     let mut events = event_source.poll("test_orch").await.unwrap();
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -953,7 +953,7 @@ async fn test_workflow_completion_with_multiple_activities() {
 
         events = event_source.poll("test_orch").await.unwrap();
         for event in &events {
-            streamflow_core::orchestrator::orchestrator::process_workflow_event(
+            kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
                 event,
                 &event_source,
                 &activity_queue,
@@ -1023,7 +1023,7 @@ async fn test_activity_scheduled_events_published() {
 
     let events = event_source.poll("test_orch").await.unwrap();
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -1102,7 +1102,7 @@ async fn test_run_orchestrator_loop() {
     let config_clone = config.clone();
 
     let orchestrator_handle = tokio::spawn(async move {
-        streamflow_core::orchestrator::orchestrator::run_orchestrator(
+        kruxiaflow_core::orchestrator::orchestrator::run_orchestrator(
             event_source_clone,
             activity_queue_clone,
             config_clone,
@@ -1143,14 +1143,14 @@ async fn test_run_orchestrator_loop() {
 
     // Verify workflow completed
     let workflow = sqlx::query!(
-        r#"SELECT status as "status: streamflow_core::events::WorkflowStatus" FROM workflows WHERE id = $1"#,
+        r#"SELECT status as "status: kruxiaflow_core::events::WorkflowStatus" FROM workflows WHERE id = $1"#,
         workflow_id
     )
     .fetch_one(&pool)
     .await
     .unwrap();
 
-    use streamflow_core::events::WorkflowStatus;
+    use kruxiaflow_core::events::WorkflowStatus;
     assert_eq!(workflow.status, WorkflowStatus::Completed);
 
     // Stop orchestrator
@@ -1174,7 +1174,7 @@ async fn test_orchestrator_backoff_when_no_events() {
 
     // Run orchestrator with no events
     let orchestrator_handle = tokio::spawn(async move {
-        streamflow_core::orchestrator::orchestrator::run_orchestrator(
+        kruxiaflow_core::orchestrator::orchestrator::run_orchestrator(
             event_source_clone,
             activity_queue_clone,
             config_clone,

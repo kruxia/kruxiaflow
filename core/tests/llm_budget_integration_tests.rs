@@ -1,12 +1,12 @@
 use rust_decimal_macros::dec;
 use serial_test::serial;
 use sqlx::PgPool;
-use streamflow_core::cost::{ActivityCostRecord, CostCalculator, CostTracker};
+use kruxiaflow_core::cost::{ActivityCostRecord, CostCalculator, CostTracker};
 use uuid::Uuid;
 
 async fn setup_test_db() -> PgPool {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
     });
 
     let pool = PgPool::connect(&database_url)

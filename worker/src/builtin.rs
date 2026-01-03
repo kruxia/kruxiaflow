@@ -8,7 +8,7 @@ use crate::activities::{
 };
 use crate::registry::ActivityRegistry;
 use std::sync::Arc;
-use streamflow_core::cache::CacheService;
+use kruxiaflow_core::cache::CacheService;
 
 /// Register all built-in activities
 ///
@@ -28,8 +28,8 @@ use streamflow_core::cache::CacheService;
 /// # Example
 ///
 /// ```rust,no_run
-/// use streamflow_worker::register_builtin_activities;
-/// use streamflow_core::cache::NoOpCache;
+/// use kruxiaflow_worker::register_builtin_activities;
+/// use kruxiaflow_core::cache::NoOpCache;
 /// use std::sync::Arc;
 ///
 /// let cache_service = Arc::new(NoOpCache::new());
@@ -68,7 +68,7 @@ pub fn register_builtin_activities(cache_service: Arc<dyn CacheService>) -> Acti
 #[cfg(test)]
 mod tests {
     use super::*;
-    use streamflow_core::cache::NoOpCache;
+    use kruxiaflow_core::cache::NoOpCache;
 
     #[test]
     fn test_register_builtin_activities() {

@@ -1,17 +1,17 @@
 # Quick Start
 
-Get StreamFlow running in 60 seconds.
+Get Kruxia Flow running in 60 seconds.
 
 ## Prerequisites
 
 - Docker and Docker Compose
 
-## Start StreamFlow
+## Start Kruxia Flow
 
 ```bash
 # Clone and start
-git clone https://github.com/kruxia/streamflow.git
-cd streamflow
+git clone https://github.com/kruxia/kruxiaflow.git
+cd kruxiaflow
 ./dev up -d
 ./dev logs -f
 
@@ -41,8 +41,8 @@ Create a simple workflow that fetches weather data:
 # Get an auth token
 TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/oauth/token \
   -d "grant_type=client_credentials" \
-  -d "client_id=streamflow-dev-client" \
-  -d "client_secret=streamflow-dev-secret" | jq -r '.access_token')
+  -d "client_id=kruxiaflow-dev-client" \
+  -d "client_secret=kruxiaflow-dev-secret" | jq -r '.access_token')
 
 # Submit a workflow
 curl -X POST http://localhost:8080/api/v1/workflows \
@@ -56,7 +56,7 @@ curl -X POST http://localhost:8080/api/v1/workflows \
 
 ## Example Workflows
 
-StreamFlow includes 10 production-ready examples in the `examples/` directory:
+Kruxia Flow includes 10 production-ready examples in the `examples/` directory:
 
 | Example                    | Concepts                                    |
 |----------------------------|---------------------------------------------|
@@ -67,7 +67,7 @@ StreamFlow includes 10 production-ready examples in the `examples/` directory:
 | 05-research-assistant.yaml | Multi-model fallback, budget-aware          |
 | 06a-faq-bot-caching.yaml   | Semantic caching, vector search             |
 
-## Stop StreamFlow
+## Stop Kruxia Flow
 
 ```bash
 ./dev down

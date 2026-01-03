@@ -1,6 +1,6 @@
 use rust_decimal::Decimal;
 use serde_json::Value;
-use streamflow_core::workflow::{ActivityOutput, OutputType};
+use kruxiaflow_core::workflow::{ActivityOutput, OutputType};
 
 /// Activity execution result
 ///
@@ -26,7 +26,7 @@ impl ActivityResult {
     /// # Example
     /// ```
     /// use serde_json::json;
-    /// use streamflow_worker::ActivityResult;
+    /// use kruxiaflow_worker::ActivityResult;
     ///
     /// let result = ActivityResult::value("result", json!({"status": "success"}));
     /// ```
@@ -44,8 +44,8 @@ impl ActivityResult {
     ///
     /// # Example
     /// ```
-    /// use streamflow_core::workflow::ActivityOutput;
-    /// use streamflow_worker::ActivityResult;
+    /// use kruxiaflow_core::workflow::ActivityOutput;
+    /// use kruxiaflow_worker::ActivityResult;
     /// use serde_json::json;
     ///
     /// let result = ActivityResult::values(vec![
@@ -66,7 +66,7 @@ impl ActivityResult {
     /// # Example
     /// ```
     /// use serde_json::json;
-    /// use streamflow_worker::ActivityResult;
+    /// use kruxiaflow_worker::ActivityResult;
     /// use rust_decimal::Decimal;
     /// use std::str::FromStr;
     ///
@@ -89,8 +89,8 @@ impl ActivityResult {
     ///
     /// # Example
     /// ```
-    /// use streamflow_core::workflow::ActivityOutput;
-    /// use streamflow_worker::ActivityResult;
+    /// use kruxiaflow_core::workflow::ActivityOutput;
+    /// use kruxiaflow_worker::ActivityResult;
     /// use serde_json::json;
     ///
     /// let result = ActivityResult::values(vec![
@@ -160,7 +160,7 @@ impl ActivityResult {
     /// # Example
     /// ```
     /// use serde_json::json;
-    /// use streamflow_worker::ActivityResult;
+    /// use kruxiaflow_worker::ActivityResult;
     ///
     /// let result = ActivityResult::value("result", json!({"data": "..."}))
     ///     .with_metadata(json!({"cached": true, "cache_key": "abc123"}));

@@ -3,16 +3,16 @@ use axum_test::TestServer;
 use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
-use streamflow_api::{AppState, AppStateBuild, app_router};
-use streamflow_core::events::PostgresEventSource;
-use streamflow_core::queue::{PostgresQueue, QueueConfig};
-use streamflow_oauth::{AuthConfig, PostgresAuthService};
+use kruxiaflow_api::{AppState, AppStateBuild, app_router};
+use kruxiaflow_core::events::PostgresEventSource;
+use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
+use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use tokio_util::sync::CancellationToken;
 
 /// Helper to create test database pool
 async fn setup_test_pool() -> PgPool {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
     });
 
     let pool = PgPool::connect(&database_url)
@@ -57,8 +57,8 @@ async fn setup_test_state() -> AppState {
 
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
-    let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
-    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    let workflow_storage = Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone()));
+    let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
 
     AppState::with_metadata(
         pool,
@@ -298,7 +298,7 @@ async fn test_check_database_health_success() {
     let pool = setup_test_pool().await;
 
     // Test that database health check passes with a working database
-    let result = streamflow_api::health::check_database_health(&pool).await;
+    let result = kruxiaflow_api::health::check_database_health(&pool).await;
     assert!(
         result.is_ok(),
         "Database health check should succeed with working database"
@@ -312,7 +312,7 @@ async fn test_check_event_source_health_success() {
 
     // Test that event source health check passes
     // Event source is PostgreSQL-based, so this tests the event_source_commands table
-    let result = streamflow_api::health::check_event_source_health(&pool).await;
+    let result = kruxiaflow_api::health::check_event_source_health(&pool).await;
     assert!(
         result.is_ok(),
         "Event source health check should succeed with working database"
@@ -326,7 +326,7 @@ async fn test_check_activity_queue_health_success() {
 
     // Test that activity queue health check passes
     // Activity queue is PostgreSQL-based, so this tests the activity_tasks table
-    let result = streamflow_api::health::check_activity_queue_health(&pool).await;
+    let result = kruxiaflow_api::health::check_activity_queue_health(&pool).await;
     assert!(
         result.is_ok(),
         "Activity queue health check should succeed with working database"
@@ -346,7 +346,7 @@ async fn test_database_health_with_invalid_connection() {
 
     // If we can't even create the pool, that's expected
     if let Ok(invalid_pool) = invalid_pool_result {
-        let result = streamflow_api::health::check_database_health(&invalid_pool).await;
+        let result = kruxiaflow_api::health::check_database_health(&invalid_pool).await;
         assert!(
             result.is_err(),
             "Database health check should fail with invalid connection"
@@ -363,7 +363,7 @@ async fn test_event_source_health_maps_errors_correctly() {
         PgPool::connect("postgres://invalid:invalid@localhost:1/invalid").await;
 
     if let Ok(invalid_pool) = invalid_pool_result {
-        let result = streamflow_api::health::check_event_source_health(&invalid_pool).await;
+        let result = kruxiaflow_api::health::check_event_source_health(&invalid_pool).await;
         assert!(
             result.is_err(),
             "Event source health check should fail with invalid connection"
@@ -372,7 +372,7 @@ async fn test_event_source_health_maps_errors_correctly() {
         // Verify it's mapped to EventSourceError
         if let Err(e) = result {
             match e {
-                streamflow_api::health::HealthCheckError::EventSourceError(_) => {
+                kruxiaflow_api::health::HealthCheckError::EventSourceError(_) => {
                     // Expected error type
                 }
                 _ => panic!("Expected EventSourceError, got {:?}", e),
@@ -389,7 +389,7 @@ async fn test_activity_queue_health_with_invalid_connection() {
         PgPool::connect("postgres://invalid:invalid@localhost:1/invalid").await;
 
     if let Ok(invalid_pool) = invalid_pool_result {
-        let result = streamflow_api::health::check_activity_queue_health(&invalid_pool).await;
+        let result = kruxiaflow_api::health::check_activity_queue_health(&invalid_pool).await;
         assert!(
             result.is_err(),
             "Activity queue health check should fail with invalid connection"
@@ -398,7 +398,7 @@ async fn test_activity_queue_health_with_invalid_connection() {
         // Verify it's mapped to QueueError
         if let Err(e) = result {
             match e {
-                streamflow_api::health::HealthCheckError::QueueError(_) => {
+                kruxiaflow_api::health::HealthCheckError::QueueError(_) => {
                     // Expected error type
                 }
                 _ => panic!("Expected QueueError, got {:?}", e),
@@ -416,19 +416,19 @@ async fn test_health_checks_with_closed_pool() {
     pool.close().await;
 
     // Try to perform health checks on closed pool
-    let db_result = streamflow_api::health::check_database_health(&pool).await;
+    let db_result = kruxiaflow_api::health::check_database_health(&pool).await;
     assert!(
         db_result.is_err(),
         "Database health check should fail with closed pool"
     );
 
-    let event_result = streamflow_api::health::check_event_source_health(&pool).await;
+    let event_result = kruxiaflow_api::health::check_event_source_health(&pool).await;
     assert!(
         event_result.is_err(),
         "Event source health check should fail with closed pool"
     );
 
-    let queue_result = streamflow_api::health::check_activity_queue_health(&pool).await;
+    let queue_result = kruxiaflow_api::health::check_activity_queue_health(&pool).await;
     assert!(
         queue_result.is_err(),
         "Activity queue health check should fail with closed pool"
@@ -445,7 +445,7 @@ async fn test_multiple_concurrent_health_checks() {
         .map(|_| {
             let pool_clone = pool.clone();
             tokio::spawn(
-                async move { streamflow_api::health::check_database_health(&pool_clone).await },
+                async move { kruxiaflow_api::health::check_database_health(&pool_clone).await },
             )
         })
         .collect();
@@ -464,7 +464,7 @@ async fn test_health_check_response_time() {
 
     // Measure response time for database health check
     let start = std::time::Instant::now();
-    let result = streamflow_api::health::check_database_health(&pool).await;
+    let result = kruxiaflow_api::health::check_database_health(&pool).await;
     let duration = start.elapsed();
 
     assert!(result.is_ok(), "Health check should succeed");
@@ -485,9 +485,9 @@ async fn test_all_health_checks_return_consistent_results() {
 
     // Run all health checks multiple times and verify consistent results
     for _ in 0..5 {
-        let db_result = streamflow_api::health::check_database_health(&pool).await;
-        let event_result = streamflow_api::health::check_event_source_health(&pool).await;
-        let queue_result = streamflow_api::health::check_activity_queue_health(&pool).await;
+        let db_result = kruxiaflow_api::health::check_database_health(&pool).await;
+        let event_result = kruxiaflow_api::health::check_event_source_health(&pool).await;
+        let queue_result = kruxiaflow_api::health::check_activity_queue_health(&pool).await;
 
         assert!(db_result.is_ok(), "Database health should be consistent");
         assert!(
@@ -501,7 +501,7 @@ async fn test_all_health_checks_return_consistent_results() {
 #[tokio::test]
 #[serial]
 async fn test_health_check_error_types() {
-    use streamflow_api::health::HealthCheckError;
+    use kruxiaflow_api::health::HealthCheckError;
 
     let pool = setup_test_pool().await;
 
@@ -509,7 +509,7 @@ async fn test_health_check_error_types() {
     pool.close().await;
 
     // Test database error
-    let db_result = streamflow_api::health::check_database_health(&pool).await;
+    let db_result = kruxiaflow_api::health::check_database_health(&pool).await;
     assert!(db_result.is_err(), "Should fail with closed pool");
     if let Err(e) = db_result {
         // Should be DatabaseError or timeout
@@ -521,7 +521,7 @@ async fn test_health_check_error_types() {
     }
 
     // Test event source error mapping
-    let event_result = streamflow_api::health::check_event_source_health(&pool).await;
+    let event_result = kruxiaflow_api::health::check_event_source_health(&pool).await;
     assert!(event_result.is_err(), "Should fail with closed pool");
     if let Err(e) = event_result {
         match e {
@@ -533,7 +533,7 @@ async fn test_health_check_error_types() {
     }
 
     // Test queue error mapping
-    let queue_result = streamflow_api::health::check_activity_queue_health(&pool).await;
+    let queue_result = kruxiaflow_api::health::check_activity_queue_health(&pool).await;
     assert!(queue_result.is_err(), "Should fail with closed pool");
     if let Err(e) = queue_result {
         match e {
@@ -549,7 +549,7 @@ async fn test_health_check_error_types() {
 #[serial]
 async fn test_health_check_with_minimal_pool() {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
     });
 
     // Create a minimal pool with just 1 connection
@@ -566,19 +566,19 @@ async fn test_health_check_with_minimal_pool() {
         .expect("Failed to run migrations");
 
     // Health checks should still work with minimal pool
-    let db_result = streamflow_api::health::check_database_health(&pool).await;
+    let db_result = kruxiaflow_api::health::check_database_health(&pool).await;
     assert!(
         db_result.is_ok(),
         "Health check should work with minimal pool"
     );
 
-    let event_result = streamflow_api::health::check_event_source_health(&pool).await;
+    let event_result = kruxiaflow_api::health::check_event_source_health(&pool).await;
     assert!(
         event_result.is_ok(),
         "Event source health check should work with minimal pool"
     );
 
-    let queue_result = streamflow_api::health::check_activity_queue_health(&pool).await;
+    let queue_result = kruxiaflow_api::health::check_activity_queue_health(&pool).await;
     assert!(
         queue_result.is_ok(),
         "Queue health check should work with minimal pool"

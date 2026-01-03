@@ -269,7 +269,7 @@ activities:
             <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
 
             <p style="color: #666; font-size: 12px;">
-              This is an automated message from StreamFlow Order Processing.<br>
+              This is an automated message from Kruxia Flow Order Processing.<br>
               Order placed on {{WORKFLOW.started_at}}
             </p>
           </div>
@@ -292,6 +292,6 @@ activities:
         If you have any questions about your order, please contact our support team.
 
         ---
-        This is an automated message from StreamFlow Order Processing.
+        This is an automated message from Kruxia Flow Order Processing.
     depends_on:
       - activity_key: record_order

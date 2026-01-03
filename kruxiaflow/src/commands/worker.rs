@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Args;
 use std::sync::Arc;
 use std::time::Duration;
-use streamflow_worker::{WorkerConfig, WorkerManager};
+use kruxiaflow_worker::{WorkerConfig, WorkerManager};
 use uuid::Uuid;
 
 /// Worker command - Launch worker service only
@@ -11,21 +11,21 @@ pub struct WorkerCommand {
     /// API server URL to connect to
     #[arg(
         long,
-        env = "STREAMFLOW_API_URL",
+        env = "KRUXIAFLOW_API_URL",
         default_value = "http://127.0.0.1:8080",
-        help = "StreamFlow API server URL",
-        long_help = "StreamFlow API server URL for activity polling\n\n\
+        help = "Kruxia Flow API server URL",
+        long_help = "Kruxia Flow API server URL for activity polling\n\n\
 Workers connect to the API server to poll for activities,\n\
 report heartbeats, and submit results.\n\n\
 Default: http://127.0.0.1:8080\n\
-Example: --api-url https://streamflow.example.com"
+Example: --api-url https://kruxiaflow.example.com"
     )]
     pub api_url: String,
 
     /// Worker ID (auto-generated if not provided)
     #[arg(
         long,
-        env = "STREAMFLOW_WORKER_ID",
+        env = "KRUXIAFLOW_WORKER_ID",
         help = "Unique worker identifier",
         long_help = "Unique worker identifier\n\n\
 If not provided, a UUID v7 is auto-generated.\n\
@@ -38,7 +38,7 @@ Example: --worker-id worker_payments_1"
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_WORKER_COUNT",
+        env = "KRUXIAFLOW_WORKER_COUNT",
         default_value = "4",
         help = "Number of concurrent worker tasks",
         long_help = "Number of concurrent worker tasks\n\n\
@@ -53,7 +53,7 @@ Example: --workers 20"
     /// Activity types to handle (comma-separated)
     #[arg(
         long,
-        env = "STREAMFLOW_WORKER_ACTIVITY_TYPES",
+        env = "KRUXIAFLOW_WORKER_ACTIVITY_TYPES",
         help = "Activity types to handle (comma-separated, default: all built-in)",
         long_help = "Activity types this worker handles\n\n\
 If not specified, handles all built-in activity types.\n\
@@ -65,7 +65,7 @@ Example: --activity-types builtin.echo,builtin.http_request,builtin.llm_prompt"
     /// Maximum activities per poll
     #[arg(
         long,
-        env = "STREAMFLOW_POLL_MAX_ACTIVITIES",
+        env = "KRUXIAFLOW_POLL_MAX_ACTIVITIES",
         default_value = "1",
         help = "Maximum activities to claim per poll",
         long_help = "Maximum number of activities each worker claims per poll\n\n\
@@ -80,7 +80,7 @@ Example: --poll-max-activities 5"
     /// Poll interval in milliseconds
     #[arg(
         long,
-        env = "STREAMFLOW_POLL_INTERVAL",
+        env = "KRUXIAFLOW_POLL_INTERVAL",
         default_value = "100",
         help = "Activity poll interval in milliseconds"
     )]
@@ -89,7 +89,7 @@ Example: --poll-max-activities 5"
     /// Activity execution timeout in seconds
     #[arg(
         long,
-        env = "STREAMFLOW_ACTIVITY_TIMEOUT",
+        env = "KRUXIAFLOW_ACTIVITY_TIMEOUT",
         default_value = "300",
         help = "Activity execution timeout in seconds"
     )]
@@ -98,7 +98,7 @@ Example: --poll-max-activities 5"
     /// Heartbeat interval in seconds
     #[arg(
         long,
-        env = "STREAMFLOW_HEARTBEAT_INTERVAL",
+        env = "KRUXIAFLOW_HEARTBEAT_INTERVAL",
         default_value = "30",
         help = "Heartbeat interval for long-running activities"
     )]
@@ -107,8 +107,8 @@ Example: --poll-max-activities 5"
     /// OAuth client ID
     #[arg(
         long,
-        env = "STREAMFLOW_CLIENT_ID",
-        default_value = "streamflow_worker",
+        env = "KRUXIAFLOW_CLIENT_ID",
+        default_value = "kruxiaflow_worker",
         help = "OAuth client ID for API authentication"
     )]
     pub client_id: String,
@@ -116,7 +116,7 @@ Example: --poll-max-activities 5"
     /// OAuth client secret
     #[arg(
         long,
-        env = "STREAMFLOW_CLIENT_SECRET",
+        env = "KRUXIAFLOW_CLIENT_SECRET",
         help = "OAuth client secret for API authentication (required)"
     )]
     pub client_secret: Option<String>,
@@ -124,7 +124,7 @@ Example: --poll-max-activities 5"
     /// Shutdown timeout in seconds
     #[arg(
         long,
-        env = "STREAMFLOW_SHUTDOWN_TIMEOUT",
+        env = "KRUXIAFLOW_SHUTDOWN_TIMEOUT",
         default_value = "30",
         help = "Graceful shutdown timeout in seconds"
     )]
@@ -142,7 +142,7 @@ impl WorkerCommand {
         }
 
         if self.client_secret.is_none() {
-            anyhow::bail!("Client secret required (--client-secret or STREAMFLOW_CLIENT_SECRET)");
+            anyhow::bail!("Client secret required (--client-secret or KRUXIAFLOW_CLIENT_SECRET)");
         }
 
         if self.api_url.is_empty() {
@@ -182,7 +182,7 @@ fn load_secret(name: &str) -> Option<String> {
 pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()> {
     // Load secrets from files if _FILE variants are set (Docker secrets pattern)
     if cmd.client_secret.is_none() {
-        cmd.client_secret = load_secret("STREAMFLOW_CLIENT_SECRET");
+        cmd.client_secret = load_secret("KRUXIAFLOW_CLIENT_SECRET");
     }
 
     cmd.validate()?;
@@ -196,7 +196,7 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
         worker_id = %worker_id,
         api_url = %cmd.api_url,
         workers = cmd.workers,
-        "Starting StreamFlow worker"
+        "Starting Kruxia Flow worker"
     );
 
     // Connect to database for workflow storage access
@@ -212,8 +212,8 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
     tracing::info!("Database connection established");
 
     // Create workflow storage for artifact access
-    let workflow_storage: Arc<dyn streamflow_core::WorkflowStorage> =
-        Arc::new(streamflow_core::PostgresStorage::new(pool.clone()));
+    let workflow_storage: Arc<dyn kruxiaflow_core::WorkflowStorage> =
+        Arc::new(kruxiaflow_core::PostgresStorage::new(pool.clone()));
 
     // Create cache service based on environment configuration
     let cache_config = crate::config::CacheConfig::new();
@@ -224,7 +224,7 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
     let registry = if let Some(ref types_str) = cmd.activity_types {
         // Filter registry to only specified types
         let requested_types: Vec<&str> = types_str.split(',').map(|s| s.trim()).collect();
-        let full_registry = streamflow_worker::register_builtin_activities(cache_service);
+        let full_registry = kruxiaflow_worker::register_builtin_activities(cache_service);
 
         // Log which types are available vs requested
         let available_types = full_registry.activity_types();
@@ -235,10 +235,10 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
         );
 
         // For MVP, use full registry (filtering can be added later)
-        // TODO: Implement registry filtering in streamflow_worker
+        // TODO: Implement registry filtering in kruxiaflow_worker
         full_registry
     } else {
-        streamflow_worker::register_builtin_activities(cache_service)
+        kruxiaflow_worker::register_builtin_activities(cache_service)
     };
 
     tracing::info!(
@@ -303,7 +303,7 @@ mod tests {
             poll_interval: 100,
             activity_timeout: 300,
             heartbeat_interval: 30,
-            client_id: "streamflow_worker".to_string(),
+            client_id: "kruxiaflow_worker".to_string(),
             client_secret: Some("secret".to_string()),
             shutdown_timeout: 30,
         }

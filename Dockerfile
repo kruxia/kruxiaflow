@@ -18,8 +18,8 @@ RUN cargo install sqlx-cli --no-default-features --features postgres,rustls
 COPY ./docker-entrypoint-develop.sh /opt/docker-entrypoint-develop.sh
 ENTRYPOINT [ "/opt/docker-entrypoint-develop.sh" ]
 
-# Default command - arguments passed to "streamflow serve"
-# The entrypoint script will always run: target/profiling/streamflow serve "$@"
+# Default command - arguments passed to "kruxiaflow serve"
+# The entrypoint script will always run: target/profiling/kruxiaflow serve "$@"
 EXPOSE 8080
 
 # == BUILD ==
@@ -35,18 +35,18 @@ RUN cargo build --release
 FROM gcr.io/distroless/cc-debian12:nonroot AS deploy
 
 # Copy single binary (migrations embedded at compile time)
-COPY --from=build /opt/target/release/streamflow /streamflow
+COPY --from=build /opt/target/release/kruxiaflow /kruxiaflow
 
 EXPOSE 8080
 
 # Direct binary execution - no shell needed
 # --migrate: wait for postgres, run migrations
 # --seed-client: seed OAuth client (idempotent - skip if exists)
-ENTRYPOINT ["/streamflow"]
+ENTRYPOINT ["/kruxiaflow"]
 CMD ["serve", "--migrate", "--seed-client"]
 
 # == PROFILING ==
-# Profiling environment for StreamFlow
+# Profiling environment for Kruxia Flow
 # This provides a Linux environment where jemalloc profiling works correctly
 FROM rust:1.90-bookworm AS profiling
 
@@ -72,6 +72,6 @@ WORKDIR /opt
 COPY docker-entrypoint-profiling.sh docker-entrypoint-profiling.sh
 ENTRYPOINT [ "/opt/docker-entrypoint-profiling.sh" ]
 
-# Default command - arguments passed to "streamflow serve"
-# The entrypoint script will always run: target/profiling/streamflow serve "$@"
+# Default command - arguments passed to "kruxiaflow serve"
+# The entrypoint script will always run: target/profiling/kruxiaflow serve "$@"
 EXPOSE 8080

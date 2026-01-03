@@ -1,6 +1,6 @@
-# StreamFlow Benchmark Suite
+# Kruxia Flow Benchmark Suite
 
-Reproducible benchmarks comparing StreamFlow against Temporal and Airflow workflow engines.
+Reproducible benchmarks comparing Kruxia Flow against Temporal and Airflow workflow engines.
 
 ## Methodology
 
@@ -28,7 +28,7 @@ docker-compose up --build
 pip install -e .
 
 # Start platforms
-docker-compose up -d streamflow temporal airflow-webserver airflow-scheduler airflow-worker
+docker-compose up -d kruxiaflow temporal airflow-webserver airflow-scheduler airflow-worker
 
 # Check platforms are accessible
 python run_benchmark.py check
@@ -37,7 +37,7 @@ python run_benchmark.py check
 python run_benchmark.py run
 
 # Run specific platform only
-python run_benchmark.py run --platform streamflow
+python run_benchmark.py run --platform kruxiaflow
 python run_benchmark.py run --platform temporal
 python run_benchmark.py run --platform airflow
 
@@ -59,14 +59,14 @@ docker-compose down
 
 ## Expected Results
 
-- **StreamFlow**: >1,000 workflows/sec average
+- **Kruxia Flow**: >1,000 workflows/sec average
 - **Temporal**: 35-100 workflows/sec (based on published benchmarks)
 - **Airflow**: 10-50 workflows/sec (batch-oriented, not optimized for throughput)
 - **Speedup**: 10x+ vs Temporal, 20x+ vs Airflow
 
 ## Architecture
 
-### StreamFlow
+### Kruxia Flow
 - **Client**: Python httpx HTTP client
 - **API**: REST API at :8080
 - **Components**: API Server, Orchestrator, Built-in Worker
@@ -100,8 +100,8 @@ benchmarks/
 ├── run_benchmark.py             # Main CLI entry point
 ├── docker-compose.yml           # All platforms in one file
 ├── Dockerfile.benchmark         # Benchmark runner container
-├── streamflow/
-│   ├── benchmark.py            # StreamFlow HTTP client benchmark
+├── kruxiaflow/
+│   ├── benchmark.py            # Kruxia Flow HTTP client benchmark
 │   └── workflows.py            # Workflow definitions (Python dicts)
 ├── temporal/
 │   ├── benchmark.py            # Temporal SDK benchmark
@@ -134,4 +134,4 @@ To add new scenarios or platforms:
 
 ## License
 
-MIT (matches StreamFlow license)
+MIT (matches Kruxia Flow license)

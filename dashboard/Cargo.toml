@@ -1,5 +1,5 @@
 [package]
-name = "streamflow-dashboard"
+name = "kruxiaflow-dashboard"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -7,8 +7,8 @@ license.workspace = true
 
 [dependencies]
 # Workspace dependencies
-streamflow-core = { path = "../core" }
-streamflow-api = { path = "../api" }
+kruxiaflow-core = { path = "../core" }
+kruxiaflow-api = { path = "../api" }
 tokio.workspace = true
 axum.workspace = true
 tower.workspace = true

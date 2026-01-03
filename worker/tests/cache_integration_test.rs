@@ -10,10 +10,10 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
 #[cfg(feature = "redis-cache")]
-use streamflow_core::cache::RedisCache;
-use streamflow_core::cache::{CacheService, NoOpCache};
-use streamflow_core::workflow::ActivitySettings;
-use streamflow_worker::{ActivityImpl, ActivityRegistry, ActivityResult};
+use kruxiaflow_core::cache::RedisCache;
+use kruxiaflow_core::cache::{CacheService, NoOpCache};
+use kruxiaflow_core::workflow::ActivitySettings;
+use kruxiaflow_worker::{ActivityImpl, ActivityRegistry, ActivityResult};
 
 /// Test activity that returns a predictable result with cost
 struct CostlyActivity {

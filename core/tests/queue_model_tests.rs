@@ -5,7 +5,7 @@ use chrono::Utc;
 use rust_decimal::Decimal;
 use serde_json::json;
 use std::str::FromStr;
-use streamflow_core::queue::models::*;
+use kruxiaflow_core::queue::models::*;
 use uuid::Uuid;
 
 // Helper to create a test UUID
@@ -91,9 +91,9 @@ fn test_activity_serialization() {
 #[test]
 fn test_activity_with_settings() {
     let settings = ActivitySettings {
-        retry: Some(streamflow_core::workflow::RetryPolicy {
+        retry: Some(kruxiaflow_core::workflow::RetryPolicy {
             max_attempts: 3,
-            strategy: streamflow_core::workflow::BackoffStrategy::Fixed,
+            strategy: kruxiaflow_core::workflow::BackoffStrategy::Fixed,
             base_seconds: 2,
             factor: 2.0,
             max_seconds: 300,
@@ -186,17 +186,17 @@ fn test_activity_settings_default_values() {
 #[test]
 fn test_activity_settings_with_all_options() {
     let settings = ActivitySettings {
-        retry: Some(streamflow_core::workflow::RetryPolicy {
+        retry: Some(kruxiaflow_core::workflow::RetryPolicy {
             max_attempts: 5,
-            strategy: streamflow_core::workflow::BackoffStrategy::Exponential,
+            strategy: kruxiaflow_core::workflow::BackoffStrategy::Exponential,
             base_seconds: 2,
             factor: 2.0,
             max_seconds: 300,
         }),
         timeout_seconds: Some(30),
-        budget: Some(streamflow_core::workflow::BudgetSettings {
+        budget: Some(kruxiaflow_core::workflow::BudgetSettings {
             limit: Decimal::from_str("10.0").unwrap(),
-            action: streamflow_core::workflow::BudgetAction::Abort,
+            action: kruxiaflow_core::workflow::BudgetAction::Abort,
         }),
         cache: true,
         cache_ttl: Some(3600),
@@ -237,9 +237,9 @@ fn test_activity_settings_serialization_skips_none() {
 #[test]
 fn test_activity_settings_clone() {
     let settings1 = ActivitySettings {
-        retry: Some(streamflow_core::workflow::RetryPolicy {
+        retry: Some(kruxiaflow_core::workflow::RetryPolicy {
             max_attempts: 3,
-            strategy: streamflow_core::workflow::BackoffStrategy::Fixed,
+            strategy: kruxiaflow_core::workflow::BackoffStrategy::Fixed,
             base_seconds: 2,
             factor: 2.0,
             max_seconds: 300,
@@ -267,9 +267,9 @@ fn test_activity_settings_clone() {
 
 #[test]
 fn test_retry_policy_with_exponential_backoff() {
-    let policy = streamflow_core::workflow::RetryPolicy {
+    let policy = kruxiaflow_core::workflow::RetryPolicy {
         max_attempts: 5,
-        strategy: streamflow_core::workflow::BackoffStrategy::Exponential,
+        strategy: kruxiaflow_core::workflow::BackoffStrategy::Exponential,
         base_seconds: 2,
         factor: 2.0,
         max_seconds: 300,
@@ -282,9 +282,9 @@ fn test_retry_policy_with_exponential_backoff() {
 
 #[test]
 fn test_retry_policy_with_fixed_backoff() {
-    let policy = streamflow_core::workflow::RetryPolicy {
+    let policy = kruxiaflow_core::workflow::RetryPolicy {
         max_attempts: 3,
-        strategy: streamflow_core::workflow::BackoffStrategy::Fixed,
+        strategy: kruxiaflow_core::workflow::BackoffStrategy::Fixed,
         base_seconds: 2,
         factor: 2.0,
         max_seconds: 300,
@@ -297,9 +297,9 @@ fn test_retry_policy_with_fixed_backoff() {
 
 #[test]
 fn test_retry_policy_clone() {
-    let policy1 = streamflow_core::workflow::RetryPolicy {
+    let policy1 = kruxiaflow_core::workflow::RetryPolicy {
         max_attempts: 3,
-        strategy: streamflow_core::workflow::BackoffStrategy::Fixed,
+        strategy: kruxiaflow_core::workflow::BackoffStrategy::Fixed,
         base_seconds: 2,
         factor: 2.0,
         max_seconds: 300,
@@ -323,9 +323,9 @@ fn test_retry_policy_clone() {
 
 #[test]
 fn test_budget_settings_serialization() {
-    let settings = streamflow_core::workflow::BudgetSettings {
+    let settings = kruxiaflow_core::workflow::BudgetSettings {
         limit: Decimal::from_str("25.50").unwrap(),
-        action: streamflow_core::workflow::BudgetAction::Abort,
+        action: kruxiaflow_core::workflow::BudgetAction::Abort,
     };
 
     let json = serde_json::to_string(&settings).unwrap();
@@ -336,15 +336,15 @@ fn test_budget_settings_serialization() {
 #[test]
 fn test_budget_settings_deserialization() {
     let json = r#"{"limit": 10.0, "action": "abort"}"#;
-    let settings: streamflow_core::workflow::BudgetSettings = serde_json::from_str(json).unwrap();
+    let settings: kruxiaflow_core::workflow::BudgetSettings = serde_json::from_str(json).unwrap();
     assert_eq!(settings.limit, Decimal::from_str("10.0").unwrap());
 }
 
 #[test]
 fn test_budget_settings_clone() {
-    let settings1 = streamflow_core::workflow::BudgetSettings {
+    let settings1 = kruxiaflow_core::workflow::BudgetSettings {
         limit: Decimal::from_str("15.0").unwrap(),
-        action: streamflow_core::workflow::BudgetAction::Continue,
+        action: kruxiaflow_core::workflow::BudgetAction::Continue,
     };
 
     let settings2 = settings1.clone();
@@ -391,9 +391,9 @@ fn test_queued_activity_with_settings() {
     let workflow_id = test_uuid();
 
     let settings = ActivitySettings {
-        retry: Some(streamflow_core::workflow::RetryPolicy {
+        retry: Some(kruxiaflow_core::workflow::RetryPolicy {
             max_attempts: 3,
-            strategy: streamflow_core::workflow::BackoffStrategy::Fixed,
+            strategy: kruxiaflow_core::workflow::BackoffStrategy::Fixed,
             base_seconds: 2,
             factor: 2.0,
             max_seconds: 300,
@@ -458,9 +458,9 @@ fn test_queued_activity_clone() {
 fn test_activity_result_success() {
     let result = ActivityResult {
         success: true,
-        outputs: Some(vec![streamflow_core::workflow::ActivityOutput {
+        outputs: Some(vec![kruxiaflow_core::workflow::ActivityOutput {
             name: "result".to_string(),
-            output_type: streamflow_core::workflow::OutputType::Value,
+            output_type: kruxiaflow_core::workflow::OutputType::Value,
             value: json!("ok"),
         }]),
         error: None,
@@ -516,9 +516,9 @@ fn test_activity_result_skips_none_fields() {
 fn test_activity_result_clone() {
     let result1 = ActivityResult {
         success: true,
-        outputs: Some(vec![streamflow_core::workflow::ActivityOutput {
+        outputs: Some(vec![kruxiaflow_core::workflow::ActivityOutput {
             name: "key".to_string(),
-            output_type: streamflow_core::workflow::OutputType::Value,
+            output_type: kruxiaflow_core::workflow::OutputType::Value,
             value: json!("value"),
         }]),
         error: None,

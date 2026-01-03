@@ -13,8 +13,8 @@ use axum::{
     http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
-use streamflow_core::storage::StorageError;
-use streamflow_core::workflow::{OutputQueryError, OutputQueryService};
+use kruxiaflow_core::storage::StorageError;
+use kruxiaflow_core::workflow::{OutputQueryError, OutputQueryService};
 use uuid::Uuid;
 
 /// Get activity output

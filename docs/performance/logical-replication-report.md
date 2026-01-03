@@ -10,7 +10,7 @@
 
 ## Executive Summary
 
-PostgreSQL logical replication offers a **push-based, log-driven** alternative to StreamFlow's current polling-based event consumption. This report evaluates logical replication as a potential post-MVP optimization for achieving sub-millisecond event delivery latency.
+PostgreSQL logical replication offers a **push-based, log-driven** alternative to Kruxia Flow's current polling-based event consumption. This report evaluates logical replication as a potential post-MVP optimization for achieving sub-millisecond event delivery latency.
 
 ### Key Findings
 
@@ -154,7 +154,7 @@ flowchart TB
 | Heavy write load | 100-500ms | Multi-subscription system |
 | Parallel apply (PG 14) | Reduced from 4s to <1s | PostgreSQL 14 optimization |
 
-**Expected for StreamFlow:**
+**Expected for Kruxia Flow:**
 - **Local PostgreSQL**: <1ms event delivery (sub-millisecond)
 - **Docker/localhost**: 1-5ms (container overhead)
 - **Network deployment**: 10-50ms (network latency)
@@ -174,7 +174,7 @@ flowchart TB
    - CPU: <5% for typical workloads
 
 3. **Comparison to Polling**:
-   - **Polling**: 4,237 polls/sec = 71.6 empty polls per event (StreamFlow early benchmarks)
+   - **Polling**: 4,237 polls/sec = 71.6 empty polls per event (Kruxia Flow early benchmarks)
    - **Logical Replication**: Zero empty polls, push on every event
    - **CPU Reduction**: 90-95% reduction in database CPU for event detection
 
@@ -229,7 +229,7 @@ PostgreSQL 16 introduced **binary format** for initial data synchronization:
 
 ## Comparison with Current Polling
 
-### Current StreamFlow Polling Implementation
+### Current Kruxia Flow Polling Implementation
 
 **File**: `core/src/events/postgres_event_source.rs`
 
@@ -280,7 +280,7 @@ async fn poll(&self, consumer_id: &str) -> Result<Vec<WorkflowEvent>> {
 | Empty polls | 71.6 per event | 0 per event | **100% eliminated** |
 | **Total orchestration cycle** | **2-10ms** | **<1ms** | **5-10× faster** |
 
-**Expected StreamFlow Performance with Logical Replication**:
+**Expected Kruxia Flow Performance with Logical Replication**:
 - **Sequential**: 25-35 wf/sec (1.5-2× improvement)
 - **Parallel**: 35-50 wf/sec (1.5-2× improvement)
 - **High Concurrency**: 80-120 wf/sec (1.4-2× improvement)
@@ -361,9 +361,9 @@ Use Rust libraries to directly consume logical replication stream.
 flowchart TB
     PG[(PostgreSQL<br/>workflow_events)]
     WAL[Write-Ahead Log]
-    Slot[Replication Slot:<br/>streamflow_orchestrator]
+    Slot[Replication Slot:<br/>kruxiaflow_orchestrator]
 
-    subgraph "StreamFlow Orchestrator"
+    subgraph "Kruxia Flow Orchestrator"
         Conn[Replication<br/>Connection]
         Decoder[Event Decoder]
         Handler[Event Handler<br/>process_workflow_event]
@@ -561,7 +561,7 @@ impl PostgresLogicalReplication {
     pub async fn new(database_url: &str) -> Result<Self> {
         let config = ReplicationConfig {
             connection_string: database_url.to_string(),
-            slot_name: "streamflow_orchestrator".to_string(),
+            slot_name: "kruxiaflow_orchestrator".to_string(),
             publication_name: "workflow_events_pub".to_string(),
             tables: vec!["workflow_events".to_string()],
         };
@@ -642,7 +642,7 @@ flowchart LR
 - ❌ **Operational overhead** (3+ additional services to run/monitor)
 - ❌ **Cost** (Kafka cluster, Debezium, network)
 - ❌ **Latency** (additional hop: PostgreSQL → Debezium → Kafka → Orchestrator)
-- ❌ **Overkill for single consumer** (StreamFlow has one orchestrator)
+- ❌ **Overkill for single consumer** (Kruxia Flow has one orchestrator)
 
 **Recommendation**: ❌ **Do not pursue for MVP**. Only consider post-MVP if:
 - Need to replicate events to multiple external systems (analytics, auditing)
@@ -696,7 +696,7 @@ max_slot_wal_keep_size = 1GB  # PostgreSQL 13+ only
 
 ```
 # Allow replication connections
-host    replication    streamflow    127.0.0.1/32    md5
+host    replication    kruxiaflow    127.0.0.1/32    md5
 ```
 
 **Docker Compose Changes**:
@@ -820,7 +820,7 @@ SELECT slot_name,
        confirmed_flush_lsn,
        pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) AS replication_lag
 FROM pg_replication_slots
-WHERE slot_name = 'streamflow_orchestrator';
+WHERE slot_name = 'kruxiaflow_orchestrator';
 ```
 
 **Alert if**:
@@ -881,13 +881,13 @@ impl PostgresLogicalReplication {
 CREATE PUBLICATION workflow_events_pub FOR TABLE workflow_events;
 
 -- Option 2: Multiple tables (future)
-CREATE PUBLICATION streamflow_pub FOR TABLE
+CREATE PUBLICATION kruxiaflow_pub FOR TABLE
     workflow_events,
     workflows,
     activity_queue;
 
 -- Option 3: All tables (not recommended)
-CREATE PUBLICATION streamflow_all FOR ALL TABLES;
+CREATE PUBLICATION kruxiaflow_all FOR ALL TABLES;
 ```
 
 **Operation Filtering**:
@@ -910,7 +910,7 @@ CREATE PUBLICATION workflow_events_pub FOR TABLE workflow_events
 WHERE (event_type IN ('WorkflowStarted', 'ActivityCompleted'));
 ```
 
-**Recommendation for StreamFlow**:
+**Recommendation for Kruxia Flow**:
 ```sql
 -- Simple: One table, INSERT only (matches current polling)
 CREATE PUBLICATION workflow_events_pub FOR TABLE workflow_events
@@ -1063,7 +1063,7 @@ pub async fn check_replication_health(&self) -> Result<ReplicationHealth> {
 - 🚫 **Multiple databases**: Logical replication is per-database
 - 🚫 **Schema changes frequent**: Decoder must handle schema evolution
 
-**StreamFlow MVP Assessment**:
+**Kruxia Flow MVP Assessment**:
 - ✅ Polling achieves 17-56 wf/sec with 99.6-100% success (good enough)
 - ✅ Event polling averages 2.092ms (acceptable)
 - ✅ Database is NOT the bottleneck (9.4% of execution time)
@@ -1105,7 +1105,7 @@ pub async fn check_replication_health(&self) -> Result<ReplicationHealth> {
 
 ### Phase 2: Proof of Concept (2-3 days)
 
-**Goal**: Validate logical replication works in StreamFlow architecture.
+**Goal**: Validate logical replication works in Kruxia Flow architecture.
 
 **Tasks**:
 1. **Setup local PostgreSQL with logical replication**
@@ -1118,7 +1118,7 @@ pub async fn check_replication_health(&self) -> Result<ReplicationHealth> {
 
 2. **Create replication slot and publication**
    ```sql
-   SELECT pg_create_logical_replication_slot('streamflow_poc', 'pgoutput');
+   SELECT pg_create_logical_replication_slot('kruxiaflow_poc', 'pgoutput');
    CREATE PUBLICATION workflow_events_pub FOR TABLE workflow_events;
    ```
 
@@ -1143,7 +1143,7 @@ pub async fn check_replication_health(&self) -> Result<ReplicationHealth> {
 
 ### Phase 3: Implementation (5-7 days)
 
-**Goal**: Integrate logical replication into StreamFlow.
+**Goal**: Integrate logical replication into Kruxia Flow.
 
 **Day 1-2: Core Implementation**
 - Implement `PostgresLogicalReplication` struct
@@ -1238,7 +1238,7 @@ pub async fn check_replication_health(&self) -> Result<ReplicationHealth> {
 
 ## Decision Matrix
 
-### Should StreamFlow Migrate to Logical Replication?
+### Should Kruxia Flow Migrate to Logical Replication?
 
 Use this matrix to decide:
 
@@ -1318,7 +1318,7 @@ However, it comes with **significant complexity**:
 
 ### Recommendation
 
-**StreamFlow should continue with polling for MVP** because:
+**Kruxia Flow should continue with polling for MVP** because:
 1. ✅ Current performance meets production targets (17-56 wf/sec, 99.6-100% success)
 2. ✅ Database is NOT the bottleneck (only 9.4% of execution time)
 3. ✅ Polling is simple, reliable, and works out-of-box
@@ -1365,7 +1365,7 @@ However, it comes with **significant complexity**:
 - [Understanding Performance Limits of Logical Replication](https://www.2ndquadrant.com/en/blog/performance-limits-of-logical-replication-solutions/)
 - [Mastering Postgres Replication Slots](https://www.morling.dev/blog/mastering-postgres-replication-slots/)
 
-### StreamFlow Documentation
+### Kruxia Flow Documentation
 - [Performance Optimization Plan](./performance-optimization-plan.md)
 - [Architecture](../architecture.md)
 - [EventSource Implementation](../../core/src/events/postgres_event_source.rs)
@@ -1374,4 +1374,4 @@ However, it comes with **significant complexity**:
 
 **Report prepared by**: Claude
 **Date**: 2025-11-10
-**For**: StreamFlow MVP Performance Analysis
+**For**: Kruxia Flow MVP Performance Analysis

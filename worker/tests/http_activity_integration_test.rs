@@ -3,17 +3,17 @@ use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
-use streamflow_api::{routes::app_router, state::AppState};
-use streamflow_core::events::PostgresEventSource;
-use streamflow_core::queue::{PostgresQueue, QueueConfig};
-use streamflow_oauth::{AuthConfig, PostgresAuthService};
-use streamflow_worker::{ActivityImpl, HttpRequestActivity};
+use kruxiaflow_api::{routes::app_router, state::AppState};
+use kruxiaflow_core::events::PostgresEventSource;
+use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
+use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
+use kruxiaflow_worker::{ActivityImpl, HttpRequestActivity};
 use tokio_util::sync::CancellationToken;
 
 /// Helper to create test database pool
 async fn setup_test_pool() -> PgPool {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
     });
 
     PgPool::connect(&database_url)
@@ -61,8 +61,8 @@ async fn create_real_server() -> (String, PgPool, tokio::task::JoinHandle<()>) {
 
     let activity_queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
-    let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
-    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    let workflow_storage = Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone()));
+    let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
     let shutdown_token = CancellationToken::new();
 
     let state = AppState::new(
@@ -187,7 +187,7 @@ async fn test_http_request_with_custom_headers() {
         "method": "GET",
         "url": format!("{}/health", server_url),
         "headers": {
-            "User-Agent": "StreamFlow-Test/1.0",
+            "User-Agent": "Kruxia Flow-Test/1.0",
             "X-Custom-Header": "test-value"
         }
     });

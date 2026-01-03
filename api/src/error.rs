@@ -167,8 +167,8 @@ impl Default for ValidationErrors {
 
 impl ValidationErrors {
     /// Convert workflow validation errors to API validation errors
-    pub fn from_workflow_validation(ve: streamflow_core::workflow::ValidationError) -> Self {
-        use streamflow_core::workflow::ValidationError as WfValidationError;
+    pub fn from_workflow_validation(ve: kruxiaflow_core::workflow::ValidationError) -> Self {
+        use kruxiaflow_core::workflow::ValidationError as WfValidationError;
 
         match ve {
             WfValidationError::SingleError(msg) => {

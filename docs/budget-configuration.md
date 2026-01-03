@@ -1,10 +1,10 @@
 # Budget Configuration Guide
 
-This guide explains how to configure budget limits and cost tracking for StreamFlow workflows that use LLM activities.
+This guide explains how to configure budget limits and cost tracking for Kruxia Flow workflows that use LLM activities.
 
 ## Overview
 
-StreamFlow provides first-class budget enforcement for workflows that use usage-based activities like LLM API calls. Budget tracking operates at two levels:
+Kruxia Flow provides first-class budget enforcement for workflows that use usage-based activities like LLM API calls. Budget tracking operates at two levels:
 
 1. **Activity-level budgets**: Per-activity spending limits with retry budgets
 2. **Workflow-level budgets**: Total spending limits across all activities
@@ -99,7 +99,7 @@ cost_usd = (prompt_tokens × prompt_price_per_million / 1,000,000)
          + (cached_tokens × cached_price_per_million / 1,000,000)
 ```
 
-**Pricing source**: PostgreSQL `llm_models` table, loaded via `streamflow seed-llm` command.
+**Pricing source**: PostgreSQL `llm_models` table, loaded via `kruxiaflow seed-llm` command.
 
 ---
 

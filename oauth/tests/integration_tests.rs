@@ -8,7 +8,7 @@ use bcrypt::hash;
 use chrono::{Duration, Utc};
 use serial_test::serial;
 use sqlx::PgPool;
-use streamflow_oauth::{
+use kruxiaflow_oauth::{
     AuthConfig, AuthError, AuthenticationService, PostgresAuthService, hash_refresh_token,
 };
 use uuid::Uuid;

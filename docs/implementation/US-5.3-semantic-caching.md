@@ -25,7 +25,7 @@
 - ✅ Workspace compiles successfully
 
 **Production Features (100%)**
-- ✅ Environment variable configuration (STREAMFLOW_CACHE_PROVIDER, STREAMFLOW_REDIS_URL, STREAMFLOW_REDIS_KEY_PREFIX)
+- ✅ Environment variable configuration (KRUXIAFLOW_CACHE_PROVIDER, KRUXIAFLOW_REDIS_URL, KRUXIAFLOW_REDIS_KEY_PREFIX)
 - ✅ Cache invalidation API endpoints (DELETE /api/v1/cache/:key, POST /api/v1/cache/invalidate)
 - ✅ Integration tests with Redis container (9 comprehensive tests)
 - ✅ API handler tests with authentication (4 tests)
@@ -33,7 +33,7 @@
 **Current Deployment:**
 - Uses `NoOpCache` by default (no Redis required - zero configuration)
 - Caching infrastructure fully functional and production-ready
-- Redis enabled via environment variables (STREAMFLOW_CACHE_PROVIDER=redis, STREAMFLOW_REDIS_URL, STREAMFLOW_REDIS_KEY_PREFIX)
+- Redis enabled via environment variables (KRUXIAFLOW_CACHE_PROVIDER=redis, KRUXIAFLOW_REDIS_URL, KRUXIAFLOW_REDIS_KEY_PREFIX)
 - Cache invalidation API endpoints available (DELETE /api/v1/cache/:key, POST /api/v1/cache/invalidate)
 - Complete test coverage (13 tests: 9 integration + 4 API handler)
 
@@ -67,7 +67,7 @@
 - Cache hits return `cost_usd: 0.0` for automatic cost tracking
 - Works for ALL activity types (LLM, HTTP, PostgreSQL, custom)
 - Gracefully degrades when Redis unavailable (uses NoOpCache)
-- ✅ Redis configuration via environment variables (STREAMFLOW_CACHE_PROVIDER, STREAMFLOW_REDIS_URL, STREAMFLOW_REDIS_KEY_PREFIX)
+- ✅ Redis configuration via environment variables (KRUXIAFLOW_CACHE_PROVIDER, KRUXIAFLOW_REDIS_URL, KRUXIAFLOW_REDIS_KEY_PREFIX)
 - ✅ API endpoints for cache invalidation (DELETE /api/v1/cache/:key, POST /api/v1/cache/invalidate)
 - ✅ Comprehensive integration tests (9 cache tests + 4 API tests)
 
@@ -223,7 +223,7 @@ flowchart TB
 
 ### Cache Service Interface
 
-Following StreamFlow's service interface pattern, introduce a new **CacheService** interface:
+Following Kruxia Flow's service interface pattern, introduce a new **CacheService** interface:
 
 ```mermaid
 flowchart TB
@@ -369,7 +369,7 @@ impl RedisCache {
         let client = Client::open(redis_url)?;
         Ok(Self {
             client,
-            key_prefix: key_prefix.unwrap_or_else(|| "streamflow:cache:".to_string()),
+            key_prefix: key_prefix.unwrap_or_else(|| "kruxiaflow:cache:".to_string()),
         })
     }
 
@@ -460,7 +460,7 @@ impl CacheService for RedisCache {
 - Connection pooling via `get_multiplexed_async_connection()`
 - `SETEX` for atomic set with TTL (no race condition)
 - `SCAN` for pattern matching (safer than `KEYS` on large datasets)
-- Key prefix for namespace isolation (default: `streamflow:cache:`)
+- Key prefix for namespace isolation (default: `kruxiaflow:cache:`)
 
 **Dependencies** (add to `core/Cargo.toml`):
 ```toml
@@ -710,9 +710,9 @@ impl ActivityRegistry {
 
 **Modified Code** (with caching):
 ```rust
-use streamflow_core::cache::CacheService;
-use streamflow_core::cache::key_generator::generate_cache_key;
-use streamflow_core::workflow::ActivitySettings;
+use kruxiaflow_core::cache::CacheService;
+use kruxiaflow_core::cache::key_generator::generate_cache_key;
+use kruxiaflow_core::workflow::ActivitySettings;
 
 pub struct ActivityRegistry {
     implementations: HashMap<String, Arc<dyn ActivityImpl>>,
@@ -917,17 +917,17 @@ let result = self.registry
 **Configuration**:
 ```bash
 # Enable Redis caching (optional)
-STREAMFLOW_CACHE_PROVIDER=redis
-STREAMFLOW_REDIS_URL=redis://localhost:6379
-STREAMFLOW_REDIS_KEY_PREFIX=streamflow:cache:
+KRUXIAFLOW_CACHE_PROVIDER=redis
+KRUXIAFLOW_REDIS_URL=redis://localhost:6379
+KRUXIAFLOW_REDIS_KEY_PREFIX=kruxiaflow:cache:
 
 # Or disable caching (use NoOp)
-STREAMFLOW_CACHE_PROVIDER=noop
+KRUXIAFLOW_CACHE_PROVIDER=noop
 ```
 
 **Initialization**:
 ```rust
-use streamflow_core::cache::{CacheService, RedisCache, NoOpCache};
+use kruxiaflow_core::cache::{CacheService, RedisCache, NoOpCache};
 use std::sync::Arc;
 
 pub fn create_cache_service(config: &Config) -> Arc<dyn CacheService> {
@@ -982,7 +982,7 @@ pub fn create_cache_service(config: &Config) -> Arc<dyn CacheService> {
 
 **Completion Criteria**:
 - [x] Configuration parsing for cache provider (using NoOpCache as default)
-- [x] Redis URL and key prefix configuration (environment variables: STREAMFLOW_CACHE_PROVIDER, STREAMFLOW_REDIS_URL, STREAMFLOW_REDIS_KEY_PREFIX)
+- [x] Redis URL and key prefix configuration (environment variables: KRUXIAFLOW_CACHE_PROVIDER, KRUXIAFLOW_REDIS_URL, KRUXIAFLOW_REDIS_KEY_PREFIX)
 - [x] Automatic fallback to NoOp on Redis failure
 - [x] Connectivity test with ping
 - [x] Logging for cache initialization status
@@ -1004,7 +1004,7 @@ use axum::{
     routing::{delete, post},
     Router,
 };
-use streamflow_core::cache::CacheService;
+use kruxiaflow_core::cache::CacheService;
 use std::sync::Arc;
 
 #[derive(serde::Serialize)]
@@ -1066,7 +1066,7 @@ curl -X DELETE http://localhost:8080/api/v1/cache/abc123def456...
 # Invalidate all cache entries for llm_prompt activities
 curl -X POST http://localhost:8080/api/v1/cache/invalidate \
   -H "Content-Type: application/json" \
-  -d '{"pattern": "streamflow:cache:llm_prompt:*"}'
+  -d '{"pattern": "kruxiaflow:cache:llm_prompt:*"}'
 ```
 
 **Completion Criteria**:
@@ -1246,7 +1246,7 @@ async fn test_redis_unavailable_fallback() {
 ```markdown
 # Semantic Caching for LLM Activities
 
-StreamFlow provides automatic result caching for LLM activities to reduce costs by 50-80% for repeated queries.
+Kruxia Flow provides automatic result caching for LLM activities to reduce costs by 50-80% for repeated queries.
 
 ## Setup
 
@@ -1265,11 +1265,11 @@ docker run -d -p 6379:6379 redis:7-alpine
 
 ```bash
 # Enable Redis caching
-export STREAMFLOW_CACHE_PROVIDER=redis
-export STREAMFLOW_REDIS_URL=redis://localhost:6379
+export KRUXIAFLOW_CACHE_PROVIDER=redis
+export KRUXIAFLOW_REDIS_URL=redis://localhost:6379
 
-# Start StreamFlow
-streamflow serve
+# Start Kruxia Flow
+kruxiaflow serve
 ```
 
 ## Usage
@@ -1413,9 +1413,9 @@ If Redis is unavailable, workflows continue executing without caching (no failur
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `STREAMFLOW_CACHE_PROVIDER` | `noop` | Cache provider: `redis` or `noop` |
-| `STREAMFLOW_REDIS_URL` | `redis://localhost:6379` | Redis connection URL |
-| `STREAMFLOW_REDIS_KEY_PREFIX` | `streamflow:cache:` | Redis key prefix for namespace isolation |
+| `KRUXIAFLOW_CACHE_PROVIDER` | `noop` | Cache provider: `redis` or `noop` |
+| `KRUXIAFLOW_REDIS_URL` | `redis://localhost:6379` | Redis connection URL |
+| `KRUXIAFLOW_REDIS_KEY_PREFIX` | `kruxiaflow:cache:` | Redis key prefix for namespace isolation |
 
 ### Activity Settings
 
@@ -1518,19 +1518,19 @@ This is a post-MVP enhancement and not required for initial implementation.
 5. ✅ TTL support with automatic expiration
 6. ✅ Graceful degradation (NoOpCache used when Redis unavailable)
 7. ✅ Activity settings integration (`cache: true`, `cache_ttl: 3600`)
-8. ✅ Environment variable configuration (STREAMFLOW_CACHE_PROVIDER, STREAMFLOW_REDIS_URL, STREAMFLOW_REDIS_KEY_PREFIX)
+8. ✅ Environment variable configuration (KRUXIAFLOW_CACHE_PROVIDER, KRUXIAFLOW_REDIS_URL, KRUXIAFLOW_REDIS_KEY_PREFIX)
 9. ✅ Cache invalidation API endpoints with JWT authentication
 10. ✅ Comprehensive test coverage (13 tests total)
 11. ✅ Complete user documentation (`docs/features/semantic-caching.md`)
 
 **Production Deployment**:
 - Uses `NoOpCache` by default (no Redis required - zero configuration)
-- Redis enabled via environment variables (STREAMFLOW_CACHE_PROVIDER=redis)
+- Redis enabled via environment variables (KRUXIAFLOW_CACHE_PROVIDER=redis)
 - Cache invalidation API endpoints available
 - All 13 tests passing (9 integration + 4 API handler tests)
 
 **All Tasks Complete** ✅:
-- [x] Environment variable configuration (STREAMFLOW_CACHE_PROVIDER, STREAMFLOW_REDIS_URL, STREAMFLOW_REDIS_KEY_PREFIX)
+- [x] Environment variable configuration (KRUXIAFLOW_CACHE_PROVIDER, KRUXIAFLOW_REDIS_URL, KRUXIAFLOW_REDIS_KEY_PREFIX)
 - [x] API endpoints for cache invalidation (DELETE /api/v1/cache/:key, POST /api/v1/cache/invalidate)
 - [x] Integration tests with Redis (9 comprehensive tests)
 - [x] API handler tests with JWT authentication (4 tests)

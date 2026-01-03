@@ -595,9 +595,9 @@ pub enum HealthCheckError {
 
 ```bash
 # Health check configuration
-STREAMFLOW_API_HEALTH_CHECK_TIMEOUT=5s        # Health check timeout
-STREAMFLOW_API_READINESS_DATABASE_CHECK=true  # Enable database readiness check
-STREAMFLOW_API_READINESS_EVENT_SOURCE_CHECK=true  # Enable event source readiness check
+KRUXIAFLOW_API_HEALTH_CHECK_TIMEOUT=5s        # Health check timeout
+KRUXIAFLOW_API_READINESS_DATABASE_CHECK=true  # Enable database readiness check
+KRUXIAFLOW_API_READINESS_EVENT_SOURCE_CHECK=true  # Enable event source readiness check
 ```
 
 ### Compile-Time Configuration
@@ -634,11 +634,11 @@ impl Default for HealthCheckConfig {
 apiVersion: v1
 kind: Pod
 metadata:
-  name: streamflow-api
+  name: kruxiaflow-api
 spec:
   containers:
-  - name: streamflow
-    image: streamflow:latest
+  - name: kruxiaflow
+    image: kruxiaflow:latest
     ports:
     - containerPort: 8080
     livenessProbe:
@@ -793,7 +793,7 @@ spec:
 
 - **US-1A.2**: Error Handling and API Contracts (health checks should follow error format)
 - **US-1A.3**: Authentication and Authorization (health checks bypass auth)
-- **US-1C.6**: CLI Health Checks (`streamflow health` uses these endpoints)
+- **US-1C.6**: CLI Health Checks (`kruxiaflow health` uses these endpoints)
 
 ---
 
@@ -885,7 +885,7 @@ api/
 
 ### Build Status
 
-✅ Successfully compiles with `cargo build -p streamflow-api`
+✅ Successfully compiles with `cargo build -p kruxiaflow-api`
 
 ### Next Steps (Phase 2)
 

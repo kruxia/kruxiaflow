@@ -1,14 +1,14 @@
 # Ollama Deployment Guide
 
-This guide covers deploying and configuring Ollama for use with StreamFlow LLM activities.
+This guide covers deploying and configuring Ollama for use with Kruxia Flow LLM activities.
 
 ## Overview
 
-Ollama is a self-hosted LLM provider that enables running models locally or in your infrastructure. StreamFlow supports Ollama as a first-class LLM provider alongside cloud providers like Anthropic, OpenAI, and Google.
+Ollama is a self-hosted LLM provider that enables running models locally or in your infrastructure. Kruxia Flow supports Ollama as a first-class LLM provider alongside cloud providers like Anthropic, OpenAI, and Google.
 
 ## Configuration
 
-StreamFlow workers discover and connect to Ollama via environment variables:
+Kruxia Flow workers discover and connect to Ollama via environment variables:
 
 | Variable          | Required | Default               | Description                                    |
 |-------------------|----------|-----------------------|------------------------------------------------|
@@ -43,13 +43,13 @@ ollama pull mistral
 ollama pull codellama
 ```
 
-**Configure StreamFlow worker**:
+**Configure Kruxia Flow worker**:
 ```bash
 # Default configuration (localhost:11434)
-cargo run -p streamflow-worker
+cargo run -p kruxiaflow-worker
 
 # Or explicitly set the URL
-OLLAMA_BASE_URL=http://localhost:11434 cargo run -p streamflow-worker
+OLLAMA_BASE_URL=http://localhost:11434 cargo run -p kruxiaflow-worker
 ```
 
 **Workflow example**:
@@ -68,7 +68,7 @@ activities:
 
 ### 2. Docker Deployment
 
-Run Ollama in a Docker container alongside StreamFlow services.
+Run Ollama in a Docker container alongside Kruxia Flow services.
 
 **Docker Compose example**:
 ```yaml
@@ -78,9 +78,9 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: streamflow
-      POSTGRES_USER: streamflow
-      POSTGRES_PASSWORD: streamflow_dev
+      POSTGRES_DB: kruxiaflow
+      POSTGRES_USER: kruxiaflow
+      POSTGRES_PASSWORD: kruxiaflow_dev
     ports:
       - "5432:5432"
     volumes:
@@ -101,22 +101,22 @@ services:
     #           count: 1
     #           capabilities: [gpu]
 
-  streamflow-api:
-    image: streamflow:latest
+  kruxiaflow-api:
+    image: kruxiaflow:latest
     command: serve
     environment:
-      STREAMFLOW_DATABASE_URL: postgres://streamflow:streamflow_dev@postgres:5432/streamflow
-      STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM: ${STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM}
+      KRUXIAFLOW_DATABASE_URL: postgres://kruxiaflow:kruxiaflow_dev@postgres:5432/kruxiaflow
+      KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM: ${KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM}
     ports:
       - "8080:8080"
     depends_on:
       - postgres
 
-  streamflow-worker:
-    image: streamflow:latest
+  kruxiaflow-worker:
+    image: kruxiaflow:latest
     command: worker
     environment:
-      STREAMFLOW_DATABASE_URL: postgres://streamflow:streamflow_dev@postgres:5432/streamflow
+      KRUXIAFLOW_DATABASE_URL: postgres://kruxiaflow:kruxiaflow_dev@postgres:5432/kruxiaflow
       OLLAMA_BASE_URL: http://ollama:11434
       # Cloud provider API keys (optional)
       # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
@@ -144,7 +144,7 @@ docker-compose exec ollama ollama pull llama3.2
 **Verify connection**:
 ```bash
 # From worker container
-docker-compose exec streamflow-worker curl http://ollama:11434/api/tags
+docker-compose exec kruxiaflow-worker curl http://ollama:11434/api/tags
 ```
 
 ---
@@ -159,7 +159,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: ollama-models-pvc
-  namespace: streamflow
+  namespace: kruxiaflow
 spec:
   accessModes:
     - ReadWriteOnce
@@ -173,7 +173,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: ollama
-  namespace: streamflow
+  namespace: kruxiaflow
 spec:
   replicas: 1
   selector:
@@ -212,7 +212,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: ollama
-  namespace: streamflow
+  namespace: kruxiaflow
 spec:
   selector:
     app: ollama
@@ -223,32 +223,32 @@ spec:
   type: ClusterIP
 ```
 
-**StreamFlow Worker Deployment**:
+**Kruxia Flow Worker Deployment**:
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: streamflow-worker
-  namespace: streamflow
+  name: kruxiaflow-worker
+  namespace: kruxiaflow
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: streamflow-worker
+      app: kruxiaflow-worker
   template:
     metadata:
       labels:
-        app: streamflow-worker
+        app: kruxiaflow-worker
     spec:
       containers:
       - name: worker
-        image: streamflow:latest
-        command: ["streamflow", "worker"]
+        image: kruxiaflow:latest
+        command: ["kruxiaflow", "worker"]
         env:
-        - name: STREAMFLOW_DATABASE_URL
+        - name: KRUXIAFLOW_DATABASE_URL
           valueFrom:
             secretKeyRef:
-              name: streamflow-secrets
+              name: kruxiaflow-secrets
               key: database-url
         - name: OLLAMA_BASE_URL
           value: "http://ollama:11434"
@@ -256,19 +256,19 @@ spec:
         - name: ANTHROPIC_API_KEY
           valueFrom:
             secretKeyRef:
-              name: streamflow-secrets
+              name: kruxiaflow-secrets
               key: anthropic-api-key
               optional: true
         - name: OPENAI_API_KEY
           valueFrom:
             secretKeyRef:
-              name: streamflow-secrets
+              name: kruxiaflow-secrets
               key: openai-api-key
               optional: true
         - name: GOOGLE_API_KEY
           valueFrom:
             secretKeyRef:
-              name: streamflow-secrets
+              name: kruxiaflow-secrets
               key: google-api-key
               optional: true
         resources:
@@ -286,7 +286,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: ollama-pull-models
-  namespace: streamflow
+  namespace: kruxiaflow
 spec:
   template:
     spec:
@@ -317,15 +317,15 @@ spec:
 **Deploy**:
 ```bash
 kubectl apply -f ollama-deployment.yaml
-kubectl apply -f streamflow-worker-deployment.yaml
+kubectl apply -f kruxiaflow-worker-deployment.yaml
 kubectl apply -f ollama-init-job.yaml
 
 # Verify Ollama is running
-kubectl get pods -n streamflow -l app=ollama
-kubectl logs -n streamflow -l app=ollama
+kubectl get pods -n kruxiaflow -l app=ollama
+kubectl logs -n kruxiaflow -l app=ollama
 
 # Check models
-kubectl exec -n streamflow deployment/ollama -- ollama list
+kubectl exec -n kruxiaflow deployment/ollama -- ollama list
 ```
 
 ---
@@ -337,12 +337,12 @@ Connect to an Ollama instance running on a different machine.
 **Configuration**:
 ```bash
 # Point worker to remote Ollama
-OLLAMA_BASE_URL=https://ollama.example.com:11434 cargo run -p streamflow-worker
+OLLAMA_BASE_URL=https://ollama.example.com:11434 cargo run -p kruxiaflow-worker
 
 # With API key authentication
 OLLAMA_BASE_URL=https://ollama.example.com:11434 \
 OLLAMA_API_KEY=your-secret-key \
-cargo run -p streamflow-worker
+cargo run -p kruxiaflow-worker
 ```
 
 **Note**: Ensure the remote Ollama instance is accessible from your worker nodes and properly secured (HTTPS, authentication).
@@ -363,7 +363,7 @@ ollama list
 docker-compose exec ollama ollama list
 
 # Kubernetes
-kubectl exec -n streamflow deployment/ollama -- ollama list
+kubectl exec -n kruxiaflow deployment/ollama -- ollama list
 ```
 
 ### Model Selection in Workflows
@@ -385,7 +385,7 @@ parameters:
 
 ### Model Discovery
 
-StreamFlow automatically validates models against Ollama's available models with a 5-minute cache. If you specify a model that doesn't exist, you'll get a clear error:
+Kruxia Flow automatically validates models against Ollama's available models with a 5-minute cache. If you specify a model that doesn't exist, you'll get a clear error:
 
 ```
 Error: Model 'invalid-model' not found in Ollama. Available models: llama3.2, mistral, codellama

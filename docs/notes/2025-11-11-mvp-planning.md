@@ -90,7 +90,7 @@ YAML + built-in activities delivers all three immediately. Python SDKs are a pos
 - Python runtime overhead is a **major weakness** of competitors
 - Temporal/Airflow/Prefect: All suffer from Python performance bottlenecks
 - **Competitor baseline: 35-100 workflows/sec** (documented PostgreSQL limit)
-- **StreamFlow target: >1,000 workflows/sec** (10x improvement)
+- **Kruxia Flow target: >1,000 workflows/sec** (10x improvement)
 - Edge deployment needs 50MB footprint, not Python's overhead
 
 **2. YAML Covers the Market**
@@ -176,10 +176,10 @@ Python/JavaScript builders (Epic 4) give developers:
 - ✅ Epic 1: Event-driven orchestration architecture
 - ✅ Epic 1A: API Server (7 of 9 stories - includes external worker HTTP API)
 - ✅ Epic 1B: Built-in Worker (uses API server, validates HTTP interface)
-- ✅ Epic 1C: StreamFlow Binary (partial - 3 of 7 stories)
+- ✅ Epic 1C: Kruxia Flow Binary (partial - 3 of 7 stories)
 
 **Remaining Pre-Epic 2** (~12 hours):
-- 📋 US-1C.2: All-in-One Service Launcher (`streamflow serve`) - 8 hours
+- 📋 US-1C.2: All-in-One Service Launcher (`kruxiaflow serve`) - 8 hours
 - 📋 US-1C.7: Graceful Shutdown and Signal Handling - 4 hours
 
 ### Phase 3: Epic 2 - Performance Benchmarking (Weeks 10-11) 📋 NEXT
@@ -236,7 +236,7 @@ Python/JavaScript builders (Epic 4) give developers:
 
 ### Your Unique Advantages (No Competitor Has All Four)
 
-| Feature                      | StreamFlow                       | Temporal                     | Airflow                      | LangChain                  | Restate                  |
+| Feature                      | Kruxia Flow                       | Temporal                     | Airflow                      | LangChain                  | Restate                  |
 |------------------------------|----------------------------------|------------------------------|------------------------------|----------------------------|--------------------------|
 | **Operational Simplicity**   | ✅ Single 4.5MB binary           | ❌ Multi-service (4+)        | ❌ Multi-service (6+)        | ❌ Not production-ready    | ✅ Single binary         |
 | **AI Cost Control**          | ✅ Built-in budget enforcement   | ❌ None                      | ❌ None                      | ❌ "Inaccurate" tracking   | ❌ None                  |
@@ -287,8 +287,8 @@ Successful declarative-first platforms:
    - Database operations (Epic 5.6) - PostgreSQL native
 
 3. **Migration tools** (Epic 9.3, 9.4):
-   - Temporal workflows → StreamFlow YAML
-   - Airflow DAGs → StreamFlow YAML
+   - Temporal workflows → Kruxia Flow YAML
+   - Airflow DAGs → Kruxia Flow YAML
    - 70%+ auto-conversion for common patterns
 
 4. **LangChain interoperability** (Epic 9.5):

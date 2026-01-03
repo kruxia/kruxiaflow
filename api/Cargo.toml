@@ -1,5 +1,5 @@
 [package]
-name = "streamflow-api"
+name = "kruxiaflow-api"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -8,8 +8,8 @@ description.workspace = true
 
 [dependencies]
 # Workspace dependencies
-streamflow-core = { path = "../core" }
-streamflow-oauth = { path = "../oauth" }
+kruxiaflow-core = { path = "../core" }
+kruxiaflow-oauth = { path = "../oauth" }
 tokio.workspace = true
 tokio-util.workspace = true
 async-trait.workspace = true
@@ -34,7 +34,7 @@ utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono", "decimal_
 utoipa-redoc = { version = "5", features = ["axum"] }
 
 [dev-dependencies]
-streamflow-worker = { path = "../worker" }
+kruxiaflow-worker = { path = "../worker" }
 tokio = { workspace = true, features = ["test-util"] }
 serial_test.workspace = true
 axum-test = "15.0"

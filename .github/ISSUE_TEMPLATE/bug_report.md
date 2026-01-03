@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Report a bug to help us improve StreamFlow
+about: Report a bug to help us improve Kruxia Flow
 title: '[BUG] '
 labels: bug
 assignees: ''
@@ -26,7 +26,7 @@ What actually happened.
 
 ## Environment
 
-- **StreamFlow Version**: (e.g., 0.3.0 or commit hash)
+- **Kruxia Flow Version**: (e.g., 0.3.0 or commit hash)
 - **OS**: (e.g., macOS 14.0, Ubuntu 22.04)
 - **Docker Version**: (if applicable)
 - **PostgreSQL Version**: (e.g., 18.1)

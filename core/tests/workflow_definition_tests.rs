@@ -1,12 +1,12 @@
 use serial_test::serial;
 use sqlx::PgPool;
-use streamflow_core::workflow::{
+use kruxiaflow_core::workflow::{
     ActivityDefinition, ActivityRelationship, WorkflowDefinition, WorkflowDefinitionRepository,
 };
 
 async fn setup_test_db() -> PgPool {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
     });
 
     let pool = PgPool::connect(&database_url)

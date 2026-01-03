@@ -12,17 +12,17 @@ use sqlx::PgPool;
 #[allow(unused_imports)]
 use std::str::FromStr;
 use std::sync::Arc;
-use streamflow_api::{AppState, AppStateBuild, app_router};
-use streamflow_core::events::PostgresEventSource;
-use streamflow_core::queue::{PostgresQueue, QueueConfig};
-use streamflow_oauth::{AuthConfig, PostgresAuthService};
+use kruxiaflow_api::{AppState, AppStateBuild, app_router};
+use kruxiaflow_core::events::PostgresEventSource;
+use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
+use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 /// Helper to create test database pool
 async fn setup_test_pool() -> PgPool {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
     });
 
     let pool = PgPool::connect(&database_url)
@@ -76,8 +76,8 @@ async fn setup_test_state() -> AppState {
 
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
-    let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
-    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    let workflow_storage = Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone()));
+    let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
 
     AppState::with_metadata(
         pool,
@@ -99,7 +99,7 @@ async fn setup_test_state() -> AppState {
 /// Helper to create test server with protected test endpoint
 async fn setup_test_server() -> TestServer {
     use axum::{Router, extract::Extension, middleware as axum_middleware, routing::get};
-    use streamflow_api::middleware::auth::ValidatedClaims;
+    use kruxiaflow_api::middleware::auth::ValidatedClaims;
 
     let state = setup_test_state().await;
 
@@ -120,7 +120,7 @@ async fn setup_test_server() -> TestServer {
         .layer(axum_middleware::from_fn(move |req, next| {
             let state = auth_state.clone();
             async move {
-                streamflow_api::middleware::auth_middleware(axum::extract::State(state), req, next)
+                kruxiaflow_api::middleware::auth_middleware(axum::extract::State(state), req, next)
                     .await
             }
         }));
@@ -353,7 +353,7 @@ async fn test_auth_middleware_rejects_expired_token() {
 
     // Create claims with past expiration
     use chrono::{Duration, Utc};
-    use streamflow_oauth::Claims;
+    use kruxiaflow_oauth::Claims;
 
     let now = Utc::now();
     let expired_claims = Claims {
@@ -416,7 +416,7 @@ async fn test_auth_middleware_rejects_wrong_issuer() {
     let auth_service = PostgresAuthService::new(pool, wrong_issuer_config).unwrap();
 
     use chrono::{Duration, Utc};
-    use streamflow_oauth::Claims;
+    use kruxiaflow_oauth::Claims;
 
     let now = Utc::now();
     let claims = Claims {
@@ -466,7 +466,7 @@ async fn test_auth_middleware_rejects_wrong_audience() {
     let auth_service = PostgresAuthService::new(pool, wrong_audience_config).unwrap();
 
     use chrono::{Duration, Utc};
-    use streamflow_oauth::Claims;
+    use kruxiaflow_oauth::Claims;
 
     let now = Utc::now();
     let claims = Claims {
@@ -508,8 +508,8 @@ async fn test_auth_middleware_rejects_wrong_audience() {
 #[serial]
 async fn test_validated_claims_subject_extraction() {
     use chrono::Utc;
-    use streamflow_api::middleware::auth::ValidatedClaims;
-    use streamflow_oauth::Claims;
+    use kruxiaflow_api::middleware::auth::ValidatedClaims;
+    use kruxiaflow_oauth::Claims;
 
     let claims = Claims {
         sub: "user-123".to_string(),
@@ -529,8 +529,8 @@ async fn test_validated_claims_subject_extraction() {
 #[serial]
 async fn test_validated_claims_full_claims_access() {
     use chrono::Utc;
-    use streamflow_api::middleware::auth::ValidatedClaims;
-    use streamflow_oauth::Claims;
+    use kruxiaflow_api::middleware::auth::ValidatedClaims;
+    use kruxiaflow_oauth::Claims;
 
     let claims = Claims {
         sub: "user-123".to_string(),
@@ -684,8 +684,8 @@ async fn test_auth_middleware_logs_validation_failure() {
 #[serial]
 async fn test_validated_claims_clone() {
     use chrono::Utc;
-    use streamflow_api::middleware::auth::ValidatedClaims;
-    use streamflow_oauth::Claims;
+    use kruxiaflow_api::middleware::auth::ValidatedClaims;
+    use kruxiaflow_oauth::Claims;
 
     let claims = Claims {
         sub: "user-123".to_string(),
@@ -708,7 +708,7 @@ async fn test_validated_claims_clone() {
 async fn test_auth_middleware_with_token_signed_by_different_key() {
     use chrono::{Duration, Utc};
     use jsonwebtoken::{EncodingKey, Header, encode};
-    use streamflow_oauth::Claims;
+    use kruxiaflow_oauth::Claims;
 
     // Use a complete different RSA private key for testing
     let different_private_key = r#"-----BEGIN PRIVATE KEY-----

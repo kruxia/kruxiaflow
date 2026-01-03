@@ -220,7 +220,7 @@ Verified trace logging working correctly:
 
 Environment variable added to `docker-compose.yml`:
 ```yaml
-STREAMFLOW_LOG_LEVEL: ${STREAMFLOW_LOG_LEVEL:-info}
+KRUXIAFLOW_LOG_LEVEL: ${KRUXIAFLOW_LOG_LEVEL:-info}
 ```
 
 ---

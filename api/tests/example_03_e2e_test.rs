@@ -13,19 +13,19 @@ use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
-use streamflow_api::{AppState, app_router};
-use streamflow_core::events::PostgresEventSource;
-use streamflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
-use streamflow_core::{OrchestratorConfig, run_orchestrator};
-use streamflow_oauth::{AuthConfig, PostgresAuthService};
-use streamflow_worker::{ActivityRegistry, HttpRequestActivity, WorkerConfig, WorkerManager};
+use kruxiaflow_api::{AppState, app_router};
+use kruxiaflow_core::events::PostgresEventSource;
+use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
+use kruxiaflow_core::{OrchestratorConfig, run_orchestrator};
+use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
+use kruxiaflow_worker::{ActivityRegistry, HttpRequestActivity, WorkerConfig, WorkerManager};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 /// Helper to create test database pool
 async fn setup_test_pool() -> PgPool {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
     });
 
     PgPool::connect(&database_url)
@@ -105,14 +105,14 @@ async fn test_example_03_parallel_document_processing() {
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
-    let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
+    let workflow_storage = Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone()));
     let shutdown_token = CancellationToken::new();
 
     // For simplicity, we'll use the API server's health endpoints
     // This avoids issues with separate mock servers and focuses on testing parallel execution
 
-    // Start StreamFlow API server
-    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    // Start Kruxia Flow API server
+    let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
     let state = AppState::new(
         pool.clone(),
         Arc::new(auth_service),
@@ -160,7 +160,7 @@ async fn test_example_03_parallel_document_processing() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Start worker with HTTP activity
-    let mut registry = ActivityRegistry::new(Arc::new(streamflow_core::NoOpCache::new()));
+    let mut registry = ActivityRegistry::new(Arc::new(kruxiaflow_core::NoOpCache::new()));
     registry.register(Arc::new(HttpRequestActivity::new()));
 
     let worker_config = WorkerConfig {
@@ -464,7 +464,7 @@ activities:
 #[tokio::test]
 #[serial]
 async fn test_example_03_verify_no_circular_dependency() {
-    use streamflow_core::workflow::definition::WorkflowDefinition;
+    use kruxiaflow_core::workflow::definition::WorkflowDefinition;
 
     let workflow_yaml = include_str!("../../examples/03-document-processing.yaml");
     let _workflow_def =

@@ -1,13 +1,13 @@
 use rust_decimal::Decimal;
 use serde_json::json;
 use std::collections::HashMap;
-use streamflow_core::events::WorkflowStatus;
-use streamflow_core::orchestrator::{
+use kruxiaflow_core::events::WorkflowStatus;
+use kruxiaflow_core::orchestrator::{
     ActivityState, WorkflowActivityStatus, WorkflowState, build_condition_context,
     evaluate_condition, find_ready_activities, find_skipped_activities, is_workflow_complete,
     is_workflow_failed,
 };
-use streamflow_core::workflow::{
+use kruxiaflow_core::workflow::{
     ActivityDefinition, ActivityOutput, ActivityRelationship, OutputType, WorkflowDefinition,
 };
 use uuid::Uuid;
@@ -16,7 +16,7 @@ fn create_test_state_with_activities(
     activities: Vec<(
         &str,
         WorkflowActivityStatus,
-        Option<Vec<streamflow_core::workflow::ActivityOutput>>,
+        Option<Vec<kruxiaflow_core::workflow::ActivityOutput>>,
     )>,
 ) -> WorkflowState {
     let workflow_id = Uuid::now_v7();

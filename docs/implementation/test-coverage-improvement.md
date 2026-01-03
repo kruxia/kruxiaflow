@@ -10,7 +10,7 @@
 **2025-11-26 - Phase 6 Completed (All Phases Complete)**
 - Configured coverage exclusions in `scripts/test.sh`
 - Excluded profiling tools: `profiling/src/bin/*`, `profiling/src/client.rs`, `profiling/src/metrics.rs`
-- Excluded seed scripts: `streamflow/src/bin/seed*`, `streamflow/src/commands/seed_llm.rs`, `streamflow/src/llm_catalog.rs`
+- Excluded seed scripts: `kruxiaflow/src/bin/seed*`, `kruxiaflow/src/commands/seed_llm.rs`, `kruxiaflow/src/llm_catalog.rs`
 - Using `--ignore-filename-regex` flag with combined regex pattern
 - Documentation added to script header
 
@@ -155,10 +155,10 @@ HTTP handlers need improved coverage for edge cases.
 
 | File                                    | Lines | Coverage | Uncovered | Impact   |
 |-----------------------------------------|-------|----------|-----------|----------|
-| `streamflow/src/commands/serve.rs`      | 270   | 24.07%   | ~205      | Low      |
-| `streamflow/src/commands/api.rs`        | 238   | 71.85%   | ~67       | Low      |
-| `streamflow/src/config.rs`              | 178   | 72.47%   | ~49       | Low      |
-| `streamflow/src/logging.rs`             | 120   | 85.00%   | ~18       | Low      |
+| `kruxiaflow/src/commands/serve.rs`      | 270   | 24.07%   | ~205      | Low      |
+| `kruxiaflow/src/commands/api.rs`        | 238   | 71.85%   | ~67       | Low      |
+| `kruxiaflow/src/config.rs`              | 178   | 72.47%   | ~49       | Low      |
+| `kruxiaflow/src/logging.rs`             | 120   | 85.00%   | ~18       | Low      |
 
 **Total uncovered in Priority 5**: ~339 lines
 
@@ -178,9 +178,9 @@ These files are development/profiling tools that could be excluded from coverage
 | `profiling/src/bin/register-workflows.rs`       | 62    | Dev tooling                  |
 | `profiling/src/client.rs`                       | 91    | Dev tooling                  |
 | `profiling/src/metrics.rs`                      | 7     | Dev tooling                  |
-| `streamflow/src/bin/seed-oauth-client.rs`       | 49    | Seed script                  |
-| `streamflow/src/commands/seed_llm.rs`           | 10    | Seed script                  |
-| `streamflow/src/llm_catalog.rs`                 | 21    | Seed utility                 |
+| `kruxiaflow/src/bin/seed-oauth-client.rs`       | 49    | Seed script                  |
+| `kruxiaflow/src/commands/seed_llm.rs`           | 10    | Seed script                  |
+| `kruxiaflow/src/llm_catalog.rs`                 | 21    | Seed utility                 |
 
 **Total excludable**: ~240 lines
 
@@ -371,9 +371,9 @@ exclude = [
     "profiling/src/bin/*",
     "profiling/src/client.rs",
     "profiling/src/metrics.rs",
-    "streamflow/src/bin/seed-oauth-client.rs",
-    "streamflow/src/commands/seed_llm.rs",
-    "streamflow/src/llm_catalog.rs",
+    "kruxiaflow/src/bin/seed-oauth-client.rs",
+    "kruxiaflow/src/commands/seed_llm.rs",
+    "kruxiaflow/src/llm_catalog.rs",
 ]
 ```
 

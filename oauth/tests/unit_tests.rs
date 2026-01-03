@@ -5,7 +5,7 @@
 
 use chrono::{Duration, Utc};
 use sqlx::PgPool;
-use streamflow_oauth::{AuthConfig, AuthError, AuthenticationService, Claims, PostgresAuthService};
+use kruxiaflow_oauth::{AuthConfig, AuthError, AuthenticationService, Claims, PostgresAuthService};
 use uuid::Uuid;
 
 /// Load test private key (PKCS#8 format)
@@ -246,18 +246,18 @@ async fn test_token_ttl_respected() {
 
 #[test]
 fn test_auth_config_default() {
-    let config = streamflow_oauth::AuthConfig::default();
+    let config = kruxiaflow_oauth::AuthConfig::default();
 
     assert_eq!(config.rsa_private_key_pem, "");
     assert_eq!(config.rsa_public_key_pem, None);
-    assert_eq!(config.jwt_issuer, "streamflow");
-    assert_eq!(config.jwt_audience, "streamflow-api");
+    assert_eq!(config.jwt_issuer, "kruxiaflow");
+    assert_eq!(config.jwt_audience, "kruxiaflow-api");
     assert_eq!(config.token_ttl, 86400);
 }
 
 #[test]
 fn test_auth_config_custom() {
-    let config = streamflow_oauth::AuthConfig {
+    let config = kruxiaflow_oauth::AuthConfig {
         rsa_private_key_pem: "test-key".to_string(),
         rsa_public_key_pem: Some("test-pub".to_string()),
         jwt_issuer: "custom-issuer".to_string(),
@@ -274,13 +274,13 @@ fn test_auth_config_custom() {
 
 #[test]
 fn test_claims_serialization() {
-    use streamflow_oauth::Claims;
+    use kruxiaflow_oauth::Claims;
 
     let claims = Claims {
         sub: "user-123".to_string(),
         jti: "jti-123".to_string(),
-        iss: "streamflow".to_string(),
-        aud: "streamflow-api".to_string(),
+        iss: "kruxiaflow".to_string(),
+        aud: "kruxiaflow-api".to_string(),
         exp: 1234567890,
         iat: 1234567800,
     };
@@ -288,21 +288,21 @@ fn test_claims_serialization() {
     let json = serde_json::to_string(&claims).unwrap();
     assert!(json.contains("\"sub\":\"user-123\""));
     assert!(json.contains("\"jti\":\"jti-123\""));
-    assert!(json.contains("\"iss\":\"streamflow\""));
-    assert!(json.contains("\"aud\":\"streamflow-api\""));
+    assert!(json.contains("\"iss\":\"kruxiaflow\""));
+    assert!(json.contains("\"aud\":\"kruxiaflow-api\""));
     assert!(json.contains("\"exp\":1234567890"));
     assert!(json.contains("\"iat\":1234567800"));
 }
 
 #[test]
 fn test_claims_deserialization() {
-    use streamflow_oauth::Claims;
+    use kruxiaflow_oauth::Claims;
 
     let json = r#"{
         "sub": "user-123",
         "jti": "jti-123",
-        "iss": "streamflow",
-        "aud": "streamflow-api",
+        "iss": "kruxiaflow",
+        "aud": "kruxiaflow-api",
         "exp": 1234567890,
         "iat": 1234567800
     }"#;
@@ -310,15 +310,15 @@ fn test_claims_deserialization() {
     let claims: Claims = serde_json::from_str(json).unwrap();
     assert_eq!(claims.sub, "user-123");
     assert_eq!(claims.jti, "jti-123");
-    assert_eq!(claims.iss, "streamflow");
-    assert_eq!(claims.aud, "streamflow-api");
+    assert_eq!(claims.iss, "kruxiaflow");
+    assert_eq!(claims.aud, "kruxiaflow-api");
     assert_eq!(claims.exp, 1234567890);
     assert_eq!(claims.iat, 1234567800);
 }
 
 #[test]
 fn test_auth_response_serialization() {
-    use streamflow_oauth::AuthResponse;
+    use kruxiaflow_oauth::AuthResponse;
 
     let response = AuthResponse {
         access_token: "token-123".to_string(),
@@ -336,7 +336,7 @@ fn test_auth_response_serialization() {
 
 #[test]
 fn test_auth_response_deserialization() {
-    use streamflow_oauth::AuthResponse;
+    use kruxiaflow_oauth::AuthResponse;
 
     let json = r#"{
         "access_token": "token-123",
@@ -354,7 +354,7 @@ fn test_auth_response_deserialization() {
 
 #[test]
 fn test_auth_response_without_refresh_token() {
-    use streamflow_oauth::AuthResponse;
+    use kruxiaflow_oauth::AuthResponse;
 
     let response = AuthResponse {
         access_token: "token-123".to_string(),
@@ -370,7 +370,7 @@ fn test_auth_response_without_refresh_token() {
 
 #[test]
 fn test_jwt_key_serialization() {
-    use streamflow_oauth::JwtKey;
+    use kruxiaflow_oauth::JwtKey;
 
     let key = JwtKey {
         kid: "key-1".to_string(),
@@ -390,7 +390,7 @@ fn test_jwt_key_serialization() {
 
 #[test]
 fn test_auth_error_display() {
-    use streamflow_oauth::AuthError;
+    use kruxiaflow_oauth::AuthError;
 
     let err = AuthError::InvalidCredentials;
     assert_eq!(err.to_string(), "Invalid credentials");
@@ -413,7 +413,7 @@ fn test_auth_error_display() {
 
 #[test]
 fn test_auth_error_from_sqlx_error() {
-    use streamflow_oauth::AuthError;
+    use kruxiaflow_oauth::AuthError;
 
     // Simulate a database connection error
     let sqlx_err = sqlx::Error::PoolTimedOut;
@@ -427,13 +427,13 @@ fn test_auth_error_from_sqlx_error() {
 
 #[test]
 fn test_claims_clone() {
-    use streamflow_oauth::Claims;
+    use kruxiaflow_oauth::Claims;
 
     let claims1 = Claims {
         sub: "user-123".to_string(),
         jti: "jti-123".to_string(),
-        iss: "streamflow".to_string(),
-        aud: "streamflow-api".to_string(),
+        iss: "kruxiaflow".to_string(),
+        aud: "kruxiaflow-api".to_string(),
         exp: 1234567890,
         iat: 1234567800,
     };
@@ -449,7 +449,7 @@ fn test_claims_clone() {
 
 #[test]
 fn test_auth_response_clone() {
-    use streamflow_oauth::AuthResponse;
+    use kruxiaflow_oauth::AuthResponse;
 
     let response1 = AuthResponse {
         access_token: "token-123".to_string(),
@@ -467,7 +467,7 @@ fn test_auth_response_clone() {
 
 #[test]
 fn test_jwt_key_clone() {
-    use streamflow_oauth::JwtKey;
+    use kruxiaflow_oauth::JwtKey;
 
     let key1 = JwtKey {
         kid: "key-1".to_string(),
@@ -487,7 +487,7 @@ fn test_jwt_key_clone() {
 
 #[test]
 fn test_auth_config_clone() {
-    use streamflow_oauth::AuthConfig;
+    use kruxiaflow_oauth::AuthConfig;
 
     let config1 = AuthConfig {
         rsa_private_key_pem: "test-key".to_string(),
@@ -520,7 +520,7 @@ async fn test_postgres_auth_service_with_invalid_private_key() {
 
     if let Err(e) = result {
         assert!(
-            matches!(e, streamflow_oauth::AuthError::InternalError(_)),
+            matches!(e, kruxiaflow_oauth::AuthError::InternalError(_)),
             "Expected InternalError for invalid key"
         );
     }
@@ -594,7 +594,7 @@ async fn test_validate_token_uses_verify_jwt() {
 
 #[test]
 fn test_hash_refresh_token_deterministic() {
-    use streamflow_oauth::hash_refresh_token;
+    use kruxiaflow_oauth::hash_refresh_token;
 
     let token = "test-token-123";
     let hash1 = hash_refresh_token(token);
@@ -605,7 +605,7 @@ fn test_hash_refresh_token_deterministic() {
 
 #[test]
 fn test_hash_refresh_token_different_tokens() {
-    use streamflow_oauth::hash_refresh_token;
+    use kruxiaflow_oauth::hash_refresh_token;
 
     let token1 = "token-1";
     let token2 = "token-2";
@@ -621,7 +621,7 @@ fn test_hash_refresh_token_different_tokens() {
 
 #[test]
 fn test_hash_refresh_token_produces_hex_string() {
-    use streamflow_oauth::hash_refresh_token;
+    use kruxiaflow_oauth::hash_refresh_token;
 
     let token = "test-token";
     let hash = hash_refresh_token(token);

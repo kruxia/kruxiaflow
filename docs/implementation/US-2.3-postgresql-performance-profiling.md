@@ -174,10 +174,10 @@ ORDER BY seq_scan + idx_scan DESC;
 
 #### 1.3 Add CLI Profiling Command
 
-Add `streamflow profile` command to gather and report metrics:
+Add `kruxiaflow profile` command to gather and report metrics:
 
 ```rust
-// streamflow/src/commands/profile.rs
+// kruxiaflow/src/commands/profile.rs
 pub async fn run_profile(pool: &PgPool) -> Result<()> {
     // 1. Query pg_stat_statements for hot queries
     // 2. Analyze index usage
@@ -382,7 +382,7 @@ var/profiling-YYYYmmdd-HHMMSS/
 #### 5.2 Profiling CLI Output
 
 ```
-$ streamflow profile --benchmark
+$ kruxiaflow profile --benchmark
 
 PostgreSQL Performance Profile
 ==============================
@@ -438,12 +438,12 @@ Based on US-2.1/US-2.2 benchmark results (56 wf/sec baseline), targets for optim
 
 ### New Files
 - `migrations/YYYYMMDD_profiling_extensions.up.sql` - pg_stat_statements + views
-- `streamflow/src/commands/profile.rs` - CLI profiling command
+- `kruxiaflow/src/commands/profile.rs` - CLI profiling command
 - `scripts/profile_queries.sh` - Profiling automation script
 
 ### Modified Files
-- `streamflow/src/commands/mod.rs` - Add profile command
-- `streamflow/src/main.rs` - Wire up profile command
+- `kruxiaflow/src/commands/mod.rs` - Add profile command
+- `kruxiaflow/src/main.rs` - Wire up profile command
 - `api/src/health/checks.rs` - Add pool metrics
 
 ---
@@ -508,14 +508,14 @@ Current partial indexes (`WHERE status IN (...)`) should be validated:
 |------------------------------------------------------|-------------------------------------------------------|
 | `migrations/20251204000001_profiling_views.up.sql`   | Profiling views (v_slow_queries, v_index_usage, etc.) |
 | `migrations/20251204000001_profiling_views.down.sql` | Rollback for profiling views                          |
-| `streamflow/src/commands/profile.rs`                 | CLI profiling command with full report generation     |
+| `kruxiaflow/src/commands/profile.rs`                 | CLI profiling command with full report generation     |
 
 ### Files Modified
 
 | File                            | Changes                                        |
 |---------------------------------|------------------------------------------------|
-| `streamflow/src/commands/mod.rs`| Added `pub mod profile;` export                |
-| `streamflow/src/main.rs`        | Added Profile command enum and wiring          |
+| `kruxiaflow/src/commands/mod.rs`| Added `pub mod profile;` export                |
+| `kruxiaflow/src/main.rs`        | Added Profile command enum and wiring          |
 | `api/src/health/responses.rs`   | Added PoolMetricsResponse struct               |
 | `api/src/health/checks.rs`      | Added get_pool_metrics() function              |
 | `api/src/health/mod.rs`         | Exported new pool metrics items                |
@@ -527,22 +527,22 @@ Current partial indexes (`WHERE status IN (...)`) should be validated:
 
 ```bash
 # Full profiling report
-streamflow profile
+kruxiaflow profile
 
 # With EXPLAIN ANALYZE for hot paths
-streamflow profile --explain
+kruxiaflow profile --explain
 
 # Verbose output with table statistics
-streamflow profile -v
+kruxiaflow profile -v
 
 # JSON output for automation
-streamflow profile --format json
+kruxiaflow profile --format json
 
 # Reset pg_stat_statements
-streamflow profile --reset
+kruxiaflow profile --reset
 
 # Filter by minimum query time
-streamflow profile --min-time-ms 1.0
+kruxiaflow profile --min-time-ms 1.0
 ```
 
 ### API Endpoints Added
@@ -573,11 +573,11 @@ streamflow profile --min-time-ms 1.0
 
 ### Integration with Existing Profiling Script
 
-The `scripts/profiling.sh` has been updated to automatically run `streamflow profile`:
+The `scripts/profiling.sh` has been updated to automatically run `kruxiaflow profile`:
 - Resets pg_stat_statements before benchmarks
 - Collects query statistics after runs
-- **NEW**: Runs `streamflow profile --explain --format json` → `db_profile.json`
-- **NEW**: Runs `streamflow profile --explain -v` → `db_profile.txt`
+- **NEW**: Runs `kruxiaflow profile --explain --format json` → `db_profile.json`
+- **NEW**: Runs `kruxiaflow profile --explain -v` → `db_profile.txt`
 - Saves results to `var/profiling-YYYYMMDD-HHMMSS/`
 
 Output files now include:

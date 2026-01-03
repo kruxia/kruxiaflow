@@ -190,7 +190,7 @@ pub fn generate_capacity_document(
 ) -> String {
     let mut doc = String::new();
 
-    doc.push_str("# StreamFlow Capacity Planning Guide\n\n");
+    doc.push_str("# Kruxia Flow Capacity Planning Guide\n\n");
     doc.push_str(&format!(
         "**Generated**: {}\n\n",
         chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
@@ -199,7 +199,7 @@ pub fn generate_capacity_document(
     // Executive Summary
     doc.push_str("## Executive Summary\n\n");
     doc.push_str(&format!(
-        "Based on stress testing with {}, StreamFlow can sustain:\n\n",
+        "Based on stress testing with {}, Kruxia Flow can sustain:\n\n",
         config.short_description()
     ));
     doc.push_str(&format!(

@@ -2,20 +2,20 @@
 
 **Date**: 2025-11-14
 **Repository**: https://github.com/earendil-works/absurd
-**Purpose**: Identify engineering patterns from absurd to improve StreamFlow
+**Purpose**: Identify engineering patterns from absurd to improve Kruxia Flow
 **Author**: Claude Sonnet 4.5
 
 ---
 
 ## Executive Summary
 
-Absurd is a PostgreSQL-based durable execution workflow system with architectural similarities to StreamFlow. Both systems use PostgreSQL as the single source of truth, implement pull-based worker models, and avoid LISTEN/NOTIFY in favor of guaranteed delivery mechanisms. This analysis identifies 12 specific areas where absurd's engineering provides patterns we should evaluate for StreamFlow.
+Absurd is a PostgreSQL-based durable execution workflow system with architectural similarities to Kruxia Flow. Both systems use PostgreSQL as the single source of truth, implement pull-based worker models, and avoid LISTEN/NOTIFY in favor of guaranteed delivery mechanisms. This analysis identifies 12 specific areas where absurd's engineering provides patterns we should evaluate for Kruxia Flow.
 
 **Key Finding**: Absurd's strength lies in its sophisticated state management, automatic retry mechanisms with exponential backoff, event-driven suspension primitives, and database-centric design philosophy that moves complexity into stored procedures.
 
 **Key Architectural Decisions**:
-1. **NO step-based checkpointing** - StreamFlow's activity-based DAG model already provides equivalent durability guarantees, with superior composability and observability.
-2. **NO database-centric business logic** - StreamFlow keeps orchestration logic in Rust services (not stored procedures) for horizontal scalability. Database CPU becomes a bottleneck when business logic runs in stored procedures; Rust services can scale horizontally by adding more instances.
+1. **NO step-based checkpointing** - Kruxia Flow's activity-based DAG model already provides equivalent durability guarantees, with superior composability and observability.
+2. **NO database-centric business logic** - Kruxia Flow keeps orchestration logic in Rust services (not stored procedures) for horizontal scalability. Database CPU becomes a bottleneck when business logic runs in stored procedures; Rust services can scale horizontally by adding more instances.
 3. **Limited use of stored procedures** - Only for hot-path atomic operations (claim_activity) where atomicity and performance matter, not for business logic.
 
 ---
@@ -119,14 +119,14 @@ CREATE TABLE checkpoints (
 - JSONB payload stores arbitrary step results
 - Checkpoint loading is O(1) lookup by `(task_id, checkpoint_name)`
 
-**StreamFlow Current State**:
+**Kruxia Flow Current State**:
 - Activities are atomic units (no internal checkpointing)
 - Activity results stored in `workflows.state_data` after completion
 - Workers must re-execute entire activity on failure/retry
 
-**StreamFlow Decision: NOT RECOMMENDED**
+**Kruxia Flow Decision: NOT RECOMMENDED**
 
-Activity-level checkpointing is redundant in StreamFlow's architecture. The workflow graph already provides durable checkpointing through activity boundaries.
+Activity-level checkpointing is redundant in Kruxia Flow's architecture. The workflow graph already provides durable checkpointing through activity boundaries.
 
 **Rationale**:
 1. **Activities ARE checkpoints** - Each activity completion is a durable checkpoint
@@ -216,7 +216,7 @@ await absurd.emitEvent("approval_received", {
 // All tasks waiting for "approval_received" become claimable
 ```
 
-**StreamFlow Current State**:
+**Kruxia Flow Current State**:
 - ✅ **Database scheduling infrastructure exists**: `activity_queue.scheduled_for` column with index support
 - ✅ **Worker polling respects scheduling**: Only claims activities where `scheduled_for <= NOW()`
 - ❌ **Not exposed in workflow definition language**: YAML ActivitySettings doesn't have delay/schedule parameters
@@ -384,11 +384,11 @@ IF cancellation_config->>'maxDuration' IS NOT NULL THEN
 END IF;
 ```
 
-**StreamFlow Current State**:
+**Kruxia Flow Current State**:
 - Activity settings in YAML support `timeout` configuration
 - No exponential backoff strategy yet
 - No max_attempts or retry configuration in activity definitions
-- **Architecture Note**: StreamFlow retry logic belongs in the **orchestrator**, not activity_queue or workers
+- **Architecture Note**: Kruxia Flow retry logic belongs in the **orchestrator**, not activity_queue or workers
   - Orchestrator consumes `ActivityFailed` events from `workflow_events`
   - Orchestrator checks retry settings from workflow definition
   - Orchestrator decides: retry or fail workflow
@@ -396,11 +396,11 @@ END IF;
   - activity_queue just stores scheduled activities (no retry logic)
   - Workers execute and report results (no retry logic)
 
-**StreamFlow Design Decision**:
+**Kruxia Flow Design Decision**:
 
 Retry is **orchestration logic** (orchestrator + workflow state), not **queue logic** (activity_queue) or **worker logic**. This differs from absurd's approach.
 
-**StreamFlow Implementation**:
+**Kruxia Flow Implementation**:
 
 **Added to MVP** as US-3.5 (Activity Settings - Retry, Timeout, Budget):
 - YAML configuration: `retry.max_attempts`, `retry.strategy` (exponential/fixed), `retry.base_seconds`, `retry.factor`, `retry.max_seconds`
@@ -413,8 +413,8 @@ Retry is **orchestration logic** (orchestrator + workflow state), not **queue lo
 
 **Key Architectural Difference from Absurd**:
 - **Absurd**: Retry logic in database stored procedures (queue-centric)
-- **StreamFlow**: Retry logic in orchestrator event handlers (orchestration-centric)
-- **Rationale**: StreamFlow's event-driven architecture makes orchestrator the natural home for retry decisions
+- **Kruxia Flow**: Retry logic in orchestrator event handlers (orchestration-centric)
+- **Rationale**: Kruxia Flow's event-driven architecture makes orchestrator the natural home for retry decisions
   - Orchestrator already evaluates workflow state and makes scheduling decisions
   - Retry is workflow orchestration logic, not queue management logic
   - Keeps activity_queue simple (just scheduled activities, no state machine)
@@ -466,7 +466,7 @@ CREATE TABLE r_default (
    - "Show me all failed attempts for task X" → `SELECT * FROM runs WHERE task_id = X AND state = 'failed'`
    - "Show me average retry count" → `SELECT AVG(attempt) FROM tasks WHERE state = 'completed'`
 
-**StreamFlow Current State**:
+**Kruxia Flow Current State**:
 - Single `activity_queue` table stores currently scheduled activities
 - **Attempt history tracked differently**: `workflow_events` table serves as immutable event log
   - Each `ActivityFailed` event captures attempt number and failure reason
@@ -475,9 +475,9 @@ CREATE TABLE r_default (
 - **Retry state tracked in workflow state**: `workflows.state_data` JSONB stores current attempt count
 - **Orchestrator-centric**: Orchestrator consumes events to make retry decisions
 
-**StreamFlow Design Decision**:
+**Kruxia Flow Design Decision**:
 
-StreamFlow does NOT need separate activity/activity_executions tables because:
+Kruxia Flow does NOT need separate activity/activity_executions tables because:
 1. **workflow_events provides attempt history** - immutable event log with full details
 2. **Workflow state tracks current attempt** - stored in `workflows.state_data` JSONB
 3. **activity_queue is ephemeral** - just scheduled activities, deleted after completion
@@ -532,9 +532,9 @@ ON activity_executions(worker, name, available_at)
 WHERE state = 'pending' AND available_at <= NOW();
 ```
 
-**But this is NOT RECOMMENDED for StreamFlow** - use workflow_events instead.
+**But this is NOT RECOMMENDED for Kruxia Flow** - use workflow_events instead.
 
-**StreamFlow Queries** (using workflow_events):
+**Kruxia Flow Queries** (using workflow_events):
 
 ```sql
 -- Debugging: Show all attempts for failing activity (from event stream)
@@ -567,7 +567,7 @@ LIMIT 1
 FOR UPDATE SKIP LOCKED;
 ```
 
-**Benefits of StreamFlow's Approach**:
+**Benefits of Kruxia Flow's Approach**:
 - **Event sourcing provides complete history** - workflow_events is append-only audit log
 - **Simpler schema** - fewer tables, less complexity
 - **Consistent with architecture** - orchestrator-centric, event-driven
@@ -629,7 +629,7 @@ SELECT cleanup_tasks('default', 86400);  -- Delete completed tasks older than 24
 - Respects foreign key dependencies
 - Can run during off-peak hours
 
-**StreamFlow Design Decision**:
+**Kruxia Flow Design Decision**:
 
 **DO NOT clean up `workflow_events`** - this table must be retained indefinitely for auditability and compliance. Event history provides complete audit trail of all workflow executions.
 
@@ -638,7 +638,7 @@ SELECT cleanup_tasks('default', 86400);  -- Delete completed tasks older than 24
 - ✅ `activity_queue` table - completed activities after retention period
 - ❌ `workflow_events` table - **NEVER delete** (audit trail, compliance)
 
-**StreamFlow Implementation**:
+**Kruxia Flow Implementation**:
 
 **Added to MVP** as US-3.8 (Database Cleanup with TTL):
 - Background tokio cleanup worker runs on configurable interval
@@ -651,12 +651,12 @@ SELECT cleanup_tasks('default', 86400);  -- Delete completed tasks older than 24
 
 **Key Difference from Absurd**:
 - **Absurd**: Cleans up all tables including event history
-- **StreamFlow**: Preserves workflow_events indefinitely (auditability requirement)
+- **Kruxia Flow**: Preserves workflow_events indefinitely (auditability requirement)
 - **Trade-off**: workflow_events grows unbounded → use table partitioning (post-MVP)
 
 **Implementation Reference**: See `docs/mvp-requirements.md` US-3.8 and `docs/implementation/mvp-workflows-implementation-plan.md` Infrastructure section
 
-**StreamFlow Cleanup Strategy Summary**:
+**Kruxia Flow Cleanup Strategy Summary**:
 
 | Table             | Cleanup Strategy                          | Retention    |
 |-------------------|-------------------------------------------|--------------|
@@ -701,14 +701,14 @@ SELECT cleanup_tasks('default', 86400);  -- Delete completed tasks older than 24
 5. **Testable**: Can test stored procedures directly with SQL
 6. **Maintainable**: Fix bug in one place, all SDKs benefit
 
-**StreamFlow Current State**:
+**Kruxia Flow Current State**:
 - Most queries written inline in Rust code
 - Some hot-path queries as stored procedures (claim_activity, schedule_activity)
 - Business logic primarily in Rust services (orchestrator, API server, workers)
 
-**StreamFlow Architectural Decision: Application Logic in Rust, Not SQL**
+**Kruxia Flow Architectural Decision: Application Logic in Rust, Not SQL**
 
-StreamFlow deliberately chose **NOT** to follow absurd's database-centric approach. Business logic stays in Rust services, not stored procedures.
+Kruxia Flow deliberately chose **NOT** to follow absurd's database-centric approach. Business logic stays in Rust services, not stored procedures.
 
 **Rationale**:
 1. **Horizontal scalability** - Database-centric architecture becomes bottleneck when scaling
@@ -735,23 +735,23 @@ StreamFlow deliberately chose **NOT** to follow absurd's database-centric approa
 
 **Key Architectural Difference from Absurd**:
 - **Absurd**: "Database is the application" - business logic in stored procedures
-- **StreamFlow**: "Database is storage" - business logic in Rust services
-- **Trade-off**: StreamFlow sacrifices some language-agnosticism for better horizontal scalability
+- **Kruxia Flow**: "Database is storage" - business logic in Rust services
+- **Trade-off**: Kruxia Flow sacrifices some language-agnosticism for better horizontal scalability
 
-**Benefits of StreamFlow's Approach**:
+**Benefits of Kruxia Flow's Approach**:
 - ✅ **Horizontal scalability** - Add more orchestrator/worker instances, not database CPUs
 - ✅ **Type safety** - Rust compiler catches errors at compile time
 - ✅ **Modern tooling** - Debuggers, profilers, IDEs work better with Rust than SQL
 - ✅ **Team velocity** - Most developers more productive in Rust than PL/pgSQL
 - ✅ **Observability** - Distributed tracing, metrics, logging easier in application layer
 
-**When StreamFlow Uses Stored Procedures** (Limited Scope):
+**When Kruxia Flow Uses Stored Procedures** (Limited Scope):
 - ✅ Hot-path atomic operations (claim_activity with FOR UPDATE SKIP LOCKED)
 - ✅ Batch inserts/updates for performance
 - ✅ Complex multi-table updates requiring atomicity
 - ✅ Cleanup operations (cleanup_workflows, cleanup_expired_artifacts)
 
-**When StreamFlow Uses Rust** (Business Logic):
+**When Kruxia Flow Uses Rust** (Business Logic):
 - ✅ Orchestration logic (retry, backoff, scheduling)
 - ✅ State evaluation (DAG traversal, condition checking)
 - ✅ Event handling (routing, transformation)
@@ -767,11 +767,11 @@ Absurd allows tasks to bind to specific database connections for transactional e
 
 **Use Case**: Ensure task spawning and database updates are atomic
 
-**StreamFlow Design Decision**:
+**Kruxia Flow Design Decision**:
 
-Transaction-aware SDKs not needed. StreamFlow's HTTP API boundary makes transaction-aware SDKs less relevant. Internal operations use transactions where needed.
+Transaction-aware SDKs not needed. Kruxia Flow's HTTP API boundary makes transaction-aware SDKs less relevant. Internal operations use transactions where needed.
 
-**StreamFlow Implementation Status**:
+**Kruxia Flow Implementation Status**:
 
 **✅ Properly Transactional Operations:**
 - Orchestrator event processing - entire event processing wrapped in transaction with advisory lock
@@ -808,12 +808,12 @@ Transaction-aware SDKs not needed. StreamFlow's HTTP API boundary makes transact
 
 Absurd provides SDK heartbeat methods that workers call periodically to extend timeout deadlines. Background processes detect and automatically fail expired executions.
 
-**StreamFlow Current State**:
+**Kruxia Flow Current State**:
 - Heartbeat endpoint exists: `POST /api/v1/activities/{id}/heartbeat`
 - Workers can call explicitly to extend timeouts
 - No automatic timeout detection or recovery
 
-**StreamFlow Implementation** (Post-MVP):
+**Kruxia Flow Implementation** (Post-MVP):
 
 **Added to post-MVP planning** as Story 5.8:
 - Background timeout detector process (runs every 10 seconds)
@@ -842,9 +842,9 @@ Absurd allows task spawning with idempotency keys - duplicate calls with the sam
 
 **Use Case**: External systems can safely retry workflow creation without creating duplicates
 
-**StreamFlow Implementation Status**:
+**Kruxia Flow Implementation Status**:
 
-**✅ FULLY IMPLEMENTED** - StreamFlow already has complete idempotency support via `unique_key`
+**✅ FULLY IMPLEMENTED** - Kruxia Flow already has complete idempotency support via `unique_key`
 
 **Implementation Details**:
 - Database constraint: `workflows.unique_key TEXT UNIQUE` prevents duplicates
@@ -914,18 +914,18 @@ CREATE INDEX idx_tasks_queue ON tasks(queue_name, available_at);
 - SLA differentiation (high-priority gets more workers)
 - Resource allocation control
 
-**StreamFlow Current State**:
+**Kruxia Flow Current State**:
 - Single global activity queue
 - No priority/queue separation
 - Workers filter by (worker, name) only
 - Activities processed in FIFO order (by `scheduled_for`)
 - High-priority workflows can be blocked by batch jobs
 
-**StreamFlow Design Decision**:
+**Kruxia Flow Design Decision**:
 
-StreamFlow will use **single-table priority queues** (not absurd's multiple queue tables). This is simpler and more flexible than creating separate tables per queue.
+Kruxia Flow will use **single-table priority queues** (not absurd's multiple queue tables). This is simpler and more flexible than creating separate tables per queue.
 
-**StreamFlow Implementation** (Post-MVP):
+**Kruxia Flow Implementation** (Post-MVP):
 
 **Added to post-MVP planning** as Story 2.5:
 - Add `priority` column to activity_queue table
@@ -978,14 +978,14 @@ IF task.state = 'cancelled' THEN
 END IF;
 ```
 
-**StreamFlow Current State**:
+**Kruxia Flow Current State**:
 - No cancellation support yet
 - Workflows run to completion or fail
 - No way to abort running workflow
 
-**StreamFlow Design Decision**:
+**Kruxia Flow Design Decision**:
 
-StreamFlow uses **heartbeat mechanism** for cancellation detection instead of absurd's explicit `ctx.isCancelled()` checks. This is simpler and sufficient for the use case.
+Kruxia Flow uses **heartbeat mechanism** for cancellation detection instead of absurd's explicit `ctx.isCancelled()` checks. This is simpler and sufficient for the use case.
 
 **Rationale**:
 1. Heartbeat infrastructure already exists for timeout detection
@@ -994,7 +994,7 @@ StreamFlow uses **heartbeat mechanism** for cancellation detection instead of ab
 4. Short-running activities complete before cancellation matters
 5. Long-running activities already send heartbeats
 
-**StreamFlow Implementation** (Post-MVP):
+**Kruxia Flow Implementation** (Post-MVP):
 
 **Added to post-MVP planning** as Story 6.6:
 - API endpoint: `POST /api/v1/workflows/{id}/cancel`
@@ -1046,9 +1046,9 @@ function getCheckpointName(baseName: string): string {
 }
 ```
 
-**StreamFlow Decision: NOT APPLICABLE**
+**Kruxia Flow Decision: NOT APPLICABLE**
 
-Since StreamFlow does not implement activity-level checkpointing (see Section 1), this pattern is not relevant. Batch processing should use dynamic activity generation in the workflow graph instead.
+Since Kruxia Flow does not implement activity-level checkpointing (see Section 1), this pattern is not relevant. Batch processing should use dynamic activity generation in the workflow graph instead.
 
 ---
 
@@ -1064,7 +1064,7 @@ Since StreamFlow does not implement activity-level checkpointing (see Section 1)
   - Changes: Added explicit `tx.begin()` / `tx.commit()` around entire method
   - All queries now use transaction (`&mut *tx`) to hold FOR UPDATE lock
 - **Automatic Retry with Exponential Backoff (Section 3)** - Essential for production reliability
-  - **StreamFlow approach**: Implement in orchestrator event handlers, not database stored procedures
+  - **Kruxia Flow approach**: Implement in orchestrator event handlers, not database stored procedures
   - Retry state tracked in workflow state (workflows.state_data)
   - Attempt history captured in workflow_events
 - **Cleanup Strategy with TTL (Section 5)** - Prevent unbounded database growth
@@ -1092,11 +1092,11 @@ Since StreamFlow does not implement activity-level checkpointing (see Section 1)
 
 ### Low Priority (Nice to Have / Not Applicable)
 
-- **Transaction-Aware SDK (Section 7)** - Not needed for StreamFlow (HTTP API boundary, internal ops already use transactions)
+- **Transaction-Aware SDK (Section 7)** - Not needed for Kruxia Flow (HTTP API boundary, internal ops already use transactions)
 
 ### Already Implemented ✅
 
-- **Idempotency Key Support (Section 9)** - StreamFlow has full idempotency via `unique_key`
+- **Idempotency Key Support (Section 9)** - Kruxia Flow has full idempotency via `unique_key`
   - ✅ Database constraint: `workflows.unique_key TEXT UNIQUE`
   - ✅ API exposed: `POST /api/v1/workflows` accepts optional `unique_key`
   - ✅ Transaction-safe: Check + Insert in single transaction
@@ -1104,17 +1104,17 @@ Since StreamFlow does not implement activity-level checkpointing (see Section 1)
   - ✅ Validation: Empty keys rejected, 255 char limit
   - ✅ OpenAPI documentation complete
 
-### Not Recommended for StreamFlow
+### Not Recommended for Kruxia Flow
 
 - **Step-Based Checkpointing (Section 1)** - Redundant with activity-based DAG model
 - **Duplicate Checkpoint Names (Section 12)** - Not applicable without checkpointing
 - **Separate Activity Attempts Table (Section 4)** - workflow_events provides attempt history
-  - StreamFlow uses event sourcing pattern instead
+  - Kruxia Flow uses event sourcing pattern instead
   - Retry state in workflow state, attempt history in workflow_events
   - Simpler schema, consistent with orchestrator-centric architecture
 - **Database-Centric Business Logic (Section 6)** - Business logic belongs in Rust services
   - Absurd puts orchestration logic in stored procedures (database-centric)
-  - StreamFlow keeps orchestration logic in Rust (application-centric)
+  - Kruxia Flow keeps orchestration logic in Rust (application-centric)
   - **Rationale**: Horizontal scalability - scale Rust services, not database CPUs
   - **Limited use**: Stored procedures only for hot-path atomic operations (claim_activity)
   - **Better for**: Type safety, testing, debugging, observability, team velocity
@@ -1131,7 +1131,7 @@ Since StreamFlow does not implement activity-level checkpointing (see Section 1)
 - **Worker model**: Workers execute task functions (code deployment)
 - **Best for**: Long-running, event-driven processes with human-in-the-loop
 
-### StreamFlow: Activity-Centric Model
+### Kruxia Flow: Activity-Centric Model
 
 - **Unit of work**: Activity (shorter-lived, seconds/minutes)
 - **Subdivision**: Workflows compose multiple activities
@@ -1139,7 +1139,7 @@ Since StreamFlow does not implement activity-level checkpointing (see Section 1)
 - **Worker model**: Workers execute activities (service calls)
 - **Best for**: Orchestration of microservices, AI pipelines, ETL
 
-**Key Insight**: These are different abstraction levels. Absurd's "task" ≈ StreamFlow's "workflow", Absurd's "step" ≈ StreamFlow's "activity". StreamFlow's activity-based DAG model already provides the same durability guarantees as absurd's checkpointing, just at a different granularity. Users needing finer-grained checkpointing should decompose work into smaller activities rather than adding checkpointing within activities.
+**Key Insight**: These are different abstraction levels. Absurd's "task" ≈ Kruxia Flow's "workflow", Absurd's "step" ≈ Kruxia Flow's "activity". Kruxia Flow's activity-based DAG model already provides the same durability guarantees as absurd's checkpointing, just at a different granularity. Users needing finer-grained checkpointing should decompose work into smaller activities rather than adding checkpointing within activities.
 
 ---
 
@@ -1188,7 +1188,7 @@ Absurd provides excellent patterns for building production-grade durable executi
 4. **Separation of concerns**: Clear boundaries between components
 5. **PostgreSQL-centric**: Single dependency for MVP
 
-### Key Architectural Differences: Absurd vs StreamFlow
+### Key Architectural Differences: Absurd vs Kruxia Flow
 
 **Absurd: Database-Centric (Queue-Based)**
 - **Business logic in database** - Stored procedures for orchestration, retry, scheduling
@@ -1200,7 +1200,7 @@ Absurd provides excellent patterns for building production-grade durable executi
 - Workers call stored procedures directly
 - **Scaling limitation**: Database CPU becomes bottleneck
 
-**StreamFlow: Application-Centric (Event-Driven)**
+**Kruxia Flow: Application-Centric (Event-Driven)**
 - **Business logic in Rust** - Services handle orchestration, retry, scheduling
 - **Rust-first architecture** - Type safety, modern tooling, horizontal scalability
 - **Database is storage** - PostgreSQL stores data, Rust runs business logic
@@ -1210,7 +1210,7 @@ Absurd provides excellent patterns for building production-grade durable executi
 - Workers report via API, orchestrator decides
 - **Scaling advantage**: Add more Rust service instances horizontally
 
-### Adoption Strategy for StreamFlow
+### Adoption Strategy for Kruxia Flow
 
 **Adopt from Absurd**:
 - ✅ Exponential backoff retry configuration (in YAML)
@@ -1218,16 +1218,16 @@ Absurd provides excellent patterns for building production-grade durable executi
 - ✅ Cleanup strategies with TTL
 - ✅ Timeout detection patterns
 
-**Adapt for StreamFlow Architecture**:
+**Adapt for Kruxia Flow Architecture**:
 - 🔄 Retry logic → orchestrator event handlers (not stored procedures) - **Rust, not SQL**
 - 🔄 Attempt history → workflow_events (not separate table) - **Event sourcing**
 - 🔄 State tracking → workflow state JSONB (not queue tables) - **Application state**
 - 🔄 Orchestration logic → Rust services (not stored procedures) - **Horizontal scalability**
 
-**Skip for StreamFlow**:
+**Skip for Kruxia Flow**:
 - ❌ Step-based checkpointing (use activity decomposition instead)
 - ❌ Separate runs table (use event sourcing instead)
 - ❌ Queue-based retry logic (use orchestrator instead)
 - ❌ Database-centric business logic (use Rust services for horizontal scalability)
 
-StreamFlow's application-centric, event-driven architecture provides the same reliability benefits as absurd's database-centric approach, with a key advantage: **horizontal scalability**. By keeping business logic in Rust services instead of stored procedures, StreamFlow can scale by adding more orchestrator and worker instances, rather than vertically scaling the database. This architectural choice aligns with modern distributed systems design and enables StreamFlow to handle higher throughput at lower cost.
+Kruxia Flow's application-centric, event-driven architecture provides the same reliability benefits as absurd's database-centric approach, with a key advantage: **horizontal scalability**. By keeping business logic in Rust services instead of stored procedures, Kruxia Flow can scale by adding more orchestrator and worker instances, rather than vertically scaling the database. This architectural choice aligns with modern distributed systems design and enables Kruxia Flow to handle higher throughput at lower cost.

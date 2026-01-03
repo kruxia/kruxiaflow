@@ -69,7 +69,7 @@ loop {
 
 ### Test Scenario
 - **Database**: PostgreSQL 15, 4 CPU, 8GB RAM, max_connections=300
-- **StreamFlow**: 2 CPU, 4GB RAM
+- **Kruxia Flow**: 2 CPU, 4GB RAM
 - **Workload**: 1,000 workflows × 5 events each = 5,000 events
 - **Event Processing**: ~10ms per event (database I/O)
 - **Workflow**: Simple 3-activity DAG
@@ -777,11 +777,11 @@ pub struct WorkflowDefinition {
 
 ```bash
 # Default mode for all workflows
-STREAMFLOW_ORCHESTRATOR_MODE=ephemeral  # or "long-lived"
+KRUXIAFLOW_ORCHESTRATOR_MODE=ephemeral  # or "long-lived"
 
 # Only used in long-lived mode
-STREAMFLOW_ORCHESTRATOR_CHANNEL_BUFFER=100
-STREAMFLOW_ORCHESTRATOR_TASK_IDLE_TIMEOUT=300  # seconds
+KRUXIAFLOW_ORCHESTRATOR_CHANNEL_BUFFER=100
+KRUXIAFLOW_ORCHESTRATOR_TASK_IDLE_TIMEOUT=300  # seconds
 ```
 
 **Decision logic:**
@@ -1134,7 +1134,7 @@ async fn test_parallel_workflow_processing() {
 ### Load Tests
 
 ```python
-# benchmarks/streamflow/parallel_load_test.py
+# benchmarks/kruxiaflow/parallel_load_test.py
 async def test_throughput():
     workflows = 1000
     events_per_workflow = 5
@@ -1185,30 +1185,30 @@ async fn test_crash_recovery() {
 
 **Week 1: Sequential Mode**
 ```bash
-STREAMFLOW_ORCHESTRATOR_MAX_CONCURRENT=1  # MVP behavior
-STREAMFLOW_ORCHESTRATOR_POLL_BATCH_SIZE=100
+KRUXIAFLOW_ORCHESTRATOR_MAX_CONCURRENT=1  # MVP behavior
+KRUXIAFLOW_ORCHESTRATOR_POLL_BATCH_SIZE=100
 ```
 
 **Week 2: Small Parallel**
 ```bash
-STREAMFLOW_ORCHESTRATOR_MAX_CONCURRENT=10
-STREAMFLOW_ORCHESTRATOR_POLL_BATCH_SIZE=100
+KRUXIAFLOW_ORCHESTRATOR_MAX_CONCURRENT=10
+KRUXIAFLOW_ORCHESTRATOR_POLL_BATCH_SIZE=100
 ```
 
 Monitor: Error rates, latency, connection pool usage
 
 **Week 3: Medium Parallel**
 ```bash
-STREAMFLOW_ORCHESTRATOR_MAX_CONCURRENT=50
-STREAMFLOW_ORCHESTRATOR_POLL_BATCH_SIZE=500
+KRUXIAFLOW_ORCHESTRATOR_MAX_CONCURRENT=50
+KRUXIAFLOW_ORCHESTRATOR_POLL_BATCH_SIZE=500
 ```
 
 Increase connection pool: `max_connections=140`
 
 **Week 4: Full Parallel**
 ```bash
-STREAMFLOW_ORCHESTRATOR_MAX_CONCURRENT=100
-STREAMFLOW_ORCHESTRATOR_POLL_BATCH_SIZE=1000
+KRUXIAFLOW_ORCHESTRATOR_MAX_CONCURRENT=100
+KRUXIAFLOW_ORCHESTRATOR_POLL_BATCH_SIZE=1000
 ```
 
 Increase connection pool: `max_connections=240`
@@ -1257,20 +1257,20 @@ Increase connection pool: `max_connections=240`
 
 ```bash
 # Concurrency (0=disabled, 1=sequential, N=parallel)
-STREAMFLOW_ORCHESTRATOR_MAX_CONCURRENT=100
+KRUXIAFLOW_ORCHESTRATOR_MAX_CONCURRENT=100
 
 # Polling
-STREAMFLOW_ORCHESTRATOR_POLL_BATCH_SIZE=1000
-STREAMFLOW_ORCHESTRATOR_POLL_INTERVAL_MIN=10  # milliseconds
-STREAMFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX=5000  # milliseconds
+KRUXIAFLOW_ORCHESTRATOR_POLL_BATCH_SIZE=1000
+KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MIN=10  # milliseconds
+KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX=5000  # milliseconds
 
 # Long-lived tasks only
-STREAMFLOW_ORCHESTRATOR_MODE=ephemeral  # or "long-lived"
-STREAMFLOW_ORCHESTRATOR_CHANNEL_BUFFER=100
-STREAMFLOW_ORCHESTRATOR_TASK_IDLE_TIMEOUT=300  # seconds
+KRUXIAFLOW_ORCHESTRATOR_MODE=ephemeral  # or "long-lived"
+KRUXIAFLOW_ORCHESTRATOR_CHANNEL_BUFFER=100
+KRUXIAFLOW_ORCHESTRATOR_TASK_IDLE_TIMEOUT=300  # seconds
 
 # Database
-STREAMFLOW_DB_MAX_CONNECTIONS=240  # 2x max_concurrent + 40
+KRUXIAFLOW_DB_MAX_CONNECTIONS=240  # 2x max_concurrent + 40
 ```
 
 ### Tuning Guide

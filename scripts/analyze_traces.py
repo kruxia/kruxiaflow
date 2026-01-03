@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Analyze tracing spans from StreamFlow server logs."""
+"""Analyze tracing spans from Kruxia Flow server logs."""
 import re
 import sys
 from collections import defaultdict

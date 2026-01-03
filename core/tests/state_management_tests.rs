@@ -1,11 +1,11 @@
 use chrono::Utc;
 use rust_decimal::Decimal;
 use serde_json::json;
-use streamflow_core::events::{WorkflowEvent, WorkflowEventType, WorkflowStatus};
-use streamflow_core::orchestrator::{
+use kruxiaflow_core::events::{WorkflowEvent, WorkflowEventType, WorkflowStatus};
+use kruxiaflow_core::orchestrator::{
     ActivityState, WorkflowActivityStatus, WorkflowState, apply_event_to_state,
 };
-use streamflow_core::workflow::outputs::{ActivityOutput, OutputType};
+use kruxiaflow_core::workflow::outputs::{ActivityOutput, OutputType};
 use uuid::Uuid;
 
 #[test]

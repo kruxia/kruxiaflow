@@ -5,8 +5,8 @@ use crate::registry::ActivityRegistry;
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use std::time::Duration;
-use streamflow_core::storage::WorkflowStorage;
-use streamflow_core::workflow::ActivityOutputDefinition;
+use kruxiaflow_core::storage::WorkflowStorage;
+use kruxiaflow_core::workflow::ActivityOutputDefinition;
 
 /// Worker poller task
 ///
@@ -171,10 +171,10 @@ impl WorkerPoller {
         // Inject temp directory into parameters for file outputs
         let mut parameters = activity.parameters;
         if let Some(executor) = &file_executor {
-            // Add _streamflow_temp_dir to parameters (internal use only)
+            // Add _kruxiaflow_temp_dir to parameters (internal use only)
             if let Some(obj) = parameters.as_object_mut() {
                 obj.insert(
-                    "_streamflow_temp_dir".to_string(),
+                    "_kruxiaflow_temp_dir".to_string(),
                     serde_json::Value::String(executor.temp_dir().display().to_string()),
                 );
             }
@@ -334,8 +334,8 @@ mod tests {
     use serde_json::{Value, json};
     use std::sync::Arc;
     use std::time::Duration;
-    use streamflow_core::WorkflowStorage;
-    use streamflow_core::workflow::ActivityOutput;
+    use kruxiaflow_core::WorkflowStorage;
+    use kruxiaflow_core::workflow::ActivityOutput;
     use uuid::Uuid;
 
     // Mock storage for tests
@@ -354,7 +354,7 @@ mod tests {
                     dyn futures::Stream<Item = Result<bytes::Bytes, std::io::Error>> + Send + Unpin,
                 >,
             >,
-        ) -> streamflow_core::storage::Result<streamflow_core::storage::FileMetadata> {
+        ) -> kruxiaflow_core::storage::Result<kruxiaflow_core::storage::FileMetadata> {
             unimplemented!("Mock storage not implemented")
         }
 
@@ -363,7 +363,7 @@ mod tests {
             _workflow_id: Uuid,
             _activity_key: &str,
             _filename: &str,
-        ) -> streamflow_core::storage::Result<
+        ) -> kruxiaflow_core::storage::Result<
             std::pin::Pin<
                 Box<dyn futures::Stream<Item = Result<bytes::Bytes, std::io::Error>> + Send>,
             >,
@@ -376,7 +376,7 @@ mod tests {
             _workflow_id: Uuid,
             _activity_key: &str,
             _filename: &str,
-        ) -> streamflow_core::storage::Result<streamflow_core::storage::FileMetadata> {
+        ) -> kruxiaflow_core::storage::Result<kruxiaflow_core::storage::FileMetadata> {
             unimplemented!("Mock storage not implemented")
         }
 
@@ -384,7 +384,7 @@ mod tests {
             &self,
             _workflow_id: Uuid,
             _activity_key: &str,
-        ) -> streamflow_core::storage::Result<Vec<streamflow_core::storage::FileMetadata>> {
+        ) -> kruxiaflow_core::storage::Result<Vec<kruxiaflow_core::storage::FileMetadata>> {
             unimplemented!("Mock storage not implemented")
         }
 
@@ -393,14 +393,14 @@ mod tests {
             _workflow_id: Uuid,
             _activity_key: &str,
             _filename: &str,
-        ) -> streamflow_core::storage::Result<()> {
+        ) -> kruxiaflow_core::storage::Result<()> {
             unimplemented!("Mock storage not implemented")
         }
 
         async fn delete_workflow_files(
             &self,
             _workflow_id: Uuid,
-        ) -> streamflow_core::storage::Result<()> {
+        ) -> kruxiaflow_core::storage::Result<()> {
             unimplemented!("Mock storage not implemented")
         }
 
@@ -409,7 +409,7 @@ mod tests {
             _workflow_id: Uuid,
             _activity_key: &str,
             _filename: &str,
-        ) -> streamflow_core::storage::Result<String> {
+        ) -> kruxiaflow_core::storage::Result<String> {
             unimplemented!("Mock storage not implemented")
         }
     }
@@ -498,7 +498,7 @@ mod tests {
             "test_secret".to_string(),
         );
         let registry = Arc::new(ActivityRegistry::new(Arc::new(
-            streamflow_core::cache::NoOpCache::new(),
+            kruxiaflow_core::cache::NoOpCache::new(),
         )));
         let storage = Arc::new(MockStorage);
 
@@ -548,7 +548,7 @@ mod tests {
             "test_secret".to_string(),
         );
         let mut registry =
-            ActivityRegistry::new(Arc::new(streamflow_core::cache::NoOpCache::new()));
+            ActivityRegistry::new(Arc::new(kruxiaflow_core::cache::NoOpCache::new()));
         registry.register(Arc::new(SuccessActivity));
         let storage = Arc::new(MockStorage);
 
@@ -589,7 +589,7 @@ mod tests {
             "test_secret".to_string(),
         );
         let mut registry =
-            ActivityRegistry::new(Arc::new(streamflow_core::cache::NoOpCache::new()));
+            ActivityRegistry::new(Arc::new(kruxiaflow_core::cache::NoOpCache::new()));
         registry.register(Arc::new(SuccessActivity));
         let storage = Arc::new(MockStorage);
 
@@ -626,7 +626,7 @@ mod tests {
             "test_secret".to_string(),
         );
         let registry = Arc::new(ActivityRegistry::new(Arc::new(
-            streamflow_core::cache::NoOpCache::new(),
+            kruxiaflow_core::cache::NoOpCache::new(),
         )));
         let storage = Arc::new(MockStorage);
 
@@ -674,7 +674,7 @@ mod tests {
             "test_secret".to_string(),
         );
         let registry = Arc::new(ActivityRegistry::new(Arc::new(
-            streamflow_core::cache::NoOpCache::new(),
+            kruxiaflow_core::cache::NoOpCache::new(),
         )));
         let storage = Arc::new(MockStorage);
 
@@ -692,7 +692,7 @@ mod tests {
     #[test]
     fn test_activity_registry_arc_cloning() {
         let mut registry =
-            ActivityRegistry::new(Arc::new(streamflow_core::cache::NoOpCache::new()));
+            ActivityRegistry::new(Arc::new(kruxiaflow_core::cache::NoOpCache::new()));
         registry.register(Arc::new(SuccessActivity));
         let registry_arc = Arc::new(registry);
 

@@ -1,6 +1,6 @@
-# StreamFlow Tools
+# Kruxia Flow Tools
 
-This directory contains utility scripts for StreamFlow development and testing.
+This directory contains utility scripts for Kruxia Flow development and testing.
 
 ## Scripts
 
@@ -30,7 +30,7 @@ Unified test runner with coverage support.
 ./scripts/test.sh --coverage-html
 
 # Test specific crate
-./scripts/test.sh -p streamflow-api
+./scripts/test.sh -p kruxiaflow-api
 
 # Unit tests only
 ./scripts/test.sh --unit
@@ -117,7 +117,7 @@ Example GitHub Actions workflow snippet:
 - name: Run tests with coverage
   run: ./scripts/test.sh --coverage-ci --skip-db-setup
   env:
-    DATABASE_URL: postgres://streamflow:streamflow_dev@localhost:5433/streamflow_test
+    DATABASE_URL: postgres://kruxiaflow:kruxiaflow_dev@localhost:5433/kruxiaflow_test
 
 - name: Upload coverage to Codecov
   uses: codecov/codecov-action@v3
@@ -141,10 +141,10 @@ Example GitHub Actions workflow snippet:
 
 ```bash
 # Test specific crate you're working on
-./scripts/test.sh -p streamflow-api
+./scripts/test.sh -p kruxiaflow-api
 
 # Check coverage for that crate
-./scripts/test.sh --coverage-html -p streamflow-api
+./scripts/test.sh --coverage-html -p kruxiaflow-api
 ```
 
 ### Debugging Failed Tests

@@ -8,11 +8,11 @@ pub struct SeedClientCommand {
     /// OAuth client ID
     #[arg(
         long,
-        env = "STREAMFLOW_CLIENT_ID",
-        default_value = "streamflow_internal_worker",
+        env = "KRUXIAFLOW_CLIENT_ID",
+        default_value = "kruxiaflow_internal_worker",
         help = "OAuth client ID to seed",
         long_help = "OAuth client ID to seed in the database.\n\n\
-Default: streamflow_internal_worker\n\
+Default: kruxiaflow_internal_worker\n\
 Example: --client-id my-app-client"
     )]
     pub client_id: String,
@@ -20,10 +20,10 @@ Example: --client-id my-app-client"
     /// OAuth client secret
     #[arg(
         long,
-        env = "STREAMFLOW_CLIENT_SECRET",
+        env = "KRUXIAFLOW_CLIENT_SECRET",
         help = "OAuth client secret (required)",
         long_help = "OAuth client secret to hash and store.\n\n\
-Required: Must be provided via flag or STREAMFLOW_CLIENT_SECRET env var\n\
+Required: Must be provided via flag or KRUXIAFLOW_CLIENT_SECRET env var\n\
 Example: --client-secret my-secret-key"
     )]
     pub client_secret: Option<String>,
@@ -34,7 +34,7 @@ Example: --client-secret my-secret-key"
         help = "Delete and re-create client even if it exists",
         long_help = "By default, seed-client skips seeding if the client already exists.\n\
 Use --force to delete the existing client and create a new one.\n\n\
-Example: streamflow seed-client --force"
+Example: kruxiaflow seed-client --force"
     )]
     pub force: bool,
 }
@@ -44,9 +44,9 @@ pub async fn execute(cmd: SeedClientCommand, database_url: String) -> Result<()>
     // Load secret from file if _FILE variant is set (Docker secrets pattern)
     let client_secret = cmd
         .client_secret
-        .or_else(|| load_secret("STREAMFLOW_CLIENT_SECRET"))
+        .or_else(|| load_secret("KRUXIAFLOW_CLIENT_SECRET"))
         .ok_or_else(|| {
-            anyhow::anyhow!("Client secret required (--client-secret or STREAMFLOW_CLIENT_SECRET)")
+            anyhow::anyhow!("Client secret required (--client-secret or KRUXIAFLOW_CLIENT_SECRET)")
         })?;
 
     // Connect to database
@@ -142,8 +142,8 @@ pub async fn seed_oauth_client(
     )
     .bind(client_id)
     .bind(&client_secret_hash)
-    .bind("StreamFlow Client")
-    .bind("OAuth client for StreamFlow services")
+    .bind("Kruxia Flow Client")
+    .bind("OAuth client for Kruxia Flow services")
     .bind(vec!["workflow:read", "workflow:write", "workflow:execute"])
     .bind(true)
     .execute(pool)

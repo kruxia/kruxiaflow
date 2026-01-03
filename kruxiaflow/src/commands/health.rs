@@ -13,9 +13,9 @@ pub struct HealthCommand {
     /// API server URL to check
     #[arg(
         long,
-        env = "STREAMFLOW_API_URL",
+        env = "KRUXIAFLOW_API_URL",
         default_value = "http://127.0.0.1:8080",
-        help = "StreamFlow API server URL"
+        help = "Kruxia Flow API server URL"
     )]
     pub api_url: String,
 
@@ -23,7 +23,7 @@ pub struct HealthCommand {
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_HEALTH_TIMEOUT",
+        env = "KRUXIAFLOW_HEALTH_TIMEOUT",
         default_value = "5",
         help = "Timeout for health checks in seconds"
     )]
@@ -33,7 +33,7 @@ pub struct HealthCommand {
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_OUTPUT_FORMAT",
+        env = "KRUXIAFLOW_OUTPUT_FORMAT",
         default_value = "text",
         help = "Output format (text, json)"
     )]
@@ -270,7 +270,7 @@ fn extract_service_health(service_name: &str, readiness: &serde_json::Value) -> 
 
 /// Print text report
 fn print_text_report(report: &HealthReport, verbose: bool) {
-    println!("StreamFlow Health Check");
+    println!("Kruxia Flow Health Check");
     println!("{:-<50}", "");
 
     for result in &report.services {

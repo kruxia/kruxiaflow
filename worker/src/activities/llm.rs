@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
-use streamflow_core::cost::{CostCalculator, ModelPricing};
+use kruxiaflow_core::cost::{CostCalculator, ModelPricing};
 use uuid::Uuid;
 
 // ============================================================================

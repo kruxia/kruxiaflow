@@ -5,10 +5,10 @@ use clap::Args;
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 use std::time::Duration;
-use streamflow_core::cache::{CacheService, RedisCache};
-use streamflow_core::events::PostgresEventSource;
-use streamflow_core::queue::{PostgresQueue, QueueConfig};
-use streamflow_oauth::{AuthConfig, PostgresAuthService};
+use kruxiaflow_core::cache::{CacheService, RedisCache};
+use kruxiaflow_core::events::PostgresEventSource;
+use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
+use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 
 #[derive(Args)]
 pub struct ApiCommand {
@@ -16,7 +16,7 @@ pub struct ApiCommand {
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_API_PORT",
+        env = "KRUXIAFLOW_API_PORT",
         help = "Port to bind API server to",
         long_help = "Port to bind API server to\n\n\
 Default: 8080\n\
@@ -28,7 +28,7 @@ Example: --port 9090"
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_API_BIND",
+        env = "KRUXIAFLOW_API_BIND",
         help = "Address to bind API server to (e.g., 0.0.0.0, 127.0.0.1)",
         long_help = "Address to bind API server to\n\n\
 Options:\n  \
@@ -67,13 +67,13 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
     tracing::info!("Database connectivity verified");
 
     // Load RSA keys for JWT signing/verification from environment
-    let rsa_private_key_pem = std::env::var("STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM").context(
-        "STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM environment variable is required. \
+    let rsa_private_key_pem = std::env::var("KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM").context(
+        "KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM environment variable is required. \
              Generate keys with: openssl genrsa -out private.pem 2048 && \
              openssl rsa -in private.pem -pubout -out public.pem",
     )?;
 
-    let rsa_public_key_pem = std::env::var("STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM").ok();
+    let rsa_public_key_pem = std::env::var("KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM").ok();
 
     tracing::info!("RSA keys loaded for JWT signing/verification");
 
@@ -81,11 +81,11 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
     let auth_config = AuthConfig {
         rsa_private_key_pem,
         rsa_public_key_pem,
-        jwt_issuer: std::env::var("STREAMFLOW_OAUTH_JWT_ISSUER")
-            .unwrap_or_else(|_| "streamflow".to_string()),
-        jwt_audience: std::env::var("STREAMFLOW_OAUTH_JWT_AUDIENCE")
-            .unwrap_or_else(|_| "streamflow-api".to_string()),
-        token_ttl: std::env::var("STREAMFLOW_OAUTH_TOKEN_TTL")
+        jwt_issuer: std::env::var("KRUXIAFLOW_OAUTH_JWT_ISSUER")
+            .unwrap_or_else(|_| "kruxiaflow".to_string()),
+        jwt_audience: std::env::var("KRUXIAFLOW_OAUTH_JWT_AUDIENCE")
+            .unwrap_or_else(|_| "kruxiaflow-api".to_string()),
+        token_ttl: std::env::var("KRUXIAFLOW_OAUTH_TOKEN_TTL")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(86400), // 24 hours
@@ -106,11 +106,11 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
     tracing::info!("Event source initialized (PostgreSQL polling)");
 
     // Initialize workflow storage (PostgreSQL Large Objects for MVP)
-    let workflow_storage = Arc::new(streamflow_core::PostgresStorage::new(db_pool.clone()));
+    let workflow_storage = Arc::new(kruxiaflow_core::PostgresStorage::new(db_pool.clone()));
     tracing::info!("Workflow storage initialized (PostgreSQL Large Objects)");
 
     // Initialize cache service (Redis for MVP)
-    let redis_url = std::env::var("STREAMFLOW_REDIS_URL")
+    let redis_url = std::env::var("KRUXIAFLOW_REDIS_URL")
         .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
     let cache_service: Arc<dyn CacheService> =
         Arc::new(RedisCache::new(&redis_url, None).context("Failed to connect to Redis")?);
@@ -118,7 +118,7 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
 
     // Create application state with configured infrastructure services
     let shutdown_token = tokio_util::sync::CancellationToken::new();
-    let app_state = streamflow_api::AppState::new(
+    let app_state = kruxiaflow_api::AppState::new(
         db_pool,
         Arc::new(auth_service),
         activity_queue,
@@ -129,7 +129,7 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
     );
 
     // Create Axum router
-    let app = streamflow_api::app_router(app_state);
+    let app = kruxiaflow_api::app_router(app_state);
 
     // Bind to address and port
     let bind_addr = config.bind_address();
@@ -228,13 +228,13 @@ mod tests {
 
         // Clean up RSA key environment variables
         unsafe {
-            std::env::remove_var("STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM");
-            std::env::remove_var("STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM");
+            std::env::remove_var("KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM");
+            std::env::remove_var("KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM");
         }
 
         // Use default database URL for testing
         let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
         });
 
         let cmd = ApiCommand {
@@ -248,7 +248,7 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
-            err_msg.contains("STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM")
+            err_msg.contains("KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM")
                 || err_msg.contains("Failed to connect to database")
                 || err_msg.contains("Database connectivity test failed")
         );
@@ -261,12 +261,12 @@ mod tests {
 
         // Set invalid RSA key
         unsafe {
-            std::env::set_var("STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM", "invalid-key");
+            std::env::set_var("KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM", "invalid-key");
         }
 
         // Use default database URL for testing
         let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
         });
 
         let cmd = ApiCommand {
@@ -281,7 +281,7 @@ mod tests {
 
         // Clean up
         unsafe {
-            std::env::remove_var("STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM");
+            std::env::remove_var("KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM");
         }
     }
 
@@ -296,16 +296,16 @@ mod tests {
         let public_key = include_str!("../../../oauth/tests/public.pem");
 
         unsafe {
-            std::env::set_var("STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM", private_key);
-            std::env::set_var("STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM", public_key);
-            std::env::set_var("STREAMFLOW_OAUTH_JWT_ISSUER", "test-issuer");
-            std::env::set_var("STREAMFLOW_OAUTH_JWT_AUDIENCE", "test-audience");
-            std::env::set_var("STREAMFLOW_OAUTH_TOKEN_TTL", "3600");
+            std::env::set_var("KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM", private_key);
+            std::env::set_var("KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM", public_key);
+            std::env::set_var("KRUXIAFLOW_OAUTH_JWT_ISSUER", "test-issuer");
+            std::env::set_var("KRUXIAFLOW_OAUTH_JWT_AUDIENCE", "test-audience");
+            std::env::set_var("KRUXIAFLOW_OAUTH_TOKEN_TTL", "3600");
         }
 
         // Use default database URL for testing
         let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
         });
 
         let cmd = ApiCommand {
@@ -320,11 +320,11 @@ mod tests {
 
         // Clean up
         unsafe {
-            std::env::remove_var("STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM");
-            std::env::remove_var("STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM");
-            std::env::remove_var("STREAMFLOW_OAUTH_JWT_ISSUER");
-            std::env::remove_var("STREAMFLOW_OAUTH_JWT_AUDIENCE");
-            std::env::remove_var("STREAMFLOW_OAUTH_TOKEN_TTL");
+            std::env::remove_var("KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM");
+            std::env::remove_var("KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM");
+            std::env::remove_var("KRUXIAFLOW_OAUTH_JWT_ISSUER");
+            std::env::remove_var("KRUXIAFLOW_OAUTH_JWT_AUDIENCE");
+            std::env::remove_var("KRUXIAFLOW_OAUTH_TOKEN_TTL");
         }
     }
 
@@ -333,10 +333,10 @@ mod tests {
     fn test_auth_config_with_invalid_ttl() {
         // Test that invalid TTL values are handled gracefully
         unsafe {
-            std::env::set_var("STREAMFLOW_OAUTH_TOKEN_TTL", "not-a-number");
+            std::env::set_var("KRUXIAFLOW_OAUTH_TOKEN_TTL", "not-a-number");
         }
 
-        let token_ttl: u64 = std::env::var("STREAMFLOW_OAUTH_TOKEN_TTL")
+        let token_ttl: u64 = std::env::var("KRUXIAFLOW_OAUTH_TOKEN_TTL")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(86400);
@@ -346,7 +346,7 @@ mod tests {
 
         // Clean up
         unsafe {
-            std::env::remove_var("STREAMFLOW_OAUTH_TOKEN_TTL");
+            std::env::remove_var("KRUXIAFLOW_OAUTH_TOKEN_TTL");
         }
     }
 
@@ -355,22 +355,22 @@ mod tests {
     fn test_auth_config_defaults() {
         // Test that auth configuration uses sensible defaults
         unsafe {
-            std::env::remove_var("STREAMFLOW_OAUTH_JWT_ISSUER");
-            std::env::remove_var("STREAMFLOW_OAUTH_JWT_AUDIENCE");
-            std::env::remove_var("STREAMFLOW_OAUTH_TOKEN_TTL");
+            std::env::remove_var("KRUXIAFLOW_OAUTH_JWT_ISSUER");
+            std::env::remove_var("KRUXIAFLOW_OAUTH_JWT_AUDIENCE");
+            std::env::remove_var("KRUXIAFLOW_OAUTH_TOKEN_TTL");
         }
 
-        let issuer = std::env::var("STREAMFLOW_OAUTH_JWT_ISSUER")
-            .unwrap_or_else(|_| "streamflow".to_string());
-        let audience = std::env::var("STREAMFLOW_OAUTH_JWT_AUDIENCE")
-            .unwrap_or_else(|_| "streamflow-api".to_string());
-        let token_ttl: u64 = std::env::var("STREAMFLOW_OAUTH_TOKEN_TTL")
+        let issuer = std::env::var("KRUXIAFLOW_OAUTH_JWT_ISSUER")
+            .unwrap_or_else(|_| "kruxiaflow".to_string());
+        let audience = std::env::var("KRUXIAFLOW_OAUTH_JWT_AUDIENCE")
+            .unwrap_or_else(|_| "kruxiaflow-api".to_string());
+        let token_ttl: u64 = std::env::var("KRUXIAFLOW_OAUTH_TOKEN_TTL")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(86400);
 
-        assert_eq!(issuer, "streamflow");
-        assert_eq!(audience, "streamflow-api");
+        assert_eq!(issuer, "kruxiaflow");
+        assert_eq!(audience, "kruxiaflow-api");
         assert_eq!(token_ttl, 86400);
     }
 
@@ -379,16 +379,16 @@ mod tests {
     fn test_auth_config_from_environment() {
         // Test that auth configuration can be set via environment variables
         unsafe {
-            std::env::set_var("STREAMFLOW_OAUTH_JWT_ISSUER", "test-issuer");
-            std::env::set_var("STREAMFLOW_OAUTH_JWT_AUDIENCE", "test-audience");
-            std::env::set_var("STREAMFLOW_OAUTH_TOKEN_TTL", "3600");
+            std::env::set_var("KRUXIAFLOW_OAUTH_JWT_ISSUER", "test-issuer");
+            std::env::set_var("KRUXIAFLOW_OAUTH_JWT_AUDIENCE", "test-audience");
+            std::env::set_var("KRUXIAFLOW_OAUTH_TOKEN_TTL", "3600");
         }
 
-        let issuer = std::env::var("STREAMFLOW_OAUTH_JWT_ISSUER")
-            .unwrap_or_else(|_| "streamflow".to_string());
-        let audience = std::env::var("STREAMFLOW_OAUTH_JWT_AUDIENCE")
-            .unwrap_or_else(|_| "streamflow-api".to_string());
-        let token_ttl: u64 = std::env::var("STREAMFLOW_OAUTH_TOKEN_TTL")
+        let issuer = std::env::var("KRUXIAFLOW_OAUTH_JWT_ISSUER")
+            .unwrap_or_else(|_| "kruxiaflow".to_string());
+        let audience = std::env::var("KRUXIAFLOW_OAUTH_JWT_AUDIENCE")
+            .unwrap_or_else(|_| "kruxiaflow-api".to_string());
+        let token_ttl: u64 = std::env::var("KRUXIAFLOW_OAUTH_TOKEN_TTL")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(86400);
@@ -399,9 +399,9 @@ mod tests {
 
         // Clean up
         unsafe {
-            std::env::remove_var("STREAMFLOW_OAUTH_JWT_ISSUER");
-            std::env::remove_var("STREAMFLOW_OAUTH_JWT_AUDIENCE");
-            std::env::remove_var("STREAMFLOW_OAUTH_TOKEN_TTL");
+            std::env::remove_var("KRUXIAFLOW_OAUTH_JWT_ISSUER");
+            std::env::remove_var("KRUXIAFLOW_OAUTH_JWT_AUDIENCE");
+            std::env::remove_var("KRUXIAFLOW_OAUTH_TOKEN_TTL");
         }
     }
 }

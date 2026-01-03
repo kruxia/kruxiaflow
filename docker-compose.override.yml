@@ -24,11 +24,11 @@ services:
       - backend
       - frontend
 
-  # Expose StreamFlow on all interfaces for local testing
-  streamflow-develop:
+  # Expose Kruxia Flow on all interfaces for local testing
+  kruxiaflow-develop:
     ports:
       - "8080:8080"
 
-  streamflow-profiling:
+  kruxiaflow-profiling:
     ports:
       - "8080:8080"

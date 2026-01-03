@@ -4,15 +4,15 @@ use serial_test::serial;
 use sqlx::PgPool;
 use std::str::FromStr;
 use std::sync::Arc;
-use streamflow_core::activity::ActivityWorkerService;
-use streamflow_core::events::{EventSource, PostgresEventSource};
-use streamflow_core::queue::{Activity, ActivityQueue, PostgresQueue, QueueConfig};
+use kruxiaflow_core::activity::ActivityWorkerService;
+use kruxiaflow_core::events::{EventSource, PostgresEventSource};
+use kruxiaflow_core::queue::{Activity, ActivityQueue, PostgresQueue, QueueConfig};
 use uuid::Uuid;
 
 /// Helper to create test database pool
 async fn setup_test_pool() -> PgPool {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
     });
 
     let pool = PgPool::connect(&database_url)
@@ -275,7 +275,7 @@ async fn test_heartbeat_wrong_worker() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        streamflow_core::activity::ActivityWorkerError::WrongWorker { .. }
+        kruxiaflow_core::activity::ActivityWorkerError::WrongWorker { .. }
     ));
 
     cleanup_activities(&pool, workflow_id).await;
@@ -297,7 +297,7 @@ async fn test_heartbeat_activity_not_found() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        streamflow_core::activity::ActivityWorkerError::ActivityNotFound(_)
+        kruxiaflow_core::activity::ActivityWorkerError::ActivityNotFound(_)
     ));
 }
 
@@ -436,7 +436,7 @@ async fn test_complete_activity_wrong_worker() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        streamflow_core::activity::ActivityWorkerError::WrongWorker { .. }
+        kruxiaflow_core::activity::ActivityWorkerError::WrongWorker { .. }
     ));
 
     cleanup_activities(&pool, workflow_id).await;
@@ -546,7 +546,7 @@ async fn test_fail_activity_wrong_worker() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        streamflow_core::activity::ActivityWorkerError::WrongWorker { .. }
+        kruxiaflow_core::activity::ActivityWorkerError::WrongWorker { .. }
     ));
 
     cleanup_activities(&pool, workflow_id).await;
@@ -574,6 +574,6 @@ async fn test_fail_activity_not_found() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        streamflow_core::activity::ActivityWorkerError::ActivityNotFound(_)
+        kruxiaflow_core::activity::ActivityWorkerError::ActivityNotFound(_)
     ));
 }

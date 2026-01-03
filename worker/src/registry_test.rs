@@ -9,8 +9,8 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
-    use streamflow_core::cache::{CacheService, CachedResult, NoOpCache};
-    use streamflow_core::workflow::ActivitySettings;
+    use kruxiaflow_core::cache::{CacheService, CachedResult, NoOpCache};
+    use kruxiaflow_core::workflow::ActivitySettings;
 
     struct TestActivity {
         name: String,
@@ -307,7 +307,7 @@ mod tests {
         async fn execute(&self, parameters: Value) -> Result<ActivityResult> {
             self.execution_count.fetch_add(1, Ordering::SeqCst);
             Ok(ActivityResult {
-                outputs: vec![streamflow_core::workflow::ActivityOutput::value(
+                outputs: vec![kruxiaflow_core::workflow::ActivityOutput::value(
                     "result", parameters,
                 )],
                 cost_usd: Some(Decimal::new(10, 2)), // $0.10

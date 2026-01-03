@@ -827,7 +827,7 @@ use crate::handlers::workflows::{SubmitWorkflowRequest, SubmitWorkflowResponse};
 #[derive(OpenApi)]
 #[openapi(
     info(
-        title = "StreamFlow API",
+        title = "Kruxia Flow API",
         version = "0.2.0",
         description = "High-performance workflow orchestration platform for AI-native workloads",
     ),

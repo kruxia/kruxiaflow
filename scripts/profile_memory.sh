@@ -4,7 +4,7 @@ set -e
 
 export PROJECT_DIR=$(dirname $(dirname "$(realpath "$0")"))
 export PROFILE_DIR="${PROJECT_DIR}/var/memory"
-export BINARY="${PROJECT_DIR}/target/profiling/streamflow"
+export BINARY="${PROJECT_DIR}/target/profiling/kruxiaflow"
 
 FINAL_DUMP=$(ls -t ${PROFILE_DIR}/jeprof.out.*.heap | head -1)
 echo "Final heap dump: $FINAL_DUMP"

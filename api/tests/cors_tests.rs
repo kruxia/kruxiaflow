@@ -7,7 +7,7 @@ use tower::ServiceExt;
 /// Test CORS allows standard HTTP methods
 #[tokio::test]
 async fn test_cors_allows_standard_methods() {
-    let layer = streamflow_api::middleware::cors_layer();
+    let layer = kruxiaflow_api::middleware::cors_layer();
     let app = axum::Router::new()
         .route("/test", axum::routing::get(|| async { "ok" }))
         .layer(layer);
@@ -39,7 +39,7 @@ async fn test_cors_allows_standard_methods() {
 /// Test CORS preflight OPTIONS request
 #[tokio::test]
 async fn test_cors_preflight_options() {
-    let layer = streamflow_api::middleware::cors_layer();
+    let layer = kruxiaflow_api::middleware::cors_layer();
     let app = axum::Router::new()
         .route("/test", axum::routing::post(|| async { "ok" }))
         .layer(layer);
@@ -81,7 +81,7 @@ async fn test_cors_preflight_options() {
 /// Test CORS allows custom headers
 #[tokio::test]
 async fn test_cors_allows_custom_headers() {
-    let layer = streamflow_api::middleware::cors_layer();
+    let layer = kruxiaflow_api::middleware::cors_layer();
     let app = axum::Router::new()
         .route("/test", axum::routing::get(|| async { "ok" }))
         .layer(layer);
@@ -114,7 +114,7 @@ async fn test_cors_allows_custom_headers() {
 /// Test CORS exposes custom headers
 #[tokio::test]
 async fn test_cors_exposes_custom_headers() {
-    let layer = streamflow_api::middleware::cors_layer();
+    let layer = kruxiaflow_api::middleware::cors_layer();
     let app = axum::Router::new()
         .route(
             "/test",
@@ -150,7 +150,7 @@ async fn test_cors_exposes_custom_headers() {
 /// Test CorsConfig default values
 #[test]
 fn test_cors_config_default() {
-    use streamflow_api::middleware::cors::CorsConfig;
+    use kruxiaflow_api::middleware::cors::CorsConfig;
 
     let config = CorsConfig::default();
 
@@ -162,7 +162,7 @@ fn test_cors_config_default() {
 /// Test CorsConfig custom values
 #[test]
 fn test_cors_config_custom() {
-    use streamflow_api::middleware::cors::CorsConfig;
+    use kruxiaflow_api::middleware::cors::CorsConfig;
 
     let config = CorsConfig {
         allowed_origins: vec!["https://example.com".to_string()],
@@ -181,7 +181,7 @@ fn test_cors_config_custom() {
 /// Test CorsConfig clone
 #[test]
 fn test_cors_config_clone() {
-    use streamflow_api::middleware::cors::CorsConfig;
+    use kruxiaflow_api::middleware::cors::CorsConfig;
 
     let config1 = CorsConfig {
         allowed_origins: vec!["https://example.com".to_string()],
@@ -198,7 +198,7 @@ fn test_cors_config_clone() {
 /// Test CORS with multiple origins
 #[tokio::test]
 async fn test_cors_with_different_origins() {
-    let layer = streamflow_api::middleware::cors_layer();
+    let layer = kruxiaflow_api::middleware::cors_layer();
     let app = axum::Router::new()
         .route("/test", axum::routing::get(|| async { "ok" }))
         .layer(layer);
@@ -236,7 +236,7 @@ async fn test_cors_with_different_origins() {
 /// Test CORS with all allowed methods
 #[tokio::test]
 async fn test_cors_with_all_methods() {
-    let layer = streamflow_api::middleware::cors_layer();
+    let layer = kruxiaflow_api::middleware::cors_layer();
 
     // Test each allowed method
     let methods = vec![
@@ -278,7 +278,7 @@ async fn test_cors_with_all_methods() {
 /// Test CORS max-age cache directive
 #[tokio::test]
 async fn test_cors_max_age() {
-    let layer = streamflow_api::middleware::cors_layer();
+    let layer = kruxiaflow_api::middleware::cors_layer();
     let app = axum::Router::new()
         .route("/test", axum::routing::post(|| async { "ok" }))
         .layer(layer);

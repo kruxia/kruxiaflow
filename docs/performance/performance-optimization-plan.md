@@ -1,4 +1,4 @@
-# StreamFlow Performance Optimization Plan
+# Kruxia Flow Performance Optimization Plan
 
 **Current Status**: ✅ **PRODUCTION READY** - Critical bugs fixed, memory leak resolved, system stable
 **Original MVP Target**: >100 wf/sec with P99 latency <200ms
@@ -824,7 +824,7 @@ fn init_tracing() {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "streamflow=info,sqlx=warn".into()),
+                .unwrap_or_else(|_| "kruxiaflow=info,sqlx=warn".into()),
         )
         .with(tracing_subscriber::fmt::layer()
             .with_target(true)
@@ -838,21 +838,21 @@ fn init_tracing() {
 
 Run benchmarks with timing enabled:
 ```bash
-RUST_LOG=streamflow=info,sqlx=debug \
-  cargo test --package streamflow-profiling --release test_sequential_workflow_load -- --nocapture
+RUST_LOG=kruxiaflow=info,sqlx=debug \
+  cargo test --package kruxiaflow-profiling --release test_sequential_workflow_load -- --nocapture
 ```
 
 Look for output like:
 ```
-[INFO  streamflow::orchestrator] 0.234s process_workflow_event workflow_id=abc123
-  [INFO  streamflow::orchestrator]   0.012s begin_transaction
-  [INFO  streamflow::orchestrator]   0.045s acquire_advisory_lock  ⚠️ SLOW
-  [INFO  streamflow::orchestrator]   0.003s load_workflow_state
-  [INFO  streamflow::orchestrator]   0.001s apply_event_to_state
-  [INFO  streamflow::orchestrator]   0.002s evaluate_dependencies
-  [INFO  streamflow::orchestrator]   0.156s schedule_activities  ⚠️ VERY SLOW
-  [INFO  streamflow::orchestrator]   0.008s save_workflow_state
-  [INFO  streamflow::orchestrator]   0.007s commit_transaction
+[INFO  kruxiaflow::orchestrator] 0.234s process_workflow_event workflow_id=abc123
+  [INFO  kruxiaflow::orchestrator]   0.012s begin_transaction
+  [INFO  kruxiaflow::orchestrator]   0.045s acquire_advisory_lock  ⚠️ SLOW
+  [INFO  kruxiaflow::orchestrator]   0.003s load_workflow_state
+  [INFO  kruxiaflow::orchestrator]   0.001s apply_event_to_state
+  [INFO  kruxiaflow::orchestrator]   0.002s evaluate_dependencies
+  [INFO  kruxiaflow::orchestrator]   0.156s schedule_activities  ⚠️ VERY SLOW
+  [INFO  kruxiaflow::orchestrator]   0.008s save_workflow_state
+  [INFO  kruxiaflow::orchestrator]   0.007s commit_transaction
 ```
 
 This will immediately show which component is the bottleneck.
@@ -988,7 +988,7 @@ SELECT COUNT(*) as total_connections,
        COUNT(*) FILTER (WHERE state = 'idle') as idle,
        COUNT(*) FILTER (WHERE state = 'idle in transaction') as idle_in_transaction
 FROM pg_stat_activity
-WHERE datname = 'streamflow_profiling';
+WHERE datname = 'kruxiaflow_profiling';
 
 -- Check for lock waits
 SELECT locktype, relation::regclass, mode, granted, pid, wait_event_type, wait_event
@@ -1016,7 +1016,7 @@ Profile the benchmark:
 ```bash
 # Start the server with release build
 cargo build --release
-./target/release/streamflow serve --port 8080 &
+./target/release/kruxiaflow serve --port 8080 &
 SERVER_PID=$!
 
 # Profile for 60 seconds while benchmark runs
@@ -1024,7 +1024,7 @@ sudo flamegraph -o flamegraph.svg -p $SERVER_PID -- sleep 60 &
 FLAMEGRAPH_PID=$!
 
 # Run benchmark
-cargo test --package streamflow-profiling --release test_sequential_workflow_load -- --nocapture
+cargo test --package kruxiaflow-profiling --release test_sequential_workflow_load -- --nocapture
 
 # Wait for flamegraph to complete
 wait $FLAMEGRAPH_PID
@@ -1057,17 +1057,17 @@ Look for:
 
 set -e
 
-echo "=== Starting StreamFlow Performance Profiling ==="
+echo "=== Starting Kruxia Flow Performance Profiling ==="
 
 # 1. Start server with tracing enabled
-export RUST_LOG=streamflow=debug,sqlx=debug
-export DATABASE_URL=postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamflow_profiling
+export RUST_LOG=kruxiaflow=debug,sqlx=debug
+export DATABASE_URL=postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow_profiling
 
 echo "Building release binary..."
 cargo build --release
 
 echo "Starting server..."
-./target/release/streamflow serve --port 8080 > server.log 2>&1 &
+./target/release/kruxiaflow serve --port 8080 > server.log 2>&1 &
 SERVER_PID=$!
 
 sleep 5  # Wait for server to start
@@ -1082,7 +1082,7 @@ FLAMEGRAPH_PID=$!
 
 # 4. Run benchmark with tracing
 echo "Running sequential workflow benchmark..."
-cargo test --package streamflow-profiling --release test_sequential_workflow_load -- --nocapture \
+cargo test --package kruxiaflow-profiling --release test_sequential_workflow_load -- --nocapture \
   | tee benchmark-trace.log
 
 # 5. Wait for profiling to complete
@@ -1509,17 +1509,17 @@ use prometheus::{IntCounter, Histogram};
 
 lazy_static! {
     static ref WORKFLOW_LATENCY: Histogram = register_histogram!(
-        "streamflow_workflow_latency_seconds",
+        "kruxiaflow_workflow_latency_seconds",
         "End-to-end workflow latency"
     ).unwrap();
 
     static ref ORCHESTRATOR_EVAL_TIME: Histogram = register_histogram!(
-        "streamflow_orchestrator_eval_seconds",
+        "kruxiaflow_orchestrator_eval_seconds",
         "Orchestrator evaluation time"
     ).unwrap();
 
     static ref QUEUE_CLAIM_TIME: Histogram = register_histogram!(
-        "streamflow_queue_claim_seconds",
+        "kruxiaflow_queue_claim_seconds",
         "Activity queue claim time"
     ).unwrap();
 }

@@ -1,6 +1,6 @@
 # Performance Reports Index
 
-This directory contains unified performance reports for StreamFlow benchmarks.
+This directory contains unified performance reports for Kruxia Flow benchmarks.
 
 ---
 

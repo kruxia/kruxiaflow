@@ -1,12 +1,12 @@
-# StreamFlow Development Guidelines for Claude
+# Kruxia Flow Development Guidelines for Claude
 
-This document contains guidelines and best practices for AI assistants (Claude) working on the StreamFlow codebase.
+This document contains guidelines and best practices for AI assistants (Claude) working on the Kruxia Flow codebase.
 
 ## Documentation Standards
 
 ### Mermaid Diagrams
 
-- **Use Mermaid for all diagrams in markdown files**: StreamFlow uses Mermaid.js for code-based diagramming
+- **Use Mermaid for all diagrams in markdown files**: Kruxia Flow uses Mermaid.js for code-based diagramming
 - **GitHub native support**: Mermaid diagrams render automatically in GitHub markdown
 - **mdBook support**: Configured via `mdbook-mermaid` preprocessor
 - **Syntax**: Use fenced code blocks with `mermaid` language identifier
@@ -119,7 +119,7 @@ All external infrastructure dependencies are wrapped in service interfaces:
 
 - **Environment variables and CLI parameters only** - no .env files, TOML, or config files
 - CLI parameters take precedence over environment variables
-- All services configurable via `STREAMFLOW_*` environment variables
+- All services configurable via `KRUXIAFLOW_*` environment variables
 
 ### Optimization Scope
 

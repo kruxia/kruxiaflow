@@ -3,15 +3,15 @@ use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
-use streamflow_core::events::{
+use kruxiaflow_core::events::{
     EventSource, NewWorkflowEvent, PostgresEventSource, WorkflowEventType,
 };
-use streamflow_core::orchestrator::{
+use kruxiaflow_core::orchestrator::{
     OrchestratorConfig,
     workflow_state::{WorkflowActivityStatus, load_materialized_state},
 };
-use streamflow_core::queue::{PostgresQueue, QueueConfig};
-use streamflow_core::workflow::{
+use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
+use kruxiaflow_core::workflow::{
     ActivityDefinition, ActivityRelationship, ActivitySettings, BudgetAction, BudgetSettings,
     WorkflowDefinition,
 };
@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 async fn setup_test_db() -> PgPool {
     let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://localhost/streamflow_test".to_string());
+        .unwrap_or_else(|_| "postgres://localhost/kruxiaflow_test".to_string());
 
     let pool = PgPool::connect(&database_url)
         .await
@@ -126,7 +126,7 @@ async fn test_simple_loop_workflow() {
         cleanup_interval: Duration::from_secs(60),
         vacuum_interval: Duration::from_secs(3600),
     };
-    let activity_queue: Arc<dyn streamflow_core::queue::ActivityQueue> =
+    let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config.clone()));
 
     // Publish WorkflowCreated event
@@ -158,7 +158,7 @@ async fn test_simple_loop_workflow() {
     assert!(!events.is_empty(), "Should have WorkflowCreated event");
 
     for event in events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             &event,
             &event_source,
             &activity_queue,
@@ -203,7 +203,7 @@ async fn test_simple_loop_workflow() {
     // Process the completion event
     let events = event_source.poll("orchestrator").await.unwrap();
     for event in events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             &event,
             &event_source,
             &activity_queue,
@@ -250,7 +250,7 @@ async fn test_simple_loop_workflow() {
     // Process the check completion
     let events = event_source.poll("orchestrator").await.unwrap();
     for event in events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             &event,
             &event_source,
             &activity_queue,
@@ -320,7 +320,7 @@ async fn test_loop_max_iterations_enforced() {
         cleanup_interval: Duration::from_secs(60),
         vacuum_interval: Duration::from_secs(3600),
     };
-    let activity_queue: Arc<dyn streamflow_core::queue::ActivityQueue> =
+    let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
 
     // Create workflow
@@ -350,7 +350,7 @@ async fn test_loop_max_iterations_enforced() {
     // Process WorkflowCreated
     let events = event_source.poll("orchestrator").await.unwrap();
     for event in events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             &event,
             &event_source,
             &activity_queue,
@@ -380,7 +380,7 @@ async fn test_loop_max_iterations_enforced() {
 
     let events = event_source.poll("orchestrator").await.unwrap();
     for event in events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             &event,
             &event_source,
             &activity_queue,
@@ -421,7 +421,7 @@ async fn test_loop_max_iterations_enforced() {
 
     let events = event_source.poll("orchestrator").await.unwrap();
     for event in events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             &event,
             &event_source,
             &activity_queue,
@@ -491,7 +491,7 @@ async fn test_iteration_counter_without_scoping() {
         cleanup_interval: Duration::from_secs(60),
         vacuum_interval: Duration::from_secs(3600),
     };
-    let activity_queue: Arc<dyn streamflow_core::queue::ActivityQueue> =
+    let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
 
     event_source
@@ -520,7 +520,7 @@ async fn test_iteration_counter_without_scoping() {
     // Process WorkflowCreated
     let events = event_source.poll("orchestrator").await.unwrap();
     for event in events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             &event,
             &event_source,
             &activity_queue,
@@ -550,7 +550,7 @@ async fn test_iteration_counter_without_scoping() {
 
     let events = event_source.poll("orchestrator").await.unwrap();
     for event in events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             &event,
             &event_source,
             &activity_queue,
@@ -641,7 +641,7 @@ async fn test_iteration_budget_accumulation() {
         cleanup_interval: Duration::from_secs(60),
         vacuum_interval: Duration::from_secs(3600),
     };
-    let activity_queue: Arc<dyn streamflow_core::queue::ActivityQueue> =
+    let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
 
     // Create workflow
@@ -671,7 +671,7 @@ async fn test_iteration_budget_accumulation() {
     // Process WorkflowCreated
     let events = event_source.poll("orchestrator").await.unwrap();
     for event in events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             &event,
             &event_source,
             &activity_queue,
@@ -703,7 +703,7 @@ async fn test_iteration_budget_accumulation() {
 
     let events = event_source.poll("orchestrator").await.unwrap();
     for event in events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             &event,
             &event_source,
             &activity_queue,
@@ -747,7 +747,7 @@ async fn test_iteration_budget_accumulation() {
 
     let events = event_source.poll("orchestrator").await.unwrap();
     for event in events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             &event,
             &event_source,
             &activity_queue,
@@ -822,7 +822,7 @@ async fn test_loop_pattern_1_fixed_iterations() {
         cleanup_interval: Duration::from_secs(60),
         vacuum_interval: Duration::from_secs(3600),
     };
-    let activity_queue: Arc<dyn streamflow_core::queue::ActivityQueue> =
+    let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
 
     // Create and execute workflow
@@ -852,7 +852,7 @@ async fn test_loop_pattern_1_fixed_iterations() {
     // Process WorkflowCreated
     let events = event_source.poll("orchestrator").await.unwrap();
     for event in events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             &event,
             &event_source,
             &activity_queue,
@@ -883,7 +883,7 @@ async fn test_loop_pattern_1_fixed_iterations() {
 
         let events = event_source.poll("orchestrator").await.unwrap();
         for event in events {
-            streamflow_core::orchestrator::orchestrator::process_workflow_event(
+            kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
                 &event,
                 &event_source,
                 &activity_queue,
@@ -985,7 +985,7 @@ async fn test_loop_pattern_2_condition_only() {
         cleanup_interval: Duration::from_secs(60),
         vacuum_interval: Duration::from_secs(3600),
     };
-    let activity_queue: Arc<dyn streamflow_core::queue::ActivityQueue> =
+    let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
 
     event_source
@@ -1014,7 +1014,7 @@ async fn test_loop_pattern_2_condition_only() {
     // Process WorkflowCreated
     let events = event_source.poll("orchestrator").await.unwrap();
     for event in events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             &event,
             &event_source,
             &activity_queue,
@@ -1046,7 +1046,7 @@ async fn test_loop_pattern_2_condition_only() {
 
         let events = event_source.poll("orchestrator").await.unwrap();
         for event in events {
-            streamflow_core::orchestrator::orchestrator::process_workflow_event(
+            kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
                 &event,
                 &event_source,
                 &activity_queue,
@@ -1076,7 +1076,7 @@ async fn test_loop_pattern_2_condition_only() {
 
         let events = event_source.poll("orchestrator").await.unwrap();
         for event in events {
-            streamflow_core::orchestrator::orchestrator::process_workflow_event(
+            kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
                 &event,
                 &event_source,
                 &activity_queue,
@@ -1107,7 +1107,7 @@ async fn test_loop_pattern_2_condition_only() {
 
     let events = event_source.poll("orchestrator").await.unwrap();
     for event in events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             &event,
             &event_source,
             &activity_queue,
@@ -1136,7 +1136,7 @@ async fn test_loop_pattern_2_condition_only() {
 
     let events = event_source.poll("orchestrator").await.unwrap();
     for event in events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             &event,
             &event_source,
             &activity_queue,

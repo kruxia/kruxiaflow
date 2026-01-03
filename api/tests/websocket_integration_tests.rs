@@ -14,10 +14,10 @@ use sqlx::PgPool;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use streamflow_api::{AppState, AppStateBuild, app_router};
-use streamflow_core::events::PostgresEventSource;
-use streamflow_core::queue::{PostgresQueue, QueueConfig};
-use streamflow_oauth::{AuthConfig, PostgresAuthService};
+use kruxiaflow_api::{AppState, AppStateBuild, app_router};
+use kruxiaflow_core::events::PostgresEventSource;
+use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
+use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use tokio::net::TcpListener;
 use tokio::time::timeout;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -31,7 +31,7 @@ use uuid::Uuid;
 /// Helper to create test database pool
 async fn setup_test_pool() -> PgPool {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
     });
 
     let pool = PgPool::connect(&database_url)
@@ -85,8 +85,8 @@ async fn setup_test_state() -> AppState {
 
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
-    let workflow_storage = Arc::new(streamflow_core::storage::PostgresStorage::new(pool.clone()));
-    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    let workflow_storage = Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone()));
+    let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
 
     AppState::with_metadata(
         pool,
@@ -247,7 +247,7 @@ async fn test_websocket_receives_broadcast_token() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Broadcast a token message
-    let msg = streamflow_api::StreamMessage::token("Hello", 0);
+    let msg = kruxiaflow_api::StreamMessage::token("Hello", 0);
     let count = connection_manager.broadcast(activity_id, msg).await;
     assert_eq!(count, 1, "Should have 1 connection");
 
@@ -293,7 +293,7 @@ async fn test_websocket_receives_complete_message() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Broadcast a complete message
-    let msg = streamflow_api::StreamMessage::complete(
+    let msg = kruxiaflow_api::StreamMessage::complete(
         activity_id,
         serde_json::json!({"output": "Final result"}),
     );
@@ -341,7 +341,7 @@ async fn test_websocket_receives_error_message() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Broadcast an error message
-    let msg = streamflow_api::StreamMessage::error(activity_id, "LLM provider timeout");
+    let msg = kruxiaflow_api::StreamMessage::error(activity_id, "LLM provider timeout");
     connection_manager.broadcast(activity_id, msg).await;
 
     // Receive the message
@@ -394,7 +394,7 @@ async fn test_websocket_multiple_connections_same_activity() {
     assert_eq!(count, 3, "Should have 3 connections");
 
     // Broadcast a message
-    let msg = streamflow_api::StreamMessage::token("broadcast", 0);
+    let msg = kruxiaflow_api::StreamMessage::token("broadcast", 0);
     let delivered = connection_manager.broadcast(activity_id, msg).await;
     assert_eq!(delivered, 3, "Should deliver to 3 connections");
 
@@ -447,7 +447,7 @@ async fn test_websocket_different_activities_isolated() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Broadcast to activity1 only
-    let msg = streamflow_api::StreamMessage::token("for-activity-1", 0);
+    let msg = kruxiaflow_api::StreamMessage::token("for-activity-1", 0);
     connection_manager.broadcast(activity1, msg).await;
 
     // ws1 should receive it
@@ -537,7 +537,7 @@ async fn test_websocket_cleanup_on_client_disconnect() {
 
     // Connection should be cleaned up
     // Note: Cleanup happens when we try to broadcast and the channel is closed
-    let msg = streamflow_api::StreamMessage::token("test", 0);
+    let msg = kruxiaflow_api::StreamMessage::token("test", 0);
     connection_manager.broadcast(activity_id, msg).await;
 
     // After failed broadcast, connection should be removed
@@ -588,7 +588,7 @@ async fn test_websocket_many_concurrent_connections() {
     );
 
     // Broadcast a message
-    let msg = streamflow_api::StreamMessage::token("concurrent-test", 0);
+    let msg = kruxiaflow_api::StreamMessage::token("concurrent-test", 0);
     let delivered = connection_manager.broadcast(activity_id, msg).await;
     assert_eq!(
         delivered, num_connections,
@@ -994,7 +994,7 @@ async fn test_websocket_message_ordering() {
 
     // Send multiple tokens in order
     for i in 0..10 {
-        let msg = streamflow_api::StreamMessage::token(format!("token-{}", i), i);
+        let msg = kruxiaflow_api::StreamMessage::token(format!("token-{}", i), i);
         connection_manager.broadcast(activity_id, msg).await;
     }
 

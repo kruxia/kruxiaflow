@@ -33,42 +33,42 @@ class ResourceStats:
 
 # Container name patterns for each platform
 PLATFORM_CONTAINERS = {
-    "StreamFlow": [
-        "streamflow-1",
-        "streamflow_streamflow_1",
-        "streamflow",
-        "streamflow-postgres-1",
-        "streamflow_streamflow-postgres_1",
-        "streamflow-postgres",
+    "Kruxia Flow": [
+        "kruxiaflow-1",
+        "kruxiaflow_kruxiaflow_1",
+        "kruxiaflow",
+        "kruxiaflow-postgres-1",
+        "kruxiaflow_kruxiaflow-postgres_1",
+        "kruxiaflow-postgres",
     ],
     "Temporal": [
         "temporal-1",
-        "streamflow_temporal_1",
+        "kruxiaflow_temporal_1",
         "temporal",
         "temporal-postgres-1",
-        "streamflow_temporal-postgres_1",
+        "kruxiaflow_temporal-postgres_1",
         "temporal-postgres",
     ],
     "Airflow": [
         "airflow-api-server-1",
-        "streamflow_airflow-api-server_1",
+        "kruxiaflow_airflow-api-server_1",
         "airflow-api-server",
         "airflow-scheduler-1",
-        "streamflow_airflow-scheduler_1",
+        "kruxiaflow_airflow-scheduler_1",
         "airflow-scheduler",
         "airflow-dag-processor-1",
-        "streamflow_airflow-dag-processor_1",
+        "kruxiaflow_airflow-dag-processor_1",
         "airflow-dag-processor",
         "airflow-worker-1",
-        "streamflow_airflow-worker_1",
+        "kruxiaflow_airflow-worker_1",
         "airflow-worker",
         "airflow-worker-2",
-        "streamflow_airflow-worker_2",
+        "kruxiaflow_airflow-worker_2",
         "airflow-postgres-1",
-        "streamflow_airflow-postgres_1",
+        "kruxiaflow_airflow-postgres_1",
         "airflow-postgres",
         "airflow-redis-1",
-        "streamflow_airflow-redis_1",
+        "kruxiaflow_airflow-redis_1",
         "airflow-redis",
     ],
 }
@@ -82,7 +82,7 @@ class ResourceMonitor:
         Initialize resource monitor.
 
         Args:
-            platform: Platform name ("StreamFlow", "Temporal", "Airflow")
+            platform: Platform name ("Kruxia Flow", "Temporal", "Airflow")
             sample_interval: Seconds between samples (default 0.5s)
         """
         self.platform = platform

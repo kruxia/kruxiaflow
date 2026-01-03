@@ -1006,7 +1006,7 @@ activities:
 JavaScript WebSocket client example:
 
 ```javascript
-// StreamFlow Token Streaming Client Example
+// Kruxia Flow Token Streaming Client Example
 // Connects to activity WebSocket and displays tokens in real-time
 
 const WebSocket = require('ws');

@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use std::sync::Arc;
-use streamflow_core::cache::CacheService;
+use kruxiaflow_core::cache::CacheService;
 
 /// Cache configuration
 #[derive(Debug, Clone)]
@@ -18,13 +18,13 @@ pub struct CacheConfig {
 impl CacheConfig {
     /// Create CacheConfig with precedence: Environment variables > Defaults
     pub fn new() -> Self {
-        let provider = std::env::var("STREAMFLOW_CACHE_PROVIDER")
+        let provider = std::env::var("KRUXIAFLOW_CACHE_PROVIDER")
             .unwrap_or_else(|_| "noop".to_string())
             .to_lowercase();
 
-        let redis_url = std::env::var("STREAMFLOW_REDIS_URL").ok();
+        let redis_url = std::env::var("KRUXIAFLOW_REDIS_URL").ok();
 
-        let redis_key_prefix = std::env::var("STREAMFLOW_REDIS_KEY_PREFIX").ok();
+        let redis_key_prefix = std::env::var("KRUXIAFLOW_REDIS_KEY_PREFIX").ok();
 
         Self {
             provider,
@@ -39,7 +39,7 @@ impl CacheConfig {
             "redis" => self.create_redis_cache(),
             _ => {
                 tracing::info!("Cache disabled (using NoOpCache)");
-                Arc::new(streamflow_core::NoOpCache::new())
+                Arc::new(kruxiaflow_core::NoOpCache::new())
             }
         }
     }
@@ -51,7 +51,7 @@ impl CacheConfig {
             .as_deref()
             .unwrap_or("redis://localhost:6379");
 
-        match streamflow_core::RedisCache::new(redis_url, self.redis_key_prefix.clone()) {
+        match kruxiaflow_core::RedisCache::new(redis_url, self.redis_key_prefix.clone()) {
             Ok(cache) => {
                 // Test connectivity
                 match tokio::runtime::Runtime::new()
@@ -70,7 +70,7 @@ impl CacheConfig {
                             error = %e,
                             "Redis ping failed, falling back to NoOpCache"
                         );
-                        Arc::new(streamflow_core::NoOpCache::new())
+                        Arc::new(kruxiaflow_core::NoOpCache::new())
                     }
                 }
             }
@@ -79,7 +79,7 @@ impl CacheConfig {
                     error = %e,
                     "Failed to create Redis cache, falling back to NoOpCache"
                 );
-                Arc::new(streamflow_core::NoOpCache::new())
+                Arc::new(kruxiaflow_core::NoOpCache::new())
             }
         }
     }
@@ -89,7 +89,7 @@ impl CacheConfig {
         tracing::warn!(
             "Redis caching requested but redis-cache feature not enabled, falling back to NoOpCache"
         );
-        Arc::new(streamflow_core::NoOpCache::new())
+        Arc::new(kruxiaflow_core::NoOpCache::new())
     }
 
     /// Redact password from Redis URL for logging
@@ -152,7 +152,7 @@ impl ApiConfig {
         // Port: CLI > Env > Default (8080)
         let port = port_cli
             .or_else(|| {
-                std::env::var("STREAMFLOW_API_PORT")
+                std::env::var("KRUXIAFLOW_API_PORT")
                     .ok()
                     .and_then(|s| s.parse().ok())
             })
@@ -160,7 +160,7 @@ impl ApiConfig {
 
         // Bind address: CLI > Env > Default (0.0.0.0)
         let bind = bind_cli
-            .or_else(|| std::env::var("STREAMFLOW_API_BIND").ok())
+            .or_else(|| std::env::var("KRUXIAFLOW_API_BIND").ok())
             .unwrap_or_else(|| "0.0.0.0".to_string());
 
         // Validate configuration
@@ -216,9 +216,9 @@ mod tests {
     fn test_cache_config_default_provider() {
         // Clean environment
         unsafe {
-            std::env::remove_var("STREAMFLOW_CACHE_PROVIDER");
-            std::env::remove_var("STREAMFLOW_REDIS_URL");
-            std::env::remove_var("STREAMFLOW_REDIS_KEY_PREFIX");
+            std::env::remove_var("KRUXIAFLOW_CACHE_PROVIDER");
+            std::env::remove_var("KRUXIAFLOW_REDIS_URL");
+            std::env::remove_var("KRUXIAFLOW_REDIS_KEY_PREFIX");
         }
 
         let config = CacheConfig::new();
@@ -232,9 +232,9 @@ mod tests {
     #[serial]
     fn test_cache_config_from_environment() {
         unsafe {
-            std::env::set_var("STREAMFLOW_CACHE_PROVIDER", "Redis"); // Mixed case
-            std::env::set_var("STREAMFLOW_REDIS_URL", "redis://localhost:6380");
-            std::env::set_var("STREAMFLOW_REDIS_KEY_PREFIX", "test:");
+            std::env::set_var("KRUXIAFLOW_CACHE_PROVIDER", "Redis"); // Mixed case
+            std::env::set_var("KRUXIAFLOW_REDIS_URL", "redis://localhost:6380");
+            std::env::set_var("KRUXIAFLOW_REDIS_KEY_PREFIX", "test:");
         }
 
         let config = CacheConfig::new();
@@ -245,9 +245,9 @@ mod tests {
 
         // Clean up
         unsafe {
-            std::env::remove_var("STREAMFLOW_CACHE_PROVIDER");
-            std::env::remove_var("STREAMFLOW_REDIS_URL");
-            std::env::remove_var("STREAMFLOW_REDIS_KEY_PREFIX");
+            std::env::remove_var("KRUXIAFLOW_CACHE_PROVIDER");
+            std::env::remove_var("KRUXIAFLOW_REDIS_URL");
+            std::env::remove_var("KRUXIAFLOW_REDIS_KEY_PREFIX");
         }
     }
 
@@ -255,9 +255,9 @@ mod tests {
     #[serial]
     fn test_cache_config_default_is_same_as_new() {
         unsafe {
-            std::env::remove_var("STREAMFLOW_CACHE_PROVIDER");
-            std::env::remove_var("STREAMFLOW_REDIS_URL");
-            std::env::remove_var("STREAMFLOW_REDIS_KEY_PREFIX");
+            std::env::remove_var("KRUXIAFLOW_CACHE_PROVIDER");
+            std::env::remove_var("KRUXIAFLOW_REDIS_URL");
+            std::env::remove_var("KRUXIAFLOW_REDIS_KEY_PREFIX");
         }
 
         let config_new = CacheConfig::new();
@@ -313,7 +313,7 @@ mod tests {
     #[serial]
     fn test_cache_config_create_noop_cache() {
         unsafe {
-            std::env::remove_var("STREAMFLOW_CACHE_PROVIDER");
+            std::env::remove_var("KRUXIAFLOW_CACHE_PROVIDER");
         }
 
         let config = CacheConfig::new();
@@ -388,8 +388,8 @@ mod tests {
     fn test_cli_overrides_env() {
         unsafe {
             std::env::set_var("DATABASE_URL", "postgres://localhost/env_db");
-            std::env::set_var("STREAMFLOW_API_PORT", "9090");
-            std::env::set_var("STREAMFLOW_API_BIND", "127.0.0.1");
+            std::env::set_var("KRUXIAFLOW_API_PORT", "9090");
+            std::env::set_var("KRUXIAFLOW_API_BIND", "127.0.0.1");
         }
 
         let config = ApiConfig::new(
@@ -406,8 +406,8 @@ mod tests {
         // Clean up
         unsafe {
             std::env::remove_var("DATABASE_URL");
-            std::env::remove_var("STREAMFLOW_API_PORT");
-            std::env::remove_var("STREAMFLOW_API_BIND");
+            std::env::remove_var("KRUXIAFLOW_API_PORT");
+            std::env::remove_var("KRUXIAFLOW_API_BIND");
         }
     }
 
@@ -416,8 +416,8 @@ mod tests {
     fn test_env_overrides_defaults() {
         unsafe {
             std::env::set_var("DATABASE_URL", "postgres://localhost/test");
-            std::env::set_var("STREAMFLOW_API_PORT", "9000");
-            std::env::set_var("STREAMFLOW_API_BIND", "localhost");
+            std::env::set_var("KRUXIAFLOW_API_PORT", "9000");
+            std::env::set_var("KRUXIAFLOW_API_BIND", "localhost");
         }
 
         let config = ApiConfig::new(None, None, None).unwrap();
@@ -428,8 +428,8 @@ mod tests {
         // Clean up
         unsafe {
             std::env::remove_var("DATABASE_URL");
-            std::env::remove_var("STREAMFLOW_API_PORT");
-            std::env::remove_var("STREAMFLOW_API_BIND");
+            std::env::remove_var("KRUXIAFLOW_API_PORT");
+            std::env::remove_var("KRUXIAFLOW_API_BIND");
         }
     }
 
@@ -501,7 +501,7 @@ mod tests {
     fn test_invalid_port_from_environment() {
         unsafe {
             std::env::set_var("DATABASE_URL", "postgres://localhost/test");
-            std::env::set_var("STREAMFLOW_API_PORT", "invalid_port");
+            std::env::set_var("KRUXIAFLOW_API_PORT", "invalid_port");
         }
 
         // Invalid port string should fall back to default
@@ -511,7 +511,7 @@ mod tests {
         // Clean up
         unsafe {
             std::env::remove_var("DATABASE_URL");
-            std::env::remove_var("STREAMFLOW_API_PORT");
+            std::env::remove_var("KRUXIAFLOW_API_PORT");
         }
     }
 

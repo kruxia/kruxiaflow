@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-StreamFlow is currently in active development. Security updates are provided for the following versions:
+Kruxia Flow is currently in active development. Security updates are provided for the following versions:
 
 | Version | Supported          |
 |--------:|--------------------|
@@ -47,7 +47,7 @@ We will not pursue civil action or initiate a complaint against researchers who:
 - Avoid privacy violations, destruction of data, and interruption of services
 - Do not exploit vulnerabilities beyond what is necessary to demonstrate the issue
 
-## Security Best Practices for StreamFlow Users
+## Security Best Practices for Kruxia Flow Users
 
 ### Authentication
 
@@ -64,8 +64,8 @@ We will not pursue civil action or initiate a complaint against researchers who:
 ### Deployment
 
 - **HTTPS**: Always use HTTPS in production environments
-- **Firewalls**: Restrict network access to StreamFlow services
-- **Updates**: Keep StreamFlow and dependencies up to date
+- **Firewalls**: Restrict network access to Kruxia Flow services
+- **Updates**: Keep Kruxia Flow and dependencies up to date
 - **Secrets Management**: Use secure secrets management (environment variables, not config files)
 
 ### LLM API Keys
@@ -80,8 +80,8 @@ We will not pursue civil action or initiate a complaint against researchers who:
 ```yaml
 # Example secure Docker Compose configuration
 services:
-  streamflow:
-    image: ghcr.io/kruxia/streamflow:latest
+  kruxiaflow:
+    image: ghcr.io/kruxia/kruxiaflow:latest
     security_opt:
       - no-new-privileges:true
     read_only: true
@@ -114,11 +114,11 @@ services:
 
 Security updates are announced through:
 
-- [GitHub Security Advisories](https://github.com/kruxia/streamflow/security/advisories)
-- [Release Notes](https://github.com/kruxia/streamflow/releases)
+- [GitHub Security Advisories](https://github.com/kruxia/kruxiaflow/security/advisories)
+- [Release Notes](https://github.com/kruxia/kruxiaflow/releases)
 
 ## Contact
 
 For security-related inquiries, contact [security@kruxia.com](mailto:security@kruxia.com).
 
-For general questions, use [GitHub Discussions](https://github.com/kruxia/streamflow/discussions).
+For general questions, use [GitHub Discussions](https://github.com/kruxia/kruxiaflow/discussions).

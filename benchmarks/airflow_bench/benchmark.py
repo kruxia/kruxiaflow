@@ -193,7 +193,7 @@ class AirflowBenchmark:
         max_concurrent: int,
     ) -> "BenchmarkMetrics":
         """Run a benchmark scenario"""
-        from streamflow.benchmark import BenchmarkMetrics, percentile
+        from kruxiaflow.benchmark import BenchmarkMetrics, percentile
 
         semaphore = asyncio.Semaphore(max_concurrent)
         results: list[tuple[bool, float]] = []

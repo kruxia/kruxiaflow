@@ -25,14 +25,14 @@ def generate_html_report(results: list, output_path: Path, timestamp: str = "") 
         scenarios[result.scenario][result.platform] = result
         platforms.add(result.platform)
 
-    # Sort platforms with StreamFlow first
-    platform_order = ["StreamFlow", "Temporal", "Airflow"]
+    # Sort platforms with Kruxia Flow first
+    platform_order = ["Kruxia Flow", "Temporal", "Airflow"]
     platforms = [p for p in platform_order if p in platforms]
 
     html = f"""<!DOCTYPE html>
 <html>
 <head>
-    <title>StreamFlow Benchmark Comparison</title>
+    <title>Kruxia Flow Benchmark Comparison</title>
     <style>
         body {{ font-family: Arial, sans-serif; margin: 40px; background-color: #f8f9fa; }}
         h1 {{ color: #333; margin-bottom: 5px; }}
@@ -62,7 +62,7 @@ def generate_html_report(results: list, output_path: Path, timestamp: str = "") 
     </style>
 </head>
 <body>
-    <h1>StreamFlow Benchmark Comparison</h1>
+    <h1>Kruxia Flow Benchmark Comparison</h1>
     <p class="timestamp">Run timestamp: {display_timestamp}</p>
     <p class="methodology">Methodology: Identical echo workflows executed on the same hardware with sequential benchmark runs.</p>
 """
@@ -138,15 +138,15 @@ def _generate_summary_section(results: list, platforms: list) -> str:
 """
 
     # Show speedup comparisons
-    if "StreamFlow" in platform_stats:
-        sf_throughput = platform_stats["StreamFlow"]["avg_throughput"]
+    if "Kruxia Flow" in platform_stats:
+        sf_throughput = platform_stats["Kruxia Flow"]["avg_throughput"]
 
         for platform in ["Temporal", "Airflow"]:
             if platform in platform_stats and platform_stats[platform]["avg_throughput"] > 0:
                 speedup = sf_throughput / platform_stats[platform]["avg_throughput"]
                 html += f"""
             <div class="summary-item">
-                <div class="label">StreamFlow vs {platform}</div>
+                <div class="label">Kruxia Flow vs {platform}</div>
                 <div class="value">{speedup:.1f}x faster</div>
             </div>
 """
@@ -247,12 +247,12 @@ def _generate_scenario_table(scenario_name: str, scenario_results: dict, platfor
             html += "                    <td>-</td>\n"
     html += "                </tr>\n"
 
-    # Speedup comparison row (relative to StreamFlow)
-    if "StreamFlow" in scenario_results and len(scenario_results) > 1:
-        sf_throughput = scenario_results["StreamFlow"].throughput_wf_per_sec
+    # Speedup comparison row (relative to Kruxia Flow)
+    if "Kruxia Flow" in scenario_results and len(scenario_results) > 1:
+        sf_throughput = scenario_results["Kruxia Flow"].throughput_wf_per_sec
         html += '                <tr class="metric-header">\n                    <td>Speedup vs Others</td>\n'
         for platform in platforms:
-            if platform == "StreamFlow":
+            if platform == "Kruxia Flow":
                 html += "                    <td>baseline</td>\n"
             elif platform in scenario_results and scenario_results[platform].throughput_wf_per_sec > 0:
                 speedup = sf_throughput / scenario_results[platform].throughput_wf_per_sec
@@ -406,11 +406,11 @@ def _generate_averages_table(results: list, platforms: list) -> str:
     html += "            </tr>\n"
 
     # Speedup comparison row
-    if "StreamFlow" in platform_stats and len(platform_stats) > 1:
-        sf_throughput = platform_stats["StreamFlow"]["avg_throughput"]
+    if "Kruxia Flow" in platform_stats and len(platform_stats) > 1:
+        sf_throughput = platform_stats["Kruxia Flow"]["avg_throughput"]
         html += '            <tr class="metric-header">\n                <td>Avg Speedup vs Others</td>\n'
         for platform in platforms:
-            if platform == "StreamFlow":
+            if platform == "Kruxia Flow":
                 html += "                <td>baseline</td>\n"
             elif platform in platform_stats and platform_stats[platform]["avg_throughput"] > 0:
                 speedup = sf_throughput / platform_stats[platform]["avg_throughput"]

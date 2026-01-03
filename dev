@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# StreamFlow Docker Compose Launcher
+# Kruxia Flow Docker Compose Launcher
 #
 # Single-command local deployment with automatic secret generation.
 # Secrets are generated on first run and stored in .env (gitignored).
@@ -53,12 +53,12 @@ has_flag() {
 # Show help
 show_help() {
     cat << 'EOF'
-StreamFlow Docker Compose Launcher
+Kruxia Flow Docker Compose Launcher
 
 Usage: ./dev <command> [options]
 
 Commands:
-  up [--profile NAME]    Start StreamFlow (default profile: develop)
+  up [--profile NAME]    Start Kruxia Flow (default profile: develop)
   down                   Stop all services
   logs [-f]              Show logs (use -f to follow)
   ps                     Show running containers

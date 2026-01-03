@@ -84,7 +84,7 @@ examples/
 The README.md in the examples directory provides:
 - Overview of the examples collection
 - Table mapping each example to the features it demonstrates
-- Instructions for running examples (`streamflow test examples/XX-*.yaml`)
+- Instructions for running examples (`kruxiaflow test examples/XX-*.yaml`)
 - Links to relevant documentation sections
 - Prerequisites for running examples (e.g., API keys, test services)
 
@@ -118,7 +118,7 @@ activities:
       method: GET
       url: "https://api.weather.gov/gridpoints/TOP/31,80/forecast"
       headers:
-        User-Agent: "StreamFlow/0.2"
+        User-Agent: "Kruxia Flow/0.2"
     outputs:
       - forecast
 
@@ -1975,7 +1975,7 @@ activities:
           <p>If you have any questions, please contact our support team.</p>
 
           <p style="color: #666; font-size: 12px; margin-top: 30px;">
-            This is an automated message from StreamFlow Order Processing.
+            This is an automated message from Kruxia Flow Order Processing.
           </p>
         </body>
         </html>
@@ -2108,7 +2108,7 @@ activities:
       region: "us-east-1"
       file: "{{FILE.transform_data.transformed_data}}"
       metadata:
-        source: "streamflow-etl"
+        source: "kruxiaflow-etl"
         row_count: "{{validate_output.validation_result.row_count}}"
     depends_on:
       - validate_output
@@ -2263,13 +2263,13 @@ impl CleanupWorker {
 **3. Configuration (Environment Variables)**
 
 ```bash
-STREAMFLOW_CLEANUP_ENABLED=true
-STREAMFLOW_CLEANUP_WORKFLOW_TTL_DAYS=7
-STREAMFLOW_CLEANUP_INTERVAL_HOURS=1
-STREAMFLOW_CLEANUP_BATCH_SIZE=1000
+KRUXIAFLOW_CLEANUP_ENABLED=true
+KRUXIAFLOW_CLEANUP_WORKFLOW_TTL_DAYS=7
+KRUXIAFLOW_CLEANUP_INTERVAL_HOURS=1
+KRUXIAFLOW_CLEANUP_BATCH_SIZE=1000
 ```
 
-**4. Integration with `streamflow serve`**
+**4. Integration with `kruxiaflow serve`**
 
 Launch cleanup worker alongside orchestrator and API server:
 
@@ -2280,8 +2280,8 @@ tokio::spawn(cleanup_worker.run());
 **5. Observability**
 
 - Log cleanup operations with deleted count
-- Metrics: `streamflow_cleanup_workflows_deleted_total`
-- Metrics: `streamflow_cleanup_last_run_timestamp_seconds`
+- Metrics: `kruxiaflow_cleanup_workflows_deleted_total`
+- Metrics: `kruxiaflow_cleanup_last_run_timestamp_seconds`
 
 #### Success Criteria
 

@@ -1,18 +1,18 @@
 #!/bin/bash
 #
-# StreamFlow Internal Profiling Runner
+# Kruxia Flow Internal Profiling Runner
 #
 # Assumes:
 #   - PostgreSQL database is running and migrations are complete
-#   - StreamFlow server is already running
-#   - OAuth client credentials are set in environment (STREAMFLOW_CLIENT_ID, STREAMFLOW_CLIENT_SECRET)
+#   - Kruxia Flow server is already running
+#   - OAuth client credentials are set in environment (KRUXIAFLOW_CLIENT_ID, KRUXIAFLOW_CLIENT_SECRET)
 #
 # Usage:
 #   ./scripts/profiling.sh [OPTIONS]
 #
 # Options:
 #   --help, -h              Show this help message
-#   --port PORT             StreamFlow server port (default: 8080)
+#   --port PORT             Kruxia Flow server port (default: 8080)
 #   --test TEST_NAME        Run specific benchmark test
 #   --nocapture             Don't capture test output
 #   --verbose, -v           Verbose output
@@ -102,7 +102,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-echo -e "${YELLOW}StreamFlow Internal Profiling Runner${NC}"
+echo -e "${YELLOW}Kruxia Flow Internal Profiling Runner${NC}"
 echo "========================================"
 
 # Create directory first, then resolve to absolute path
@@ -113,20 +113,20 @@ echo -e "${BLUE}Output directory: $OUTPUT_DIR${NC}"
 
 # Configure tracing level for performance analysis
 echo -e "${BLUE}Configuring tracing level: $TRACE_LEVEL${NC}"
-export RUST_LOG="info,streamflow=$TRACE_LEVEL,sqlx=info"
+export RUST_LOG="info,kruxiaflow=$TRACE_LEVEL,sqlx=info"
 export RUST_BACKTRACE=1
-export STREAMFLOW_LOG_LEVEL="$TRACE_LEVEL"
+export KRUXIAFLOW_LOG_LEVEL="$TRACE_LEVEL"
 echo -e "${BLUE}Tracing configured (RUST_LOG=$RUST_LOG)${NC}"
 
 # Check required environment variables
-if [ -z "$STREAMFLOW_CLIENT_ID" ]; then
-    echo -e "${RED}Error: STREAMFLOW_CLIENT_ID environment variable not set${NC}"
+if [ -z "$KRUXIAFLOW_CLIENT_ID" ]; then
+    echo -e "${RED}Error: KRUXIAFLOW_CLIENT_ID environment variable not set${NC}"
     echo "Please set OAuth client credentials in your environment"
     exit 1
 fi
 
-if [ -z "$STREAMFLOW_CLIENT_SECRET" ]; then
-    echo -e "${RED}Error: STREAMFLOW_CLIENT_SECRET environment variable not set${NC}"
+if [ -z "$KRUXIAFLOW_CLIENT_SECRET" ]; then
+    echo -e "${RED}Error: KRUXIAFLOW_CLIENT_SECRET environment variable not set${NC}"
     echo "Please set OAuth client credentials in your environment"
     exit 1
 fi
@@ -135,8 +135,8 @@ if [ -z "$DATABASE_URL" ]; then
     echo -e "${RED}Error: DATABASE_URL environment variable not set${NC}"
     echo "Please set DATABASE_URL in your environment"
     exit 1
-elif [[ ! "$DATABASE_URL" =~ "streamflow_profiling" ]]; then
-    DATABASE_URL="${DATABASE_URL%/*}/streamflow_profiling"
+elif [[ ! "$DATABASE_URL" =~ "kruxiaflow_profiling" ]]; then
+    DATABASE_URL="${DATABASE_URL%/*}/kruxiaflow_profiling"
 fi
 
 # Extract database name from DATABASE_URL
@@ -145,7 +145,7 @@ DB_NAME="${DATABASE_URL##*/}"
 # Verify server is accessible
 echo -e "${YELLOW}Verifying server is running...${NC}"
 if ! curl -f http://localhost:${PORT}/health > /dev/null 2>&1; then
-    echo -e "${RED}Error: StreamFlow server not accessible at http://localhost:${PORT}${NC}"
+    echo -e "${RED}Error: Kruxia Flow server not accessible at http://localhost:${PORT}${NC}"
     echo "Please start the server before running benchmarks"
     exit 1
 fi
@@ -157,12 +157,12 @@ echo -e "${YELLOW}Initializing for benchmark suite...${NC}"
 
 # Reset pg_stat_statements for clean measurement
 echo -e "${BLUE}Resetting pg_stat_statements...${NC}"
-docker exec streamflow-postgres psql -U streamflow -d ${DB_NAME} -c "SELECT pg_stat_statements_reset();" 2>/dev/null || true
+docker exec kruxiaflow-postgres psql -U kruxiaflow -d ${DB_NAME} -c "SELECT pg_stat_statements_reset();" 2>/dev/null || true
 
 # Truncate tables for clean state before first test
 # Note: Each test will truncate before running, and database state is preserved after each test
 echo -e "${BLUE}Truncating workflow tables for first test...${NC}"
-docker exec streamflow-postgres psql -U streamflow -d ${DB_NAME} -c "
+docker exec kruxiaflow-postgres psql -U kruxiaflow -d ${DB_NAME} -c "
     TRUNCATE TABLE workflow_events CASCADE;
     TRUNCATE TABLE activity_queue CASCADE;
     TRUNCATE TABLE workflows CASCADE;
@@ -183,13 +183,13 @@ else
 fi
 
 # Set base URL and sustained load duration for benchmarks
-export STREAMFLOW_BASE_URL="http://localhost:${PORT}"
+export KRUXIAFLOW_BASE_URL="http://localhost:${PORT}"
 export SUSTAINED_LOAD_DURATION_SECS="${SUSTAINED_DURATION}"
 
 # Register workflow definitions
 echo ""
 echo -e "${YELLOW}Registering workflow definitions...${NC}"
-if cargo run --package streamflow-profiling --bin register-workflows 2>&1; then
+if cargo run --package kruxiaflow-profiling --bin register-workflows 2>&1; then
     echo -e "${GREEN}Workflow definitions registered successfully${NC}"
 else
     echo -e "${RED}Error: Failed to register workflow definitions${NC}"
@@ -219,7 +219,7 @@ else
 fi
 
 # Build base command
-BASE_CMD="cargo test --package streamflow-profiling --test load_tests --release"
+BASE_CMD="cargo test --package kruxiaflow-profiling --test load_tests --release"
 
 if [ -n "$VERBOSE" ]; then
     BASE_CMD="$BASE_CMD $VERBOSE"
@@ -243,7 +243,7 @@ for test_name in "${TESTS_TO_RUN[@]}"; do
 
     # Clean database BEFORE each test to ensure clean state
     echo -e "${BLUE}Truncating database before test...${NC}"
-    docker exec streamflow-postgres psql -U streamflow -d ${DB_NAME} -c "
+    docker exec kruxiaflow-postgres psql -U kruxiaflow -d ${DB_NAME} -c "
         TRUNCATE TABLE workflow_events CASCADE;
         TRUNCATE TABLE activity_queue CASCADE;
         TRUNCATE TABLE workflows CASCADE;
@@ -281,11 +281,11 @@ echo -e "${YELLOW}========================================${NC}"
 echo -e "${YELLOW}All tests completed${NC}"
 echo -e "${YELLOW}========================================${NC}"
 
-# Capture StreamFlow server logs
+# Capture Kruxia Flow server logs
 if [ "$BUILD_MODE" == "profiling" ]; then
-    CONTAINER_NAME="streamflow-profiling"
+    CONTAINER_NAME="kruxiaflow-profiling"
 else
-    CONTAINER_NAME="streamflow"
+    CONTAINER_NAME="kruxiaflow"
 fi
 echo ""
 echo -e "${YELLOW}Capturing server logs...${NC}"
@@ -322,17 +322,17 @@ echo ""
 echo -e "${YELLOW}Collecting PostgreSQL query statistics...${NC}"
 
 # Ensure pg_stat_statements extension exists
-docker exec streamflow-postgres psql -U streamflow -d ${DB_NAME} -c "
+docker exec kruxiaflow-postgres psql -U kruxiaflow -d ${DB_NAME} -c "
     CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 " > /dev/null 2>&1
 
 # Check if extension was created successfully
-if docker exec streamflow-postgres psql -U streamflow -d ${DB_NAME} -c "
+if docker exec kruxiaflow-postgres psql -U kruxiaflow -d ${DB_NAME} -c "
     SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements';
 " 2>/dev/null | grep -q "1"; then
     # Get slow queries using psql inside the Docker container
     # Note: Using 0.01ms threshold to capture queries (most queries are sub-millisecond now)
-    docker exec streamflow-postgres psql -U streamflow -d ${DB_NAME} -c "
+    docker exec kruxiaflow-postgres psql -U kruxiaflow -d ${DB_NAME} -c "
         SELECT
             query,
             calls,
@@ -467,18 +467,18 @@ else
     echo -e "${YELLOW}Note: No results.json generated (tests may have failed or been skipped)${NC}"
 fi
 
-# Run streamflow profile command for comprehensive database profiling
+# Run kruxiaflow profile command for comprehensive database profiling
 echo ""
 echo -e "${YELLOW}Running database performance profiling...${NC}"
 
-# Build the streamflow binary if needed (use release for accuracy)
-if cargo build --package streamflow --release 2>/dev/null; then
-    STREAMFLOW_BIN="${PROJECT_DIR}/target/release/streamflow"
+# Build the kruxiaflow binary if needed (use release for accuracy)
+if cargo build --package kruxiaflow --release 2>/dev/null; then
+    KRUXIAFLOW_BIN="${PROJECT_DIR}/target/release/kruxiaflow"
 
     # Generate JSON profile with EXPLAIN ANALYZE
     # Note: stderr goes to log file, only stdout (JSON) goes to output file
     echo -e "${BLUE}Generating JSON profile with execution plans...${NC}"
-    if $STREAMFLOW_BIN profile --explain --format json > "$OUTPUT_DIR/db_profile.json" 2>"$OUTPUT_DIR/db_profile_errors.log"; then
+    if $KRUXIAFLOW_BIN profile --explain --format json > "$OUTPUT_DIR/db_profile.json" 2>"$OUTPUT_DIR/db_profile_errors.log"; then
         # Validate JSON output (remove any non-JSON lines that might have leaked)
         if python3 -c "import json; json.load(open('$OUTPUT_DIR/db_profile.json'))" 2>/dev/null; then
             echo -e "${GREEN}Database profile (JSON) saved to: $OUTPUT_DIR/db_profile.json${NC}"
@@ -503,7 +503,7 @@ if cargo build --package streamflow --release 2>/dev/null; then
 
     # Generate text profile with verbose output and EXPLAIN ANALYZE
     echo -e "${BLUE}Generating text profile with execution plans...${NC}"
-    if $STREAMFLOW_BIN profile --explain -v > "$OUTPUT_DIR/db_profile.txt" 2>&1; then
+    if $KRUXIAFLOW_BIN profile --explain -v > "$OUTPUT_DIR/db_profile.txt" 2>&1; then
         echo -e "${GREEN}Database profile (text) saved to: $OUTPUT_DIR/db_profile.txt${NC}"
 
         # Display summary of slow queries
@@ -514,7 +514,7 @@ if cargo build --package streamflow --release 2>/dev/null; then
         echo -e "${YELLOW}Note: Database profiling failed${NC}"
     fi
 else
-    echo -e "${YELLOW}Note: Could not build streamflow binary for profiling${NC}"
+    echo -e "${YELLOW}Note: Could not build kruxiaflow binary for profiling${NC}"
 fi
 
 # Compare with baseline if requested
@@ -585,9 +585,9 @@ if [ "$PROFILING_SUCCESS" = true ]; then
     echo "Database State:"
     echo "  The database has NOT been cleaned after the last test."
     echo "  To inspect accumulated data:"
-    echo "    docker exec streamflow-postgres psql -U streamflow -d ${DB_NAME} -c 'SELECT COUNT(*) FROM workflows;'"
-    echo "    docker exec streamflow-postgres psql -U streamflow -d ${DB_NAME} -c 'SELECT COUNT(*) FROM workflow_events;'"
-    echo "    docker exec streamflow-postgres psql -U streamflow -d ${DB_NAME} -c 'SELECT COUNT(*) FROM activity_queue;'"
+    echo "    docker exec kruxiaflow-postgres psql -U kruxiaflow -d ${DB_NAME} -c 'SELECT COUNT(*) FROM workflows;'"
+    echo "    docker exec kruxiaflow-postgres psql -U kruxiaflow -d ${DB_NAME} -c 'SELECT COUNT(*) FROM workflow_events;'"
+    echo "    docker exec kruxiaflow-postgres psql -U kruxiaflow -d ${DB_NAME} -c 'SELECT COUNT(*) FROM activity_queue;'"
 
     exit 0
 else
@@ -595,7 +595,7 @@ else
     echo ""
     echo "Tips for debugging:"
     echo "  - Check profiling output: cat ${OUTPUT_DIR}/profiling-output.txt"
-    echo "  - Verify OAuth credentials are set: echo \$STREAMFLOW_CLIENT_ID"
+    echo "  - Verify OAuth credentials are set: echo \$KRUXIAFLOW_CLIENT_ID"
     echo "  - Verify server is running: curl http://localhost:${PORT}/health"
     echo "  - Check workflow status via API"
 

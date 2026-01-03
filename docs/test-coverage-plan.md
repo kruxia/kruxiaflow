@@ -10,7 +10,7 @@
 
 ## Executive Summary
 
-This plan addresses the test coverage gaps in the StreamFlow codebase, prioritizing critical untested components before improving existing coverage. The plan is organized into 4 phases that will incrementally increase coverage from ~75% to >90%.
+This plan addresses the test coverage gaps in the Kruxia Flow codebase, prioritizing critical untested components before improving existing coverage. The plan is organized into 4 phases that will incrementally increase coverage from ~75% to >90%.
 
 ### Recent Progress
 
@@ -95,7 +95,7 @@ These files contain security-critical code or core orchestration logic with inad
 
 ### 1.4 CLI & Application Entry Points (MEDIUM Priority) ✅ COMPLETED
 
-**File**: `streamflow/src/commands/api.rs`
+**File**: `kruxiaflow/src/commands/api.rs`
 - **Previous**: 0% (0/157 lines)
 - **Current**: 64.97% (102/157 lines) ✅ GOOD
 - **Function Coverage**: 66.67% (12/18 functions)
@@ -110,7 +110,7 @@ These files contain security-critical code or core orchestration logic with inad
   - ✅ Auth configuration from environment
 - **Status**: ✅ COMPLETE - Good coverage for CLI command logic
 
-**File**: `streamflow/src/main.rs`
+**File**: `kruxiaflow/src/main.rs`
 - **Previous**: 0% (0/10 lines)
 - **Current**: 100% (10/10 lines) ✅ PERFECT
 - **Function Coverage**: 100% (2/2 functions)
@@ -129,7 +129,7 @@ These files contain security-critical code or core orchestration logic with inad
   - ✅ API --bind flag
 - **Status**: ✅ COMPLETE - Perfect coverage via integration tests
 
-**File**: `streamflow/src/logging.rs`
+**File**: `kruxiaflow/src/logging.rs`
 - **Previous**: 0% (0/54 lines)
 - **Current**: 87.04% (47/54 lines) ✅ EXCELLENT
 - **Function Coverage**: 90.00% (9/10 functions)
@@ -142,7 +142,7 @@ These files contain security-critical code or core orchestration logic with inad
   - ✅ Logging initialization sequence
 - **Status**: ✅ COMPLETE - Excellent coverage for logging infrastructure
 
-**File**: `streamflow/src/signals.rs`
+**File**: `kruxiaflow/src/signals.rs`
 - **Previous**: 0% (0/76 lines)
 - **Current**: 90.79% (69/76 lines) ✅ EXCELLENT
 - **Function Coverage**: 100% (15/15 functions)
@@ -163,11 +163,11 @@ The following files have been successfully tested and now have excellent coverag
 - ✅ **api/src/middleware/auth.rs**: 98.00% lines, 100% functions - was 13.04% ⚠️ CRITICAL
 - ✅ **core/src/orchestrator/orchestrator.rs**: 93.64% regions, 100% functions - was 50.00% ⚠️ CRITICAL
 - ✅ **core/src/queue/monitor.rs**: 90.09% regions, 93.75% functions - was 18.39% ⚠️ HIGH
-- ✅ **streamflow/src/main.rs**: 100% (10/10 lines), 100% functions - was 0%
-- ✅ **streamflow/src/signals.rs**: 90.79% (69/76 lines), 100% functions - was 0%
-- ✅ **streamflow/src/logging.rs**: 87.04% (47/54 lines), 90% functions - was 0%
-- ✅ **streamflow/src/commands/api.rs**: 64.97% (102/157 lines), 66.67% functions - was 0%
-- ✅ **streamflow/src/config.rs**: 98.47% (129/131 lines), 100% functions - was 94.66%
+- ✅ **kruxiaflow/src/main.rs**: 100% (10/10 lines), 100% functions - was 0%
+- ✅ **kruxiaflow/src/signals.rs**: 90.79% (69/76 lines), 100% functions - was 0%
+- ✅ **kruxiaflow/src/logging.rs**: 87.04% (47/54 lines), 90% functions - was 0%
+- ✅ **kruxiaflow/src/commands/api.rs**: 64.97% (102/157 lines), 66.67% functions - was 0%
+- ✅ **kruxiaflow/src/config.rs**: 98.47% (129/131 lines), 100% functions - was 94.66%
 - ✅ **oauth/src/lib.rs**: 100% (9/9 lines) - was 0%
 - ✅ **api/src/handlers/oauth.rs**: 98.75% (79/80 lines) - was 0%
 - ✅ **core/src/orchestrator/backoff.rs**: 100% (18/18 lines) - was 0%
@@ -377,7 +377,7 @@ These files have already achieved the >90% coverage target but could be pushed t
   - Concurrent state update tests
   - State serialization tests
 
-**File**: `streamflow/src/config.rs`
+**File**: `kruxiaflow/src/config.rs`
 - **Current**: 94.66% (124/131 lines)
 - **Function Coverage**: 93.75% (15/16 functions)
 - **Target**: >95% (optional)

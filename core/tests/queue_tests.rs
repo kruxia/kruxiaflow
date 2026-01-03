@@ -2,18 +2,18 @@ use serde_json::json;
 use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
-use streamflow_core::queue::{
+use kruxiaflow_core::queue::{
     Activity, ActivityQueue, ActivityResult, ActivitySettings, PostgresQueue, QueueConfig,
     QueueMonitor,
 };
-use streamflow_core::workflow::{BackoffStrategy, RetryPolicy};
+use kruxiaflow_core::workflow::{BackoffStrategy, RetryPolicy};
 use tokio::time::{Duration, sleep};
 use uuid::Uuid;
 
 /// Helper to create test database pool
 async fn setup_test_pool() -> PgPool {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5433/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
     });
 
     let pool = PgPool::connect(&database_url)
@@ -309,7 +309,7 @@ async fn test_heartbeat_conflict_detection() {
     );
 
     match heartbeat_result {
-        Err(streamflow_core::queue::QueueError::ActivityReclaimed) => {
+        Err(kruxiaflow_core::queue::QueueError::ActivityReclaimed) => {
             // Expected error
         }
         _ => panic!("Expected ActivityReclaimed error"),
@@ -472,9 +472,9 @@ async fn test_completion_idempotency() {
 
     let result = ActivityResult {
         success: true,
-        outputs: Some(vec![streamflow_core::workflow::ActivityOutput {
+        outputs: Some(vec![kruxiaflow_core::workflow::ActivityOutput {
             name: "result".to_string(),
-            output_type: streamflow_core::workflow::OutputType::Value,
+            output_type: kruxiaflow_core::workflow::OutputType::Value,
             value: json!("success"),
         }]),
         error: None,

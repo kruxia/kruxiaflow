@@ -10,20 +10,20 @@
 ## User Story
 
 **As** a developer
-**I want** to launch the API server via `streamflow api` command
+**I want** to launch the API server via `kruxiaflow api` command
 **So that** I can develop and test the API endpoints independently
 
 ### Acceptance Criteria
 
-- Main binary crate `streamflow` with CLI framework (clap)
-- `streamflow api` command launches HTTP server on specified port
+- Main binary crate `kruxiaflow` with CLI framework (clap)
+- `kruxiaflow api` command launches HTTP server on specified port
 - Configuration via CLI flags: `--port`, `--bind`, `--database-url`
-- Configuration via environment variables: `DATABASE_URL`, `STREAMFLOW_API_PORT`, `STREAMFLOW_API_BIND`
+- Configuration via environment variables: `DATABASE_URL`, `KRUXIAFLOW_API_PORT`, `KRUXIAFLOW_API_BIND`
 - Configuration precedence: CLI flags > Environment variables > Defaults
 - Default configuration: Port 8080, bind to 0.0.0.0
 - Database connection pool initialization with validation
 - Graceful shutdown on SIGTERM/SIGINT
-- Logging: Structured logging with configurable level (via `--log-level` or `STREAMFLOW_LOG_LEVEL`)
+- Logging: Structured logging with configurable level (via `--log-level` or `KRUXIAFLOW_LOG_LEVEL`)
 - Startup logging: Log configuration and successful startup
 - Health endpoints accessible after startup
 
@@ -31,7 +31,7 @@
 
 ## Rationale
 
-This user story implements the minimal portion of **Epic 1C (StreamFlow Binary and CLI)** needed to run the API server for development and testing of **Epic 1A (API Server)**.
+This user story implements the minimal portion of **Epic 1C (Kruxia Flow Binary and CLI)** needed to run the API server for development and testing of **Epic 1A (API Server)**.
 
 **Why this story is needed now**:
 - US-1A.1 implemented health check infrastructure but no running server
@@ -40,25 +40,25 @@ This user story implements the minimal portion of **Epic 1C (StreamFlow Binary a
 - Validate API server architecture and configuration approach
 
 **Scope Limitation**:
-- Only implements `streamflow api` command (not `serve`, `orchestrator`, `worker`, or `migrate`)
+- Only implements `kruxiaflow api` command (not `serve`, `orchestrator`, `worker`, or `migrate`)
 - Minimal configuration management (just what's needed for API server)
 - Basic graceful shutdown (full implementation in Epic 1C)
 - Simple logging setup (enhanced logging in Epic 1C)
 
 **Full Epic 1C implementation will add**:
-- All-in-one mode (`streamflow serve`)
+- All-in-one mode (`kruxiaflow serve`)
 - Individual service launchers (`orchestrator`, `worker`)
-- Database migration CLI (`streamflow migrate`)
+- Database migration CLI (`kruxiaflow migrate`)
 - Advanced configuration (YAML files, validation)
 - Enhanced signal handling and shutdown coordination
-- Health check CLI (`streamflow health`)
+- Health check CLI (`kruxiaflow health`)
 
 ---
 
 ## Architecture Reference
 
 Per `docs/architecture.md`:
-- StreamFlow is built as a single binary with multiple launchable services
+- Kruxia Flow is built as a single binary with multiple launchable services
 - API Server uses Axum framework for HTTP/WebSocket
 - All services share database connection pool
 - Configuration via environment variables (CLI precedence over env vars)
@@ -75,11 +75,11 @@ Per `docs/mvp-requirements.md` (Epic 1C):
 
 ### Component 1: Main Binary Crate Structure
 
-**Location**: New crate `streamflow/` at repository root
+**Location**: New crate `kruxiaflow/` at repository root
 
 **Crate Structure**:
 ```
-streamflow/
+kruxiaflow/
 ├── Cargo.toml              # Main binary crate
 └── src/
     ├── main.rs             # CLI entry point
@@ -94,12 +94,12 @@ streamflow/
 **Cargo.toml**:
 ```toml
 [package]
-name = "streamflow"
+name = "kruxiaflow"
 version = "0.2.0"
 edition = "2024"
 
 [[bin]]
-name = "streamflow"
+name = "kruxiaflow"
 path = "src/main.rs"
 
 [dependencies]
@@ -118,8 +118,8 @@ anyhow = "1"
 thiserror = "1"
 
 # Internal dependencies
-streamflow-api = { path = "../api" }
-streamflow-core = { path = "../core" }
+kruxiaflow-api = { path = "../api" }
+kruxiaflow-core = { path = "../core" }
 
 # Database
 sqlx = { version = "0.8", features = ["postgres", "runtime-tokio-rustls"] }
@@ -133,7 +133,7 @@ signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
 - `clap`: CLI parsing with derive macros and environment variable support
 - `tokio`: Async runtime for HTTP server
 - `tracing`/`tracing-subscriber`: Structured logging
-- `streamflow-api`: API server implementation (Axum routes)
+- `kruxiaflow-api`: API server implementation (Axum routes)
 - `sqlx`: Database connection pooling
 - `signal-hook`: Signal handling for graceful shutdown
 
@@ -141,7 +141,7 @@ signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
 
 ### Component 2: CLI Entry Point
 
-**File**: `streamflow/src/main.rs`
+**File**: `kruxiaflow/src/main.rs`
 
 **Responsibilities**:
 1. Define CLI structure with clap
@@ -160,12 +160,12 @@ mod config;
 mod logging;
 mod signals;
 
-/// StreamFlow - High-performance workflow orchestration
+/// Kruxia Flow - High-performance workflow orchestration
 #[derive(Parser)]
 #[command(
-    name = "streamflow",
+    name = "kruxiaflow",
     version,
-    about = "StreamFlow workflow orchestration platform",
+    about = "Kruxia Flow workflow orchestration platform",
     long_about = None
 )]
 struct Cli {
@@ -181,7 +181,7 @@ struct Cli {
     /// Log level
     #[arg(
         long,
-        env = "STREAMFLOW_LOG_LEVEL",
+        env = "KRUXIAFLOW_LOG_LEVEL",
         default_value = "info",
         global = true,
         help = "Log level (trace, debug, info, warn, error)"
@@ -191,7 +191,7 @@ struct Cli {
     /// Log format
     #[arg(
         long,
-        env = "STREAMFLOW_LOG_FORMAT",
+        env = "KRUXIAFLOW_LOG_FORMAT",
         default_value = "text",
         global = true,
         help = "Log format (text, json)"
@@ -238,7 +238,7 @@ async fn main() -> Result<()> {
 
 ### Component 3: Configuration Management
 
-**File**: `streamflow/src/config.rs`
+**File**: `kruxiaflow/src/config.rs`
 
 **Responsibilities**:
 1. Define configuration structures
@@ -279,7 +279,7 @@ impl ApiConfig {
         // Port: CLI > Env > Default (8080)
         let port = port_cli
             .or_else(|| {
-                std::env::var("STREAMFLOW_API_PORT")
+                std::env::var("KRUXIAFLOW_API_PORT")
                     .ok()
                     .and_then(|s| s.parse().ok())
             })
@@ -287,7 +287,7 @@ impl ApiConfig {
 
         // Bind address: CLI > Env > Default (0.0.0.0)
         let bind = bind_cli
-            .or_else(|| std::env::var("STREAMFLOW_API_BIND").ok())
+            .or_else(|| std::env::var("KRUXIAFLOW_API_BIND").ok())
             .unwrap_or_else(|| "0.0.0.0".to_string());
 
         // Validate configuration
@@ -341,7 +341,7 @@ impl ApiConfig {
 
 ### Component 4: Logging Setup
 
-**File**: `streamflow/src/logging.rs`
+**File**: `kruxiaflow/src/logging.rs`
 
 **Responsibilities**:
 1. Initialize tracing subscriber
@@ -390,7 +390,7 @@ pub fn init(log_level: &str, log_format: &str) -> Result<()> {
 
 ### Component 5: Signal Handling for Graceful Shutdown
 
-**File**: `streamflow/src/signals.rs`
+**File**: `kruxiaflow/src/signals.rs`
 
 **Responsibilities**:
 1. Listen for SIGTERM and SIGINT
@@ -438,10 +438,10 @@ pub async fn shutdown_signal() {
 
 ### Component 6: API Command Implementation
 
-**File**: `streamflow/src/commands/api.rs`
+**File**: `kruxiaflow/src/commands/api.rs`
 
 **Responsibilities**:
-1. Define CLI arguments for `streamflow api`
+1. Define CLI arguments for `kruxiaflow api`
 2. Initialize database connection pool
 3. Create AppState
 4. Launch Axum HTTP server
@@ -463,7 +463,7 @@ pub struct ApiCommand {
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_API_PORT",
+        env = "KRUXIAFLOW_API_PORT",
         help = "Port to bind API server to"
     )]
     port: Option<u16>,
@@ -472,7 +472,7 @@ pub struct ApiCommand {
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_API_BIND",
+        env = "KRUXIAFLOW_API_BIND",
         help = "Address to bind API server to (e.g., 0.0.0.0, 127.0.0.1)"
     )]
     bind: Option<String>,
@@ -509,10 +509,10 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
     tracing::info!("Database connectivity verified");
 
     // Create application state
-    let app_state = streamflow_api::AppState::new(db_pool);
+    let app_state = kruxiaflow_api::AppState::new(db_pool);
 
     // Create Axum router
-    let app = streamflow_api::app_router(app_state);
+    let app = kruxiaflow_api::app_router(app_state);
 
     // Bind to address and port
     let bind_addr = config.bind_address();
@@ -561,7 +561,7 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
 
 ### Component 7: Commands Module Exports
 
-**File**: `streamflow/src/commands/mod.rs`
+**File**: `kruxiaflow/src/commands/mod.rs`
 
 ```rust
 pub mod api;
@@ -579,7 +579,7 @@ pub mod api;
 
 ### Unit Tests
 
-**File**: `streamflow/src/config_test.rs`
+**File**: `kruxiaflow/src/config_test.rs`
 
 **Test Cases**:
 
@@ -598,7 +598,7 @@ pub mod api;
 
 ### Integration Tests
 
-**File**: `streamflow/tests/api_server_test.rs`
+**File**: `kruxiaflow/tests/api_server_test.rs`
 
 **Test Scenarios**:
 
@@ -623,7 +623,7 @@ pub mod api;
 1. **Build and Run**:
    ```bash
    cargo build --release
-   ./target/release/streamflow api --database-url postgres://localhost/streamflow_dev
+   ./target/release/kruxiaflow api --database-url postgres://localhost/kruxiaflow_dev
    ```
 
 2. **Verify Startup**:
@@ -650,16 +650,16 @@ pub mod api;
 5. **Test Configuration**:
    ```bash
    # Test CLI flags
-   ./streamflow api --port 9090 --bind 127.0.0.1
+   ./kruxiaflow api --port 9090 --bind 127.0.0.1
 
    # Test environment variables
-   STREAMFLOW_API_PORT=9090 STREAMFLOW_API_BIND=127.0.0.1 ./streamflow api
+   KRUXIAFLOW_API_PORT=9090 KRUXIAFLOW_API_BIND=127.0.0.1 ./kruxiaflow api
 
    # Test log levels
-   ./streamflow api --log-level debug
+   ./kruxiaflow api --log-level debug
 
    # Test JSON logging
-   ./streamflow api --log-format json
+   ./kruxiaflow api --log-format json
    ```
 
 ---
@@ -668,8 +668,8 @@ pub mod api;
 
 ### New Dependencies
 
-- **Main Binary Crate**: New `streamflow/` crate at repository root
-- **Workspace Configuration**: Update root `Cargo.toml` to include `streamflow` as workspace member
+- **Main Binary Crate**: New `kruxiaflow/` crate at repository root
+- **Workspace Configuration**: Update root `Cargo.toml` to include `kruxiaflow` as workspace member
 
 ### Updated Workspace Cargo.toml
 
@@ -680,15 +680,15 @@ members = [
     "core",
     "activity",
     "dashboard",
-    "streamflow",  # New main binary crate
+    "kruxiaflow",  # New main binary crate
 ]
 resolver = "2"
 ```
 
 ### Internal Dependencies
 
-- `streamflow-api`: Provides `AppState` and `app_router`
-- `streamflow-core`: Core types (will be used by orchestrator, worker commands)
+- `kruxiaflow-api`: Provides `AppState` and `app_router`
+- `kruxiaflow-core`: Core types (will be used by orchestrator, worker commands)
 - `sqlx`: Database connection pooling
 
 ### External Dependencies
@@ -710,23 +710,23 @@ resolver = "2"
 DATABASE_URL=postgres://user:pass@host:port/database
 
 # Optional (with defaults)
-STREAMFLOW_API_PORT=8080
-STREAMFLOW_API_BIND=0.0.0.0
-STREAMFLOW_LOG_LEVEL=info
-STREAMFLOW_LOG_FORMAT=text
+KRUXIAFLOW_API_PORT=8080
+KRUXIAFLOW_API_BIND=0.0.0.0
+KRUXIAFLOW_LOG_LEVEL=info
+KRUXIAFLOW_LOG_FORMAT=text
 ```
 
 ### CLI Flags
 
 ```bash
-streamflow api [OPTIONS]
+kruxiaflow api [OPTIONS]
 
 OPTIONS:
-  -p, --port <PORT>              Port to bind API server to [env: STREAMFLOW_API_PORT] [default: 8080]
-  -b, --bind <BIND>              Address to bind to [env: STREAMFLOW_API_BIND] [default: 0.0.0.0]
+  -p, --port <PORT>              Port to bind API server to [env: KRUXIAFLOW_API_PORT] [default: 8080]
+  -b, --bind <BIND>              Address to bind to [env: KRUXIAFLOW_API_BIND] [default: 0.0.0.0]
       --database-url <URL>       PostgreSQL connection URL [env: DATABASE_URL]
-      --log-level <LEVEL>        Log level (trace, debug, info, warn, error) [env: STREAMFLOW_LOG_LEVEL] [default: info]
-      --log-format <FORMAT>      Log format (text, json) [env: STREAMFLOW_LOG_FORMAT] [default: text]
+      --log-level <LEVEL>        Log level (trace, debug, info, warn, error) [env: KRUXIAFLOW_LOG_LEVEL] [default: info]
+      --log-format <FORMAT>      Log format (text, json) [env: KRUXIAFLOW_LOG_FORMAT] [default: text]
   -h, --help                     Print help
   -V, --version                  Print version
 ```
@@ -742,13 +742,13 @@ OPTIONS:
 FROM rust:1.75 AS builder
 WORKDIR /app
 COPY . .
-RUN cargo build --release --bin streamflow
+RUN cargo build --release --bin kruxiaflow
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/streamflow /usr/local/bin/
+COPY --from=builder /app/target/release/kruxiaflow /usr/local/bin/
 EXPOSE 8080
-CMD ["streamflow", "api"]
+CMD ["kruxiaflow", "api"]
 ```
 
 ### Kubernetes Deployment
@@ -758,28 +758,28 @@ CMD ["streamflow", "api"]
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: streamflow-api
+  name: kruxiaflow-api
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: streamflow-api
+      app: kruxiaflow-api
   template:
     metadata:
       labels:
-        app: streamflow-api
+        app: kruxiaflow-api
     spec:
       containers:
-      - name: streamflow
-        image: streamflow:latest
-        command: ["streamflow", "api"]
+      - name: kruxiaflow
+        image: kruxiaflow:latest
+        command: ["kruxiaflow", "api"]
         env:
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
-              name: streamflow-secrets
+              name: kruxiaflow-secrets
               key: database-url
-        - name: STREAMFLOW_LOG_FORMAT
+        - name: KRUXIAFLOW_LOG_FORMAT
           value: "json"
         ports:
         - containerPort: 8080
@@ -803,7 +803,7 @@ spec:
 
 ### Functional Requirements
 
-- ✅ `streamflow api` command launches HTTP server
+- ✅ `kruxiaflow api` command launches HTTP server
 - ✅ Server binds to configured port and address
 - ✅ Database connection pool initialized successfully
 - ✅ Health endpoints (`/health`, `/health/ready`, `/api/v1/info`) accessible
@@ -827,11 +827,11 @@ spec:
 ## Implementation Phases
 
 ### Phase 1: Basic CLI Structure (P0)
-- Create `streamflow/` crate
+- Create `kruxiaflow/` crate
 - Implement CLI parsing with clap
-- Add `streamflow api` subcommand skeleton
+- Add `kruxiaflow api` subcommand skeleton
 - Add logging initialization
-- Verify `streamflow --help` and `streamflow api --help` work
+- Verify `kruxiaflow --help` and `kruxiaflow api --help` work
 
 ### Phase 2: Configuration Management (P0)
 - Implement `ApiConfig` structure
@@ -921,11 +921,11 @@ spec:
 ## Future Enhancements (Epic 1C)
 
 ### Full Service Launcher Suite
-- `streamflow serve` - All-in-one mode (orchestrator + API + worker)
-- `streamflow orchestrator` - Launch orchestrator only
-- `streamflow worker` - Launch worker only
-- `streamflow migrate` - Database migration management
-- `streamflow health` - CLI health check command
+- `kruxiaflow serve` - All-in-one mode (orchestrator + API + worker)
+- `kruxiaflow orchestrator` - Launch orchestrator only
+- `kruxiaflow worker` - Launch worker only
+- `kruxiaflow migrate` - Database migration management
+- `kruxiaflow health` - CLI health check command
 
 ### Advanced Configuration
 - YAML configuration file support
@@ -974,10 +974,10 @@ spec:
 **Implementation Summary**:
 All phases 1-6 have been successfully implemented:
 
-1. **Phase 1: CLI Structure** - Created `streamflow/` binary crate with clap-based CLI parsing
+1. **Phase 1: CLI Structure** - Created `kruxiaflow/` binary crate with clap-based CLI parsing
    - Main binary with subcommand structure
    - Global flags for database URL, log level, and log format
-   - `streamflow api` subcommand for launching API server
+   - `kruxiaflow api` subcommand for launching API server
 
 2. **Phase 2: Configuration** - Implemented `ApiConfig` with proper precedence
    - Configuration precedence: CLI flags > Environment variables > Defaults
@@ -992,7 +992,7 @@ All phases 1-6 have been successfully implemented:
 4. **Phase 4: API Server Launch** - Integrated Axum server with existing API routes
    - Binds to configurable address and port
    - Logs startup information including health endpoint URLs
-   - Uses existing `streamflow-api` routes and handlers
+   - Uses existing `kruxiaflow-api` routes and handlers
 
 5. **Phase 5: Graceful Shutdown** - Implemented SIGTERM/SIGINT signal handling
    - Async signal handling integrated with Axum
@@ -1005,26 +1005,26 @@ All phases 1-6 have been successfully implemented:
    - All clippy warnings resolved
 
 **Files Created**:
-- `streamflow/Cargo.toml` - Binary crate configuration
-- `streamflow/src/main.rs` - CLI entry point
-- `streamflow/src/config.rs` - Configuration management with tests
-- `streamflow/src/logging.rs` - Logging initialization
-- `streamflow/src/signals.rs` - Signal handling
-- `streamflow/src/commands/mod.rs` - Command module exports
-- `streamflow/src/commands/api.rs` - API server command implementation
+- `kruxiaflow/Cargo.toml` - Binary crate configuration
+- `kruxiaflow/src/main.rs` - CLI entry point
+- `kruxiaflow/src/config.rs` - Configuration management with tests
+- `kruxiaflow/src/logging.rs` - Logging initialization
+- `kruxiaflow/src/signals.rs` - Signal handling
+- `kruxiaflow/src/commands/mod.rs` - Command module exports
+- `kruxiaflow/src/commands/api.rs` - API server command implementation
 
 **Workspace Changes**:
-- Updated root `Cargo.toml` to include `streamflow` in workspace members
+- Updated root `Cargo.toml` to include `kruxiaflow` in workspace members
 
 **Testing Results**:
 - ✅ All 52 tests pass across workspace
-- ✅ No compilation warnings in streamflow binary
+- ✅ No compilation warnings in kruxiaflow binary
 - ✅ Release build succeeds
 - ✅ Help commands work correctly
 - ✅ Configuration precedence tested and verified
 
 **Acceptance Criteria Verification**:
-- ✅ `streamflow api` command launches HTTP server
+- ✅ `kruxiaflow api` command launches HTTP server
 - ✅ Configuration via CLI flags: `--port`, `--bind`, `--database-url`
 - ✅ Configuration via environment variables
 - ✅ Configuration precedence: CLI > Env > Defaults
@@ -1037,5 +1037,5 @@ All phases 1-6 have been successfully implemented:
 
 **Post-Implementation**:
 - Epic 1A stories (US-1A.2 through US-1A.9) can now proceed
-- API server can be tested with real HTTP requests via `streamflow api` command
+- API server can be tested with real HTTP requests via `kruxiaflow api` command
 - Foundation ready for Epic 1C full implementation (serve, orchestrator, worker commands)

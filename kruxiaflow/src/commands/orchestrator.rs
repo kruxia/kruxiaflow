@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Args;
 use std::sync::Arc;
 use std::time::Duration;
-use streamflow_core::{
+use kruxiaflow_core::{
     ActivityQueue, EventSource, OrchestratorConfig, PostgresEventSource, PostgresQueue,
     QueueConfig, run_orchestrator,
 };
@@ -14,7 +14,7 @@ pub struct OrchestratorCommand {
     /// Orchestrator consumer ID (for event polling checkpoint)
     #[arg(
         long,
-        env = "STREAMFLOW_ORCHESTRATOR_CONSUMER_ID",
+        env = "KRUXIAFLOW_ORCHESTRATOR_CONSUMER_ID",
         default_value = "orchestrator_default",
         help = "Unique consumer ID for event checkpointing",
         long_help = "Unique consumer ID for event checkpointing\n\n\
@@ -28,7 +28,7 @@ Example: --consumer-id orch_prod_1"
     /// Event polling interval in milliseconds
     #[arg(
         long,
-        env = "STREAMFLOW_ORCHESTRATOR_POLL_INTERVAL",
+        env = "KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL",
         default_value = "10",
         help = "Event polling interval in milliseconds",
         long_help = "How often the orchestrator polls for new workflow events\n\n\
@@ -41,7 +41,7 @@ Example: --poll-interval 50"
     /// Shutdown timeout in seconds
     #[arg(
         long,
-        env = "STREAMFLOW_SHUTDOWN_TIMEOUT",
+        env = "KRUXIAFLOW_SHUTDOWN_TIMEOUT",
         default_value = "30",
         help = "Graceful shutdown timeout in seconds"
     )]
@@ -69,7 +69,7 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
     tracing::info!(
         consumer_id = %cmd.consumer_id,
         poll_interval_ms = cmd.poll_interval,
-        "Starting StreamFlow orchestrator"
+        "Starting Kruxia Flow orchestrator"
     );
 
     // Create shutdown coordinator

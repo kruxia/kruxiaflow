@@ -6,7 +6,7 @@ import json
 import click
 from datetime import datetime, timezone
 from pathlib import Path
-from streamflow.benchmark import StreamFlowBenchmark
+from kruxiaflow.benchmark import StreamFlowBenchmark
 from temporal.benchmark import TemporalBenchmark
 from temporal.workflows import SequentialBench5, SequentialBench3, ParallelBench10
 from shared.report import generate_html_report
@@ -15,17 +15,17 @@ from shared.resource_monitor import ResourceMonitor
 
 @click.group()
 def cli():
-    """StreamFlow Benchmark Suite - Compare StreamFlow vs Temporal vs Airflow"""
+    """Kruxia Flow Benchmark Suite - Compare Kruxia Flow vs Temporal vs Airflow"""
     pass
 
 
 @cli.command()
-@click.option("--platform", "-p", type=click.Choice(["streamflow", "temporal", "airflow"]), multiple=True, help="Platform(s) to benchmark (can specify multiple)")
+@click.option("--platform", "-p", type=click.Choice(["kruxiaflow", "temporal", "airflow"]), multiple=True, help="Platform(s) to benchmark (can specify multiple)")
 @click.option("--output-dir", type=click.Path(), default="results", help="Output directory for results")
 def run(platform: tuple[str, ...], output_dir: str):
     """Run benchmarks"""
     # Default to all platforms if none specified
-    platforms = list(platform) if platform else ["streamflow", "temporal", "airflow"]
+    platforms = list(platform) if platform else ["kruxiaflow", "temporal", "airflow"]
     asyncio.run(run_benchmarks(platforms, output_dir))
 
 
@@ -53,15 +53,15 @@ async def run_benchmarks(platforms: list[str], output_dir: str):
                 json.dump([vars(r) for r in all_results], f, indent=2)
             generate_html_report(all_results, html_path, timestamp_iso)
 
-    if "streamflow" in platforms:
+    if "kruxiaflow" in platforms:
         try:
-            streamflow_results = await run_streamflow_benchmarks(timestamp_iso)
-            all_results.extend(streamflow_results)
+            kruxiaflow_results = await run_kruxiaflow_benchmarks(timestamp_iso)
+            all_results.extend(kruxiaflow_results)
             save_results()
             click.echo(f"  💾 Incremental save: {json_path}")
         except Exception as e:
-            click.secho(f"❌ StreamFlow benchmarks failed: {e}", fg="red")
-            errors.append(("streamflow", str(e)))
+            click.secho(f"❌ Kruxia Flow benchmarks failed: {e}", fg="red")
+            errors.append(("kruxiaflow", str(e)))
 
     if "temporal" in platforms:
         try:
@@ -110,7 +110,7 @@ def report(results_path: str):
         data = json.load(f)
 
     # Reconstruct BenchmarkMetrics objects
-    from streamflow.benchmark import BenchmarkMetrics
+    from kruxiaflow.benchmark import BenchmarkMetrics
     results = [BenchmarkMetrics(**item) for item in data]
 
     output_dir = results_file.parent
@@ -126,15 +126,15 @@ def check():
 
     click.echo("Checking platform availability...")
 
-    # Check StreamFlow
+    # Check Kruxia Flow
     try:
-        response = httpx.get("http://streamflow:8080/health", timeout=5.0)
+        response = httpx.get("http://kruxiaflow:8080/health", timeout=5.0)
         if response.status_code == 200:
-            click.secho("✅ StreamFlow is accessible", fg="green")
+            click.secho("✅ Kruxia Flow is accessible", fg="green")
         else:
-            click.secho(f"⚠️  StreamFlow returned status {response.status_code}", fg="yellow")
+            click.secho(f"⚠️  Kruxia Flow returned status {response.status_code}", fg="yellow")
     except Exception as e:
-        click.secho(f"❌ StreamFlow not accessible: {e}", fg="red")
+        click.secho(f"❌ Kruxia Flow not accessible: {e}", fg="red")
 
     # Check Temporal
     click.echo("ℹ️  Temporal check requires SDK connection (run benchmarks to verify)")
@@ -173,25 +173,25 @@ def print_summary(all_results):
     click.secho("Summary", bold=True)
     click.echo("=" * 60)
 
-    streamflow_results = [r for r in all_results if r.platform == "StreamFlow"]
+    kruxiaflow_results = [r for r in all_results if r.platform == "Kruxia Flow"]
     temporal_results = [r for r in all_results if r.platform == "Temporal"]
     airflow_results = [r for r in all_results if r.platform == "Airflow"]
 
-    if streamflow_results:
-        sf_avg = sum(r.throughput_wf_per_sec for r in streamflow_results) / len(streamflow_results)
-        click.echo(f"StreamFlow avg throughput: {sf_avg:.2f} wf/sec")
+    if kruxiaflow_results:
+        sf_avg = sum(r.throughput_wf_per_sec for r in kruxiaflow_results) / len(kruxiaflow_results)
+        click.echo(f"Kruxia Flow avg throughput: {sf_avg:.2f} wf/sec")
 
         if sf_avg >= 1000:
-            click.secho("🎉 StreamFlow target achieved: >1,000 wf/sec!", fg="green", bold=True)
+            click.secho("🎉 Kruxia Flow target achieved: >1,000 wf/sec!", fg="green", bold=True)
         else:
-            click.secho(f"⚠️  StreamFlow below target: {sf_avg:.2f}/1000 wf/sec", fg="yellow")
+            click.secho(f"⚠️  Kruxia Flow below target: {sf_avg:.2f}/1000 wf/sec", fg="yellow")
 
     if temporal_results:
         temp_avg = sum(r.throughput_wf_per_sec for r in temporal_results) / len(temporal_results)
         click.echo(f"Temporal avg throughput: {temp_avg:.2f} wf/sec")
 
-    if streamflow_results and temporal_results:
-        sf_avg = sum(r.throughput_wf_per_sec for r in streamflow_results) / len(streamflow_results)
+    if kruxiaflow_results and temporal_results:
+        sf_avg = sum(r.throughput_wf_per_sec for r in kruxiaflow_results) / len(kruxiaflow_results)
         temp_avg = sum(r.throughput_wf_per_sec for r in temporal_results) / len(temporal_results)
         speedup = sf_avg / temp_avg if temp_avg > 0 else 0
         click.secho(f"Speedup vs Temporal: {speedup:.1f}x", fg="green" if speedup >= 10 else "yellow", bold=True)
@@ -200,24 +200,24 @@ def print_summary(all_results):
         af_avg = sum(r.throughput_wf_per_sec for r in airflow_results) / len(airflow_results)
         click.echo(f"Airflow avg throughput: {af_avg:.2f} wf/sec")
 
-    if streamflow_results and airflow_results:
-        sf_avg = sum(r.throughput_wf_per_sec for r in streamflow_results) / len(streamflow_results)
+    if kruxiaflow_results and airflow_results:
+        sf_avg = sum(r.throughput_wf_per_sec for r in kruxiaflow_results) / len(kruxiaflow_results)
         af_avg = sum(r.throughput_wf_per_sec for r in airflow_results) / len(airflow_results)
         speedup = sf_avg / af_avg if af_avg > 0 else 0
         click.secho(f"Speedup vs Airflow: {speedup:.1f}x", fg="green" if speedup >= 10 else "yellow", bold=True)
 
 
-async def run_streamflow_benchmarks(timestamp: str):
-    """Run StreamFlow benchmark scenarios"""
+async def run_kruxiaflow_benchmarks(timestamp: str):
+    """Run Kruxia Flow benchmark scenarios"""
     print("=" * 60)
-    print("Running StreamFlow Benchmarks")
+    print("Running Kruxia Flow Benchmarks")
     print("=" * 60)
 
     benchmark = StreamFlowBenchmark()
     await benchmark.setup()
 
     # Initialize resource monitor
-    monitor = ResourceMonitor("StreamFlow")
+    monitor = ResourceMonitor("Kruxia Flow")
     monitor.connect()
 
     results = []

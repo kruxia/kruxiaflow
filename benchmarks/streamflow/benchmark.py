@@ -1,4 +1,4 @@
-"""StreamFlow benchmark using HTTP API (httpx client)"""
+"""Kruxia Flow benchmark using HTTP API (httpx client)"""
 
 import asyncio
 import httpx
@@ -32,11 +32,11 @@ class BenchmarkMetrics:
 
 
 class StreamFlowBenchmark:
-    """Benchmark runner for StreamFlow via HTTP API"""
+    """Benchmark runner for Kruxia Flow via HTTP API"""
 
     def __init__(
         self,
-        base_url: str = "http://streamflow:8080",
+        base_url: str = "http://kruxiaflow:8080",
         client_id: str = "benchmark",
         client_secret: str = "benchmark_secret",
     ):
@@ -145,7 +145,7 @@ class StreamFlowBenchmark:
         latencies.sort()
 
         return BenchmarkMetrics(
-            platform="StreamFlow",
+            platform="Kruxia Flow",
             scenario=scenario_name,
             total_workflows=num_workflows,
             successful=successful,

@@ -234,7 +234,7 @@ pub is_back_edge: bool
 ### Running the Benchmark
 
 ```bash
-cd /path/to/streamflow
+cd /path/to/kruxiaflow
 cargo bench --bench loop_performance
 ```
 

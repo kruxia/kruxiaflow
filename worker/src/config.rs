@@ -55,29 +55,29 @@ impl WorkerConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
         let mut config = Self::default();
 
-        if let Ok(url) = std::env::var("STREAMFLOW_API_URL") {
+        if let Ok(url) = std::env::var("KRUXIAFLOW_API_URL") {
             config.api_url = url;
         }
 
-        if let Ok(id) = std::env::var("STREAMFLOW_WORKER_ID") {
+        if let Ok(id) = std::env::var("KRUXIAFLOW_WORKER_ID") {
             config.worker_id = id;
         }
 
-        if let Ok(types) = std::env::var("STREAMFLOW_ACTIVITY_TYPES") {
+        if let Ok(types) = std::env::var("KRUXIAFLOW_ACTIVITY_TYPES") {
             config.activity_types = types.split(',').map(|s| s.trim().to_string()).collect();
         }
 
-        if let Ok(concurrency) = std::env::var("STREAMFLOW_WORKER_CONCURRENCY") {
+        if let Ok(concurrency) = std::env::var("KRUXIAFLOW_WORKER_CONCURRENCY") {
             config.concurrency = concurrency
                 .parse()
                 .map_err(|_| ConfigError::InvalidConcurrency)?;
         }
 
-        if let Ok(client_id) = std::env::var("STREAMFLOW_CLIENT_ID") {
+        if let Ok(client_id) = std::env::var("KRUXIAFLOW_CLIENT_ID") {
             config.client_id = client_id;
         }
 
-        if let Ok(client_secret) = std::env::var("STREAMFLOW_CLIENT_SECRET") {
+        if let Ok(client_secret) = std::env::var("KRUXIAFLOW_CLIENT_SECRET") {
             config.client_secret = client_secret;
         }
 
@@ -120,7 +120,7 @@ pub enum ConfigError {
     #[error("Invalid concurrency value (must be > 0)")]
     InvalidConcurrency,
 
-    #[error("Missing client secret (STREAMFLOW_CLIENT_SECRET required)")]
+    #[error("Missing client secret (KRUXIAFLOW_CLIENT_SECRET required)")]
     MissingClientSecret,
 }
 
@@ -144,12 +144,12 @@ mod tests {
 
         // Clear relevant environment variables first
         let env_vars = [
-            "STREAMFLOW_API_URL",
-            "STREAMFLOW_WORKER_ID",
-            "STREAMFLOW_ACTIVITY_TYPES",
-            "STREAMFLOW_WORKER_CONCURRENCY",
-            "STREAMFLOW_CLIENT_ID",
-            "STREAMFLOW_CLIENT_SECRET",
+            "KRUXIAFLOW_API_URL",
+            "KRUXIAFLOW_WORKER_ID",
+            "KRUXIAFLOW_ACTIVITY_TYPES",
+            "KRUXIAFLOW_WORKER_CONCURRENCY",
+            "KRUXIAFLOW_CLIENT_ID",
+            "KRUXIAFLOW_CLIENT_SECRET",
         ];
 
         unsafe {
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn test_from_env_with_defaults() {
-        with_env_vars(vec![("STREAMFLOW_CLIENT_SECRET", "test_secret")], || {
+        with_env_vars(vec![("KRUXIAFLOW_CLIENT_SECRET", "test_secret")], || {
             let config = WorkerConfig::from_env().unwrap();
 
             assert_eq!(config.api_url, "http://localhost:8080");
@@ -210,12 +210,12 @@ mod tests {
     fn test_from_env_with_custom_values() {
         with_env_vars(
             vec![
-                ("STREAMFLOW_API_URL", "http://api.example.com:9090"),
-                ("STREAMFLOW_WORKER_ID", "custom_worker_123"),
-                ("STREAMFLOW_ACTIVITY_TYPES", "ns1.activity1, ns2.activity2"),
-                ("STREAMFLOW_WORKER_CONCURRENCY", "8"),
-                ("STREAMFLOW_CLIENT_ID", "custom_client"),
-                ("STREAMFLOW_CLIENT_SECRET", "super_secret"),
+                ("KRUXIAFLOW_API_URL", "http://api.example.com:9090"),
+                ("KRUXIAFLOW_WORKER_ID", "custom_worker_123"),
+                ("KRUXIAFLOW_ACTIVITY_TYPES", "ns1.activity1, ns2.activity2"),
+                ("KRUXIAFLOW_WORKER_CONCURRENCY", "8"),
+                ("KRUXIAFLOW_CLIENT_ID", "custom_client"),
+                ("KRUXIAFLOW_CLIENT_SECRET", "super_secret"),
             ],
             || {
                 let config = WorkerConfig::from_env().unwrap();
@@ -237,8 +237,8 @@ mod tests {
     fn test_from_env_invalid_concurrency() {
         with_env_vars(
             vec![
-                ("STREAMFLOW_WORKER_CONCURRENCY", "not_a_number"),
-                ("STREAMFLOW_CLIENT_SECRET", "secret"),
+                ("KRUXIAFLOW_WORKER_CONCURRENCY", "not_a_number"),
+                ("KRUXIAFLOW_CLIENT_SECRET", "secret"),
             ],
             || {
                 let result = WorkerConfig::from_env();
@@ -351,7 +351,7 @@ mod tests {
         let err = ConfigError::MissingClientSecret;
         assert_eq!(
             err.to_string(),
-            "Missing client secret (STREAMFLOW_CLIENT_SECRET required)"
+            "Missing client secret (KRUXIAFLOW_CLIENT_SECRET required)"
         );
     }
 
@@ -359,8 +359,8 @@ mod tests {
     fn test_from_env_with_single_activity_type() {
         with_env_vars(
             vec![
-                ("STREAMFLOW_ACTIVITY_TYPES", "worker.single"),
-                ("STREAMFLOW_CLIENT_SECRET", "secret"),
+                ("KRUXIAFLOW_ACTIVITY_TYPES", "worker.single"),
+                ("KRUXIAFLOW_CLIENT_SECRET", "secret"),
             ],
             || {
                 let config = WorkerConfig::from_env().unwrap();
@@ -374,10 +374,10 @@ mod tests {
         with_env_vars(
             vec![
                 (
-                    "STREAMFLOW_ACTIVITY_TYPES",
+                    "KRUXIAFLOW_ACTIVITY_TYPES",
                     "ns1.act1 , ns2.act2  ,  ns3.act3",
                 ),
-                ("STREAMFLOW_CLIENT_SECRET", "secret"),
+                ("KRUXIAFLOW_CLIENT_SECRET", "secret"),
             ],
             || {
                 let config = WorkerConfig::from_env().unwrap();

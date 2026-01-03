@@ -38,7 +38,7 @@
 | Benchmark Scenarios          | `profiling/src/scenarios.rs`                  | ✅     |
 | Load Test Runner             | `profiling/tests/load_tests.rs`               | ✅     |
 | Profiling Script             | `scripts/profiling.sh`                        | ✅     |
-| PostgreSQL Profiling         | `streamflow profile` command                  | ✅     |
+| PostgreSQL Profiling         | `kruxiaflow profile` command                  | ✅     |
 | Memory Tracking              | `var/memory/memory_usage.csv`                 | ✅     |
 | Query Analysis Views         | `v_slow_queries`, `v_index_usage`, etc.       | ✅     |
 
@@ -241,7 +241,7 @@ Create dedicated stress test binary with rich CLI options:
 
 ```rust
 // CLI interface:
-// streamflow-stress-test [OPTIONS]
+// kruxiaflow-stress-test [OPTIONS]
 //
 // Options:
 //   --initial-concurrent N    Start at N concurrent workflows (default: 100)
@@ -482,11 +482,11 @@ enum CapacityStatus {
 **File**: `docs/capacity-planning.md` (generated)
 
 ```markdown
-# StreamFlow Capacity Planning Guide
+# Kruxia Flow Capacity Planning Guide
 
 ## Executive Summary
 
-Based on stress testing with [configuration details], StreamFlow can sustain:
+Based on stress testing with [configuration details], Kruxia Flow can sustain:
 - **Safe Operating Capacity**: X,XXX concurrent workflows
 - **Peak Capacity**: X,XXX concurrent workflows (with degraded latency)
 - **Breaking Point**: X,XXX concurrent workflows
@@ -550,7 +550,7 @@ Create wrapper script for stress testing:
 ```bash
 #!/bin/bash
 #
-# StreamFlow Stress Test Runner
+# Kruxia Flow Stress Test Runner
 #
 # Usage:
 #   ./scripts/stress-test.sh [OPTIONS]
@@ -573,7 +573,7 @@ Create wrapper script for stress testing:
 **File**: `docs/stress-testing.md`
 
 ```markdown
-# StreamFlow Stress Testing Guide
+# Kruxia Flow Stress Testing Guide
 
 ## Overview
 
@@ -606,7 +606,7 @@ Safe operating limits for production deployment.
 
 ### Testing Specific Scenarios
 ```bash
-cargo run --package streamflow-profiling --bin stress-test -- \
+cargo run --package kruxiaflow-profiling --bin stress-test -- \
   --initial-concurrent 100 \
   --peak-concurrent 5000 \
   --step-size 200 \
@@ -878,7 +878,7 @@ tokio-util = { version = "0.7", features = ["time"] }
 ./scripts/stress-test.sh --full
 
 # Custom test
-cargo run --package streamflow-profiling --bin stress-test --release -- \
+cargo run --package kruxiaflow-profiling --bin stress-test --release -- \
   --peak-concurrent 3000 --step-size 200 --step-duration 45
 ```
 
@@ -886,7 +886,7 @@ cargo run --package streamflow-profiling --bin stress-test --release -- \
 
 ```bash
 # Run all stress tests
-cargo test --package streamflow-profiling --test stress_tests -- --ignored --nocapture
+cargo test --package kruxiaflow-profiling --test stress_tests -- --ignored --nocapture
 
 # Run specific tests
 cargo test ... test_stress_quick -- --ignored --nocapture

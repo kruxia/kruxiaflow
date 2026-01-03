@@ -168,7 +168,7 @@ mod tests {
 
     async fn setup_test_pool() -> PgPool {
         let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamflow".to_string()
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
         });
 
         PgPool::connect(&database_url)

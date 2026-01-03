@@ -4,7 +4,7 @@ members = [
     "api",
     "oauth",
     "dashboard",
-    "streamflow",
+    "kruxiaflow",
     "worker",
     "profiling",
 ]

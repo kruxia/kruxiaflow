@@ -3,7 +3,7 @@
 
 use serial_test::serial;
 use std::time::Duration;
-use streamflow_core::queue::config::QueueConfig;
+use kruxiaflow_core::queue::config::QueueConfig;
 
 #[test]
 fn test_queue_config_default() {
@@ -35,12 +35,12 @@ fn test_queue_config_clone() {
 fn test_queue_config_from_env_with_no_env_vars() {
     // Clear any existing env vars
     unsafe {
-        std::env::remove_var("STREAMFLOW_QUEUE_POLL_INTERVAL");
-        std::env::remove_var("STREAMFLOW_QUEUE_BATCH_SIZE");
-        std::env::remove_var("STREAMFLOW_QUEUE_DEFAULT_TIMEOUT");
-        std::env::remove_var("STREAMFLOW_QUEUE_DEFAULT_MAX_RETRIES");
-        std::env::remove_var("STREAMFLOW_QUEUE_CLEANUP_INTERVAL");
-        std::env::remove_var("STREAMFLOW_QUEUE_VACUUM_INTERVAL");
+        std::env::remove_var("KRUXIAFLOW_QUEUE_POLL_INTERVAL");
+        std::env::remove_var("KRUXIAFLOW_QUEUE_BATCH_SIZE");
+        std::env::remove_var("KRUXIAFLOW_QUEUE_DEFAULT_TIMEOUT");
+        std::env::remove_var("KRUXIAFLOW_QUEUE_DEFAULT_MAX_RETRIES");
+        std::env::remove_var("KRUXIAFLOW_QUEUE_CLEANUP_INTERVAL");
+        std::env::remove_var("KRUXIAFLOW_QUEUE_VACUUM_INTERVAL");
     }
 
     let config = QueueConfig::from_env();
@@ -56,7 +56,7 @@ fn test_queue_config_from_env_with_no_env_vars() {
 #[serial]
 fn test_queue_config_from_env_with_poll_interval_ms() {
     unsafe {
-        std::env::set_var("STREAMFLOW_QUEUE_POLL_INTERVAL", "250ms");
+        std::env::set_var("KRUXIAFLOW_QUEUE_POLL_INTERVAL", "250ms");
     }
 
     let config = QueueConfig::from_env();
@@ -64,7 +64,7 @@ fn test_queue_config_from_env_with_poll_interval_ms() {
     assert_eq!(config.poll_interval, Duration::from_millis(250));
 
     unsafe {
-        std::env::remove_var("STREAMFLOW_QUEUE_POLL_INTERVAL");
+        std::env::remove_var("KRUXIAFLOW_QUEUE_POLL_INTERVAL");
     }
 }
 
@@ -72,7 +72,7 @@ fn test_queue_config_from_env_with_poll_interval_ms() {
 #[serial]
 fn test_queue_config_from_env_with_poll_interval_seconds() {
     unsafe {
-        std::env::set_var("STREAMFLOW_QUEUE_POLL_INTERVAL", "2s");
+        std::env::set_var("KRUXIAFLOW_QUEUE_POLL_INTERVAL", "2s");
     }
 
     let config = QueueConfig::from_env();
@@ -80,7 +80,7 @@ fn test_queue_config_from_env_with_poll_interval_seconds() {
     assert_eq!(config.poll_interval, Duration::from_secs(2));
 
     unsafe {
-        std::env::remove_var("STREAMFLOW_QUEUE_POLL_INTERVAL");
+        std::env::remove_var("KRUXIAFLOW_QUEUE_POLL_INTERVAL");
     }
 }
 
@@ -88,7 +88,7 @@ fn test_queue_config_from_env_with_poll_interval_seconds() {
 #[serial]
 fn test_queue_config_from_env_with_poll_interval_minutes() {
     unsafe {
-        std::env::set_var("STREAMFLOW_QUEUE_POLL_INTERVAL", "5m");
+        std::env::set_var("KRUXIAFLOW_QUEUE_POLL_INTERVAL", "5m");
     }
 
     let config = QueueConfig::from_env();
@@ -96,7 +96,7 @@ fn test_queue_config_from_env_with_poll_interval_minutes() {
     assert_eq!(config.poll_interval, Duration::from_secs(300));
 
     unsafe {
-        std::env::remove_var("STREAMFLOW_QUEUE_POLL_INTERVAL");
+        std::env::remove_var("KRUXIAFLOW_QUEUE_POLL_INTERVAL");
     }
 }
 
@@ -104,7 +104,7 @@ fn test_queue_config_from_env_with_poll_interval_minutes() {
 #[serial]
 fn test_queue_config_from_env_with_batch_size() {
     unsafe {
-        std::env::set_var("STREAMFLOW_QUEUE_BATCH_SIZE", "500");
+        std::env::set_var("KRUXIAFLOW_QUEUE_BATCH_SIZE", "500");
     }
 
     let config = QueueConfig::from_env();
@@ -112,7 +112,7 @@ fn test_queue_config_from_env_with_batch_size() {
     assert_eq!(config.batch_size, 500);
 
     unsafe {
-        std::env::remove_var("STREAMFLOW_QUEUE_BATCH_SIZE");
+        std::env::remove_var("KRUXIAFLOW_QUEUE_BATCH_SIZE");
     }
 }
 

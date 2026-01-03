@@ -1,6 +1,6 @@
-# Contributing to StreamFlow
+# Contributing to Kruxia Flow
 
-Thank you for your interest in contributing to StreamFlow! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to Kruxia Flow! This document provides guidelines and information for contributors.
 
 ## Table of Contents
 
@@ -30,8 +30,8 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 ```bash
 # Clone the repository
-git clone https://github.com/kruxia/streamflow.git
-cd streamflow
+git clone https://github.com/kruxia/kruxiaflow.git
+cd kruxiaflow
 
 # Start the development environment
 ./dev up -d
@@ -78,7 +78,7 @@ cargo install sqlx-cli --no-default-features --features postgres
 docker run -d --name pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:18
 
 # Set up the database
-export DATABASE_URL='postgres://postgres:dev@localhost:5432/streamflow'
+export DATABASE_URL='postgres://postgres:dev@localhost:5432/kruxiaflow'
 sqlx database create
 sqlx migrate run
 
@@ -86,7 +86,7 @@ sqlx migrate run
 cargo build
 
 # Run the server
-cargo run --bin streamflow -- serve
+cargo run --bin kruxiaflow -- serve
 ```
 
 ### Environment Variables
@@ -101,9 +101,9 @@ Key environment variables:
 
 | Variable           | Description                    | Default                                           |
 |--------------------|--------------------------------|---------------------------------------------------|
-| `DATABASE_URL`     | PostgreSQL connection string   | `postgres://postgres:dev@localhost:5432/streamflow` |
-| `STREAMFLOW_HOST`  | API server host                | `0.0.0.0`                                         |
-| `STREAMFLOW_PORT`  | API server port                | `8080`                                            |
+| `DATABASE_URL`     | PostgreSQL connection string   | `postgres://postgres:dev@localhost:5432/kruxiaflow` |
+| `KRUXIAFLOW_HOST`  | API server host                | `0.0.0.0`                                         |
+| `KRUXIAFLOW_PORT`  | API server port                | `8080`                                            |
 | `RUST_LOG`         | Log level                      | `info`                                            |
 
 ## How to Contribute
@@ -112,7 +112,7 @@ Key environment variables:
 
 Before submitting a bug report:
 
-1. Check the [existing issues](https://github.com/kruxia/streamflow/issues) to avoid duplicates
+1. Check the [existing issues](https://github.com/kruxia/kruxiaflow/issues) to avoid duplicates
 2. Ensure you're using the latest version
 3. Collect relevant information (logs, environment, reproduction steps)
 
@@ -128,9 +128,9 @@ When submitting a bug report, include:
 
 Feature requests are welcome! Please:
 
-1. Check [existing issues](https://github.com/kruxia/streamflow/issues) and [discussions](https://github.com/kruxia/streamflow/discussions) first
+1. Check [existing issues](https://github.com/kruxia/kruxiaflow/issues) and [discussions](https://github.com/kruxia/kruxiaflow/discussions) first
 2. Provide a clear use case for the feature
-3. Explain how it fits with StreamFlow's goals (AI-native workflow orchestration with cost control)
+3. Explain how it fits with Kruxia Flow's goals (AI-native workflow orchestration with cost control)
 
 ### Contributing Code
 
@@ -222,7 +222,7 @@ Use conventional commit prefixes:
 cargo test test_name
 
 # Run tests for a specific crate
-cargo test -p streamflow-core
+cargo test -p kruxiaflow-core
 ```
 
 ### Writing Tests
@@ -258,8 +258,8 @@ Tests use a separate test database. Set up with:
 
 ### Getting Help
 
-- **GitHub Discussions**: [Ask questions and share ideas](https://github.com/kruxia/streamflow/discussions)
-- **GitHub Issues**: [Report bugs and request features](https://github.com/kruxia/streamflow/issues)
+- **GitHub Discussions**: [Ask questions and share ideas](https://github.com/kruxia/kruxiaflow/discussions)
+- **GitHub Issues**: [Report bugs and request features](https://github.com/kruxia/kruxiaflow/issues)
 
 ### Communication Guidelines
 
@@ -274,4 +274,4 @@ Contributors are recognized in:
 - Release notes for significant contributions
 - The project README for major features
 
-Thank you for contributing to StreamFlow!
+Thank you for contributing to Kruxia Flow!

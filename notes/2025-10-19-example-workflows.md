@@ -1,43 +1,43 @@
 2025-10-19
 
-# StreamFlow Example Workflows
+# Kruxia Flow Example Workflows
 
-The StreamFlow examples are located in the `streamflow-examples` crate, which is a separate binary and library that keeps the core StreamFlow libraries clean and lightweight. All example workflows can be explored via the CLI:
+The Kruxia Flow examples are located in the `kruxiaflow-examples` crate, which is a separate binary and library that keeps the core Kruxia Flow libraries clean and lightweight. All example workflows can be explored via the CLI:
 
 ```bash
 # List all examples
-cargo run --bin streamflow-examples list
+cargo run --bin kruxiaflow-examples list
 
 # Get info about a specific example
-cargo run --bin streamflow-examples info autonomous_research
+cargo run --bin kruxiaflow-examples info autonomous_research
 
 # Run an example (demonstration mode)
-cargo run --bin streamflow-examples run autonomous_research
+cargo run --bin kruxiaflow-examples run autonomous_research
 ```
 
 ## Comprehensive Example Workflows
 
 ### 1. Autonomous Research Agent
-- **Code**: `streamflow-examples/src/workflows/autonomous_research.rs`
-- **Tests**: `streamflow-examples/src/workflows/autonomous_research_comprehensive_tests.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/autonomous_research.rs`
+- **Tests**: `kruxiaflow-examples/src/workflows/autonomous_research_comprehensive_tests.rs`
 - **Documentation**: `book/src/examples/autonomous-research.md`
 - **Description**: Dynamic parallel searches, iterative loops, context accumulation, and budget tracking for autonomous AI research.
 - **Key Patterns**: Parallel Activities, Iterative Loops, Context Accumulation, Budget Tracking
 
 ### 2. Adaptive Content Generator
-- **Code**: `streamflow-examples/src/workflows/adaptive_content.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/adaptive_content.rs`
 - **Documentation**: `book/src/examples/adaptive-content.md`
 - **Description**: Quality gates, budget limits, retry with strategy modification, and parallel variant generation.
 - **Key Patterns**: Budget Tracking, Retry with Strategy Modification
 
 ### 3. Code Review & Fix Agent
-- **Code**: `streamflow-examples/src/workflows/code_review_fix_agent.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/code_review_fix_agent.rs`
 - **Documentation**: `docs/implementation-architecture/phase-10.1-code-review-fix-agent.md`
 - **Description**: Parallel analysis, human approval gates, retry with strategy modification, auto-fix minor issues, and comprehensive reporting.
 - **Key Patterns**: Parallel Activities, Retry with Strategy Modification, External Signals
 
 ### 4. Multi-Agent Debate System
-- **Code**: `streamflow-examples/src/workflows/multi_agent_debate.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/multi_agent_debate.rs`
 - **Documentation**:
     - `book/src/examples/multi-agent-debate.md`
     - `docs/implementation-architecture/phase-10.2-multi-agent-debate.md`
@@ -45,7 +45,7 @@ cargo run --bin streamflow-examples run autonomous_research
 - **Key Patterns**: Parallel Activities, Iterative Loops, Progress Tracking
 
 ### 5. Dynamic Task Decomposition Agent
-- **Code**: `streamflow-examples/src/workflows/dynamic_task_decomposition.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/dynamic_task_decomposition.rs`
 - **Documentation**:
     - `book/src/examples/dynamic-task-decomposition.md`
     - `docs/implementation-architecture/phase-10.3-dynamic-task-decomposition.md`
@@ -53,7 +53,7 @@ cargo run --bin streamflow-examples run autonomous_research
 - **Key Patterns**: Parallel Activities, Conditional Routing, Retry with Strategy Modification
 
 ### 6. Human-Supervised AI Code Generator
-- **Code**: `streamflow-examples/src/workflows/human_supervised_code_gen.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/human_supervised_code_gen.rs`
 - **Documentation**:
     - `book/src/examples/human-supervised-code-generation.md`
     - `docs/implementation-architecture/phase-10.4-human-supervised-ai-code-generator.md`
@@ -61,7 +61,7 @@ cargo run --bin streamflow-examples run autonomous_research
 - **Key Patterns**: Parallel Activities, Conditional Routing, Non-Deterministic Activities, External Signals
 
 ### 7. Multi-Stage Approval Pipeline
-- **Code**: `streamflow-examples/src/workflows/multi_stage_approval.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/multi_stage_approval.rs`
 - **Documentation**:
     - `book/src/examples/multi-stage-approval.md`
     - `docs/implementation-architecture/phase-10.5-multi-stage-approval-pipeline.md`
@@ -69,7 +69,7 @@ cargo run --bin streamflow-examples run autonomous_research
 - **Key Patterns**: External Signals, Conditional Routing, Parallel Activities
 
 ### 8. Data Pipeline
-- **Code**: `streamflow-examples/src/workflows/data_pipeline.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/data_pipeline.rs`
 - **Documentation**:
     - `book/src/examples/data-pipeline.md`
     - `docs/implementation-architecture/phase-10.6-data-pipeline-example.md`
@@ -77,7 +77,7 @@ cargo run --bin streamflow-examples run autonomous_research
 - **Key Patterns**: Parallel Activities, Progress Tracking, Error Handling
 
 ### 9. Order Fulfillment Saga
-- **Code**: `streamflow-examples/src/workflows/order_fulfillment_saga.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/order_fulfillment_saga.rs`
 - **Documentation**:
     - `book/src/examples/order-fulfillment-saga.md`
     - `docs/implementation-architecture/phase-10.7-order-fulfillment-saga.md`
@@ -87,59 +87,59 @@ cargo run --bin streamflow-examples run autonomous_research
 ## Additional Example Workflows
 
 ### 10. Cost-Constrained Research Pipeline
-- **Code**: `streamflow-examples/src/workflows/cost_constrained_research.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/cost_constrained_research.rs`
 - **Documentation**: `book/src/examples/cost-constrained-research.md`
 - **Description**: Strict budget constraints, per-activity budgets, and provider fallback chains.
 - **Key Patterns**: Budget Tracking, Retry with Strategy Modification
 
 ### 11. Non-Deterministic Creative Workflow
-- **Code**: `streamflow-examples/src/workflows/creative_recovery.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/creative_recovery.rs`
 - **Documentation**: `book/src/examples/creative-recovery.md`
 - **Description**: Proper handling of non-deterministic activities with crash recovery and result replay.
 - **Key Patterns**: Non-Deterministic Activities
 
 ### 12. Payment Processing
-- **Code**: `streamflow-examples/src/workflows/payment_processing.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/payment_processing.rs`
 - **Documentation**: `book/src/examples/payment.md`
 - **Description**: Sequential activities, error handling, retry logic, and compensation on failure.
 - **Key Patterns**: Basic workflow patterns, Error Handling
 
 ### 13. AI Customer Support
-- **Code**: `streamflow-examples/src/workflows/ai_customer_support.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/ai_customer_support.rs`
 - **Documentation**: `book/src/examples/ai-customer-support.md`
 - **Description**: Streaming responses, context management, cost tracking, and conditional routing.
 - **Key Patterns**: Streaming, Conditional Routing
 
 ## Pattern Example Workflows
 
-These workflows demonstrate specific StreamFlow patterns in isolation:
+These workflows demonstrate specific Kruxia Flow patterns in isolation:
 
 ### 14. Parallel Research (Pattern Example)
-- **Code**: `streamflow-examples/src/workflows/parallel_research.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/parallel_research.rs`
 - **Documentation**: `book/src/guide/parallel-activities.md`
 - **Description**: Dynamic parallel activity execution with flexible wait strategies (All, Any, FirstN).
 - **Key Patterns**: Parallel Activities
 
 ### 15. Iterative Loops (Pattern Example)
-- **Code**: `streamflow-examples/src/workflows/iterative_loops.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/iterative_loops.rs`
 - **Documentation**: `book/src/guide/iterative-loops.md`
 - **Description**: Loop patterns with max iteration guards, LLM-based exit conditions.
 - **Key Patterns**: Iterative Loops
 
 ### 16. Context Accumulation (Pattern Example)
-- **Code**: `streamflow-examples/src/workflows/context_accumulation.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/context_accumulation.rs`
 - **Documentation**: `book/src/guide/context-accumulation.md`
 - **Description**: Context management, state passing, filtering, and summarization for multi-turn conversations.
 - **Key Patterns**: Context Accumulation
 
 ### 17. Conditional Routing (Pattern Example)
-- **Code**: `streamflow-examples/src/workflows/conditional_routing.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/conditional_routing.rs`
 - **Documentation**: `book/src/guide/conditional-routing.md`
 - **Description**: If/else branching, switch/match patterns, dynamic activity selection, LLM-driven routing.
 - **Key Patterns**: Conditional Routing
 
 ### 18. Determinism (Pattern Example)
-- **Code**: `streamflow-examples/src/workflows/determinism.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/determinism.rs`
 - **Documentation**:
     - `book/src/guide/determinism.md`
     - `book/src/examples/determinism.md`
@@ -147,7 +147,7 @@ These workflows demonstrate specific StreamFlow patterns in isolation:
 - **Key Patterns**: Non-Deterministic Activities
 
 ### 19. Retry Strategies (Pattern Example)
-- **Code**: `streamflow-examples/src/workflows/retry_strategies.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/retry_strategies.rs`
 - **Documentation**:
     - `book/src/guide/errors.md`
     - `book/src/examples/retry-strategies.md`
@@ -155,13 +155,13 @@ These workflows demonstrate specific StreamFlow patterns in isolation:
 - **Key Patterns**: Retry with Strategy Modification
 
 ### 20. Streaming Activity (Pattern Example)
-- **Code**: `streamflow-examples/src/workflows/streaming_activity.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/streaming_activity.rs`
 - **Documentation**: `book/src/guide/streaming.md`
 - **Description**: Real-time token streaming for AI workloads via WebSocket.
 - **Key Patterns**: Streaming
 
 ### 21. Timeout Patterns (Pattern Example)
-- **Code**: `streamflow-examples/src/workflows/timeout_patterns.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/timeout_patterns.rs`
 - **Documentation**: Referenced in implementation docs for extended timeouts
 - **Description**: Extended timeouts, heartbeat mechanism, timeout strategies, manual progress reporting for long-running activities.
 - **Key Patterns**: Extended Timeouts & Heartbeats
@@ -169,18 +169,18 @@ These workflows demonstrate specific StreamFlow patterns in isolation:
 ## Benchmark Workflows
 
 ### 22. Benchmark Pipeline
-- **Code**: `streamflow-examples/src/workflows/benchmark_pipeline.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/benchmark_pipeline.rs`
 - **Documentation**: `benchmark-suite/docs/phase-2-status.md`
-- **Description**: Performance benchmarking workflow for testing StreamFlow throughput and latency.
+- **Description**: Performance benchmarking workflow for testing Kruxia Flow throughput and latency.
 - **Key Patterns**: Performance Testing
 
 ```yaml
 # Benchmark Pipeline Workflow Definition
-# Sequential ETL pipeline for benchmarking StreamFlow performance
+# Sequential ETL pipeline for benchmarking Kruxia Flow performance
 activities:
   # Step 1: Extract data from source
   - name: extract_data
-    worker: streamflow_examples
+    worker: kruxiaflow_examples
     parameters:
       source: "{{ARG.source}}"  # Optional: source system identifier
       data_size_kb: "{{ARG.data_size_kb}}"  # Optional: KB to generate (default: 5)
@@ -195,7 +195,7 @@ activities:
 
   # Step 2: Transform the extracted data
   - name: transform_data
-    worker: streamflow_examples
+    worker: kruxiaflow_examples
     parameters:
       extract_result: "{{extract_data}}"  # Full output from extract_data
       operations: "{{ARG.transform_operations}}"  # Optional: ops list (default: ["normalize", "enrich"])
@@ -215,7 +215,7 @@ activities:
 
   # Step 3: Validate the transformed data
   - name: validate_data
-    worker: streamflow_examples
+    worker: kruxiaflow_examples
     parameters:
       transform_result: "{{transform_data}}"  # Full output from transform_data
       rules: "{{ARG.validation_rules}}"  # Optional: rules list (default: ["schema_check", "data_quality"])
@@ -234,7 +234,7 @@ activities:
 
   # Step 4: Load data to destination
   - name: load_data
-    worker: streamflow_examples
+    worker: kruxiaflow_examples
     parameters:
       validate_result: "{{validate_data}}"  # Full output from validate_data
       destination: "{{ARG.destination}}"  # Optional: target system (default: "benchmark_output")
@@ -253,7 +253,7 @@ activities:
 
   # Step 5: Complete pipeline and summarize results
   - name: complete_pipeline
-    worker: streamflow_examples
+    worker: kruxiaflow_examples
     parameters:
       results:  # Map of all previous activity results
         extract: "{{extract_data}}"
@@ -282,16 +282,16 @@ activities:
 ```
 
 ### 23. Benchmark Pipeline Workflow
-- **Code**: `streamflow-examples/src/workflows/benchmark_pipeline_workflow.rs`
+- **Code**: `kruxiaflow-examples/src/workflows/benchmark_pipeline_workflow.rs`
 - **Description**: Extended benchmark pipeline workflow implementation.
 - **Key Patterns**: Performance Testing
 
 ## Supporting Files
 
-- **Module Definition**: `streamflow-examples/src/workflows/mod.rs` - Module organization and public exports
-- **Main Entry Point**: `streamflow-examples/src/main.rs` - CLI for exploring and running examples
-- **Library Entry**: `streamflow-examples/src/lib.rs` - Library interface for the examples crate
-- **Streaming Demo**: `streamflow-examples/examples/streaming_demo.rs` - Standalone streaming demonstration
+- **Module Definition**: `kruxiaflow-examples/src/workflows/mod.rs` - Module organization and public exports
+- **Main Entry Point**: `kruxiaflow-examples/src/main.rs` - CLI for exploring and running examples
+- **Library Entry**: `kruxiaflow-examples/src/lib.rs` - Library interface for the examples crate
+- **Streaming Demo**: `kruxiaflow-examples/examples/streaming_demo.rs` - Standalone streaming demonstration
 
 ## Documentation References
 
@@ -322,7 +322,7 @@ Various test reports validate the example implementations:
 
 ## Usage Notes
 
-1. **Running Examples**: All examples require the StreamFlow server to be running (`cargo run --bin streamflow serve`)
+1. **Running Examples**: All examples require the Kruxia Flow server to be running (`cargo run --bin kruxiaflow serve`)
 2. **Book Documentation**: The mdBook (`book/src/examples/`) contains user-facing documentation for most production examples
 3. **Implementation Architecture**: Technical implementation details are in `docs/implementation-architecture/`
 4. **Pattern Learning Path**: Start with pattern examples to understand individual concepts before exploring comprehensive workflows

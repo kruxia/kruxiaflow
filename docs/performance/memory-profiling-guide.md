@@ -49,13 +49,13 @@ ls -t ${PROFILE_DIR}/jeprof.out.*.heap
 FINAL_DUMP=$(ls -t ${PROFILE_DIR}/jeprof.out.*.heap | head -1)
 
 # Generate text report of top allocations
-jeprof --show_bytes --text target/profiling/streamflow "$FINAL_DUMP" > ${PROFILE_DIR}/allocation_report.txt
+jeprof --show_bytes --text target/profiling/kruxiaflow "$FINAL_DUMP" > ${PROFILE_DIR}/allocation_report.txt
 
 # View top 30 allocations
 head -30 ${PROFILE_DIR}/allocation_report.txt
 
 # Generate flamegraph SVG (requires graphviz)
-jeprof --show_bytes --svg target/profiling/streamflow "$FINAL_DUMP" > ${PROFILE_DIR}/flamegraph.svg
+jeprof --show_bytes --svg target/profiling/kruxiaflow "$FINAL_DUMP" > ${PROFILE_DIR}/flamegraph.svg
 
 # Open flamegraph
 open flamegraph.svg
@@ -82,7 +82,7 @@ sudo apt-get install heaptrack heaptrack-gui
 cargo build --release
 
 # Run with heaptrack
-heaptrack ./target/release/streamflow serve --port 8080 --workers 20 &
+heaptrack ./target/release/kruxiaflow serve --port 8080 --workers 20 &
 SERVER_PID=$!
 
 # Wait for server to start
@@ -95,10 +95,10 @@ sleep 5
 kill $SERVER_PID
 
 # Analyze (GUI)
-heaptrack_gui heaptrack.streamflow.*.gz
+heaptrack_gui heaptrack.kruxiaflow.*.gz
 
 # Or text analysis
-heaptrack_print heaptrack.streamflow.*.gz | head -50
+heaptrack_print heaptrack.kruxiaflow.*.gz | head -50
 ```
 
 ## What to Look For
@@ -109,9 +109,9 @@ The allocation report shows functions sorted by total memory allocated:
 
 ```
 Total: 124.03 MB
- 42.5 MB (34.3%)  streamflow_core::orchestrator::workflow_state::save_materialized_state
+ 42.5 MB (34.3%)  kruxiaflow_core::orchestrator::workflow_state::save_materialized_state
  28.7 MB (23.1%)  sqlx::postgres::connection::establish
- 15.2 MB (12.3%)  streamflow_core::events::postgres_event_source::poll
+ 15.2 MB (12.3%)  kruxiaflow_core::events::postgres_event_source::poll
   8.1 MB  (6.5%)  tokio::runtime::thread_pool::spawn
   ...
 ```
@@ -173,7 +173,7 @@ prepare_cached: 15 MB
 
 ### Invalid conf pair errors
 
-If you see errors like `<jemalloc>: Invalid conf pair: prof:true`, this means you're trying to set options that are already compiled in. The StreamFlow binary has profiling support compiled in via the `malloc_conf` static variable in main.rs.
+If you see errors like `<jemalloc>: Invalid conf pair: prof:true`, this means you're trying to set options that are already compiled in. The Kruxia Flow binary has profiling support compiled in via the `malloc_conf` static variable in main.rs.
 
 **Solution**: Use `_RJEM_MALLOC_CONF` (not `MALLOC_CONF`) and only set runtime activation options:
 ```bash
@@ -202,7 +202,7 @@ cargo build --release --features profiling
 
 3. **Check the binary has profiling enabled**:
 ```bash
-strings target/release/streamflow | grep "prof:true"
+strings target/release/kruxiaflow | grep "prof:true"
 ```
 Should output: `prof:true,prof_active:false,lg_prof_sample:19,prof_final:true`
 

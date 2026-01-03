@@ -1,10 +1,10 @@
-# StreamFlow Go-to-Market Strategy: Production-Ready Orchestration for the AI Era
+# Kruxia Flow Go-to-Market Strategy: Production-Ready Orchestration for the AI Era
 
 ## Strategic positioning for AI workflows without the cloud provider trap
 
-The workflow orchestration market stands at a critical juncture. Apache Airflow dominates with 320 million monthly downloads, yet shows fundamental limitations for AI workloads and real-time requirements. Meanwhile, HashiCorp's Business Source License disaster and Redis's forced reversal demonstrate that defensive licensing destroys more value than it protects. This creates a unique 18-24 month window for StreamFlow to establish category leadership in "production-ready AI orchestration" before the market consolidates.
+The workflow orchestration market stands at a critical juncture. Apache Airflow dominates with 320 million monthly downloads, yet shows fundamental limitations for AI workloads and real-time requirements. Meanwhile, HashiCorp's Business Source License disaster and Redis's forced reversal demonstrate that defensive licensing destroys more value than it protects. This creates a unique 18-24 month window for Kruxia Flow to establish category leadership in "production-ready AI orchestration" before the market consolidates.
 
-**The core insight**: Companies don't need another orchestration framework—they're actively removing frameworks like LangChain from production due to complexity. What they desperately need is an orchestration platform that solves the production gap: GPU scheduling, cost governance, evaluation frameworks, and operational simplicity that traditional tools lack. StreamFlow's 10MB binary, 50MB RAM footprint, and 10x performance aren't just technical achievements—they're the foundation for "operational simplicity at scale," the #1 buying criterion that beats raw performance every time.
+**The core insight**: Companies don't need another orchestration framework—they're actively removing frameworks like LangChain from production due to complexity. What they desperately need is an orchestration platform that solves the production gap: GPU scheduling, cost governance, evaluation frameworks, and operational simplicity that traditional tools lack. Kruxia Flow's 10MB binary, 50MB RAM footprint, and 10x performance aren't just technical achievements—they're the foundation for "operational simplicity at scale," the #1 buying criterion that beats raw performance every time.
 
 ---
 
@@ -12,7 +12,7 @@ The workflow orchestration market stands at a critical juncture. Apache Airflow 
 
 ### AGPL v3 + Commercial License (Dual Licensing)
 
-**Primary Recommendation**: Release StreamFlow core under **AGPL v3** with a commercial license option for companies that need proprietary modifications or want to avoid AGPL obligations.
+**Primary Recommendation**: Release Kruxia Flow core under **AGPL v3** with a commercial license option for companies that need proprietary modifications or want to avoid AGPL obligations.
 
 **Rationale from 2024-2025 market evidence**:
 
@@ -20,7 +20,7 @@ The workflow orchestration market stands at a critical juncture. Apache Airflow 
 
 **Why NOT BSL/SSPL**: HashiCorp lost billions in valuation and was eventually acquired after their BSL change. Redis had to reverse course and add AGPL after losing all external contributors and facing the Valkey fork. The pattern is clear—restrictive licenses on infrastructure tools create successful competitor forks rather than protecting business value.
 
-**Commercial license strategy**: Offer Apache 2.0 commercial license for companies that want to modify StreamFlow for proprietary products or enterprises with AGPL restrictions in their legal policies. Pricing: Contact sales for custom pricing (typically $50K-250K annually for enterprise).
+**Commercial license strategy**: Offer Apache 2.0 commercial license for companies that want to modify Kruxia Flow for proprietary products or enterprises with AGPL restrictions in their legal policies. Pricing: Contact sales for custom pricing (typically $50K-250K annually for enterprise).
 
 **What goes in open source (AGPL) vs. commercial**:
 - **Open source core**: All runtime functionality, core orchestration, workflow execution, PostgreSQL integration, basic observability
@@ -38,16 +38,16 @@ The workflow orchestration market stands at a critical juncture. Apache Airflow 
 
 **Don't fight AWS/GCP/Azure**: Partner with them from day one. Companies with AWS partnerships report 51% higher revenue growth. Elastic recovered after partnering with AWS post-conflict.
 
-**StreamFlow cloud provider strategy**:
+**Kruxia Flow cloud provider strategy**:
 1. **AWS Marketplace listing** (year 1) with hourly billing, integrated with AWS IAM
 2. **GCP/Azure Marketplace** (year 2) for multi-cloud presence
-3. **Co-selling motion**: Cloud provider sales teams get commission for StreamFlow referrals
+3. **Co-selling motion**: Cloud provider sales teams get commission for Kruxia Flow referrals
 4. **Deep integrations**: Native AWS Lambda, GCP Cloud Functions, Azure Functions orchestration
-5. **Managed offering**: StreamFlow Cloud (your hosted version) available alongside marketplaces
+5. **Managed offering**: Kruxia Flow Cloud (your hosted version) available alongside marketplaces
 
 **Pricing model**: Usage-based (industry standard for 92% of developer tools)
 
-**StreamFlow Cloud pricing structure**:
+**Kruxia Flow Cloud pricing structure**:
 - **Free tier**: 1M workflow actions/month, 5GB storage, community support
 - **Team**: $100/month + $30 per million actions (volume discounts at 10M actions)
 - **Business**: $500/month + $25 per million actions + SSO/SAML + audit logs + 99.9% SLA
@@ -110,7 +110,7 @@ The workflow orchestration market stands at a critical juncture. Apache Airflow 
 
 ### Core positioning: "Production-ready orchestration for AI workflows"
 
-**The positioning statement**: StreamFlow is the only workflow orchestration platform that gets AI from prototype to production. Unlike traditional orchestrators built for batch data pipelines (Airflow) or heavy enterprise tools (Temporal complexity), StreamFlow provides GPU scheduling, cost governance, and agent orchestration with operational simplicity—10x the performance in a 10MB binary.
+**The positioning statement**: Kruxia Flow is the only workflow orchestration platform that gets AI from prototype to production. Unlike traditional orchestrators built for batch data pipelines (Airflow) or heavy enterprise tools (Temporal complexity), Kruxia Flow provides GPU scheduling, cost governance, and agent orchestration with operational simplicity—10x the performance in a 10MB binary.
 
 **Why this works**:
 - **"Production-ready" addresses the gap**: Companies are removing LangChain from production; Microsoft warns customers avoid agentic solutions due to complexity
@@ -139,7 +139,7 @@ The workflow orchestration market stands at a critical juncture. Apache Airflow 
 
 ### Competitive positioning
 
-**vs. Apache Airflow**: "Airflow forces your code to follow its rules. StreamFlow adapts to your workflows."
+**vs. Apache Airflow**: "Airflow forces your code to follow its rules. Kruxia Flow adapts to your workflows."
 - Built-in AI features (GPU scheduling, token tracking) vs. batch-focused
 - Single binary deployment vs. complex setup
 - 10x faster, sub-second latency vs. scheduler bottlenecks
@@ -172,7 +172,7 @@ The workflow orchestration market stands at a critical juncture. Apache Airflow 
 
 - Publish migration guides and technical deep-dives
 - Ship evaluation framework and prompt versioning
-- Launch StreamFlow Cloud free tier
+- Launch Kruxia Flow Cloud free tier
 - Engage in AI/ML communities
 
 ### Phase 2 (Months 4-6): Momentum + Social Proof
@@ -207,15 +207,15 @@ The workflow orchestration market stands at a critical juncture. Apache Airflow 
 
 ### HackerNews Show HN Launch (Primary)
 
-**Title**: "Show HN: StreamFlow – Workflow orchestration for AI (single binary, Rust, PostgreSQL)"
+**Title**: "Show HN: Kruxia Flow – Workflow orchestration for AI (single binary, Rust, PostgreSQL)"
 
 **Post structure**:
-1. Introduction (1-2 sentences): "Hi HN, I'm [name]. I built StreamFlow, a workflow orchestration platform for AI workloads."
+1. Introduction (1-2 sentences): "Hi HN, I'm [name]. I built Kruxia Flow, a workflow orchestration platform for AI workloads."
 2. The problem (3-4 sentences): Current orchestrators weren't built for AI workflows—GPU scheduling is manual, cost tracking requires custom code, deployment is complex
 3. The solution (3-4 sentences): Single 10MB binary, 50MB RAM, built-in GPU scheduling, token tracking, PostgreSQL backend, 10x faster than Temporal
 4. Technical details (2-3 sentences): Core runtime architecture, workflow definitions, event-driven, open-sourced under AGPL v3
 5. Backstory (2-3 sentences): Previous experience, built after frustration with existing tools
-6. What's different (3-4 sentences): Unlike Airflow (batch) or Temporal (complex), StreamFlow is AI-native and operationally simple
+6. What's different (3-4 sentences): Unlike Airflow (batch) or Temporal (complex), Kruxia Flow is AI-native and operationally simple
 7. Ask for feedback: Request feedback from people building AI systems or managing platform engineering teams
 
 **Engagement**: Answer EVERY comment within 30 minutes for first 24 hours, go deep on technical questions, find agreement points with critics
@@ -224,9 +224,9 @@ The workflow orchestration market stands at a critical juncture. Apache Airflow 
 
 ### Benchmarking Campaign
 
-**Month 1**: "StreamFlow vs. Airflow vs. Temporal: Performance Comparison" with open-source methodology
-**Month 3**: "GPU Scheduling Efficiency: StreamFlow vs. Manual Kubernetes" with real AI workload
-**Month 6**: "Edge Orchestration Showdown: StreamFlow vs. K3s" on Raspberry Pi and edge servers
+**Month 1**: "Kruxia Flow vs. Airflow vs. Temporal: Performance Comparison" with open-source methodology
+**Month 3**: "GPU Scheduling Efficiency: Kruxia Flow vs. Manual Kubernetes" with real AI workload
+**Month 6**: "Edge Orchestration Showdown: Kruxia Flow vs. K3s" on Raspberry Pi and edge servers
 **Month 9**: "2025 Workflow Orchestration Performance Report" with updated benchmarks
 
 ### Technical Deep-Dive Content (Monthly)
@@ -268,19 +268,19 @@ Month 1: Architecture deep-dive | Month 2: GPU scheduling implementation | Month
 ### Responding to competitive moves
 
 **Scenario 1: Airflow adds AI features**
-- **Response**: "Airflow is bolting AI onto batch infrastructure. StreamFlow is AI-native from the ground up."
+- **Response**: "Airflow is bolting AI onto batch infrastructure. Kruxia Flow is AI-native from the ground up."
 - **Action**: Double down on developer experience differentiation
 
 **Scenario 2: Temporal launches AI features**
-- **Response**: "Temporal is great for durable execution. StreamFlow combines that with AI features and operational simplicity."
+- **Response**: "Temporal is great for durable execution. Kruxia Flow combines that with AI features and operational simplicity."
 - **Action**: Focus on AI-specific features Temporal won't prioritize
 
 **Scenario 3: AWS/GCP/Azure launch managed orchestration**
-- **Response**: "Cloud providers are great partners. StreamFlow works across all clouds + on-prem."
+- **Response**: "Cloud providers are great partners. Kruxia Flow works across all clouds + on-prem."
 - **Action**: Deepen partnerships, don't fight them
 
 **Scenario 4: Open-source fork emerges**
-- **Response**: "We welcome forks—that's open source. Here's why StreamFlow is still the best choice."
+- **Response**: "We welcome forks—that's open source. Here's why Kruxia Flow is still the best choice."
 - **Action**: Maintain goodwill, show faster velocity and community
 
 **Scenario 5: Competitor publishes faster benchmarks**
@@ -289,9 +289,9 @@ Month 1: Architecture deep-dive | Month 2: GPU scheduling implementation | Month
 
 ### Comparison pages
 
-Create dedicated pages: streamflow.dev/vs/airflow, streamflow.dev/vs/temporal
+Create dedicated pages: kruxiaflow.dev/vs/airflow, kruxiaflow.dev/vs/temporal
 
-**Structure**: Acknowledge competitor strengths → Define when StreamFlow is better choice → Feature comparison table → Migration guide → Testimonials → CTA
+**Structure**: Acknowledge competitor strengths → Define when Kruxia Flow is better choice → Feature comparison table → Migration guide → Testimonials → CTA
 
 **Principles**: Never attack, be honest about limitations, define new category, use quantified differentiation
 
@@ -407,17 +407,17 @@ Add to low-budget tactics:
 
 **Community partnerships**: Co-host events with complementary tools (LlamaIndex, Hugging Face)—split costs, 2x audience
 
-**User-generated content**: Encourage users to blog about StreamFlow, offer swag/credits for blog posts, creates authentic content at scale
+**User-generated content**: Encourage users to blog about Kruxia Flow, offer swag/credits for blog posts, creates authentic content at scale
 
 **GitHub stars campaign**: "Star us on GitHub" CTAs everywhere, GitHub badges in README, star-to-win raffles (tasteful, not spammy)
 
-**Comparison SEO**: Create comparison pages (StreamFlow vs X) for every competitor—captures high-intent search traffic for free
+**Comparison SEO**: Create comparison pages (Kruxia Flow vs X) for every competitor—captures high-intent search traffic for free
 
 ---
 
 ## Conclusion: Winning the AI orchestration category
 
-StreamFlow enters a market at inflection. Airflow's dominance is built on 2014 architecture inadequate for AI workloads. Temporal solves durable execution but with enterprise complexity. LangChain is being removed from production. The gap is clear: **production-ready AI orchestration with operational simplicity**.
+Kruxia Flow enters a market at inflection. Airflow's dominance is built on 2014 architecture inadequate for AI workloads. Temporal solves durable execution but with enterprise complexity. LangChain is being removed from production. The gap is clear: **production-ready AI orchestration with operational simplicity**.
 
 **Your strategic advantages**:
 
@@ -438,4 +438,4 @@ StreamFlow enters a market at inflection. Airflow's dominance is built on 2014 a
 
 **Success looks like**: By Month 12, you have 75+ paying customers, $200K MRR, 3,000 GitHub stars, strong community, enterprise reference customers, and clear category leadership in "production-ready AI orchestration." You've proven that operational simplicity + AI-native features beats both legacy batch orchestrators and complex enterprise platforms.
 
-**The path forward is clear. Execute with discipline, listen to customers, build in public, and own the production gap. The market is ready—StreamFlow just needs to capture it.**
+**The path forward is clear. Execute with discipline, listen to customers, build in public, and own the production gap. The market is ready—Kruxia Flow just needs to capture it.**

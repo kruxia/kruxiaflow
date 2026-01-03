@@ -1,4 +1,4 @@
-# StreamFlow Profiling Quick Start Guide
+# Kruxia Flow Profiling Quick Start Guide
 
 This guide shows you how to run comprehensive performance profiling to identify bottlenecks.
 
@@ -6,10 +6,10 @@ This guide shows you how to run comprehensive performance profiling to identify 
 
 1. **Environment variables set** (source .envrc or set manually):
    ```bash
-   export STREAMFLOW_CLIENT_ID="streamflow-dev-client"
-   export STREAMFLOW_CLIENT_SECRET="dev-secret-key"
-   export STREAMFLOW_OAUTH_RSA_PUBLIC_KEY_PEM="$(cat dev-keys/public.pem)"
-   export STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="$(cat dev-keys/private.pem)"
+   export KRUXIAFLOW_CLIENT_ID="kruxiaflow-dev-client"
+   export KRUXIAFLOW_CLIENT_SECRET="dev-secret-key"
+   export KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM="$(cat dev-keys/public.pem)"
+   export KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="$(cat dev-keys/private.pem)"
    ```
 
 2. **Install cargo-flamegraph** (if not already installed):
@@ -43,7 +43,7 @@ The script will:
 - ✅ Set up database (drop/recreate/migrate)
 - ✅ Seed OAuth client
 - ✅ Build release binary
-- ✅ Start StreamFlow server with debug logging (RUST_LOG=streamflow=debug)
+- ✅ Start Kruxia Flow server with debug logging (RUST_LOG=kruxiaflow=debug)
 - ✅ Reset pg_stat_statements for clean measurement
 - ✅ Register workflow definitions
 - ✅ Start CPU profiling (flamegraph attached to server process)
@@ -68,7 +68,7 @@ ls -lh profiling/results-20251108-123456
 
 **Output files:**
 - `flamegraph.svg` - CPU flamegraph showing hot paths
-- `server.log` - StreamFlow server logs with debug output
+- `server.log` - Kruxia Flow server logs with debug output
 - `slow-queries.txt` - PostgreSQL queries slower than 1ms
 - `flamegraph.log` - Profiler output/errors (if any)
 
@@ -287,7 +287,7 @@ cat profiling-results-*/server.log
 Common issues:
 - Port 8080 already in use: `lsof -i :8080` and kill the process
 - Database connection failed: Check `DATABASE_URL`
-- Missing environment variables: Check all `STREAMFLOW_*` vars are set
+- Missing environment variables: Check all `KRUXIAFLOW_*` vars are set
 
 ### Benchmark times out
 

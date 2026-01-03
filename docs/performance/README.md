@@ -1,6 +1,6 @@
 # Performance Documentation
 
-This directory contains comprehensive performance analysis, optimization plans, and investigation results for StreamFlow.
+This directory contains comprehensive performance analysis, optimization plans, and investigation results for Kruxia Flow.
 
 ## 📊 Current Status (December 2025)
 
@@ -190,7 +190,7 @@ To scale beyond 200 concurrent workflows:
 - [Post-MVP](../post-mvp.md) - Future optimizations
 
 ### External
-- [StreamFlow Benchmark](../../benchmark/) - Test code
+- [Kruxia Flow Benchmark](../../benchmark/) - Test code
 - [Core Orchestrator](../../core/src/orchestrator/) - Orchestration logic
 - [Event Source](../../core/src/events/) - Event streaming
 

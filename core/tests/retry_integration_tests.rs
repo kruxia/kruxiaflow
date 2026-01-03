@@ -2,18 +2,18 @@ use serde_json::json;
 use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
-use streamflow_core::events::{
+use kruxiaflow_core::events::{
     ActivityDefinition, EventSource, NewWorkflowEvent, PostgresEventSource, WorkflowDefinition,
     WorkflowEventType,
 };
-use streamflow_core::orchestrator::OrchestratorConfig;
-use streamflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
-use streamflow_core::workflow::{ActivitySettings, BackoffStrategy, RetryPolicy};
+use kruxiaflow_core::orchestrator::OrchestratorConfig;
+use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
+use kruxiaflow_core::workflow::{ActivitySettings, BackoffStrategy, RetryPolicy};
 use uuid::Uuid;
 
 async fn setup_test_db() -> PgPool {
     let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://localhost/streamflow_test".to_string());
+        .unwrap_or_else(|_| "postgres://localhost/kruxiaflow_test".to_string());
 
     let pool = PgPool::connect(&database_url)
         .await
@@ -33,7 +33,7 @@ async fn poll_with_retry(
     event_source: &Arc<dyn EventSource>,
     consumer_id: &str,
     max_attempts: u32,
-) -> Vec<streamflow_core::events::WorkflowEvent> {
+) -> Vec<kruxiaflow_core::events::WorkflowEvent> {
     for attempt in 0..max_attempts {
         let events = event_source.poll(consumer_id).await.unwrap();
         if !events.is_empty() {
@@ -76,7 +76,7 @@ async fn process_all_events(
             } else {
                 // Process the retry batch
                 for event in &retry_events {
-                    streamflow_core::orchestrator::orchestrator::process_workflow_event(
+                    kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
                         event,
                         event_source,
                         activity_queue,
@@ -98,7 +98,7 @@ async fn process_all_events(
         }
 
         for event in &events {
-            streamflow_core::orchestrator::orchestrator::process_workflow_event(
+            kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
                 event,
                 event_source,
                 activity_queue,
@@ -230,7 +230,7 @@ async fn test_activity_retry_with_exponential_backoff() {
 
     let events = event_source.poll("test_retry").await.unwrap();
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -337,14 +337,14 @@ async fn test_activity_retry_with_exponential_backoff() {
 
     // 6. Verify workflow completed successfully
     let workflow = sqlx::query!(
-        r#"SELECT status as "status: streamflow_core::events::WorkflowStatus" FROM workflows WHERE id = $1"#,
+        r#"SELECT status as "status: kruxiaflow_core::events::WorkflowStatus" FROM workflows WHERE id = $1"#,
         workflow_id
     )
     .fetch_one(&pool)
     .await
     .unwrap();
 
-    use streamflow_core::events::WorkflowStatus;
+    use kruxiaflow_core::events::WorkflowStatus;
     assert_eq!(workflow.status, WorkflowStatus::Completed);
 }
 
@@ -413,7 +413,7 @@ async fn test_activity_retry_max_attempts_reached() {
 
     let events = event_source.poll("test_max_attempts").await.unwrap();
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -494,14 +494,14 @@ async fn test_activity_retry_max_attempts_reached() {
 
     // 6. Verify workflow status is Failed
     let workflow = sqlx::query!(
-        r#"SELECT status as "status: streamflow_core::events::WorkflowStatus" FROM workflows WHERE id = $1"#,
+        r#"SELECT status as "status: kruxiaflow_core::events::WorkflowStatus" FROM workflows WHERE id = $1"#,
         workflow_id
     )
     .fetch_one(&pool)
     .await
     .unwrap();
 
-    use streamflow_core::events::WorkflowStatus;
+    use kruxiaflow_core::events::WorkflowStatus;
     assert_eq!(workflow.status, WorkflowStatus::Failed);
 }
 
@@ -566,7 +566,7 @@ async fn test_activity_retry_with_fixed_backoff() {
 
     let events = event_source.poll("test_fixed_backoff").await.unwrap();
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -595,7 +595,7 @@ async fn test_activity_retry_with_fixed_backoff() {
 
     let events = event_source.poll("test_fixed_backoff").await.unwrap();
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -676,7 +676,7 @@ async fn test_activity_without_retry_fails_immediately() {
 
     let events = event_source.poll("test_no_retry").await.unwrap();
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -705,7 +705,7 @@ async fn test_activity_without_retry_fails_immediately() {
 
     let events = event_source.poll("test_no_retry").await.unwrap();
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -814,7 +814,7 @@ async fn test_retry_state_tracking_with_cost_accumulation() {
 
     let events = event_source.poll("test_cost").await.unwrap();
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,
@@ -843,7 +843,7 @@ async fn test_retry_state_tracking_with_cost_accumulation() {
 
     let events = event_source.poll("test_cost").await.unwrap();
     for event in &events {
-        streamflow_core::orchestrator::orchestrator::process_workflow_event(
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
             &event_source,
             &activity_queue,

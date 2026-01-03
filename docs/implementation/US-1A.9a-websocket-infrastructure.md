@@ -106,11 +106,11 @@ const ws = new WebSocket(url, protocols);
 | CLI tools                      | ✅ Yes         | Header or query param |
 | Browser JavaScript             | ❌ No          | Query param only      |
 
-**StreamFlow Clients**:
+**Kruxia Flow Clients**:
 - **Workers/agents** (non-browser): Could use headers, but query param works universally
 - **Dashboard UI** (browser): Requires query param
 
-**Security Consideration**: Query parameter tokens can appear in server access logs, browser history, and referrer headers. For StreamFlow, this is acceptable because:
+**Security Consideration**: Query parameter tokens can appear in server access logs, browser history, and referrer headers. For Kruxia Flow, this is acceptable because:
 1. Tokens are short-lived JWTs
 2. WebSocket URLs are not typically shared or bookmarked
 3. Browser compatibility is required for dashboard streaming

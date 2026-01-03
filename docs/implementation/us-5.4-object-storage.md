@@ -46,7 +46,7 @@
 
 ### Service Interface Pattern
 
-Following StreamFlow's service interface pattern (ActivityQueue, EventSource, etc.), we introduce a new **WorkflowStorage** interface:
+Following Kruxia Flow's service interface pattern (ActivityQueue, EventSource, etc.), we introduce a new **WorkflowStorage** interface:
 
 ```mermaid
 flowchart TB
@@ -55,7 +55,7 @@ flowchart TB
         Activity[Activity Executor]
     end
 
-    subgraph Framework["StreamFlow Framework"]
+    subgraph Framework["Kruxia Flow Framework"]
         Orchestrator[Orchestrator]
         TemplateResolver[Template Resolver]
         StorageInterface[WorkflowStorage Interface]
@@ -650,7 +650,7 @@ pub trait ActivityImpl: Send + Sync {
 #### Migration Strategy
 
 **Phase 1: Create Worker-Side ActivityResult** ✅ Complete
-- Created `streamflow_core::ActivityOutput` and `OutputType`
+- Created `kruxiaflow_core::ActivityOutput` and `OutputType`
 - Added to activity queue models
 - Template resolver updated
 
@@ -713,7 +713,7 @@ sequenceDiagram
 pub struct FileExecutor {
     workflow_id: Uuid,
     activity_key: String,
-    temp_dir: PathBuf,  // /tmp/streamflow/{workflow_id}/{activity_key}/
+    temp_dir: PathBuf,  // /tmp/kruxiaflow/{workflow_id}/{activity_key}/
 }
 
 impl FileExecutor {
@@ -806,7 +806,7 @@ pub struct CompleteActivityRequest {
 File: `worker/src/activity_result.rs` (new)
 
 ```rust
-use streamflow_core::{ActivityOutput, OutputType};
+use kruxiaflow_core::{ActivityOutput, OutputType};
 use serde_json::Value;
 
 /// Activity execution result
@@ -1624,11 +1624,11 @@ DROP TABLE IF EXISTS workflow_files;
 - ✅ Added `WorkflowStorage` to `WorkerPoller` and `WorkerManager`
 - ✅ Parse `output_definitions` from pending activities
 - ✅ Create `FileExecutor` when output_definitions exist
-- ✅ Inject temp directory path via `_streamflow_temp_dir` parameter
+- ✅ Inject temp directory path via `_kruxiaflow_temp_dir` parameter
 - ✅ Process file outputs after activity execution
 - ✅ Upload files to storage automatically
 - ✅ Cleanup temp directory after completion
-- ✅ Updated `streamflow serve` command to pass storage to workers
+- ✅ Updated `kruxiaflow serve` command to pass storage to workers
 
 **End-to-End Testing:**
 - ✅ Created comprehensive integration test (`worker/tests/file_workflow_integration_test.rs`)
@@ -1666,9 +1666,9 @@ DROP TABLE IF EXISTS workflow_files;
 1. **Dyn Compatibility**: WorkflowStorage uses `Pin<Box<dyn Stream>>` for trait object safety
 2. **Streaming**: All file operations use 8KB chunks to avoid memory issues
 3. **Backward Compatibility**: ActivityResult can convert to legacy Value format
-4. **Temp Directory Pattern**: `/tmp/streamflow/{workflow_id}/{activity_key}/`
+4. **Temp Directory Pattern**: `/tmp/kruxiaflow/{workflow_id}/{activity_key}/`
 5. **File References**: Format is `{workflow_id}/{activity_key}/{filename}`
-6. **Parameter Injection**: Temp directory passed via `_streamflow_temp_dir` internal parameter (thread-safe)
+6. **Parameter Injection**: Temp directory passed via `_kruxiaflow_temp_dir` internal parameter (thread-safe)
 
 ### MVP Completion Summary
 

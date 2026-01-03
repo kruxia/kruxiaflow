@@ -1,6 +1,6 @@
 # Implementation Plan: US-1C.6 Health Checks and Service Monitoring
 
-**Epic**: 1C - StreamFlow Binary and CLI
+**Epic**: 1C - Kruxia Flow Binary and CLI
 **User Story**: US-1C.6
 **Status**: ✅ Implemented
 **Priority**: P2 (Operational tooling)
@@ -15,16 +15,16 @@
 
 **As** a platform engineering lead
 **I want** CLI commands to check service health and status
-**So that** I can monitor StreamFlow in production
+**So that** I can monitor Kruxia Flow in production
 
 ---
 
 ## Acceptance Criteria
 
-- [x] `streamflow health` - Check if all services are healthy
+- [x] `kruxiaflow health` - Check if all services are healthy
   - Checks: Database connectivity, API server reachability, orchestrator running
   - Exit code: 0 (healthy), 1 (unhealthy)
-- [x] `streamflow status` - Show detailed service status
+- [x] `kruxiaflow status` - Show detailed service status
   - Output: Service names, health status, uptime, version
 - [x] Health check timeout: Configurable (default 5s)
 - [x] Output formats: Human-readable text or JSON (via `--format json`)
@@ -39,7 +39,7 @@ While US-1A.1 provides HTTP health endpoints (`/health`, `/health/ready`), CLI t
 2. **Exit Codes**: Standard POSIX exit codes for automation
 3. **Aggregation**: Check multiple services in one command
 4. **No HTTP Client Required**: Check health without curl/wget
-5. **Consistent UX**: Same interface as other streamflow commands
+5. **Consistent UX**: Same interface as other kruxiaflow commands
 
 **Deferral Rationale**: Basic health endpoints from US-1A.1 are sufficient for Epic 2. Enhanced CLI monitoring tools can be informed by Epic 2 metrics requirements.
 
@@ -51,7 +51,7 @@ While US-1A.1 provides HTTP health endpoints (`/health`, `/health/ready`), CLI t
 
 ```mermaid
 flowchart TB
-    Start([streamflow health]) --> ParseArgs[Parse Arguments]
+    Start([kruxiaflow health]) --> ParseArgs[Parse Arguments]
     ParseArgs --> GetTarget{Target<br/>Specified?}
 
     GetTarget -->|Yes| SingleTarget[Check Single Target]
@@ -87,7 +87,7 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    Start([streamflow status]) --> Connect[Connect to Services]
+    Start([kruxiaflow status]) --> Connect[Connect to Services]
 
     Connect --> GetAPI[Query API Server<br/>/api/v1/info]
     Connect --> GetDB[Query Database<br/>Version & Stats]
@@ -114,10 +114,10 @@ flowchart TB
 
 ### Component 1: Health Command
 
-**Location**: `streamflow/src/commands/health.rs` (new file)
+**Location**: `kruxiaflow/src/commands/health.rs` (new file)
 
 **Responsibilities**:
-1. Check connectivity to all StreamFlow services
+1. Check connectivity to all Kruxia Flow services
 2. Report health status with appropriate exit codes
 3. Support multiple output formats
 
@@ -137,9 +137,9 @@ pub struct HealthCommand {
     /// API server URL to check
     #[arg(
         long,
-        env = "STREAMFLOW_API_URL",
+        env = "KRUXIAFLOW_API_URL",
         default_value = "http://127.0.0.1:8080",
-        help = "StreamFlow API server URL"
+        help = "Kruxia Flow API server URL"
     )]
     pub api_url: String,
 
@@ -147,7 +147,7 @@ pub struct HealthCommand {
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_HEALTH_TIMEOUT",
+        env = "KRUXIAFLOW_HEALTH_TIMEOUT",
         default_value = "5",
         help = "Timeout for health checks in seconds"
     )]
@@ -157,7 +157,7 @@ pub struct HealthCommand {
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_OUTPUT_FORMAT",
+        env = "KRUXIAFLOW_OUTPUT_FORMAT",
         default_value = "text",
         help = "Output format (text, json)"
     )]
@@ -410,7 +410,7 @@ async fn check_orchestrator(api_url: &str, timeout: Duration) -> HealthResult {
 
 /// Print text report
 fn print_text_report(report: &HealthReport, verbose: bool) {
-    println!("StreamFlow Health Check");
+    println!("Kruxia Flow Health Check");
     println!("{:-<50}", "");
 
     for result in &report.services {
@@ -478,7 +478,7 @@ mod tests {
 
 ### Component 2: Status Command
 
-**Location**: `streamflow/src/commands/status.rs` (new file)
+**Location**: `kruxiaflow/src/commands/status.rs` (new file)
 
 **Responsibilities**:
 1. Query detailed status from all services
@@ -501,9 +501,9 @@ pub struct StatusCommand {
     /// API server URL
     #[arg(
         long,
-        env = "STREAMFLOW_API_URL",
+        env = "KRUXIAFLOW_API_URL",
         default_value = "http://127.0.0.1:8080",
-        help = "StreamFlow API server URL"
+        help = "Kruxia Flow API server URL"
     )]
     pub api_url: String,
 
@@ -511,7 +511,7 @@ pub struct StatusCommand {
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_STATUS_TIMEOUT",
+        env = "KRUXIAFLOW_STATUS_TIMEOUT",
         default_value = "10",
         help = "Timeout for status queries in seconds"
     )]
@@ -521,7 +521,7 @@ pub struct StatusCommand {
     #[arg(
         short,
         long,
-        env = "STREAMFLOW_OUTPUT_FORMAT",
+        env = "KRUXIAFLOW_OUTPUT_FORMAT",
         default_value = "text",
         help = "Output format (text, json)"
     )]
@@ -673,7 +673,7 @@ async fn get_database_status(database_url: &str, timeout: Duration) -> DatabaseS
 
 /// Print text status
 fn print_text_status(report: &StatusReport) {
-    println!("StreamFlow Status");
+    println!("Kruxia Flow Status");
     println!("{:=<60}", "");
 
     // Services table
@@ -741,7 +741,7 @@ mod tests {
 
 ### Component 3: Update Main Binary
 
-**Location**: `streamflow/src/main.rs`
+**Location**: `kruxiaflow/src/main.rs`
 
 ```rust
 // Add to imports
@@ -755,30 +755,30 @@ enum Commands {
 
     /// Check service health
     #[command(
-        about = "Check health of StreamFlow services",
-        long_about = "Check health of StreamFlow services\n\n\
+        about = "Check health of Kruxia Flow services",
+        long_about = "Check health of Kruxia Flow services\n\n\
 Performs health checks on database, API server, and orchestrator.\n\
 Exit code: 0 (healthy), 1 (unhealthy).\n\n\
 EXAMPLES:\n  \
-  streamflow health                    # Check all services\n  \
-  streamflow health --service api      # Check API only\n  \
-  streamflow health --format json      # JSON output\n  \
-  streamflow health --timeout 10       # 10 second timeout\n\n\
+  kruxiaflow health                    # Check all services\n  \
+  kruxiaflow health --service api      # Check API only\n  \
+  kruxiaflow health --format json      # JSON output\n  \
+  kruxiaflow health --timeout 10       # 10 second timeout\n\n\
 USE IN SCRIPTS:\n  \
-  if streamflow health; then\n  \
-    echo 'StreamFlow is healthy'\n  \
+  if kruxiaflow health; then\n  \
+    echo 'Kruxia Flow is healthy'\n  \
   fi"
     )]
     Health(commands::health::HealthCommand),
 
     /// Show detailed service status
     #[command(
-        about = "Show detailed status of StreamFlow services",
-        long_about = "Show detailed status of StreamFlow services\n\n\
+        about = "Show detailed status of Kruxia Flow services",
+        long_about = "Show detailed status of Kruxia Flow services\n\n\
 Displays version, uptime, and configuration for all services.\n\n\
 EXAMPLES:\n  \
-  streamflow status                # Show status\n  \
-  streamflow status --format json  # JSON output"
+  kruxiaflow status                # Show status\n  \
+  kruxiaflow status --format json  # JSON output"
     )]
     Status(commands::status::StatusCommand),
 }
@@ -795,7 +795,7 @@ match cli.command {
 
 ### Component 4: Update Commands Module
 
-**Location**: `streamflow/src/commands/mod.rs`
+**Location**: `kruxiaflow/src/commands/mod.rs`
 
 ```rust
 pub mod api;
@@ -816,7 +816,7 @@ pub mod worker;
 ### Health Check - Text Format
 
 ```
-StreamFlow Health Check
+Kruxia Flow Health Check
 --------------------------------------------------
 ✅ database     - Connected successfully
    Latency: 12ms
@@ -865,7 +865,7 @@ Overall: ✅ HEALTHY
 ### Status - Text Format
 
 ```
-StreamFlow Status
+Kruxia Flow Status
 ============================================================
 
 📊 Services:
@@ -919,13 +919,13 @@ mod tests {
 
 ### Integration Tests
 
-**File**: `streamflow/tests/health_status_integration_test.rs` (new)
+**File**: `kruxiaflow/tests/health_status_integration_test.rs` (new)
 
 ```rust
 #[tokio::test]
 #[serial]
 async fn test_health_all_services_running() {
-    // Start streamflow serve
+    // Start kruxiaflow serve
     // Run health command
     // Verify exit code 0
 }
@@ -941,7 +941,7 @@ async fn test_health_api_unavailable() {
 #[tokio::test]
 #[serial]
 async fn test_health_json_output() {
-    // Start streamflow serve
+    // Start kruxiaflow serve
     // Run health command with --format json
     // Parse output as JSON
     // Verify structure
@@ -950,7 +950,7 @@ async fn test_health_json_output() {
 #[tokio::test]
 #[serial]
 async fn test_status_command() {
-    // Start streamflow serve
+    // Start kruxiaflow serve
     // Run status command
     // Verify output contains version and uptime
 }
@@ -960,31 +960,31 @@ async fn test_status_command() {
 
 ```bash
 # 1. Start services
-./target/release/streamflow serve &
+./target/release/kruxiaflow serve &
 
 # 2. Basic health check
-./target/release/streamflow health
+./target/release/kruxiaflow health
 
 # 3. Health check with JSON output
-./target/release/streamflow health --format json
+./target/release/kruxiaflow health --format json
 
 # 4. Check specific service
-./target/release/streamflow health --service api
+./target/release/kruxiaflow health --service api
 
 # 5. Verbose health check
-./target/release/streamflow health -v
+./target/release/kruxiaflow health -v
 
 # 6. Status command
-./target/release/streamflow status
+./target/release/kruxiaflow status
 
 # 7. Status with JSON
-./target/release/streamflow status --format json
+./target/release/kruxiaflow status --format json
 
 # 8. Custom timeout
-./target/release/streamflow health --timeout 10
+./target/release/kruxiaflow health --timeout 10
 
 # 9. Use in script
-if ./target/release/streamflow health; then
+if ./target/release/kruxiaflow health; then
     echo "All services healthy"
 else
     echo "Some services unhealthy"
@@ -996,7 +996,7 @@ fi
 ## Implementation Phases
 
 ### Phase 1: Health Command (~2 hours) ✅
-- [x] Create `streamflow/src/commands/health.rs`
+- [x] Create `kruxiaflow/src/commands/health.rs`
 - [x] Implement database health check
 - [x] Implement API health check
 - [x] Implement orchestrator health check
@@ -1005,7 +1005,7 @@ fi
 - [x] Update `commands/mod.rs` and `main.rs`
 
 ### Phase 2: Status Command (~1.5 hours) ✅
-- [x] Create `streamflow/src/commands/status.rs`
+- [x] Create `kruxiaflow/src/commands/status.rs`
 - [x] Implement API status query
 - [x] Implement database status query
 - [x] Implement text and JSON output
@@ -1025,12 +1025,12 @@ fi
 ## Success Criteria
 
 ### Functional Requirements
-- [x] `streamflow health` checks all services
-- [x] `streamflow health --service X` checks specific service
-- [x] `streamflow health --format json` outputs JSON
+- [x] `kruxiaflow health` checks all services
+- [x] `kruxiaflow health --service X` checks specific service
+- [x] `kruxiaflow health --format json` outputs JSON
 - [x] Exit code 0 when healthy, 1 when unhealthy
-- [x] `streamflow status` shows detailed status
-- [x] `streamflow status --format json` outputs JSON
+- [x] `kruxiaflow status` shows detailed status
+- [x] `kruxiaflow status --format json` outputs JSON
 - [x] Configurable timeout (default 5s)
 
 ### Non-Functional Requirements
@@ -1050,10 +1050,10 @@ fi
 | Variable                    | Default                   | Description                    |
 | --------------------------- | ------------------------- | ------------------------------ |
 | `DATABASE_URL`              | (optional)                | PostgreSQL connection string   |
-| `STREAMFLOW_API_URL`        | `http://127.0.0.1:8080`   | API server URL                 |
-| `STREAMFLOW_HEALTH_TIMEOUT` | `5`                       | Health check timeout (seconds) |
-| `STREAMFLOW_STATUS_TIMEOUT` | `10`                      | Status query timeout (seconds) |
-| `STREAMFLOW_OUTPUT_FORMAT`  | `text`                    | Output format (text/json)      |
+| `KRUXIAFLOW_API_URL`        | `http://127.0.0.1:8080`   | API server URL                 |
+| `KRUXIAFLOW_HEALTH_TIMEOUT` | `5`                       | Health check timeout (seconds) |
+| `KRUXIAFLOW_STATUS_TIMEOUT` | `10`                      | Status query timeout (seconds) |
+| `KRUXIAFLOW_OUTPUT_FORMAT`  | `text`                    | Output format (text/json)      |
 
 ---
 

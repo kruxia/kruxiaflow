@@ -10,20 +10,20 @@ use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
-use streamflow_api::{AppState, app_router};
-use streamflow_core::events::{EventSource, PostgresEventSource};
-use streamflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
-use streamflow_core::storage::{PostgresStorage, WorkflowStorage};
-use streamflow_core::{OrchestratorConfig, run_orchestrator};
-use streamflow_oauth::{AuthenticationService, PostgresAuthService};
-use streamflow_worker::{WorkerConfig, WorkerManager, register_builtin_activities};
+use kruxiaflow_api::{AppState, app_router};
+use kruxiaflow_core::events::{EventSource, PostgresEventSource};
+use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
+use kruxiaflow_core::storage::{PostgresStorage, WorkflowStorage};
+use kruxiaflow_core::{OrchestratorConfig, run_orchestrator};
+use kruxiaflow_oauth::{AuthenticationService, PostgresAuthService};
+use kruxiaflow_worker::{WorkerConfig, WorkerManager, register_builtin_activities};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 /// Helper to create test database pool
 async fn setup_test_pool() -> PgPool {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://streamflow:streamflow_dev@127.0.0.1:5432/streamflow".to_string()
+        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
     });
 
     let pool = PgPool::connect(&database_url)
@@ -59,7 +59,7 @@ async fn setup_test_services(
     Arc<dyn WorkflowStorage>,
     CancellationToken,
 ) {
-    use streamflow_oauth::AuthConfig;
+    use kruxiaflow_oauth::AuthConfig;
     let auth_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
         rsa_public_key_pem: Some(test_rsa_public_key()),
@@ -165,7 +165,7 @@ async fn test_end_to_end_file_workflow() -> Result<()> {
     let (client_id, client_secret) = create_test_client(&pool).await;
 
     // Create API state
-    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
     let state = AppState::new(
         pool.clone(),
         auth_service.clone(),
@@ -232,7 +232,7 @@ async fn test_end_to_end_file_workflow() -> Result<()> {
     let access_token = token_body["access_token"].as_str().unwrap();
 
     // Start worker with storage
-    let cache_service = Arc::new(streamflow_core::cache::NoOpCache::new());
+    let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
     let registry = register_builtin_activities(cache_service);
     let worker_config = WorkerConfig {
         api_url: server_url.clone(),
@@ -416,7 +416,7 @@ async fn test_file_workflow_with_multiple_outputs() -> Result<()> {
     let activity_key = "test_activity";
 
     // Simulate activity creating a file
-    use streamflow_core::workflow::{ActivityOutputDefinition, OutputType};
+    use kruxiaflow_core::workflow::{ActivityOutputDefinition, OutputType};
 
     let output_definitions = vec![
         ActivityOutputDefinition {
@@ -430,7 +430,7 @@ async fn test_file_workflow_with_multiple_outputs() -> Result<()> {
     ];
 
     // Create FileExecutor
-    use streamflow_worker::file_executor::FileExecutor;
+    use kruxiaflow_worker::file_executor::FileExecutor;
     let executor = FileExecutor::new(
         workflow_id,
         activity_key.to_string(),

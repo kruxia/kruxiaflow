@@ -118,11 +118,11 @@ Post-Test: NO CLEANUP
 1. **`core/src/orchestrator/orchestrator.rs`**
    - Added backoff state debug logging
 
-2. **`streamflow/Cargo.toml`**
+2. **`kruxiaflow/Cargo.toml`**
    - Added jemalloc profiling support
    - Feature flag: `--features profiling`
 
-3. **`streamflow/src/main.rs`**
+3. **`kruxiaflow/src/main.rs`**
    - Integrated jemalloc allocator
 
 4. **`scripts/profiling.sh`**

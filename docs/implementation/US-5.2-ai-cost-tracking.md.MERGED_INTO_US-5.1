@@ -612,7 +612,7 @@ pub enum CostError {
 
 **Changes**:
 ```rust
-use streamflow_core::cost::tracker::{CostTracker, ActivityCostRecord};
+use kruxiaflow_core::cost::tracker::{CostTracker, ActivityCostRecord};
 
 #[async_trait]
 impl crate::registry::ActivityImpl for LLMPromptActivity {
@@ -821,7 +821,7 @@ async fn handle_activity_completed(
 use axum::{extract::State, Json};
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
-use streamflow_core::cost::tracker::CostTracker;
+use kruxiaflow_core::cost::tracker::CostTracker;
 
 #[derive(Debug, Serialize)]
 pub struct WorkflowCostSummary {

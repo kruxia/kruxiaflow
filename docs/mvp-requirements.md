@@ -1,4 +1,4 @@
-2025-11-29# StreamFlow MVP Product Requirements Document
+2025-11-29# Kruxia Flow MVP Product Requirements Document
 
 **Version**: 0.2.0
 **Date**: November 26, 2025
@@ -6,7 +6,7 @@
 - **Epic 1**: ✅ Complete (Event-Driven Orchestration)
 - **Epic 1A**: ✅ Complete (API Server - 8/9 stories complete, including US-1A.9a WebSocket)
 - **Epic 1B**: ✅ Complete (Built-in Worker)
-- **Epic 1C**: ⏳ Partial (StreamFlow Binary - US-1C.1, US-1C.2, US-1C.7 complete)
+- **Epic 1C**: ⏳ Partial (Kruxia Flow Binary - US-1C.1, US-1C.2, US-1C.7 complete)
 - **Epic 2**: ✅ Complete (Performance Benchmarking - US-2.1, US-2.2, US-2.3, US-2.4 complete)
 - **Epic 6**: ⏳ Partial (PostgreSQL Optimization - US-6.1 ✅, US-6.4 partial via US-2.3)
 - **Epic 3**: ✅ 90% Complete (YAML Workflows - Examples 1-9 ✅, Example 10 📋)
@@ -21,7 +21,7 @@
 
 ## Executive Summary
 
-StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning the platform to capture the emerging $80B+ convergence of workflow orchestration and AI agent markets. The product combines performance-critical orchestration (Rust, event-driven, PostgreSQL-optimized) with AI-native features (cost controls, token streaming, multi-provider LLM support) in an operationally simple package (single 10MB binary, 50MB RAM).
+Kruxia Flow v0.2 addresses critical issues discovered in v0.1 while positioning the platform to capture the emerging $80B+ convergence of workflow orchestration and AI agent markets. The product combines performance-critical orchestration (Rust, event-driven, PostgreSQL-optimized) with AI-native features (cost controls, token streaming, multi-provider LLM support) in an operationally simple package (single 10MB binary, 50MB RAM).
 
 **Core Value Proposition**: Production-ready AI orchestration with operational simplicity—the only platform combining deterministic workflow execution with non-deterministic AI agents, built-in cost controls, and edge deployment capability.
 
@@ -103,7 +103,7 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 
 ## Epic 1A: API Server
 
-**Business Objective**: Provide HTTP/REST API for workflow submission, management, and monitoring to enable client applications and AI agents to interact with StreamFlow
+**Business Objective**: Provide HTTP/REST API for workflow submission, management, and monitoring to enable client applications and AI agents to interact with Kruxia Flow
 
 ### User Stories
 
@@ -121,18 +121,18 @@ StreamFlow v0.2 addresses critical issues discovered in v0.1 while positioning t
 
 **US-1A.1.5: API Server CLI Launcher** ✅ Complete
 - **As** a developer
-- **I want** to launch the API server via `streamflow api` command
+- **I want** to launch the API server via `kruxiaflow api` command
 - **So that** I can develop and test the API endpoints independently
 - **Acceptance Criteria**:
-  - Main binary crate `streamflow` with CLI framework (clap)
-  - `streamflow api` command launches HTTP server on specified port
+  - Main binary crate `kruxiaflow` with CLI framework (clap)
+  - `kruxiaflow api` command launches HTTP server on specified port
   - Configuration via CLI flags: `--port`, `--bind`, `--database-url`
-  - Configuration via environment variables: `DATABASE_URL`, `STREAMFLOW_API_PORT`, `STREAMFLOW_API_BIND`
+  - Configuration via environment variables: `DATABASE_URL`, `KRUXIAFLOW_API_PORT`, `KRUXIAFLOW_API_BIND`
   - Configuration precedence: CLI flags > Environment variables > Defaults
   - Default configuration: Port 8080, bind to 0.0.0.0
   - Database connection pool initialization with validation
   - Graceful shutdown on SIGTERM/SIGINT
-  - Logging: Structured logging with configurable level (via `--log-level` or `STREAMFLOW_LOG_LEVEL`)
+  - Logging: Structured logging with configurable level (via `--log-level` or `KRUXIAFLOW_LOG_LEVEL`)
   - Startup logging: Log configuration and successful startup
   - Health endpoints accessible after startup
 - **Scope**: Minimal implementation from Epic 1C focused only on API server launcher
@@ -335,61 +335,61 @@ The built-in worker is implemented as an HTTP client to the API server rather th
 
 ---
 
-## Epic 1C: StreamFlow Binary and CLI
+## Epic 1C: Kruxia Flow Binary and CLI
 
-**Business Objective**: Provide a unified binary and CLI interface to launch and manage StreamFlow services, enabling single-binary deployment and flexible service orchestration
+**Business Objective**: Provide a unified binary and CLI interface to launch and manage Kruxia Flow services, enabling single-binary deployment and flexible service orchestration
 
 ### User Stories
 
 **US-1C.1: Main Binary and CLI Framework** ✅ Complete
 - **As** a platform engineering lead
 - **I want** a single binary with subcommands to launch different services
-- **So that** I can deploy StreamFlow with minimal dependencies
+- **So that** I can deploy Kruxia Flow with minimal dependencies
 - **Acceptance Criteria**:
-  - Main crate `streamflow` that depends on `core`, `api`, and `worker` crates
+  - Main crate `kruxiaflow` that depends on `core`, `api`, and `worker` crates
   - CLI framework (clap) with subcommands for different services
   - Subcommands: `serve`, `orchestrator`, `api`, `worker`, `version`, `migrate`
   - Global flags: `--config`, `--log-level`, `--log-format`, `--database-url`
   - Help text and examples for each subcommand
   - Binary size: <15MB release build
-  - Version information: `streamflow --version` shows semantic version and build info
+  - Version information: `kruxiaflow --version` shows semantic version and build info
 
 **US-1C.2: Service Launcher - All-in-One Mode** ✅ Complete
 - **As** a developer
 - **I want** to launch all services together with one command
-- **So that** I can quickly start StreamFlow for development or single-node deployment
+- **So that** I can quickly start Kruxia Flow for development or single-node deployment
 - **Acceptance Criteria**:
-  - `streamflow serve` launches orchestrator + API server + built-in worker(s)
+  - `kruxiaflow serve` launches orchestrator + API server + built-in worker(s)
   - Configuration: `--port` (API port, default 8080), `--workers` (worker count, default 1)
   - Service startup order: Database connectivity check → Orchestrator → API server → Workers
   - Health checks: Wait for each service to be ready before starting next
   - Graceful shutdown: SIGTERM/SIGINT stops all services cleanly (drain workers, close connections)
   - Logging: Structured JSON or human-readable format (configurable)
   - All services share same database connection pool
-- **Implementation**: `streamflow serve` command in `streamflow/src/commands/serve.rs`. See `docs/implementation/US-1C.2-all-in-one-launcher.md` for details.
+- **Implementation**: `kruxiaflow serve` command in `kruxiaflow/src/commands/serve.rs`. See `docs/implementation/US-1C.2-all-in-one-launcher.md` for details.
 
 **US-1C.3: Service Launcher - Individual Services** ✅ Complete
 - **As** a platform engineering lead
 - **I want** to launch services independently for distributed deployment
 - **So that** I can scale orchestrator, API, and workers separately
 - **Acceptance Criteria**:
-  - `streamflow orchestrator` - Launch orchestrator only
+  - `kruxiaflow orchestrator` - Launch orchestrator only
     - Flags: `--consumer-id` (for event consumer checkpointing)
-  - `streamflow api` - Launch API server only
+  - `kruxiaflow api` - Launch API server only
     - Flags: `--port` (default 8080), `--bind` (default 0.0.0.0)
-  - `streamflow worker` - Launch worker only
+  - `kruxiaflow worker` - Launch worker only
     - Flags: `--activity-types` (worker.name list), `--api-url`, `--worker-id`
   - Each service can run on different hosts/containers
-  - Environment variable configuration: `DATABASE_URL`, `STREAMFLOW_API_URL`, etc.
+  - Environment variable configuration: `DATABASE_URL`, `KRUXIAFLOW_API_URL`, etc.
 - **Deferral Rationale**: All-in-one mode (US-1C.2) is sufficient for Epic 2 benchmarking. Distributed deployment can be validated after performance baseline is established.
 
 **US-1C.4: Configuration Management** ✅ Complete
 - **As** a platform engineering lead
 - **I want** flexible configuration via environment variables and CLI flags
-- **So that** I can deploy StreamFlow in different environments without code changes
+- **So that** I can deploy Kruxia Flow in different environments without code changes
 - **Acceptance Criteria**:
   - Configuration precedence: CLI flags > Environment variables > Defaults
-  - Environment variables: `DATABASE_URL`, `STREAMFLOW_API_PORT`, `STREAMFLOW_LOG_LEVEL`, etc.
+  - Environment variables: `DATABASE_URL`, `KRUXIAFLOW_API_PORT`, `KRUXIAFLOW_LOG_LEVEL`, etc.
   - Configuration validation on startup (fail fast with clear error messages)
   - Sensitive values: Support for environment variables (no secrets in CLI arguments)
   - Configuration logging: Print effective configuration on startup (redact secrets)
@@ -399,17 +399,17 @@ The built-in worker is implemented as an HTTP client to the API server rather th
 - **As** a platform engineering lead
 - **I want** to manage database migrations via CLI
 - **So that** I can control schema updates independently of service startup
-- REMOVED: We can just ship the sqlx binary and not incorporate it in the streamflow binary.
+- REMOVED: We can just ship the sqlx binary and not incorporate it in the kruxiaflow binary.
 
 **US-1C.6: Health Checks and Service Monitoring** ✅ Complete
 - **As** a platform engineering lead
 - **I want** CLI commands to check service health and status
-- **So that** I can monitor StreamFlow in production
+- **So that** I can monitor Kruxia Flow in production
 - **Acceptance Criteria**:
-  - `streamflow health` - Check if all services are healthy
+  - `kruxiaflow health` - Check if all services are healthy
     - Checks: Database connectivity, API server reachability, orchestrator running
     - Exit code: 0 (healthy), 1 (unhealthy)
-  - `streamflow status` - Show detailed service status
+  - `kruxiaflow status` - Show detailed service status
     - Output: Service names, health status, uptime, version
   - Health check timeout: Configurable (default 5s)
   - Output formats: Human-readable text or JSON (via `--format json`)
@@ -430,13 +430,13 @@ The built-in worker is implemented as an HTTP client to the API server rather th
   - Shutdown timeout: Configurable via `--shutdown-timeout` (default 30s)
   - Worker drain: Workers finish current activities before exiting
   - Logging: Log shutdown progress and any errors
-- **Implementation**: Integrated into `streamflow serve` command using `CancellationToken` and `with_graceful_shutdown()`. See `docs/implementation/US-1C.7-graceful-shutdown.md` for details.
+- **Implementation**: Integrated into `kruxiaflow serve` command using `CancellationToken` and `with_graceful_shutdown()`. See `docs/implementation/US-1C.7-graceful-shutdown.md` for details.
 
 ### Implementation Notes
 
 **Crate Structure**:
 ```
-streamflow/
+kruxiaflow/
 ├── core/           # Core orchestration logic (queue, orchestrator, events)
 ├── api/            # API server (Axum HTTP server)
 ├── worker/         # Built-in worker implementation
@@ -500,11 +500,11 @@ streamflow/
   - Docker Compose setup for reproducibility
   - Published methodology: Open-source on GitHub
   - Results: HTML report with charts
-  - Target proof: StreamFlow >1,000 wf/sec vs Temporal/Conductor 35-100 wf/sec
+  - Target proof: Kruxia Flow >1,000 wf/sec vs Temporal/Conductor 35-100 wf/sec
   - **Critical**: Run after Epic 1 to validate event-driven architecture
-- **Implementation**: Complete benchmark suite in `benchmarks/` directory with StreamFlow, Temporal, and Airflow benchmarks. See `docs/implementation/US-2.2-competitor-comparison-benchmarks.md` for details.
+- **Implementation**: Complete benchmark suite in `benchmarks/` directory with Kruxia Flow, Temporal, and Airflow benchmarks. See `docs/implementation/US-2.2-competitor-comparison-benchmarks.md` for details.
 - **Results** (v0.2.0 MVP baseline):
-  - **StreamFlow**: 17-123 wf/sec (avg 56 wf/sec) - 100% success rate
+  - **Kruxia Flow**: 17-123 wf/sec (avg 56 wf/sec) - 100% success rate
   - **Temporal**: 14-65 wf/sec (avg 35 wf/sec) - 100% success rate
   - **Airflow**: 0.33-3.1 wf/sec (avg 1.3 wf/sec) - 3-16% success rate (configuration issues)
   - **Speedup**: 1.6x faster than Temporal, 44x faster than Airflow
@@ -521,7 +521,7 @@ streamflow/
   - ✅ Connection pool utilization metrics
   - ✅ Lock contention detection
   - ✅ Recommendations for Epic 6 (PostgreSQL Optimization)
-- **Implementation**: `streamflow profile` CLI command with `--explain` flag, profiling views in PostgreSQL, integrated with `scripts/profiling.sh`. See `docs/implementation/US-2.3-postgresql-performance-profiling.md`.
+- **Implementation**: `kruxiaflow profile` CLI command with `--explain` flag, profiling views in PostgreSQL, integrated with `scripts/profiling.sh`. See `docs/implementation/US-2.3-postgresql-performance-profiling.md`.
 - **Key Optimization Applied**: Event poll query optimization reduced DB time from 73.7% to 1.8% (97.6% reduction). Changed LEFT JOIN pattern to scalar subquery, enabling Index Range Scan. Tuples read reduced from 127M to 62K (2,050x improvement).
 
 **US-2.4: Stress Testing and Capacity Planning** ✅ Complete
@@ -547,7 +547,7 @@ streamflow/
 - **I want** real-time performance metrics via Grafana
 - **So that** we catch performance issues immediately during feature development
 - **Acceptance Criteria**:
-  - Prometheus metrics endpoint (`/metrics`) exposing StreamFlow metrics
+  - Prometheus metrics endpoint (`/metrics`) exposing Kruxia Flow metrics
   - Grafana dashboard template with key performance metrics:
     - Real-time workflow throughput (workflows/sec)
     - Workflow start latency percentiles (P50, P95, P99)
@@ -669,7 +669,7 @@ streamflow/
 - **I want** CLI tools to validate and test workflows before deployment
 - **So that** I catch errors early and iterate quickly
 - **Acceptance Criteria**:
-  - **Validation CLI**: `streamflow validate workflow.yaml`
+  - **Validation CLI**: `kruxiaflow validate workflow.yaml`
     - Syntax validation (valid YAML)
     - Semantic validation (all activity types exist, no orphaned activities)
     - Edge validation (all `depends_on` and `contributes_to` references exist)
@@ -677,7 +677,7 @@ streamflow/
     - Output validation (referenced outputs exist in activity definitions)
     - Template expression validation (valid syntax for `{{INPUT.*}}`, `{{FILE.*}}`, `{{SECRET.*}}`, etc.)
     - Error messages with line numbers and context
-  - **Testing CLI**: `streamflow test workflow.yaml --input test.json`
+  - **Testing CLI**: `kruxiaflow test workflow.yaml --input test.json`
     - Load workflow definition from file
     - Parse input parameters from JSON
     - Execute workflow locally (single-process mode, no distributed orchestrator)
@@ -685,7 +685,7 @@ streamflow/
     - Show final workflow state
     - Report total cost and execution time
     - Support for testing workflows in `examples/` directory
-  - **Visualization CLI**: `streamflow visualize workflow.yaml --format png|svg|mermaid`
+  - **Visualization CLI**: `kruxiaflow visualize workflow.yaml --format png|svg|mermaid`
     - Parse workflow into graph structure
     - Generate Mermaid diagram syntax
     - Optionally render to PNG/SVG (via mermaid CLI or graphviz)
@@ -741,10 +741,10 @@ streamflow/
     - ✅ `activity_queue` table - completed activities after retention period
     - ❌ `workflow_events` table - **NEVER delete** (audit trail, compliance requirement)
   - **Configuration** (environment variables):
-    - `STREAMFLOW_CLEANUP_ENABLED=true` - Enable/disable cleanup worker
-    - `STREAMFLOW_CLEANUP_WORKFLOW_TTL_DAYS=7` - Delete completed workflows after N days
-    - `STREAMFLOW_CLEANUP_INTERVAL_HOURS=1` - Run cleanup every N hours
-    - `STREAMFLOW_CLEANUP_BATCH_SIZE=1000` - Process N records per batch
+    - `KRUXIAFLOW_CLEANUP_ENABLED=true` - Enable/disable cleanup worker
+    - `KRUXIAFLOW_CLEANUP_WORKFLOW_TTL_DAYS=7` - Delete completed workflows after N days
+    - `KRUXIAFLOW_CLEANUP_INTERVAL_HOURS=1` - Run cleanup every N hours
+    - `KRUXIAFLOW_CLEANUP_BATCH_SIZE=1000` - Process N records per batch
   - **Cleanup worker implementation**:
     - Background tokio task runs on configurable interval
     - Batch deletion to prevent long transactions
@@ -760,8 +760,8 @@ streamflow/
     - DO NOT delete workflow_events (preserve audit trail)
   - **Observability**:
     - Log cleanup operations with count of deleted records
-    - Metrics: `streamflow_cleanup_workflows_deleted_total`
-    - Metrics: `streamflow_cleanup_last_run_timestamp`
+    - Metrics: `kruxiaflow_cleanup_workflows_deleted_total`
+    - Metrics: `kruxiaflow_cleanup_last_run_timestamp`
 - **Design Decision**: `workflow_events` must never be deleted for auditability and compliance
   - Event history provides complete audit trail of all workflow executions
   - Post-MVP: Use table partitioning to manage query performance (see post-mvp.md Story 2.3)
@@ -838,7 +838,7 @@ streamflow/
   - ✅ Cache invalidation API endpoints: `DELETE /api/v1/cache/:key`, `POST /api/v1/cache/invalidate`
   - ✅ Graceful degradation: Workflows run without caching if Redis is unavailable (NoOpCache fallback)
   - ✅ Universal caching: Works for ALL activity types (LLM, HTTP, PostgreSQL, custom)
-  - ✅ Environment variable configuration: `STREAMFLOW_CACHE_PROVIDER`, `STREAMFLOW_REDIS_URL`, `STREAMFLOW_REDIS_KEY_PREFIX`
+  - ✅ Environment variable configuration: `KRUXIAFLOW_CACHE_PROVIDER`, `KRUXIAFLOW_REDIS_URL`, `KRUXIAFLOW_REDIS_KEY_PREFIX`
   - 🔮 Post-MVP: Semantic similarity matching using embeddings (advanced feature)
 - **Implementation**: See `docs/implementation/US-5.3-semantic-caching.md` (100% Complete)
 
@@ -990,7 +990,7 @@ streamflow/
   - ✅ Monitor index usage and bloat (`v_index_usage`, `v_unused_indexes` views)
   - ⏳ GIN indexes for JSONB parameter queries (not yet needed)
   - ⏳ Index maintenance automation (VACUUM scheduling)
-- **Implementation**: Profiling views created in migration, `streamflow profile` reports unused indexes
+- **Implementation**: Profiling views created in migration, `kruxiaflow profile` reports unused indexes
 
 **US-6.5: Materialized Views for Hot Queries**
 - **As** a platform engineering lead
@@ -1092,7 +1092,7 @@ streamflow/
   - Binary size: <15MB (with all built-in activities)
   - Zero external dependencies (statically linked)
   - Embedded SQLite for edge (PostgreSQL for cloud)
-  - Single command deployment: `./streamflow serve`
+  - Single command deployment: `./kruxiaflow serve`
   - Configuration via environment variables or single config file
 
 **US-8.2: Minimal Resource Footprint**
@@ -1153,11 +1153,11 @@ streamflow/
 - **I want** comprehensive CLI tools
 - **So that** I can develop and debug workflows locally
 - **Acceptance Criteria**:
-  - `streamflow validate`: Check syntax and semantics
-  - `streamflow test`: Run workflow with sample input locally
-  - `streamflow visualize`: Generate DAG diagram (PNG, HTML, Mermaid)
-  - `streamflow deploy`: Upload workflow to production
-  - `streamflow list`: Show deployed workflows
+  - `kruxiaflow validate`: Check syntax and semantics
+  - `kruxiaflow test`: Run workflow with sample input locally
+  - `kruxiaflow visualize`: Generate DAG diagram (PNG, HTML, Mermaid)
+  - `kruxiaflow deploy`: Upload workflow to production
+  - `kruxiaflow list`: Show deployed workflows
   - Debug mode: Step-by-step execution with state inspection
 
 **US-9.2: VS Code Extension with IntelliSense**
@@ -1165,7 +1165,7 @@ streamflow/
 - **I want** IDE support for YAML workflows
 - **So that** I get autocomplete and inline validation
 - **Acceptance Criteria**:
-  - Syntax highlighting for StreamFlow YAML
+  - Syntax highlighting for Kruxia Flow YAML
   - IntelliSense for activity types (from registry)
   - Inline error diagnostics (red squiggles)
   - "Go to definition" for activity references
@@ -1177,19 +1177,19 @@ streamflow/
 - **I want** automated migration from Temporal workflows
 - **So that** we reduce migration risk and time
 - **Acceptance Criteria**:
-  - CLI: `streamflow import temporal --workflows ./temporal --output ./streamflow`
+  - CLI: `kruxiaflow import temporal --workflows ./temporal --output ./kruxiaflow`
   - Analyze workflow structure (70% directly convertible to YAML, 30% more conveniently expressed in Python)
   - Generate YAML for straightforward workflows
   - Generate Python builder for workflows that benefit from programmatic definition
   - Migration report: Coverage analysis, manual steps required
-  - Examples: Temporal samples converted to StreamFlow
+  - Examples: Temporal samples converted to Kruxia Flow
 
 **US-9.4: Migration Tools from Airflow**
 - **As** a data engineer
 - **I want** automated migration from Airflow DAGs
 - **So that** we move existing pipelines with minimal rewrite
 - **Acceptance Criteria**:
-  - CLI: `streamflow import airflow --dags ./airflow/dags --output ./streamflow`
+  - CLI: `kruxiaflow import airflow --dags ./airflow/dags --output ./kruxiaflow`
   - Operator mapping: PythonOperator → Python activity, BashOperator → bash activity
   - DAG structure preserved: Tasks → Activities, dependencies → edges
   - Variables and connections migrated
@@ -1197,13 +1197,13 @@ streamflow/
 
 **US-9.5: LangChain Interoperability**
 - **As** an AI researcher
-- **I want** to use LangChain tools within StreamFlow workflows
+- **I want** to use LangChain tools within Kruxia Flow workflows
 - **So that** I leverage existing LangChain ecosystem (600+ integrations)
 - **Acceptance Criteria**:
   - Python activity can import LangChain: `from langchain import ...`
   - LangChain tools callable from Python activities
-  - LangSmith tracing integrated with StreamFlow observability
-  - Migration guide: LangChain chains → StreamFlow workflows
+  - LangSmith tracing integrated with Kruxia Flow observability
+  - Migration guide: LangChain chains → Kruxia Flow workflows
   - 50+ top LangChain integrations verified compatible
 
 **US-9.6: Local Development with Hot Reload**
@@ -1211,7 +1211,7 @@ streamflow/
 - **I want** instant feedback during development
 - **So that** I iterate quickly without manual restarts
 - **Acceptance Criteria**:
-  - Watch mode: `streamflow dev --watch workflows/`
+  - Watch mode: `kruxiaflow dev --watch workflows/`
   - Hot reload on YAML/Python changes
   - Local test execution: <30 second cycle time (edit → test → result)
   - Mock activities for fast testing
@@ -1253,7 +1253,7 @@ streamflow/
 **US-10.3: OpenTelemetry Integration**
 - **As** a platform engineering lead
 - **I want** OpenTelemetry traces for existing observability stack
-- **So that** StreamFlow integrates with our Datadog/New Relic setup
+- **So that** Kruxia Flow integrates with our Datadog/New Relic setup
 - **Acceptance Criteria**:
   - Export spans to OTLP endpoint
   - Trace context propagation across activities
@@ -1462,13 +1462,13 @@ streamflow/
    - ✅ Activity execution and result reporting
    - ✅ Concurrent worker polling with HTTP client
 
-1C. **StreamFlow Binary and CLI** (Epic 1C):
+1C. **Kruxia Flow Binary and CLI** (Epic 1C):
    - ✅ **Pre-Epic 2 (Partial Complete - 1 of 3)**:
      - Main binary and CLI framework - US-1C.1 ✅
      - Version command with build metadata ✅
      - Binary size: 4.5MB (well under 15MB target) ✅
    - 📋 **Pre-Epic 2 (Remaining - 2 of 3)**:
-     - All-in-one mode (`streamflow serve`) - US-1C.2
+     - All-in-one mode (`kruxiaflow serve`) - US-1C.2
      - Graceful shutdown and signal handling - US-1C.7
    - 📋 **Post-Epic 2 (Deferred)**:
      - Individual service launchers - US-1C.3
@@ -1649,15 +1649,15 @@ See full competitive landscape in:
 - Traditional orchestration: notes/2025-10-05-workflow-market-landscape.md (Category 1)
 - AI frameworks: notes/2025-10-05-workflow-market-landscape.md (Category 2)
 - Rust competitors: notes/2025-10-05-competitive-landscape.md
-- Strategic positioning: notes/2025-10-11-streamflow-gtm-strategy.md
+- Strategic positioning: notes/2025-10-11-kruxiaflow-gtm-strategy.md
 
 ### C. Go-To-Market Strategy
 
 See detailed GTM plan in:
-- Customer segmentation: notes/2025-10-11-streamflow-gtm-strategy.md (section 2)
-- Positioning and messaging: notes/2025-10-11-streamflow-gtm-strategy.md (section 3)
-- Launch roadmap: notes/2025-10-11-streamflow-gtm-strategy.md (section 4)
-- Budget-conscious tactics: notes/2025-10-11-streamflow-gtm-strategy.md (section 8)
+- Customer segmentation: notes/2025-10-11-kruxiaflow-gtm-strategy.md (section 2)
+- Positioning and messaging: notes/2025-10-11-kruxiaflow-gtm-strategy.md (section 3)
+- Launch roadmap: notes/2025-10-11-kruxiaflow-gtm-strategy.md (section 4)
+- Budget-conscious tactics: notes/2025-10-11-kruxiaflow-gtm-strategy.md (section 8)
 
 ### D. Implementation Roadmap (Revised with Pre-Epic 2 Requirements)
 
@@ -1735,7 +1735,7 @@ flowchart TB
   - Version command with build metadata
   - Binary size: 4.5MB (well under 15MB target)
 - ✅ **US-1C.2**: All-in-One Service Launcher (8 hours)
-  - `streamflow serve` launches all services
+  - `kruxiaflow serve` launches all services
   - Shared connection pool
 - ✅ **US-1C.7**: Graceful Shutdown (4 hours)
   - SIGTERM/SIGINT handling
@@ -1844,7 +1844,7 @@ flowchart TB
 | 0.5     | 2025-10-30 | Claude Code | Created Epic 1B (Built-in Worker), moved US-1B.1 from Epic 1 to Epic 1B. Built-in worker uses API server for consistency with external workers. Added architecture decision and tradeoff analysis. |
 | 0.6     | 2025-10-30 | Claude Code | Swapped Epic 2 (YAML) and Epic 3 (Benchmarking). Benchmarking now Epic 2 (after Epic 1B), YAML now Epic 3. Benchmarking uses programmatic workflows (no YAML dependency), validates core architecture earlier, and informs YAML design. Updated all references, roadmap phases, and release criteria. |
 | 0.7     | 2025-10-30 | Sean Harrison | Revised and Re-ordered Epic 1A (API). Fixed event serialization format to PascalCase (WorkflowCreated, ActivityCompleted, etc.) matching PostgreSQL enum and Rust types. |
-| 0.8     | 2025-10-30 | Claude Code | Added Epic 1C (StreamFlow Binary and CLI) with 7 user stories covering main binary, service launchers (serve, orchestrator, api, worker), configuration management, database migrations, health checks, and graceful shutdown. Updated release criteria and roadmap. |
+| 0.8     | 2025-10-30 | Claude Code | Added Epic 1C (Kruxia Flow Binary and CLI) with 7 user stories covering main binary, service launchers (serve, orchestrator, api, worker), configuration management, database migrations, health checks, and graceful shutdown. Updated release criteria and roadmap. |
 | 0.9     | 2025-11-06 | Claude Code | Revised epic sequencing: Split Epic 1A and 1C into Pre-Epic 2 (US-1A.6,7 and US-1C.1,2,7) and Post-Epic 2 (US-1A.8,9 and US-1C.3,4,5,6). Pre-Epic 2 stories provide minimal viable system for benchmarking. Post-Epic 2 stories will be informed by performance insights. Updated implementation roadmap to show phased approach. All deferred stories remain in MVP scope, just resequenced for better risk management and earlier performance validation. |
 | 0.9.0   | 2025-11-08 | Claude Code | Implementation progress update: Completed US-1A.6 (Workflow Status Query), US-1A.7 (Worker Activity APIs), US-1B.1 (Built-in Worker), and US-1C.1 (Main Binary and CLI Framework). Epic 1B now complete. Phase 2C is 90% complete with only US-1C.2 and US-1C.7 remaining (~12 hours). Binary size: 4.5MB (well under 15MB target). Ready for Epic 2 benchmarking after US-1C.2/1C.7 completion. |
 | 0.9.1   | 2025-11-08 | Claude Code | Refined US-2.5 (Performance Dashboard) to focus exclusively on Grafana capabilities: Prometheus metrics endpoint, Grafana dashboard template, PostgreSQL datasource, and alerting rules. Deferred custom web UI for workflow inspection to Epic 10 (US-10.1). Updated US-10.1 to clarify it complements Grafana with workflow-level debugging and inspection capabilities. |

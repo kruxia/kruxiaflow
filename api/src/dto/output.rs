@@ -6,8 +6,8 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use streamflow_core::WorkflowStatus;
-use streamflow_core::orchestrator::WorkflowActivityStatus;
+use kruxiaflow_core::WorkflowStatus;
+use kruxiaflow_core::orchestrator::WorkflowActivityStatus;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -33,8 +33,8 @@ pub struct FileInfo {
     pub download_url: String,
 }
 
-impl From<streamflow_core::workflow::FileInfo> for FileInfo {
-    fn from(info: streamflow_core::workflow::FileInfo) -> Self {
+impl From<kruxiaflow_core::workflow::FileInfo> for FileInfo {
+    fn from(info: kruxiaflow_core::workflow::FileInfo) -> Self {
         Self {
             filename: info.filename,
             size: info.size,
@@ -75,8 +75,8 @@ pub struct GetActivityOutputResponse {
     pub files: Vec<FileInfo>,
 }
 
-impl From<streamflow_core::workflow::ActivityOutputResult> for GetActivityOutputResponse {
-    fn from(result: streamflow_core::workflow::ActivityOutputResult) -> Self {
+impl From<kruxiaflow_core::workflow::ActivityOutputResult> for GetActivityOutputResponse {
+    fn from(result: kruxiaflow_core::workflow::ActivityOutputResult) -> Self {
         Self {
             workflow_id: result.workflow_id,
             activity_key: result.activity_key,
@@ -113,8 +113,8 @@ pub struct ActivityOutputSummary {
     pub is_terminal: bool,
 }
 
-impl From<streamflow_core::workflow::ActivityOutputSummary> for ActivityOutputSummary {
-    fn from(summary: streamflow_core::workflow::ActivityOutputSummary) -> Self {
+impl From<kruxiaflow_core::workflow::ActivityOutputSummary> for ActivityOutputSummary {
+    fn from(summary: kruxiaflow_core::workflow::ActivityOutputSummary) -> Self {
         Self {
             status: summary.status,
             output: summary.output,
@@ -152,8 +152,8 @@ pub struct GetWorkflowOutputResponse {
     pub terminal_outputs: Vec<String>,
 }
 
-impl From<streamflow_core::workflow::WorkflowOutputResult> for GetWorkflowOutputResponse {
-    fn from(result: streamflow_core::workflow::WorkflowOutputResult) -> Self {
+impl From<kruxiaflow_core::workflow::WorkflowOutputResult> for GetWorkflowOutputResponse {
+    fn from(result: kruxiaflow_core::workflow::WorkflowOutputResult) -> Self {
         Self {
             workflow_id: result.workflow_id,
             status: result.status,

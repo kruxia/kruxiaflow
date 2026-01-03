@@ -1,4 +1,4 @@
-# StreamFlow Docker Compose Configuration
+# Kruxia Flow Docker Compose Configuration
 #
 # Profiles:
 #   - develop: Development with hot reload and source mounting
@@ -14,8 +14,8 @@
 #
 # Required environment variables (see .env.example):
 #   - POSTGRES_PASSWORD: Database password
-#   - STREAMFLOW_CLIENT_ID: OAuth client ID
-#   - STREAMFLOW_CLIENT_SECRET: OAuth client secret
+#   - KRUXIAFLOW_CLIENT_ID: OAuth client ID
+#   - KRUXIAFLOW_CLIENT_SECRET: OAuth client secret
 
 x-logging: &default-logging
   driver: "json-file"
@@ -31,19 +31,19 @@ x-healthcheck-defaults: &healthcheck-defaults
 
 networks:
   frontend:
-    name: streamflow-frontend
+    name: kruxiaflow-frontend
   backend:
-    name: streamflow-backend
+    name: kruxiaflow-backend
     internal: true
 
 services:
   postgres:
     image: postgres:18.1-bookworm
-    container_name: streamflow-postgres
+    container_name: kruxiaflow-postgres
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-streamflow}
+      POSTGRES_USER: ${POSTGRES_USER:-kruxiaflow}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      POSTGRES_DB: ${POSTGRES_DB:-streamflow}
+      POSTGRES_DB: ${POSTGRES_DB:-kruxiaflow}
     command:
       - "postgres"
       - "-c"
@@ -64,7 +64,7 @@ services:
       - backend
     healthcheck:
       <<: *healthcheck-defaults
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-streamflow}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kruxiaflow}"]
     restart: unless-stopped
     logging: *default-logging
     deploy:
@@ -76,8 +76,8 @@ services:
           cpus: '0.5'
           memory: 1G
     labels:
-      com.streamflow.service: "database"
-      com.streamflow.component: "postgres"
+      com.kruxiaflow.service: "database"
+      com.kruxiaflow.component: "postgres"
     security_opt:
       - no-new-privileges:true
     ulimits:
@@ -87,7 +87,7 @@ services:
 
   redis:
     image: redis:7.4-alpine
-    container_name: streamflow-redis
+    container_name: kruxiaflow-redis
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
@@ -109,15 +109,15 @@ services:
           cpus: '0.1'
           memory: 128M
     labels:
-      com.streamflow.service: "cache"
-      com.streamflow.component: "redis"
+      com.kruxiaflow.service: "cache"
+      com.kruxiaflow.component: "redis"
     security_opt:
       - no-new-privileges:true
 
   # Mailhog for email testing (US-5.7a email_send activity)
   mailhog:
     image: mailhog/mailhog:v1.0.1
-    container_name: streamflow-mailhog
+    container_name: kruxiaflow-mailhog
     ports:
       - "127.0.0.1:1025:1025"   # SMTP server
       - "127.0.0.1:8025:8025"   # Web UI for viewing emails
@@ -143,12 +143,12 @@ services:
           cpus: '0.25'
           memory: 128M
     labels:
-      com.streamflow.service: "email"
-      com.streamflow.component: "mailhog"
-      com.streamflow.profile: "develop"
+      com.kruxiaflow.service: "email"
+      com.kruxiaflow.component: "mailhog"
+      com.kruxiaflow.profile: "develop"
 
-  # StreamFlow API server in develop mode
-  streamflow-develop:
+  # Kruxia Flow API server in develop mode
+  kruxiaflow-develop:
     build:
       context: .
       dockerfile: Dockerfile
@@ -159,7 +159,7 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "${STREAMFLOW_PORT:-127.0.0.1:8080}:8080"
+      - "${KRUXIAFLOW_PORT:-127.0.0.1:8080}:8080"
     networks:
       - frontend
       - backend
@@ -169,23 +169,23 @@ services:
     stop_grace_period: 30s
     environment:
       # Database connection
-      DATABASE_URL: postgres://${POSTGRES_USER:-streamflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-streamflow}
+      DATABASE_URL: postgres://${POSTGRES_USER:-kruxiaflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-kruxiaflow}
       # Rust build settings
       CARGO_HOME: /opt/.cargo
       CARGO_TARGET_DIR: /opt/target
       # OAuth configuration (required)
-      STREAMFLOW_CLIENT_ID: ${STREAMFLOW_CLIENT_ID:?STREAMFLOW_CLIENT_ID is required}
-      STREAMFLOW_CLIENT_SECRET: ${STREAMFLOW_CLIENT_SECRET:?STREAMFLOW_CLIENT_SECRET is required}
-      STREAMFLOW_OAUTH_TOKEN_ISSUER: ${STREAMFLOW_OAUTH_TOKEN_ISSUER:-http://localhost:8080}
-      STREAMFLOW_OAUTH_TOKEN_AUDIENCE: ${STREAMFLOW_OAUTH_TOKEN_AUDIENCE:-streamflow-api}
+      KRUXIAFLOW_CLIENT_ID: ${KRUXIAFLOW_CLIENT_ID:?KRUXIAFLOW_CLIENT_ID is required}
+      KRUXIAFLOW_CLIENT_SECRET: ${KRUXIAFLOW_CLIENT_SECRET:?KRUXIAFLOW_CLIENT_SECRET is required}
+      KRUXIAFLOW_OAUTH_TOKEN_ISSUER: ${KRUXIAFLOW_OAUTH_TOKEN_ISSUER:-http://localhost:8080}
+      KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE: ${KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE:-kruxiaflow-api}
       # Worker configuration
-      STREAMFLOW_WORKER_COUNT: ${STREAMFLOW_WORKER_COUNT:-20}
-      STREAMFLOW_POLL_MAX_ACTIVITIES: ${STREAMFLOW_POLL_MAX_ACTIVITIES:-1}
+      KRUXIAFLOW_WORKER_COUNT: ${KRUXIAFLOW_WORKER_COUNT:-20}
+      KRUXIAFLOW_POLL_MAX_ACTIVITIES: ${KRUXIAFLOW_POLL_MAX_ACTIVITIES:-1}
       # Cache configuration
-      STREAMFLOW_CACHE_PROVIDER: ${STREAMFLOW_CACHE_PROVIDER:-redis}
-      STREAMFLOW_REDIS_URL: redis://redis:6379
+      KRUXIAFLOW_CACHE_PROVIDER: ${KRUXIAFLOW_CACHE_PROVIDER:-redis}
+      KRUXIAFLOW_REDIS_URL: redis://redis:6379
       # Logging configuration
-      STREAMFLOW_LOG_LEVEL: ${STREAMFLOW_LOG_LEVEL:-info}
+      KRUXIAFLOW_LOG_LEVEL: ${KRUXIAFLOW_LOG_LEVEL:-info}
     # No health check for develop - Rust build during startup takes several minutes
     # Use ./dev logs -f to monitor startup progress
     restart: unless-stopped
@@ -199,9 +199,9 @@ services:
           cpus: '0.5'
           memory: 512M
     labels:
-      com.streamflow.service: "api"
-      com.streamflow.component: "streamflow"
-      com.streamflow.profile: "develop"
+      com.kruxiaflow.service: "api"
+      com.kruxiaflow.component: "kruxiaflow"
+      com.kruxiaflow.profile: "develop"
     ulimits:
       nofile:
         soft: 65536
@@ -214,8 +214,8 @@ services:
       - cargo_git_cache:/opt/.cargo/git
       - cargo_target_cache:/opt/target
 
-  # StreamFlow profiling mode - saves jemalloc profiles and memory tracking to /opt/var/
-  streamflow-profiling:
+  # Kruxia Flow profiling mode - saves jemalloc profiles and memory tracking to /opt/var/
+  kruxiaflow-profiling:
     build:
       context: .
       dockerfile: Dockerfile
@@ -226,7 +226,7 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "${STREAMFLOW_PORT:-127.0.0.1:8080}:8080"
+      - "${KRUXIAFLOW_PORT:-127.0.0.1:8080}:8080"
     networks:
       - frontend
       - backend
@@ -236,24 +236,24 @@ services:
     stop_grace_period: 30s
     environment:
       # Database connection (separate database for profiling)
-      DATABASE_URL: postgres://${POSTGRES_USER:-streamflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/streamflow_profiling
-      DATABASE_ADMIN_URL: postgres://${POSTGRES_USER:-streamflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-streamflow}
+      DATABASE_URL: postgres://${POSTGRES_USER:-kruxiaflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/kruxiaflow_profiling
+      DATABASE_ADMIN_URL: postgres://${POSTGRES_USER:-kruxiaflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-kruxiaflow}
       # Rust build settings
       CARGO_HOME: /opt/.cargo
       CARGO_TARGET_DIR: /opt/target
       # OAuth configuration (required)
-      STREAMFLOW_CLIENT_ID: ${STREAMFLOW_CLIENT_ID:?STREAMFLOW_CLIENT_ID is required}
-      STREAMFLOW_CLIENT_SECRET: ${STREAMFLOW_CLIENT_SECRET:?STREAMFLOW_CLIENT_SECRET is required}
-      STREAMFLOW_OAUTH_TOKEN_ISSUER: ${STREAMFLOW_OAUTH_TOKEN_ISSUER:-http://localhost:8080}
-      STREAMFLOW_OAUTH_TOKEN_AUDIENCE: ${STREAMFLOW_OAUTH_TOKEN_AUDIENCE:-streamflow-api}
+      KRUXIAFLOW_CLIENT_ID: ${KRUXIAFLOW_CLIENT_ID:?KRUXIAFLOW_CLIENT_ID is required}
+      KRUXIAFLOW_CLIENT_SECRET: ${KRUXIAFLOW_CLIENT_SECRET:?KRUXIAFLOW_CLIENT_SECRET is required}
+      KRUXIAFLOW_OAUTH_TOKEN_ISSUER: ${KRUXIAFLOW_OAUTH_TOKEN_ISSUER:-http://localhost:8080}
+      KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE: ${KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE:-kruxiaflow-api}
       # Profiling uses minimal workers
-      STREAMFLOW_WORKER_COUNT: "1"
-      STREAMFLOW_POLL_MAX_ACTIVITIES: "1"
+      KRUXIAFLOW_WORKER_COUNT: "1"
+      KRUXIAFLOW_POLL_MAX_ACTIVITIES: "1"
       # Cache configuration
-      STREAMFLOW_CACHE_PROVIDER: ${STREAMFLOW_CACHE_PROVIDER:-redis}
-      STREAMFLOW_REDIS_URL: redis://redis:6379
+      KRUXIAFLOW_CACHE_PROVIDER: ${KRUXIAFLOW_CACHE_PROVIDER:-redis}
+      KRUXIAFLOW_REDIS_URL: redis://redis:6379
       # Logging configuration
-      STREAMFLOW_LOG_LEVEL: ${STREAMFLOW_LOG_LEVEL:-info}
+      KRUXIAFLOW_LOG_LEVEL: ${KRUXIAFLOW_LOG_LEVEL:-info}
     healthcheck:
       <<: *healthcheck-defaults
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
@@ -269,9 +269,9 @@ services:
           cpus: '1'
           memory: 6G
     labels:
-      com.streamflow.service: "api"
-      com.streamflow.component: "streamflow"
-      com.streamflow.profile: "profiling"
+      com.kruxiaflow.service: "api"
+      com.kruxiaflow.component: "kruxiaflow"
+      com.kruxiaflow.profile: "profiling"
     ulimits:
       nofile:
         soft: 65536
@@ -285,10 +285,10 @@ services:
       - cargo_target_cache:/opt/target
 
   # Production deployment
-  # Uses kruxia/streamflow from Docker Hub if available, builds locally otherwise
+  # Uses kruxia/kruxiaflow from Docker Hub if available, builds locally otherwise
   # Run scripts/init.sh first to generate secrets
-  streamflow-deploy:
-    image: kruxia/streamflow:latest
+  kruxiaflow-deploy:
+    image: kruxia/kruxiaflow:latest
     build:
       context: .
       dockerfile: Dockerfile
@@ -299,7 +299,7 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "${STREAMFLOW_PORT:-8080}:8080"
+      - "${KRUXIAFLOW_PORT:-8080}:8080"
     networks:
       - frontend
       - backend
@@ -308,24 +308,24 @@ services:
     init: true
     stop_grace_period: 30s
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-streamflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-streamflow}
+      DATABASE_URL: postgres://${POSTGRES_USER:-kruxiaflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-kruxiaflow}
       # OAuth configuration (required)
-      STREAMFLOW_CLIENT_ID: ${STREAMFLOW_CLIENT_ID:?STREAMFLOW_CLIENT_ID is required}
-      STREAMFLOW_CLIENT_SECRET: ${STREAMFLOW_CLIENT_SECRET:?STREAMFLOW_CLIENT_SECRET is required}
-      STREAMFLOW_OAUTH_TOKEN_ISSUER: ${STREAMFLOW_OAUTH_TOKEN_ISSUER:-http://localhost:8080}
-      STREAMFLOW_OAUTH_TOKEN_AUDIENCE: ${STREAMFLOW_OAUTH_TOKEN_AUDIENCE:-streamflow-api}
+      KRUXIAFLOW_CLIENT_ID: ${KRUXIAFLOW_CLIENT_ID:?KRUXIAFLOW_CLIENT_ID is required}
+      KRUXIAFLOW_CLIENT_SECRET: ${KRUXIAFLOW_CLIENT_SECRET:?KRUXIAFLOW_CLIENT_SECRET is required}
+      KRUXIAFLOW_OAUTH_TOKEN_ISSUER: ${KRUXIAFLOW_OAUTH_TOKEN_ISSUER:-http://localhost:8080}
+      KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE: ${KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE:-kruxiaflow-api}
       # Worker configuration
-      STREAMFLOW_WORKER_COUNT: ${STREAMFLOW_WORKER_COUNT:-20}
-      STREAMFLOW_POLL_MAX_ACTIVITIES: ${STREAMFLOW_POLL_MAX_ACTIVITIES:-1}
+      KRUXIAFLOW_WORKER_COUNT: ${KRUXIAFLOW_WORKER_COUNT:-20}
+      KRUXIAFLOW_POLL_MAX_ACTIVITIES: ${KRUXIAFLOW_POLL_MAX_ACTIVITIES:-1}
       # Cache configuration
-      STREAMFLOW_CACHE_PROVIDER: ${STREAMFLOW_CACHE_PROVIDER:-redis}
-      STREAMFLOW_REDIS_URL: redis://redis:6379
+      KRUXIAFLOW_CACHE_PROVIDER: ${KRUXIAFLOW_CACHE_PROVIDER:-redis}
+      KRUXIAFLOW_REDIS_URL: redis://redis:6379
       # Logging configuration
-      STREAMFLOW_LOG_LEVEL: ${STREAMFLOW_LOG_LEVEL:-info}
+      KRUXIAFLOW_LOG_LEVEL: ${KRUXIAFLOW_LOG_LEVEL:-info}
     healthcheck:
       <<: *healthcheck-defaults
       # Use built-in health command (no shell/curl needed in distroless)
-      test: ["CMD", "/streamflow", "health", "--timeout", "5"]
+      test: ["CMD", "/kruxiaflow", "health", "--timeout", "5"]
       start_period: 30s
     restart: unless-stopped
     logging: *default-logging
@@ -338,9 +338,9 @@ services:
           cpus: '0.25'
           memory: 256M
     labels:
-      com.streamflow.service: "api"
-      com.streamflow.component: "streamflow"
-      com.streamflow.profile: "deploy"
+      com.kruxiaflow.service: "api"
+      com.kruxiaflow.component: "kruxiaflow"
+      com.kruxiaflow.profile: "deploy"
     security_opt:
       - no-new-privileges:true
     ulimits:
@@ -352,22 +352,22 @@ services:
 
 volumes:
   postgres_data:
-    name: streamflow-postgres-data
+    name: kruxiaflow-postgres-data
     labels:
-      com.streamflow.volume: "database"
+      com.kruxiaflow.volume: "database"
   redis_data:
-    name: streamflow-redis-data
+    name: kruxiaflow-redis-data
     labels:
-      com.streamflow.volume: "cache"
+      com.kruxiaflow.volume: "cache"
   cargo_cache:
-    name: streamflow-cargo-cache
+    name: kruxiaflow-cargo-cache
     labels:
-      com.streamflow.volume: "build-cache"
+      com.kruxiaflow.volume: "build-cache"
   cargo_git_cache:
-    name: streamflow-cargo-git
+    name: kruxiaflow-cargo-git
     labels:
-      com.streamflow.volume: "build-cache"
+      com.kruxiaflow.volume: "build-cache"
   cargo_target_cache:
-    name: streamflow-cargo-target
+    name: kruxiaflow-cargo-target
     labels:
-      com.streamflow.volume: "build-cache"
+      com.kruxiaflow.volume: "build-cache"

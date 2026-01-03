@@ -1,9 +1,9 @@
 #!/bin/bash
-# Check StreamFlow binary size against 15MB target
+# Check Kruxia Flow binary size against 15MB target
 
 set -e
 
-BINARY_PATH="${1:-target/release/streamflow}"
+BINARY_PATH="${1:-target/release/kruxiaflow}"
 TARGET_SIZE_MB=15
 
 if [ ! -f "$BINARY_PATH" ]; then

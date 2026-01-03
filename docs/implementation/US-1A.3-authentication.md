@@ -765,8 +765,8 @@ impl Default for AuthConfig {
     fn default() -> Self {
         Self {
             rsa_private_key_pem: String::new(), // Must be provided
-            jwt_issuer: "streamflow".to_string(),
-            jwt_audience: "streamflow-api".to_string(),
+            jwt_issuer: "kruxiaflow".to_string(),
+            jwt_audience: "kruxiaflow-api".to_string(),
             token_ttl: 86400, // 24 hours
         }
     }
@@ -1065,7 +1065,7 @@ use crate::handlers::oauth::{TokenRequest, TokenResponse, GrantType};
 #[derive(OpenApi)]
 #[openapi(
     info(
-        title = "StreamFlow API",
+        title = "Kruxia Flow API",
         version = "0.2.0",
         description = "High-performance workflow orchestration platform for AI-native workloads",
     ),
@@ -1505,23 +1505,23 @@ oauth = { path = "../oauth" }
 ```bash
 # RSA private key for JWT signing (PEM format)
 # Generate with: openssl genrsa -out private.pem 2048
-STREAMFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="-----BEGIN RSA PRIVATE KEY-----
+KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="-----BEGIN RSA PRIVATE KEY-----
 ...
 -----END RSA PRIVATE KEY-----"
 
 # JWT configuration
-STREAMFLOW_OAUTH_JWT_ISSUER=streamflow
-STREAMFLOW_OAUTH_JWT_AUDIENCE=streamflow-api
-STREAMFLOW_OAUTH_TOKEN_TTL=86400  # 24 hours
+KRUXIAFLOW_OAUTH_JWT_ISSUER=kruxiaflow
+KRUXIAFLOW_OAUTH_JWT_AUDIENCE=kruxiaflow-api
+KRUXIAFLOW_OAUTH_TOKEN_TTL=86400  # 24 hours
 
 # Database URL (already configured)
-DATABASE_URL=postgres://localhost/streamflow
+DATABASE_URL=postgres://localhost/kruxiaflow
 ```
 
 ### CLI Configuration (for future)
 
 ```bash
-streamflow serve \
+kruxiaflow serve \
   --auth-rsa-key-file=/path/to/private.pem \
   --auth-token-ttl=86400
 ```
@@ -1539,7 +1539,7 @@ Update `docs/api-reference.md`:
 
 All API endpoints (except health checks and token issuance) require authentication via JWT Bearer token.
 
-StreamFlow implements OAuth 2.0 (RFC 6749) compliant authentication.
+Kruxia Flow implements OAuth 2.0 (RFC 6749) compliant authentication.
 
 ### Obtaining a Token
 

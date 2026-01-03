@@ -1,6 +1,6 @@
 # Docker-Based Memory Profiling
 
-This guide explains how to use Docker-based memory profiling for StreamFlow, which provides proper symbol resolution on all platforms (especially macOS where native jeprof has limitations).
+This guide explains how to use Docker-based memory profiling for Kruxia Flow, which provides proper symbol resolution on all platforms (especially macOS where native jeprof has limitations).
 
 ## Why Docker for Profiling?
 
@@ -25,7 +25,7 @@ This guide explains how to use Docker-based memory profiling for StreamFlow, whi
 This will:
 1. Build the profiling Docker image (first time only)
 2. Start PostgreSQL if not running
-3. Build StreamFlow with jemalloc profiling inside the container
+3. Build Kruxia Flow with jemalloc profiling inside the container
 4. Run the sustained throughput benchmark
 5. Generate allocation reports with full symbol information
 6. Save results to `var/memory-profile-TIMESTAMP/`
@@ -59,7 +59,7 @@ Drop into the container for manual profiling or debugging:
 
 # Inside container:
 ./scripts/profile_memory.sh              # Run profiling
-jeprof --text target/profiling/streamflow var/memory-profile-*/jeprof.out.*.heap
+jeprof --text target/profiling/kruxiaflow var/memory-profile-*/jeprof.out.*.heap
 ```
 
 ## Architecture
@@ -86,7 +86,7 @@ profile_memory_docker.sh  →   profile_memory.sh
                               │
                               ├─ cargo build --profile profiling --features profiling
                               ├─ profiling.sh --profiling
-                              │  └─ StreamFlow server with jemalloc enabled
+                              │  └─ Kruxia Flow server with jemalloc enabled
                               │     └─ Heap dumps → var/jeprof.out.*.heap
                               │
                               ├─ jeprof --text [binary] [heap]  → allocation_report.txt
@@ -101,7 +101,7 @@ With proper symbol resolution, you'll see:
 
 ```
 Total: 84775072 B
- 24528800  28.9%  28.9%  24528800  28.9% streamflow_core::orchestrator::evaluate_workflow
+ 24528800  28.9%  28.9%  24528800  28.9% kruxiaflow_core::orchestrator::evaluate_workflow
  13109200  15.5%  44.4%  13109200  15.5% tokio::runtime::task::raw::RawTask::new
  11012736  13.0%  57.4%  11012736  13.0% sqlx_postgres::connection::establish
   8671533  10.2%  67.6%   8671533  10.2% hyper::proto::h1::conn::Conn::new
@@ -134,7 +134,7 @@ Error: connection refused
 **Solution:** Ensure PostgreSQL is running:
 ```bash
 docker-compose up -d postgres
-docker exec streamflow-postgres pg_isready -U streamflow
+docker exec kruxiaflow-postgres pg_isready -U kruxiaflow
 ```
 
 ### Build Errors
@@ -152,7 +152,7 @@ cargo build --profile profiling --features profiling
 
 Check the benchmark logs:
 ```bash
-tail -100 var/memory-profile-*/streamflow-profiling.log
+tail -100 var/memory-profile-*/kruxiaflow-profiling.log
 ```
 
 Verify jemalloc config:
@@ -201,12 +201,12 @@ export _RJEM_MALLOC_CONF="prof_active:true,prof_prefix:$PROFILE_DIR/jeprof.out,l
 # Inside container:
 export _RJEM_MALLOC_CONF="prof_active:true,prof_prefix:/opt/var/custom.heap"
 cargo build --profile profiling --features profiling
-./target/profiling/streamflow serve --workers 20 &
+./target/profiling/kruxiaflow serve --workers 20 &
 
 # ... run your workload ...
 
 # Analyze
-jeprof --text target/profiling/streamflow var/custom.heap.* > custom_report.txt
+jeprof --text target/profiling/kruxiaflow var/custom.heap.* > custom_report.txt
 ```
 
 ## See Also
