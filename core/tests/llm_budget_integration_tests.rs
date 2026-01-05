@@ -1,4 +1,4 @@
-use kruxiaflow_core::cost::{ActivityCostRecord, CostCalculator, CostTracker};
+use kruxiaflow_core::cost::{ActivityCostRecord, CostCalculator, CostTracker, ModelPricing};
 use rust_decimal_macros::dec;
 use serial_test::serial;
 use sqlx::PgPool;
@@ -91,30 +91,79 @@ async fn test_cost_calculator_batch_get_pricing() {
     // Verify all models have pricing
     assert_eq!(pricing.len(), 3);
 
-    // Verify Sonnet pricing
-    let sonnet_key = (
-        "anthropic".to_string(),
-        "claude-3-5-sonnet-20241022".to_string(),
-    );
-    let sonnet = pricing.get(&sonnet_key).unwrap();
+    // Verify Sonnet pricing (keys now in "provider/model" format)
+    let sonnet_key = "anthropic/claude-3-5-sonnet-20241022";
+    let sonnet = pricing.get(sonnet_key).unwrap();
     assert_eq!(sonnet.input_price_per_million, dec!(3.00));
     assert_eq!(sonnet.output_price_per_million, dec!(15.00));
     assert_eq!(sonnet.cached_input_price_per_million, Some(dec!(0.30)));
 
     // Verify Haiku pricing
-    let haiku_key = (
-        "anthropic".to_string(),
-        "claude-3-5-haiku-20241022".to_string(),
-    );
-    let haiku = pricing.get(&haiku_key).unwrap();
+    let haiku_key = "anthropic/claude-3-5-haiku-20241022";
+    let haiku = pricing.get(haiku_key).unwrap();
     assert_eq!(haiku.input_price_per_million, dec!(0.80));
     assert_eq!(haiku.output_price_per_million, dec!(4.00));
 
     // Verify Ollama pricing (free)
-    let ollama_key = ("ollama".to_string(), "llama3.2".to_string());
-    let ollama = pricing.get(&ollama_key).unwrap();
+    let ollama_key = "ollama/llama3.2";
+    let ollama = pricing.get(ollama_key).unwrap();
     assert_eq!(ollama.input_price_per_million, dec!(0.00));
     assert_eq!(ollama.output_price_per_million, dec!(0.00));
+}
+
+#[tokio::test]
+#[serial]
+async fn test_batch_get_pricing_json_serialization() {
+    // Regression test for bug: Model Pricing HashMap Tuple Keys Cannot Be Serialized to JSON
+    // See: docs/bugs/2026-01-04-model-pricing-tuple-key-serialization.md
+    let pool = setup_test_db().await;
+    clean_test_data(&pool).await;
+    seed_llm_pricing(&pool).await;
+
+    let calculator = CostCalculator::new(pool.clone());
+
+    let models = vec![
+        (
+            "anthropic".to_string(),
+            "claude-3-5-sonnet-20241022".to_string(),
+        ),
+        (
+            "anthropic".to_string(),
+            "claude-3-5-haiku-20241022".to_string(),
+        ),
+    ];
+
+    let pricing = calculator
+        .batch_get_pricing(&models)
+        .await
+        .expect("Failed to get pricing");
+
+    // This should succeed - verifies HashMap keys are strings not tuples
+    let json_result = serde_json::to_value(&pricing);
+    assert!(
+        json_result.is_ok(),
+        "Failed to serialize pricing to JSON: {:?}",
+        json_result.err()
+    );
+
+    let json_value = json_result.unwrap();
+    assert!(json_value.is_object(), "JSON should be an object");
+
+    // Verify the JSON structure contains the expected keys
+    let json_obj = json_value.as_object().unwrap();
+    assert!(
+        json_obj.contains_key("anthropic/claude-3-5-sonnet-20241022"),
+        "JSON should contain sonnet pricing"
+    );
+    assert!(
+        json_obj.contains_key("anthropic/claude-3-5-haiku-20241022"),
+        "JSON should contain haiku pricing"
+    );
+
+    // Verify we can roundtrip the JSON
+    let roundtrip: std::collections::HashMap<String, ModelPricing> =
+        serde_json::from_value(json_value).expect("Failed to deserialize JSON");
+    assert_eq!(roundtrip.len(), 2);
 }
 
 #[tokio::test]
