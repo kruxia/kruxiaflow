@@ -7,7 +7,7 @@
 #   docker compose -f docker-compose.yml --profile deploy up
 #
 # For development, this file is auto-loaded:
-#   docker compose --profile develop up
+#   docker compose up
 
 services:
   # Connect to frontend network since backend is internal-only
@@ -24,8 +24,14 @@ services:
       - backend
       - frontend
 
+  # Enable mailhog by default for development (clears profile requirement)
+  mailhog:
+    profiles: []
+
   # Expose Kruxia Flow on all interfaces for local testing
+  # Enable by default for development (clears profile requirement)
   kruxiaflow-develop:
+    profiles: []
     ports:
       - "8080:8080"
 

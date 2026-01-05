@@ -1,9 +1,9 @@
-use serde_json::json;
-use serial_test::serial;
-use sqlx::PgPool;
 use kruxiaflow_core::events::{
     EventSource, NewWorkflowEvent, PostgresEventSource, WorkflowEventType,
 };
+use serde_json::json;
+use serial_test::serial;
+use sqlx::PgPool;
 use uuid::Uuid;
 
 async fn setup_test_db() -> PgPool {

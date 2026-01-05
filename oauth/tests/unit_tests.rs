@@ -4,8 +4,8 @@
 //! These tests use the test keys in oauth/tests/*.pem and do not require a database.
 
 use chrono::{Duration, Utc};
-use sqlx::PgPool;
 use kruxiaflow_oauth::{AuthConfig, AuthError, AuthenticationService, Claims, PostgresAuthService};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 /// Load test private key (PKCS#8 format)

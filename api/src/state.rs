@@ -1,11 +1,11 @@
 use crate::websocket::ConnectionManager;
-use sqlx::PgPool;
-use std::sync::Arc;
 use kruxiaflow_core::cache::CacheService;
 use kruxiaflow_core::events::EventSource;
 use kruxiaflow_core::queue::ActivityQueue;
 use kruxiaflow_core::storage::WorkflowStorage;
 use kruxiaflow_oauth::AuthenticationService;
+use sqlx::PgPool;
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
 /// Build metadata captured at compile time
@@ -174,13 +174,13 @@ pub mod tests {
     use super::*;
     use async_trait::async_trait;
     use futures::stream::{self, Stream};
-    use sqlx::PgPool;
-    use std::pin::Pin;
     use kruxiaflow_core::cache::{CacheService, CachedResult};
     use kruxiaflow_core::events::{EventError, NewWorkflowEvent, WorkflowEvent};
     use kruxiaflow_core::queue::{Activity, ActivityResult, QueuedActivity};
     use kruxiaflow_core::storage::{FileMetadata, StorageError};
     use kruxiaflow_oauth::{AuthResponse, AuthResult, AuthenticationService, Claims, JwtKey};
+    use sqlx::PgPool;
+    use std::pin::Pin;
     use tokio_util::bytes::Bytes;
     use uuid::Uuid;
 

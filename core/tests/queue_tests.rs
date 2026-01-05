@@ -1,12 +1,12 @@
-use serde_json::json;
-use serial_test::serial;
-use sqlx::PgPool;
-use std::sync::Arc;
 use kruxiaflow_core::queue::{
     Activity, ActivityQueue, ActivityResult, ActivitySettings, PostgresQueue, QueueConfig,
     QueueMonitor,
 };
 use kruxiaflow_core::workflow::{BackoffStrategy, RetryPolicy};
+use serde_json::json;
+use serial_test::serial;
+use sqlx::PgPool;
+use std::sync::Arc;
 use tokio::time::{Duration, sleep};
 use uuid::Uuid;
 

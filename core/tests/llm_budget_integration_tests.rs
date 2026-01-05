@@ -1,7 +1,7 @@
+use kruxiaflow_core::cost::{ActivityCostRecord, CostCalculator, CostTracker};
 use rust_decimal_macros::dec;
 use serial_test::serial;
 use sqlx::PgPool;
-use kruxiaflow_core::cost::{ActivityCostRecord, CostCalculator, CostTracker};
 use uuid::Uuid;
 
 async fn setup_test_db() -> PgPool {

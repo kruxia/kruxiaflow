@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use std::sync::Arc;
 use kruxiaflow_core::cache::CacheService;
+use std::sync::Arc;
 
 /// Cache configuration
 #[derive(Debug, Clone)]

@@ -1,5 +1,5 @@
-use serde_json::json;
 use kruxiaflow_core::workflow::{ActivityOutput, ActivityOutputDefinition, OutputType};
+use serde_json::json;
 
 #[test]
 fn test_output_type_default() {

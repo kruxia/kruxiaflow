@@ -3,8 +3,8 @@ use crate::config::WorkerConfig;
 use crate::poller::WorkerPoller;
 use crate::registry::ActivityRegistry;
 use anyhow::Result;
-use std::sync::Arc;
 use kruxiaflow_core::storage::WorkflowStorage;
+use std::sync::Arc;
 use tokio::task::JoinHandle;
 
 /// Worker manager

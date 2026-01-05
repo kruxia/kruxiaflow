@@ -1,3 +1,4 @@
+use kruxiaflow_profiling::{create_parallel_workflow, create_sequential_workflow};
 /// Utility to register benchmark workflow definitions via API
 ///
 /// Usage:
@@ -9,7 +10,6 @@
 ///   - KRUXIAFLOW_CLIENT_SECRET: OAuth client secret
 use reqwest::Client;
 use std::env;
-use kruxiaflow_profiling::{create_parallel_workflow, create_sequential_workflow};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

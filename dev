@@ -58,7 +58,7 @@ Kruxia Flow Docker Compose Launcher
 Usage: ./dev <command> [options]
 
 Commands:
-  up [--profile NAME]    Start Kruxia Flow (default profile: develop)
+  up [--profile NAME]    Start Kruxia Flow (default: development)
   down                   Stop all services
   logs [-f]              Show logs (use -f to follow)
   ps                     Show running containers
@@ -70,7 +70,7 @@ Commands:
   *                      Any other docker compose command
 
 Profiles:
-  develop    Development mode with hot reload (default)
+  (default)  Development mode with hot reload
   deploy     Production-like with prebuilt image
   profiling  Memory profiling with jemalloc
 
@@ -124,8 +124,8 @@ main() {
                 log_info "Starting with profile: $profile"
                 exec docker compose --profile "$profile" up $other_args
             else
-                log_info "Starting with profile: develop"
-                exec docker compose --profile develop up $other_args
+                log_info "Starting development environment"
+                exec docker compose up $other_args
             fi
             ;;
         down|stop)

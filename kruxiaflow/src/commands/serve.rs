@@ -1,9 +1,5 @@
 use anyhow::Result;
 use clap::Args;
-use sqlx::PgPool;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::time::Duration;
 use kruxiaflow_api::{AppState, app_router};
 use kruxiaflow_core::{
     ActivityQueue, CacheService, EventSource, OrchestratorConfig, PostgresEventSource,
@@ -11,6 +7,10 @@ use kruxiaflow_core::{
 };
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use kruxiaflow_worker::{WorkerConfig, WorkerManager};
+use sqlx::PgPool;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;

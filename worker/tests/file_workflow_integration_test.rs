@@ -5,11 +5,6 @@
 /// 2. Worker uploads file to storage
 /// 3. File can be retrieved from storage
 use anyhow::Result;
-use serde_json::json;
-use serial_test::serial;
-use sqlx::PgPool;
-use std::sync::Arc;
-use std::time::Duration;
 use kruxiaflow_api::{AppState, app_router};
 use kruxiaflow_core::events::{EventSource, PostgresEventSource};
 use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
@@ -17,6 +12,11 @@ use kruxiaflow_core::storage::{PostgresStorage, WorkflowStorage};
 use kruxiaflow_core::{OrchestratorConfig, run_orchestrator};
 use kruxiaflow_oauth::{AuthenticationService, PostgresAuthService};
 use kruxiaflow_worker::{WorkerConfig, WorkerManager, register_builtin_activities};
+use serde_json::json;
+use serial_test::serial;
+use sqlx::PgPool;
+use std::sync::Arc;
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 

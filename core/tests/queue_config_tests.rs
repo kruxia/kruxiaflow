@@ -1,9 +1,9 @@
 // core/tests/queue_config_tests.rs
 //! Unit tests for QueueConfig
 
+use kruxiaflow_core::queue::config::QueueConfig;
 use serial_test::serial;
 use std::time::Duration;
-use kruxiaflow_core::queue::config::QueueConfig;
 
 #[test]
 fn test_queue_config_default() {

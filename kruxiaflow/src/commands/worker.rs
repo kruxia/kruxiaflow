@@ -1,8 +1,8 @@
 use anyhow::Result;
 use clap::Args;
+use kruxiaflow_worker::{WorkerConfig, WorkerManager};
 use std::sync::Arc;
 use std::time::Duration;
-use kruxiaflow_worker::{WorkerConfig, WorkerManager};
 use uuid::Uuid;
 
 /// Worker command - Launch worker service only

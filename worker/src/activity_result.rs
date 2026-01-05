@@ -1,6 +1,6 @@
+use kruxiaflow_core::workflow::{ActivityOutput, OutputType};
 use rust_decimal::Decimal;
 use serde_json::Value;
-use kruxiaflow_core::workflow::{ActivityOutput, OutputType};
 
 /// Activity execution result
 ///

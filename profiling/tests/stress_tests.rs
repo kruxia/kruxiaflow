@@ -10,7 +10,6 @@ use serial_test::serial;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 use kruxiaflow_profiling::bottleneck::BottleneckAnalyzer;
