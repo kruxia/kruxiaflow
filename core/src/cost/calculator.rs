@@ -135,10 +135,11 @@ impl CostCalculator {
 
     /// Batch calculate costs for multiple models
     /// Efficient for calculating costs across many activities at once
+    /// Returns HashMap with keys in "provider/model" format for JSON serializability
     pub async fn batch_get_pricing(
         &self,
         models: &[(String, String)], // Vec of (provider, model)
-    ) -> Result<HashMap<(String, String), ModelPricing>> {
+    ) -> Result<HashMap<String, ModelPricing>> {
         if models.is_empty() {
             return Ok(HashMap::new());
         }
@@ -168,7 +169,8 @@ impl CostCalculator {
 
         let mut pricing_map = HashMap::new();
         for row in results {
-            let key = (row.provider, row.model);
+            // Use "provider/model" format as key for JSON serializability
+            let key = format!("{}/{}", row.provider, row.model);
             pricing_map.insert(
                 key,
                 ModelPricing {

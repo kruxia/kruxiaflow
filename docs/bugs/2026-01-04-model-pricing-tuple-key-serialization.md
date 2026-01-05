@@ -1,8 +1,9 @@
 # Bug: Model Pricing HashMap Tuple Keys Cannot Be Serialized to JSON
 
 **Date Discovered:** 2026-01-04
+**Date Resolved:** 2026-01-04
 **Severity:** High (blocks all LLM activity execution)
-**Status:** Open
+**Status:** Resolved
 
 ## Summary
 
@@ -107,8 +108,24 @@ This would require updating all call sites but provides a cleaner API.
 
 None. The bug must be fixed in the Kruxia Flow codebase.
 
+## Resolution
+
+**Fix Applied:** Changed `batch_get_pricing` return type from `HashMap<(String, String), ModelPricing>` to `HashMap<String, ModelPricing>` using "provider/model" string format for keys.
+
+**Changes Made:**
+1. **core/src/cost/calculator.rs:142** - Updated return type to `HashMap<String, ModelPricing>`
+2. **core/src/cost/calculator.rs:173** - Changed key format to `format!("{}/{}", provider, model)`
+3. **core/src/orchestrator/orchestrator.rs:1482** - Updated code to use string keys when accessing pricing map
+4. **core/tests/llm_budget_integration_tests.rs:95-111** - Updated existing test to use string keys
+5. **core/tests/llm_budget_integration_tests.rs:114-167** - Added new test `test_batch_get_pricing_json_serialization` to prevent regression
+
+**Test Coverage:**
+- `test_cost_calculator_batch_get_pricing` - Verifies batch pricing retrieval with string keys
+- `test_batch_get_pricing_json_serialization` - Regression test that verifies JSON serialization works and can roundtrip
+
 ## Related Code
 
 - `core/src/orchestrator/orchestrator.rs` - `enrich_llm_activity_params_w_budget` function (lines 1382-1558)
-- `core/src/cost/calculator.rs` - `batch_get_pricing` function (lines 138-183)
+- `core/src/cost/calculator.rs` - `batch_get_pricing` function (lines 138-185)
 - `core/src/cost/calculator.rs` - `ModelPricing` struct (lines 11-16)
+- `core/tests/llm_budget_integration_tests.rs` - Test coverage for the fix

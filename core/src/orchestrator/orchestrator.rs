@@ -1478,8 +1478,9 @@ async fn enrich_llm_activity_params_w_budget(
         // Check if we should abort before scheduling
         // Find the cheapest model in the chain
         let mut cheapest_estimate = None;
-        for model_key in &model_list {
-            if let Some(pricing) = model_pricing.get(model_key) {
+        for (provider, model) in &model_list {
+            let model_key = format!("{}/{}", provider, model);
+            if let Some(pricing) = model_pricing.get(&model_key) {
                 // Conservative estimate: assume 1000 input tokens and max_tokens output
                 let estimated_input_tokens = 1000;
                 let estimated_output_tokens = params
