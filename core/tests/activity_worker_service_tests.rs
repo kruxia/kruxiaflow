@@ -1,12 +1,12 @@
+use kruxiaflow_core::activity::ActivityWorkerService;
+use kruxiaflow_core::events::{EventSource, PostgresEventSource};
+use kruxiaflow_core::queue::{Activity, ActivityQueue, PostgresQueue, QueueConfig};
 use rust_decimal::Decimal;
 use serde_json::json;
 use serial_test::serial;
 use sqlx::PgPool;
 use std::str::FromStr;
 use std::sync::Arc;
-use kruxiaflow_core::activity::ActivityWorkerService;
-use kruxiaflow_core::events::{EventSource, PostgresEventSource};
-use kruxiaflow_core::queue::{Activity, ActivityQueue, PostgresQueue, QueueConfig};
 use uuid::Uuid;
 
 /// Helper to create test database pool

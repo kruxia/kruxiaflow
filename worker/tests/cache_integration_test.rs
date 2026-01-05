@@ -5,15 +5,15 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use rust_decimal::Decimal;
-use serde_json::{Value, json};
-use std::sync::Arc;
-use std::time::Duration;
 #[cfg(feature = "redis-cache")]
 use kruxiaflow_core::cache::RedisCache;
 use kruxiaflow_core::cache::{CacheService, NoOpCache};
 use kruxiaflow_core::workflow::ActivitySettings;
 use kruxiaflow_worker::{ActivityImpl, ActivityRegistry, ActivityResult};
+use rust_decimal::Decimal;
+use serde_json::{Value, json};
+use std::sync::Arc;
+use std::time::Duration;
 
 /// Test activity that returns a predictable result with cost
 struct CostlyActivity {

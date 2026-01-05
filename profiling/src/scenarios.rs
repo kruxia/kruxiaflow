@@ -1,7 +1,7 @@
-use std::collections::HashMap;
 use kruxiaflow_core::workflow::definition::{
     ActivityDefinition, ActivityRelationship, WorkflowDefinition,
 };
+use std::collections::HashMap;
 
 /// Create a sequential workflow definition with specified number of activities
 pub fn create_sequential_workflow(num_activities: usize) -> WorkflowDefinition {

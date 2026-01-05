@@ -2,10 +2,10 @@
 //! Unit tests for queue models (serialization, deserialization, Display impls)
 
 use chrono::Utc;
+use kruxiaflow_core::queue::models::*;
 use rust_decimal::Decimal;
 use serde_json::json;
 use std::str::FromStr;
-use kruxiaflow_core::queue::models::*;
 use uuid::Uuid;
 
 // Helper to create a test UUID

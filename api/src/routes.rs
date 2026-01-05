@@ -2,7 +2,9 @@ use crate::error::AppError;
 use crate::state::AppState;
 use crate::{handlers, middleware, openapi};
 use axum::{
-    Json, Router, middleware as axum_middleware,
+    Json, Router,
+    extract::DefaultBodyLimit,
+    middleware as axum_middleware,
     response::IntoResponse,
     routing::{delete, get, post},
 };
@@ -210,21 +212,23 @@ pub fn app_router(state: AppState) -> Router {
         // Fallback handler for 404 errors
         .fallback(fallback_404)
         .with_state(state)
-        // Apply global middleware (request ID, CORS)
+        // Apply global middleware (request ID, CORS, body limit)
         .layer(axum_middleware::from_fn(middleware::request_id_middleware))
         .layer(middleware::cors_layer())
+        // Set body size limit to 50MB for large embedding payloads
+        .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use axum_test::TestServer;
-    use serial_test::serial;
-    use sqlx::PgPool;
-    use std::sync::Arc;
     use kruxiaflow_core::events::PostgresEventSource;
     use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
     use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
+    use serial_test::serial;
+    use sqlx::PgPool;
+    use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
 
     /// Helper to create test database pool

@@ -1,8 +1,8 @@
 // core/tests/backoff_tests.rs
 //! Unit tests for AdaptiveBackoff
 
-use std::time::Duration;
 use kruxiaflow_core::orchestrator::backoff::AdaptiveBackoff;
+use std::time::Duration;
 
 #[test]
 fn test_backoff_starts_at_min() {

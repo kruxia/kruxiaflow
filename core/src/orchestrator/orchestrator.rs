@@ -22,8 +22,10 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 const CONSUMER_ID: &str = "orchestrator";
+const MAX_EVENT_PROCESSING_RETRIES: u32 = 5;
 
 // Conditional span creation macro - only creates spans when profiling feature is enabled
 #[cfg(feature = "profiling")]
@@ -61,10 +63,14 @@ pub async fn run_orchestrator(
         config.backoff_multiplier,
     );
 
+    // Track event processing failures to detect poison messages
+    let mut event_failures: HashMap<Uuid, u32> = HashMap::new();
+
     tracing::info!(
-        "Orchestrator starting with consumer_id={}, workflow_timeout={}s",
+        "Orchestrator starting with consumer_id={}, workflow_timeout={}s, max_event_retries={}",
         CONSUMER_ID,
-        config.workflow_timeout.as_secs()
+        config.workflow_timeout.as_secs(),
+        MAX_EVENT_PROCESSING_RETRIES
     );
 
     // Spawn background task to check for stuck workflows
@@ -111,20 +117,48 @@ pub async fn run_orchestrator(
             if let Err(e) =
                 process_workflow_event(event, &event_source, &activity_queue, &config).await
             {
-                // Log error but continue processing
+                // Track failure count for this event
+                let failure_count = event_failures.entry(event.id).or_insert(0);
+                *failure_count += 1;
+
                 tracing::error!(
                     event_id = %event.id,
                     workflow_id = %event.workflow_id,
                     event_type = ?event.event_type,
+                    failure_count = *failure_count,
+                    max_retries = MAX_EVENT_PROCESSING_RETRIES,
                     error = %e,
                     "Failed to process event"
                 );
-                // Note: Event position is NOT updated on error, will be reprocessed
-                continue;
-            }
 
-            // Update consumer position after successful processing (durable checkpoint)
-            event_source.update_position(CONSUMER_ID, event.id).await?;
+                // If we've exceeded max retries, treat as poison message
+                if *failure_count >= MAX_EVENT_PROCESSING_RETRIES {
+                    tracing::error!(
+                        event_id = %event.id,
+                        workflow_id = %event.workflow_id,
+                        event_type = ?event.event_type,
+                        failure_count = *failure_count,
+                        "Poison message detected - publishing failure event after {} failed attempts",
+                        MAX_EVENT_PROCESSING_RETRIES
+                    );
+
+                    // Publish a failure event for this poison message
+                    let _ = publish_failure_for_poison_event(event, &event_source, &e.to_string())
+                        .await;
+
+                    // Update position to skip this poison event
+                    // The failure event will be processed normally by the orchestrator
+                    event_source.update_position(CONSUMER_ID, event.id).await?;
+                    event_failures.remove(&event.id);
+                } else {
+                    // Will be retried on next poll
+                    continue;
+                }
+            } else {
+                // Success - clear failure count and update position
+                event_failures.remove(&event.id);
+                event_source.update_position(CONSUMER_ID, event.id).await?;
+            }
         }
 
         // Got events - reset backoff
@@ -1665,6 +1699,67 @@ async fn record_llm_activity_cost(
         provider = %provider,
         model = %model,
         "Recorded LLM activity cost"
+    );
+
+    Ok(())
+}
+
+/// Publish a failure event when a poison message is detected
+///
+/// When the orchestrator cannot process an event (typically ActivityCompleted)
+/// after multiple retries, this publishes an ActivityFailed event so the workflow
+/// can continue processing with the activity marked as failed.
+///
+/// This is better than failing the entire workflow - other branches may still succeed.
+async fn publish_failure_for_poison_event(
+    event: &WorkflowEvent,
+    event_source: &Arc<dyn EventSource>,
+    error: &str,
+) -> Result<()> {
+    // Only handle events that relate to specific activities
+    let activity_key = match &event.activity_key {
+        Some(key) => key.clone(),
+        None => {
+            tracing::warn!(
+                workflow_id = %event.workflow_id,
+                event_id = %event.id,
+                event_type = ?event.event_type,
+                "Cannot publish ActivityFailed for poison event - no activity_key (event type: {:?})",
+                event.event_type
+            );
+            return Ok(());
+        }
+    };
+
+    tracing::warn!(
+        workflow_id = %event.workflow_id,
+        event_id = %event.id,
+        event_type = ?event.event_type,
+        activity_key = %activity_key,
+        "Publishing ActivityFailed event for poison message"
+    );
+
+    // Publish ActivityFailed event with orchestrator error
+    let failed_event = NewWorkflowEvent {
+        workflow_id: event.workflow_id,
+        event_type: WorkflowEventType::ActivityFailed,
+        activity_key: Some(activity_key.clone()),
+        payload: json!({
+            "error": format!("ORCHESTRATOR_ERROR: Failed to process {} event after {} attempts: {}",
+                event.event_type, MAX_EVENT_PROCESSING_RETRIES, error),
+            "error_code": "ORCHESTRATOR_PROCESSING_ERROR",
+            "poison_event_id": event.id,
+            "original_event_type": format!("{:?}", event.event_type),
+        }),
+        iteration: event.iteration,
+    };
+
+    event_source.publish(failed_event).await?;
+
+    tracing::info!(
+        workflow_id = %event.workflow_id,
+        activity_key = %activity_key,
+        "Published ActivityFailed event for poison message - workflow will process failure normally"
     );
 
     Ok(())

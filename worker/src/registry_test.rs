@@ -4,13 +4,13 @@ mod tests {
     use crate::registry::*;
     use anyhow::Result;
     use async_trait::async_trait;
+    use kruxiaflow_core::cache::{CacheService, CachedResult, NoOpCache};
+    use kruxiaflow_core::workflow::ActivitySettings;
     use rust_decimal::Decimal;
     use serde_json::{Value, json};
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
-    use kruxiaflow_core::cache::{CacheService, CachedResult, NoOpCache};
-    use kruxiaflow_core::workflow::ActivitySettings;
 
     struct TestActivity {
         name: String,

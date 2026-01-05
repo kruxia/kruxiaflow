@@ -7,8 +7,8 @@ use crate::activities::{
     PostgresQueryActivity, PostgresTransactionActivity, new_pool_cache,
 };
 use crate::registry::ActivityRegistry;
-use std::sync::Arc;
 use kruxiaflow_core::cache::CacheService;
+use std::sync::Arc;
 
 /// Register all built-in activities
 ///

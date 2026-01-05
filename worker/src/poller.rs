@@ -3,10 +3,10 @@ use crate::config::WorkerConfig;
 use crate::file_executor::FileExecutor;
 use crate::registry::ActivityRegistry;
 use anyhow::{Context, Result};
-use std::sync::Arc;
-use std::time::Duration;
 use kruxiaflow_core::storage::WorkflowStorage;
 use kruxiaflow_core::workflow::ActivityOutputDefinition;
+use std::sync::Arc;
+use std::time::Duration;
 
 /// Worker poller task
 ///
@@ -331,11 +331,11 @@ mod tests {
     use crate::client::WorkerApiClient;
     use crate::registry::{ActivityImpl, ActivityRegistry};
     use async_trait::async_trait;
+    use kruxiaflow_core::WorkflowStorage;
+    use kruxiaflow_core::workflow::ActivityOutput;
     use serde_json::{Value, json};
     use std::sync::Arc;
     use std::time::Duration;
-    use kruxiaflow_core::WorkflowStorage;
-    use kruxiaflow_core::workflow::ActivityOutput;
     use uuid::Uuid;
 
     // Mock storage for tests

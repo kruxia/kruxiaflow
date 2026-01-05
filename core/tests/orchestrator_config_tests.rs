@@ -1,9 +1,9 @@
 // core/tests/orchestrator_config_tests.rs
 //! Unit tests for OrchestratorConfig
 
+use kruxiaflow_core::orchestrator::config::OrchestratorConfig;
 use sqlx::PgPool;
 use std::time::Duration;
-use kruxiaflow_core::orchestrator::config::OrchestratorConfig;
 
 async fn mock_pool() -> PgPool {
     let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {

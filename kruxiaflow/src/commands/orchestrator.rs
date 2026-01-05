@@ -1,11 +1,11 @@
 use anyhow::Result;
 use clap::Args;
-use std::sync::Arc;
-use std::time::Duration;
 use kruxiaflow_core::{
     ActivityQueue, EventSource, OrchestratorConfig, PostgresEventSource, PostgresQueue,
     QueueConfig, run_orchestrator,
 };
+use std::sync::Arc;
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
 /// Orchestrator command - Launch orchestrator service only

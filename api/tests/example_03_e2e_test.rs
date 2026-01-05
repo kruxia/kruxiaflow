@@ -1,3 +1,9 @@
+use kruxiaflow_api::{AppState, app_router};
+use kruxiaflow_core::events::PostgresEventSource;
+use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
+use kruxiaflow_core::{OrchestratorConfig, run_orchestrator};
+use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
+use kruxiaflow_worker::{ActivityRegistry, HttpRequestActivity, WorkerConfig, WorkerManager};
 /// End-to-end test for Example 3: Parallel File Processing
 ///
 /// This test verifies:
@@ -13,12 +19,6 @@ use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
-use kruxiaflow_api::{AppState, app_router};
-use kruxiaflow_core::events::PostgresEventSource;
-use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
-use kruxiaflow_core::{OrchestratorConfig, run_orchestrator};
-use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
-use kruxiaflow_worker::{ActivityRegistry, HttpRequestActivity, WorkerConfig, WorkerManager};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 

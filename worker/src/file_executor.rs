@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures::StreamExt;
+use kruxiaflow_core::storage::WorkflowStorage;
+use kruxiaflow_core::{ActivityOutput, ActivityOutputDefinition, OutputType};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use kruxiaflow_core::storage::WorkflowStorage;
-use kruxiaflow_core::{ActivityOutput, ActivityOutputDefinition, OutputType};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
@@ -236,8 +236,8 @@ pub async fn create_output_file(path: &Path, content: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sqlx::PgPool;
     use kruxiaflow_core::storage::PostgresStorage;
+    use sqlx::PgPool;
 
     async fn setup_test_storage() -> Arc<dyn WorkflowStorage> {
         let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {

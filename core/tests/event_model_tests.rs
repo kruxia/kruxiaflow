@@ -2,8 +2,8 @@
 //! Unit tests for event models (serialization, deserialization, Display impls)
 
 use chrono::Utc;
-use serde_json::json;
 use kruxiaflow_core::events::models::*;
+use serde_json::json;
 use uuid::Uuid;
 
 // Helper to create a test UUID

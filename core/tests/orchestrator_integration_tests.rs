@@ -1,14 +1,14 @@
-use serde_json::json;
-use serial_test::serial;
-use sqlx::PgPool;
-use std::sync::Arc;
-use std::time::Duration;
 use kruxiaflow_core::events::{
     ActivityDefinition, DependencyEdge, EventSource, NewWorkflowEvent, PostgresEventSource,
     WorkflowDefinition, WorkflowEventType,
 };
 use kruxiaflow_core::orchestrator::OrchestratorConfig;
 use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
+use serde_json::json;
+use serial_test::serial;
+use sqlx::PgPool;
+use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 async fn setup_test_db() -> PgPool {

@@ -26,11 +26,14 @@ tracing.workspace = true
 
 # Additional dependencies
 regex = "1"
-minijinja = "2.6"
+minijinja = { version = "2.6", features = ["builtins", "json"] }
 sha2 = "0.10"
 
 # Optional dependencies
-redis = { version = "0.32", features = ["tokio-comp", "connection-manager"], optional = true }
+redis = { version = "0.32", features = [
+    "tokio-comp",
+    "connection-manager",
+], optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

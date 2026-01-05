@@ -9,15 +9,15 @@
 
 use bcrypt::hash;
 use futures::StreamExt;
+use kruxiaflow_api::{AppState, AppStateBuild, app_router};
+use kruxiaflow_core::events::PostgresEventSource;
+use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
+use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use serial_test::serial;
 use sqlx::PgPool;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use kruxiaflow_api::{AppState, AppStateBuild, app_router};
-use kruxiaflow_core::events::PostgresEventSource;
-use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
-use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use tokio::net::TcpListener;
 use tokio::time::timeout;
 use tokio_tungstenite::{connect_async, tungstenite::Message};

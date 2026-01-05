@@ -182,14 +182,14 @@ mod tests {
     use axum::http::StatusCode;
     use axum_test::TestServer;
     use bcrypt;
-    use serial_test::serial;
-    use sqlx::PgPool;
-    use std::sync::Arc;
     use kruxiaflow_core::cache::NoOpCache;
     use kruxiaflow_core::events::PostgresEventSource;
     use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
     use kruxiaflow_core::storage::PostgresStorage;
     use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
+    use serial_test::serial;
+    use sqlx::PgPool;
+    use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
 
     /// Helper to create test database pool
