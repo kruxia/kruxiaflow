@@ -498,6 +498,18 @@ async fn handle_activity_failed(
         },
     };
 
+    // Log info when retry activity is started
+    tracing::info!(
+        workflow_id = %state.workflow_id,
+        activity_key = %activity_to_schedule.key,
+        worker = %activity_to_schedule.worker,
+        activity_name = %activity_to_schedule.activity_name,
+        iteration = ?activity_to_schedule.iteration,
+        attempt = current_attempt + 1,
+        scheduled_for = ?scheduled_for,
+        "Activity started (retry)"
+    );
+
     activity_queue
         .schedule(state.workflow_id, vec![activity_to_schedule])
         .await?;
@@ -1174,6 +1186,18 @@ pub async fn process_workflow_event(
                     output_definitions: a.output_definitions.clone(),
                     iteration,
                 });
+            }
+
+            // Log info when activities are started
+            for activity in &activities_to_schedule {
+                tracing::info!(
+                    workflow_id = %event.workflow_id,
+                    activity_key = %activity.key,
+                    worker = %activity.worker,
+                    activity_name = %activity.activity_name,
+                    iteration = ?activity.iteration,
+                    "Activity started"
+                );
             }
 
             activity_queue
