@@ -152,6 +152,7 @@ async fn test_simple_loop_workflow() {
         backoff_multiplier: 2.0,
         workflow_timeout: Duration::from_secs(300),
         timeout_check_interval: Duration::from_secs(60),
+        secrets: std::collections::HashMap::new(),
     };
 
     let events = event_source.poll("orchestrator").await.unwrap();
@@ -345,6 +346,7 @@ async fn test_loop_max_iterations_enforced() {
         backoff_multiplier: 2.0,
         workflow_timeout: Duration::from_secs(300),
         timeout_check_interval: Duration::from_secs(60),
+        secrets: std::collections::HashMap::new(),
     };
 
     // Process WorkflowCreated
@@ -515,6 +517,7 @@ async fn test_iteration_counter_without_scoping() {
         backoff_multiplier: 2.0,
         workflow_timeout: Duration::from_secs(300),
         timeout_check_interval: Duration::from_secs(60),
+        secrets: std::collections::HashMap::new(),
     };
 
     // Process WorkflowCreated
@@ -666,6 +669,7 @@ async fn test_iteration_budget_accumulation() {
         backoff_multiplier: 2.0,
         workflow_timeout: Duration::from_secs(300),
         timeout_check_interval: Duration::from_secs(60),
+        secrets: std::collections::HashMap::new(),
     };
 
     // Process WorkflowCreated
@@ -847,6 +851,7 @@ async fn test_loop_pattern_1_fixed_iterations() {
         backoff_multiplier: 2.0,
         workflow_timeout: Duration::from_secs(300),
         timeout_check_interval: Duration::from_secs(60),
+        secrets: std::collections::HashMap::new(),
     };
 
     // Process WorkflowCreated
@@ -1009,6 +1014,7 @@ async fn test_loop_pattern_2_condition_only() {
         backoff_multiplier: 2.0,
         workflow_timeout: Duration::from_secs(300),
         timeout_check_interval: Duration::from_secs(60),
+        secrets: std::collections::HashMap::new(),
     };
 
     // Process WorkflowCreated

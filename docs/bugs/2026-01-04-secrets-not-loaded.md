@@ -1,9 +1,10 @@
 # Bug: Workflow Secrets Not Loaded from Environment Variables
 
 **Date**: 2026-01-04
-**Status**: Open
+**Status**: Resolved
 **Severity**: High
 **Component**: Orchestrator / Template Context
+**Resolution Date**: 2026-01-06
 
 ## Summary
 
@@ -130,3 +131,67 @@ fn build_template_context(
 - Discovered while debugging researcher project workflow failures
 - Related docker-compose config: `KRUXIAFLOW_SECRET_DB_URL` environment variable
 - Template context implementation: `core/src/workflow/template.rs:85-88`
+
+## Resolution
+
+### Implementation
+
+1. **Added `secrets` field to `OrchestratorConfig`** (`core/src/orchestrator/config.rs`):
+   - New `secrets: HashMap<String, String>` field
+   - `with_secrets()` builder method for passing secrets directly
+   - `with_secrets_from_env()` builder method to load from environment
+
+2. **Added `load_secrets_from_env()` function** (`core/src/orchestrator/config.rs:79-86`):
+   ```rust
+   pub fn load_secrets_from_env() -> HashMap<String, String> {
+       std::env::vars()
+           .filter_map(|(key, value)| {
+               key.strip_prefix("KRUXIAFLOW_SECRET_")
+                   .map(|suffix| (suffix.to_lowercase(), value))
+           })
+           .collect()
+   }
+   ```
+
+3. **Updated `build_template_context()`** (`core/src/orchestrator/orchestrator.rs:292-336`):
+   - Added `secrets: &HashMap<String, String>` parameter
+   - Calls `context.with_secrets(secrets.clone())` to add secrets to template context
+
+4. **Updated call sites** to pass secrets from config:
+   - `handle_activity_failed()` - added secrets parameter
+   - Main event processing loop passes `&config.secrets`
+
+### Usage
+
+Set environment variables with `KRUXIAFLOW_SECRET_` prefix:
+
+```bash
+export KRUXIAFLOW_SECRET_DB_URL="postgres://user:pass@localhost/db"
+export KRUXIAFLOW_SECRET_API_KEY="sk-12345"
+```
+
+Initialize orchestrator config with secrets:
+
+```rust
+let config = OrchestratorConfig::new(pool)
+    .with_secrets_from_env();
+```
+
+Access in workflow templates:
+
+```yaml
+parameters:
+  db_url: "{{SECRET.db_url}}"
+  api_key: "{{SECRET.api_key}}"
+```
+
+### Files Changed
+
+- `core/src/orchestrator/config.rs`: Added secrets field, helper functions, and tests
+- `core/src/orchestrator/orchestrator.rs`: Updated `build_template_context()` and call sites
+- `core/tests/orchestrator_loop_tests.rs`: Updated test configs with secrets field
+
+### Tests Added
+
+- `test_load_secrets_from_env`: Verifies environment variable loading with prefix stripping and lowercase conversion
+- `test_build_template_context_with_secrets`: Verifies secrets are added to template context

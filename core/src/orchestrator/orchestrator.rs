@@ -292,6 +292,7 @@ fn compute_scheduled_for(
 fn build_template_context(
     state: &super::workflow_state::WorkflowState,
     workflow_id: uuid::Uuid,
+    secrets: &HashMap<String, String>,
 ) -> TemplateContext {
     let mut context = TemplateContext::new();
 
@@ -303,6 +304,9 @@ fn build_template_context(
             .collect();
         context = context.with_inputs(inputs);
     }
+
+    // Add secrets (from environment variables KRUXIAFLOW_SECRET_*)
+    context = context.with_secrets(secrets.clone());
 
     // Add activity outputs and iteration outputs
     for (activity_key, activity_state) in &state.activities {
@@ -340,6 +344,7 @@ async fn handle_activity_failed(
     event_source: &Arc<dyn EventSource>,
     activity_queue: &Arc<dyn ActivityQueue>,
     pool: &sqlx::PgPool,
+    secrets: &HashMap<String, String>,
 ) -> Result<bool> {
     let activity_key = event
         .activity_key
@@ -409,7 +414,7 @@ async fn handle_activity_failed(
     );
 
     // Build template context for resolving parameters (before mutating state)
-    let template_context = build_template_context(state, state.workflow_id);
+    let template_context = build_template_context(state, state.workflow_id, secrets);
 
     // Now update activity state (mutable borrow)
     let activity_state = state.activities.get_mut(activity_key).ok_or_else(|| {
@@ -930,6 +935,7 @@ pub async fn process_workflow_event(
             event_source,
             activity_queue,
             &config.pool,
+            &config.secrets,
         )
         .await?;
 
@@ -1114,7 +1120,7 @@ pub async fn process_workflow_event(
             let context_span = profile_span!("build_template_context");
             let template_context = {
                 let _enter = context_span.enter();
-                build_template_context(&state, event.workflow_id)
+                build_template_context(&state, event.workflow_id, &config.secrets)
             };
 
             // Resolve templates in activity parameters
@@ -2149,8 +2155,9 @@ mod tests {
     fn test_build_template_context_empty_state() {
         let state = create_test_workflow_state(vec![], json!({}));
         let workflow_id = state.workflow_id;
+        let secrets = HashMap::new();
 
-        let context = build_template_context(&state, workflow_id);
+        let context = build_template_context(&state, workflow_id, &secrets);
 
         assert!(context.inputs.is_empty());
         assert!(context.activity_states.is_empty());
@@ -2168,8 +2175,9 @@ mod tests {
         });
         let state = create_test_workflow_state(vec![], input);
         let workflow_id = state.workflow_id;
+        let secrets = HashMap::new();
 
-        let context = build_template_context(&state, workflow_id);
+        let context = build_template_context(&state, workflow_id, &secrets);
 
         assert_eq!(
             context.inputs.get("topic").unwrap().as_str().unwrap(),
@@ -2196,8 +2204,9 @@ mod tests {
             json!({}),
         );
         let workflow_id = state.workflow_id;
+        let secrets = HashMap::new();
 
-        let context = build_template_context(&state, workflow_id);
+        let context = build_template_context(&state, workflow_id, &secrets);
 
         // Verify activity was added to context
         assert!(context.activity_states.contains_key("search"));
@@ -2207,8 +2216,9 @@ mod tests {
     fn test_build_template_context_workflow_status() {
         let state = create_test_workflow_state(vec![], json!({}));
         let workflow_id = state.workflow_id;
+        let secrets = HashMap::new();
 
-        let context = build_template_context(&state, workflow_id);
+        let context = build_template_context(&state, workflow_id, &secrets);
 
         assert_eq!(
             context.workflow.get("status").unwrap().as_str().unwrap(),
@@ -2243,8 +2253,9 @@ mod tests {
             json!({}),
         );
         let workflow_id = state.workflow_id;
+        let secrets = HashMap::new();
 
-        let context = build_template_context(&state, workflow_id);
+        let context = build_template_context(&state, workflow_id, &secrets);
 
         // All activities should be in context, even pending ones
         assert!(context.activity_states.contains_key("activity1"));
@@ -2292,10 +2303,32 @@ mod tests {
             input: json!({}),
         };
         let workflow_id = state.workflow_id;
+        let secrets = HashMap::new();
 
-        let context = build_template_context(&state, workflow_id);
+        let context = build_template_context(&state, workflow_id, &secrets);
 
         // Verify iteration context is captured
         assert!(context.activity_states.contains_key("loop_activity"));
+    }
+
+    #[test]
+    fn test_build_template_context_with_secrets() {
+        let state = create_test_workflow_state(vec![], json!({}));
+        let workflow_id = state.workflow_id;
+        let mut secrets = HashMap::new();
+        secrets.insert(
+            "db_url".to_string(),
+            "postgres://secret:pass@localhost/db".to_string(),
+        );
+        secrets.insert("api_key".to_string(), "sk-12345".to_string());
+
+        let context = build_template_context(&state, workflow_id, &secrets);
+
+        // Verify secrets are in context
+        assert_eq!(
+            context.secrets.get("db_url").unwrap(),
+            "postgres://secret:pass@localhost/db"
+        );
+        assert_eq!(context.secrets.get("api_key").unwrap(), "sk-12345");
     }
 }
