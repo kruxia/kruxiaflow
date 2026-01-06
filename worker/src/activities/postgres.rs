@@ -310,11 +310,13 @@ where
                 }
                 Value::Bool(b) => query.bind(*b),
                 Value::Null => query.bind(Option::<String>::None),
-                _ => {
-                    return Err(anyhow::anyhow!(
-                        "Unsupported parameter type: {}",
-                        param.to_string()
-                    ));
+                Value::Array(_) | Value::Object(_) => {
+                    // Serialize arrays and objects as JSON strings for PostgreSQL JSONB
+                    // Use in SQL with ::jsonb cast, e.g.: SELECT * FROM jsonb_array_elements($1::jsonb)
+                    let json_str = serde_json::to_string(param).map_err(|e| {
+                        anyhow::anyhow!("Failed to serialize JSON parameter: {}", e)
+                    })?;
+                    query.bind(json_str)
                 }
             };
         }
@@ -1528,5 +1530,272 @@ mod tests {
             "query": format!("DROP TABLE {}", table_name)
         });
         activity.execute(cleanup).await.unwrap();
+    }
+
+    // ========================================================================
+    // Array/Object Parameter Tests (Bug fix: unsupported parameter type)
+    // See docs/bugs/2026-01-05-postgres-array-params-unsupported.md
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_postgres_query_array_parameter() {
+        let pool_cache = test_pool_cache();
+        let activity = PostgresQueryActivity::new(pool_cache);
+
+        // Use jsonb_array_elements to extract array elements - this is the bug scenario
+        let query = json!({
+            "db_url": test_db_url(),
+            "query": "SELECT value::text FROM jsonb_array_elements($1::jsonb) AS value ORDER BY value",
+            "params": [[1, 2, 3, 4, 5]]
+        });
+
+        let result = activity.execute(query).await.unwrap();
+
+        let output_value = result.to_json_value();
+        let rows = output_value
+            .get("result")
+            .unwrap()
+            .get("rows")
+            .unwrap()
+            .as_array()
+            .unwrap();
+
+        // Should have 5 rows, one for each array element
+        assert_eq!(rows.len(), 5);
+        assert_eq!(rows[0].get("value").unwrap(), "1");
+        assert_eq!(rows[4].get("value").unwrap(), "5");
+    }
+
+    #[tokio::test]
+    async fn test_postgres_query_object_parameter() {
+        let pool_cache = test_pool_cache();
+        let activity = PostgresQueryActivity::new(pool_cache);
+
+        // Create table with JSONB column
+        let table_name = format!("test_jsonb_{}", uuid::Uuid::now_v7().simple());
+        let setup = json!({
+            "db_url": test_db_url(),
+            "query": format!("CREATE TABLE {} (id SERIAL PRIMARY KEY, data JSONB)", table_name)
+        });
+        activity.execute(setup).await.unwrap();
+
+        // Insert an object parameter
+        let test_object = serde_json::json!({
+            "name": "Test User",
+            "age": 30,
+            "active": true,
+            "tags": ["admin", "user"]
+        });
+        let insert = json!({
+            "db_url": test_db_url(),
+            "query": format!("INSERT INTO {} (data) VALUES ($1::jsonb) RETURNING id, data", table_name),
+            "params": [test_object.clone()]
+        });
+        let result = activity.execute(insert).await.unwrap();
+
+        let output_value = result.to_json_value();
+        let rows = output_value
+            .get("result")
+            .unwrap()
+            .get("rows")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+
+        // Query the inserted data
+        let query = json!({
+            "db_url": test_db_url(),
+            "query": format!("SELECT data->>'name' as name, (data->>'age')::int as age FROM {}", table_name)
+        });
+        let result = activity.execute(query).await.unwrap();
+
+        let output_value = result.to_json_value();
+        let rows = output_value
+            .get("result")
+            .unwrap()
+            .get("rows")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(rows[0].get("name").unwrap(), "Test User");
+        assert_eq!(rows[0].get("age").unwrap(), 30);
+
+        // Cleanup
+        let cleanup = json!({
+            "db_url": test_db_url(),
+            "query": format!("DROP TABLE {}", table_name)
+        });
+        activity.execute(cleanup).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_postgres_query_nested_json_parameter() {
+        let pool_cache = test_pool_cache();
+        let activity = PostgresQueryActivity::new(pool_cache);
+
+        // Test with deeply nested structure
+        let nested_data = serde_json::json!({
+            "level1": {
+                "level2": {
+                    "level3": {
+                        "values": [1, 2, 3],
+                        "message": "deep nested"
+                    }
+                }
+            },
+            "array_of_objects": [
+                {"id": 1, "name": "first"},
+                {"id": 2, "name": "second"}
+            ]
+        });
+
+        // Query nested values using PostgreSQL JSON operators
+        let query = json!({
+            "db_url": test_db_url(),
+            "query": "SELECT $1::jsonb->'level1'->'level2'->'level3'->>'message' as message",
+            "params": [nested_data]
+        });
+
+        let result = activity.execute(query).await.unwrap();
+
+        let output_value = result.to_json_value();
+        let rows = output_value
+            .get("result")
+            .unwrap()
+            .get("rows")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(rows[0].get("message").unwrap(), "deep nested");
+    }
+
+    #[tokio::test]
+    async fn test_postgres_query_json_special_characters() {
+        let pool_cache = test_pool_cache();
+        let activity = PostgresQueryActivity::new(pool_cache);
+
+        // Test JSON with special characters (quotes, newlines, unicode)
+        let special_data = serde_json::json!({
+            "quoted": "He said \"hello\"",
+            "newlines": "line1\nline2\nline3",
+            "unicode": "日本語 emoji: 🎉",
+            "backslash": "path\\to\\file",
+            "tab": "col1\tcol2"
+        });
+
+        let query = json!({
+            "db_url": test_db_url(),
+            "query": "SELECT $1::jsonb->>'quoted' as quoted, $1::jsonb->>'unicode' as unicode",
+            "params": [special_data]
+        });
+
+        let result = activity.execute(query).await.unwrap();
+
+        let output_value = result.to_json_value();
+        let rows = output_value
+            .get("result")
+            .unwrap()
+            .get("rows")
+            .unwrap()
+            .as_array()
+            .unwrap();
+
+        assert_eq!(rows[0].get("quoted").unwrap(), "He said \"hello\"");
+        assert_eq!(rows[0].get("unicode").unwrap(), "日本語 emoji: 🎉");
+    }
+
+    #[tokio::test]
+    async fn test_postgres_query_array_of_objects_parameter() {
+        let pool_cache = test_pool_cache();
+        let activity = PostgresQueryActivity::new(pool_cache);
+
+        // This is the exact pattern from the bug report - array of objects
+        let passages = serde_json::json!([
+            {"sequence": 1, "content": "First passage", "page": 1},
+            {"sequence": 2, "content": "Second passage", "page": 2},
+            {"sequence": 3, "content": "Third passage", "page": 3}
+        ]);
+
+        // Extract each object and get specific fields
+        let query = json!({
+            "db_url": test_db_url(),
+            "query": "SELECT (elem->>'sequence')::int as seq, elem->>'content' as content FROM jsonb_array_elements($1::jsonb) AS elem ORDER BY (elem->>'sequence')::int",
+            "params": [passages]
+        });
+
+        let result = activity.execute(query).await.unwrap();
+
+        let output_value = result.to_json_value();
+        let rows = output_value
+            .get("result")
+            .unwrap()
+            .get("rows")
+            .unwrap()
+            .as_array()
+            .unwrap();
+
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0].get("seq").unwrap(), 1);
+        assert_eq!(rows[0].get("content").unwrap(), "First passage");
+        assert_eq!(rows[2].get("seq").unwrap(), 3);
+        assert_eq!(rows[2].get("content").unwrap(), "Third passage");
+    }
+
+    #[tokio::test]
+    async fn test_postgres_transaction_json_parameters() {
+        let pool_cache = test_pool_cache();
+        let query_activity = PostgresQueryActivity::new(pool_cache.clone());
+        let tx_activity = PostgresTransactionActivity::new(pool_cache);
+
+        // Create table for transaction test
+        let table_name = format!("test_tx_jsonb_{}", uuid::Uuid::now_v7().simple());
+        let setup = json!({
+            "db_url": test_db_url(),
+            "query": format!("CREATE TABLE {} (id SERIAL PRIMARY KEY, data JSONB)", table_name)
+        });
+        query_activity.execute(setup).await.unwrap();
+
+        // Execute transaction with JSON parameters
+        let obj1 = serde_json::json!({"name": "Item 1", "value": 100});
+        let obj2 = serde_json::json!({"name": "Item 2", "value": 200});
+
+        let params = json!({
+            "db_url": test_db_url(),
+            "statements": [
+                {
+                    "query": format!("INSERT INTO {} (data) VALUES ($1::jsonb)", table_name),
+                    "params": [obj1]
+                },
+                {
+                    "query": format!("INSERT INTO {} (data) VALUES ($1::jsonb)", table_name),
+                    "params": [obj2]
+                },
+                {
+                    "query": format!("SELECT data->>'name' as name FROM {} ORDER BY id", table_name)
+                }
+            ]
+        });
+
+        let result = tx_activity.execute(params).await.unwrap();
+        let output_value = result.to_json_value();
+        let result_obj = output_value.get("result").unwrap();
+
+        assert_eq!(result_obj.get("success").unwrap(), true);
+        assert_eq!(result_obj.get("statements_executed").unwrap(), 3);
+
+        // Check the SELECT result from the third statement
+        let results = result_obj.get("results").unwrap().as_array().unwrap();
+        let select_rows = results[2].get("rows").unwrap().as_array().unwrap();
+        assert_eq!(select_rows.len(), 2);
+        assert_eq!(select_rows[0].get("name").unwrap(), "Item 1");
+        assert_eq!(select_rows[1].get("name").unwrap(), "Item 2");
+
+        // Cleanup
+        let cleanup = json!({
+            "db_url": test_db_url(),
+            "query": format!("DROP TABLE {}", table_name)
+        });
+        query_activity.execute(cleanup).await.unwrap();
     }
 }

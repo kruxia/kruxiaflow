@@ -1,9 +1,10 @@
 # Bug: postgres_query and postgres_transaction Don't Support Array/Object Parameters
 
 **Date**: 2026-01-05
-**Status**: Open
+**Status**: Resolved
 **Severity**: Medium
 **Component**: Worker / Postgres Activities
+**Resolution Date**: 2026-01-06
 
 ## Summary
 
@@ -211,3 +212,46 @@ This confirms the issue is in the template → postgres_query pipeline, not in t
 
 - Also affects `postgres_transaction` activity which uses the same `execute_statement` function
 - Related to template `| tojson` filter behavior (see `2026-01-04-secrets-not-loaded.md`)
+
+## Resolution
+
+### Fix Applied
+
+Updated `execute_statement` function in `worker/src/activities/postgres.rs` (lines 313-319) to handle `Value::Array` and `Value::Object` by serializing them to JSON strings:
+
+```rust
+Value::Array(_) | Value::Object(_) => {
+    // Serialize arrays and objects as JSON strings for PostgreSQL JSONB
+    // Use in SQL with ::jsonb cast, e.g.: SELECT * FROM jsonb_array_elements($1::jsonb)
+    let json_str = serde_json::to_string(param)
+        .map_err(|e| anyhow::anyhow!("Failed to serialize JSON parameter: {}", e))?;
+    query.bind(json_str)
+}
+```
+
+### Usage
+
+To use array or object parameters, cast the parameter to `jsonb` in your SQL:
+
+```yaml
+parameters:
+  db_url: "{{INPUT.db_url}}"
+  query: "SELECT * FROM jsonb_array_elements($1::jsonb)"
+  params:
+    - "{{some_activity.array_output}}"
+```
+
+### Files Changed
+
+- `worker/src/activities/postgres.rs`: Added Array/Object handling in `execute_statement` function
+
+### Tests Added
+
+New unit tests in `worker/src/activities/postgres.rs`:
+
+- `test_postgres_query_array_parameter`: Verifies array parameters work with `jsonb_array_elements()`
+- `test_postgres_query_object_parameter`: Verifies object parameters work with JSONB column insert
+- `test_postgres_query_nested_json_parameter`: Verifies deeply nested structures
+- `test_postgres_query_json_special_characters`: Verifies special characters (quotes, newlines, unicode)
+- `test_postgres_query_array_of_objects_parameter`: Reproduces the exact bug scenario from the report
+- `test_postgres_transaction_json_parameters`: Verifies JSON parameters work in transactions
