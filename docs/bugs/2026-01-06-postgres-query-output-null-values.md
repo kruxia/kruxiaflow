@@ -1,9 +1,10 @@
 # Bug: postgres_query Activity Output Returns Null Values for Database Fields
 
 **Date**: 2026-01-06
-**Status**: Open
+**Status**: Resolved
 **Severity**: High
 **Component**: Worker / Template Engine / Activity Output Serialization
+**Resolution Date**: 2026-01-06
 
 ## Summary
 
@@ -162,3 +163,36 @@ The `Some(Null)` indicates the fields exist in the JSON structure but have null 
 1. **Custom worker activity** - Failed because the custom worker receives the same null values
 2. **Template filters** - No filter can recover null values
 3. **Different field selection** - Issue affects all non-string types regardless of column names
+
+## Resolution
+
+### Root Cause
+
+The bug was in `worker/src/activities/postgres.rs` in the `row_to_json` function (lines 182-214). The function had two problems:
+
+1. **Missing UUID type handling**: There was no `try_get::<uuid::Uuid>` call, so UUID columns fell through to the default `Value::Null` case.
+
+2. **Missing nullable type handling**: The code only tried non-nullable type variants (e.g., `try_get::<i32>`). For PostgreSQL columns that are nullable (defined without `NOT NULL`), sqlx requires using `Option<T>` even when the current value is non-null. When the code tried `try_get::<i32>` on a nullable integer column, it failed and fell through to `Value::Null`.
+
+### Fix Applied
+
+Updated `row_to_json` to:
+
+1. Add UUID type handling with `try_get::<uuid::Uuid>` and `try_get::<Option<uuid::Uuid>>`
+2. For each type, try both non-nullable and nullable variants in sequence
+3. Added support for additional integer sizes (SMALLINT via `i16`, BIGINT via `i64`)
+4. Added support for REAL via `f32` in addition to DOUBLE PRECISION via `f64`
+
+### Files Changed
+
+- `worker/src/activities/postgres.rs`: Fixed `row_to_json` function
+
+### Tests Added
+
+New unit tests in `worker/src/activities/postgres.rs`:
+
+- `test_postgres_query_uuid_columns`: Verifies non-nullable UUID columns serialize correctly
+- `test_postgres_query_nullable_uuid`: Verifies nullable UUID columns handle both values and NULLs
+- `test_postgres_query_nullable_integer`: Verifies nullable integer columns work correctly
+- `test_postgres_query_mixed_types`: Reproduces the exact bug scenario with UUID, integer, float, string, and boolean columns
+- `test_postgres_query_smallint_bigint`: Verifies SMALLINT and BIGINT column support
