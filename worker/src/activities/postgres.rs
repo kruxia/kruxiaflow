@@ -180,6 +180,9 @@ fn determine_query_type(sql: &str) -> QueryType {
 }
 
 /// Convert a PostgreSQL row to JSON
+///
+/// Handles both nullable and non-nullable columns for all supported types.
+/// For nullable columns, sqlx requires using Option<T> even when the value is non-null.
 fn row_to_json(row: &PgRow) -> Result<Value> {
     let mut map = serde_json::Map::new();
 
@@ -187,25 +190,91 @@ fn row_to_json(row: &PgRow) -> Result<Value> {
         let column_name = column.name();
 
         // Try to get value as different types
-        let value: Value = if let Ok(v) = row.try_get::<String, _>(column_name) {
-            Value::String(v)
-        } else if let Ok(v) = row.try_get::<i32, _>(column_name) {
-            json!(v)
-        } else if let Ok(v) = row.try_get::<i64, _>(column_name) {
-            json!(v)
-        } else if let Ok(v) = row.try_get::<f64, _>(column_name) {
-            json!(v)
-        } else if let Ok(v) = row.try_get::<bool, _>(column_name) {
-            Value::Bool(v)
-        } else if let Ok(v) = row.try_get::<Value, _>(column_name) {
-            // Try as JSON/JSONB
-            v
-        } else if let Ok(Some(v)) = row.try_get::<Option<String>, _>(column_name) {
-            Value::String(v)
-        } else {
-            // NULL or unsupported type
-            Value::Null
-        };
+        // Order matters: try non-nullable first, then nullable variants
+        // UUID must be tried before String since UUIDs are often displayed as strings
+        let value: Value =
+            // UUID (non-nullable, then nullable)
+            if let Ok(v) = row.try_get::<uuid::Uuid, _>(column_name) {
+                Value::String(v.to_string())
+            } else if let Ok(opt) = row.try_get::<Option<uuid::Uuid>, _>(column_name) {
+                match opt {
+                    Some(v) => Value::String(v.to_string()),
+                    None => Value::Null,
+                }
+            }
+            // String (non-nullable, then nullable)
+            else if let Ok(v) = row.try_get::<String, _>(column_name) {
+                Value::String(v)
+            } else if let Ok(opt) = row.try_get::<Option<String>, _>(column_name) {
+                match opt {
+                    Some(v) => Value::String(v),
+                    None => Value::Null,
+                }
+            }
+            // i16 (SMALLINT) - try before i32
+            else if let Ok(v) = row.try_get::<i16, _>(column_name) {
+                json!(v)
+            } else if let Ok(opt) = row.try_get::<Option<i16>, _>(column_name) {
+                match opt {
+                    Some(v) => json!(v),
+                    None => Value::Null,
+                }
+            }
+            // i32 (INTEGER)
+            else if let Ok(v) = row.try_get::<i32, _>(column_name) {
+                json!(v)
+            } else if let Ok(opt) = row.try_get::<Option<i32>, _>(column_name) {
+                match opt {
+                    Some(v) => json!(v),
+                    None => Value::Null,
+                }
+            }
+            // i64 (BIGINT)
+            else if let Ok(v) = row.try_get::<i64, _>(column_name) {
+                json!(v)
+            } else if let Ok(opt) = row.try_get::<Option<i64>, _>(column_name) {
+                match opt {
+                    Some(v) => json!(v),
+                    None => Value::Null,
+                }
+            }
+            // f32 (REAL)
+            else if let Ok(v) = row.try_get::<f32, _>(column_name) {
+                json!(v)
+            } else if let Ok(opt) = row.try_get::<Option<f32>, _>(column_name) {
+                match opt {
+                    Some(v) => json!(v),
+                    None => Value::Null,
+                }
+            }
+            // f64 (DOUBLE PRECISION)
+            else if let Ok(v) = row.try_get::<f64, _>(column_name) {
+                json!(v)
+            } else if let Ok(opt) = row.try_get::<Option<f64>, _>(column_name) {
+                match opt {
+                    Some(v) => json!(v),
+                    None => Value::Null,
+                }
+            }
+            // bool
+            else if let Ok(v) = row.try_get::<bool, _>(column_name) {
+                Value::Bool(v)
+            } else if let Ok(opt) = row.try_get::<Option<bool>, _>(column_name) {
+                match opt {
+                    Some(v) => Value::Bool(v),
+                    None => Value::Null,
+                }
+            }
+            // JSON/JSONB
+            else if let Ok(v) = row.try_get::<Value, _>(column_name) {
+                v
+            } else if let Ok(opt) = row.try_get::<Option<Value>, _>(column_name) {
+                opt.unwrap_or(Value::Null)
+            }
+            // Fallback: NULL or unsupported type
+            else {
+                Value::Null
+            };
 
         map.insert(column_name.to_string(), value);
     }
@@ -1062,5 +1131,402 @@ mod tests {
             let cache = pool_cache.read().await;
             assert_eq!(cache.len(), 1);
         }
+    }
+
+    // ========================================================================
+    // Type Handling Tests (Bug fix: null values for UUID/nullable types)
+    // See docs/bugs/2026-01-06-postgres-query-output-null-values.md
+    // ========================================================================
+
+    #[tokio::test]
+    async fn test_postgres_query_uuid_columns() {
+        let pool_cache = test_pool_cache();
+        let activity = PostgresQueryActivity::new(pool_cache);
+
+        // Create table with UUID column
+        let table_name = format!("test_uuid_{}", uuid::Uuid::now_v7().simple());
+        let setup = json!({
+            "db_url": test_db_url(),
+            "query": format!(
+                "CREATE TABLE {} (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name TEXT)",
+                table_name
+            )
+        });
+        activity.execute(setup).await.unwrap();
+
+        // Insert a row with explicit UUID (cast string to uuid)
+        let test_uuid = uuid::Uuid::now_v7();
+        let insert = json!({
+            "db_url": test_db_url(),
+            "query": format!("INSERT INTO {} (id, name) VALUES ($1::uuid, $2)", table_name),
+            "params": [test_uuid.to_string(), "Test User"]
+        });
+        activity.execute(insert).await.unwrap();
+
+        // Query the UUID column - this is the bug scenario
+        let query = json!({
+            "db_url": test_db_url(),
+            "query": format!("SELECT id, name FROM {}", table_name)
+        });
+        let result = activity.execute(query).await.unwrap();
+
+        let output_value = result.to_json_value();
+        let rows = output_value
+            .get("result")
+            .unwrap()
+            .get("rows")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+
+        // UUID should be serialized as string, NOT null
+        let id_value = rows[0].get("id").unwrap();
+        assert!(
+            id_value.is_string(),
+            "UUID should be a string, got: {:?}",
+            id_value
+        );
+        assert_eq!(id_value.as_str().unwrap(), test_uuid.to_string());
+
+        // Cleanup
+        let cleanup = json!({
+            "db_url": test_db_url(),
+            "query": format!("DROP TABLE {}", table_name)
+        });
+        activity.execute(cleanup).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_postgres_query_nullable_uuid() {
+        let pool_cache = test_pool_cache();
+        let activity = PostgresQueryActivity::new(pool_cache);
+
+        // Create table with nullable UUID column
+        let table_name = format!("test_nullable_uuid_{}", uuid::Uuid::now_v7().simple());
+        let setup = json!({
+            "db_url": test_db_url(),
+            "query": format!(
+                "CREATE TABLE {} (id SERIAL PRIMARY KEY, ref_id UUID, name TEXT)",
+                table_name
+            )
+        });
+        activity.execute(setup).await.unwrap();
+
+        // Insert rows - one with UUID, one with NULL
+        let test_uuid = uuid::Uuid::now_v7();
+        let insert1 = json!({
+            "db_url": test_db_url(),
+            "query": format!("INSERT INTO {} (ref_id, name) VALUES ($1::uuid, $2)", table_name),
+            "params": [test_uuid.to_string(), "With UUID"]
+        });
+        activity.execute(insert1).await.unwrap();
+
+        let insert2 = json!({
+            "db_url": test_db_url(),
+            "query": format!("INSERT INTO {} (ref_id, name) VALUES (NULL, $1)", table_name),
+            "params": ["Without UUID"]
+        });
+        activity.execute(insert2).await.unwrap();
+
+        // Query both rows
+        let query = json!({
+            "db_url": test_db_url(),
+            "query": format!("SELECT ref_id, name FROM {} ORDER BY id", table_name)
+        });
+        let result = activity.execute(query).await.unwrap();
+
+        let output_value = result.to_json_value();
+        let rows = output_value
+            .get("result")
+            .unwrap()
+            .get("rows")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(rows.len(), 2);
+
+        // First row: UUID should be present as string
+        let ref_id1 = rows[0].get("ref_id").unwrap();
+        assert!(
+            ref_id1.is_string(),
+            "ref_id should be a string, got: {:?}",
+            ref_id1
+        );
+        assert_eq!(ref_id1.as_str().unwrap(), test_uuid.to_string());
+
+        // Second row: UUID should be null
+        let ref_id2 = rows[1].get("ref_id").unwrap();
+        assert!(
+            ref_id2.is_null(),
+            "ref_id should be null, got: {:?}",
+            ref_id2
+        );
+
+        // Cleanup
+        let cleanup = json!({
+            "db_url": test_db_url(),
+            "query": format!("DROP TABLE {}", table_name)
+        });
+        activity.execute(cleanup).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_postgres_query_nullable_integer() {
+        let pool_cache = test_pool_cache();
+        let activity = PostgresQueryActivity::new(pool_cache);
+
+        // Create table with nullable integer columns
+        let table_name = format!("test_nullable_int_{}", uuid::Uuid::now_v7().simple());
+        let setup = json!({
+            "db_url": test_db_url(),
+            "query": format!(
+                "CREATE TABLE {} (id SERIAL PRIMARY KEY, page_start INTEGER, page_end INTEGER)",
+                table_name
+            )
+        });
+        activity.execute(setup).await.unwrap();
+
+        // Insert rows with various nullable integer states
+        let insert1 = json!({
+            "db_url": test_db_url(),
+            "query": format!("INSERT INTO {} (page_start, page_end) VALUES (1, 10)", table_name)
+        });
+        activity.execute(insert1).await.unwrap();
+
+        let insert2 = json!({
+            "db_url": test_db_url(),
+            "query": format!("INSERT INTO {} (page_start, page_end) VALUES (5, NULL)", table_name)
+        });
+        activity.execute(insert2).await.unwrap();
+
+        let insert3 = json!({
+            "db_url": test_db_url(),
+            "query": format!("INSERT INTO {} (page_start, page_end) VALUES (NULL, NULL)", table_name)
+        });
+        activity.execute(insert3).await.unwrap();
+
+        // Query all rows
+        let query = json!({
+            "db_url": test_db_url(),
+            "query": format!("SELECT id, page_start, page_end FROM {} ORDER BY id", table_name)
+        });
+        let result = activity.execute(query).await.unwrap();
+
+        let output_value = result.to_json_value();
+        let rows = output_value
+            .get("result")
+            .unwrap()
+            .get("rows")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(rows.len(), 3);
+
+        // Row 1: Both integers present
+        assert_eq!(rows[0].get("page_start").unwrap(), 1);
+        assert_eq!(rows[0].get("page_end").unwrap(), 10);
+
+        // Row 2: page_start present, page_end null
+        assert_eq!(rows[1].get("page_start").unwrap(), 5);
+        assert!(rows[1].get("page_end").unwrap().is_null());
+
+        // Row 3: Both null
+        assert!(rows[2].get("page_start").unwrap().is_null());
+        assert!(rows[2].get("page_end").unwrap().is_null());
+
+        // Cleanup
+        let cleanup = json!({
+            "db_url": test_db_url(),
+            "query": format!("DROP TABLE {}", table_name)
+        });
+        activity.execute(cleanup).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_postgres_query_mixed_types() {
+        let pool_cache = test_pool_cache();
+        let activity = PostgresQueryActivity::new(pool_cache);
+
+        // Create table with mixed column types (reproducing the exact bug scenario)
+        let table_name = format!("test_mixed_types_{}", uuid::Uuid::now_v7().simple());
+        let setup = json!({
+            "db_url": test_db_url(),
+            "query": format!(
+                r#"CREATE TABLE {} (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    source_id UUID,
+                    page_start INTEGER,
+                    page_end INTEGER,
+                    score REAL,
+                    title TEXT,
+                    active BOOLEAN
+                )"#,
+                table_name
+            )
+        });
+        activity.execute(setup).await.unwrap();
+
+        // Insert test data (cast string params to uuid)
+        let test_id = uuid::Uuid::now_v7();
+        let test_source_id = uuid::Uuid::now_v7();
+        let insert = json!({
+            "db_url": test_db_url(),
+            "query": format!(
+                "INSERT INTO {} (id, source_id, page_start, page_end, score, title, active) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7)",
+                table_name
+            ),
+            "params": [test_id.to_string(), test_source_id.to_string(), 42, 100, 0.95, "Test Document", true]
+        });
+        activity.execute(insert).await.unwrap();
+
+        // Query - this is the exact pattern that was failing
+        let query = json!({
+            "db_url": test_db_url(),
+            "query": format!("SELECT id, source_id, page_start, page_end, score, title, active FROM {}", table_name)
+        });
+        let result = activity.execute(query).await.unwrap();
+
+        let output_value = result.to_json_value();
+        let rows = output_value
+            .get("result")
+            .unwrap()
+            .get("rows")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+
+        let row = &rows[0];
+
+        // UUID columns should be strings, not null
+        let id_val = row.get("id").unwrap();
+        assert!(id_val.is_string(), "id should be string, got: {:?}", id_val);
+        assert_eq!(id_val.as_str().unwrap(), test_id.to_string());
+
+        let source_id_val = row.get("source_id").unwrap();
+        assert!(
+            source_id_val.is_string(),
+            "source_id should be string, got: {:?}",
+            source_id_val
+        );
+        assert_eq!(source_id_val.as_str().unwrap(), test_source_id.to_string());
+
+        // Integer columns should be numbers, not null
+        let page_start = row.get("page_start").unwrap();
+        assert!(
+            page_start.is_number(),
+            "page_start should be number, got: {:?}",
+            page_start
+        );
+        assert_eq!(page_start, 42);
+
+        let page_end = row.get("page_end").unwrap();
+        assert!(
+            page_end.is_number(),
+            "page_end should be number, got: {:?}",
+            page_end
+        );
+        assert_eq!(page_end, 100);
+
+        // Float column
+        let score = row.get("score").unwrap();
+        assert!(
+            score.is_number(),
+            "score should be number, got: {:?}",
+            score
+        );
+
+        // String column
+        let title = row.get("title").unwrap();
+        assert!(
+            title.is_string(),
+            "title should be string, got: {:?}",
+            title
+        );
+        assert_eq!(title.as_str().unwrap(), "Test Document");
+
+        // Boolean column
+        let active = row.get("active").unwrap();
+        assert!(
+            active.is_boolean(),
+            "active should be boolean, got: {:?}",
+            active
+        );
+        assert_eq!(active, true);
+
+        // Cleanup
+        let cleanup = json!({
+            "db_url": test_db_url(),
+            "query": format!("DROP TABLE {}", table_name)
+        });
+        activity.execute(cleanup).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_postgres_query_smallint_bigint() {
+        let pool_cache = test_pool_cache();
+        let activity = PostgresQueryActivity::new(pool_cache);
+
+        // Create table with various integer sizes
+        let table_name = format!("test_int_sizes_{}", uuid::Uuid::now_v7().simple());
+        let setup = json!({
+            "db_url": test_db_url(),
+            "query": format!(
+                "CREATE TABLE {} (id SERIAL PRIMARY KEY, small_val SMALLINT, big_val BIGINT)",
+                table_name
+            )
+        });
+        activity.execute(setup).await.unwrap();
+
+        // Insert test data
+        let insert = json!({
+            "db_url": test_db_url(),
+            "query": format!("INSERT INTO {} (small_val, big_val) VALUES ($1, $2)", table_name),
+            "params": [32767, 9223372036854775807_i64]
+        });
+        activity.execute(insert).await.unwrap();
+
+        // Query
+        let query = json!({
+            "db_url": test_db_url(),
+            "query": format!("SELECT small_val, big_val FROM {}", table_name)
+        });
+        let result = activity.execute(query).await.unwrap();
+
+        let output_value = result.to_json_value();
+        let rows = output_value
+            .get("result")
+            .unwrap()
+            .get("rows")
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+
+        // SMALLINT should work
+        let small_val = rows[0].get("small_val").unwrap();
+        assert!(
+            small_val.is_number(),
+            "small_val should be number, got: {:?}",
+            small_val
+        );
+        assert_eq!(small_val, 32767);
+
+        // BIGINT should work
+        let big_val = rows[0].get("big_val").unwrap();
+        assert!(
+            big_val.is_number(),
+            "big_val should be number, got: {:?}",
+            big_val
+        );
+        assert_eq!(big_val.as_i64().unwrap(), 9223372036854775807_i64);
+
+        // Cleanup
+        let cleanup = json!({
+            "db_url": test_db_url(),
+            "query": format!("DROP TABLE {}", table_name)
+        });
+        activity.execute(cleanup).await.unwrap();
     }
 }
