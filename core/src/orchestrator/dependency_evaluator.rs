@@ -238,9 +238,12 @@ fn is_activity_ready(
 
             // Check if dependency is in terminal state FIRST
             // (must check this before evaluating conditions since conditions may reference outputs)
+            // Terminal states: Completed, Failed, or Skipped (all are final states)
             if !matches!(
                 dependency_state.status,
-                WorkflowActivityStatus::Completed | WorkflowActivityStatus::Failed
+                WorkflowActivityStatus::Completed
+                    | WorkflowActivityStatus::Failed
+                    | WorkflowActivityStatus::Skipped
             ) {
                 tracing::trace!(
                     "Activity {} not ready: dependency {} is in state {:?}",

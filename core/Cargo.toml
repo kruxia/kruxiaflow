@@ -26,7 +26,7 @@ tracing.workspace = true
 
 # Additional dependencies
 regex = "1"
-minijinja = { version = "2.6", features = ["builtins", "json"] }
+minijinja = { version = "2.6", features = ["builtins", "json", "urlencode"] }
 sha2 = "0.10"
 
 # Optional dependencies

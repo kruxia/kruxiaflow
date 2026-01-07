@@ -1361,9 +1361,11 @@ pub async fn process_workflow_event(
         state.status = new_status;
 
         // Log workflow completion at info level
-        tracing::debug!(
-            event = if is_workflow_failed(&state) { "WorkflowFailed" } else { "WorkflowCompleted" },
+        tracing::info!(
             workflow_id = %event.workflow_id,
+            workflow_name = %state.definition_name,
+            status = %new_status,
+            "Workflow completed"
         );
     }
 

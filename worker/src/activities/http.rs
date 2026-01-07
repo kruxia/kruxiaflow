@@ -245,6 +245,12 @@ impl ActivityImpl for HttpRequestActivity {
         let params: HttpRequestParams = serde_json::from_value(parameters)
             .context("Failed to parse HTTP request parameters")?;
 
+        tracing::info!(
+            method = %params.method,
+            url = %params.url,
+            "HTTP request starting"
+        );
+
         // Check if we should download to file
         let download_filename = params.download_to_file.clone();
         if let Some(filename) = download_filename {
@@ -254,6 +260,12 @@ impl ActivityImpl for HttpRequestActivity {
             let response = self.executor.execute(params).await?;
             let status = response.status();
             let success = status.is_success();
+
+            tracing::info!(
+                status = %status,
+                success = success,
+                "HTTP request completed (downloading to file)"
+            );
 
             // Stream response body to file
             use tokio::fs::File;
@@ -340,9 +352,10 @@ impl ActivityImpl for HttpRequestActivity {
             }
         };
 
-        tracing::debug!(
-            "HTTP request completed with status: {}",
-            http_response.status
+        tracing::info!(
+            status = http_response.status,
+            success = http_response.success,
+            "HTTP request completed"
         );
 
         // Return as ActivityResult
