@@ -3,6 +3,7 @@ use minijinja::{Environment, Value as MiniValue};
 use serde_json::Value;
 use std::collections::HashMap;
 use thiserror::Error;
+use tracing;
 
 #[derive(Debug, Error)]
 pub enum TemplateError {
@@ -354,7 +355,21 @@ fn resolve_value_recursive(
                 let expr_str = extract_expression(s);
                 let expr = env.compile_expression(expr_str)?;
                 let mini_result = expr.eval(context)?;
-                Ok(minijinja_to_serde_json(&mini_result))
+                let result = minijinja_to_serde_json(&mini_result);
+
+                // Debug logging for embeddings_file template resolution
+                if expr_str.contains("embeddings_file") {
+                    tracing::info!(
+                        expr = %expr_str,
+                        mini_result_kind = ?mini_result.kind(),
+                        mini_result_is_undefined = mini_result.is_undefined(),
+                        mini_result_str = %mini_result,
+                        result = ?result,
+                        "Template resolved embeddings_file expression"
+                    );
+                }
+
+                Ok(result)
             } else if contains_templates(s) {
                 // String contains embedded templates - render as template string
                 let tmpl = env.template_from_str(s)?;
@@ -375,11 +390,22 @@ fn resolve_value_recursive(
         }
         Value::Object(obj) => {
             // Recursively resolve object values
-            let resolved: Result<serde_json::Map<String, Value>, _> = obj
+            let resolved: Result<serde_json::Map<String, Value>, TemplateError> = obj
                 .iter()
                 .map(|(k, v)| {
-                    resolve_value_recursive(v, env, context)
-                        .map(|resolved_v| (k.clone(), resolved_v))
+                    let resolved_v = resolve_value_recursive(v, env, context)?;
+
+                    // Debug logging for embeddings_file key
+                    if k == "embeddings_file" {
+                        tracing::info!(
+                            key = %k,
+                            input_value = ?v,
+                            resolved_value = ?resolved_v,
+                            "Object key embeddings_file resolved"
+                        );
+                    }
+
+                    Ok((k.clone(), resolved_v))
                 })
                 .collect();
             Ok(Value::Object(resolved?))

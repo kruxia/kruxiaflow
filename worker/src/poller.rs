@@ -1,7 +1,7 @@
 use crate::client::{PendingActivity, WorkerApiClient};
 use crate::config::WorkerConfig;
 use crate::file_executor::FileExecutor;
-use crate::registry::ActivityRegistry;
+use crate::registry::{ActivityContext, ActivityRegistry};
 use anyhow::{Context, Result};
 use kruxiaflow_core::storage::WorkflowStorage;
 use kruxiaflow_core::workflow::ActivityOutputDefinition;
@@ -186,17 +186,26 @@ impl WorkerPoller {
             .as_ref()
             .and_then(|s| serde_json::from_value(s.clone()).ok());
 
-        // Execute activity with settings for caching support
+        // Create activity context for streaming support
+        let ctx = ActivityContext::new(
+            activity.workflow_id,
+            activity.activity_id,
+            activity.activity_key.clone(),
+            Some(Arc::clone(&self.storage)),
+        );
+
+        // Execute activity with context for caching and streaming support
         let exec_span = tracing::debug_span!("activity_handler");
         let result = {
             let _enter = exec_span.enter();
             self.registry
-                .execute(
+                .execute_with_context(
                     &activity.worker,
                     &activity.activity_name,
                     parameters,
                     settings,
                     timeout,
+                    &ctx,
                 )
                 .await
         };
@@ -236,6 +245,16 @@ impl WorkerPoller {
                     // Convert ActivityResult to JSON value format for API
                     let output = activity_result.to_json_value();
                     let cost_usd = activity_result.cost_usd;
+
+                    // Debug: log what we're sending to the API
+                    if let Some(result_obj) = output.get("result").and_then(|r| r.as_object()) {
+                        tracing::info!(
+                            activity_id = %activity.activity_id,
+                            result_keys = ?result_obj.keys().collect::<Vec<_>>(),
+                            has_embeddings_file = result_obj.contains_key("embeddings_file"),
+                            "Sending activity result to API"
+                        );
+                    }
 
                     if let Err(err) = self
                         .client

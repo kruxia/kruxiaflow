@@ -3,10 +3,11 @@ use crate::llm::{
     AnthropicProvider, EmbeddingRequest, GoogleProvider, LLMError, LLMProvider, OllamaProvider,
     OpenAIProvider, PromptRequest,
 };
-use crate::registry::ActivityImpl;
+use crate::registry::{ActivityContext, ActivityImpl};
 use crate::streaming::{StreamSender, StreamingActivity};
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
+use bytes::Bytes;
 use futures::StreamExt;
 use kruxiaflow_core::cost::{CostCalculator, ModelPricing};
 use rust_decimal::Decimal;
@@ -15,6 +16,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
+use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
 
 // ============================================================================
@@ -810,6 +812,172 @@ impl Default for EmbeddingActivity {
 
 #[async_trait]
 impl ActivityImpl for EmbeddingActivity {
+    /// Execute with context - streams all embeddings to workflow storage
+    ///
+    /// Embeddings are always streamed to workflow storage as JSON Lines format,
+    /// ensuring consistent memory usage regardless of input size.
+    async fn execute_with_context(
+        &self,
+        parameters: Value,
+        ctx: &ActivityContext,
+    ) -> Result<ActivityResult> {
+        let params: EmbeddingParams = serde_json::from_value(parameters.clone())
+            .context("Failed to parse embedding parameters")?;
+
+        let total_inputs = params.input.len();
+
+        // Require workflow storage for streaming
+        let storage = match &ctx.storage {
+            Some(s) => s.clone(),
+            None => {
+                tracing::warn!(
+                    total_inputs = total_inputs,
+                    "No workflow storage available - falling back to in-memory"
+                );
+                return self.execute(parameters).await;
+            }
+        };
+
+        tracing::info!(
+            total_inputs = total_inputs,
+            workflow_id = %ctx.workflow_id,
+            activity_key = %ctx.activity_key,
+            "Streaming embeddings to workflow storage"
+        );
+
+        // Convert model spec to fallback chain
+        let fallback_chain = params.model.to_fallback_chain()?;
+        let batch_size = params.batch_size;
+        let filename = "embeddings.jsonl";
+
+        // Create channel for streaming to storage
+        let (tx, rx) = tokio::sync::mpsc::channel::<Bytes>(32);
+
+        // Spawn upload task
+        let upload_workflow_id = ctx.workflow_id;
+        let upload_activity_key = ctx.activity_key.clone();
+        let upload_storage = storage.clone();
+        let upload_handle = tokio::spawn(async move {
+            let stream = ReceiverStream::new(rx).map(Ok::<_, std::io::Error>);
+            upload_storage
+                .upload_file(
+                    upload_workflow_id,
+                    &upload_activity_key,
+                    filename,
+                    Some("application/x-ndjson"),
+                    Box::pin(stream),
+                )
+                .await
+        });
+
+        // Process batches and stream to storage
+        let mut total_prompt_tokens = 0u32;
+        let mut total_output_tokens = 0u32;
+        let mut model_name = String::new();
+        let mut provider_name = String::new();
+        let mut embedding_count = 0usize;
+
+        let num_batches = (total_inputs + batch_size - 1) / batch_size;
+        tracing::info!(
+            total_inputs = total_inputs,
+            batch_size = batch_size,
+            num_batches = num_batches,
+            "Processing embeddings in batches with streaming"
+        );
+
+        for (batch_idx, batch) in params.input.chunks(batch_size).enumerate() {
+            tracing::info!(
+                batch = batch_idx + 1,
+                batch_size = batch.len(),
+                progress = format!("{}/{}", batch_idx * batch_size + batch.len(), total_inputs),
+                "Processing embedding batch"
+            );
+
+            let batch_request = EmbeddingRequest {
+                model: String::new(),
+                input: batch.to_vec(),
+            };
+
+            let response = fallback_chain.embed(&batch_request).await.with_context(|| {
+                format!(
+                    "Failed to generate embeddings for batch {} ({} items)",
+                    batch_idx + 1,
+                    batch.len()
+                )
+            })?;
+
+            // Stream embeddings to storage as JSON Lines (one per line)
+            for embedding in response.embeddings {
+                let line = serde_json::to_string(&embedding)
+                    .context("Failed to serialize embedding")?;
+                tx.send(Bytes::from(format!("{}\n", line)))
+                    .await
+                    .context("Failed to send embedding to storage stream")?;
+                embedding_count += 1;
+            }
+
+            total_prompt_tokens += response.usage.prompt_tokens;
+            total_output_tokens += response.usage.output_tokens;
+            model_name = response.model;
+            provider_name = response.provider;
+
+            tracing::info!(
+                batch = batch_idx + 1,
+                embeddings_streamed = embedding_count,
+                "Batch completed and streamed"
+            );
+        }
+
+        // Close stream and wait for upload to complete
+        drop(tx);
+        let file_metadata = upload_handle
+            .await
+            .context("Upload task panicked")?
+            .context("Failed to upload embeddings to storage")?;
+
+        tracing::info!(
+            total_embeddings = embedding_count,
+            total_prompt_tokens = total_prompt_tokens,
+            file_size = file_metadata.size,
+            "All embedding batches completed and streamed to storage"
+        );
+
+        // Get file reference for consumer activities
+        let file_ref = storage
+            .get_file_reference(ctx.workflow_id, &ctx.activity_key, filename)
+            .await
+            .context("Failed to get file reference")?;
+
+        tracing::info!(
+            file_ref = %file_ref,
+            "Generated embeddings file reference"
+        );
+
+        // Return file reference instead of embeddings array
+        // Always include both keys so templates can reference either one
+        let outputs = json!({
+            "embeddings": null,  // Not present when streaming - use embeddings_file instead
+            "embeddings_file": file_ref,
+            "embedding_count": embedding_count,
+            "model": model_name,
+            "provider": provider_name,
+            "usage": {
+                "prompt_tokens": total_prompt_tokens,
+                "output_tokens": total_output_tokens,
+                "total_tokens": total_prompt_tokens + total_output_tokens,
+                "cached_tokens": null,
+            }
+        });
+
+        tracing::info!(
+            outputs_keys = ?outputs.as_object().map(|m| m.keys().collect::<Vec<_>>()),
+            embeddings_file = ?outputs.get("embeddings_file"),
+            "Embedding activity returning streamed output"
+        );
+
+        Ok(ActivityResult::value("result", outputs))
+    }
+
     async fn execute(&self, parameters: Value) -> Result<ActivityResult> {
         let params: EmbeddingParams =
             serde_json::from_value(parameters).context("Failed to parse embedding parameters")?;
@@ -829,8 +997,11 @@ impl ActivityImpl for EmbeddingActivity {
 
             let response = fallback_chain.embed(&base_request).await?;
 
+            // Always include both keys so templates can reference either one
             let outputs = json!({
                 "embeddings": response.embeddings,
+                "embeddings_file": null,  // Not present for inline embeddings
+                "embedding_count": response.embeddings.len(),
                 "model": response.model,
                 "provider": response.provider,
                 "usage": {
@@ -899,8 +1070,11 @@ impl ActivityImpl for EmbeddingActivity {
             "All embedding batches completed"
         );
 
+        // Always include both keys so templates can reference either one
         let outputs = json!({
             "embeddings": all_embeddings,
+            "embeddings_file": null,  // Not present for inline embeddings
+            "embedding_count": all_embeddings.len(),
             "model": model_name,
             "provider": provider_name,
             "usage": {

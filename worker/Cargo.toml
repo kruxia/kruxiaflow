@@ -10,6 +10,7 @@ description = "Built-in activity worker for Kruxia Flow"
 # Async runtime
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+tokio-stream = "0.1"
 async-trait = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }

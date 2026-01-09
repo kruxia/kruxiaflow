@@ -2,21 +2,77 @@ use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
 use kruxiaflow_core::cache::{CacheService, CachedResult, key_generator};
+use kruxiaflow_core::storage::WorkflowStorage;
 use kruxiaflow_core::workflow::{ActivityOutput, ActivitySettings};
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use uuid::Uuid;
 
 use crate::activity_result::ActivityResult;
+
+/// Context available to activities during execution
+///
+/// Provides activities with workflow metadata and optional storage access
+/// for streaming large outputs.
+#[derive(Clone)]
+pub struct ActivityContext {
+    /// Unique identifier for the workflow instance
+    pub workflow_id: Uuid,
+    /// Unique identifier for this activity execution
+    pub activity_id: Uuid,
+    /// Activity key from workflow definition
+    pub activity_key: String,
+    /// Optional workflow storage for streaming large outputs
+    pub storage: Option<Arc<dyn WorkflowStorage>>,
+}
+
+impl ActivityContext {
+    /// Create a new activity context
+    pub fn new(
+        workflow_id: Uuid,
+        activity_id: Uuid,
+        activity_key: String,
+        storage: Option<Arc<dyn WorkflowStorage>>,
+    ) -> Self {
+        Self {
+            workflow_id,
+            activity_id,
+            activity_key,
+            storage,
+        }
+    }
+}
 
 /// Activity implementation trait
 ///
 /// All activity implementations must implement this trait.
 #[async_trait]
 pub trait ActivityImpl: Send + Sync {
-    /// Execute the activity
+    /// Execute the activity with full context
+    ///
+    /// Override this method to access workflow storage for streaming large outputs.
+    /// Default implementation delegates to the simple `execute` method.
+    ///
+    /// # Arguments
+    /// * `parameters` - Activity input parameters
+    /// * `ctx` - Activity context with workflow_id and optional storage
+    ///
+    /// # Returns
+    /// * `Ok(ActivityResult)` - Activity result with outputs on success
+    /// * `Err(error)` - Activity error on failure
+    async fn execute_with_context(
+        &self,
+        parameters: Value,
+        _ctx: &ActivityContext,
+    ) -> Result<ActivityResult> {
+        // Default: delegate to simple execute (backwards compatible)
+        self.execute(parameters).await
+    }
+
+    /// Execute the activity (simple form)
     ///
     /// # Arguments
     /// * `parameters` - Activity input parameters
@@ -79,6 +135,34 @@ impl ActivityRegistry {
         settings: Option<ActivitySettings>,
         timeout: Duration,
     ) -> Result<ActivityResult> {
+        // For backwards compatibility, create a minimal context
+        let ctx = ActivityContext::new(
+            Uuid::nil(),
+            Uuid::nil(),
+            String::new(),
+            None,
+        );
+        self.execute_with_context(worker, activity_name, parameters, settings, timeout, &ctx)
+            .await
+    }
+
+    /// Execute an activity with full context and caching support
+    ///
+    /// This method transparently handles caching for all activity types:
+    /// - Checks cache before execution if caching is enabled
+    /// - Returns cached result with cost_usd = 0.0 on cache hit
+    /// - Stores result in cache after successful execution
+    ///
+    /// Returns activity result or error.
+    pub async fn execute_with_context(
+        &self,
+        worker: &str,
+        activity_name: &str,
+        parameters: Value,
+        settings: Option<ActivitySettings>,
+        timeout: Duration,
+        ctx: &ActivityContext,
+    ) -> Result<ActivityResult> {
         let key = format!("{}.{}", worker, activity_name);
 
         // Check if caching is enabled for this activity
@@ -135,9 +219,12 @@ impl ActivityRegistry {
             .get(&key)
             .ok_or_else(|| anyhow::anyhow!("Activity implementation not found: {}", key))?;
 
-        // Execute with timeout
-        let result =
-            tokio::time::timeout(timeout, implementation.execute(parameters.clone())).await;
+        // Execute with timeout using context-aware method
+        let result = tokio::time::timeout(
+            timeout,
+            implementation.execute_with_context(parameters.clone(), ctx),
+        )
+        .await;
 
         let mut activity_result = match result {
             Ok(Ok(output)) => output,
