@@ -352,7 +352,7 @@ pub async fn poll_activities(
                 let timeout_seconds = a
                     .settings
                     .as_ref()
-                    .and_then(|s| s.get("timeout"))
+                    .and_then(|s| s.get("timeout_seconds"))
                     .and_then(|t| t.as_i64());
 
                 PendingActivity {
