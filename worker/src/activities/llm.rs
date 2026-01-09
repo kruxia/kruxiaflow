@@ -782,6 +782,15 @@ pub struct EmbeddingParams {
 
     /// Input texts to embed
     pub input: Vec<String>,
+
+    /// Batch size for large inputs (default: 500)
+    /// When input.len() > batch_size, inputs are processed in batches
+    #[serde(default = "default_batch_size")]
+    pub batch_size: usize,
+}
+
+fn default_batch_size() -> usize {
+    500
 }
 
 /// Embedding Activity implementation
@@ -808,23 +817,97 @@ impl ActivityImpl for EmbeddingActivity {
         // Convert model spec to fallback chain
         let fallback_chain = params.model.to_fallback_chain()?;
 
-        // Create base request (model will be filled in by fallback chain for each provider)
-        let base_request = EmbeddingRequest {
-            model: String::new(), // Placeholder, will be replaced
-            input: params.input,
-        };
+        let total_inputs = params.input.len();
+        let batch_size = params.batch_size;
 
-        let response = fallback_chain.embed(&base_request).await?;
+        // If input is small enough, process in one batch
+        if total_inputs <= batch_size {
+            let base_request = EmbeddingRequest {
+                model: String::new(),
+                input: params.input,
+            };
+
+            let response = fallback_chain.embed(&base_request).await?;
+
+            let outputs = json!({
+                "embeddings": response.embeddings,
+                "model": response.model,
+                "provider": response.provider,
+                "usage": {
+                    "prompt_tokens": response.usage.prompt_tokens,
+                    "output_tokens": response.usage.output_tokens,
+                    "total_tokens": response.usage.total_tokens,
+                    "cached_tokens": response.usage.cached_tokens,
+                }
+            });
+
+            return Ok(ActivityResult::value("result", outputs));
+        }
+
+        // Batch processing for large inputs
+        tracing::info!(
+            total_inputs = total_inputs,
+            batch_size = batch_size,
+            num_batches = (total_inputs + batch_size - 1) / batch_size,
+            "Processing embeddings in batches"
+        );
+
+        let mut all_embeddings: Vec<Vec<f64>> = Vec::with_capacity(total_inputs);
+        let mut total_prompt_tokens = 0u32;
+        let mut total_output_tokens = 0u32;
+        let mut model_name = String::new();
+        let mut provider_name = String::new();
+
+        for (batch_idx, batch) in params.input.chunks(batch_size).enumerate() {
+            tracing::info!(
+                batch = batch_idx + 1,
+                batch_size = batch.len(),
+                progress = format!("{}/{}", batch_idx * batch_size + batch.len(), total_inputs),
+                "Processing embedding batch"
+            );
+
+            let batch_request = EmbeddingRequest {
+                model: String::new(),
+                input: batch.to_vec(),
+            };
+
+            let response = fallback_chain.embed(&batch_request).await.with_context(|| {
+                format!(
+                    "Failed to generate embeddings for batch {} ({} items)",
+                    batch_idx + 1,
+                    batch.len()
+                )
+            })?;
+
+            // Accumulate results
+            all_embeddings.extend(response.embeddings);
+            total_prompt_tokens += response.usage.prompt_tokens;
+            total_output_tokens += response.usage.output_tokens;
+            model_name = response.model;
+            provider_name = response.provider;
+
+            tracing::info!(
+                batch = batch_idx + 1,
+                embeddings_generated = all_embeddings.len(),
+                "Batch completed"
+            );
+        }
+
+        tracing::info!(
+            total_embeddings = all_embeddings.len(),
+            total_prompt_tokens = total_prompt_tokens,
+            "All embedding batches completed"
+        );
 
         let outputs = json!({
-            "embeddings": response.embeddings,
-            "model": response.model,
-            "provider": response.provider,
+            "embeddings": all_embeddings,
+            "model": model_name,
+            "provider": provider_name,
             "usage": {
-                "prompt_tokens": response.usage.prompt_tokens,
-                "output_tokens": response.usage.output_tokens,
-                "total_tokens": response.usage.total_tokens,
-                "cached_tokens": response.usage.cached_tokens,
+                "prompt_tokens": total_prompt_tokens,
+                "output_tokens": total_output_tokens,
+                "total_tokens": total_prompt_tokens + total_output_tokens,
+                "cached_tokens": null,
             }
         });
 

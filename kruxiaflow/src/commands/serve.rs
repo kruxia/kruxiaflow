@@ -89,6 +89,15 @@ Example: --workers 20"
     )]
     pub client_secret: Option<String>,
 
+    /// Default activity execution timeout in seconds
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_ACTIVITY_TIMEOUT",
+        default_value = "300",
+        help = "Default activity execution timeout in seconds (can be overridden per-activity)"
+    )]
+    pub activity_timeout: u64,
+
     /// OAuth RSA private key (PEM format)
     #[arg(
         long,
@@ -307,6 +316,7 @@ async fn spawn_workers(
     client_id: String,
     client_secret: String,
     workflow_storage: Arc<dyn kruxiaflow_core::WorkflowStorage>,
+    activity_timeout: u64,
 ) -> Result<Vec<JoinHandle<()>>> {
     tracing::info!(
         count = worker_count,
@@ -329,7 +339,7 @@ async fn spawn_workers(
         poll_max_activities,
         poll_interval: Duration::from_millis(100),
         concurrency: worker_count,
-        activity_timeout: Duration::from_secs(300),
+        activity_timeout: Duration::from_secs(activity_timeout),
         heartbeat_interval: Duration::from_secs(30),
         client_id,
         client_secret,
@@ -552,6 +562,7 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         cmd.client_id.clone(),
         cmd.client_secret.unwrap(),
         workflow_storage.clone(),
+        cmd.activity_timeout,
     )
     .await?;
 
