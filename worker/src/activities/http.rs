@@ -20,6 +20,7 @@ struct HttpExecutor {
 impl HttpExecutor {
     fn new() -> Self {
         let client = Client::builder()
+            .gzip(true) // Enable automatic gzip decompression
             .timeout(Duration::from_secs(30))
             .build()
             .expect("Failed to build HTTP client");
