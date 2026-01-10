@@ -1,7 +1,7 @@
 # Bug: http_request Activity Doesn't Decompress Gzip Responses
 
 **Date**: 2026-01-07
-**Status**: Open
+**Status**: Fixed, needs testing
 **Severity**: Medium
 **Component**: Worker / HTTP Request Activity
 
