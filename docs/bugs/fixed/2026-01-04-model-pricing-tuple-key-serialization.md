@@ -120,8 +120,16 @@ None. The bug must be fixed in the Kruxia Flow codebase.
 5. **core/tests/llm_budget_integration_tests.rs:114-167** - Added new test `test_batch_get_pricing_json_serialization` to prevent regression
 
 **Test Coverage:**
-- `test_cost_calculator_batch_get_pricing` - Verifies batch pricing retrieval with string keys
-- `test_batch_get_pricing_json_serialization` - Regression test that verifies JSON serialization works and can roundtrip
+- `test_cost_calculator_batch_get_pricing` - Verifies batch pricing retrieval with string keys (integration test)
+- `test_batch_get_pricing_json_serialization` - Regression test that verifies JSON serialization works and can roundtrip (integration test)
+
+**Unit Tests (no database required):**
+- `test_model_pricing_json_serialization` - Verifies ModelPricing struct serializes to JSON
+- `test_model_pricing_json_roundtrip` - Verifies ModelPricing can roundtrip through JSON
+- `test_model_pricing_hashmap_string_keys_serializable` - Verifies HashMap<String, ModelPricing> serializes (the fix)
+- `test_model_pricing_hashmap_tuple_keys_not_serializable` - Documents that tuple keys fail (the bug)
+- `test_model_pricing_hashmap_string_keys_roundtrip` - Verifies HashMap<String, ModelPricing> roundtrips
+- `test_model_pricing_key_format_provider_slash_model` - Verifies key format is "provider/model"
 
 ## Related Code
 

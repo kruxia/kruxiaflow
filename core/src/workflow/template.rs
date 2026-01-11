@@ -572,6 +572,220 @@ mod tests {
         assert_eq!(result, "Bearer secret_key_123");
     }
 
+    // ============================================================================
+    // Regression Tests: Secrets in Template Context
+    // Prevents: docs/bugs/2026-01-04-secrets-not-loaded.md
+    // ============================================================================
+
+    #[test]
+    fn test_secrets_with_builder_pattern() {
+        // Verify the with_secrets() builder method works correctly
+        let mut secrets = HashMap::new();
+        secrets.insert(
+            "db_url".to_string(),
+            "postgres://localhost/test".to_string(),
+        );
+        secrets.insert("api_key".to_string(), "sk-12345".to_string());
+
+        let context = TemplateContext::new().with_secrets(secrets);
+
+        // Verify secrets are accessible in templates
+        let template = "{{SECRET.db_url}}";
+        let result = resolve_template(template, &context).unwrap();
+        assert_eq!(result, "postgres://localhost/test");
+
+        let template = "{{SECRET.api_key}}";
+        let result = resolve_template(template, &context).unwrap();
+        assert_eq!(result, "sk-12345");
+    }
+
+    #[test]
+    fn test_secrets_multiple_in_one_template() {
+        // Multiple secrets referenced in a single template string
+        let mut secrets = HashMap::new();
+        secrets.insert("host".to_string(), "db.example.com".to_string());
+        secrets.insert("port".to_string(), "5432".to_string());
+        secrets.insert("user".to_string(), "admin".to_string());
+        secrets.insert("pass".to_string(), "secret123".to_string());
+
+        let context = TemplateContext::new().with_secrets(secrets);
+
+        let template =
+            "postgres://{{SECRET.user}}:{{SECRET.pass}}@{{SECRET.host}}:{{SECRET.port}}/mydb";
+        let result = resolve_template(template, &context).unwrap();
+        assert_eq!(
+            result,
+            "postgres://admin:secret123@db.example.com:5432/mydb"
+        );
+    }
+
+    #[test]
+    fn test_secrets_as_whole_value() {
+        // When entire value is a secret reference, type should be preserved (string)
+        let mut secrets = HashMap::new();
+        secrets.insert(
+            "db_url".to_string(),
+            "postgres://localhost/test".to_string(),
+        );
+
+        let context = TemplateContext::new().with_secrets(secrets);
+
+        let value = Value::String("{{SECRET.db_url}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(
+            result,
+            Value::String("postgres://localhost/test".to_string())
+        );
+    }
+
+    #[test]
+    fn test_secrets_with_special_characters() {
+        // Secret values with special characters should be preserved exactly
+        let mut secrets = HashMap::new();
+        secrets.insert(
+            "complex_pass".to_string(),
+            "p@ss=word!with#special$chars&more%stuff".to_string(),
+        );
+
+        let context = TemplateContext::new().with_secrets(secrets);
+
+        let value = Value::String("{{SECRET.complex_pass}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(
+            result,
+            Value::String("p@ss=word!with#special$chars&more%stuff".to_string())
+        );
+    }
+
+    #[test]
+    fn test_secrets_in_object() {
+        // Secrets should resolve correctly when used in object values
+        let mut secrets = HashMap::new();
+        secrets.insert(
+            "db_url".to_string(),
+            "postgres://localhost/test".to_string(),
+        );
+        secrets.insert("api_key".to_string(), "sk-secret-key".to_string());
+
+        let context = TemplateContext::new().with_secrets(secrets);
+
+        let object = serde_json::json!({
+            "database_url": "{{SECRET.db_url}}",
+            "authorization": "Bearer {{SECRET.api_key}}"
+        });
+
+        let result = resolve_template_value(&object, &context).unwrap();
+        assert_eq!(
+            result,
+            serde_json::json!({
+                "database_url": "postgres://localhost/test",
+                "authorization": "Bearer sk-secret-key"
+            })
+        );
+    }
+
+    #[test]
+    fn test_secrets_missing_returns_null() {
+        // Accessing a non-existent key on SECRET object returns null (not an error)
+        // because SECRET itself exists as an empty object
+        let context = TemplateContext::new(); // No secrets
+
+        let value = Value::String("{{SECRET.missing_key}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+
+        // Missing keys on existing objects return null (undefined -> null)
+        assert_eq!(result, Value::Null);
+    }
+
+    #[test]
+    fn test_secrets_undefined_top_level_fails() {
+        // Accessing a completely undefined top-level variable fails in strict mode
+        let context = TemplateContext::new();
+
+        let value = Value::String("{{UNDEFINED_CONTEXT.key}}".to_string());
+        let result = resolve_template_value(&value, &context);
+
+        assert!(
+            result.is_err(),
+            "Should fail when top-level context doesn't exist"
+        );
+    }
+
+    #[test]
+    fn test_secrets_empty_string_value() {
+        // Empty string secrets should be preserved, not treated as missing
+        let mut secrets = HashMap::new();
+        secrets.insert("empty_secret".to_string(), "".to_string());
+
+        let context = TemplateContext::new().with_secrets(secrets);
+
+        let value = Value::String("{{SECRET.empty_secret}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("".to_string()));
+    }
+
+    #[test]
+    fn test_secrets_combined_with_inputs() {
+        // Secrets and inputs should work together in the same template
+        let mut secrets = HashMap::new();
+        secrets.insert("api_key".to_string(), "sk-secret".to_string());
+
+        let mut inputs = HashMap::new();
+        inputs.insert(
+            "endpoint".to_string(),
+            Value::String("https://api.example.com".to_string()),
+        );
+
+        let context = TemplateContext::new()
+            .with_secrets(secrets)
+            .with_inputs(inputs);
+
+        let template = "curl -H 'Authorization: {{SECRET.api_key}}' {{INPUT.endpoint}}";
+        let result = resolve_template(template, &context).unwrap();
+        assert_eq!(
+            result,
+            "curl -H 'Authorization: sk-secret' https://api.example.com"
+        );
+    }
+
+    #[test]
+    fn test_secrets_with_filter() {
+        // Secrets should work with minijinja filters
+        let mut secrets = HashMap::new();
+        secrets.insert("name".to_string(), "secret_value".to_string());
+
+        let context = TemplateContext::new().with_secrets(secrets);
+
+        let value = Value::String("{{SECRET.name | upper}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("SECRET_VALUE".to_string()));
+    }
+
+    #[test]
+    fn test_secrets_default_filter_for_missing() {
+        // The default filter can provide fallback for missing secrets
+        let context = TemplateContext::new(); // No secrets
+
+        let value = Value::String("{{SECRET.missing | default('fallback_value')}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("fallback_value".to_string()));
+    }
+
+    #[test]
+    fn test_secret_context_is_object() {
+        // Verify SECRET is exposed as an object in the template context
+        let mut secrets = HashMap::new();
+        secrets.insert("key1".to_string(), "value1".to_string());
+        secrets.insert("key2".to_string(), "value2".to_string());
+
+        let context = TemplateContext::new().with_secrets(secrets);
+
+        // Access multiple secrets to verify object structure
+        let template = "{{SECRET.key1}}-{{SECRET.key2}}";
+        let result = resolve_template(template, &context).unwrap();
+        assert_eq!(result, "value1-value2");
+    }
+
     #[test]
     fn test_resolve_template_value_preserves_types() {
         use crate::workflow::{ActivityOutput, OutputType};

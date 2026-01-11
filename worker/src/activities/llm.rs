@@ -898,18 +898,21 @@ impl ActivityImpl for EmbeddingActivity {
                 input: batch.to_vec(),
             };
 
-            let response = fallback_chain.embed(&batch_request).await.with_context(|| {
-                format!(
-                    "Failed to generate embeddings for batch {} ({} items)",
-                    batch_idx + 1,
-                    batch.len()
-                )
-            })?;
+            let response = fallback_chain
+                .embed(&batch_request)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to generate embeddings for batch {} ({} items)",
+                        batch_idx + 1,
+                        batch.len()
+                    )
+                })?;
 
             // Stream embeddings to storage as JSON Lines (one per line)
             for embedding in response.embeddings {
-                let line = serde_json::to_string(&embedding)
-                    .context("Failed to serialize embedding")?;
+                let line =
+                    serde_json::to_string(&embedding).context("Failed to serialize embedding")?;
                 tx.send(Bytes::from(format!("{}\n", line)))
                     .await
                     .context("Failed to send embedding to storage stream")?;
@@ -1042,13 +1045,16 @@ impl ActivityImpl for EmbeddingActivity {
                 input: batch.to_vec(),
             };
 
-            let response = fallback_chain.embed(&batch_request).await.with_context(|| {
-                format!(
-                    "Failed to generate embeddings for batch {} ({} items)",
-                    batch_idx + 1,
-                    batch.len()
-                )
-            })?;
+            let response = fallback_chain
+                .embed(&batch_request)
+                .await
+                .with_context(|| {
+                    format!(
+                        "Failed to generate embeddings for batch {} ({} items)",
+                        batch_idx + 1,
+                        batch.len()
+                    )
+                })?;
 
             // Accumulate results
             all_embeddings.extend(response.embeddings);

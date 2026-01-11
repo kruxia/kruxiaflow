@@ -193,5 +193,29 @@ parameters:
 
 ### Tests Added
 
-- `test_load_secrets_from_env`: Verifies environment variable loading with prefix stripping and lowercase conversion
-- `test_build_template_context_with_secrets`: Verifies secrets are added to template context
+**Environment Variable Loading (core/src/orchestrator/config.rs):**
+- `test_load_secrets_from_env` - Verifies basic environment variable loading with prefix stripping and lowercase conversion
+- `test_load_secrets_from_env_empty` - Verifies empty environment returns empty HashMap
+- `test_load_secrets_preserves_underscores_in_name` - Verifies underscores in secret names are preserved after prefix stripping
+- `test_load_secrets_preserves_special_characters_in_value` - Verifies special characters in values are preserved
+- `test_load_secrets_handles_empty_value` - Verifies empty string values are preserved
+- `test_load_secrets_case_insensitivity` - Verifies keys are lowercased regardless of original case
+- `test_load_secrets_prefix_only_not_included` - Verifies behavior with prefix only (no suffix)
+- `test_load_secrets_similar_prefix_not_matched` - Verifies similar but incorrect prefixes don't match
+- `test_load_secrets_url_with_credentials` - Verifies database URLs with credentials work correctly
+- `test_load_secrets_json_value` - Verifies JSON values (e.g., service account keys) are preserved
+
+**Template Resolution (core/src/workflow/template.rs):**
+- `test_resolve_secret_template` - Original test for basic secret template resolution
+- `test_secrets_with_builder_pattern` - Verifies with_secrets() builder method
+- `test_secrets_multiple_in_one_template` - Verifies multiple secrets in one template
+- `test_secrets_as_whole_value` - Verifies secrets as entire template value
+- `test_secrets_with_special_characters` - Verifies special characters in secret values
+- `test_secrets_in_object` - Verifies secrets in JSON object values
+- `test_secrets_missing_returns_null` - Verifies missing secrets return null (not error)
+- `test_secrets_undefined_top_level_fails` - Verifies undefined top-level context fails in strict mode
+- `test_secrets_empty_string_value` - Verifies empty string secrets are preserved
+- `test_secrets_combined_with_inputs` - Verifies secrets and inputs work together
+- `test_secrets_with_filter` - Verifies secrets work with minijinja filters
+- `test_secrets_default_filter_for_missing` - Verifies default filter provides fallback
+- `test_secret_context_is_object` - Verifies SECRET is exposed as an object

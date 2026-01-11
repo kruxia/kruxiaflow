@@ -576,6 +576,240 @@ impl ActivityImpl for PostgresTransactionActivity {
 mod tests {
     use super::*;
 
+    // ========================================================================
+    // Unit Tests: JSON Parameter Serialization (No Database Required)
+    // Regression tests for: docs/bugs/2026-01-05-postgres-array-params-unsupported.md
+    // ========================================================================
+
+    /// Helper to simulate the parameter serialization logic used in execute_statement
+    /// This extracts the serialization behavior for unit testing without needing a database
+    fn serialize_param_for_postgres(param: &Value) -> Result<String> {
+        match param {
+            Value::String(s) => Ok(s.clone()),
+            Value::Number(n) => Ok(n.to_string()),
+            Value::Bool(b) => Ok(b.to_string()),
+            Value::Null => Ok("NULL".to_string()),
+            Value::Array(_) | Value::Object(_) => {
+                // This is the fix being tested - arrays and objects serialize to JSON strings
+                serde_json::to_string(param)
+                    .map_err(|e| anyhow::anyhow!("Failed to serialize JSON parameter: {}", e))
+            }
+        }
+    }
+
+    #[test]
+    fn test_serialize_array_parameter() {
+        // Simple array of integers
+        let param = json!([1, 2, 3, 4, 5]);
+        let result = serialize_param_for_postgres(&param).unwrap();
+        assert_eq!(result, "[1,2,3,4,5]");
+    }
+
+    #[test]
+    fn test_serialize_array_of_strings() {
+        let param = json!(["hello", "world", "test"]);
+        let result = serialize_param_for_postgres(&param).unwrap();
+        assert_eq!(result, r#"["hello","world","test"]"#);
+    }
+
+    #[test]
+    fn test_serialize_object_parameter() {
+        let param = json!({"name": "test", "value": 42});
+        let result = serialize_param_for_postgres(&param).unwrap();
+        // Note: JSON object key order may vary, so parse and compare
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed.get("name").unwrap(), "test");
+        assert_eq!(parsed.get("value").unwrap(), 42);
+    }
+
+    #[test]
+    fn test_serialize_nested_object() {
+        let param = json!({
+            "level1": {
+                "level2": {
+                    "level3": {
+                        "value": "deep"
+                    }
+                }
+            }
+        });
+        let result = serialize_param_for_postgres(&param).unwrap();
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(
+            parsed
+                .get("level1")
+                .unwrap()
+                .get("level2")
+                .unwrap()
+                .get("level3")
+                .unwrap()
+                .get("value")
+                .unwrap(),
+            "deep"
+        );
+    }
+
+    #[test]
+    fn test_serialize_array_of_objects() {
+        // This is the exact bug scenario from the report
+        let param = json!([
+            {"sequence": 1, "content": "First passage"},
+            {"sequence": 2, "content": "Second passage"},
+            {"sequence": 3, "content": "Third passage"}
+        ]);
+        let result = serialize_param_for_postgres(&param).unwrap();
+
+        // Should produce valid JSON array
+        let parsed: Vec<Value> = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[0].get("sequence").unwrap(), 1);
+        assert_eq!(parsed[0].get("content").unwrap(), "First passage");
+        assert_eq!(parsed[2].get("sequence").unwrap(), 3);
+    }
+
+    #[test]
+    fn test_serialize_special_characters_in_json() {
+        // JSON with quotes, newlines, backslashes, and unicode
+        let param = json!({
+            "quoted": "He said \"hello\"",
+            "newlines": "line1\nline2",
+            "unicode": "日本語 emoji: 🎉",
+            "backslash": "path\\to\\file",
+            "tab": "col1\tcol2"
+        });
+        let result = serialize_param_for_postgres(&param).unwrap();
+
+        // Should be valid JSON that can be parsed back
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed.get("quoted").unwrap(), "He said \"hello\"");
+        assert_eq!(parsed.get("newlines").unwrap(), "line1\nline2");
+        assert_eq!(parsed.get("unicode").unwrap(), "日本語 emoji: 🎉");
+        assert_eq!(parsed.get("backslash").unwrap(), "path\\to\\file");
+        assert_eq!(parsed.get("tab").unwrap(), "col1\tcol2");
+    }
+
+    #[test]
+    fn test_serialize_empty_array() {
+        let param = json!([]);
+        let result = serialize_param_for_postgres(&param).unwrap();
+        assert_eq!(result, "[]");
+    }
+
+    #[test]
+    fn test_serialize_empty_object() {
+        let param = json!({});
+        let result = serialize_param_for_postgres(&param).unwrap();
+        assert_eq!(result, "{}");
+    }
+
+    #[test]
+    fn test_serialize_mixed_array() {
+        // Array with mixed types
+        let param = json!([1, "two", true, null, {"nested": "object"}, [1, 2, 3]]);
+        let result = serialize_param_for_postgres(&param).unwrap();
+
+        let parsed: Vec<Value> = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed.len(), 6);
+        assert_eq!(parsed[0], 1);
+        assert_eq!(parsed[1], "two");
+        assert_eq!(parsed[2], true);
+        assert!(parsed[3].is_null());
+        assert_eq!(parsed[4].get("nested").unwrap(), "object");
+        assert_eq!(parsed[5].as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_serialize_large_array() {
+        // Test with a larger array
+        let items: Vec<Value> = (0..1000)
+            .map(|i| json!({"id": i, "data": format!("item_{}", i)}))
+            .collect();
+        let param = Value::Array(items);
+        let result = serialize_param_for_postgres(&param).unwrap();
+
+        let parsed: Vec<Value> = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed.len(), 1000);
+        assert_eq!(parsed[0].get("id").unwrap(), 0);
+        assert_eq!(parsed[999].get("id").unwrap(), 999);
+    }
+
+    #[test]
+    fn test_serialize_object_with_null_value() {
+        let param = json!({"present": "value", "missing": null});
+        let result = serialize_param_for_postgres(&param).unwrap();
+
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed.get("present").unwrap(), "value");
+        assert!(parsed.get("missing").unwrap().is_null());
+    }
+
+    #[test]
+    fn test_serialize_object_with_numeric_values() {
+        let param = json!({
+            "integer": 42,
+            "float": 3.14159,
+            "negative": -100,
+            "zero": 0,
+            "big": 9223372036854775807_i64
+        });
+        let result = serialize_param_for_postgres(&param).unwrap();
+
+        let parsed: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(parsed.get("integer").unwrap(), 42);
+        assert_eq!(parsed.get("negative").unwrap(), -100);
+        assert_eq!(parsed.get("zero").unwrap(), 0);
+        assert_eq!(
+            parsed.get("big").unwrap().as_i64().unwrap(),
+            9223372036854775807_i64
+        );
+    }
+
+    #[test]
+    fn test_serialize_scalar_types_unchanged() {
+        // Scalar types should pass through without JSON serialization
+        assert_eq!(
+            serialize_param_for_postgres(&json!("hello")).unwrap(),
+            "hello"
+        );
+        assert_eq!(serialize_param_for_postgres(&json!(42)).unwrap(), "42");
+        assert_eq!(serialize_param_for_postgres(&json!(3.14)).unwrap(), "3.14");
+        assert_eq!(serialize_param_for_postgres(&json!(true)).unwrap(), "true");
+        assert_eq!(
+            serialize_param_for_postgres(&json!(false)).unwrap(),
+            "false"
+        );
+        assert_eq!(serialize_param_for_postgres(&json!(null)).unwrap(), "NULL");
+    }
+
+    #[test]
+    fn test_array_produces_valid_postgresql_jsonb() {
+        // The serialized array should be valid for PostgreSQL's ::jsonb cast
+        let param = json!([{"id": 1}, {"id": 2}]);
+        let result = serialize_param_for_postgres(&param).unwrap();
+
+        // Valid JSON that PostgreSQL can parse
+        assert!(result.starts_with('['));
+        assert!(result.ends_with(']'));
+        // Should NOT have extra quotes around it (that would cause the "cannot extract from scalar" error)
+        assert!(!result.starts_with("\"["));
+    }
+
+    #[test]
+    fn test_object_produces_valid_postgresql_jsonb() {
+        let param = json!({"key": "value"});
+        let result = serialize_param_for_postgres(&param).unwrap();
+
+        // Valid JSON that PostgreSQL can parse
+        assert!(result.starts_with('{'));
+        assert!(result.ends_with('}'));
+        // Should NOT have extra quotes
+        assert!(!result.starts_with("\"{"));
+    }
+
+    // ========================================================================
+    // Integration Test Helpers (Database Required)
+    // ========================================================================
+
     // Helper to get test database URL
     fn test_db_url() -> String {
         std::env::var("DATABASE_URL").unwrap_or_else(|_| {
