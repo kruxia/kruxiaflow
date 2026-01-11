@@ -684,6 +684,7 @@ mod tests {
             migrate: false,
             seed_client: false,
             db_connect_timeout: 60,
+            activity_timeout: 300,
         }
     }
 
@@ -869,6 +870,7 @@ mod tests {
             migrate: true,
             seed_client: true,
             db_connect_timeout: 120,
+            activity_timeout: 300,
         };
 
         assert!(cmd.validate().is_ok());
