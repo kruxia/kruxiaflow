@@ -1920,9 +1920,7 @@ async fn timeout_checker_task(
         }
 
         // Check for stale activities (activity-level timeout)
-        if let Err(e) =
-            check_and_reclaim_stale_activities(&activity_queue, &event_source).await
-        {
+        if let Err(e) = check_and_reclaim_stale_activities(&activity_queue, &event_source).await {
             tracing::error!("Failed to check for stale activities: {}", e);
         }
     }
@@ -2007,10 +2005,7 @@ async fn check_and_reclaim_stale_activities(
         return Ok(());
     }
 
-    tracing::info!(
-        "Reclaimed {} stale activities",
-        reclaimed.len()
-    );
+    tracing::info!("Reclaimed {} stale activities", reclaimed.len());
 
     // For activities that were marked as failed, emit ActivityFailed events
     // so the orchestrator can update workflow state

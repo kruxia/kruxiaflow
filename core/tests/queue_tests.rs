@@ -1101,7 +1101,11 @@ async fn test_reclaim_stale_activities_multiple_activities() {
     .expect("Failed to count failed");
 
     assert_eq!(pending_count, Some(1), "One activity should be pending");
-    assert_eq!(running_count, Some(1), "One activity should still be running (non_stale)");
+    assert_eq!(
+        running_count,
+        Some(1),
+        "One activity should still be running (non_stale)"
+    );
     assert_eq!(failed_count_db, Some(1), "One activity should be failed");
 
     cleanup_queue(&pool, workflow_id).await;
