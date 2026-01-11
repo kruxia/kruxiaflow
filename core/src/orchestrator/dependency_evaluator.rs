@@ -423,6 +423,18 @@ fn get_dependencies(activity: &ActivityDefinition) -> Vec<&ActivityRelationship>
     }
 }
 
+/// Convert WorkflowActivityStatus to snake_case string for template context
+pub fn status_to_string(status: WorkflowActivityStatus) -> String {
+    match status {
+        WorkflowActivityStatus::NotScheduled => "not_scheduled".to_string(),
+        WorkflowActivityStatus::Pending => "pending".to_string(),
+        WorkflowActivityStatus::Running => "running".to_string(),
+        WorkflowActivityStatus::Completed => "completed".to_string(),
+        WorkflowActivityStatus::Failed => "failed".to_string(),
+        WorkflowActivityStatus::Skipped => "skipped".to_string(),
+    }
+}
+
 /// Build template context from workflow state for condition evaluation
 pub fn build_condition_context(state: &WorkflowState) -> TemplateContext {
     let mut context = TemplateContext::new();
@@ -436,10 +448,11 @@ pub fn build_condition_context(state: &WorkflowState) -> TemplateContext {
         context = context.with_inputs(inputs);
     }
 
-    // Add activity outputs and iteration outputs
+    // Add activity outputs, iteration outputs, and status
     for (activity_key, activity_state) in &state.activities {
         // Add all activities to context, even if they don't have outputs yet
         // This ensures iteration-scoped activities are always available as arrays
+        // and status is always accessible for conditional dependencies
         let outputs = activity_state.outputs.clone().unwrap_or_default();
         context.add_activity_state(
             activity_key.clone(),
@@ -447,6 +460,7 @@ pub fn build_condition_context(state: &WorkflowState) -> TemplateContext {
             activity_state.iteration_outputs.clone(),
             activity_state.iteration,
             activity_state.accumulated_cost_usd,
+            status_to_string(activity_state.status),
         );
     }
 
@@ -576,4 +590,438 @@ pub fn find_skipped_activities<'a>(
     }
 
     Ok(skipped)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::workflow::{ActivityDefinition, ActivityRelationship, StreamingConfig};
+    use rust_decimal::Decimal;
+
+    /// Helper to create a minimal ActivityState
+    fn make_activity_state(
+        key: &str,
+        status: WorkflowActivityStatus,
+    ) -> (String, super::super::workflow_state::ActivityState) {
+        (
+            key.to_string(),
+            super::super::workflow_state::ActivityState {
+                key: key.to_string(),
+                status,
+                outputs: None,
+                error: None,
+                started_at: None,
+                completed_at: None,
+                attempt: 1,
+                last_error: None,
+                accumulated_cost_usd: Decimal::ZERO,
+                iteration: 0,
+                iteration_outputs: None,
+            },
+        )
+    }
+
+    /// Helper to create a WorkflowState with given activities
+    fn make_workflow_state(
+        activities: Vec<(String, super::super::workflow_state::ActivityState)>,
+    ) -> WorkflowState {
+        WorkflowState {
+            workflow_id: uuid::Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: crate::events::WorkflowStatus::Running,
+            activities: activities.into_iter().collect(),
+            state_data: serde_json::json!({}),
+            input: serde_json::json!({}),
+        }
+    }
+
+    /// Helper to create a minimal ActivityDefinition
+    fn make_activity_def(
+        key: &str,
+        depends_on: Option<Vec<ActivityRelationship>>,
+    ) -> ActivityDefinition {
+        ActivityDefinition {
+            key: key.to_string(),
+            worker: "test".to_string(),
+            activity_name: None,
+            parameters: None,
+            output_definitions: None,
+            depends_on,
+            dependency_of: None,
+            settings: None,
+            iteration_scoped: false,
+            iteration_limit: None,
+            is_loop_activity: false,
+            streaming: StreamingConfig::default(),
+        }
+    }
+
+    // ============================================================================
+    // Status-Based Conditional Dependency Tests
+    // Regression tests for: docs/bugs/2026-01-10-orchestrator-logic.md
+    // ============================================================================
+
+    #[test]
+    fn test_status_condition_completed_activity() {
+        // When activity status is 'completed', condition {{activity.status == 'completed'}} is true
+        let activities = vec![make_activity_state(
+            "dep_activity",
+            WorkflowActivityStatus::Completed,
+        )];
+        let state = make_workflow_state(activities);
+        let context = build_condition_context(&state);
+
+        let result =
+            evaluate_condition("{{dep_activity.status == 'completed'}}", &context).unwrap();
+        assert!(result, "Condition should be true for completed activity");
+    }
+
+    #[test]
+    fn test_status_condition_skipped_activity() {
+        // When activity status is 'skipped', condition {{activity.status == 'completed'}} is false
+        let activities = vec![make_activity_state(
+            "dep_activity",
+            WorkflowActivityStatus::Skipped,
+        )];
+        let state = make_workflow_state(activities);
+        let context = build_condition_context(&state);
+
+        let result =
+            evaluate_condition("{{dep_activity.status == 'completed'}}", &context).unwrap();
+        assert!(!result, "Condition should be false for skipped activity");
+
+        let result = evaluate_condition("{{dep_activity.status == 'skipped'}}", &context).unwrap();
+        assert!(result, "Condition should be true for skipped activity");
+    }
+
+    #[test]
+    fn test_status_condition_failed_activity() {
+        // When activity status is 'failed', condition {{activity.status == 'completed'}} is false
+        let activities = vec![make_activity_state(
+            "dep_activity",
+            WorkflowActivityStatus::Failed,
+        )];
+        let state = make_workflow_state(activities);
+        let context = build_condition_context(&state);
+
+        let result =
+            evaluate_condition("{{dep_activity.status == 'completed'}}", &context).unwrap();
+        assert!(!result, "Condition should be false for failed activity");
+
+        let result = evaluate_condition("{{dep_activity.status == 'failed'}}", &context).unwrap();
+        assert!(result, "Condition should be true for failed activity");
+    }
+
+    #[test]
+    fn test_converging_paths_one_completed() {
+        // Scenario: Two mutually exclusive paths (path_a and path_b) converge on finalize
+        // path_a completed, path_b skipped
+        // Finalize should see path_a.status == 'completed' as true
+
+        let activities = vec![
+            make_activity_state("path_a", WorkflowActivityStatus::Completed),
+            make_activity_state("path_b", WorkflowActivityStatus::Skipped),
+        ];
+        let state = make_workflow_state(activities);
+        let context = build_condition_context(&state);
+
+        // Condition for path_a dependency (should be true - applicable)
+        let result = evaluate_condition("{{path_a.status == 'completed'}}", &context).unwrap();
+        assert!(result, "path_a should be applicable");
+
+        // Condition for path_b dependency (should be false - not applicable)
+        let result = evaluate_condition("{{path_b.status == 'completed'}}", &context).unwrap();
+        assert!(!result, "path_b should not be applicable");
+    }
+
+    #[test]
+    fn test_converging_paths_other_completed() {
+        // Scenario: path_b completed, path_a skipped
+
+        let activities = vec![
+            make_activity_state("path_a", WorkflowActivityStatus::Skipped),
+            make_activity_state("path_b", WorkflowActivityStatus::Completed),
+        ];
+        let state = make_workflow_state(activities);
+        let context = build_condition_context(&state);
+
+        // Condition for path_a dependency (should be false - not applicable)
+        let result = evaluate_condition("{{path_a.status == 'completed'}}", &context).unwrap();
+        assert!(!result, "path_a should not be applicable");
+
+        // Condition for path_b dependency (should be true - applicable)
+        let result = evaluate_condition("{{path_b.status == 'completed'}}", &context).unwrap();
+        assert!(result, "path_b should be applicable");
+    }
+
+    #[test]
+    fn test_converging_paths_both_skipped() {
+        // Scenario: Both paths skipped
+        // When all paths are skipped, no dependency is applicable
+
+        let activities = vec![
+            make_activity_state("path_a", WorkflowActivityStatus::Skipped),
+            make_activity_state("path_b", WorkflowActivityStatus::Skipped),
+        ];
+        let state = make_workflow_state(activities);
+        let context = build_condition_context(&state);
+
+        // Neither path is applicable
+        let result = evaluate_condition("{{path_a.status == 'completed'}}", &context).unwrap();
+        assert!(!result, "path_a should not be applicable");
+
+        let result = evaluate_condition("{{path_b.status == 'completed'}}", &context).unwrap();
+        assert!(!result, "path_b should not be applicable");
+    }
+
+    #[test]
+    fn test_unconditional_dependency_on_skipped_cascades() {
+        // An unconditional dependency on a skipped activity should cause the dependent to be skipped
+        // This tests the semantic: depends_on: [A] where A is skipped → dependent is skipped
+
+        let definition = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![
+                make_activity_def("activity_a", None),
+                make_activity_def(
+                    "activity_b",
+                    Some(vec![ActivityRelationship {
+                        activity_key: "activity_a".to_string(),
+                        conditions: None, // Unconditional dependency
+                        is_back_edge: false,
+                    }]),
+                ),
+            ],
+        };
+
+        // activity_a is skipped, activity_b is NotScheduled
+        let activities = vec![
+            make_activity_state("activity_a", WorkflowActivityStatus::Skipped),
+            make_activity_state("activity_b", WorkflowActivityStatus::NotScheduled),
+        ];
+        let state = make_workflow_state(activities);
+
+        // activity_b should be found as needing to be skipped
+        let skipped = find_skipped_activities(&definition, &state).unwrap();
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].key, "activity_b");
+    }
+
+    #[test]
+    fn test_unconditional_dependency_on_failed_cascades() {
+        // An unconditional dependency on a failed activity should cause the dependent to be skipped
+
+        let definition = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![
+                make_activity_def("activity_a", None),
+                make_activity_def(
+                    "activity_b",
+                    Some(vec![ActivityRelationship {
+                        activity_key: "activity_a".to_string(),
+                        conditions: None, // Unconditional dependency
+                        is_back_edge: false,
+                    }]),
+                ),
+            ],
+        };
+
+        // activity_a failed, activity_b is NotScheduled
+        let activities = vec![
+            make_activity_state("activity_a", WorkflowActivityStatus::Failed),
+            make_activity_state("activity_b", WorkflowActivityStatus::NotScheduled),
+        ];
+        let state = make_workflow_state(activities);
+
+        // activity_b should be found as needing to be skipped
+        let skipped = find_skipped_activities(&definition, &state).unwrap();
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].key, "activity_b");
+    }
+
+    #[test]
+    fn test_conditional_dependency_with_status_check() {
+        // A conditional dependency with status check should work correctly
+        // depends_on:
+        //   - activity_key: path_a
+        //     condition: "{{path_a.status == 'completed'}}"
+
+        let definition = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![
+                make_activity_def("path_a", None),
+                make_activity_def(
+                    "finalize",
+                    Some(vec![ActivityRelationship {
+                        activity_key: "path_a".to_string(),
+                        conditions: Some(vec!["{{path_a.status == 'completed'}}".to_string()]),
+                        is_back_edge: false,
+                    }]),
+                ),
+            ],
+        };
+
+        // path_a completed, finalize is NotScheduled
+        let activities = vec![
+            make_activity_state("path_a", WorkflowActivityStatus::Completed),
+            make_activity_state("finalize", WorkflowActivityStatus::NotScheduled),
+        ];
+        let state = make_workflow_state(activities);
+
+        // finalize should be ready (condition satisfied)
+        let ready = find_ready_activities(&definition, &state).unwrap();
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].key, "finalize");
+    }
+
+    #[test]
+    fn test_conditional_dependency_skipped_not_applicable() {
+        // When dependency is skipped and condition checks status == 'completed',
+        // the dependency is not applicable
+
+        let definition = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![
+                make_activity_def("path_a", None),
+                make_activity_def(
+                    "finalize",
+                    Some(vec![ActivityRelationship {
+                        activity_key: "path_a".to_string(),
+                        conditions: Some(vec!["{{path_a.status == 'completed'}}".to_string()]),
+                        is_back_edge: false,
+                    }]),
+                ),
+            ],
+        };
+
+        // path_a skipped, finalize is NotScheduled
+        let activities = vec![
+            make_activity_state("path_a", WorkflowActivityStatus::Skipped),
+            make_activity_state("finalize", WorkflowActivityStatus::NotScheduled),
+        ];
+        let state = make_workflow_state(activities);
+
+        // finalize should not be ready (condition not satisfied)
+        let ready = find_ready_activities(&definition, &state).unwrap();
+        assert!(
+            ready.is_empty(),
+            "finalize should not be ready when only dependency is skipped"
+        );
+
+        // finalize should be marked as skipped (no applicable dependencies)
+        let skipped = find_skipped_activities(&definition, &state).unwrap();
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].key, "finalize");
+    }
+
+    #[test]
+    fn test_converging_conditional_dependencies_one_path() {
+        // Converging paths with status conditions: one path completes
+        // depends_on:
+        //   - activity_key: path_a
+        //     condition: "{{path_a.status == 'completed'}}"
+        //   - activity_key: path_b
+        //     condition: "{{path_b.status == 'completed'}}"
+
+        let definition = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![
+                make_activity_def("path_a", None),
+                make_activity_def("path_b", None),
+                make_activity_def(
+                    "finalize",
+                    Some(vec![
+                        ActivityRelationship {
+                            activity_key: "path_a".to_string(),
+                            conditions: Some(vec!["{{path_a.status == 'completed'}}".to_string()]),
+                            is_back_edge: false,
+                        },
+                        ActivityRelationship {
+                            activity_key: "path_b".to_string(),
+                            conditions: Some(vec!["{{path_b.status == 'completed'}}".to_string()]),
+                            is_back_edge: false,
+                        },
+                    ]),
+                ),
+            ],
+        };
+
+        // path_a completed, path_b skipped, finalize is NotScheduled
+        let activities = vec![
+            make_activity_state("path_a", WorkflowActivityStatus::Completed),
+            make_activity_state("path_b", WorkflowActivityStatus::Skipped),
+            make_activity_state("finalize", WorkflowActivityStatus::NotScheduled),
+        ];
+        let state = make_workflow_state(activities);
+
+        // finalize should be ready (path_a condition satisfied)
+        let ready = find_ready_activities(&definition, &state).unwrap();
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].key, "finalize");
+    }
+
+    #[test]
+    fn test_converging_conditional_dependencies_both_skipped() {
+        // Converging paths with status conditions: both paths skipped
+
+        let definition = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![
+                make_activity_def("path_a", None),
+                make_activity_def("path_b", None),
+                make_activity_def(
+                    "finalize",
+                    Some(vec![
+                        ActivityRelationship {
+                            activity_key: "path_a".to_string(),
+                            conditions: Some(vec!["{{path_a.status == 'completed'}}".to_string()]),
+                            is_back_edge: false,
+                        },
+                        ActivityRelationship {
+                            activity_key: "path_b".to_string(),
+                            conditions: Some(vec!["{{path_b.status == 'completed'}}".to_string()]),
+                            is_back_edge: false,
+                        },
+                    ]),
+                ),
+            ],
+        };
+
+        // Both paths skipped, finalize is NotScheduled
+        let activities = vec![
+            make_activity_state("path_a", WorkflowActivityStatus::Skipped),
+            make_activity_state("path_b", WorkflowActivityStatus::Skipped),
+            make_activity_state("finalize", WorkflowActivityStatus::NotScheduled),
+        ];
+        let state = make_workflow_state(activities);
+
+        // finalize should not be ready (no conditions satisfied)
+        let ready = find_ready_activities(&definition, &state).unwrap();
+        assert!(
+            ready.is_empty(),
+            "finalize should not be ready when all paths are skipped"
+        );
+
+        // finalize should be marked as skipped (no applicable dependencies)
+        let skipped = find_skipped_activities(&definition, &state).unwrap();
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].key, "finalize");
+    }
+
+    #[test]
+    fn test_status_to_string_all_variants() {
+        // Verify status_to_string returns correct snake_case strings
+        assert_eq!(
+            status_to_string(WorkflowActivityStatus::NotScheduled),
+            "not_scheduled"
+        );
+        assert_eq!(status_to_string(WorkflowActivityStatus::Pending), "pending");
+        assert_eq!(status_to_string(WorkflowActivityStatus::Running), "running");
+        assert_eq!(
+            status_to_string(WorkflowActivityStatus::Completed),
+            "completed"
+        );
+        assert_eq!(status_to_string(WorkflowActivityStatus::Failed), "failed");
+        assert_eq!(status_to_string(WorkflowActivityStatus::Skipped), "skipped");
+    }
 }

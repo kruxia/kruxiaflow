@@ -41,6 +41,9 @@ pub struct ActivityContextInfo {
 
     /// Accumulated cost in USD across all attempts/iterations
     pub accumulated_cost_usd: rust_decimal::Decimal,
+
+    /// Activity status: "completed", "failed", "skipped", "pending", "running", "not_scheduled"
+    pub status: String,
 }
 
 /// Template context for resolving expressions
@@ -96,6 +99,7 @@ impl TemplateContext {
         iteration_outputs: Option<HashMap<String, Vec<Value>>>,
         iteration: u32,
         accumulated_cost_usd: rust_decimal::Decimal,
+        status: String,
     ) {
         self.activity_states.insert(
             activity_key,
@@ -104,13 +108,21 @@ impl TemplateContext {
                 iteration_outputs,
                 iteration,
                 accumulated_cost_usd,
+                status,
             },
         );
     }
 
     /// Legacy method for backward compatibility
     pub fn add_activity_output(&mut self, activity_key: String, outputs: Vec<ActivityOutput>) {
-        self.add_activity_state(activity_key, outputs, None, 0, rust_decimal::Decimal::ZERO);
+        self.add_activity_state(
+            activity_key,
+            outputs,
+            None,
+            0,
+            rust_decimal::Decimal::ZERO,
+            "completed".to_string(), // Default to completed for legacy callers
+        );
     }
 
     /// Set current activity context for {{ACTIVITY.*}} variables
@@ -172,10 +184,16 @@ impl TemplateContext {
             // Check if this is an iteration-scoped activity
             if let Some(iteration_outputs) = &activity_info.iteration_outputs {
                 // Iteration-scoped: outputs are already grouped by name as arrays
-                let value_map: serde_json::Map<String, Value> = iteration_outputs
+                let mut value_map: serde_json::Map<String, Value> = iteration_outputs
                     .iter()
                     .map(|(name, values)| (name.clone(), Value::Array(values.clone())))
                     .collect();
+
+                // Add status to activity context
+                value_map.insert(
+                    "status".to_string(),
+                    Value::String(activity_info.status.clone()),
+                );
 
                 // Always add iteration-scoped activities to context, even if empty
                 // This ensures templates can reference them (e.g., {{activity.output | last}})
@@ -207,15 +225,18 @@ impl TemplateContext {
                     }
                 }
 
-                // Add value outputs as top-level activity key
-                if !value_outputs.is_empty() {
-                    context_map.insert(
-                        activity_key.clone(),
-                        serde_json_to_minijinja(&Value::Object(
-                            value_outputs.into_iter().collect(),
-                        )),
-                    );
-                }
+                // Add activity to context with status (always) and value outputs
+                // This ensures {{activity.status}} is always accessible, even if no outputs yet
+                let mut activity_obj: serde_json::Map<String, Value> =
+                    value_outputs.into_iter().collect();
+                activity_obj.insert(
+                    "status".to_string(),
+                    Value::String(activity_info.status.clone()),
+                );
+                context_map.insert(
+                    activity_key.clone(),
+                    serde_json_to_minijinja(&Value::Object(activity_obj)),
+                );
 
                 // Add to FILE map
                 if !file_outputs.is_empty() {
@@ -285,6 +306,7 @@ impl TemplateContext {
                 "iteration": activity_info.iteration,
                 "accumulated_cost_usd": activity_info.accumulated_cost_usd.to_string(),
                 "remaining_budget_usd": remaining_budget,
+                "status": activity_info.status,
             });
 
             context_map.insert(
@@ -967,6 +989,7 @@ mod tests {
             Some(iteration_outputs),
             2,
             rust_decimal::Decimal::new(750, 2), // $7.50
+            "completed".to_string(),
         );
 
         // Access all iterations as array
@@ -1015,6 +1038,7 @@ mod tests {
             Some(iteration_outputs),
             2,
             rust_decimal::Decimal::ZERO,
+            "completed".to_string(),
         );
 
         // Access latest value using | last filter
@@ -1048,6 +1072,7 @@ mod tests {
             Some(iteration_outputs),
             2,
             rust_decimal::Decimal::ZERO,
+            "completed".to_string(),
         );
 
         // Get array length using | length filter
@@ -1069,6 +1094,7 @@ mod tests {
             Some(iteration_outputs),
             2, // iteration = 2
             rust_decimal::Decimal::ZERO,
+            "completed".to_string(),
         );
 
         // Set current activity context
@@ -1093,6 +1119,7 @@ mod tests {
             Some(iteration_outputs),
             2,
             rust_decimal::Decimal::new(1050, 2), // $10.50
+            "completed".to_string(),
         );
 
         // Set current activity context
@@ -1117,6 +1144,7 @@ mod tests {
             Some(iteration_outputs),
             2,
             rust_decimal::Decimal::new(750, 2), // $7.50 accumulated
+            "completed".to_string(),
         );
 
         // Set current activity context with budget limit of $10.00
@@ -1155,6 +1183,7 @@ mod tests {
             None, // Not iteration-scoped
             0,
             rust_decimal::Decimal::ZERO,
+            "completed".to_string(),
         );
 
         // Should return single values (not arrays)
@@ -1187,6 +1216,7 @@ mod tests {
             Some(iteration_outputs),
             2,
             rust_decimal::Decimal::ZERO,
+            "completed".to_string(),
         );
 
         // Check latest iteration result in condition (typical loop pattern)
@@ -1212,6 +1242,7 @@ mod tests {
             Some(iteration_outputs_false),
             2,
             rust_decimal::Decimal::ZERO,
+            "completed".to_string(),
         );
 
         let value2 = Value::String("{{evaluate.sufficient | last}}".to_string());
@@ -1232,6 +1263,7 @@ mod tests {
             Some(iteration_outputs),
             2,
             rust_decimal::Decimal::new(750, 2),
+            "completed".to_string(),
         );
 
         // Don't set current_activity_key - ACTIVITY context should not be available
@@ -1477,5 +1509,345 @@ mod tests {
 
         let result2 = resolve_template(&condition, &context2).unwrap();
         assert_eq!(result2, "true");
+    }
+
+    // ============================================================================
+    // Activity Status Exposure Tests
+    // Regression tests for: docs/bugs/2026-01-10-orchestrator-logic.md
+    // ============================================================================
+
+    #[test]
+    fn test_activity_status_completed() {
+        let mut context = TemplateContext::new();
+        context.add_activity_state(
+            "fetch".to_string(),
+            vec![],
+            None,
+            0,
+            rust_decimal::Decimal::ZERO,
+            "completed".to_string(),
+        );
+
+        // Status should be accessible via {{activity.status}}
+        let value = Value::String("{{fetch.status}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("completed".to_string()));
+
+        // Condition checking status should work
+        let value = Value::String("{{fetch.status == 'completed'}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_activity_status_skipped() {
+        let mut context = TemplateContext::new();
+        context.add_activity_state(
+            "optional_step".to_string(),
+            vec![],
+            None,
+            0,
+            rust_decimal::Decimal::ZERO,
+            "skipped".to_string(),
+        );
+
+        // Status should show skipped
+        let value = Value::String("{{optional_step.status}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("skipped".to_string()));
+
+        // Condition checking for completed should be false
+        let value = Value::String("{{optional_step.status == 'completed'}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Bool(false));
+
+        // Condition checking for skipped should be true
+        let value = Value::String("{{optional_step.status == 'skipped'}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_activity_status_failed() {
+        let mut context = TemplateContext::new();
+        context.add_activity_state(
+            "risky_step".to_string(),
+            vec![],
+            None,
+            0,
+            rust_decimal::Decimal::ZERO,
+            "failed".to_string(),
+        );
+
+        let value = Value::String("{{risky_step.status}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("failed".to_string()));
+
+        let value = Value::String("{{risky_step.status == 'failed'}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_activity_status_not_scheduled() {
+        let mut context = TemplateContext::new();
+        context.add_activity_state(
+            "pending_step".to_string(),
+            vec![],
+            None,
+            0,
+            rust_decimal::Decimal::ZERO,
+            "not_scheduled".to_string(),
+        );
+
+        let value = Value::String("{{pending_step.status}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("not_scheduled".to_string()));
+    }
+
+    #[test]
+    fn test_activity_status_running() {
+        let mut context = TemplateContext::new();
+        context.add_activity_state(
+            "active_step".to_string(),
+            vec![],
+            None,
+            0,
+            rust_decimal::Decimal::ZERO,
+            "running".to_string(),
+        );
+
+        let value = Value::String("{{active_step.status}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("running".to_string()));
+    }
+
+    #[test]
+    fn test_activity_status_pending() {
+        let mut context = TemplateContext::new();
+        context.add_activity_state(
+            "queued_step".to_string(),
+            vec![],
+            None,
+            0,
+            rust_decimal::Decimal::ZERO,
+            "pending".to_string(),
+        );
+
+        let value = Value::String("{{queued_step.status}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("pending".to_string()));
+    }
+
+    #[test]
+    fn test_status_first_pattern_prevents_template_error() {
+        // This test verifies the fix for:
+        // docs/bugs/2026-01-10-orchestrator-logic.md - Problem 2
+        //
+        // When a dependency is skipped, accessing its result would cause a template error.
+        // The status-first pattern uses short-circuit evaluation to avoid this:
+        //   {{dep.status == 'completed' and dep.result.field}}
+        //
+        // If status != 'completed', the right side is never evaluated.
+
+        let mut context = TemplateContext::new();
+        context.add_activity_state(
+            "find_bibliography".to_string(),
+            vec![], // No outputs - activity was skipped
+            None,
+            0,
+            rust_decimal::Decimal::ZERO,
+            "skipped".to_string(),
+        );
+
+        // The status-first pattern: check status before accessing result
+        // MiniJinja's `and` short-circuits, so if left side is false,
+        // the right side (which would error) is never evaluated
+        let condition = "{{find_bibliography.status == 'completed' and find_bibliography.result.rows | length > 0}}";
+        let value = Value::String(condition.to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+
+        // Should be false (status != 'completed'), not a template error
+        assert_eq!(result, Value::Bool(false));
+    }
+
+    #[test]
+    fn test_status_first_pattern_passes_when_completed() {
+        use crate::workflow::{ActivityOutput, OutputType};
+
+        let mut context = TemplateContext::new();
+        let outputs = vec![ActivityOutput {
+            name: "result".to_string(),
+            output_type: OutputType::Value,
+            value: serde_json::json!({
+                "rows": [{"id": 1}, {"id": 2}]
+            }),
+        }];
+        context.add_activity_state(
+            "find_bibliography".to_string(),
+            outputs,
+            None,
+            0,
+            rust_decimal::Decimal::ZERO,
+            "completed".to_string(),
+        );
+
+        // When activity is completed, the full condition is evaluated
+        let condition = "{{find_bibliography.status == 'completed' and find_bibliography.result.rows | length > 0}}";
+        let value = Value::String(condition.to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+
+        // Should be true (status == 'completed' AND rows.length > 0)
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_converging_paths_with_status_conditions() {
+        // This test verifies the pattern for converging exclusive paths:
+        // docs/bugs/2026-01-10-orchestrator-logic.md - Problem 3
+        //
+        // When multiple mutually exclusive paths converge, we use status conditions:
+        //   depends_on:
+        //     - activity_key: path_a
+        //       condition: "{{path_a.status == 'completed'}}"
+        //     - activity_key: path_b
+        //       condition: "{{path_b.status == 'completed'}}"
+
+        // Scenario: path_a completed, path_b was skipped
+        let mut context = TemplateContext::new();
+        context.add_activity_state(
+            "path_a".to_string(),
+            vec![],
+            None,
+            0,
+            rust_decimal::Decimal::ZERO,
+            "completed".to_string(),
+        );
+        context.add_activity_state(
+            "path_b".to_string(),
+            vec![],
+            None,
+            0,
+            rust_decimal::Decimal::ZERO,
+            "skipped".to_string(),
+        );
+
+        // Condition for path_a dependency (should be true)
+        let value = Value::String("{{path_a.status == 'completed'}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Bool(true));
+
+        // Condition for path_b dependency (should be false)
+        let value = Value::String("{{path_b.status == 'completed'}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Bool(false));
+
+        // At least one path completed - finalize should run
+        let value = Value::String(
+            "{{path_a.status == 'completed' or path_b.status == 'completed'}}".to_string(),
+        );
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_converging_paths_both_skipped() {
+        // When all converging paths are skipped, the dependent activity should also be skipped
+
+        let mut context = TemplateContext::new();
+        context.add_activity_state(
+            "path_a".to_string(),
+            vec![],
+            None,
+            0,
+            rust_decimal::Decimal::ZERO,
+            "skipped".to_string(),
+        );
+        context.add_activity_state(
+            "path_b".to_string(),
+            vec![],
+            None,
+            0,
+            rust_decimal::Decimal::ZERO,
+            "skipped".to_string(),
+        );
+
+        // Neither path completed
+        let value = Value::String(
+            "{{path_a.status == 'completed' or path_b.status == 'completed'}}".to_string(),
+        );
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Bool(false));
+    }
+
+    #[test]
+    fn test_status_in_activity_context() {
+        // Verify status is also available via ACTIVITY context for current activity
+        let mut context = TemplateContext::new();
+        context.add_activity_state(
+            "my_activity".to_string(),
+            vec![],
+            None,
+            3,
+            rust_decimal::Decimal::ZERO,
+            "running".to_string(),
+        );
+
+        // Set current activity context
+        context = context.with_current_activity("my_activity".to_string(), None);
+
+        // ACTIVITY.status should be accessible
+        let value = Value::String("{{ACTIVITY.status}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("running".to_string()));
+    }
+
+    #[test]
+    fn test_status_with_iteration_scoped_activity() {
+        // Status should work with iteration-scoped activities too
+        let mut context = TemplateContext::new();
+        let mut iteration_outputs = HashMap::new();
+        iteration_outputs.insert(
+            "results".to_string(),
+            vec![serde_json::json!("result1"), serde_json::json!("result2")],
+        );
+
+        context.add_activity_state(
+            "search".to_string(),
+            vec![],
+            Some(iteration_outputs),
+            2,
+            rust_decimal::Decimal::ZERO,
+            "completed".to_string(),
+        );
+
+        // Status should be accessible
+        let value = Value::String("{{search.status}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("completed".to_string()));
+
+        // Outputs should still be accessible as arrays
+        let value = Value::String("{{search.results | length}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Number(2.into()));
+    }
+
+    #[test]
+    fn test_activity_without_outputs_has_status() {
+        // Even activities without any outputs should have status accessible
+        let mut context = TemplateContext::new();
+        context.add_activity_state(
+            "setup".to_string(),
+            vec![], // No outputs
+            None,
+            0,
+            rust_decimal::Decimal::ZERO,
+            "completed".to_string(),
+        );
+
+        // Status should still be accessible
+        let value = Value::String("{{setup.status}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("completed".to_string()));
     }
 }
