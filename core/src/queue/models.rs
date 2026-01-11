@@ -141,6 +141,26 @@ impl std::fmt::Display for ActivityStatus {
     }
 }
 
+/// Result of reclaiming a stale activity
+#[derive(Debug, Clone)]
+pub enum StaleActivityAction {
+    /// Activity was reset to pending for retry
+    ResetToPending,
+    /// Activity was marked as failed (retries exhausted)
+    MarkedFailed,
+}
+
+/// Information about a stale activity that was reclaimed
+#[derive(Debug, Clone)]
+pub struct StaleActivityInfo {
+    pub workflow_id: Uuid,
+    pub activity_key: String,
+    pub iteration: Option<i32>,
+    pub action: StaleActivityAction,
+    pub retry_count: i32,
+    pub max_retries: i32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

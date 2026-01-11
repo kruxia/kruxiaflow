@@ -1,6 +1,6 @@
 use crate::queue::{
     Activity, ActivityQueue, ActivityResult, ActivitySettings, ActivityStatus, ActivitySummary,
-    QueueConfig, QueueError, QueuedActivity, Result,
+    QueueConfig, QueueError, QueuedActivity, Result, StaleActivityAction, StaleActivityInfo,
 };
 use async_trait::async_trait;
 use sqlx::PgPool;
@@ -507,5 +507,111 @@ impl ActivityQueue for PostgresQueue {
         tx.commit().await?;
 
         Ok(will_retry)
+    }
+
+    async fn reclaim_stale_activities(&self, limit: i64) -> Result<Vec<StaleActivityInfo>> {
+        // Use a transaction to ensure consistent handling of all stale activities
+        let mut tx = self.pool.begin().await?;
+
+        // Find all stale activities (running + timeout exceeded)
+        // We need to handle two cases:
+        // 1. Activities with retries remaining -> reset to pending
+        // 2. Activities with no retries remaining -> mark as failed
+        let stale_activities = sqlx::query!(
+            r#"
+            SELECT id, workflow_id, activity_key, iteration, retry_count, max_retries
+            FROM activity_queue
+            WHERE status = 'running'::activity_status
+              AND claimed_at IS NOT NULL
+              AND NOW() > claimed_at + timeout_duration
+            ORDER BY claimed_at ASC
+            LIMIT $1
+            FOR UPDATE SKIP LOCKED
+            "#,
+            limit
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+
+        if stale_activities.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let mut results = Vec::with_capacity(stale_activities.len());
+
+        for activity in stale_activities {
+            let has_retries = activity.retry_count < activity.max_retries;
+
+            if has_retries {
+                // Reset to pending for retry
+                sqlx::query!(
+                    r#"
+                    UPDATE activity_queue
+                    SET status = 'pending'::activity_status,
+                        claimed_by = NULL,
+                        claimed_at = NULL,
+                        scheduled_for = NOW(),
+                        retry_count = retry_count + 1
+                    WHERE id = $1
+                    "#,
+                    activity.id
+                )
+                .execute(&mut *tx)
+                .await?;
+
+                warn!(
+                    activity_id = %activity.id,
+                    workflow_id = %activity.workflow_id,
+                    activity_key = %activity.activity_key,
+                    retry_count = activity.retry_count + 1,
+                    max_retries = activity.max_retries,
+                    "Reclaimed stale activity - reset to pending for retry"
+                );
+
+                results.push(StaleActivityInfo {
+                    workflow_id: activity.workflow_id,
+                    activity_key: activity.activity_key,
+                    iteration: activity.iteration,
+                    action: StaleActivityAction::ResetToPending,
+                    retry_count: activity.retry_count + 1,
+                    max_retries: activity.max_retries,
+                });
+            } else {
+                // No retries remaining - mark as failed
+                sqlx::query!(
+                    r#"
+                    UPDATE activity_queue
+                    SET status = 'failed'::activity_status,
+                        completed_at = NOW()
+                    WHERE id = $1
+                    "#,
+                    activity.id
+                )
+                .execute(&mut *tx)
+                .await?;
+
+                warn!(
+                    activity_id = %activity.id,
+                    workflow_id = %activity.workflow_id,
+                    activity_key = %activity.activity_key,
+                    retry_count = activity.retry_count,
+                    max_retries = activity.max_retries,
+                    "Reclaimed stale activity - marked as failed (retries exhausted)"
+                );
+
+                results.push(StaleActivityInfo {
+                    workflow_id: activity.workflow_id,
+                    activity_key: activity.activity_key,
+                    iteration: activity.iteration,
+                    action: StaleActivityAction::MarkedFailed,
+                    retry_count: activity.retry_count,
+                    max_retries: activity.max_retries,
+                });
+            }
+        }
+
+        tx.commit().await?;
+
+        Ok(results)
     }
 }

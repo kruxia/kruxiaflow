@@ -661,3 +661,448 @@ async fn test_parallel_execution() {
 
     cleanup_queue(&pool, workflow_id).await;
 }
+
+// ===========================================================================
+// reclaim_stale_activities tests
+// ===========================================================================
+
+#[tokio::test]
+#[serial]
+async fn test_reclaim_stale_activities_resets_to_pending() {
+    use kruxiaflow_core::queue::StaleActivityAction;
+
+    let pool = setup_test_pool().await;
+    let mut config = QueueConfig::default();
+    config.default_timeout = Duration::from_secs(1);
+
+    let queue = PostgresQueue::new(pool.clone(), config);
+    let workflow_id = Uuid::now_v7();
+    let worker_id = "worker_test_01";
+
+    // Schedule activity with retries remaining
+    let activity = Activity {
+        key: "test_activity".to_string(),
+        worker: "test".to_string(),
+        activity_name: "test_task".to_string(),
+        parameters: json!({"key": "value"}),
+        settings: Some(ActivitySettings {
+            timeout_seconds: Some(1),
+            retry: Some(RetryPolicy {
+                max_attempts: 3, // Allows retries
+                strategy: BackoffStrategy::Fixed,
+                base_seconds: 2,
+                factor: 2.0,
+                max_seconds: 300,
+            }),
+            budget: None,
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: None,
+            scheduled_for: None,
+        }),
+        scheduled_for: None,
+        output_definitions: None,
+        iteration: None,
+    };
+
+    queue
+        .schedule(workflow_id, vec![activity])
+        .await
+        .expect("Failed to schedule activity");
+
+    // Worker claims activity
+    let claimed = queue
+        .claim_next(worker_id, "test", "test_task")
+        .await
+        .expect("Failed to claim")
+        .expect("Should have claimed");
+
+    assert_eq!(claimed.retry_count, 0);
+
+    // Wait for timeout to expire
+    sleep(Duration::from_millis(1200)).await;
+
+    // Call reclaim_stale_activities
+    let reclaimed = queue
+        .reclaim_stale_activities(100)
+        .await
+        .expect("Failed to reclaim stale activities");
+
+    assert_eq!(reclaimed.len(), 1, "Should reclaim 1 stale activity");
+    assert_eq!(reclaimed[0].workflow_id, workflow_id);
+    assert_eq!(reclaimed[0].activity_key, "test_activity");
+    assert!(
+        matches!(reclaimed[0].action, StaleActivityAction::ResetToPending),
+        "Activity with retries should be reset to pending"
+    );
+    assert_eq!(reclaimed[0].retry_count, 1);
+
+    // Verify activity is now pending in database
+    let status = sqlx::query_scalar!(
+        r#"SELECT status::text FROM activity_queue WHERE workflow_id = $1"#,
+        workflow_id
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to get status");
+
+    assert_eq!(status, Some("pending".to_string()));
+
+    // Verify activity can be claimed again
+    let reclaimed_claimed = queue
+        .claim_next(worker_id, "test", "test_task")
+        .await
+        .expect("Failed to claim")
+        .expect("Should claim reclaimed activity");
+
+    assert_eq!(reclaimed_claimed.id, claimed.id);
+    assert_eq!(reclaimed_claimed.retry_count, 1);
+
+    cleanup_queue(&pool, workflow_id).await;
+}
+
+#[tokio::test]
+#[serial]
+async fn test_reclaim_stale_activities_marks_failed_when_retries_exhausted() {
+    use kruxiaflow_core::queue::StaleActivityAction;
+
+    let pool = setup_test_pool().await;
+    let mut config = QueueConfig::default();
+    config.default_timeout = Duration::from_secs(1);
+
+    let queue = PostgresQueue::new(pool.clone(), config);
+    let workflow_id = Uuid::now_v7();
+
+    // Schedule activity with max_attempts=0 (no retries allowed after initial claim)
+    // max_attempts in RetryPolicy represents the number of RETRIES, not total attempts
+    let activity = Activity {
+        key: "test_activity".to_string(),
+        worker: "test".to_string(),
+        activity_name: "test_task".to_string(),
+        parameters: json!({"key": "value"}),
+        settings: Some(ActivitySettings {
+            timeout_seconds: Some(1),
+            retry: Some(RetryPolicy {
+                max_attempts: 0, // No retries after initial claim
+                strategy: BackoffStrategy::Fixed,
+                base_seconds: 2,
+                factor: 2.0,
+                max_seconds: 300,
+            }),
+            budget: None,
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: None,
+            scheduled_for: None,
+        }),
+        scheduled_for: None,
+        output_definitions: None,
+        iteration: None,
+    };
+
+    queue
+        .schedule(workflow_id, vec![activity])
+        .await
+        .expect("Failed to schedule activity");
+
+    // Worker claims activity
+    let claimed = queue
+        .claim_next("worker_test_01", "test", "test_task")
+        .await
+        .expect("Failed to claim")
+        .expect("Should have claimed");
+
+    assert_eq!(claimed.retry_count, 0);
+
+    // Wait for timeout to expire
+    sleep(Duration::from_millis(1200)).await;
+
+    // Call reclaim_stale_activities
+    let reclaimed = queue
+        .reclaim_stale_activities(100)
+        .await
+        .expect("Failed to reclaim stale activities");
+
+    assert_eq!(reclaimed.len(), 1, "Should reclaim 1 stale activity");
+    assert_eq!(reclaimed[0].workflow_id, workflow_id);
+    assert_eq!(reclaimed[0].activity_key, "test_activity");
+    assert!(
+        matches!(reclaimed[0].action, StaleActivityAction::MarkedFailed),
+        "Activity with no retries should be marked as failed"
+    );
+    assert_eq!(reclaimed[0].retry_count, 0);
+    assert_eq!(reclaimed[0].max_retries, 0);
+
+    // Verify activity is now failed in database
+    let status = sqlx::query_scalar!(
+        r#"SELECT status::text FROM activity_queue WHERE workflow_id = $1"#,
+        workflow_id
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to get status");
+
+    assert_eq!(status, Some("failed".to_string()));
+
+    // Verify activity cannot be claimed again
+    let no_claim = queue
+        .claim_next("worker_test_02", "test", "test_task")
+        .await
+        .expect("Claim call should succeed");
+
+    assert!(no_claim.is_none(), "Should not claim failed activity");
+
+    cleanup_queue(&pool, workflow_id).await;
+}
+
+#[tokio::test]
+#[serial]
+async fn test_reclaim_stale_activities_does_not_affect_non_stale() {
+    let pool = setup_test_pool().await;
+    let mut config = QueueConfig::default();
+    config.default_timeout = Duration::from_secs(60); // Long timeout
+
+    let queue = PostgresQueue::new(pool.clone(), config);
+    let workflow_id = Uuid::now_v7();
+    let worker_id = "worker_test_01";
+
+    // Schedule activity with long timeout
+    let activity = Activity {
+        key: "test_activity".to_string(),
+        worker: "test".to_string(),
+        activity_name: "test_task".to_string(),
+        parameters: json!({"key": "value"}),
+        settings: Some(ActivitySettings {
+            timeout_seconds: Some(60), // 60 second timeout
+            retry: Some(RetryPolicy {
+                max_attempts: 3,
+                strategy: BackoffStrategy::Fixed,
+                base_seconds: 2,
+                factor: 2.0,
+                max_seconds: 300,
+            }),
+            budget: None,
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: None,
+            scheduled_for: None,
+        }),
+        scheduled_for: None,
+        output_definitions: None,
+        iteration: None,
+    };
+
+    queue
+        .schedule(workflow_id, vec![activity])
+        .await
+        .expect("Failed to schedule activity");
+
+    // Worker claims activity
+    let claimed = queue
+        .claim_next(worker_id, "test", "test_task")
+        .await
+        .expect("Failed to claim")
+        .expect("Should have claimed");
+
+    // Do NOT wait for timeout - activity is still valid
+
+    // Call reclaim_stale_activities
+    let reclaimed = queue
+        .reclaim_stale_activities(100)
+        .await
+        .expect("Failed to reclaim stale activities");
+
+    assert!(
+        reclaimed.is_empty(),
+        "Should not reclaim non-stale activities"
+    );
+
+    // Verify activity is still running in database
+    let status = sqlx::query_scalar!(
+        r#"SELECT status::text FROM activity_queue WHERE workflow_id = $1"#,
+        workflow_id
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to get status");
+
+    assert_eq!(status, Some("running".to_string()));
+
+    // Verify claimed_by is still set
+    let claimed_by = sqlx::query_scalar!(
+        r#"SELECT claimed_by FROM activity_queue WHERE id = $1"#,
+        claimed.id
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to get claimed_by");
+
+    assert_eq!(claimed_by, Some(worker_id.to_string()));
+
+    cleanup_queue(&pool, workflow_id).await;
+}
+
+#[tokio::test]
+#[serial]
+async fn test_reclaim_stale_activities_multiple_activities() {
+    use kruxiaflow_core::queue::StaleActivityAction;
+
+    let pool = setup_test_pool().await;
+    let mut config = QueueConfig::default();
+    config.default_timeout = Duration::from_secs(1);
+
+    let queue = PostgresQueue::new(pool.clone(), config);
+    let workflow_id = Uuid::now_v7();
+
+    // Schedule 3 activities: 2 will timeout, 1 has long timeout
+    let activities: Vec<Activity> = vec![
+        Activity {
+            key: "stale_with_retry".to_string(),
+            worker: "test".to_string(),
+            activity_name: "test_task".to_string(),
+            parameters: json!({"key": "value1"}),
+            settings: Some(ActivitySettings {
+                timeout_seconds: Some(1),
+                retry: Some(RetryPolicy {
+                    max_attempts: 3, // Has retries
+                    strategy: BackoffStrategy::Fixed,
+                    base_seconds: 2,
+                    factor: 2.0,
+                    max_seconds: 300,
+                }),
+                budget: None,
+                cache: false,
+                cache_ttl: None,
+                iteration_limit: None,
+                delay: None,
+                scheduled_for: None,
+            }),
+            scheduled_for: None,
+            output_definitions: None,
+            iteration: None,
+        },
+        Activity {
+            key: "stale_no_retry".to_string(),
+            worker: "test".to_string(),
+            activity_name: "test_task".to_string(),
+            parameters: json!({"key": "value2"}),
+            settings: Some(ActivitySettings {
+                timeout_seconds: Some(1),
+                retry: Some(RetryPolicy {
+                    max_attempts: 0, // No retries (max_attempts is number of retries, not total attempts)
+                    strategy: BackoffStrategy::Fixed,
+                    base_seconds: 2,
+                    factor: 2.0,
+                    max_seconds: 300,
+                }),
+                budget: None,
+                cache: false,
+                cache_ttl: None,
+                iteration_limit: None,
+                delay: None,
+                scheduled_for: None,
+            }),
+            scheduled_for: None,
+            output_definitions: None,
+            iteration: None,
+        },
+        Activity {
+            key: "non_stale".to_string(),
+            worker: "test".to_string(),
+            activity_name: "test_task".to_string(),
+            parameters: json!({"key": "value3"}),
+            settings: Some(ActivitySettings {
+                timeout_seconds: Some(600), // 10 minute timeout
+                retry: Some(RetryPolicy {
+                    max_attempts: 3,
+                    strategy: BackoffStrategy::Fixed,
+                    base_seconds: 2,
+                    factor: 2.0,
+                    max_seconds: 300,
+                }),
+                budget: None,
+                cache: false,
+                cache_ttl: None,
+                iteration_limit: None,
+                delay: None,
+                scheduled_for: None,
+            }),
+            scheduled_for: None,
+            output_definitions: None,
+            iteration: None,
+        },
+    ];
+
+    queue
+        .schedule(workflow_id, activities)
+        .await
+        .expect("Failed to schedule activities");
+
+    // Claim all 3 activities
+    for i in 0..3 {
+        let worker_id = format!("worker_test_{:02}", i);
+        queue
+            .claim_next(&worker_id, "test", "test_task")
+            .await
+            .expect("Failed to claim")
+            .expect("Should have claimed");
+    }
+
+    // Wait for short timeouts to expire
+    sleep(Duration::from_millis(1200)).await;
+
+    // Call reclaim_stale_activities
+    let reclaimed = queue
+        .reclaim_stale_activities(100)
+        .await
+        .expect("Failed to reclaim stale activities");
+
+    assert_eq!(reclaimed.len(), 2, "Should reclaim 2 stale activities");
+
+    // Verify the actions
+    let reset_count = reclaimed
+        .iter()
+        .filter(|r| matches!(r.action, StaleActivityAction::ResetToPending))
+        .count();
+    let failed_count = reclaimed
+        .iter()
+        .filter(|r| matches!(r.action, StaleActivityAction::MarkedFailed))
+        .count();
+
+    assert_eq!(reset_count, 1, "One activity should be reset to pending");
+    assert_eq!(failed_count, 1, "One activity should be marked as failed");
+
+    // Verify database state
+    let pending_count = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) FROM activity_queue WHERE workflow_id = $1 AND status = 'pending'"#,
+        workflow_id
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to count pending");
+
+    let running_count = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) FROM activity_queue WHERE workflow_id = $1 AND status = 'running'"#,
+        workflow_id
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to count running");
+
+    let failed_count_db = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) FROM activity_queue WHERE workflow_id = $1 AND status = 'failed'"#,
+        workflow_id
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to count failed");
+
+    assert_eq!(pending_count, Some(1), "One activity should be pending");
+    assert_eq!(running_count, Some(1), "One activity should still be running (non_stale)");
+    assert_eq!(failed_count_db, Some(1), "One activity should be failed");
+
+    cleanup_queue(&pool, workflow_id).await;
+}

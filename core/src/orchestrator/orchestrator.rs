@@ -14,7 +14,7 @@ use crate::cost::{ActivityCostRecord, CostCalculator, CostTracker};
 use crate::events::{
     EventSource, NewWorkflowEvent, WorkflowEvent, WorkflowEventType, WorkflowStatus,
 };
-use crate::queue::{Activity, ActivityQueue};
+use crate::queue::{Activity, ActivityQueue, StaleActivityAction};
 use crate::workflow::template::{TemplateContext, resolve_template_value};
 use crate::workflow::{BudgetAction, apply_duration, parse_scheduled_for};
 use chrono::{DateTime, Utc};
@@ -74,12 +74,19 @@ pub async fn run_orchestrator(
         MAX_EVENT_PROCESSING_RETRIES
     );
 
-    // Spawn background task to check for stuck workflows
+    // Spawn background task to check for stuck workflows and stale activities
     let timeout_config = config.clone();
     let timeout_event_source = event_source.clone();
+    let timeout_activity_queue = activity_queue.clone();
     let timeout_shutdown = shutdown_token.clone();
     tokio::spawn(async move {
-        timeout_checker_task(timeout_config, timeout_event_source, timeout_shutdown).await;
+        timeout_checker_task(
+            timeout_config,
+            timeout_event_source,
+            timeout_activity_queue,
+            timeout_shutdown,
+        )
+        .await;
     });
 
     loop {
@@ -1056,6 +1063,29 @@ pub async fn process_workflow_event(
         );
     }
 
+    // 3.6. Early exit for terminal workflow states
+    // If workflow is already Completed or Failed, skip all scheduling logic
+    // This prevents errors in scheduling from blocking workflow state persistence
+    // and avoids scheduling activities for workflows that should not run anymore
+    let is_terminal = matches!(
+        state.status,
+        WorkflowStatus::Completed | WorkflowStatus::Failed
+    );
+
+    if is_terminal {
+        tracing::info!(
+            workflow_id = %event.workflow_id,
+            workflow_name = %state.definition_name,
+            status = %state.status,
+            "Workflow in terminal state, skipping activity scheduling"
+        );
+
+        // Save the terminal state and return early
+        save_materialized_state(&mut tx, event.workflow_id, &state).await?;
+        tx.commit().await?;
+        return Ok(());
+    }
+
     // 4. Find ready activities (using updated state)
     let eval_start = std::time::Instant::now();
     let eval_span = profile_span!(
@@ -1859,14 +1889,15 @@ async fn publish_failure_for_poison_event(
     Ok(())
 }
 
-/// Background task to check for stuck workflows and timeout them
+/// Background task to check for stuck workflows and stale activities
 async fn timeout_checker_task(
     config: OrchestratorConfig,
     event_source: Arc<dyn EventSource>,
+    activity_queue: Arc<dyn ActivityQueue>,
     shutdown_token: Option<CancellationToken>,
 ) {
     tracing::info!(
-        "Timeout checker starting (check_interval={}s, timeout={}s)",
+        "Timeout checker starting (check_interval={}s, workflow_timeout={}s)",
         config.timeout_check_interval.as_secs(),
         config.workflow_timeout.as_secs()
     );
@@ -1883,9 +1914,16 @@ async fn timeout_checker_task(
         // Sleep for check interval
         tokio::time::sleep(config.timeout_check_interval).await;
 
-        // Check for stuck workflows
+        // Check for stuck workflows (workflow-level timeout)
         if let Err(e) = check_and_timeout_stuck_workflows(&config, &event_source).await {
             tracing::error!("Failed to check for stuck workflows: {}", e);
+        }
+
+        // Check for stale activities (activity-level timeout)
+        if let Err(e) =
+            check_and_reclaim_stale_activities(&activity_queue, &event_source).await
+        {
+            tracing::error!("Failed to check for stale activities: {}", e);
         }
     }
 }
@@ -1947,6 +1985,81 @@ async fn check_and_timeout_stuck_workflows(
                 workflow.id,
                 e
             );
+        }
+    }
+
+    Ok(())
+}
+
+/// Check for stale running activities and reclaim them
+///
+/// Activities that have been running longer than their timeout are either:
+/// - Reset to pending (if retries remain) - workers will pick them up again
+/// - Marked as failed (if retries exhausted) - we emit ActivityFailed event
+async fn check_and_reclaim_stale_activities(
+    activity_queue: &Arc<dyn ActivityQueue>,
+    event_source: &Arc<dyn EventSource>,
+) -> Result<()> {
+    // Reclaim up to 100 stale activities per check
+    let reclaimed = activity_queue.reclaim_stale_activities(100).await?;
+
+    if reclaimed.is_empty() {
+        return Ok(());
+    }
+
+    tracing::info!(
+        "Reclaimed {} stale activities",
+        reclaimed.len()
+    );
+
+    // For activities that were marked as failed, emit ActivityFailed events
+    // so the orchestrator can update workflow state
+    for activity in reclaimed {
+        match activity.action {
+            StaleActivityAction::ResetToPending => {
+                // Activity will be picked up by a worker - no event needed
+                // The worker will emit ActivityCompleted or ActivityFailed when done
+                tracing::debug!(
+                    workflow_id = %activity.workflow_id,
+                    activity_key = %activity.activity_key,
+                    retry_count = activity.retry_count,
+                    "Stale activity reset to pending for retry"
+                );
+            }
+            StaleActivityAction::MarkedFailed => {
+                // Emit ActivityFailed event so orchestrator updates workflow state
+                let failed_event = NewWorkflowEvent {
+                    workflow_id: activity.workflow_id,
+                    event_type: WorkflowEventType::ActivityFailed,
+                    activity_key: Some(activity.activity_key.clone()),
+                    payload: json!({
+                        "error": format!(
+                            "Activity timed out after {} retries (max_retries={})",
+                            activity.retry_count,
+                            activity.max_retries
+                        ),
+                        "error_code": "ACTIVITY_TIMEOUT",
+                        "retry_count": activity.retry_count,
+                        "max_retries": activity.max_retries,
+                    }),
+                    iteration: activity.iteration,
+                };
+
+                if let Err(e) = event_source.publish(failed_event).await {
+                    tracing::error!(
+                        workflow_id = %activity.workflow_id,
+                        activity_key = %activity.activity_key,
+                        error = %e,
+                        "Failed to publish ActivityFailed event for timed out activity"
+                    );
+                } else {
+                    tracing::warn!(
+                        workflow_id = %activity.workflow_id,
+                        activity_key = %activity.activity_key,
+                        "Published ActivityFailed event for timed out activity"
+                    );
+                }
+            }
         }
     }
 

@@ -59,4 +59,14 @@ pub trait ActivityQueue: Send + Sync {
 
     /// Send heartbeat for long-running activity (extends timeout deadline)
     async fn heartbeat(&self, activity_id: Uuid, worker_id: &str) -> Result<()>;
+
+    /// Reclaim stale running activities that have exceeded their timeout.
+    ///
+    /// This is a background maintenance operation that:
+    /// - Finds activities where status='running' AND NOW() > claimed_at + timeout_duration
+    /// - If retry_count < max_retries: resets to pending for retry
+    /// - If retry_count >= max_retries: marks as failed
+    ///
+    /// Returns information about all reclaimed activities for event emission.
+    async fn reclaim_stale_activities(&self, limit: i64) -> Result<Vec<StaleActivityInfo>>;
 }
