@@ -2275,7 +2275,10 @@ async fn test_completed_workflow_early_exit() {
         )
         .await;
 
-        assert!(result.is_ok(), "Duplicate events should be handled gracefully");
+        assert!(
+            result.is_ok(),
+            "Duplicate events should be handled gracefully"
+        );
     }
 
     // Status should still be Completed
