@@ -1,9 +1,47 @@
 # Feature Request: Workflow Chaining
 
 **Date**: 2026-01-08
-**Status**: Proposed
-**Priority**: High
+**Status**: Deferred
+**Priority**: Low
 **Component**: Core / Orchestrator / Workflow Definitions
+
+## Resolution Note
+
+**2026-01-10**: Workflow chaining can already be achieved without dedicated syntax. Any workflow can include an HTTP activity that calls the kruxiaflow API to trigger a follow-up workflow:
+
+```yaml
+activities:
+  - key: trigger_enrichment
+    worker: http
+    condition: "{{finalize.result.rows[0].status == 'ready'}}"
+    parameters:
+      method: POST
+      url: "{{INPUT.kruxiaflow_api_url}}/api/v1/workflows"
+      headers:
+        Content-Type: application/json
+        Authorization: "Bearer {{INPUT.api_token}}"
+      body:
+        definition_name: enrich_bibliographic
+        namespace: "{{INPUT.namespace}}"
+        input:
+          source_id: "{{INPUT.source_id}}"
+          db_url: "{{INPUT.db_url}}"
+    depends_on: [finalize]
+```
+
+This approach:
+- Uses existing primitives (no new syntax required)
+- Leverages existing condition evaluation for conditional triggering
+- Works with existing input mapping via template expressions
+- Keeps workflow definitions self-contained and explicit
+
+What native chaining would add beyond this:
+- Parent-child relationship tracking in the database
+- API to view workflow trees (`?include=children`)
+- Cascade cancellation (`?cascade=true`)
+- Slightly cleaner declarative syntax
+
+These are ergonomic and observability improvements that can be revisited if demand warrants.
 
 ## Summary
 

@@ -247,8 +247,24 @@ parameters:
 
 ### Tests Added
 
-New unit tests in `worker/src/activities/postgres.rs`:
+**Unit Tests (no database required):**
+- `test_serialize_array_parameter` - Simple integer array serialization
+- `test_serialize_array_of_strings` - String array serialization
+- `test_serialize_object_parameter` - Object serialization
+- `test_serialize_nested_object` - Deeply nested object serialization
+- `test_serialize_array_of_objects` - Reproduces the exact bug scenario from the report
+- `test_serialize_special_characters_in_json` - Quotes, newlines, unicode, backslashes
+- `test_serialize_empty_array` - Empty array edge case
+- `test_serialize_empty_object` - Empty object edge case
+- `test_serialize_mixed_array` - Array with mixed types
+- `test_serialize_large_array` - Large array (1000 items)
+- `test_serialize_object_with_null_value` - Object with null field
+- `test_serialize_object_with_numeric_values` - Various numeric types
+- `test_serialize_scalar_types_unchanged` - Scalar types pass through correctly
+- `test_array_produces_valid_postgresql_jsonb` - Verifies no double-quoting
+- `test_object_produces_valid_postgresql_jsonb` - Verifies no double-quoting
 
+**Integration Tests (database required):**
 - `test_postgres_query_array_parameter`: Verifies array parameters work with `jsonb_array_elements()`
 - `test_postgres_query_object_parameter`: Verifies object parameters work with JSONB column insert
 - `test_postgres_query_nested_json_parameter`: Verifies deeply nested structures

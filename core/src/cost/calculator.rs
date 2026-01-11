@@ -359,6 +359,182 @@ mod tests {
     }
 
     // ============================================================================
+    // Regression Tests: Model Pricing JSON Serialization
+    // Prevents: docs/bugs/2026-01-04-model-pricing-tuple-key-serialization.md
+    // ============================================================================
+
+    #[test]
+    fn test_model_pricing_json_serialization() {
+        // Verify ModelPricing struct serializes to JSON correctly
+        let pricing = ModelPricing {
+            input_price_per_million: dec!(3.00),
+            output_price_per_million: dec!(15.00),
+            cached_input_price_per_million: Some(dec!(0.30)),
+        };
+
+        let json = serde_json::to_value(&pricing).expect("ModelPricing should serialize to JSON");
+        assert!(json.is_object());
+
+        let obj = json.as_object().unwrap();
+        assert!(obj.contains_key("input_price_per_million"));
+        assert!(obj.contains_key("output_price_per_million"));
+        assert!(obj.contains_key("cached_input_price_per_million"));
+    }
+
+    #[test]
+    fn test_model_pricing_json_roundtrip() {
+        // Verify ModelPricing can roundtrip through JSON
+        let pricing = ModelPricing {
+            input_price_per_million: dec!(3.00),
+            output_price_per_million: dec!(15.00),
+            cached_input_price_per_million: Some(dec!(0.30)),
+        };
+
+        let json = serde_json::to_string(&pricing).expect("Should serialize");
+        let roundtrip: ModelPricing = serde_json::from_str(&json).expect("Should deserialize");
+
+        assert_eq!(
+            roundtrip.input_price_per_million,
+            pricing.input_price_per_million
+        );
+        assert_eq!(
+            roundtrip.output_price_per_million,
+            pricing.output_price_per_million
+        );
+        assert_eq!(
+            roundtrip.cached_input_price_per_million,
+            pricing.cached_input_price_per_million
+        );
+    }
+
+    #[test]
+    fn test_model_pricing_hashmap_string_keys_serializable() {
+        // Regression test: HashMap<String, ModelPricing> should serialize to JSON
+        // This is the FIXED behavior after the bug was resolved
+        let mut pricing_map: HashMap<String, ModelPricing> = HashMap::new();
+
+        pricing_map.insert(
+            "anthropic/claude-3-5-sonnet-20241022".to_string(),
+            ModelPricing {
+                input_price_per_million: dec!(3.00),
+                output_price_per_million: dec!(15.00),
+                cached_input_price_per_million: Some(dec!(0.30)),
+            },
+        );
+        pricing_map.insert(
+            "anthropic/claude-3-5-haiku-20241022".to_string(),
+            ModelPricing {
+                input_price_per_million: dec!(0.80),
+                output_price_per_million: dec!(4.00),
+                cached_input_price_per_million: Some(dec!(0.08)),
+            },
+        );
+
+        // This MUST succeed - verifies the fix is in place
+        let json = serde_json::to_value(&pricing_map)
+            .expect("HashMap<String, ModelPricing> must serialize to JSON");
+
+        assert!(json.is_object(), "JSON should be an object");
+        let obj = json.as_object().unwrap();
+        assert!(
+            obj.contains_key("anthropic/claude-3-5-sonnet-20241022"),
+            "Should have sonnet key"
+        );
+        assert!(
+            obj.contains_key("anthropic/claude-3-5-haiku-20241022"),
+            "Should have haiku key"
+        );
+    }
+
+    #[test]
+    fn test_model_pricing_hashmap_tuple_keys_not_serializable() {
+        // Documents the BROKEN behavior that was fixed
+        // HashMap<(String, String), ModelPricing> CANNOT serialize to JSON
+        // because JSON only supports string keys
+        let mut pricing_map: HashMap<(String, String), ModelPricing> = HashMap::new();
+
+        pricing_map.insert(
+            (
+                "anthropic".to_string(),
+                "claude-3-5-sonnet-20241022".to_string(),
+            ),
+            ModelPricing {
+                input_price_per_million: dec!(3.00),
+                output_price_per_million: dec!(15.00),
+                cached_input_price_per_million: Some(dec!(0.30)),
+            },
+        );
+
+        // This MUST fail - JSON doesn't support tuple keys
+        let result = serde_json::to_value(&pricing_map);
+        assert!(
+            result.is_err(),
+            "HashMap with tuple keys should NOT serialize to JSON"
+        );
+
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("key must be a string"),
+            "Error should mention string keys: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_model_pricing_hashmap_string_keys_roundtrip() {
+        // Verify HashMap<String, ModelPricing> can roundtrip through JSON
+        let mut pricing_map: HashMap<String, ModelPricing> = HashMap::new();
+
+        pricing_map.insert(
+            "anthropic/claude-3-5-sonnet-20241022".to_string(),
+            ModelPricing {
+                input_price_per_million: dec!(3.00),
+                output_price_per_million: dec!(15.00),
+                cached_input_price_per_million: Some(dec!(0.30)),
+            },
+        );
+        pricing_map.insert(
+            "ollama/llama3.2".to_string(),
+            ModelPricing {
+                input_price_per_million: dec!(0.00),
+                output_price_per_million: dec!(0.00),
+                cached_input_price_per_million: None,
+            },
+        );
+
+        let json = serde_json::to_string(&pricing_map).expect("Should serialize");
+        let roundtrip: HashMap<String, ModelPricing> =
+            serde_json::from_str(&json).expect("Should deserialize");
+
+        assert_eq!(roundtrip.len(), 2);
+        assert!(roundtrip.contains_key("anthropic/claude-3-5-sonnet-20241022"));
+        assert!(roundtrip.contains_key("ollama/llama3.2"));
+
+        let sonnet = roundtrip
+            .get("anthropic/claude-3-5-sonnet-20241022")
+            .unwrap();
+        assert_eq!(sonnet.input_price_per_million, dec!(3.00));
+        assert_eq!(sonnet.output_price_per_million, dec!(15.00));
+    }
+
+    #[test]
+    fn test_model_pricing_key_format_provider_slash_model() {
+        // Verify the key format is exactly "provider/model"
+        // This is important for the orchestrator to access pricing correctly
+        let provider = "anthropic";
+        let model = "claude-3-5-sonnet-20241022";
+        let key = format!("{}/{}", provider, model);
+
+        assert_eq!(key, "anthropic/claude-3-5-sonnet-20241022");
+
+        // Verify we can parse the key back to provider/model
+        let parts: Vec<&str> = key.splitn(2, '/').collect();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0], provider);
+        assert_eq!(parts[1], model);
+    }
+
+    // ============================================================================
     // Integration Tests (Require Database)
     // ============================================================================
 

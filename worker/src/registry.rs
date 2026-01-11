@@ -136,12 +136,7 @@ impl ActivityRegistry {
         timeout: Duration,
     ) -> Result<ActivityResult> {
         // For backwards compatibility, create a minimal context
-        let ctx = ActivityContext::new(
-            Uuid::nil(),
-            Uuid::nil(),
-            String::new(),
-            None,
-        );
+        let ctx = ActivityContext::new(Uuid::nil(), Uuid::nil(), String::new(), None);
         self.execute_with_context(worker, activity_name, parameters, settings, timeout, &ctx)
             .await
     }

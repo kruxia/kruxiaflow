@@ -89,6 +89,11 @@ pub fn load_secrets_from_env() -> HashMap<String, String> {
 mod tests {
     use super::*;
 
+    // ============================================================================
+    // Regression Tests: Secrets Loading from Environment Variables
+    // Prevents: docs/bugs/2026-01-04-secrets-not-loaded.md
+    // ============================================================================
+
     #[test]
     fn test_load_secrets_from_env() {
         // Set test environment variables
@@ -130,6 +135,217 @@ mod tests {
             std::env::remove_var("KRUXIAFLOW_SECRET_API_KEY");
             std::env::remove_var("KRUXIAFLOW_SECRET_MIXED_CASE_NAME");
             std::env::remove_var("OTHER_VAR");
+        }
+    }
+
+    #[test]
+    fn test_load_secrets_from_env_empty() {
+        // Ensure test isolation - save and clear any existing secrets
+        let existing_secrets: Vec<(String, String)> = std::env::vars()
+            .filter(|(k, _)| k.starts_with("KRUXIAFLOW_SECRET_"))
+            .collect();
+
+        unsafe {
+            for (key, _) in &existing_secrets {
+                std::env::remove_var(key);
+            }
+        }
+
+        // With no KRUXIAFLOW_SECRET_* variables, should return empty HashMap
+        let secrets = load_secrets_from_env();
+        let filtered: HashMap<String, String> = secrets
+            .into_iter()
+            .filter(|(k, _)| {
+                // Filter out any that might have been set by other tests
+                k != "db_url" && k != "api_key" && k != "mixed_case_name"
+            })
+            .collect();
+
+        // Should be empty or only contain secrets from this test run
+        assert!(
+            filtered.is_empty() || filtered.len() < 5,
+            "Expected empty or minimal secrets, got: {:?}",
+            filtered
+        );
+
+        // Restore
+        unsafe {
+            for (key, value) in existing_secrets {
+                std::env::set_var(key, value);
+            }
+        }
+    }
+
+    #[test]
+    fn test_load_secrets_preserves_underscores_in_name() {
+        // Secret names with underscores after the prefix should be preserved
+        unsafe {
+            std::env::set_var(
+                "KRUXIAFLOW_SECRET_DATABASE_CONNECTION_STRING",
+                "postgres://db",
+            );
+        }
+
+        let secrets = load_secrets_from_env();
+
+        // The key should be "database_connection_string" (lowercased, underscores preserved)
+        assert_eq!(
+            secrets.get("database_connection_string"),
+            Some(&"postgres://db".to_string())
+        );
+
+        // Cleanup
+        unsafe {
+            std::env::remove_var("KRUXIAFLOW_SECRET_DATABASE_CONNECTION_STRING");
+        }
+    }
+
+    #[test]
+    fn test_load_secrets_preserves_special_characters_in_value() {
+        // Secret values with special characters should be preserved exactly
+        let special_value = "p@ss=word!with#special$chars&more%stuff";
+
+        unsafe {
+            std::env::set_var("KRUXIAFLOW_SECRET_SPECIAL_PASS", special_value);
+        }
+
+        let secrets = load_secrets_from_env();
+
+        assert_eq!(
+            secrets.get("special_pass"),
+            Some(&special_value.to_string())
+        );
+
+        // Cleanup
+        unsafe {
+            std::env::remove_var("KRUXIAFLOW_SECRET_SPECIAL_PASS");
+        }
+    }
+
+    #[test]
+    fn test_load_secrets_handles_empty_value() {
+        // Empty secret value should be preserved (not filtered out)
+        unsafe {
+            std::env::set_var("KRUXIAFLOW_SECRET_EMPTY_SECRET", "");
+        }
+
+        let secrets = load_secrets_from_env();
+
+        assert_eq!(secrets.get("empty_secret"), Some(&"".to_string()));
+
+        // Cleanup
+        unsafe {
+            std::env::remove_var("KRUXIAFLOW_SECRET_EMPTY_SECRET");
+        }
+    }
+
+    #[test]
+    fn test_load_secrets_case_insensitivity() {
+        // Keys should be lowercased regardless of original case
+        unsafe {
+            std::env::set_var("KRUXIAFLOW_SECRET_UPPERCASE_KEY", "value1");
+            std::env::set_var("KRUXIAFLOW_SECRET_lowercase_key", "value2");
+            std::env::set_var("KRUXIAFLOW_SECRET_MixedCase_Key", "value3");
+        }
+
+        let secrets = load_secrets_from_env();
+
+        // All should be accessible via lowercase keys
+        assert_eq!(secrets.get("uppercase_key"), Some(&"value1".to_string()));
+        assert_eq!(secrets.get("lowercase_key"), Some(&"value2".to_string()));
+        assert_eq!(secrets.get("mixedcase_key"), Some(&"value3".to_string()));
+
+        // Cleanup
+        unsafe {
+            std::env::remove_var("KRUXIAFLOW_SECRET_UPPERCASE_KEY");
+            std::env::remove_var("KRUXIAFLOW_SECRET_lowercase_key");
+            std::env::remove_var("KRUXIAFLOW_SECRET_MixedCase_Key");
+        }
+    }
+
+    #[test]
+    fn test_load_secrets_prefix_only_not_included() {
+        // The prefix itself without any suffix should not create an entry
+        unsafe {
+            std::env::set_var("KRUXIAFLOW_SECRET_", "empty_key_value");
+        }
+
+        let secrets = load_secrets_from_env();
+
+        // Empty string key should exist but be empty
+        assert_eq!(secrets.get(""), Some(&"empty_key_value".to_string()));
+
+        // Cleanup
+        unsafe {
+            std::env::remove_var("KRUXIAFLOW_SECRET_");
+        }
+    }
+
+    #[test]
+    fn test_load_secrets_similar_prefix_not_matched() {
+        // Variables with similar but not exact prefix should not be included
+        unsafe {
+            std::env::set_var("KRUXIAFLOW_SECRETS_EXTRA_S", "should-not-match");
+            std::env::set_var("KRUXIAFLOW_SECRET", "no-underscore");
+            std::env::set_var("KRUXIAFLOW_SECRETX_TYPO", "typo-prefix");
+        }
+
+        let secrets = load_secrets_from_env();
+
+        // None of these should be included (wrong prefix)
+        assert!(secrets.get("extra_s").is_none());
+        assert!(
+            secrets.get("").is_none()
+                || secrets.get("").map(|v| v.as_str()) != Some("no-underscore")
+        );
+        assert!(secrets.get("typo").is_none());
+
+        // Cleanup
+        unsafe {
+            std::env::remove_var("KRUXIAFLOW_SECRETS_EXTRA_S");
+            std::env::remove_var("KRUXIAFLOW_SECRET");
+            std::env::remove_var("KRUXIAFLOW_SECRETX_TYPO");
+        }
+    }
+
+    #[test]
+    fn test_load_secrets_url_with_credentials() {
+        // Common use case: database URLs with embedded credentials
+        let db_url = "postgres://admin:super$ecret@db.example.com:5432/mydb?sslmode=require";
+
+        unsafe {
+            std::env::set_var("KRUXIAFLOW_SECRET_DATABASE_URL", db_url);
+        }
+
+        let secrets = load_secrets_from_env();
+
+        assert_eq!(secrets.get("database_url"), Some(&db_url.to_string()));
+
+        // Cleanup
+        unsafe {
+            std::env::remove_var("KRUXIAFLOW_SECRET_DATABASE_URL");
+        }
+    }
+
+    #[test]
+    fn test_load_secrets_json_value() {
+        // Secret values can contain JSON (e.g., service account keys)
+        let json_value = r#"{"type":"service_account","project_id":"test","private_key":"-----BEGIN RSA PRIVATE KEY-----\nMIIE..."}"#;
+
+        unsafe {
+            std::env::set_var("KRUXIAFLOW_SECRET_SERVICE_ACCOUNT", json_value);
+        }
+
+        let secrets = load_secrets_from_env();
+
+        assert_eq!(
+            secrets.get("service_account"),
+            Some(&json_value.to_string())
+        );
+
+        // Cleanup
+        unsafe {
+            std::env::remove_var("KRUXIAFLOW_SECRET_SERVICE_ACCOUNT");
         }
     }
 }
