@@ -303,6 +303,27 @@ impl Default for TemplateContext {
     }
 }
 
+/// Create a minijinja Environment with custom filters
+fn create_template_env() -> Environment<'static> {
+    let mut env = Environment::new();
+
+    // Configure strict undefined behavior - errors on undefined variables
+    env.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
+
+    // Add custom coalesce filter that handles both undefined and null values
+    // This addresses: docs/bugs/2026-01-08-minijinja-default-filter-null.md
+    // The built-in `default` filter only handles undefined, not null/None values
+    env.add_filter("coalesce", |value: MiniValue, default: MiniValue| {
+        if value.is_undefined() || value.is_none() {
+            default
+        } else {
+            value
+        }
+    });
+
+    env
+}
+
 /// Check if a string contains template expressions {{...}}
 fn contains_templates(s: &str) -> bool {
     s.contains("{{") && s.contains("}}")
@@ -335,9 +356,7 @@ pub fn resolve_template_value(
     value: &Value,
     context: &TemplateContext,
 ) -> Result<Value, TemplateError> {
-    let mut env = Environment::new();
-    // Configure strict undefined behavior - errors on undefined variables
-    env.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
+    let env = create_template_env();
     let mini_context = context.to_minijinja_value();
 
     resolve_value_recursive(value, &env, &mini_context)
@@ -505,9 +524,7 @@ pub fn resolve_template(
     template: &str,
     context: &TemplateContext,
 ) -> Result<String, TemplateError> {
-    let mut env = Environment::new();
-    // Configure strict undefined behavior - errors on undefined variables
-    env.set_undefined_behavior(minijinja::UndefinedBehavior::Strict);
+    let env = create_template_env();
     let mini_context = context.to_minijinja_value();
 
     if contains_templates(template) {
@@ -1229,5 +1246,236 @@ mod tests {
         let value = Value::String("{{ACTIVITY.iteration}}".to_string());
         let result = resolve_template_value(&value, &context).unwrap();
         assert_eq!(result, Value::Number(2.into())); // Should return actual value
+    }
+
+    // ============================================================================
+    // Coalesce Filter Tests
+    // Regression tests for: docs/bugs/2026-01-08-minijinja-default-filter-null.md
+    // ============================================================================
+
+    #[test]
+    fn test_coalesce_filter_on_null_value() {
+        // The coalesce filter should return the default when value is null
+        use crate::workflow::{ActivityOutput, OutputType};
+
+        let mut context = TemplateContext::new();
+        let outputs = vec![ActivityOutput {
+            name: "result".to_string(),
+            output_type: OutputType::Value,
+            value: serde_json::json!({
+                "rows": [{"doi": null}]  // Explicit null value from database
+            }),
+        }];
+        context.add_activity_output("check_source".to_string(), outputs);
+
+        // Without coalesce, accessing doi returns null
+        let value = Value::String("{{check_source.result.rows[0].doi}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Null);
+
+        // With coalesce, null values get the fallback
+        let value = Value::String("{{check_source.result.rows[0].doi | coalesce('')}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("".to_string()));
+    }
+
+    #[test]
+    fn test_coalesce_filter_with_length() {
+        // This is the exact bug case: {{value | coalesce('') | length > 0}}
+        // The default filter doesn't work because it only handles undefined, not null
+        use crate::workflow::{ActivityOutput, OutputType};
+
+        let mut context = TemplateContext::new();
+        let outputs = vec![ActivityOutput {
+            name: "result".to_string(),
+            output_type: OutputType::Value,
+            value: serde_json::json!({
+                "rows": [{"doi": null}]
+            }),
+        }];
+        context.add_activity_output("check_source".to_string(), outputs);
+
+        // This should work: coalesce handles null, then length works on empty string
+        let value = Value::String(
+            "{{check_source.result.rows[0].doi | coalesce('') | length}}".to_string(),
+        );
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Number(0.into()));
+
+        // Test the full condition pattern
+        let value = Value::String(
+            "{{check_source.result.rows[0].doi | coalesce('') | length > 0}}".to_string(),
+        );
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Bool(false));
+    }
+
+    #[test]
+    fn test_coalesce_filter_on_undefined_value() {
+        // Coalesce should also handle undefined values (like default does)
+        let context = TemplateContext::new();
+
+        // Missing key on INPUT should trigger coalesce fallback
+        let value = Value::String("{{INPUT.missing | coalesce('fallback')}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("fallback".to_string()));
+    }
+
+    #[test]
+    fn test_coalesce_filter_on_non_null_value() {
+        // Coalesce should pass through non-null values unchanged
+        use crate::workflow::{ActivityOutput, OutputType};
+
+        let mut context = TemplateContext::new();
+        let outputs = vec![ActivityOutput {
+            name: "result".to_string(),
+            output_type: OutputType::Value,
+            value: serde_json::json!({
+                "rows": [{"doi": "10.1234/test"}]
+            }),
+        }];
+        context.add_activity_output("check_source".to_string(), outputs);
+
+        // When value is present, coalesce returns it unchanged
+        let value = Value::String("{{check_source.result.rows[0].doi | coalesce('')}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("10.1234/test".to_string()));
+
+        // Length check should work on the actual value
+        let value = Value::String(
+            "{{check_source.result.rows[0].doi | coalesce('') | length > 0}}".to_string(),
+        );
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_coalesce_filter_preserves_type() {
+        // Coalesce should preserve types of non-null values
+        use crate::workflow::{ActivityOutput, OutputType};
+
+        let mut context = TemplateContext::new();
+        let outputs = vec![ActivityOutput {
+            name: "result".to_string(),
+            output_type: OutputType::Value,
+            value: serde_json::json!({
+                "count": 42,
+                "active": true,
+                "items": ["a", "b", "c"]
+            }),
+        }];
+        context.add_activity_output("data".to_string(), outputs);
+
+        // Number type preserved
+        let value = Value::String("{{data.result.count | coalesce(0)}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Number(42.into()));
+
+        // Boolean type preserved
+        let value = Value::String("{{data.result.active | coalesce(false)}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Bool(true));
+
+        // Array type preserved
+        let value = Value::String("{{data.result.items | coalesce([])}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(
+            result,
+            Value::Array(vec![
+                Value::String("a".to_string()),
+                Value::String("b".to_string()),
+                Value::String("c".to_string())
+            ])
+        );
+    }
+
+    #[test]
+    fn test_coalesce_vs_default_on_null() {
+        // Demonstrate the difference between coalesce and default filters
+        use crate::workflow::{ActivityOutput, OutputType};
+
+        let mut context = TemplateContext::new();
+        let outputs = vec![ActivityOutput {
+            name: "result".to_string(),
+            output_type: OutputType::Value,
+            value: serde_json::json!({
+                "doi": null  // Explicit null
+            }),
+        }];
+        context.add_activity_output("source".to_string(), outputs);
+
+        // default filter: does NOT handle null (only undefined)
+        // This returns null because the key exists (just has null value)
+        let value = Value::String("{{source.result.doi | default('fallback')}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Null); // default doesn't help with null!
+
+        // coalesce filter: handles BOTH null and undefined
+        let value = Value::String("{{source.result.doi | coalesce('fallback')}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("fallback".to_string())); // coalesce works!
+    }
+
+    #[test]
+    fn test_coalesce_with_zero_and_empty_string() {
+        // Zero and empty string are valid non-null values, should NOT trigger fallback
+        use crate::workflow::{ActivityOutput, OutputType};
+
+        let mut context = TemplateContext::new();
+        let outputs = vec![ActivityOutput {
+            name: "result".to_string(),
+            output_type: OutputType::Value,
+            value: serde_json::json!({
+                "count": 0,
+                "name": ""
+            }),
+        }];
+        context.add_activity_output("data".to_string(), outputs);
+
+        // Zero should NOT be replaced
+        let value = Value::String("{{data.result.count | coalesce(99)}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Number(0.into()));
+
+        // Empty string should NOT be replaced
+        let value = Value::String("{{data.result.name | coalesce('default')}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("".to_string()));
+    }
+
+    #[test]
+    fn test_coalesce_in_condition_expression() {
+        // Test coalesce in a full conditional expression (typical use case)
+        use crate::workflow::{ActivityOutput, OutputType};
+
+        let mut context = TemplateContext::new();
+        let outputs = vec![ActivityOutput {
+            name: "result".to_string(),
+            output_type: OutputType::Value,
+            value: serde_json::json!({
+                "rows": [{"doi": null}]
+            }),
+        }];
+        context.add_activity_output("check_source".to_string(), outputs);
+
+        // The bug scenario: using coalesce to safely check length of possibly-null field
+        let condition =
+            "{{check_source.result.rows[0].doi | coalesce('') | length > 0}}".to_string();
+        let result = resolve_template(&condition, &context).unwrap();
+        assert_eq!(result, "false");
+
+        // With a non-null DOI
+        let mut context2 = TemplateContext::new();
+        let outputs2 = vec![ActivityOutput {
+            name: "result".to_string(),
+            output_type: OutputType::Value,
+            value: serde_json::json!({
+                "rows": [{"doi": "10.1093/mind/fzab057"}]
+            }),
+        }];
+        context2.add_activity_output("check_source".to_string(), outputs2);
+
+        let result2 = resolve_template(&condition, &context2).unwrap();
+        assert_eq!(result2, "true");
     }
 }
