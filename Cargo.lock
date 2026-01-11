@@ -1788,6 +1788,7 @@ dependencies = [
  "bcrypt",
  "bytes",
  "chrono",
+ "flate2",
  "futures",
  "kruxiaflow-api",
  "kruxiaflow-core",

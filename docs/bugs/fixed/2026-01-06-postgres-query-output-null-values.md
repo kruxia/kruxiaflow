@@ -189,7 +189,21 @@ Updated `row_to_json` to:
 
 ### Tests Added
 
-New unit tests in `worker/src/activities/postgres.rs`:
+**Unit Tests (no database required):**
+
+These tests verify the `StatementResult` serialization contract that downstream activities depend on:
+
+- `test_statement_result_serialization_with_rows` - Verifies rows serialize correctly with UUIDs, strings, integers
+- `test_statement_result_rows_affected` - Verifies INSERT/UPDATE/DELETE output format
+- `test_statement_result_uuid_as_string` - Regression test: UUIDs are strings, not null
+- `test_statement_result_integers_as_numbers` - Regression test: Integers are numbers, not null
+- `test_statement_result_nullable_values` - Verifies NULL is JSON null, not missing field
+- `test_statement_result_mixed_types` - Reproduces exact bug scenario with all types
+- `test_statement_result_roundtrip` - Verifies JSON roundtrip preserves all types
+- `test_statement_result_empty_rows` - Empty rows array edge case
+- `test_statement_result_jsonb_values` - JSONB columns preserve structure
+
+**Integration Tests (database required):**
 
 - `test_postgres_query_uuid_columns`: Verifies non-nullable UUID columns serialize correctly
 - `test_postgres_query_nullable_uuid`: Verifies nullable UUID columns handle both values and NULLs

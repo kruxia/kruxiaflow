@@ -105,28 +105,32 @@ This allows the dependency evaluation to proceed to condition checking. If the c
 
 ## Test Cases Needed
 
-1. Activity with conditional dependency where dependency is Skipped (condition false)
-2. Activity with unconditional dependency where dependency is Skipped (should still wait)
-3. Activity with mix of Completed and Skipped dependencies
-4. Workflow with multiple conditional branches where some are taken and some are skipped
+1. Activity with conditional dependency where dependency is Skipped (condition false) → not applicable
+2. Activity with unconditional dependency where dependency is Skipped → B is Skipped (cascaded)
+3. Activity with unconditional dependency where dependency is Failed → B is Skipped (cascaded)
+4. Activity with mix of Completed and Skipped dependencies (conditional) → runs if any applicable
+5. Workflow with multiple conditional branches where some are taken and some are skipped
+6. Cascade chain: A→B→C where A is Skipped → B and C both Skipped
 
 ## Semantic Notes
 
 After this fix, the behavior is:
 
-| Dependency Status | Has Condition | Condition Value | Result |
-|-------------------|---------------|-----------------|--------|
-| Completed | No | N/A | Applicable, satisfied |
-| Completed | Yes | true | Applicable, satisfied |
-| Completed | Yes | false | Not applicable |
-| Failed | No | N/A | Applicable, blocks activity |
-| Failed | Yes | true | Applicable, satisfied (allows conditional error handling) |
-| Failed | Yes | false | Not applicable |
-| Skipped | No | N/A | Applicable, blocks activity |
-| Skipped | Yes | true | Applicable, satisfied |
-| Skipped | Yes | false | Not applicable |
-| NotScheduled | Any | Any | Not terminal, must wait |
-| Pending | Any | Any | Not terminal, must wait |
-| Running | Any | Any | Not terminal, must wait |
+| Dep Status   | Has Cond | Cond Val | Result                     |
+|--------------|----------|-------|-------------------------------|
+| Completed    | No       | N/A   | Satisfied                     |
+| Completed    | Yes      | true  | Satisfied                     |
+| Completed    | Yes      | false | Not applicable                |
+| Failed       | No       | N/A   | **Cascades skip** (B skipped) |
+| Failed       | Yes      | true  | Satisfied (error handling)    |
+| Failed       | Yes      | false | Not applicable                |
+| Skipped      | No       | N/A   | **Cascades skip** (B skipped) |
+| Skipped      | Yes      | true  | Satisfied                     |
+| Skipped      | Yes      | false | Not applicable                |
+| NotScheduled | Any      | Any   | Not terminal, must wait       |
+| Pending      | Any      | Any   | Not terminal, must wait       |
+| Running      | Any      | Any   | Not terminal, must wait       |
 
-For unconditional dependencies, `Skipped` will block the activity (same as `Failed`). For conditional dependencies where the condition is true, the activity can proceed even if the dependency is `Skipped`.
+**Key semantic**: For unconditional dependencies, if the dependency is `Skipped` or `Failed`, the dependent activity is **canceled** (marked as Skipped), not blocked forever. This cascades through the dependency chain via `find_skipped_activities()`.
+
+For conditional dependencies where the condition is true, the activity can proceed even if the dependency is `Skipped`.

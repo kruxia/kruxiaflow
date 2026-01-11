@@ -1,7 +1,7 @@
 # Bug: http_request Activity Doesn't Decompress Gzip Responses
 
 **Date**: 2026-01-07
-**Status**: Fixed, needs testing
+**Status**: Fixed
 **Severity**: Medium
 **Component**: Worker / HTTP Request Activity
 
@@ -116,16 +116,19 @@ Option 2 (auto-decompression) is the best solution because:
 
 ## Files Affected
 
-- Location of `http_request` activity implementation (likely `worker/src/activities/http.rs` or similar)
+- `worker/src/activities/http.rs` - HTTP request activity implementation (fix: `.gzip(true)` on reqwest client)
 
-## Test Cases Needed
+## Test Cases (Implemented)
 
-1. Request to server returning gzip-compressed JSON
-2. Request to server returning uncompressed JSON
-3. Request to server returning gzip-compressed HTML
-4. Request with explicit `Accept-Encoding: identity`
-5. Request with explicit `Accept-Encoding: gzip`
-6. Binary response (should work regardless)
+Tests in `worker/tests/http_activity_integration_test.rs`:
+
+1. `test_http_gzip_compressed_json_response` - Request to server returning gzip-compressed JSON
+2. `test_http_uncompressed_json_response` - Request to server returning uncompressed JSON
+3. `test_http_gzip_compressed_text_response` - Request to server returning gzip-compressed HTML
+4. `test_http_explicit_accept_encoding_identity` - Request with explicit `Accept-Encoding: identity`
+5. `test_http_explicit_accept_encoding_gzip` - Request with explicit `Accept-Encoding: gzip`
+6. `test_http_gzip_response_with_unicode` - Unicode content in gzip response
+7. `test_http_gzip_large_response` - Large gzip-compressed response
 
 ## Related Issues
 
