@@ -1,9 +1,12 @@
 # Bug: Unconditional Dependencies on Mutually Exclusive Activities Cause Hang
 
 **Date**: 2026-01-08
-**Status**: Open
+**Status**: Consolidated
+**Consolidated Into**: [2026-01-10-orchestrator-logic.md](2026-01-10-orchestrator-logic.md)
 **Severity**: High
 **Component**: Core / Orchestrator / Dependency Evaluator
+
+> **Note**: This bug has been consolidated with two related bugs into a unified analysis and implementation plan. The solution is to expose activity status in templates, allowing users to write explicit `{{dep.status == 'completed'}}` conditions. Unconditional dependency behavior remains unchanged. See the consolidated report for the implementation plan.
 
 ## Summary
 

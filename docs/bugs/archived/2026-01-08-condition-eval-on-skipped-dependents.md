@@ -1,9 +1,12 @@
 # Bug: Template Evaluation on Skipped Activities' Dependents
 
 **Date**: 2026-01-08
-**Status**: Open
+**Status**: Consolidated
+**Consolidated Into**: [2026-01-10-orchestrator-logic.md](2026-01-10-orchestrator-logic.md)
 **Severity**: High
 **Component**: Core / Orchestrator / Dependency Evaluator
+
+> **Note**: This bug has been consolidated with two related bugs into a unified analysis and implementation plan. The fix involves short-circuiting condition evaluation when the dependency is skipped. See the consolidated report for the implementation plan.
 
 ## Summary
 

@@ -1096,6 +1096,182 @@ activities:
 
 See `examples/03-document-processing.yaml` for complete example demonstrating parallel execution with file management.
 
+### External Worker File Access
+
+External worker activities access workflow file storage through HTTP API endpoints. This enables workers in any language to download files from previous activities and upload file outputs.
+
+#### File Reference Format
+
+Files stored in workflow storage are referenced using a URI format:
+
+```
+{provider}://{workflow_id}/{activity_key}/{filename}
+```
+
+**Examples**:
+```
+postgres://019353a1-b0c1-7000-8000-000000000001/extract_content/passages.jsonl
+s3://019353a1-b0c1-7000-8000-000000000001/transform_data/output.csv
+```
+
+#### How File References Reach Activities
+
+Activities receive file references through **parameters** in the poll response. Workflow definitions use template expressions to pass file references between activities:
+
+```yaml
+activities:
+  - key: extract_content
+    worker: external
+    activity_name: document_parser
+    parameters:
+      input_url: "{{INPUT.document_url}}"
+    outputs:
+      - name: passages_file
+        type: file  # Stored in workflow storage
+
+  - key: process_data
+    worker: external
+    activity_name: data_processor
+    depends_on:
+      - extract_content
+    parameters:
+      # File reference passed via template expression
+      input_file: "{{FILE.extract_content.passages_file}}"
+      config: "{{INPUT.processing_config}}"
+```
+
+When the worker polls via `POST /api/v1/workers/poll`, it receives:
+
+```json
+{
+  "activity_id": "550e8400-e29b-41d4-a716-446655440000",
+  "workflow_id": "019353a1-b0c1-7000-8000-000000000001",
+  "activity_key": "process_data",
+  "parameters": {
+    "input_file": "postgres://019353a1-.../extract_content/passages.jsonl",
+    "config": {"threshold": 0.8}
+  }
+}
+```
+
+#### File Download API
+
+External workers download files using the authenticated HTTP endpoint:
+
+```http
+GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/files/{filename}
+Authorization: Bearer {jwt_token}
+```
+
+**Response**:
+- `Content-Type`: File's content type (e.g., `application/json`)
+- `Content-Disposition`: `attachment; filename="{filename}"`
+- Body: Binary file content (streamed in 8KB chunks)
+
+**Example Worker Code** (Python):
+```python
+def download_file(self, file_reference: str) -> bytes:
+    """Download file from workflow storage using file reference."""
+    # Parse reference: postgres://workflow_id/activity_key/filename
+    parts = file_reference.replace("postgres://", "").split("/")
+    workflow_id, activity_key, filename = parts[0], parts[1], "/".join(parts[2:])
+
+    response = requests.get(
+        f"{self.api_url}/workflows/{workflow_id}/activities/{activity_key}/files/{filename}",
+        headers={"Authorization": f"Bearer {self.access_token}"},
+        stream=True
+    )
+    response.raise_for_status()
+    return response.content
+```
+
+#### File Upload API
+
+External workers upload files when completing activities that declare file outputs:
+
+```http
+POST /api/v1/workflows/{workflow_id}/activities/{activity_key}/files/{filename}
+Authorization: Bearer {jwt_token}
+Content-Type: application/octet-stream
+
+{binary file content}
+```
+
+**Response** (200 OK):
+```json
+{
+  "filename": "result.jsonl",
+  "size": 102400,
+  "content_type": "application/x-ndjson",
+  "created_at": "2025-11-27T10:30:00Z"
+}
+```
+
+**Example Worker Code** (Python):
+```python
+def upload_file(self, workflow_id: str, activity_key: str,
+                filename: str, content: bytes, content_type: str) -> dict:
+    """Upload file to workflow storage."""
+    response = requests.post(
+        f"{self.api_url}/workflows/{workflow_id}/activities/{activity_key}/files/{filename}",
+        headers={
+            "Authorization": f"Bearer {self.access_token}",
+            "Content-Type": content_type
+        },
+        data=content
+    )
+    response.raise_for_status()
+    return response.json()
+```
+
+#### Complete External Worker Flow with Files
+
+```mermaid
+sequenceDiagram
+    participant W as External Worker
+    participant A as API Server
+    participant S as Workflow Storage
+
+    Note over W,A: 1) Poll for activity
+    W->>A: POST /api/v1/workers/poll
+    A-->>W: Activity with file reference in parameters
+
+    Note over W,S: 2) Download input file
+    W->>A: GET /workflows/{wf}/activities/{act}/files/{name}
+    A->>S: Stream file from storage
+    S-->>A: File chunks (8KB)
+    A-->>W: File content
+
+    Note over W: 3) Process file locally
+    W->>W: Execute activity logic
+
+    Note over W,S: 4) Upload output file
+    W->>A: POST /workflows/{wf}/activities/{act}/files/{name}
+    A->>S: Stream file to storage
+    S-->>A: File stored
+    A-->>W: File metadata
+
+    Note over W,A: 5) Complete activity
+    W->>A: POST /activities/{id}/complete
+    A-->>W: Acknowledged
+```
+
+#### File Access Summary
+
+| Operation     | Endpoint                                                                  | Use Case                       |
+|---------------|---------------------------------------------------------------------------|--------------------------------|
+| **Download**  | `GET /api/v1/workflows/{wf}/activities/{act}/files/{filename}`            | Get input files from prior activities |
+| **Upload**    | `POST /api/v1/workflows/{wf}/activities/{act}/files/{filename}`           | Store output files             |
+| **List**      | `GET /api/v1/workflows/{wf}/activities/{act}/output`                      | List files with download URLs  |
+| **Metadata**  | Response from upload or list endpoints                                    | Get file size, type, timestamps |
+
+**Key Points**:
+- All file operations require JWT authentication (Bearer token)
+- Files are streamed in 8KB chunks to avoid memory bloat
+- Large files (multi-GB) are supported via streaming
+- Both built-in and external workers use identical HTTP API endpoints
+- File references are opaque URIs that workers parse to construct API calls
+
 ### Query Optimization
 
 **Stored Procedures**: Most queries are implemented as stored procedures managed by sqlx:
