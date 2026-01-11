@@ -2723,6 +2723,11 @@ POST /api/v1/workflows/{id}/signal
 {"event": "approval_granted", "data": {...}}
 ```
 
+**Implementation Notes**:
+- Wait-for-event activities do **not** run in a worker - they are completed directly by the API when the signal/event arrives via `POST /api/v1/workflows/{id}/signal`
+- The orchestrator schedules wait-for-event activities but they remain in a "waiting" state until the API receives the corresponding signal
+- This avoids tying up worker resources for potentially long human response times
+
 **Use Cases**:
 - Manual approval steps
 - Wait for external webhook
