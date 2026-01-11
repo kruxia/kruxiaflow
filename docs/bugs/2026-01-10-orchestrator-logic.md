@@ -51,37 +51,39 @@ If `find_bibliography` was skipped, `result` is undefined, causing a MiniJinja t
 
 The problem: Step 2 happens even for skipped dependencies, and the template evaluation fails.
 
-### Problem 3: Semantic Table Not Fully Implemented
+### Problem 3: Semantic Table Clarification
 
-The intended semantic table from `2026-01-06-skipped-not-treated-as-terminal-state.md`:
+The correct semantic table for dependency evaluation:
 
-| Dependency Status | Has Condition | Condition Value | Result              |
-|-------------------|---------------|-----------------|---------------------|
-| Completed         | No            | N/A             | Satisfied           |
-| Completed         | Yes           | true            | Satisfied           |
-| Completed         | Yes           | false           | Not applicable      |
-| Skipped           | No            | N/A             | **Should satisfy?** |
-| Skipped           | Yes           | true            | Not applicable      |
-| Skipped           | Yes           | false           | Not applicable      |
-| Failed            | No            | N/A             | Blocks (fail path)  |
-| Failed            | Yes           | true            | Satisfied           |
-| Failed            | Yes           | false           | Not applicable      |
+| Dependency Status | Has Condition | Condition Value | Result                    |
+|-------------------|---------------|-----------------|---------------------------|
+| Completed         | No            | N/A             | Satisfied                 |
+| Completed         | Yes           | true            | Satisfied                 |
+| Completed         | Yes           | false           | Not applicable            |
+| Skipped           | No            | N/A             | **Cascades skip**         |
+| Skipped           | Yes           | true            | Not applicable            |
+| Skipped           | Yes           | false           | Not applicable            |
+| Failed            | No            | N/A             | **Cascades skip**         |
+| Failed            | Yes           | true            | Satisfied                 |
+| Failed            | Yes           | false           | Not applicable            |
 
-The current implementation (lines 284-298) treats unconditional dependencies as always requiring `Completed` status:
+**Key semantic**: When activity B has an unconditional dependency on activity A that is Failed or Skipped, activity B should be **canceled** (marked as Skipped), not blocked forever.
+
+The current implementation (lines 284-298) correctly returns `Ok(false)` for non-Completed deps:
 
 ```rust
 } else {
     // No explicit conditions - this dependency is always applicable
     found_applicable_dependency = true;
 
-    // Dependency activity must be Completed (not just Failed)
+    // Dependency activity must be Completed (not just Failed/Skipped)
     if dependency_state.status != WorkflowActivityStatus::Completed {
-        return Ok(false); // Only run dependent activities on success
+        return Ok(false); // Activity not ready - will be caught by find_skipped_activities
     }
 }
 ```
 
-This means unconditional `depends_on: [store_references_openalex]` on a skipped activity blocks forever.
+This is then caught by `find_skipped_activities()` which marks activities as Skipped when they have all-terminal dependencies but cannot run. This **cascades** the skip/fail state through the dependency chain.
 
 ## Impact
 
@@ -133,14 +135,19 @@ if let Some(condition_list) = &dep_rel.conditions {
 
 This prevents template errors when conditions reference skipped activity results.
 
-### Part 3: Keep Unconditional Dependencies Simple
+### Part 3: Unconditional Dependency Cascade Behavior
 
-**No change to unconditional dependency behavior.** Unconditional dependencies continue to require `Completed` status.
+**Unconditional dependencies cascade skip/fail state.** When an activity has an unconditional dependency on a Failed or Skipped activity, the dependent activity is automatically marked as Skipped.
 
-**Rationale**: Keeping unconditional dependencies simple and intuitive:
-- `depends_on: [activity_a]` ≡ `depends_on: [{activity_key: activity_a, condition: "{{activity_a.status == 'completed'}}"}]`
-- Users who need different semantics (e.g., "run after whichever path completes") use explicit status conditions
-- No implicit magic behavior that users must learn
+**Rationale**: This provides intuitive "fail-fast" behavior:
+- If A fails, all activities that unconditionally depend on A are canceled
+- If A is skipped (e.g., condition was false), downstream unconditional deps are also skipped
+- This cascades through the entire dependency chain
+- Prevents workflows from hanging with activities stuck in NotScheduled
+
+**Semantic equivalence**:
+- `depends_on: [activity_a]` means "run only if activity_a completed successfully"
+- If activity_a is Failed/Skipped → this activity is Skipped (cascaded)
 
 **User-facing pattern for converging exclusive paths**:
 
@@ -156,7 +163,7 @@ This prevents template errors when conditions reference skipped activity results
       condition: "{{mark_no_citations.status == 'completed'}}"
 ```
 
-This is explicit, self-documenting, and follows the principle that workflow authors should clearly express their intent.
+This pattern uses explicit status conditions to say "run after whichever path completes" rather than relying on unconditional dependencies.
 
 ## Implementation Plan
 
@@ -236,9 +243,10 @@ Test cases needed:
    - When path_b runs and path_a is skipped: finalize runs after path_b
    - When both are skipped: finalize is also skipped
 
-5. **Unconditional dependencies unchanged**:
-   - Unconditional `depends_on: [activity_a]` blocks if activity_a is skipped
-   - Confirms no implicit behavior change for unconditional deps
+5. **Unconditional dependencies cascade skip/fail**:
+   - Unconditional `depends_on: [activity_a]` is Skipped if activity_a is Skipped
+   - Unconditional `depends_on: [activity_a]` is Skipped if activity_a is Failed
+   - Cascade propagates through the dependency chain
 
 ### Phase 5: Documentation
 
@@ -279,7 +287,7 @@ This is a backwards-compatible enhancement:
 - [ ] Skipped dependencies with conditions don't cause template errors (short-circuit)
 - [ ] Condition `{{dep.status == 'completed'}}` is true only when dep completed
 - [ ] Condition `{{dep.status == 'completed'}}` is false when dep is skipped (not applicable)
-- [ ] Unconditional dependencies on skipped activities still block (unchanged behavior)
+- [ ] Unconditional dependencies on skipped activities cascade (activity is Skipped)
 - [ ] Workflows with converging exclusive paths work when using explicit status conditions
 - [ ] All existing tests pass
 - [ ] New tests cover status exposure and short-circuit behavior

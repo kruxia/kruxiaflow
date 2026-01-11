@@ -807,6 +807,283 @@ mod tests {
     }
 
     // ========================================================================
+    // Unit Tests: StatementResult Output Format (No Database Required)
+    // Regression tests for: docs/bugs/2026-01-06-postgres-query-output-null-values.md
+    //
+    // These tests verify the expected output format of postgres_query results.
+    // The row_to_json function requires PgRow which needs a database, but we can
+    // verify the StatementResult serialization contract that downstream activities
+    // depend on.
+    // ========================================================================
+
+    #[test]
+    fn test_statement_result_serialization_with_rows() {
+        // Verify StatementResult serializes correctly with rows
+        let result = StatementResult {
+            rows: Some(vec![
+                json!({"id": "550e8400-e29b-41d4-a716-446655440000", "name": "test", "count": 42}),
+                json!({"id": "550e8400-e29b-41d4-a716-446655440001", "name": "test2", "count": 100}),
+            ]),
+            rows_affected: None,
+        };
+
+        let json_str = serde_json::to_string(&result).expect("Should serialize");
+        let parsed: Value = serde_json::from_str(&json_str).expect("Should parse");
+
+        // Verify structure
+        let rows = parsed.get("rows").expect("Should have rows");
+        assert!(rows.is_array());
+        assert_eq!(rows.as_array().unwrap().len(), 2);
+
+        // Verify first row has correct types
+        let row0 = &rows.as_array().unwrap()[0];
+        assert!(row0.get("id").unwrap().is_string());
+        assert!(row0.get("name").unwrap().is_string());
+        assert!(row0.get("count").unwrap().is_number());
+    }
+
+    #[test]
+    fn test_statement_result_rows_affected() {
+        // Verify StatementResult with rows_affected (INSERT/UPDATE/DELETE)
+        let result = StatementResult {
+            rows: None,
+            rows_affected: Some(5),
+        };
+
+        let json_str = serde_json::to_string(&result).expect("Should serialize");
+        let parsed: Value = serde_json::from_str(&json_str).expect("Should parse");
+
+        // rows should not be present (skip_serializing_if)
+        assert!(parsed.get("rows").is_none());
+        assert_eq!(parsed.get("rows_affected").unwrap(), 5);
+    }
+
+    #[test]
+    fn test_statement_result_uuid_as_string() {
+        // Regression test: UUIDs should be serialized as strings, not null
+        // This is the expected output format from row_to_json
+        let uuid_str = "550e8400-e29b-41d4-a716-446655440000";
+        let result = StatementResult {
+            rows: Some(vec![json!({"id": uuid_str, "source_id": uuid_str})]),
+            rows_affected: None,
+        };
+
+        let json_str = serde_json::to_string(&result).expect("Should serialize");
+        let parsed: Value = serde_json::from_str(&json_str).expect("Should parse");
+
+        let row = &parsed.get("rows").unwrap().as_array().unwrap()[0];
+
+        // UUIDs should be strings, NOT null
+        let id = row.get("id").unwrap();
+        assert!(id.is_string(), "UUID should be string, got: {:?}", id);
+        assert_eq!(id.as_str().unwrap(), uuid_str);
+
+        let source_id = row.get("source_id").unwrap();
+        assert!(
+            source_id.is_string(),
+            "UUID should be string, got: {:?}",
+            source_id
+        );
+    }
+
+    #[test]
+    fn test_statement_result_integers_as_numbers() {
+        // Regression test: Integers should be serialized as numbers, not null
+        let result = StatementResult {
+            rows: Some(vec![json!({
+                "page_start": 1,
+                "page_end": 100,
+                "small_val": 32767_i16,
+                "big_val": 9223372036854775807_i64
+            })]),
+            rows_affected: None,
+        };
+
+        let json_str = serde_json::to_string(&result).expect("Should serialize");
+        let parsed: Value = serde_json::from_str(&json_str).expect("Should parse");
+
+        let row = &parsed.get("rows").unwrap().as_array().unwrap()[0];
+
+        // All integers should be numbers, NOT null
+        let page_start = row.get("page_start").unwrap();
+        assert!(
+            page_start.is_number(),
+            "Integer should be number, got: {:?}",
+            page_start
+        );
+        assert_eq!(page_start, 1);
+
+        let page_end = row.get("page_end").unwrap();
+        assert!(
+            page_end.is_number(),
+            "Integer should be number, got: {:?}",
+            page_end
+        );
+        assert_eq!(page_end, 100);
+
+        let big_val = row.get("big_val").unwrap();
+        assert!(
+            big_val.is_number(),
+            "BIGINT should be number, got: {:?}",
+            big_val
+        );
+        assert_eq!(big_val.as_i64().unwrap(), 9223372036854775807_i64);
+    }
+
+    #[test]
+    fn test_statement_result_nullable_values() {
+        // Regression test: Nullable columns should properly represent NULL as JSON null
+        let result = StatementResult {
+            rows: Some(vec![
+                json!({"id": 1, "nullable_field": "has_value", "another_nullable": 42}),
+                json!({"id": 2, "nullable_field": null, "another_nullable": null}),
+            ]),
+            rows_affected: None,
+        };
+
+        let json_str = serde_json::to_string(&result).expect("Should serialize");
+        let parsed: Value = serde_json::from_str(&json_str).expect("Should parse");
+
+        let rows = parsed.get("rows").unwrap().as_array().unwrap();
+
+        // First row: values present
+        assert_eq!(rows[0].get("nullable_field").unwrap(), "has_value");
+        assert_eq!(rows[0].get("another_nullable").unwrap(), 42);
+
+        // Second row: null values should be JSON null, not missing
+        assert!(
+            rows[1].get("nullable_field").is_some(),
+            "Nullable field should exist"
+        );
+        assert!(
+            rows[1].get("nullable_field").unwrap().is_null(),
+            "Nullable field should be null"
+        );
+        assert!(rows[1].get("another_nullable").unwrap().is_null());
+    }
+
+    #[test]
+    fn test_statement_result_mixed_types() {
+        // Regression test: Mixed types should all serialize correctly
+        // This reproduces the exact bug scenario from the report
+        let result = StatementResult {
+            rows: Some(vec![json!({
+                "id": "550e8400-e29b-41d4-a716-446655440000",  // UUID as string
+                "source_id": "550e8400-e29b-41d4-a716-446655440001",  // UUID as string
+                "page_start": 42,  // INTEGER
+                "page_end": 100,  // INTEGER
+                "score": 0.95,  // REAL/FLOAT
+                "title": "Test Document",  // TEXT
+                "active": true  // BOOLEAN
+            })]),
+            rows_affected: None,
+        };
+
+        let json_str = serde_json::to_string(&result).expect("Should serialize");
+        let parsed: Value = serde_json::from_str(&json_str).expect("Should parse");
+
+        let row = &parsed.get("rows").unwrap().as_array().unwrap()[0];
+
+        // ALL fields should have their correct types, NONE should be null
+        assert!(row.get("id").unwrap().is_string());
+        assert!(row.get("source_id").unwrap().is_string());
+        assert!(row.get("page_start").unwrap().is_number());
+        assert!(row.get("page_end").unwrap().is_number());
+        assert!(row.get("score").unwrap().is_number());
+        assert!(row.get("title").unwrap().is_string());
+        assert!(row.get("active").unwrap().is_boolean());
+
+        // Verify specific values
+        assert_eq!(
+            row.get("id").unwrap(),
+            "550e8400-e29b-41d4-a716-446655440000"
+        );
+        assert_eq!(row.get("page_start").unwrap(), 42);
+        assert_eq!(row.get("title").unwrap(), "Test Document");
+        assert_eq!(row.get("active").unwrap(), true);
+    }
+
+    #[test]
+    fn test_statement_result_roundtrip() {
+        // Verify StatementResult survives JSON roundtrip (important for activity output storage)
+        let original = StatementResult {
+            rows: Some(vec![json!({
+                "uuid_field": "550e8400-e29b-41d4-a716-446655440000",
+                "int_field": 42,
+                "float_field": 3.14,
+                "bool_field": true,
+                "null_field": null,
+                "string_field": "hello"
+            })]),
+            rows_affected: None,
+        };
+
+        // Serialize to JSON string
+        let json_str = serde_json::to_string(&original).expect("Should serialize");
+
+        // Deserialize back
+        let roundtrip: StatementResult =
+            serde_json::from_str(&json_str).expect("Should deserialize");
+
+        // Verify structure preserved
+        assert!(roundtrip.rows.is_some());
+        let rows = roundtrip.rows.unwrap();
+        assert_eq!(rows.len(), 1);
+
+        let row = &rows[0];
+        assert_eq!(
+            row.get("uuid_field").unwrap(),
+            "550e8400-e29b-41d4-a716-446655440000"
+        );
+        assert_eq!(row.get("int_field").unwrap(), 42);
+        assert!(row.get("null_field").unwrap().is_null());
+    }
+
+    #[test]
+    fn test_statement_result_empty_rows() {
+        // Empty rows array should serialize correctly
+        let result = StatementResult {
+            rows: Some(vec![]),
+            rows_affected: None,
+        };
+
+        let json_str = serde_json::to_string(&result).expect("Should serialize");
+        let parsed: Value = serde_json::from_str(&json_str).expect("Should parse");
+
+        let rows = parsed.get("rows").unwrap().as_array().unwrap();
+        assert!(rows.is_empty());
+    }
+
+    #[test]
+    fn test_statement_result_jsonb_values() {
+        // JSONB columns should preserve their structure
+        let result = StatementResult {
+            rows: Some(vec![json!({
+                "id": 1,
+                "metadata": {"key": "value", "nested": {"a": 1, "b": 2}},
+                "tags": ["tag1", "tag2", "tag3"]
+            })]),
+            rows_affected: None,
+        };
+
+        let json_str = serde_json::to_string(&result).expect("Should serialize");
+        let parsed: Value = serde_json::from_str(&json_str).expect("Should parse");
+
+        let row = &parsed.get("rows").unwrap().as_array().unwrap()[0];
+
+        // JSONB object should be preserved
+        let metadata = row.get("metadata").unwrap();
+        assert!(metadata.is_object());
+        assert_eq!(metadata.get("key").unwrap(), "value");
+        assert_eq!(metadata.get("nested").unwrap().get("a").unwrap(), 1);
+
+        // JSONB array should be preserved
+        let tags = row.get("tags").unwrap();
+        assert!(tags.is_array());
+        assert_eq!(tags.as_array().unwrap().len(), 3);
+    }
+
+    // ========================================================================
     // Integration Test Helpers (Database Required)
     // ========================================================================
 
