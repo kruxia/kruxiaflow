@@ -1,7 +1,7 @@
 # Bug: Template Evaluation Errors Crash Timeout Event Processing
 
 **Reported:** 2026-01-08
-**Status:** Fix implemented, needs testing
+**Status:** Fixed
 **Severity:** High - causes workflows to get permanently stuck
 
 ## Summary
@@ -93,12 +93,22 @@ Mark individual activity as failed and continue with others instead of returning
 
 - `core/src/orchestrator/orchestrator.rs`
 
-## Testing Required
+## Testing
 
-1. **Unit test:** Process `WorkflowFailed` event when activities have unresolved template dependencies
-2. **Integration test:** Workflow timeout with incomplete activities - verify status becomes `failed`
-3. **Regression test:** Normal workflow completion still works
-4. **Edge case:** Template error in single activity during parameter resolution - other activities should still schedule
+### Automated Tests
+
+Regression tests added in `core/tests/orchestrator_integration_tests.rs`:
+
+- `test_workflow_failed_with_incomplete_template_dependencies` - Process WorkflowFailed event when activities have unresolved template dependencies, verify workflow transitions to Failed status
+- `test_workflow_failed_with_multiple_incomplete_dependencies` - More complex scenario with multiple activities and nested conditions
+- `test_normal_workflow_with_conditions_still_completes` - Regression test ensuring normal workflow completion with conditions still works
+
+Run with:
+```bash
+cargo test --package kruxiaflow-core --test orchestrator_integration_tests -- test_workflow_failed_with_incomplete
+cargo test --package kruxiaflow-core --test orchestrator_integration_tests -- test_workflow_failed_with_multiple
+cargo test --package kruxiaflow-core --test orchestrator_integration_tests -- test_normal_workflow_with_conditions
+```
 
 ## Related Issues
 

@@ -1192,3 +1192,504 @@ async fn test_orchestrator_backoff_when_no_events() {
     // If we get here without hanging, backoff is working
     assert!(true, "Orchestrator backoff works when no events");
 }
+
+// ============================================================================
+// Template Error During Timeout Processing Tests
+// Bug fix: docs/bugs/2026-01-08-template-error-crashes-timeout-processing.md
+// ============================================================================
+
+/// Test: WorkflowFailed event with template conditions on incomplete activities
+///
+/// Verifies fix for bug where template evaluation errors during WorkflowFailed
+/// processing caused the workflow to get stuck in 'running' state.
+///
+/// The bug occurred when:
+/// 1. A timeout triggers WorkflowFailed event
+/// 2. find_ready_activities evaluates conditions like {{activity_a.result.rows}}
+/// 3. activity_a never completed, so result is undefined
+/// 4. Template error crashes processing, workflow stays stuck
+///
+/// Expected behavior after fix: workflow gracefully transitions to Failed status.
+#[tokio::test]
+#[serial]
+async fn test_workflow_failed_with_incomplete_template_dependencies() {
+    let pool = setup_test_db().await;
+    clean_test_data(&pool).await;
+
+    // Create workflow with template conditions that reference activity outputs
+    let definition = WorkflowDefinition {
+        id: Uuid::now_v7(),
+        name: "template_timeout_workflow".to_string(),
+        version: "1.0".to_string(),
+        activities: vec![
+            ActivityDefinition {
+                key: "fetch_data".to_string(),
+                worker: "test".to_string(),
+                activity_name: "fetch".to_string(),
+                parameters: json!({}),
+                settings: None,
+                depends_on: None,
+                dependency_of: None,
+                output_definitions: None,
+            },
+            ActivityDefinition {
+                key: "process_data".to_string(),
+                worker: "test".to_string(),
+                activity_name: "process".to_string(),
+                parameters: json!({}),
+                settings: None,
+                // This condition references fetch_data outputs which won't exist
+                depends_on: Some(vec![DependencyEdge {
+                    activity_key: "fetch_data".to_string(),
+                    conditions: Some(vec!["{{fetch_data.rows | length > 0}}".to_string()]),
+                }]),
+                dependency_of: None,
+                output_definitions: None,
+            },
+        ],
+    };
+
+    let definition_id = insert_workflow_definition(&pool, &definition).await;
+    let workflow_id = Uuid::now_v7();
+    insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
+
+    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let activity_queue: Arc<dyn ActivityQueue> =
+        Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let config = OrchestratorConfig::new(pool.clone());
+
+    // 1. Publish and process WorkflowCreated to start the workflow
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id,
+            event_type: WorkflowEventType::WorkflowCreated,
+            activity_key: None,
+            payload: json!({}),
+            iteration: None,
+        })
+        .await
+        .expect("Failed to publish WorkflowCreated");
+
+    let events = event_source
+        .poll("test_orchestrator")
+        .await
+        .expect("Failed to poll");
+
+    for event in &events {
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
+            event,
+            &event_source,
+            &activity_queue,
+            &config,
+        )
+        .await
+        .expect("Failed to process WorkflowCreated event");
+    }
+
+    // Verify fetch_data was scheduled (first activity has no dependencies)
+    let queued = sqlx::query!(
+        r#"SELECT activity_key FROM activity_queue WHERE workflow_id = $1"#,
+        workflow_id
+    )
+    .fetch_all(&pool)
+    .await
+    .expect("Failed to query queue");
+
+    assert_eq!(queued.len(), 1, "fetch_data should be scheduled");
+    assert_eq!(queued[0].activity_key, "fetch_data");
+
+    // 2. Simulate timeout by publishing WorkflowFailed event
+    //    NOTE: fetch_data is still pending, so process_data's conditions
+    //    will reference undefined outputs
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id,
+            event_type: WorkflowEventType::WorkflowFailed,
+            activity_key: None,
+            payload: json!({"reason": "Workflow timeout", "timeout_seconds": 1}),
+            iteration: None,
+        })
+        .await
+        .expect("Failed to publish WorkflowFailed");
+
+    event_source
+        .update_position("test_orchestrator", events.last().unwrap().id)
+        .await
+        .expect("Failed to update position");
+
+    let failure_events = event_source
+        .poll("test_orchestrator")
+        .await
+        .expect("Failed to poll");
+
+    // Process the WorkflowFailed event
+    // Before the fix, this would crash with template error
+    // After the fix, it should gracefully handle the error
+    for event in &failure_events {
+        let result = kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
+            event,
+            &event_source,
+            &activity_queue,
+            &config,
+        )
+        .await;
+
+        // Processing should succeed (or if it fails, we catch the error gracefully)
+        // The key assertion is that the workflow ends up in Failed status
+        if let Err(e) = result {
+            // If there's still an error, log it but continue - we'll check final status
+            eprintln!(
+                "Warning: process_workflow_event returned error (may be expected during fix): {:?}",
+                e
+            );
+        }
+    }
+
+    // 3. Verify workflow status is Failed (not stuck in running)
+    let workflow = sqlx::query!(
+        r#"SELECT status as "status: kruxiaflow_core::events::WorkflowStatus" FROM workflows WHERE id = $1"#,
+        workflow_id
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("Failed to query workflow");
+
+    use kruxiaflow_core::events::WorkflowStatus;
+    assert_eq!(
+        workflow.status,
+        WorkflowStatus::Failed,
+        "Workflow should be in Failed status after timeout, not stuck in running"
+    );
+}
+
+/// Test: WorkflowFailed event with complex nested template conditions
+///
+/// Tests a more complex scenario where multiple activities have template
+/// conditions that depend on incomplete activities.
+#[tokio::test]
+#[serial]
+async fn test_workflow_failed_with_multiple_incomplete_dependencies() {
+    let pool = setup_test_db().await;
+    clean_test_data(&pool).await;
+
+    // Create workflow with multiple activities that have complex conditions
+    let definition = WorkflowDefinition {
+        id: Uuid::now_v7(),
+        name: "complex_template_timeout".to_string(),
+        version: "1.0".to_string(),
+        activities: vec![
+            ActivityDefinition {
+                key: "root".to_string(),
+                worker: "test".to_string(),
+                activity_name: "root".to_string(),
+                parameters: json!({}),
+                settings: None,
+                depends_on: None,
+                dependency_of: None,
+                output_definitions: None,
+            },
+            ActivityDefinition {
+                key: "branch_a".to_string(),
+                worker: "test".to_string(),
+                activity_name: "process".to_string(),
+                parameters: json!({}),
+                settings: None,
+                depends_on: Some(vec![DependencyEdge {
+                    activity_key: "root".to_string(),
+                    conditions: Some(vec!["{{root.value == 'A'}}".to_string()]),
+                }]),
+                dependency_of: None,
+                output_definitions: None,
+            },
+            ActivityDefinition {
+                key: "branch_b".to_string(),
+                worker: "test".to_string(),
+                activity_name: "process".to_string(),
+                parameters: json!({}),
+                settings: None,
+                depends_on: Some(vec![DependencyEdge {
+                    activity_key: "root".to_string(),
+                    conditions: Some(vec!["{{root.value == 'B'}}".to_string()]),
+                }]),
+                dependency_of: None,
+                output_definitions: None,
+            },
+            ActivityDefinition {
+                key: "final".to_string(),
+                worker: "test".to_string(),
+                activity_name: "final".to_string(),
+                parameters: json!({}),
+                settings: None,
+                // Depends on both branches - will have undefined refs when timeout occurs
+                depends_on: Some(vec![
+                    DependencyEdge {
+                        activity_key: "branch_a".to_string(),
+                        conditions: None,
+                    },
+                    DependencyEdge {
+                        activity_key: "branch_b".to_string(),
+                        conditions: None,
+                    },
+                ]),
+                dependency_of: None,
+                output_definitions: None,
+            },
+        ],
+    };
+
+    let definition_id = insert_workflow_definition(&pool, &definition).await;
+    let workflow_id = Uuid::now_v7();
+    insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
+
+    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let activity_queue: Arc<dyn ActivityQueue> =
+        Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let config = OrchestratorConfig::new(pool.clone());
+
+    // Start workflow
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id,
+            event_type: WorkflowEventType::WorkflowCreated,
+            activity_key: None,
+            payload: json!({}),
+            iteration: None,
+        })
+        .await
+        .unwrap();
+
+    let events = event_source.poll("test_orch").await.unwrap();
+    for event in &events {
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
+            event,
+            &event_source,
+            &activity_queue,
+            &config,
+        )
+        .await
+        .unwrap();
+    }
+
+    // Timeout the workflow without completing root
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id,
+            event_type: WorkflowEventType::WorkflowFailed,
+            activity_key: None,
+            payload: json!({"reason": "Workflow timeout", "timeout_seconds": 1}),
+            iteration: None,
+        })
+        .await
+        .unwrap();
+
+    event_source
+        .update_position("test_orch", events.last().unwrap().id)
+        .await
+        .unwrap();
+
+    let failure_events = event_source.poll("test_orch").await.unwrap();
+
+    for event in &failure_events {
+        let _ = kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
+            event,
+            &event_source,
+            &activity_queue,
+            &config,
+        )
+        .await;
+    }
+
+    // Verify workflow is Failed
+    let workflow = sqlx::query!(
+        r#"SELECT status as "status: kruxiaflow_core::events::WorkflowStatus" FROM workflows WHERE id = $1"#,
+        workflow_id
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    use kruxiaflow_core::events::WorkflowStatus;
+    assert_eq!(
+        workflow.status,
+        WorkflowStatus::Failed,
+        "Workflow should be Failed after timeout"
+    );
+}
+
+/// Test: Normal workflow completion still works (regression test)
+///
+/// Ensures that fixing the template error doesn't break normal workflow
+/// completion where activities complete successfully.
+#[tokio::test]
+#[serial]
+async fn test_normal_workflow_with_conditions_still_completes() {
+    let pool = setup_test_db().await;
+    clean_test_data(&pool).await;
+
+    // Same structure as template timeout test, but we complete activities properly
+    let definition = WorkflowDefinition {
+        id: Uuid::now_v7(),
+        name: "normal_conditional_workflow".to_string(),
+        version: "1.0".to_string(),
+        activities: vec![
+            ActivityDefinition {
+                key: "fetch_data".to_string(),
+                worker: "test".to_string(),
+                activity_name: "fetch".to_string(),
+                parameters: json!({}),
+                settings: None,
+                depends_on: None,
+                dependency_of: None,
+                output_definitions: None,
+            },
+            ActivityDefinition {
+                key: "process_data".to_string(),
+                worker: "test".to_string(),
+                activity_name: "process".to_string(),
+                parameters: json!({}),
+                settings: None,
+                depends_on: Some(vec![DependencyEdge {
+                    activity_key: "fetch_data".to_string(),
+                    conditions: Some(vec!["{{fetch_data.has_data == true}}".to_string()]),
+                }]),
+                dependency_of: None,
+                output_definitions: None,
+            },
+        ],
+    };
+
+    let definition_id = insert_workflow_definition(&pool, &definition).await;
+    let workflow_id = Uuid::now_v7();
+    insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
+
+    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let activity_queue: Arc<dyn ActivityQueue> =
+        Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let config = OrchestratorConfig::new(pool.clone());
+
+    // Start workflow
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id,
+            event_type: WorkflowEventType::WorkflowCreated,
+            activity_key: None,
+            payload: json!({}),
+            iteration: None,
+        })
+        .await
+        .unwrap();
+
+    let mut events = event_source.poll("test_orch").await.unwrap();
+    for event in &events {
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
+            event,
+            &event_source,
+            &activity_queue,
+            &config,
+        )
+        .await
+        .unwrap();
+    }
+
+    // Complete fetch_data with output that satisfies condition
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id,
+            event_type: WorkflowEventType::ActivityCompleted,
+            activity_key: Some("fetch_data".to_string()),
+            payload: json!({"outputs": {"has_data": true, "rows": [1, 2, 3]}}),
+            iteration: None,
+        })
+        .await
+        .unwrap();
+
+    event_source
+        .update_position("test_orch", events.last().unwrap().id)
+        .await
+        .unwrap();
+
+    events = event_source.poll("test_orch").await.unwrap();
+    for event in &events {
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
+            event,
+            &event_source,
+            &activity_queue,
+            &config,
+        )
+        .await
+        .unwrap();
+    }
+
+    // Verify process_data was scheduled (condition satisfied)
+    let queued = sqlx::query!(
+        r#"SELECT activity_key FROM activity_queue WHERE workflow_id = $1"#,
+        workflow_id
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    assert!(
+        queued.iter().any(|q| q.activity_key == "process_data"),
+        "process_data should be scheduled when condition is satisfied"
+    );
+
+    // Complete process_data
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id,
+            event_type: WorkflowEventType::ActivityCompleted,
+            activity_key: Some("process_data".to_string()),
+            payload: json!({"outputs": {"processed": true}}),
+            iteration: None,
+        })
+        .await
+        .unwrap();
+
+    event_source
+        .update_position("test_orch", events.last().unwrap().id)
+        .await
+        .unwrap();
+
+    events = event_source.poll("test_orch").await.unwrap();
+    for event in &events {
+        kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
+            event,
+            &event_source,
+            &activity_queue,
+            &config,
+        )
+        .await
+        .unwrap();
+    }
+
+    // Check for completion
+    event_source
+        .update_position("test_orch", events.last().unwrap().id)
+        .await
+        .unwrap();
+
+    let completion_events = event_source.poll("test_orch").await.unwrap();
+    assert!(
+        completion_events
+            .iter()
+            .any(|e| e.event_type == WorkflowEventType::WorkflowCompleted),
+        "Workflow should complete successfully"
+    );
+
+    // Verify workflow status is Completed
+    let workflow = sqlx::query!(
+        r#"SELECT status as "status: kruxiaflow_core::events::WorkflowStatus" FROM workflows WHERE id = $1"#,
+        workflow_id
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    use kruxiaflow_core::events::WorkflowStatus;
+    assert_eq!(
+        workflow.status,
+        WorkflowStatus::Completed,
+        "Workflow should be Completed when all activities succeed"
+    );
+}

@@ -682,3 +682,264 @@ async fn test_complete_workflow_end_to_end() {
 
     cleanup_test_data(&pool, workflow_id).await;
 }
+
+// ============================================================================
+// Per-Activity Timeout Tests
+// Bug fix: docs/bugs/2026-01-08-per-activity-timeout-not-passed-to-worker.md
+// ============================================================================
+
+/// Helper to schedule activities with custom timeout_seconds in settings
+async fn schedule_activity_with_timeout(
+    pool: &PgPool,
+    workflow_id: Uuid,
+    timeout_seconds: u64,
+) -> String {
+    let queue = PostgresQueue::new(pool.clone(), QueueConfig::default());
+    let activity_key = format!("activity_timeout_{}", timeout_seconds);
+
+    let activity = Activity {
+        key: activity_key.clone(),
+        worker: "builtin".to_string(),
+        activity_name: "http_request".to_string(),
+        parameters: json!({"url": "https://example.com"}),
+        settings: Some(kruxiaflow_core::workflow::definition::ActivitySettings {
+            timeout_seconds: Some(timeout_seconds),
+            retry: None,
+            budget: None,
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: None,
+            scheduled_for: None,
+        }),
+        scheduled_for: None,
+        output_definitions: None,
+        iteration: None,
+    };
+
+    queue
+        .schedule(workflow_id, vec![activity])
+        .await
+        .expect("Failed to schedule activity with timeout");
+
+    activity_key
+}
+
+/// Test: Per-activity timeout_seconds from settings is correctly passed to worker
+///
+/// Verifies fix for bug where timeout_seconds in activity settings was not
+/// being extracted and returned to the worker because the code looked for
+/// the wrong field name ("timeout" instead of "timeout_seconds").
+#[tokio::test]
+#[serial]
+async fn test_poll_returns_timeout_seconds_from_settings() {
+    let (server, pool) = create_test_server().await;
+    let token = get_test_token(&server).await;
+    let workflow_id = Uuid::now_v7();
+
+    // Schedule activity with 5-second timeout (short for testing)
+    let activity_key = schedule_activity_with_timeout(&pool, workflow_id, 5).await;
+
+    // Poll for the activity
+    let response = server
+        .post("/api/v1/workers/poll")
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+        )
+        .json(&json!({
+            "activity_types": ["builtin.http_request"],
+            "worker_id": "worker_timeout_test",
+            "max_activities": 1
+        }))
+        .await;
+
+    assert_eq!(response.status_code(), StatusCode::OK);
+
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["count"], 1);
+
+    let activity = &body["activities"][0];
+
+    // Verify activity_key matches
+    assert_eq!(activity["activity_key"].as_str().unwrap(), activity_key);
+
+    // CRITICAL: Verify timeout_seconds is correctly extracted from settings
+    // This was the bug - timeout_seconds was always null because the code
+    // looked for "timeout" instead of "timeout_seconds"
+    assert_eq!(
+        activity["timeout_seconds"].as_i64(),
+        Some(5),
+        "timeout_seconds should be extracted from settings and returned to worker"
+    );
+
+    // Also verify settings contains the original timeout_seconds
+    assert_eq!(
+        activity["settings"]["timeout_seconds"].as_i64(),
+        Some(5),
+        "settings should contain original timeout_seconds value"
+    );
+
+    cleanup_test_data(&pool, workflow_id).await;
+}
+
+/// Test: Different timeout values are correctly passed (regression test)
+///
+/// Tests various timeout values to ensure the extraction works correctly
+/// for different durations.
+#[tokio::test]
+#[serial]
+async fn test_poll_returns_various_timeout_values() {
+    let (server, pool) = create_test_server().await;
+    let token = get_test_token(&server).await;
+
+    // Test different timeout values (using short values for fast tests)
+    let test_cases = vec![
+        (1, "1 second"),
+        (10, "10 seconds"),
+        (30, "30 seconds"),
+        (60, "1 minute"),
+    ];
+
+    for (timeout, description) in test_cases {
+        let workflow_id = Uuid::now_v7();
+        schedule_activity_with_timeout(&pool, workflow_id, timeout).await;
+
+        let response = server
+            .post("/api/v1/workers/poll")
+            .add_header(
+                HeaderName::from_static("authorization"),
+                HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+            )
+            .json(&json!({
+                "activity_types": ["builtin.http_request"],
+                "worker_id": &format!("worker_timeout_{}", timeout),
+                "max_activities": 1
+            }))
+            .await;
+
+        assert_eq!(response.status_code(), StatusCode::OK);
+
+        let body: serde_json::Value = response.json();
+        let activity = &body["activities"][0];
+
+        assert_eq!(
+            activity["timeout_seconds"].as_i64(),
+            Some(timeout as i64),
+            "Failed for {}: expected timeout_seconds={}",
+            description,
+            timeout
+        );
+
+        cleanup_test_data(&pool, workflow_id).await;
+    }
+}
+
+/// Test: Activity without timeout_seconds returns null
+///
+/// Ensures that when no timeout is configured, the timeout_seconds field
+/// is null (allowing worker to use its default).
+#[tokio::test]
+#[serial]
+async fn test_poll_returns_null_timeout_when_not_configured() {
+    let (server, pool) = create_test_server().await;
+    let token = get_test_token(&server).await;
+    let workflow_id = Uuid::now_v7();
+
+    // Schedule activity without timeout (uses schedule_test_activities which has no settings)
+    schedule_test_activities(&pool, workflow_id, 1).await;
+
+    let response = server
+        .post("/api/v1/workers/poll")
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+        )
+        .json(&json!({
+            "activity_types": ["payments.authorize"],
+            "worker_id": "worker_no_timeout_test",
+            "max_activities": 1
+        }))
+        .await;
+
+    assert_eq!(response.status_code(), StatusCode::OK);
+
+    let body: serde_json::Value = response.json();
+    let activity = &body["activities"][0];
+
+    // timeout_seconds should be null when not configured
+    assert!(
+        activity["timeout_seconds"].is_null(),
+        "timeout_seconds should be null when not configured in settings"
+    );
+
+    cleanup_test_data(&pool, workflow_id).await;
+}
+
+/// Test: Activity with settings but no timeout_seconds returns null
+///
+/// Tests the case where settings exist but timeout_seconds is not set.
+#[tokio::test]
+#[serial]
+async fn test_poll_returns_null_timeout_when_settings_has_no_timeout() {
+    let (server, pool) = create_test_server().await;
+    let token = get_test_token(&server).await;
+    let workflow_id = Uuid::now_v7();
+
+    // Schedule activity with settings but no timeout_seconds
+    let queue = PostgresQueue::new(pool.clone(), QueueConfig::default());
+    let activity = Activity {
+        key: "activity_no_timeout".to_string(),
+        worker: "builtin".to_string(),
+        activity_name: "http_request".to_string(),
+        parameters: json!({"url": "https://example.com"}),
+        settings: Some(kruxiaflow_core::workflow::definition::ActivitySettings {
+            timeout_seconds: None, // No timeout configured
+            retry: None,
+            budget: None,
+            cache: true, // Other settings exist
+            cache_ttl: Some(60),
+            iteration_limit: None,
+            delay: None,
+            scheduled_for: None,
+        }),
+        scheduled_for: None,
+        output_definitions: None,
+        iteration: None,
+    };
+
+    queue
+        .schedule(workflow_id, vec![activity])
+        .await
+        .expect("Failed to schedule activity");
+
+    let response = server
+        .post("/api/v1/workers/poll")
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+        )
+        .json(&json!({
+            "activity_types": ["builtin.http_request"],
+            "worker_id": "worker_settings_no_timeout",
+            "max_activities": 1
+        }))
+        .await;
+
+    assert_eq!(response.status_code(), StatusCode::OK);
+
+    let body: serde_json::Value = response.json();
+    let activity = &body["activities"][0];
+
+    // timeout_seconds should be null when not set in settings
+    assert!(
+        activity["timeout_seconds"].is_null(),
+        "timeout_seconds should be null when not set in settings (even if other settings exist)"
+    );
+
+    // But other settings should be present
+    assert_eq!(activity["settings"]["cache"], true);
+    assert_eq!(activity["settings"]["cache_ttl"], 60);
+
+    cleanup_test_data(&pool, workflow_id).await;
+}
