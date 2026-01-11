@@ -73,10 +73,23 @@ Additionally, made the default worker timeout configurable via `KRUXIAFLOW_ACTIV
 
 ## Testing
 
+### Manual Testing
+
 After fix:
 1. Deploy workflow with `timeout_seconds: 900`
 2. Trigger activity and verify it runs for up to 15 minutes
 3. Confirm `timeout_seconds` is correctly passed in API response to worker
+
+### Automated Tests
+
+Regression tests added in `api/tests/worker_activity_integration_tests.rs`:
+
+- `test_poll_returns_timeout_seconds_from_settings` - Verifies timeout_seconds is extracted from settings and returned to worker
+- `test_poll_returns_various_timeout_values` - Tests multiple timeout values (1s, 10s, 30s, 60s)
+- `test_poll_returns_null_timeout_when_not_configured` - Verifies null returned when no settings configured
+- `test_poll_returns_null_timeout_when_settings_has_no_timeout` - Verifies null when settings exist but timeout is not set
+
+Run with: `cargo test --package kruxiaflow-api --test worker_activity_integration_tests -- timeout`
 
 ## Related
 
