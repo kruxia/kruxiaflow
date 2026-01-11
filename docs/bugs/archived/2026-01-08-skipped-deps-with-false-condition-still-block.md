@@ -1,9 +1,12 @@
 # Bug: Skipped Dependencies with False Conditions Still Block Downstream Activities
 
 **Date**: 2026-01-08
-**Status**: Open
+**Status**: Consolidated
+**Consolidated Into**: [2026-01-10-orchestrator-logic.md](2026-01-10-orchestrator-logic.md)
 **Severity**: Critical
 **Component**: Core / Orchestrator / Dependency Evaluator
+
+> **Note**: This bug has been consolidated with two related bugs into a unified analysis and implementation plan. The root cause was identified as activity status not being exposed to template conditions. See the consolidated report for the implementation plan.
 
 ## Summary
 
