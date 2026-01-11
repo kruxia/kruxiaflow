@@ -100,6 +100,24 @@ Key changes:
 - `worker/src/activities/llm.rs` - Streaming EmbeddingActivity implementation
 - `worker/src/poller.rs` - Passes context to activities
 
+## Testing
+
+### Automated Tests
+
+Regression tests added in `worker/tests/embedding_streaming_test.rs`:
+
+- `test_streaming_embeddings_returns_file_reference` - Verifies streaming to storage returns embeddings_file reference
+- `test_inline_embeddings_without_storage` - Verifies fallback to inline embeddings when no storage available
+- `test_batch_processing_streams_incrementally` - Verifies batch processing streams to storage incrementally
+- `test_output_structure_has_both_keys` - Verifies both embeddings and embeddings_file keys always present
+- `test_direct_execute_returns_inline` - Verifies execute() fallback returns inline embeddings
+- `test_usage_metrics_reported` - Verifies usage metrics are correctly reported
+
+Run with:
+```bash
+cargo test --package kruxiaflow-worker --test embedding_streaming_test
+```
+
 ## Related
 
 - Feature: Batched Embeddings (implemented - handles API timeout but not memory)
