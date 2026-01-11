@@ -1491,7 +1491,164 @@ sqlx::query!(
 - **Workflow-level locking**: Advisory locks prevent race conditions on individual workflows
 - **Lock-free queue**: `FOR UPDATE SKIP LOCKED` allows concurrent worker claims
 - **Batch scheduling**: All ready activities scheduled in single transaction (idempotent via UNIQUE constraint)
-- **AND semantics**: Fan-in activities require ALL dependencies to be satisfied (not just some)
+- **AND semantics**: Fan-in activities require ALL unconditional dependencies to be satisfied (not just some)
+
+### Conditional Dependencies
+
+Dependencies can have conditions that determine whether they apply. Understanding the semantics is crucial for building correct workflows.
+
+#### Unconditional vs Conditional Dependencies
+
+```yaml
+# Unconditional dependency - activity B requires activity A to complete
+- key: activity_b
+  depends_on:
+    - activity_key: activity_a
+
+# Conditional dependency - dependency only applies if condition is true
+- key: activity_b
+  depends_on:
+    - activity_key: activity_a
+      condition: "{{activity_a.result.success == true}}"
+```
+
+#### Core Semantic: Condition False = "Not Applicable"
+
+**This is the key insight**: When a condition evaluates to `false`, it means **"this dependency does not apply"**, NOT "this activity cannot run."
+
+| Condition Result | Meaning                                           |
+|------------------|---------------------------------------------------|
+| `true`           | Dependency applies and must be satisfied          |
+| `false`          | Dependency **does not apply** (as if it doesn't exist) |
+
+#### AND vs OR Semantics
+
+**Unconditional dependencies use AND semantics** - ALL must be satisfied:
+
+```yaml
+- key: aggregate
+  depends_on:
+    - activity_key: task_a  # Must complete
+    - activity_key: task_b  # Must complete
+    - activity_key: task_c  # Must complete
+# aggregate runs only when ALL three complete
+```
+
+**Conditional dependencies use OR semantics** - ANY satisfied dependency triggers execution:
+
+```yaml
+- key: finalize
+  depends_on:
+    - activity_key: path_a
+      condition: "{{path_a.status == 'completed'}}"
+    - activity_key: path_b
+      condition: "{{path_b.status == 'completed'}}"
+# finalize runs when ANY condition is true (either path completes)
+```
+
+#### Dependency Evaluation Truth Table
+
+| Dependency Status | Has Condition | Condition Value | Result                     |
+|-------------------|---------------|-----------------|----------------------------|
+| Completed         | No            | N/A             | **Satisfied**              |
+| Completed         | Yes           | `true`          | **Satisfied**              |
+| Completed         | Yes           | `false`         | Not applicable (ignored)   |
+| Skipped           | No            | N/A             | Cascades skip to dependent |
+| Skipped           | Yes           | any             | Not applicable (ignored)   |
+| Failed            | No            | N/A             | Cascades skip to dependent |
+| Failed            | Yes           | `true`          | **Satisfied** (explicit)   |
+| Failed            | Yes           | `false`         | Not applicable (ignored)   |
+| Pending/Running   | any           | any             | Not yet evaluable (wait)   |
+
+#### Converging Exclusive Paths
+
+A common pattern is mutually exclusive branches that converge:
+
+```yaml
+activities:
+  - key: check_condition
+    # Returns {path: "A"} or {path: "B"}
+
+  - key: path_a
+    depends_on:
+      - activity_key: check_condition
+        condition: "{{check_condition.result.path == 'A'}}"
+
+  - key: path_b
+    depends_on:
+      - activity_key: check_condition
+        condition: "{{check_condition.result.path == 'B'}}"
+
+  # WRONG: Unconditional deps will hang (one path is always skipped)
+  - key: finalize_wrong
+    depends_on:
+      - activity_key: path_a
+      - activity_key: path_b
+
+  # CORRECT: Use status conditions - runs after whichever path completes
+  - key: finalize_correct
+    depends_on:
+      - activity_key: path_a
+        condition: "{{path_a.status == 'completed'}}"
+      - activity_key: path_b
+        condition: "{{path_b.status == 'completed'}}"
+```
+
+**Why `finalize_wrong` fails**: Unconditional dependencies require Completed status. When `path_a` runs, `path_b` is skipped. The unconditional dependency on `path_b` will never be satisfied → workflow hangs.
+
+**Why `finalize_correct` works**:
+- If `path_a` completed: first condition is `true` → dependency satisfied → `finalize` runs
+- If `path_b` completed: second condition is `true` → dependency satisfied → `finalize` runs
+- If both skipped: both conditions are `false` → no applicable dependencies → `finalize` is skipped
+
+#### Status-First Pattern for Result Access
+
+When conditions reference activity results, always check status first to avoid template errors:
+
+```yaml
+# BAD: Template error if find_data was skipped (result is undefined)
+condition: "{{find_data.result.rows | length > 0}}"
+
+# GOOD: Short-circuits - result never accessed if status != completed
+condition: "{{find_data.status == 'completed' and find_data.result.rows | length > 0}}"
+
+# SIMPLEST: Just check status if you don't need to inspect results
+condition: "{{find_data.status == 'completed'}}"
+```
+
+**How it works**: MiniJinja's `and` operator short-circuits. If the left side (`status == 'completed'`) is `false`, the right side is never evaluated, so the undefined `result` is never accessed.
+
+#### Activity Status Values
+
+The `{{activity.status}}` variable returns one of:
+
+| Status           | Meaning                                        |
+|------------------|------------------------------------------------|
+| `not_scheduled`  | Activity has not yet been scheduled            |
+| `pending`        | Scheduled but not yet picked up by worker      |
+| `running`        | Currently being executed by a worker           |
+| `completed`      | Successfully finished                          |
+| `failed`         | Finished with an error                         |
+| `skipped`        | Not executed (deps not satisfied or cascaded)  |
+
+#### Cascade Behavior
+
+When an activity is skipped or fails, downstream activities with unconditional dependencies are automatically skipped (cascade):
+
+```yaml
+- key: step1
+- key: step2
+  depends_on: [step1]
+- key: step3
+  depends_on: [step2]
+
+# If step1 fails:
+# - step1: failed
+# - step2: skipped (unconditional dep on failed activity)
+# - step3: skipped (unconditional dep on skipped activity)
+```
+
+This "fail-fast" behavior prevents workflows from hanging with activities stuck waiting for dependencies that can never be satisfied.
 
 ### Long-Running Activities
 

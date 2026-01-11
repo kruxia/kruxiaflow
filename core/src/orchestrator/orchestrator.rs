@@ -2,6 +2,7 @@ use super::{
     AdaptiveBackoff, OrchestratorConfig, Result,
     dependency_evaluator::{
         find_ready_activities, find_skipped_activities, is_workflow_complete, is_workflow_failed,
+        status_to_string,
     },
     workflow_state::{
         WorkflowActivityStatus, apply_event_to_state, initialize_workflow_state,
@@ -308,10 +309,11 @@ fn build_template_context(
     // Add secrets (from environment variables KRUXIAFLOW_SECRET_*)
     context = context.with_secrets(secrets.clone());
 
-    // Add activity outputs and iteration outputs
+    // Add activity outputs, iteration outputs, and status
     for (activity_key, activity_state) in &state.activities {
         // Add all activities to context, even if they don't have outputs yet
         // This ensures iteration-scoped activities are always available as arrays
+        // and status is always accessible for conditional dependencies
         let outputs = activity_state.outputs.clone().unwrap_or_default();
         context.add_activity_state(
             activity_key.clone(),
@@ -319,6 +321,7 @@ fn build_template_context(
             activity_state.iteration_outputs.clone(),
             activity_state.iteration,
             activity_state.accumulated_cost_usd,
+            status_to_string(activity_state.status),
         );
     }
 
