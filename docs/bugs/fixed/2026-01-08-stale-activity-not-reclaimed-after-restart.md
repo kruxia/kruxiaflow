@@ -1,7 +1,8 @@
 # Bug: Stale Running Activities Not Reclaimed After Worker/Orchestrator Restart
 
 **Date**: 2026-01-08
-**Status**: Open
+**Status**: Fixed
+**Fixed Date**: 2026-01-10
 **Severity**: High
 **Component**: Core / Orchestrator / Timeout Checker
 
@@ -122,3 +123,45 @@ Potential causes to investigate:
 - `core/src/orchestrator/orchestrator.rs` (timeout checker task)
 - `core/src/queue/postgres_queue.rs` (activity queue operations)
 - `core/src/orchestrator/mod.rs` (orchestrator initialization)
+
+## Root Cause
+
+The existing timeout checker only handled **workflow-level** timeouts (workflows that have been running too long overall). There was **no background process** that checked for **activity-level** timeouts.
+
+The stale activity reclaim logic in `claim_next` only worked **when a worker polls** for work - it was opportunistic. If no workers ever polled for that specific activity type (worker/name combination), or all workers were down, the activity stayed stuck forever.
+
+## Fix
+
+The fix added a background activity timeout checker that runs alongside the existing workflow timeout checker:
+
+1. **New `reclaim_stale_activities` method** added to `ActivityQueue` trait (`core/src/queue/mod.rs`)
+   - Finds activities where `status='running'` AND `NOW() > claimed_at + timeout_duration`
+   - If `retry_count < max_retries`: resets to `pending` status for retry
+   - If `retry_count >= max_retries`: marks as `failed`
+
+2. **Implementation in PostgresQueue** (`core/src/queue/postgres_queue.rs`)
+   - Uses transaction with `FOR UPDATE SKIP LOCKED` for safe concurrent access
+   - Increments `retry_count` when resetting to pending
+   - Returns `StaleActivityInfo` for each reclaimed activity
+
+3. **Background checker in orchestrator** (`core/src/orchestrator/orchestrator.rs`)
+   - `check_and_reclaim_stale_activities()` function calls `reclaim_stale_activities(100)` each check interval
+   - For activities marked as failed, emits `ActivityFailed` event so the orchestrator updates workflow state
+   - For activities reset to pending, no event needed - workers will pick them up
+
+4. **Tests** (`core/tests/queue_tests.rs`)
+   - `test_reclaim_stale_activities_resets_to_pending` - verifies stale activities with retries are reset
+   - `test_reclaim_stale_activities_marks_failed_when_retries_exhausted` - verifies activities fail after max retries
+   - `test_reclaim_stale_activities_does_not_affect_non_stale` - verifies non-stale activities are untouched
+   - `test_reclaim_stale_activities_multiple_activities` - verifies correct handling of mixed scenarios
+
+## Behavior After Fix
+
+1. Activity is claimed by a worker and set to `running` status
+2. Worker or orchestrator process restarts (e.g., container rebuild, crash, deployment)
+3. The background timeout checker (running every `timeout_check_interval`) scans for stale activities
+4. If the activity has exceeded its `timeout_duration`:
+   - If retries remain: Reset to `pending`, worker will pick it up and retry
+   - If retries exhausted: Mark as `failed`, emit `ActivityFailed` event
+5. The orchestrator processes the `ActivityFailed` event and updates workflow state appropriately
+6. Workflow can complete (successfully or with failure) instead of hanging indefinitely

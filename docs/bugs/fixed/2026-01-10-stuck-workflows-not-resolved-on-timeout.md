@@ -1,7 +1,8 @@
 # Bug: Stuck Workflows Not Resolved on Timeout
 
 **Date**: 2026-01-10
-**Status**: Open
+**Status**: Fixed
+**Fixed Date**: 2026-01-10
 **Severity**: High
 **Component**: Orchestrator
 
@@ -135,3 +136,51 @@ WHERE id IN (
     '019ba91a-3d97-7182-bbae-093e85096383'
 );
 ```
+
+## Fix
+
+Implemented the **alternative (more comprehensive)** fix: Check for terminal state before any scheduling logic.
+
+### Change in `core/src/orchestrator/orchestrator.rs`
+
+Added early exit check in `process_workflow_event` after `apply_event_to_state` and cost recording:
+
+```rust
+// 3.6. Early exit for terminal workflow states
+// If workflow is already Completed or Failed, skip all scheduling logic
+// This prevents errors in scheduling from blocking workflow state persistence
+// and avoids scheduling activities for workflows that should not run anymore
+let is_terminal = matches!(
+    state.status,
+    WorkflowStatus::Completed | WorkflowStatus::Failed
+);
+
+if is_terminal {
+    tracing::info!(
+        workflow_id = %event.workflow_id,
+        workflow_name = %state.definition_name,
+        status = %state.status,
+        "Workflow in terminal state, skipping activity scheduling"
+    );
+
+    // Save the terminal state and return early
+    save_materialized_state(&mut tx, event.workflow_id, &state).await?;
+    tx.commit().await?;
+    return Ok(());
+}
+```
+
+### Behavior After Fix
+
+1. `apply_event_to_state` sets `state.status = Failed` (or `Completed`)
+2. **NEW**: Check if workflow is in terminal state
+3. **NEW**: If terminal, save state immediately and return - skip all scheduling logic
+4. No template evaluation, dependency checking, or activity scheduling occurs
+5. Transaction commits successfully with the terminal status persisted
+
+### Tests Added (`core/tests/orchestrator_integration_tests.rs`)
+
+- `test_workflow_failed_event_persists_status_immediately` - Verifies Failed status is persisted
+- `test_failed_workflow_does_not_schedule_activities` - Verifies no activities scheduled after failure
+- `test_events_on_already_failed_workflow_handled_gracefully` - Verifies late events don't cause errors
+- `test_completed_workflow_early_exit` - Verifies Completed workflows also benefit from early exit
