@@ -9,7 +9,8 @@ use tokio::task::JoinHandle;
 
 /// Worker manager
 ///
-/// Spawns and manages multiple worker poller tasks.
+/// Spawns and manages a single worker poller task that uses semaphore-based
+/// concurrency to efficiently execute activities.
 pub struct WorkerManager {
     config: WorkerConfig,
     registry: Arc<ActivityRegistry>,
@@ -31,12 +32,13 @@ impl WorkerManager {
 
     /// Start worker
     ///
-    /// Spawns N worker poller tasks based on config.concurrency.
+    /// Spawns a single worker poller task that uses a semaphore to manage
+    /// concurrent activity execution (configured by max_concurrent_activities).
     pub async fn start(&self) -> Result<Vec<JoinHandle<()>>> {
         tracing::info!(
             worker_id = %self.config.worker_id,
-            concurrency = self.config.concurrency,
-            "Starting worker manager"
+            max_concurrent_activities = self.config.max_concurrent_activities,
+            "Starting worker manager with semaphore-based concurrency"
         );
 
         let client = WorkerApiClient::new(
@@ -45,38 +47,31 @@ impl WorkerManager {
             self.config.client_secret.clone(),
         );
 
-        let mut handles = Vec::new();
+        let poller = WorkerPoller::new(
+            self.config.clone(),
+            client,
+            Arc::clone(&self.registry),
+            Arc::clone(&self.storage),
+        );
 
-        for i in 0..self.config.concurrency {
-            // Create a unique worker_id for each poller thread
-            let mut poller_config = self.config.clone();
-            poller_config.worker_id = format!("{}_poller_{}", self.config.worker_id, i);
+        let handle = tokio::spawn(async move {
+            tracing::info!("Starting poller task");
+            if let Err(err) = poller.run().await {
+                tracing::error!(error = ?err, "Poller task failed");
+            }
+        });
 
-            let poller = WorkerPoller::new(
-                poller_config,
-                client.clone(),
-                Arc::clone(&self.registry),
-                Arc::clone(&self.storage),
-            );
+        tracing::info!(
+            "Worker manager started with 1 poller (max {} concurrent activities)",
+            self.config.max_concurrent_activities
+        );
 
-            let handle = tokio::spawn(async move {
-                tracing::info!(poller_id = i, "Starting poller task");
-                if let Err(err) = poller.run().await {
-                    tracing::error!(poller_id = i, error = ?err, "Poller task failed");
-                }
-            });
-
-            handles.push(handle);
-        }
-
-        tracing::info!("Worker manager started with {} pollers", handles.len());
-
-        Ok(handles)
+        Ok(vec![handle])
     }
 
     /// Stop worker
     ///
-    /// Gracefully shuts down all poller tasks.
+    /// Gracefully shuts down the poller task.
     pub async fn stop(&self, handles: Vec<JoinHandle<()>>) {
         tracing::info!("Stopping worker manager");
 

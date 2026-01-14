@@ -234,12 +234,14 @@ async fn test_end_to_end_file_workflow() -> Result<()> {
     // Start worker with storage
     let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
     let registry = register_builtin_activities(cache_service);
+    #[allow(deprecated)]
     let worker_config = WorkerConfig {
         api_url: server_url.clone(),
         worker_id: "test_worker".to_string(),
         activity_types: registry.activity_types(),
         poll_interval: Duration::from_millis(100),
         poll_max_activities: 5,
+        max_concurrent_activities: 16,
         concurrency: 1,
         activity_timeout: Duration::from_secs(30),
         heartbeat_interval: Duration::from_secs(10),

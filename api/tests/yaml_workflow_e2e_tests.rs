@@ -163,12 +163,14 @@ async fn test_yaml_workflow_end_to_end_with_healthcheck() {
     let mut registry = ActivityRegistry::new(Arc::new(kruxiaflow_core::NoOpCache::new()));
     registry.register(Arc::new(HttpRequestActivity::new()));
 
+    #[allow(deprecated)]
     let worker_config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("test_worker_{}", Uuid::now_v7()),
         activity_types: registry.activity_types(),
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
+        max_concurrent_activities: 16,
         concurrency: 1,
         activity_timeout: Duration::from_secs(30),
         heartbeat_interval: Duration::from_secs(30),
@@ -489,12 +491,14 @@ async fn test_conditional_branching_workflow() {
     registry.register(Arc::new(HttpRequestActivity::new()));
     registry.register(Arc::new(PostgresQueryActivity::new(new_pool_cache())));
 
+    #[allow(deprecated)]
     let worker_config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("test_worker_{}", Uuid::now_v7()),
         activity_types: registry.activity_types(),
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
+        max_concurrent_activities: 16,
         concurrency: 1,
         activity_timeout: Duration::from_secs(30),
         heartbeat_interval: Duration::from_secs(30),

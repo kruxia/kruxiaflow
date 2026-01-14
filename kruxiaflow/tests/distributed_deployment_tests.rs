@@ -120,7 +120,7 @@ fn test_worker_command_help() {
     assert!(stdout.contains("worker"));
     assert!(stdout.contains("--api-url"));
     assert!(stdout.contains("--worker-id"));
-    assert!(stdout.contains("--workers"));
+    assert!(stdout.contains("--max-activities"));
     assert!(stdout.contains("--activity-types"));
     assert!(stdout.contains("--client-secret"));
     assert!(stdout.contains("distributed"));
@@ -167,11 +167,11 @@ fn test_worker_worker_id_flag_accepted() {
 }
 
 #[test]
-fn test_worker_workers_flag_accepted() {
+fn test_worker_max_activities_flag_accepted() {
     let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("worker")
-        .arg("--workers")
-        .arg("20")
+        .arg("--max-activities")
+        .arg("32")
         .arg("--help")
         .output()
         .expect("Failed to execute kruxiaflow binary");
@@ -293,8 +293,8 @@ fn test_worker_with_all_flags() {
         .arg("http://api.example.com:8080")
         .arg("--worker-id")
         .arg("worker_prod_1")
-        .arg("--workers")
-        .arg("10")
+        .arg("--max-activities")
+        .arg("32")
         .arg("--activity-types")
         .arg("builtin.echo,builtin.llm_prompt")
         .arg("--poll-max-activities")
@@ -428,12 +428,12 @@ fn test_orchestrator_invalid_poll_interval_zero() {
 }
 
 #[test]
-fn test_worker_invalid_workers_zero() {
+fn test_worker_invalid_max_activities_zero() {
     let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("--database-url")
         .arg("postgres://localhost/test")
         .arg("worker")
-        .arg("--workers")
+        .arg("--max-activities")
         .arg("0")
         .arg("--client-secret")
         .arg("test")
@@ -450,12 +450,12 @@ fn test_worker_invalid_workers_zero() {
 // =========================================================================
 
 #[test]
-fn test_worker_short_workers_flag() {
-    // -w is the short form of --workers
+fn test_worker_short_max_activities_flag() {
+    // -m is the short form of --max-activities
     let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("worker")
-        .arg("-w")
-        .arg("8")
+        .arg("-m")
+        .arg("32")
         .arg("--help")
         .output()
         .expect("Failed to execute kruxiaflow binary");
@@ -712,13 +712,13 @@ fn test_orchestrator_invalid_poll_interval_too_high() {
 }
 
 #[test]
-fn test_worker_invalid_workers_too_high() {
-    // Worker count must be <= 100
+fn test_worker_invalid_max_activities_too_high() {
+    // Max activities must be <= 100
     let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("--database-url")
         .arg("postgres://localhost/test")
         .arg("worker")
-        .arg("--workers")
+        .arg("--max-activities")
         .arg("101")
         .arg("--client-secret")
         .arg("test_secret")
@@ -730,8 +730,8 @@ fn test_worker_invalid_workers_too_high() {
 
     assert!(!output.status.success());
     assert!(
-        stderr.contains("Worker count") || stderr.contains("100"),
-        "Error message should mention worker count limit: {}",
+        stderr.contains("Max concurrent activities") || stderr.contains("100"),
+        "Error message should mention max activities limit: {}",
         stderr
     );
 }

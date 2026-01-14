@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    UPDATE activity_queue\n                    SET status = 'pending'::activity_status,\n                        claimed_by = NULL,\n                        claimed_at = NULL,\n                        scheduled_for = NOW(),\n                        retry_count = retry_count + 1\n                    WHERE id = $1\n                    ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "587091a069207aa3a251f754a5e6ac6034e6e4da7dec44536595340120ba59c9"
+}
