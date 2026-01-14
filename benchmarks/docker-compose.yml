@@ -30,14 +30,19 @@ services:
       KRUXIAFLOW_WORKER_COUNT: "1" # default = 4
       KRUXIAFLOW_POLL_MAX_ACTIVITIES: "1" # default
       KRUXIAFLOW_LOG_LEVEL: info
+      # OAuth RSA keys for JWT signing/validation (dev keys from ../dev-keys/)
+      # TODO: make this seamless with dev setup
+      KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM: "${KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM:-}"
+      KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM: "${KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM:-}"
     depends_on:
       - kruxiaflow-postgres
-    command: [ "serve" ]
+    command: [ "serve", "--migrate", "--seed-client" ]
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
+      test: [ "CMD", "/kruxiaflow", "version" ]
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 30s
 
   # Temporal stack
   temporal-postgres:
@@ -227,18 +232,18 @@ services:
         condition: service_healthy
       temporal:
         condition: service_healthy
-      airflow-api-server:
-        condition: service_healthy
-      airflow-scheduler:
-        condition: service_healthy
-      airflow-dag-processor:
-        condition: service_started
-      airflow-worker:
-        condition: service_started
+      # airflow-api-server:
+      #   condition: service_healthy
+      # airflow-scheduler:
+      #   condition: service_healthy
+      # airflow-dag-processor:
+      #   condition: service_started
+      # airflow-worker:
+      #   condition: service_started
     volumes:
       - ./:/app/
       - /var/run/docker.sock:/var/run/docker.sock  # For resource monitoring
-    command: [ "python", "run_benchmark.py", "run" ]
+    command: [ "python", "run_benchmark.py", "run", "-p", "kruxiaflow", "-p", "temporal" ]
 
 volumes:
   kruxiaflow_pg_data:

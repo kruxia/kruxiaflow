@@ -234,7 +234,7 @@ A new built-in activity `web_scrape` with capabilities:
 - Can add native scraper in Week 2 for cost optimization demo
 
 #### 2. Search API Integration
-**Status**: ⚠️ Zero Code Needed (HTTP + API Keys)
+**Status**: ✅ Zero Code Needed (HTTP + API Keys)
 **Priority**: High (Week 1)
 **Effort**: Configuration Only
 
@@ -292,6 +292,22 @@ A new built-in activity `web_scrape` with capabilities:
     model: anthropic/claude-haiku-4-20250415  # Cheap classifier
     prompt: |
       Classify this research question complexity as: SIMPLE, MEDIUM, or COMPLEX
+
+      SIMPLE - Factual queries, definitions, simple summaries:
+      - "What is the capital of France?"
+      - "Define machine learning"
+      - "When was Python first released?"
+
+      MEDIUM - Analysis queries, comparisons, structured research:
+      - "Compare REST and GraphQL APIs for mobile applications"
+      - "What are the pros and cons of microservices architecture?"
+      - "How does React's virtual DOM improve performance?"
+
+      COMPLEX - Deep synthesis, multi-faceted analysis, expert reasoning:
+      - "Analyze the long-term economic and social implications of widespread AI adoption in healthcare"
+      - "Compare distributed workflow orchestration architectures and recommend an approach for a fintech startup with strict compliance requirements"
+      - "Evaluate the trade-offs between eventual consistency and strong consistency in globally distributed databases for real-time trading systems"
+
       Question: {{INPUT.research_question}}
 
       Respond with only one word.
@@ -309,7 +325,7 @@ A new built-in activity `web_scrape` with capabilities:
       conditions:
         - "{{classify_complexity.result.content | contains('SIMPLE')}}"
 
-- key: research_complex
+- key: research_medium
   activity_name: llm_prompt
   parameters:
     model: anthropic/claude-sonnet-4-5-20250929
@@ -317,7 +333,7 @@ A new built-in activity `web_scrape` with capabilities:
   depends_on:
     - activity_key: classify_complexity
       conditions:
-        - "{{classify_complexity.result.content | contains('COMPLEX')}}"
+        - "{{classify_complexity.result.content | contains('MEDIUM')}}"
 ```
 
 **Week 2 Enhancement**: RouteLLM-style complexity detection
