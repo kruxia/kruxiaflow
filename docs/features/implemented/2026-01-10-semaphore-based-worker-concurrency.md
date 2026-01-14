@@ -1,8 +1,9 @@
 # Semaphore-Based Worker Concurrency
 
 **Date**: 2026-01-10
-**Status**: Proposed
+**Status**: Implemented
 **Priority**: Medium
+**Implemented**: 2026-01-10
 
 ## Problem Statement
 
@@ -176,13 +177,43 @@ The `concurrency` parameter would be deprecated or repurposed to mean max in-fli
 
 ## Implementation Steps
 
-1. [ ] Add `Semaphore` to `WorkerPoller` struct
-2. [ ] Rewrite `run()` to use semaphore-based polling loop
-3. [ ] Remove batch-wait logic from `poll_and_execute()`
-4. [ ] Update `WorkerManager` to spawn single poller (or keep multi-poller with Option B)
-5. [ ] Update `WorkerConfig` with new parameters
-6. [ ] Add deprecation warning for old `concurrency` parameter
-7. [ ] Update documentation
+1. [x] Add `Semaphore` to `WorkerPoller` struct
+2. [x] Rewrite `run()` to use semaphore-based polling loop
+3. [x] Remove batch-wait logic from `poll_and_execute()`
+4. [x] Update `WorkerManager` to spawn single poller (Option A implemented)
+5. [x] Update `WorkerConfig` with new parameters
+6. [x] Add deprecation warning for old `concurrency` parameter
+7. [x] Update documentation
+
+## Implementation Details
+
+**Option A (Single Poller with Semaphore)** was implemented as recommended.
+
+### Files Changed
+
+- `worker/src/config.rs`: Added `max_concurrent_activities` field, deprecated `concurrency`
+- `worker/src/poller.rs`: Added semaphore field, rewrote `run()` and `poll_and_execute()`
+- `worker/src/manager.rs`: Updated to spawn single poller instead of multiple
+- `kruxiaflow/src/commands/worker.rs`: Updated CLI to use `--max-activities` flag
+- `kruxiaflow/src/commands/serve.rs`: Updated CLI to use `--max-activities` flag
+
+### New Tests Added
+
+- `test_semaphore_created_with_max_concurrent_activities`
+- `test_semaphore_acquire_reduces_permits`
+- `test_poll_max_capped_to_available_slots`
+- `test_semaphore_is_arc_clonable`
+- `test_semaphore_concurrent_access`
+- `test_config_max_concurrent_activities_different_values`
+
+### CLI Changes
+
+| Old Flag        | New Flag             | Environment Variable                    |
+|-----------------|----------------------|-----------------------------------------|
+| `--workers`     | `--max-activities`   | `KRUXIAFLOW_WORKER_MAX_ACTIVITIES`     |
+| `-w`            | `-m`                 | (same)                                  |
+
+The old `KRUXIAFLOW_WORKER_CONCURRENCY` environment variable is still supported with a deprecation warning, and the value is migrated automatically (`max_concurrent_activities = concurrency * poll_max_activities`).
 
 ## Migration Path
 

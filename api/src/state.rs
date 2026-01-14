@@ -252,6 +252,14 @@ pub mod tests {
         ) -> kruxiaflow_core::queue::Result<()> {
             Ok(())
         }
+
+        async fn reclaim_stale_activities(
+            &self,
+            _limit: i64,
+        ) -> kruxiaflow_core::queue::Result<Vec<kruxiaflow_core::queue::StaleActivityInfo>>
+        {
+            Ok(vec![])
+        }
     }
 
     // Mock event source for testing

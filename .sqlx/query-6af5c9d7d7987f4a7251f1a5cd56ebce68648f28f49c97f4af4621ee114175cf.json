@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, workflow_id, activity_key, iteration, retry_count, max_retries\n            FROM activity_queue\n            WHERE status = 'running'::activity_status\n              AND claimed_at IS NOT NULL\n              AND NOW() > claimed_at + timeout_duration\n            ORDER BY claimed_at ASC\n            LIMIT $1\n            FOR UPDATE SKIP LOCKED\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "workflow_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "activity_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "iteration",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "retry_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "max_retries",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "6af5c9d7d7987f4a7251f1a5cd56ebce68648f28f49c97f4af4621ee114175cf"
+}

@@ -163,13 +163,15 @@ async fn test_example_03_parallel_document_processing() {
     let mut registry = ActivityRegistry::new(Arc::new(kruxiaflow_core::NoOpCache::new()));
     registry.register(Arc::new(HttpRequestActivity::new()));
 
+    #[allow(deprecated)]
     let worker_config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("test_worker_{}", Uuid::now_v7()),
         activity_types: registry.activity_types(),
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
-        concurrency: 5, // Allow parallel execution
+        max_concurrent_activities: 20, // Allow parallel execution
+        concurrency: 5,
         activity_timeout: Duration::from_secs(30),
         heartbeat_interval: Duration::from_secs(30),
         client_id: "test_worker".to_string(),

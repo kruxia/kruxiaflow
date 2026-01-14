@@ -139,12 +139,14 @@ async fn test_worker_poll_and_execute_echo() {
     println!("Activities scheduled: {}", count_after_schedule.0);
 
     // Configure worker
+    #[allow(deprecated)]
     let config = WorkerConfig {
         api_url: server_url,
         worker_id: "test_worker".to_string(),
         activity_types: vec!["builtin.echo".to_string()],
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
+        max_concurrent_activities: 16,
         concurrency: 1,
         activity_timeout: Duration::from_secs(30),
         heartbeat_interval: Duration::from_secs(30),
@@ -207,13 +209,15 @@ async fn test_worker_concurrency() {
     // Schedule 10 echo activities
     schedule_test_activities(&pool, workflow_id, 10).await;
 
-    // Configure worker with concurrency=4
+    // Configure worker with max_concurrent_activities=16
+    #[allow(deprecated)]
     let config = WorkerConfig {
         api_url: server_url,
         worker_id: "test_worker_concurrent".to_string(),
         activity_types: vec!["builtin.echo".to_string()],
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
+        max_concurrent_activities: 16,
         concurrency: 4,
         activity_timeout: Duration::from_secs(30),
         heartbeat_interval: Duration::from_secs(30),
@@ -262,12 +266,14 @@ async fn test_worker_authentication_failure() {
     let (server_url, pool, server_handle) = create_real_server().await;
 
     // Configure worker with invalid credentials
+    #[allow(deprecated)]
     let config = WorkerConfig {
         api_url: server_url,
         worker_id: "test_worker_badauth".to_string(),
         activity_types: vec!["default.echo".to_string()],
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
+        max_concurrent_activities: 16,
         concurrency: 1,
         activity_timeout: Duration::from_secs(30),
         heartbeat_interval: Duration::from_secs(30),

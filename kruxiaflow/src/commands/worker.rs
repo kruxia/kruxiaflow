@@ -34,21 +34,21 @@ Example: --worker-id worker_payments_1"
     )]
     pub worker_id: Option<String>,
 
-    /// Number of concurrent worker tasks
+    /// Maximum concurrent in-flight activities
     #[arg(
         short,
         long,
-        env = "KRUXIAFLOW_WORKER_COUNT",
-        default_value = "4",
-        help = "Number of concurrent worker tasks",
-        long_help = "Number of concurrent worker tasks\n\n\
-Each task can process one activity at a time.\n\
-Total throughput = tasks × activities per second.\n\n\
-Default: 4\n\
+        env = "KRUXIAFLOW_WORKER_MAX_ACTIVITIES",
+        default_value = "16",
+        help = "Maximum concurrent in-flight activities",
+        long_help = "Maximum number of activities that can execute concurrently\n\n\
+Uses semaphore-based concurrency for efficient resource usage.\n\
+Activities complete independently without blocking each other.\n\n\
+Default: 16\n\
 Range: 1-100\n\
-Example: --workers 20"
+Example: --max-activities 32"
     )]
-    pub workers: usize,
+    pub max_activities: usize,
 
     /// Activity types to handle (comma-separated)
     #[arg(
@@ -133,8 +133,8 @@ Example: --poll-max-activities 5"
 
 impl WorkerCommand {
     pub fn validate(&self) -> Result<()> {
-        if self.workers == 0 || self.workers > 100 {
-            anyhow::bail!("Worker count must be between 1 and 100");
+        if self.max_activities == 0 || self.max_activities > 100 {
+            anyhow::bail!("Max concurrent activities must be between 1 and 100");
         }
 
         if self.poll_max_activities == 0 || self.poll_max_activities > 100 {
@@ -195,8 +195,8 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
     tracing::info!(
         worker_id = %worker_id,
         api_url = %cmd.api_url,
-        workers = cmd.workers,
-        "Starting Kruxia Flow worker"
+        max_concurrent_activities = cmd.max_activities,
+        "Starting Kruxia Flow worker with semaphore-based concurrency"
     );
 
     // Connect to database for workflow storage access
@@ -246,13 +246,15 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
         "Activity registry initialized"
     );
 
+    #[allow(deprecated)]
     let config = WorkerConfig {
         api_url: cmd.api_url.clone(),
         worker_id: worker_id.clone(),
         activity_types: registry.activity_types(),
         poll_max_activities: cmd.poll_max_activities,
         poll_interval: Duration::from_millis(cmd.poll_interval),
-        concurrency: cmd.workers,
+        max_concurrent_activities: cmd.max_activities,
+        concurrency: 1, // Deprecated, set to 1 (single poller with semaphore)
         activity_timeout: Duration::from_secs(cmd.activity_timeout),
         heartbeat_interval: Duration::from_secs(cmd.heartbeat_interval),
         client_id: cmd.client_id.clone(),
@@ -297,7 +299,7 @@ mod tests {
         WorkerCommand {
             api_url: "http://127.0.0.1:8080".to_string(),
             worker_id: Some("worker_test".to_string()),
-            workers: 4,
+            max_activities: 16,
             activity_types: None,
             poll_max_activities: 1,
             poll_interval: 100,
@@ -323,16 +325,16 @@ mod tests {
     }
 
     #[test]
-    fn test_worker_command_invalid_workers_zero() {
+    fn test_worker_command_invalid_max_activities_zero() {
         let mut cmd = valid_worker_command();
-        cmd.workers = 0;
+        cmd.max_activities = 0;
         assert!(cmd.validate().is_err());
     }
 
     #[test]
-    fn test_worker_command_invalid_workers_over_100() {
+    fn test_worker_command_invalid_max_activities_over_100() {
         let mut cmd = valid_worker_command();
-        cmd.workers = 101;
+        cmd.max_activities = 101;
         assert!(cmd.validate().is_err());
     }
 
@@ -375,13 +377,13 @@ mod tests {
     fn test_worker_command_valid_boundaries() {
         // Test minimum boundaries
         let mut cmd = valid_worker_command();
-        cmd.workers = 1;
+        cmd.max_activities = 1;
         cmd.poll_max_activities = 1;
         cmd.shutdown_timeout = 5;
         assert!(cmd.validate().is_ok());
 
         // Test maximum boundaries
-        cmd.workers = 100;
+        cmd.max_activities = 100;
         cmd.poll_max_activities = 100;
         cmd.shutdown_timeout = 300;
         assert!(cmd.validate().is_ok());

@@ -321,12 +321,14 @@ async fn test_example_10_order_processing_with_email() {
     )));
     registry.register(Arc::new(EmailSendActivity::new()));
 
+    #[allow(deprecated)]
     let worker_config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("test_worker_ex10_{}", Uuid::now_v7()),
         activity_types: registry.activity_types(),
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
+        max_concurrent_activities: 20,
         concurrency: 5,
         activity_timeout: Duration::from_secs(30),
         heartbeat_interval: Duration::from_secs(30),

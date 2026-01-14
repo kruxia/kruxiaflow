@@ -7,15 +7,19 @@ use kruxiaflow_core::storage::WorkflowStorage;
 use kruxiaflow_core::workflow::ActivityOutputDefinition;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 /// Worker poller task
 ///
-/// Continuously polls for activities, executes them, and reports results.
+/// Uses a semaphore-based concurrency model where the worker maintains N in-flight
+/// activity slots and polls for more work whenever slots become available.
+/// This ensures activities complete independently without blocking each other.
 pub struct WorkerPoller {
     config: WorkerConfig,
     client: WorkerApiClient,
     registry: Arc<ActivityRegistry>,
     storage: Arc<dyn WorkflowStorage>,
+    semaphore: Arc<Semaphore>,
 }
 
 impl WorkerPoller {
@@ -25,20 +29,31 @@ impl WorkerPoller {
         registry: Arc<ActivityRegistry>,
         storage: Arc<dyn WorkflowStorage>,
     ) -> Self {
+        let semaphore = Arc::new(Semaphore::new(config.max_concurrent_activities));
         Self {
             config,
             client,
             registry,
             storage,
+            semaphore,
         }
     }
 
-    /// Run the poller loop
+    /// Run the semaphore-based poller loop
+    ///
+    /// Uses a semaphore to limit concurrent in-flight activities. The loop:
+    /// 1. Waits for at least one slot to be available
+    /// 2. Polls for activities (up to available slots)
+    /// 3. Spawns each activity with its own permit
+    /// 4. Loops immediately to fill more slots
+    ///
+    /// Activities complete independently, and the worker continuously fills available slots.
     pub async fn run(&self) -> Result<()> {
         tracing::info!(
             worker_id = %self.config.worker_id,
             activity_types = ?self.config.activity_types,
-            "Starting worker poller"
+            max_concurrent_activities = self.config.max_concurrent_activities,
+            "Starting worker poller with semaphore-based concurrency"
         );
 
         loop {
@@ -48,7 +63,7 @@ impl WorkerPoller {
                         // No activities available, sleep before next poll
                         tokio::time::sleep(self.config.poll_interval).await;
                     }
-                    // If activities were executed, poll immediately for more
+                    // If activities were executed, loop immediately to fill more slots
                 }
                 Err(err) => {
                     tracing::error!("Poller error: {:?}", err);
@@ -59,59 +74,79 @@ impl WorkerPoller {
         }
     }
 
-    /// Poll for activities and execute them
+    /// Poll for activities and execute them using semaphore-based concurrency
     ///
-    /// Returns number of activities executed.
+    /// Returns number of activities spawned.
     #[cfg_attr(feature = "profiling", tracing::instrument(skip(self), fields(worker_id = %self.config.worker_id)))]
     async fn poll_and_execute(&self) -> Result<usize> {
-        // Poll for activities
+        // Wait for at least one slot to be available
+        let permit = Arc::clone(&self.semaphore)
+            .acquire_owned()
+            .await
+            .map_err(|_| anyhow::anyhow!("Semaphore closed"))?;
+
+        // Check how many additional slots are available (+1 for the one we hold)
+        let available_slots = self.semaphore.available_permits() + 1;
+
+        // Poll for up to `available_slots` activities, capped by poll_max_activities
+        let max_to_poll = available_slots.min(self.config.poll_max_activities);
+
         let response = self
             .client
             .poll_activities(
                 &self.config.worker_id,
                 self.config.activity_types.clone(),
-                self.config.poll_max_activities,
+                max_to_poll,
             )
             .await
             .context("Failed to poll activities")?;
 
         if response.count == 0 {
+            // No work available, release permit and return
+            drop(permit);
             return Ok(0);
         }
 
         tracing::debug!(
             worker_id = %self.config.worker_id,
             count = response.count,
+            available_slots = available_slots,
             "Claimed activities"
         );
 
-        // Execute all activities concurrently
-        // Since activities are already ready (no dependencies), spawn them all in parallel
-        let mut tasks = Vec::new();
-        for activity in response.activities {
+        // Acquire additional permits for extra activities (we already hold one)
+        let mut permits: Vec<OwnedSemaphorePermit> = vec![permit];
+        for _ in 1..response.count {
+            let additional_permit = Arc::clone(&self.semaphore)
+                .acquire_owned()
+                .await
+                .map_err(|_| anyhow::anyhow!("Semaphore closed"))?;
+            permits.push(additional_permit);
+        }
+
+        // Spawn each activity with its own permit
+        for (activity, permit) in response.activities.into_iter().zip(permits) {
             let config = self.config.clone();
             let client = self.client.clone();
             let registry = Arc::clone(&self.registry);
-
             let storage = Arc::clone(&self.storage);
-            tasks.push(tokio::spawn(async move {
+            let semaphore = Arc::clone(&self.semaphore);
+
+            tokio::spawn(async move {
                 let poller = WorkerPoller {
                     config,
                     client,
                     registry,
                     storage,
+                    semaphore,
                 };
                 poller.execute_activity(activity).await;
-            }));
+                drop(permit); // Release slot when done
+            });
         }
 
-        // Wait for all activities to complete
-        for task in tasks {
-            if let Err(err) = task.await {
-                tracing::error!("Activity task panicked: {:?}", err);
-            }
-        }
-
+        // Return immediately - don't wait for activities to complete
+        // The semaphore ensures we don't over-commit resources
         Ok(response.count)
     }
 
@@ -344,6 +379,7 @@ impl WorkerPoller {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use crate::activity_result::ActivityResult;
@@ -500,7 +536,8 @@ mod tests {
             activity_types: vec!["test.success".to_string()],
             poll_max_activities: 10,
             poll_interval: Duration::from_millis(100),
-            concurrency: 4,
+            max_concurrent_activities: 16,
+            concurrency: 4, // Deprecated
             activity_timeout: Duration::from_secs(5),
             heartbeat_interval: Duration::from_secs(30),
             client_id: "test_client".to_string(),
@@ -525,6 +562,9 @@ mod tests {
 
         assert_eq!(poller.config.worker_id, "test_worker");
         assert_eq!(poller.config.poll_max_activities, 10);
+        assert_eq!(poller.config.max_concurrent_activities, 16);
+        // Verify semaphore is created with correct number of permits
+        assert_eq!(poller.semaphore.available_permits(), 16);
     }
 
     #[test]
@@ -718,5 +758,188 @@ mod tests {
         // Test that Arc can be cloned for spawning tasks
         let cloned = Arc::clone(&registry_arc);
         assert!(Arc::ptr_eq(&registry_arc, &cloned));
+    }
+
+    // =========================================================================
+    // Semaphore-based concurrency tests
+    // =========================================================================
+
+    #[test]
+    fn test_semaphore_created_with_max_concurrent_activities() {
+        // Verify semaphore is created with the correct number of permits
+        let config = WorkerConfig {
+            max_concurrent_activities: 32,
+            ..test_config()
+        };
+        let client = WorkerApiClient::new(
+            "http://localhost:8080".to_string(),
+            "test_client".to_string(),
+            "test_secret".to_string(),
+        );
+        let registry = Arc::new(ActivityRegistry::new(Arc::new(
+            kruxiaflow_core::cache::NoOpCache::new(),
+        )));
+        let storage = Arc::new(MockStorage);
+
+        let poller = WorkerPoller::new(config, client, registry, storage);
+
+        assert_eq!(poller.semaphore.available_permits(), 32);
+    }
+
+    #[tokio::test]
+    async fn test_semaphore_acquire_reduces_permits() {
+        let config = WorkerConfig {
+            max_concurrent_activities: 4,
+            ..test_config()
+        };
+        let client = WorkerApiClient::new(
+            "http://localhost:8080".to_string(),
+            "test_client".to_string(),
+            "test_secret".to_string(),
+        );
+        let registry = Arc::new(ActivityRegistry::new(Arc::new(
+            kruxiaflow_core::cache::NoOpCache::new(),
+        )));
+        let storage = Arc::new(MockStorage);
+
+        let poller = WorkerPoller::new(config, client, registry, storage);
+
+        // Initially all permits are available
+        assert_eq!(poller.semaphore.available_permits(), 4);
+
+        // Acquire a permit
+        let permit1 = poller.semaphore.clone().acquire_owned().await.unwrap();
+        assert_eq!(poller.semaphore.available_permits(), 3);
+
+        // Acquire another
+        let permit2 = poller.semaphore.clone().acquire_owned().await.unwrap();
+        assert_eq!(poller.semaphore.available_permits(), 2);
+
+        // Release permits
+        drop(permit1);
+        assert_eq!(poller.semaphore.available_permits(), 3);
+
+        drop(permit2);
+        assert_eq!(poller.semaphore.available_permits(), 4);
+    }
+
+    #[test]
+    fn test_poll_max_capped_to_available_slots() {
+        // Test that poll_max_activities is correctly capped to available slots
+        let poll_max_activities = 10;
+        let available_slots = 3;
+
+        let max_to_poll = available_slots.min(poll_max_activities);
+        assert_eq!(max_to_poll, 3);
+
+        // When more slots available than poll_max
+        let available_slots = 50;
+        let max_to_poll = available_slots.min(poll_max_activities);
+        assert_eq!(max_to_poll, 10);
+    }
+
+    #[test]
+    fn test_semaphore_is_arc_clonable() {
+        // Verify semaphore can be cloned across tasks
+        let config = test_config();
+        let client = WorkerApiClient::new(
+            "http://localhost:8080".to_string(),
+            "test_client".to_string(),
+            "test_secret".to_string(),
+        );
+        let registry = Arc::new(ActivityRegistry::new(Arc::new(
+            kruxiaflow_core::cache::NoOpCache::new(),
+        )));
+        let storage = Arc::new(MockStorage);
+
+        let poller = WorkerPoller::new(config, client, registry, storage);
+
+        // Semaphore can be cloned
+        let sem_clone = Arc::clone(&poller.semaphore);
+        assert!(Arc::ptr_eq(&poller.semaphore, &sem_clone));
+    }
+
+    #[tokio::test]
+    async fn test_semaphore_concurrent_access() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use tokio::sync::Semaphore;
+
+        // Test that semaphore correctly limits concurrent access
+        let max_concurrent = 4;
+        let semaphore = Arc::new(Semaphore::new(max_concurrent));
+        let active_count = Arc::new(AtomicUsize::new(0));
+        let max_active_count = Arc::new(AtomicUsize::new(0));
+
+        let mut handles = Vec::new();
+
+        for _ in 0..16 {
+            let sem = Arc::clone(&semaphore);
+            let active = Arc::clone(&active_count);
+            let max_active = Arc::clone(&max_active_count);
+
+            handles.push(tokio::spawn(async move {
+                // Acquire permit
+                let _permit = sem.acquire().await.unwrap();
+
+                // Track active count
+                let current = active.fetch_add(1, Ordering::SeqCst) + 1;
+
+                // Update max if needed
+                let mut prev_max = max_active.load(Ordering::SeqCst);
+                while current > prev_max {
+                    match max_active.compare_exchange_weak(
+                        prev_max,
+                        current,
+                        Ordering::SeqCst,
+                        Ordering::SeqCst,
+                    ) {
+                        Ok(_) => break,
+                        Err(x) => prev_max = x,
+                    }
+                }
+
+                // Simulate work
+                tokio::time::sleep(Duration::from_millis(10)).await;
+
+                active.fetch_sub(1, Ordering::SeqCst);
+            }));
+        }
+
+        // Wait for all tasks
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        // Max concurrent should never exceed semaphore limit
+        assert!(max_active_count.load(Ordering::SeqCst) <= max_concurrent);
+    }
+
+    #[test]
+    fn test_config_max_concurrent_activities_different_values() {
+        // Test various max_concurrent_activities values
+        for max in [1, 4, 16, 32, 64, 100] {
+            let config = WorkerConfig {
+                max_concurrent_activities: max,
+                ..test_config()
+            };
+            let client = WorkerApiClient::new(
+                "http://localhost:8080".to_string(),
+                "test_client".to_string(),
+                "test_secret".to_string(),
+            );
+            let registry = Arc::new(ActivityRegistry::new(Arc::new(
+                kruxiaflow_core::cache::NoOpCache::new(),
+            )));
+            let storage = Arc::new(MockStorage);
+
+            let poller = WorkerPoller::new(config, client, registry, storage);
+
+            assert_eq!(
+                poller.semaphore.available_permits(),
+                max,
+                "Semaphore should have {} permits",
+                max
+            );
+        }
     }
 }

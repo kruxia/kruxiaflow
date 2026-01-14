@@ -49,19 +49,21 @@ Example: --bind 127.0.0.1"
     )]
     pub bind: String,
 
-    /// Number of worker tasks
+    /// Maximum concurrent in-flight activities
     #[arg(
-        short,
+        short = 'w',
         long,
-        env = "KRUXIAFLOW_WORKER_COUNT",
-        default_value = "4",
-        help = "Number of concurrent worker tasks",
-        long_help = "Number of concurrent worker tasks to spawn\n\n\
-Default: 1\n\
+        env = "KRUXIAFLOW_WORKER_MAX_ACTIVITIES",
+        default_value = "16",
+        help = "Maximum concurrent in-flight activities",
+        long_help = "Maximum number of activities that can execute concurrently\n\n\
+Uses semaphore-based concurrency for efficient resource usage.\n\
+Activities complete independently without blocking each other.\n\n\
+Default: 16\n\
 Range: 1-100\n\
-Example: --workers 20"
+Example: --max-activities 32"
     )]
-    pub workers: usize,
+    pub max_activities: usize,
 
     /// Orchestrator consumer ID (for event polling checkpoint)
     #[arg(
@@ -193,8 +195,8 @@ Example: --db-connect-timeout 120"
 impl ServeCommand {
     /// Validate configuration
     pub fn validate(&self) -> Result<()> {
-        if self.workers == 0 || self.workers > 100 {
-            anyhow::bail!("Worker count must be between 1 and 100");
+        if self.max_activities == 0 || self.max_activities > 100 {
+            anyhow::bail!("Max concurrent activities must be between 1 and 100");
         }
 
         if self.poll_max_activities == 0 || self.poll_max_activities > 100 {
@@ -310,7 +312,7 @@ async fn spawn_api_server(
 
 /// Spawn worker tasks
 async fn spawn_workers(
-    worker_count: usize,
+    max_concurrent_activities: usize,
     poll_max_activities: usize,
     api_url: String,
     client_id: String,
@@ -319,9 +321,9 @@ async fn spawn_workers(
     activity_timeout: u64,
 ) -> Result<Vec<JoinHandle<()>>> {
     tracing::info!(
-        count = worker_count,
+        max_concurrent_activities = max_concurrent_activities,
         api_url = %api_url,
-        "Starting workers"
+        "Starting worker with semaphore-based concurrency"
     );
 
     // Create cache service based on environment configuration
@@ -332,13 +334,15 @@ async fn spawn_workers(
     // Create activity registry with all built-in activities pre-registered
     let registry = kruxiaflow_worker::register_builtin_activities(cache_service);
 
+    #[allow(deprecated)]
     let config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("internal_worker_{}", Uuid::now_v7()),
         activity_types: registry.activity_types(),
         poll_max_activities,
         poll_interval: Duration::from_millis(100),
-        concurrency: worker_count,
+        max_concurrent_activities,
+        concurrency: 1, // Deprecated, set to 1 (single poller with semaphore)
         activity_timeout: Duration::from_secs(activity_timeout),
         heartbeat_interval: Duration::from_secs(30),
         client_id,
@@ -351,7 +355,7 @@ async fn spawn_workers(
     // Wait a moment for workers to authenticate
     tokio::time::sleep(Duration::from_millis(500)).await;
 
-    tracing::info!(count = handles.len(), "Workers ready");
+    tracing::info!(count = handles.len(), "Worker ready");
 
     Ok(handles)
 }
@@ -469,9 +473,9 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     tracing::info!(
         port = cmd.port,
         bind = %cmd.bind,
-        workers = cmd.workers,
+        max_concurrent_activities = cmd.max_activities,
         shutdown_timeout = cmd.shutdown_timeout,
-        "Starting Kruxia Flow all-in-one mode"
+        "Starting Kruxia Flow all-in-one mode with semaphore-based worker concurrency"
     );
 
     // Create shutdown coordinator
@@ -556,7 +560,7 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
 
     // 5. Spawn workers (workers will be gracefully stopped via manager)
     let worker_handles = spawn_workers(
-        cmd.workers,
+        cmd.max_activities,
         cmd.poll_max_activities,
         api_url.clone(),
         cmd.client_id.clone(),
@@ -670,7 +674,7 @@ mod tests {
         ServeCommand {
             port: 8080,
             bind: "0.0.0.0".to_string(),
-            workers: 1,
+            max_activities: 16,
             orchestrator_id: "orchestrator_default".to_string(),
             client_id: "kruxiaflow_internal_worker".to_string(),
             client_secret: Some("secret".to_string()),
@@ -695,38 +699,48 @@ mod tests {
     }
 
     // =========================================================================
-    // Worker count validation tests
+    // Max concurrent activities validation tests
     // =========================================================================
 
     #[test]
-    fn test_serve_command_invalid_workers_zero() {
+    fn test_serve_command_invalid_max_activities_zero() {
         let mut cmd = valid_serve_command();
-        cmd.workers = 0;
+        cmd.max_activities = 0;
 
         let result = cmd.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Worker count"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Max concurrent activities")
+        );
     }
 
     #[test]
-    fn test_serve_command_invalid_workers_over_100() {
+    fn test_serve_command_invalid_max_activities_over_100() {
         let mut cmd = valid_serve_command();
-        cmd.workers = 101;
+        cmd.max_activities = 101;
 
         let result = cmd.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Worker count"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Max concurrent activities")
+        );
     }
 
     #[test]
-    fn test_serve_command_valid_workers_at_boundaries() {
+    fn test_serve_command_valid_max_activities_at_boundaries() {
         // Test minimum boundary (1)
         let mut cmd = valid_serve_command();
-        cmd.workers = 1;
+        cmd.max_activities = 1;
         assert!(cmd.validate().is_ok());
 
         // Test maximum boundary (100)
-        cmd.workers = 100;
+        cmd.max_activities = 100;
         assert!(cmd.validate().is_ok());
     }
 
@@ -854,7 +868,7 @@ mod tests {
         let cmd = ServeCommand {
             port: 9090,
             bind: "127.0.0.1".to_string(),
-            workers: 50,
+            max_activities: 50,
             orchestrator_id: "custom_orchestrator".to_string(),
             client_id: "custom_client".to_string(),
             client_secret: Some("my_secret".to_string()),
@@ -879,16 +893,16 @@ mod tests {
         assert_eq!(cmd.db_connect_timeout, 120);
         assert_eq!(cmd.port, 9090);
         assert_eq!(cmd.bind, "127.0.0.1");
-        assert_eq!(cmd.workers, 50);
+        assert_eq!(cmd.max_activities, 50);
         assert_eq!(cmd.orchestrator_id, "custom_orchestrator");
         assert!(cmd.oauth_public_key.is_some());
     }
 
     #[test]
     fn test_serve_command_validates_in_order() {
-        // Validation should fail on first error - test that workers is checked first
+        // Validation should fail on first error - test that max_activities is checked first
         let mut cmd = valid_serve_command();
-        cmd.workers = 0;
+        cmd.max_activities = 0;
         cmd.poll_max_activities = 0;
         cmd.client_secret = None;
         cmd.oauth_private_key = None;
@@ -896,7 +910,12 @@ mod tests {
 
         let result = cmd.validate();
         assert!(result.is_err());
-        // Should fail on workers first
-        assert!(result.unwrap_err().to_string().contains("Worker count"));
+        // Should fail on max_activities first
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Max concurrent activities")
+        );
     }
 }
