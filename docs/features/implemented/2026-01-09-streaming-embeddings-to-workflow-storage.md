@@ -263,8 +263,23 @@ Benefits:
 3. [x] Update `ActivityRegistry` to pass context to activities
 4. [x] Update `EmbeddingActivity` to stream large outputs
 5. [x] Update researcher `store.passages` to read from file reference
-6. [ ] Add integration tests for large document ingestion
+6. [x] Add integration tests for large document ingestion
 7. [x] Update documentation (this file)
+
+## Test Coverage
+
+Tests added in `worker/tests/embedding_streaming_test.rs`:
+- `test_streaming_embeddings_returns_file_reference` - Verifies file reference returned
+- `test_inline_embeddings_without_storage` - Verifies fallback to inline
+- `test_batch_processing_streams_incrementally` - Verifies batched streaming
+- `test_output_structure_has_both_keys` - Verifies template compatibility
+- `test_batching_splits_large_inputs` - Verifies batch splitting (100 inputs, batch_size=25)
+- `test_single_batch_for_small_inputs` - Verifies single batch for small inputs
+- `test_default_batch_size` - Verifies default batch_size is applied
+- `test_streaming_failure_returns_error` - Verifies error handling on failure
+- `test_partial_write_on_failure` - Verifies graceful handling of partial writes
+- `test_empty_input_handled` - Verifies empty input handling
+- `test_large_batch_data_integrity` - Verifies data integrity across batches
 
 ## Estimated Effort
 
