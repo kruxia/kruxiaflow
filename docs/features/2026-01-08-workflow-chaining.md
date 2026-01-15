@@ -7,7 +7,11 @@
 
 ## Resolution Note
 
-**2026-01-10**: Workflow chaining can already be achieved without dedicated syntax. Any workflow can include an HTTP activity that calls the kruxiaflow API to trigger a follow-up workflow:
+**2026-01-15**: Workflow chaining can be achieved using existing and planned primitives without dedicated syntax:
+
+### Current Approach (MVP): HTTP Activity
+
+Any workflow can include an HTTP activity that calls the kruxiaflow API to trigger a follow-up workflow:
 
 ```yaml
 activities:
@@ -34,12 +38,65 @@ This approach:
 - Leverages existing condition evaluation for conditional triggering
 - Works with existing input mapping via template expressions
 - Keeps workflow definitions self-contained and explicit
+- Child workflow runs independently (fire-and-forget)
 
-What native chaining would add beyond this:
-- Parent-child relationship tracking in the database
-- API to view workflow trees (`?include=children`)
-- Cascade cancellation (`?cascade=true`)
-- Slightly cleaner declarative syntax
+### Future Approach (Post-MVP): Wait for Child Completion
+
+With the event-based waiting primitive (see `docs/post-mvp.md` Story 6.0), workflows can wait for child workflow completion:
+
+```yaml
+activities:
+  - key: trigger_enrichment
+    worker: builtin
+    activity_name: http_request
+    parameters:
+      method: POST
+      url: "{{INPUT.kruxiaflow_api_url}}/api/v1/workflows"
+      headers:
+        Content-Type: application/json
+        Authorization: "Bearer {{INPUT.api_token}}"
+      body:
+        definition_name: enrich_bibliographic
+        input:
+          source_id: "{{INPUT.source_id}}"
+    outputs:
+      child_workflow_id: "{{result.workflow_id}}"
+    depends_on: [finalize]
+
+  - key: wait_for_enrichment
+    worker: builtin
+    activity_name: wait_for_signal
+    parameters:
+      event_name: "workflow_{{trigger_enrichment.child_workflow_id}}_completed"
+      timeout: 3600
+    depends_on: [trigger_enrichment]
+
+  - key: use_enrichment_results
+    worker: builtin
+    activity_name: postgres_query
+    parameters:
+      query: "SELECT * FROM bibliographic WHERE source_id = {{INPUT.source_id}}"
+    depends_on: [wait_for_enrichment]
+```
+
+**How it works**:
+1. Trigger child workflow via HTTP activity
+2. Use `wait_for_signal` activity to wait for completion event
+3. When child completes, system sends signal to parent workflow
+4. Parent workflow continues with subsequent activities
+
+**Benefits over fire-and-forget**:
+- Parent workflow waits for child completion
+- Access to child workflow outputs
+- Sequential chaining (child must complete before parent continues)
+- Error propagation (child failure can fail parent)
+
+**What native chaining syntax would add beyond this**:
+- Parent-child relationship tracking in database (automatic)
+- API to view workflow trees (`GET /api/v1/workflows/{id}?include=children`)
+- Cascade cancellation (`DELETE /api/v1/workflows/{id}?cascade=true`)
+- Slightly cleaner declarative syntax (fewer manual steps)
+- Automatic event subscription (no need to specify event name)
 
 These are ergonomic and observability improvements that can be revisited if demand warrants.
 

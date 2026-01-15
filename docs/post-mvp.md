@@ -1693,6 +1693,241 @@ workflow.add_activities(fallback_chain)
 - Better testing (unit test workflow logic)
 - Dynamic workflow generation based on configuration
 
+**Implementation Plan**: See `docs/implementation/python-sdk-implementation-plan.md` (Phase 1)
+
+**Estimated Time**: 5-7 days
+
+---
+
+### Story 4.1b: Python Worker SDK
+
+**Priority**: P1 (High - Required for Python workflow testing)
+
+**As** a Python developer
+**I want** a library to build custom Python workers
+**So that** I can implement and test custom activities locally
+
+**Rationale**: Python workflow definitions (Story 4.1) require the ability to test activities locally. This necessitates a Python worker SDK. These two components are interdependent and should be developed together.
+
+**Scope**:
+- Worker class for polling activities from Kruxia Flow API
+- Activity decorator for registering activity implementations
+- Automatic result serialization and error handling
+- Heartbeat management for long-running activities
+- File artifact upload/download support
+- Logging integration
+- Type-safe parameter handling
+
+**Example API**:
+```python
+from kruxiaflow.worker import Worker, Activity, ActivityResult
+
+worker = Worker(
+    worker_id="my-python-worker",
+    api_url="http://localhost:8080",
+    api_token="${KRUXIAFLOW_TOKEN}",
+    concurrency=5
+)
+
+@worker.activity(name="analyze_text", timeout=30)
+async def analyze_text(params: dict) -> ActivityResult:
+    text = params["text"]
+    # Custom analysis logic
+    result = await analyze(text)
+
+    return ActivityResult(
+        output={"sentiment": result.sentiment},
+        cost_usd=0.0001
+    )
+
+if __name__ == "__main__":
+    worker.run()  # Blocks, polls for activities
+```
+
+**Key Features**:
+- Async-first API (modern Python patterns)
+- Automatic polling with exponential backoff
+- Graceful shutdown handling
+- Context object for file operations and logging
+- Error handling and result serialization
+
+**Package**: `kruxiaflow-worker` (separate from workflow SDK)
+
+**Implementation Plan**: See `docs/implementation/python-sdk-implementation-plan.md` (Phase 1)
+
+**Estimated Time**: 7-10 days
+
+---
+
+### Story 4.1c: Pre-installed Python Packages
+
+**Priority**: P1 (High - Enables real-world use cases)
+
+**As** a Python developer
+**I want** common Python packages pre-installed in the built-in worker
+**So that** I can write data engineering, ML, and NLP scripts without deploying custom workers
+
+**Rationale**: Instead of creating 30+ discrete activities (like `read_csv`, `filter_dataframe`), provide a single `script` activity with rich package ecosystem. This is more flexible and aligns with Python developers' expectations.
+
+**Design Philosophy**:
+- Discrete activities like `read_csv` don't make sense (need to pass DataFrames between activities)
+- Python's strength is flexibility - let users write scripts
+- Pre-installed packages = the "standard library"
+- Example documentation provides guidance
+
+**Scope**:
+
+**Data Engineering Packages**:
+```
+pandas>=2.0.0           # DataFrame operations
+pyarrow>=14.0.0         # Parquet support
+sqlalchemy>=2.0.0       # Database connections
+```
+
+**Data Science / ML Packages**:
+```
+numpy>=1.24.0           # Numerical operations
+scikit-learn>=1.3.0     # ML algorithms
+scipy>=1.10.0           # Scientific computing
+```
+
+**Natural Language Processing Packages**:
+```
+transformers>=4.30.0    # Hugging Face models
+sentence-transformers   # Embeddings
+nltk>=3.8.0            # Basic NLP tools
+```
+
+**Utility Packages**:
+```
+httpx>=0.24.0          # HTTP requests
+beautifulsoup4>=4.12.0 # HTML parsing
+pillow>=10.0.0         # Image processing
+orjson>=3.9.0          # Fast JSON
+```
+
+**Total Size**: ~200-300MB
+
+**Example Usage**:
+```yaml
+- key: process_data
+  worker: python
+  activity_name: script
+  parameters:
+    script: |
+      import pandas as pd
+
+      # Download CSV
+      csv_path = download_file(INPUT["data_url"])
+      df = pd.read_csv(csv_path)
+
+      # Transform
+      df_clean = df[df["status"] == "active"].groupby("category").sum()
+
+      # Upload result
+      result_url = upload_file(df_clean.to_csv(), "result.csv")
+      OUTPUT = {"result_url": result_url}
+```
+
+**Documentation**: Provide example snippets for common tasks
+- Data engineering: CSV/Parquet processing, SQL queries
+- Machine learning: Training, prediction, evaluation
+- NLP: Text classification, embeddings, entity extraction
+
+**Benefits**:
+- Maximum flexibility (write any Python code)
+- No artificial activity boundaries
+- Familiar to Python developers
+- Competitive with Airflow operators (but more flexible)
+- Simpler maintenance (no 30+ activity implementations)
+
+**Implementation Plan**: See `docs/implementation/python-sdk-implementation-plan.md` (Phase 2)
+
+**Estimated Time**: 2-3 days
+
+---
+
+### Story 4.1d: Built-in Python Worker
+
+**Priority**: P1 (High - Zero-setup experience)
+**Depends On**: Story 4.1c (Pre-installed Python Packages)
+
+**As** a new Kruxia Flow user
+**I want** to execute Python scripts without deploying a separate worker
+**So that** I can get started in under 5 minutes
+
+**Rationale**: Zero-configuration Python execution is a major competitive advantage and critical for developer onboarding. This removes deployment friction and enables "60-second quick start" marketing.
+
+**Scope**:
+- Python worker bundled with Kruxia Flow
+- Auto-starts with `kruxiaflow serve`
+- **Single activity**: `script` (worker: `python`, activity: `script`)
+- All Story 4.1c packages pre-installed
+- Helper functions for file operations
+- Sandboxed execution environment
+
+**Usage**:
+```yaml
+activities:
+  - key: process_data
+    worker: python
+    activity_name: script
+    parameters:
+      script: |
+        import pandas as pd
+        import numpy as np
+
+        # Download data
+        csv_path = download_file(INPUT["data_url"])
+        df = pd.read_csv(csv_path)
+
+        # Process
+        df_filtered = df[df["value"] > 100]
+        df_filtered["normalized"] = (df_filtered["value"] - df_filtered["value"].mean()) / df_filtered["value"].std()
+
+        # Upload result
+        result_url = upload_file(df_filtered.to_csv(), "result.csv")
+
+        OUTPUT = {"result_url": result_url, "row_count": len(df_filtered)}
+```
+
+**Helper Functions** (available in script scope):
+- `INPUT` - Dict containing workflow inputs
+- `OUTPUT` - Dict to populate with results
+- `upload_file(content, filename)` - Upload to file storage, returns URL
+- `download_file(url)` - Download from file storage, returns local path
+- `logger` - Logger instance
+- `workflow_id` - Current workflow ID
+- `activity_key` - Current activity key
+
+**Security**:
+- Restricted builtins (no direct file I/O beyond helpers)
+- Timeout enforcement (default 300s)
+- Memory limits
+- Sandboxed execution
+
+**Deployment**:
+- Docker image with Python + all packages (~500MB)
+- Alternative: PyOxidizer for native binary (~150-200MB)
+- Starts automatically with `kruxiaflow serve`
+
+**Benefits**:
+- Zero-config Python execution
+- Full Python flexibility (not limited to discrete activities)
+- Competitive with Temporal (separate SDKs required)
+- Simplifies onboarding
+- Strong marketing message ("Python in 60 seconds")
+
+**Custom Workers Still Needed For**:
+- Specialized dependencies (domain libraries)
+- Long-running operations (better heartbeat control)
+- Type safety (parameter validation)
+- Reusable team activities
+
+**Implementation Plan**: See `docs/implementation/python-sdk-implementation-plan.md` (Phase 3)
+
+**Estimated Time**: 3-4 days
+
 ---
 
 ### Story 4.2: TypeScript SDK for Workflow Definitions
@@ -2567,6 +2802,314 @@ healthcheck:
 
 **Goal**: Enable sophisticated workflow patterns beyond basic sequential/parallel execution.
 
+### Story 6.0: Event-Based Activity Waiting (Core Primitive)
+
+**Priority**: P1 (High - Foundational primitive for multiple features)
+
+**As** a platform developer
+**I want** a core primitive for activities to wait for external events without consuming worker resources
+**So that** we can enable human-in-the-loop workflows, workflow chaining, webhook integration, and other async patterns
+
+**Rationale**:
+
+This is a foundational infrastructure primitive that unifies multiple high-value features:
+- ✅ **Human-in-the-loop workflows**: Manual approval steps, review processes
+- ✅ **Workflow chaining**: Wait for child workflow completion (without polling)
+- ✅ **External system integration**: Wait for webhooks, callbacks, third-party events
+- ✅ **Long-running async operations**: Batch jobs, ML training, external processing
+
+Without this primitive, these patterns require polling (wasteful) or application-level coordination (complex).
+
+**Core Scope** (Primitives Only):
+
+1. **New activity state**: `waiting`
+   - Activities can enter waiting state without blocking workers
+   - Orchestrator skips waiting activities during DAG evaluation
+   - Waiting activities resume when matching event arrives
+
+2. **Event subscription mechanism**:
+   ```sql
+   CREATE TABLE activity_event_subscriptions (
+       id UUID PRIMARY KEY,
+       workflow_id UUID NOT NULL,
+       activity_key TEXT NOT NULL,
+       event_type TEXT NOT NULL,          -- 'signal', 'workflow_completed', 'webhook', etc.
+       event_filter JSONB,                 -- Match criteria (e.g., workflow_id, event_name)
+       timeout_at TIMESTAMPTZ NOT NULL,
+       created_at TIMESTAMPTZ DEFAULT NOW(),
+
+       UNIQUE(workflow_id, activity_key),
+       INDEX idx_subscriptions_timeout (timeout_at) WHERE timeout_at IS NOT NULL
+   );
+   ```
+
+3. **Signal API endpoint**:
+   ```bash
+   # Generic event signaling
+   POST /api/v1/workflows/{workflow_id}/signal
+   {
+     "activity_key": "wait_for_approval",
+     "event_name": "approval_granted",
+     "data": {"approved_by": "user@example.com", "comment": "LGTM"}
+   }
+   ```
+
+4. **Built-in wait activity** (`wait_for_signal`):
+   ```yaml
+   activities:
+     - key: wait_for_approval
+       worker: builtin
+       activity_name: wait_for_signal
+       parameters:
+         event_name: "approval_granted"  # Required
+         timeout: 86400                  # 24 hours (required)
+       depends_on: [analyze_document]
+   ```
+
+5. **Orchestrator changes**:
+   - Recognize `waiting` status during DAG evaluation
+   - Skip scheduling waiting activities to workers
+   - Check subscription timeouts (fail expired waits)
+   - Resume DAG evaluation when waiting activity completes
+
+6. **Timeout handler** (background task):
+   - Periodically check for expired subscriptions
+   - Fail waiting activities that exceed timeout
+   - Cleanup subscription records
+
+**What This Story Does NOT Include** (defer to other stories):
+- ❌ Specific built-in activities (`wait_for_workflow`, `wait_for_webhook`) - build on this primitive later
+- ❌ Workflow pause/resume API - Story 6.4 uses this primitive
+- ❌ Workflow chaining syntax - can be implemented as HTTP activity + wait_for_signal
+- ❌ UI for approval workflows - just primitives for now
+- ❌ Advanced event routing/filtering - start simple
+
+**Implementation Details**:
+
+**Activity State Enum**:
+```rust
+pub enum ActivityStatus {
+    Pending,
+    Running,
+    Waiting,      // NEW: Waiting for external event
+    Completed,
+    Failed,
+    Skipped,
+}
+```
+
+**Signal API Handler**:
+```rust
+// POST /api/v1/workflows/{workflow_id}/signal
+pub async fn signal_workflow(
+    pool: &PgPool,
+    workflow_id: Uuid,
+    payload: SignalPayload,
+) -> Result<()> {
+    // Find matching subscription
+    let subscription = sqlx::query!(
+        r#"
+        SELECT workflow_id, activity_key, event_filter
+        FROM activity_event_subscriptions
+        WHERE workflow_id = $1
+        AND (
+            event_filter IS NULL
+            OR event_filter @> $2::jsonb
+        )
+        "#,
+        workflow_id,
+        json!({"event_name": payload.event_name}),
+    )
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some(sub) = subscription {
+        // Complete waiting activity with event data
+        complete_waiting_activity(
+            pool,
+            sub.workflow_id,
+            &sub.activity_key,
+            payload.data,
+        ).await?;
+
+        // Delete subscription
+        sqlx::query!(
+            "DELETE FROM activity_event_subscriptions
+             WHERE workflow_id = $1 AND activity_key = $2",
+            workflow_id,
+            sub.activity_key
+        )
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(())
+}
+
+async fn complete_waiting_activity(
+    pool: &PgPool,
+    workflow_id: Uuid,
+    activity_key: &str,
+    event_data: Value,
+) -> Result<()> {
+    // Update activity status to completed
+    sqlx::query!(
+        r#"
+        UPDATE activity_queue
+        SET status = 'completed',
+            result = $3,
+            completed_at = NOW()
+        WHERE workflow_id = $1
+        AND activity_key = $2
+        AND status = 'waiting'
+        "#,
+        workflow_id,
+        activity_key,
+        json!({"event_data": event_data})
+    )
+    .execute(pool)
+    .await?;
+
+    // Trigger orchestrator to continue DAG evaluation
+    // (via ActivityCompleted event or direct notification)
+
+    Ok(())
+}
+```
+
+**Built-in `wait_for_signal` Activity**:
+```rust
+pub struct WaitForSignalActivity;
+
+#[async_trait]
+impl ActivityImpl for WaitForSignalActivity {
+    async fn execute(&self, parameters: Value) -> Result<ActivityResult> {
+        let event_name: String = parameters["event_name"]
+            .as_str()
+            .ok_or(anyhow!("event_name required"))?
+            .to_string();
+
+        let timeout_secs: i64 = parameters["timeout"]
+            .as_i64()
+            .ok_or(anyhow!("timeout required"))?;
+
+        // Return special result indicating waiting state
+        Ok(ActivityResult::Waiting {
+            event_filter: json!({"event_name": event_name}),
+            timeout: Duration::from_secs(timeout_secs as u64),
+        })
+    }
+
+    fn name(&self) -> &str { "wait_for_signal" }
+    fn worker(&self) -> &str { "builtin" }
+}
+```
+
+**Orchestrator DAG Evaluation**:
+```rust
+// In orchestrator loop
+for activity in &workflow.activities {
+    match activity.status {
+        ActivityStatus::Waiting => {
+            // Skip - waiting for external event
+            // Check timeout (handled by background task)
+            continue;
+        }
+        ActivityStatus::Pending => {
+            if dependencies_met(activity) {
+                schedule_activity(activity).await?;
+            }
+        }
+        // ... existing logic
+    }
+}
+```
+
+**Timeout Handler** (background task):
+```rust
+async fn check_waiting_activity_timeouts(pool: &PgPool) {
+    loop {
+        tokio::time::sleep(Duration::from_secs(10)).await;
+
+        // Find expired subscriptions
+        let expired = sqlx::query!(
+            r#"
+            SELECT workflow_id, activity_key
+            FROM activity_event_subscriptions
+            WHERE timeout_at < NOW()
+            "#
+        )
+        .fetch_all(pool)
+        .await?;
+
+        for sub in expired {
+            // Fail activity with timeout error
+            sqlx::query!(
+                r#"
+                UPDATE activity_queue
+                SET status = 'failed',
+                    error = 'Event timeout exceeded',
+                    completed_at = NOW()
+                WHERE workflow_id = $1 AND activity_key = $2
+                "#,
+                sub.workflow_id,
+                sub.activity_key
+            )
+            .execute(pool)
+            .await?;
+
+            // Delete subscription
+            sqlx::query!(
+                "DELETE FROM activity_event_subscriptions
+                 WHERE workflow_id = $1 AND activity_key = $2",
+                sub.workflow_id,
+                sub.activity_key
+            )
+            .execute(pool)
+            .await?;
+        }
+    }
+}
+```
+
+**Testing**:
+- Unit test: `wait_for_signal` activity returns `Waiting` result
+- Integration test: Signal API completes waiting activity
+- Integration test: Timeout fails waiting activity after deadline
+- Integration test: Workflow continues after waiting activity completes
+- E2E test: Human approval workflow (submit → wait → signal → complete)
+
+**Success Criteria**:
+- ✅ Activities can enter `waiting` state without blocking workers
+- ✅ Signal API completes waiting activities with event data
+- ✅ Timeouts fail activities that wait too long
+- ✅ Orchestrator correctly resumes DAG evaluation after event
+- ✅ No worker slots consumed by waiting activities
+- ✅ Database schema supports event subscriptions
+
+**Benefits**:
+- **Foundational primitive**: Enables multiple high-value features
+- **Resource efficient**: No worker slots consumed while waiting
+- **Scalable**: Thousands of concurrent waits with minimal overhead
+- **Simple API**: Clean primitives, not overengineered
+- **Event-driven**: Instant resume when event arrives (no polling)
+
+**Estimated Implementation Time**: 5-7 days
+- Core infrastructure (2-3 days)
+- Signal API + built-in activity (1-2 days)
+- Orchestrator changes (1 day)
+- Timeout handler (1 day)
+- Tests + documentation (1 day)
+
+**Unlocks These Features** (built on this primitive):
+- Story 6.4: Workflow Pause/Resume (uses this primitive)
+- Workflow chaining with wait semantics (HTTP + `wait_for_signal`)
+- External webhook integration (webhook → signal API)
+- Human-in-the-loop workflows (UI → signal API)
+- Long-running async operations (external job → signal when done)
+
+---
+
 ### Story 6.1: Workflow Versioning
 
 **Priority**: P1 (High - Production requirement)
@@ -2702,42 +3245,46 @@ activities:
 ### Story 6.4: Workflow Pause/Resume
 
 **Priority**: P2 (Medium - Manual intervention)
+**Depends On**: Story 6.0 (Event-Based Activity Waiting)
 
 **As** a workflow operator
 **I want** to pause a running workflow and resume it later
-**So that** I can handle manual approval steps or external dependencies
+**So that** I can handle debugging, rate limiting, or manual intervention
+
+**Note**: This story builds on the event-based waiting primitive from Story 6.0. Manual approval steps and wait-for-event functionality are already handled by Story 6.0's `wait_for_signal` activity.
 
 **Scope**:
 - Pause workflow API (stop scheduling new activities)
 - Resume workflow API (continue from paused state)
-- Wait-for-event activity (external signal)
-- Manual approval step (human-in-the-loop)
-- Timeout on pause (auto-resume or fail)
+- Workflow-level pause state (different from activity-level waiting)
 - UI for paused workflows
+- Optional: Auto-resume after timeout
 
 **API**:
 ```bash
+# Pause entire workflow (stops scheduling new activities)
 POST /api/v1/workflows/{id}/pause
+
+# Resume paused workflow
 POST /api/v1/workflows/{id}/resume
-POST /api/v1/workflows/{id}/signal
-{"event": "approval_granted", "data": {...}}
 ```
 
 **Implementation Notes**:
-- Wait-for-event activities do **not** run in a worker - they are completed directly by the API when the signal/event arrives via `POST /api/v1/workflows/{id}/signal`
-- The orchestrator schedules wait-for-event activities but they remain in a "waiting" state until the API receives the corresponding signal
-- This avoids tying up worker resources for potentially long human response times
+- Pausing stops the orchestrator from scheduling new activities
+- Running activities continue to completion
+- Differs from Story 6.0 (activity-level waiting) - this is workflow-level control
+- Pause state stored in `workflows` table (e.g., `status = 'paused'`)
 
 **Use Cases**:
-- Manual approval steps
-- Wait for external webhook
-- Debugging (pause to inspect state)
+- Debugging (pause to inspect state, logs, intermediate results)
 - Rate limiting (pause until quota resets)
+- Manual coordination (pause one workflow while fixing another)
+- Emergency intervention (pause problematic workflow)
 
 **Benefits**:
-- Human-in-the-loop workflows
-- External system integration
-- Better control over execution
+- Operational control over workflow execution
+- Better debugging capabilities
+- Manual intervention for edge cases
 
 ---
 
