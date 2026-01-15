@@ -209,10 +209,10 @@ pub mod tests {
         async fn claim_next(
             &self,
             _worker_id: &str,
-            _namespace: &str,
-            _name: &str,
-        ) -> kruxiaflow_core::queue::Result<Option<QueuedActivity>> {
-            Ok(None)
+            _activity_types: Vec<(String, String)>,
+            _max_activities: usize,
+        ) -> kruxiaflow_core::queue::Result<Vec<QueuedActivity>> {
+            Ok(vec![])
         }
 
         async fn get_activity_summary(

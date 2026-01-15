@@ -1,9 +1,10 @@
 # Bug: Activity Polling Uses Multiple Sequential Queries Instead of Single Batched Query
 
 **Date**: 2026-01-15
-**Status**: Open
+**Status**: Resolved
 **Severity**: High (Performance)
 **Component**: Core / Activity Worker Service / PostgreSQL Queue
+**Resolution Date**: 2026-01-15
 
 ## Summary
 
@@ -317,3 +318,50 @@ sqlx::query!(
 - `core/src/queue/postgres_queue.rs:119-216` - Single-activity claim query
 - `api/src/handlers/workers.rs:294-373` - HTTP API handler for polling
 - `worker/src/poller.rs:81-151` - Worker-side polling logic
+
+## Resolution
+
+**Implemented**: 2026-01-15
+
+The bugfix was successfully implemented by:
+
+1. **Updated `ActivityQueue` trait** (core/src/queue/mod.rs:30-36):
+   - Changed `claim_next` signature to accept `Vec<(String, String)>` for activity types
+   - Added `max_activities: usize` parameter
+   - Changed return type from `Option<QueuedActivity>` to `Vec<QueuedActivity>`
+
+2. **Implemented batched query** (core/src/queue/postgres_queue.rs:118-216):
+   - Single SQL query using `unnest()` to match (worker, name) pairs from parallel arrays
+   - Uses `LIMIT $max_activities` to claim multiple activities atomically
+   - Maintains `FOR UPDATE SKIP LOCKED` for safe concurrent claiming
+   - Returns early if activity_types is empty (avoids unnecessary database call)
+
+3. **Simplified worker service** (core/src/activity/worker_service.rs:89-105):
+   - Removed nested loops
+   - Single call to `queue.claim_next()` with all activity types and max limit
+   - Reduced code from ~30 lines to ~10 lines
+
+4. **Updated all test calls**:
+   - Updated core/tests/queue_tests.rs (12 tests)
+   - Updated core/tests/scheduling_integration_tests.rs (1 test)
+   - Changed from `claim_next(worker_id, "worker", "name")` to `claim_next(worker_id, vec![("worker".to_string(), "name".to_string())], 1)`
+   - Changed assertions from `is_some()` to `!is_empty()` and unwrapping from `.unwrap()` to `[0]`
+
+5. **Added comprehensive tests** (core/tests/batched_claim_tests.rs):
+   - test_claim_multiple_activities_single_type: Verify claiming multiple activities of same type
+   - test_claim_multiple_activities_multiple_types: Verify claiming from different activity types in single call
+   - test_claim_respects_max_activities_limit: Ensure max_activities parameter is honored
+   - test_claim_with_empty_activity_types: Verify empty input returns empty result
+   - test_claim_when_fewer_available_than_requested: Verify partial claims work correctly
+   - test_batched_claim_concurrent_workers: Verify concurrent claims remain safe with batching
+
+**Performance Impact**:
+- **Before**: N sequential queries (where N = min(available_activities, max_activities))
+  - Example: max_activities=10 → up to 10 separate database queries
+- **After**: 1 batched query regardless of max_activities
+  - Example: max_activities=10 → exactly 1 database query
+
+**Test Results**:
+- All existing tests pass (12 queue tests, 6 scheduling tests, 237 core lib tests)
+- All new batched claiming tests pass (6 new tests)
+- No regressions detected

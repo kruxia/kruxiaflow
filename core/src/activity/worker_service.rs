@@ -92,32 +92,14 @@ impl ActivityWorkerService {
         worker_id: String,
         max_activities: usize,
     ) -> ActivityWorkerResult<Vec<PendingActivityRecord>> {
-        let mut claimed = Vec::new();
-
-        // Poll for each activity type until we reach max_activities
-        for (worker, name) in activity_types {
-            while claimed.len() < max_activities {
-                // Delegate to ActivityQueue
-                match self.queue.claim_next(&worker_id, &worker, &name).await? {
-                    Some(activity) => {
-                        claimed.push(PendingActivityRecord::from(activity));
-                    }
-                    None => break, // No more activities of this type
-                }
-            }
-
-            if claimed.len() >= max_activities {
-                break;
-            }
-        }
-
-        if claimed.len() > 0 {
-            tracing::debug!(
-                worker_id = %worker_id,
-                claimed_count = claimed.len(),
-                "Activities claimed by worker"
-            );
-        }
+        // Single call to claim_next, no loop needed - the queue handles batching
+        let claimed = self
+            .queue
+            .claim_next(&worker_id, activity_types, max_activities)
+            .await?
+            .into_iter()
+            .map(PendingActivityRecord::from)
+            .collect();
 
         Ok(claimed)
     }

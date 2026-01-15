@@ -115,104 +115,121 @@ impl ActivityQueue for PostgresQueue {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self), level = "debug")]
+    #[tracing::instrument(skip(self, activity_types), level = "debug", fields(num_types = activity_types.len(), max_activities = max_activities))]
     async fn claim_next(
         &self,
         worker_id: &str,
-        worker: &str,
-        name: &str,
-    ) -> Result<Option<QueuedActivity>> {
+        activity_types: Vec<(String, String)>,
+        max_activities: usize,
+    ) -> Result<Vec<QueuedActivity>> {
+        // Return early if no activity types requested
+        if activity_types.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Split activity types into parallel arrays for PostgreSQL
+        let workers: Vec<String> = activity_types.iter().map(|(w, _)| w.clone()).collect();
+        let names: Vec<String> = activity_types.iter().map(|(_, n)| n.clone()).collect();
+
         // This query:
-        // 1. Finds the next claimable activity (pending OR stale running)
-        // 2. Updates it to running status
+        // 1. Finds up to max_activities claimable activities matching ANY of the activity types
+        // 2. Updates them to running status
         // 3. Sets claimed_by, claimed_at
         // 4. Increments retry_count if reclaiming a stale activity
         // 5. Uses FOR UPDATE SKIP LOCKED for safe concurrency
-        let activity = sqlx::query!(
+        //
+        // Uses unnest() to match (worker, name) pairs from parallel arrays
+        let activities = sqlx::query!(
             r#"
             UPDATE activity_queue
             SET status = 'running'::activity_status,
                 claimed_at = NOW(),
-                claimed_by = $3::TEXT,
+                claimed_by = $1::TEXT,
                 retry_count = CASE
                     WHEN status = 'running'::activity_status THEN retry_count + 1
                     ELSE retry_count
                 END
-            WHERE id = (
+            WHERE id = ANY(
                 SELECT id FROM activity_queue
-                WHERE worker = $1
-                  AND name = $2
-                  AND (
-                      -- Fresh pending activities
-                      (status = 'pending'::activity_status AND scheduled_for <= NOW())
-                      OR
-                      -- Stale running activities (timeout expired, retries not exhausted)
-                      (status = 'running'::activity_status
-                       AND NOW() > claimed_at + timeout_duration
-                       AND retry_count < max_retries)
-                  )
+                WHERE (worker, name) IN (
+                    SELECT * FROM unnest($2::text[], $3::text[])
+                )
+                AND (
+                    -- Fresh pending activities
+                    (status = 'pending'::activity_status AND scheduled_for <= NOW())
+                    OR
+                    -- Stale running activities (timeout expired, retries not exhausted)
+                    (status = 'running'::activity_status
+                     AND NOW() > claimed_at + timeout_duration
+                     AND retry_count < max_retries)
+                )
                 ORDER BY scheduled_for ASC
-                LIMIT 1
+                LIMIT $4
                 FOR UPDATE SKIP LOCKED
             )
             RETURNING id, workflow_id, activity_key, worker, name as activity_name,
                       parameters, settings, retry_count, claimed_at, output_definitions, iteration
             "#,
-            worker,
-            name,
-            worker_id
+            worker_id,
+            &workers[..],
+            &names[..],
+            max_activities as i64
         )
-        .fetch_optional(&self.pool)
+        .fetch_all(&self.pool)
         .await?;
 
-        match activity {
-            Some(row) => {
-                let settings: Option<ActivitySettings> = row
-                    .settings
-                    .map(|v| serde_json::from_value(v))
-                    .transpose()?;
+        let mut results = Vec::with_capacity(activities.len());
 
-                let output_definitions = row
-                    .output_definitions
-                    .map(|v| serde_json::from_value(v))
-                    .transpose()?;
+        for row in activities {
+            let settings: Option<ActivitySettings> = row
+                .settings
+                .map(|v| serde_json::from_value(v))
+                .transpose()?;
 
-                let queued = QueuedActivity {
-                    id: row.id,
-                    workflow_id: row.workflow_id,
-                    activity_key: row.activity_key,
-                    worker: row.worker,
-                    activity_name: row.activity_name,
-                    parameters: row.parameters,
-                    settings,
-                    retry_count: row.retry_count,
-                    claimed_at: row.claimed_at.unwrap(),
-                    output_definitions,
-                    iteration: row.iteration,
-                };
+            let output_definitions = row
+                .output_definitions
+                .map(|v| serde_json::from_value(v))
+                .transpose()?;
 
-                if queued.retry_count > 0 {
-                    warn!(
-                        activity_id = %queued.id,
-                        workflow_id = %queued.workflow_id,
-                        retry_count = queued.retry_count,
-                        "Reclaimed stale activity"
-                    );
-                } else {
-                    debug!(
-                        activity_id = %queued.id,
-                        workflow_id = %queued.workflow_id,
-                        "Claimed activity"
-                    );
-                }
+            let queued = QueuedActivity {
+                id: row.id,
+                workflow_id: row.workflow_id,
+                activity_key: row.activity_key,
+                worker: row.worker,
+                activity_name: row.activity_name,
+                parameters: row.parameters,
+                settings,
+                retry_count: row.retry_count,
+                claimed_at: row.claimed_at.unwrap(),
+                output_definitions,
+                iteration: row.iteration,
+            };
 
-                Ok(Some(queued))
+            if queued.retry_count > 0 {
+                warn!(
+                    activity_id = %queued.id,
+                    workflow_id = %queued.workflow_id,
+                    retry_count = queued.retry_count,
+                    "Reclaimed stale activity"
+                );
+            } else {
+                debug!(
+                    activity_id = %queued.id,
+                    workflow_id = %queued.workflow_id,
+                    "Claimed activity"
+                );
             }
-            None => {
-                debug!(worker = %worker, name = %name, "No claimable activities");
-                Ok(None)
-            }
+
+            results.push(queued);
         }
+
+        if results.is_empty() {
+            debug!("No claimable activities");
+        } else {
+            debug!(claimed_count = results.len(), "Activities claimed");
+        }
+
+        Ok(results)
     }
 
     async fn get_activity_summary(&self, activity_id: Uuid) -> Result<ActivitySummary> {
