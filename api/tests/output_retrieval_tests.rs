@@ -5,7 +5,9 @@
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum_test::TestServer;
 use bcrypt::hash;
-use kruxiaflow_api::dto::{GetActivityOutputResponse, GetWorkflowOutputResponse};
+use kruxiaflow_api::dto::{
+    GetActivityOutputResponse, GetWorkflowOutputResponse, UploadActivityFileResponse,
+};
 use kruxiaflow_api::handlers::workflows::SubmitWorkflowResponse;
 use kruxiaflow_api::{AppState, AppStateBuild, app_router};
 use kruxiaflow_core::WorkflowStatus;
@@ -147,7 +149,8 @@ async fn deploy_test_workflow(server: &TestServer, token: &str, name: &str) -> S
         }))
         .await;
 
-    if response.status_code() != StatusCode::CREATED {
+    // Accept both 201 Created (new) and 200 OK (already exists/unchanged)
+    if response.status_code() != StatusCode::CREATED && response.status_code() != StatusCode::OK {
         let error_text = response.text();
         panic!(
             "Workflow definition deployment failed with status {}: {}",
@@ -671,4 +674,247 @@ async fn test_output_retrieval_end_to_end() {
     let body: GetWorkflowOutputResponse = response4.json();
     assert_eq!(body.outputs.len(), 2);
     assert!(body.terminal_outputs.contains(&"step2".to_string()));
+}
+
+// ============================================================================
+// File Upload Tests
+// ============================================================================
+
+#[tokio::test]
+#[serial]
+async fn test_upload_file_success() {
+    let server = setup_test_server().await;
+    let token = get_test_token(&server).await;
+
+    // Deploy and submit workflow
+    let def_name = "test_file_upload";
+    deploy_test_workflow(&server, &token, def_name).await;
+    let workflow_id = submit_workflow(&server, &token, def_name).await;
+
+    // Upload a file
+    let file_content = b"Hello, World! This is a test file.";
+    let response = server
+        .post(&format!(
+            "/api/v1/workflows/{}/activities/step1/files/test.txt",
+            workflow_id
+        ))
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+        )
+        .add_header(
+            HeaderName::from_static("content-type"),
+            HeaderValue::from_static("text/plain"),
+        )
+        .bytes(file_content.to_vec().into())
+        .await;
+
+    assert_eq!(response.status_code(), StatusCode::CREATED);
+
+    let body: UploadActivityFileResponse = response.json();
+    assert_eq!(body.workflow_id, workflow_id);
+    assert_eq!(body.activity_key, "step1");
+    assert_eq!(body.filename, "test.txt");
+    assert_eq!(body.size, file_content.len() as i64);
+    assert_eq!(body.content_type, Some("text/plain".to_string()));
+}
+
+#[tokio::test]
+#[serial]
+async fn test_upload_and_download_file_roundtrip() {
+    let server = setup_test_server().await;
+    let token = get_test_token(&server).await;
+
+    // Deploy and submit workflow
+    let def_name = "test_file_roundtrip";
+    deploy_test_workflow(&server, &token, def_name).await;
+    let workflow_id = submit_workflow(&server, &token, def_name).await;
+
+    // Upload a JSONL file
+    let file_content = br#"{"id":1,"text":"first passage"}
+{"id":2,"text":"second passage"}
+{"id":3,"text":"third passage"}"#;
+
+    let upload_response = server
+        .post(&format!(
+            "/api/v1/workflows/{}/activities/step1/files/passages.jsonl",
+            workflow_id
+        ))
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+        )
+        .add_header(
+            HeaderName::from_static("content-type"),
+            HeaderValue::from_static("application/x-ndjson"),
+        )
+        .bytes(file_content.to_vec().into())
+        .await;
+
+    assert_eq!(upload_response.status_code(), StatusCode::CREATED);
+
+    let upload_body: UploadActivityFileResponse = upload_response.json();
+    assert_eq!(upload_body.filename, "passages.jsonl");
+    assert_eq!(
+        upload_body.content_type,
+        Some("application/x-ndjson".to_string())
+    );
+
+    // Download the file
+    let download_response = server
+        .get(&format!(
+            "/api/v1/workflows/{}/activities/step1/files/passages.jsonl",
+            workflow_id
+        ))
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+        )
+        .await;
+
+    assert_eq!(download_response.status_code(), StatusCode::OK);
+    assert_eq!(
+        download_response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "application/x-ndjson"
+    );
+    assert_eq!(download_response.as_bytes().as_ref(), file_content);
+}
+
+#[tokio::test]
+#[serial]
+async fn test_upload_file_requires_authentication() {
+    let server = setup_test_server().await;
+
+    let workflow_id = Uuid::now_v7();
+
+    let response = server
+        .post(&format!(
+            "/api/v1/workflows/{}/activities/step1/files/test.txt",
+            workflow_id
+        ))
+        .bytes(b"test content".to_vec().into())
+        .await;
+
+    assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+#[serial]
+async fn test_upload_file_binary_content() {
+    let server = setup_test_server().await;
+    let token = get_test_token(&server).await;
+
+    // Deploy and submit workflow
+    let def_name = "test_binary_upload";
+    deploy_test_workflow(&server, &token, def_name).await;
+    let workflow_id = submit_workflow(&server, &token, def_name).await;
+
+    // Upload binary content (simulating PDF or image)
+    let binary_content: Vec<u8> = (0..256).map(|i| i as u8).collect();
+
+    let response = server
+        .post(&format!(
+            "/api/v1/workflows/{}/activities/step1/files/data.bin",
+            workflow_id
+        ))
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+        )
+        .add_header(
+            HeaderName::from_static("content-type"),
+            HeaderValue::from_static("application/octet-stream"),
+        )
+        .bytes(binary_content.clone().into())
+        .await;
+
+    assert_eq!(response.status_code(), StatusCode::CREATED);
+
+    let body: UploadActivityFileResponse = response.json();
+    assert_eq!(body.size, binary_content.len() as i64);
+
+    // Verify download returns same content
+    let download_response = server
+        .get(&format!(
+            "/api/v1/workflows/{}/activities/step1/files/data.bin",
+            workflow_id
+        ))
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+        )
+        .await;
+
+    assert_eq!(download_response.status_code(), StatusCode::OK);
+    assert_eq!(
+        download_response.as_bytes().as_ref(),
+        binary_content.as_slice()
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn test_upload_file_overwrite_existing() {
+    let server = setup_test_server().await;
+    let token = get_test_token(&server).await;
+
+    // Deploy and submit workflow
+    let def_name = "test_file_overwrite";
+    deploy_test_workflow(&server, &token, def_name).await;
+    let workflow_id = submit_workflow(&server, &token, def_name).await;
+
+    // Upload initial file
+    let initial_content = b"initial content";
+    let response1 = server
+        .post(&format!(
+            "/api/v1/workflows/{}/activities/step1/files/test.txt",
+            workflow_id
+        ))
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+        )
+        .bytes(initial_content.to_vec().into())
+        .await;
+
+    assert_eq!(response1.status_code(), StatusCode::CREATED);
+
+    // Upload new content to same filename (overwrite)
+    let new_content = b"updated content with more data";
+    let response2 = server
+        .post(&format!(
+            "/api/v1/workflows/{}/activities/step1/files/test.txt",
+            workflow_id
+        ))
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+        )
+        .bytes(new_content.to_vec().into())
+        .await;
+
+    assert_eq!(response2.status_code(), StatusCode::CREATED);
+
+    let body: UploadActivityFileResponse = response2.json();
+    assert_eq!(body.size, new_content.len() as i64);
+
+    // Verify download returns new content
+    let download_response = server
+        .get(&format!(
+            "/api/v1/workflows/{}/activities/step1/files/test.txt",
+            workflow_id
+        ))
+        .add_header(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+        )
+        .await;
+
+    assert_eq!(download_response.status_code(), StatusCode::OK);
+    assert_eq!(download_response.as_bytes().as_ref(), new_content);
 }

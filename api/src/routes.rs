@@ -60,6 +60,7 @@ pub fn public_routes() -> Router<AppState> {
 /// - GET /api/v1/workflows/{workflow_id}/output - Get workflow output
 /// - GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/output - Get activity output
 /// - GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/files/{filename} - Download file
+/// - POST /api/v1/workflows/{workflow_id}/activities/{activity_key}/files/{filename} - Upload file
 /// - POST /api/v1/workers/poll - Poll for activities
 /// - POST /api/v1/activities/{activity_id}/heartbeat - Send heartbeat
 /// - POST /api/v1/activities/{activity_id}/complete - Complete activity
@@ -115,7 +116,7 @@ pub fn protected_routes() -> Router<AppState> {
         )
         .route(
             "/api/v1/workflows/:workflow_id/activities/:activity_key/files/:filename",
-            get(handlers::download_activity_file),
+            get(handlers::download_activity_file).post(handlers::upload_activity_file),
         )
         // LLM Provider Catalog
         .route("/api/v1/llm/providers", get(handlers::list_providers))
