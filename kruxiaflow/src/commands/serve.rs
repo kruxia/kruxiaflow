@@ -132,11 +132,11 @@ Example: --shutdown-timeout 60"
     /// Maximum activities per worker poll
     #[arg(
         long,
-        env = "KRUXIAFLOW_POLL_MAX_ACTIVITIES",
-        default_value = "1",
+        env = "KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES",
+        default_value = "5",
         help = "Maximum number of activities each worker claims per poll",
         long_help = "Maximum number of activities each worker claims per poll\n\n\
-Default: 1\n\
+Default: 5\n\
 Range: 1-100\n\
 Note: Lower values (1-5) improve work distribution across workers\n\
 Example: --poll-max-activities 10"
@@ -231,7 +231,8 @@ async fn spawn_orchestrator(
     let ready_notify = Arc::new(Notify::new());
     let ready_clone = Arc::clone(&ready_notify);
 
-    let config = OrchestratorConfig::new(pool);
+    // Load orchestrator config from environment variables
+    let config = OrchestratorConfig::from_env(pool);
 
     let handle = tokio::spawn(async move {
         tracing::info!("Starting orchestrator");
@@ -513,8 +514,8 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
 
     let auth_service = Arc::new(PostgresAuthService::new(pool.clone(), auth_config)?);
 
-    // Create activity queue
-    let queue_config = QueueConfig::default();
+    // Create activity queue with environment variable configuration
+    let queue_config = QueueConfig::from_env();
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
 

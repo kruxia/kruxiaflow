@@ -19,11 +19,60 @@ impl OrchestratorConfig {
     pub fn new(pool: PgPool) -> Self {
         Self {
             pool,
-            poll_interval_min: Duration::from_millis(10),
-            poll_interval_max: Duration::from_millis(500), // Optimized for low latency
-            backoff_multiplier: 1.3,                       // Optimized for faster convergence
-            workflow_timeout: Duration::from_secs(300),    // 5 minutes default timeout
+            poll_interval_min: Duration::from_millis(50), // 20 polls/sec max (fix for high CPU)
+            poll_interval_max: Duration::from_millis(1000), // 1 second when idle
+            backoff_multiplier: 1.5,                      // Moderate backoff
+            workflow_timeout: Duration::from_secs(300),   // 5 minutes default timeout
             timeout_check_interval: Duration::from_secs(30), // Check every 30 seconds
+            secrets: HashMap::new(),
+        }
+    }
+
+    /// Create OrchestratorConfig from environment variables with fallback to defaults
+    ///
+    /// Environment variables:
+    /// - `KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MIN_MS`: Minimum poll interval in milliseconds (default: 50)
+    /// - `KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX_MS`: Maximum poll interval in milliseconds (default: 1000)
+    /// - `KRUXIAFLOW_ORCHESTRATOR_BACKOFF_MULTIPLIER`: Backoff multiplier (default: 1.5)
+    /// - `KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS`: Workflow timeout in seconds (default: 300)
+    /// - `KRUXIAFLOW_ORCHESTRATOR_TIMEOUT_CHECK_INTERVAL_SECS`: Timeout check interval in seconds (default: 30)
+    pub fn from_env(pool: PgPool) -> Self {
+        let poll_interval_min_ms: u64 =
+            std::env::var("KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MIN_MS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(50);
+
+        let poll_interval_max_ms: u64 =
+            std::env::var("KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX_MS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1000);
+
+        let backoff_multiplier: f64 = std::env::var("KRUXIAFLOW_ORCHESTRATOR_BACKOFF_MULTIPLIER")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(1.5);
+
+        let workflow_timeout_secs: u64 =
+            std::env::var("KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(300);
+
+        let timeout_check_interval_secs: u64 =
+            std::env::var("KRUXIAFLOW_ORCHESTRATOR_TIMEOUT_CHECK_INTERVAL_SECS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(30);
+
+        Self {
+            pool,
+            poll_interval_min: Duration::from_millis(poll_interval_min_ms),
+            poll_interval_max: Duration::from_millis(poll_interval_max_ms),
+            backoff_multiplier,
+            workflow_timeout: Duration::from_secs(workflow_timeout_secs),
+            timeout_check_interval: Duration::from_secs(timeout_check_interval_secs),
             secrets: HashMap::new(),
         }
     }

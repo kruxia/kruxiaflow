@@ -1,7 +1,8 @@
 # Bug: Orchestrator High CPU When Idle
 
 **Date**: 2026-01-10
-**Status**: Open
+**Status**: Resolved
+**Resolved**: 2026-01-14
 **Severity**: Medium
 **Component**: Orchestrator
 
@@ -138,6 +139,44 @@ if successful_events > 0 {
    ```
 
 2. Increase poll interval via environment variable (if supported) or rebuild with higher minimum.
+
+## Resolution
+
+### Changes Applied (2026-01-14)
+
+1. **Increased minimum poll interval from 10ms to 50ms** (`core/src/orchestrator/config.rs`)
+   - Reduces maximum poll rate from 100/sec to 20/sec
+   - Trade-off: ~25ms average latency increase (acceptable for most workflows)
+
+2. **Increased maximum poll interval from 500ms to 1000ms**
+   - Reduces CPU usage when idle by allowing longer sleeps
+
+3. **Made all polling parameters configurable via environment variables:**
+   - `KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MIN_MS` (default: 50)
+   - `KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX_MS` (default: 1000)
+   - `KRUXIAFLOW_ORCHESTRATOR_BACKOFF_MULTIPLIER` (default: 1.5)
+   - `KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS` (default: 300)
+   - `KRUXIAFLOW_ORCHESTRATOR_TIMEOUT_CHECK_INTERVAL_SECS` (default: 30)
+
+4. **Added CLI parameters for orchestrator command:**
+   - `--poll-interval-min` / `--poll-interval-max`
+   - `--backoff-multiplier`
+
+5. **Updated serve command to use `OrchestratorConfig::from_env()`**
+
+### Worker Polling
+
+Worker polling is configurable via:
+- `KRUXIAFLOW_WORKER_POLL_INTERVAL_MS` (default: 100ms)
+- `KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES` (default: 1)
+
+### Queue Configuration
+
+Additional queue configuration via environment variables:
+- `KRUXIAFLOW_QUEUE_POLL_INTERVAL` (default: 100ms)
+- `KRUXIAFLOW_QUEUE_BATCH_SIZE` (default: 100)
+- `KRUXIAFLOW_QUEUE_DEFAULT_TIMEOUT` (default: 60s)
+- `KRUXIAFLOW_QUEUE_DEFAULT_MAX_RETRIES` (default: 3)
 
 ## Testing
 
