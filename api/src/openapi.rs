@@ -25,7 +25,7 @@ use crate::handlers::workflows::{
     ActivityState, GetWorkflowResponse, ListWorkflowsResponse, SubmitWorkflowRequest,
     SubmitWorkflowResponse, WorkflowSummary,
 };
-use crate::health::{LivenessResponse, ReadinessResponse, ServiceInfo};
+use crate::health::{LivenessResponse, PoolMetricsResponse, ReadinessResponse, ServiceInfo};
 use utoipa::OpenApi;
 
 /// OpenAPI specification for Kruxia Flow API
@@ -52,6 +52,7 @@ use utoipa::OpenApi;
         // Health check endpoints
         crate::handlers::health::liveness_handler,
         crate::handlers::health::readiness_handler,
+        crate::handlers::health::pool_metrics_handler,
         crate::handlers::health::service_info_handler,
 
         // OAuth 2.0 endpoints
@@ -103,6 +104,7 @@ use utoipa::OpenApi;
             // Health check schemas
             LivenessResponse,
             ReadinessResponse,
+            PoolMetricsResponse,
             ServiceInfo,
 
             // OAuth 2.0 schemas

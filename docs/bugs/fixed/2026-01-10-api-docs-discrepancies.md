@@ -1,7 +1,8 @@
 # API Documentation Discrepancies
 
 **Date**: 2026-01-10
-**Status**: Open
+**Status**: Resolved
+**Resolved**: 2026-01-14
 **Priority**: Medium
 
 ## Summary
@@ -163,3 +164,33 @@ The following documented endpoints are not implemented:
 
 - Route definitions: `api/src/routes.rs`
 - Handler exports: `api/src/handlers/mod.rs`
+
+---
+
+## Resolution
+
+**Resolved 2026-01-14**
+
+### Changes Made
+
+1. **Updated `api/src/openapi.rs`** - Added missing endpoint to utoipa OpenAPI spec:
+   - Added `pool_metrics_handler` to paths (GET /health/pool)
+   - Added `PoolMetricsResponse` to schemas
+
+2. **Created `docs/api-reference.md`** - Comprehensive API reference documenting all 32 routes with request/response examples
+
+3. **Fixed `docs/architecture.md` discrepancies**:
+   - `/api/v1/auth/token` → `/api/v1/oauth/token` (4 occurrences)
+   - `GET /api/v1/activities/poll` → `POST /api/v1/workers/poll` (3 occurrences)
+   - `WS /api/v1/ws/activities/{id}` → `GET /api/v1/activities/{id}/ws` (4 occurrences)
+   - Removed unimplemented `POST /api/v1/auth/refresh`
+   - Removed unimplemented `POST /api/v1/activities/{id}/start`
+   - Updated artifact section to reflect actual file system API
+
+4. **Updated `docs/SUMMARY.md`** - Added API Reference to documentation index
+
+### Notes
+
+- Internal streaming endpoints (`/ws/token`, `/ws/complete`, `/ws/error`, `/ws/subscribers`) documented in API reference as internal
+- Cache invalidation endpoints now documented
+- All route discrepancies between docs and code resolved

@@ -98,8 +98,7 @@ flowchart TB
 **Endpoints**:
 
 *Authentication*:
-- `POST /api/v1/auth/token` - Obtain access token (client credentials or password grant)
-- `POST /api/v1/auth/refresh` - Refresh expired token
+- `POST /api/v1/oauth/token` - Obtain access token (client credentials or password grant)
 
 *Workflow Management*:
 - `POST /api/v1/workflows` - Start new workflow
@@ -111,27 +110,25 @@ flowchart TB
 - `GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/files/{filename}` - Download activity file
 
 *Activity Worker Endpoints*:
-- `GET /api/v1/activities/poll` - Poll for pending activities (long-polling supported)
-- `POST /api/v1/activities/{id}/start` - Claim activity (optional explicit claim)
+- `POST /api/v1/workers/poll` - Poll for pending activities
 - `POST /api/v1/activities/{id}/complete` - Report activity completion
 - `POST /api/v1/activities/{id}/fail` - Report activity failure
 - `POST /api/v1/activities/{id}/heartbeat` - Long-running activity heartbeat
-- `WS /api/v1/ws/activities/{id}` - Token streaming for LLM activities
+- `GET /api/v1/activities/{id}/ws` - WebSocket token streaming for LLM activities
 
-*Artifact Management*:
-- `POST /api/v1/workflows/{workflow_id}/artifacts` - Upload artifact
-- `GET /api/v1/workflows/{workflow_id}/artifacts/{key}` - Download artifact
-- `HEAD /api/v1/workflows/{workflow_id}/artifacts/{key}` - Get artifact metadata
-- `DELETE /api/v1/workflows/{workflow_id}/artifacts/{key}` - Delete artifact
-- `GET /api/v1/workflows/{workflow_id}/artifacts` - List workflow artifacts
+*File Management*:
+- `GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/output` - Get activity output with file list
+- `GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/files/{filename}` - Download activity file
 
 **WebSocket Token Streaming**:
 
 LLM activities with `streaming: true` support real-time token delivery via WebSocket:
 
 ```
-WS /api/v1/ws/activities/{activity_id}?token=<jwt>
+GET /api/v1/activities/{activity_id}/ws?token=<jwt>
 ```
+
+(WebSocket upgrade request)
 
 **Client Connection Flow**:
 1. Submit workflow via `POST /api/v1/workflows`
@@ -163,7 +160,7 @@ The API provides public auth endpoints for token acquisition:
 
 1. **Client Credentials Flow** (for workers and services):
    ```http
-   POST /api/v1/auth/token
+   POST /api/v1/oauth/token
    Content-Type: application/json
 
    {
@@ -175,7 +172,7 @@ The API provides public auth endpoints for token acquisition:
 
 2. **Password Grant Flow** (for human users/testing):
    ```http
-   POST /api/v1/auth/token
+   POST /api/v1/oauth/token
    Content-Type: application/json
 
    {
@@ -310,13 +307,13 @@ sequenceDiagram
     participant Auth as Auth Provider
 
     Note over W,A: Step 1: Obtain Access Token
-    W->>A: POST /api/v1/auth/token<br/>{grant_type: "client_credentials",<br/>client_id, client_secret}
+    W->>A: POST /api/v1/oauth/token<br/>{grant_type: "client_credentials",<br/>client_id, client_secret}
     A->>Auth: Validate credentials
     Auth-->>A: Valid
     A-->>W: {access_token: "eyJhbGc...",<br/>token_type: "Bearer",<br/>expires_in: 3600}
 
     Note over W,A: Step 2: Use Token for API Requests
-    W->>A: GET /activities/poll<br/>Authorization: Bearer eyJhbGc...
+    W->>A: POST /workers/poll<br/>Authorization: Bearer eyJhbGc...
     A->>A: Validate JWT
     A-->>W: Activity details
 ```
@@ -325,7 +322,7 @@ Detailed flow:
 
 1. **Worker obtains access token** via API auth endpoint:
    ```http
-   POST /api/v1/auth/token
+   POST /api/v1/oauth/token
    Content-Type: application/json
 
    {
@@ -346,14 +343,20 @@ Detailed flow:
 
 3. **Worker uses token** for all subsequent API requests:
    ```http
-   GET /api/v1/activities/poll?worker=builtin&name=http_request
+   POST /api/v1/workers/poll
    Authorization: Bearer eyJhbGc...
+   Content-Type: application/json
+
+   {"worker": "builtin", "name": "http_request"}
    ```
 
 **Polling Strategy** (via authenticated API endpoint):
 ```http
-GET /api/v1/activities/poll?worker={worker}&name={name}
+POST /api/v1/workers/poll
 Authorization: Bearer {token}
+Content-Type: application/json
+
+{"worker": "{worker}", "name": "{name}"}
 ```
 
 The API executes:
@@ -566,7 +569,7 @@ LLM completions with multi-model fallback, budget awareness, and optional stream
 **Features**:
 - Multi-model fallback chains (tries each model in order until success)
 - Budget-aware model selection (skips expensive models when cost exceeds budget)
-- Token streaming via WebSocket (`WS /api/v1/ws/activities/{id}`)
+- Token streaming via WebSocket (`GET /api/v1/activities/{id}/ws`)
 - Cost tracking per request (`result.cost_usd`, `result.usage.total_tokens`)
 - Provider metadata (`result.provider`, `result.model`)
 - Supported providers: Anthropic, OpenAI, Google
@@ -821,36 +824,35 @@ Downstream activities reference artifacts using special template syntax:
     destination: "s3://output/result.csv"
 ```
 
-**Artifact Lifecycle**:
+**File Lifecycle** (activity-level storage):
 
-1. **Creation**: Activity stores large data to artifact storage via API
+1. **Creation**: Activity stores output files when completing
    ```http
-   POST /api/v1/workflows/{workflow_id}/artifacts
-   Content-Type: multipart/form-data
+   POST /api/v1/workflows/{workflow_id}/activities/{activity_key}/files/{filename}
+   Content-Type: application/octet-stream
    Authorization: Bearer {token}
 
-   artifact_key=transformed_data.csv
-   file=@/path/to/data.csv
+   {binary file content}
    ```
 
-2. **Reference**: Activity outputs include artifact reference
-   ```json
-   {
-     "artifact_ref": "transformed_data.csv",
-     "size_bytes": 1048576
-   }
+2. **Reference**: Activity outputs include file references via template expressions
+   ```yaml
+   parameters:
+     input_file: "{{FILE.previous_activity.output.csv}}"
    ```
 
-3. **Access**: Downstream activities retrieve artifacts
+3. **Access**: Downstream activities retrieve files from prior activities
    ```http
-   GET /api/v1/workflows/{workflow_id}/artifacts/{artifact_key}
+   GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/files/{filename}
    Authorization: Bearer {token}
    ```
 
-4. **Cleanup**: Artifacts deleted when workflow completes or expires
+4. **Cleanup**: Files deleted when workflow completes or expires
    - Configurable retention period per workflow
    - Automatic cleanup via background job
    - CASCADE delete when workflow is deleted
+
+See [File Management](#file-management-external-workers) for complete API documentation.
 
 **Storage Backend Configuration**:
 
@@ -3260,7 +3262,7 @@ activities:
 
 **LLM Token Streaming**:
 - `streaming: true` flag on activities to enable real-time token delivery
-- WebSocket endpoint: `WS /api/v1/ws/activities/{id}?token=<jwt>`
+- WebSocket endpoint: `GET /api/v1/activities/{id}/ws?token=<jwt>`
 - StreamMessage types: `token`, `complete`, `error`
 - Automatic fallback to non-streaming when no WebSocket subscribers
 
