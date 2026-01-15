@@ -49,6 +49,37 @@ impl WorkflowDefinition {
         })
     }
 
+    /// Compute a SHA-256 hash of the normalized definition content.
+    /// Used for idempotent deployment comparison.
+    ///
+    /// The hash is computed from a normalized JSON representation that:
+    /// - Excludes version and created_at metadata (these vary per deployment)
+    /// - Uses sorted keys for deterministic serialization
+    /// - Includes name and activities
+    ///
+    /// Returns raw 32-byte hash (stored as BYTEA in PostgreSQL).
+    /// Two definitions with the same content_hash are considered identical.
+    pub fn content_hash(&self) -> Vec<u8> {
+        use sha2::{Digest, Sha256};
+
+        // Create normalized representation (excludes version, created_at)
+        // Note: serde_json serializes keys in their struct definition order,
+        // and we use BTreeMap-like ordering for the JSON object
+        let normalized = serde_json::json!({
+            "activities": &self.activities,
+            "name": &self.name,
+        });
+
+        // Serialize deterministically (serde_json sorts object keys)
+        let canonical =
+            serde_json::to_string(&normalized).expect("WorkflowDefinition should always serialize");
+
+        // Compute SHA-256 hash
+        let mut hasher = Sha256::new();
+        hasher.update(canonical.as_bytes());
+        hasher.finalize().to_vec()
+    }
+
     /// Validate workflow definition structure and compute metadata
     pub fn validate(&mut self) -> Result<(), ValidationError> {
         let mut errors = ValidationErrors::new();

@@ -56,7 +56,9 @@ async fn test_store_and_get_workflow_definition() {
     };
 
     // Store the definition
-    let stored = repo.store(definition.clone()).await.unwrap();
+    let result = repo.store(definition.clone()).await.unwrap();
+    let stored = result.definition;
+    assert!(result.is_new);
 
     assert_eq!(stored.name, "test_workflow");
     assert!(!stored.version.is_empty());
@@ -137,9 +139,11 @@ async fn test_get_latest_workflow_definition() {
     };
 
     // Store two versions with a delay to ensure different timestamps
-    let stored1 = repo.store(definition1).await.unwrap();
+    let result1 = repo.store(definition1).await.unwrap();
+    let stored1 = result1.definition;
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-    let stored2 = repo.store(definition2).await.unwrap();
+    let result2 = repo.store(definition2).await.unwrap();
+    let stored2 = result2.definition;
 
     // Get latest should return version 2
     let latest = repo
@@ -305,7 +309,8 @@ async fn test_workflow_definition_with_dependencies() {
         ],
     };
 
-    let stored = repo.store(definition).await.unwrap();
+    let result = repo.store(definition).await.unwrap();
+    let stored = result.definition;
 
     let retrieved = repo
         .get(&stored.name, &stored.version)
