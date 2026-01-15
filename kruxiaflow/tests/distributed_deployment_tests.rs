@@ -31,7 +31,8 @@ fn test_orchestrator_command_help() {
     assert!(output.status.success());
     assert!(stdout.contains("orchestrator"));
     assert!(stdout.contains("--consumer-id"));
-    assert!(stdout.contains("--poll-interval"));
+    assert!(stdout.contains("--poll-interval-min"));
+    assert!(stdout.contains("--poll-interval-max"));
     assert!(stdout.contains("--shutdown-timeout"));
     assert!(stdout.contains("distributed"));
 }
@@ -66,8 +67,10 @@ fn test_orchestrator_consumer_id_flag_accepted() {
 fn test_orchestrator_poll_interval_flag_accepted() {
     let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("orchestrator")
-        .arg("--poll-interval")
+        .arg("--poll-interval-min")
         .arg("50")
+        .arg("--poll-interval-max")
+        .arg("1000")
         .arg("--help")
         .output()
         .expect("Failed to execute kruxiaflow binary");
@@ -96,8 +99,12 @@ fn test_orchestrator_with_all_flags() {
         .arg("orchestrator")
         .arg("--consumer-id")
         .arg("orch_prod_1")
-        .arg("--poll-interval")
+        .arg("--poll-interval-min")
         .arg("100")
+        .arg("--poll-interval-max")
+        .arg("2000")
+        .arg("--backoff-multiplier")
+        .arg("1.5")
         .arg("--shutdown-timeout")
         .arg("45")
         .arg("--help")
@@ -415,7 +422,7 @@ fn test_orchestrator_invalid_poll_interval_zero() {
         .arg("--database-url")
         .arg("postgres://localhost/test")
         .arg("orchestrator")
-        .arg("--poll-interval")
+        .arg("--poll-interval-min")
         .arg("0")
         .env_remove("DATABASE_URL")
         .output()
@@ -690,12 +697,12 @@ fn test_worker_fails_with_empty_api_url() {
 
 #[test]
 fn test_orchestrator_invalid_poll_interval_too_high() {
-    // Poll interval must be <= 10000ms
+    // Minimum poll interval must be <= 10000ms
     let output = Command::new(env!("CARGO_BIN_EXE_kruxiaflow"))
         .arg("--database-url")
         .arg("postgres://localhost/test")
         .arg("orchestrator")
-        .arg("--poll-interval")
+        .arg("--poll-interval-min")
         .arg("10001")
         .env_remove("DATABASE_URL")
         .output()
@@ -705,7 +712,7 @@ fn test_orchestrator_invalid_poll_interval_too_high() {
 
     assert!(!output.status.success());
     assert!(
-        stderr.contains("Poll interval") || stderr.contains("10000"),
+        stderr.contains("poll interval") || stderr.contains("10000"),
         "Error message should mention poll interval limit: {}",
         stderr
     );
