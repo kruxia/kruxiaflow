@@ -24,6 +24,8 @@ pub use query_service::{
     WorkflowSummaryRecord,
 };
 
-pub use repository::{RepositoryError, StoredWorkflowDefinition, WorkflowDefinitionRepository};
+pub use repository::{
+    RepositoryError, StoreResult, StoredWorkflowDefinition, WorkflowDefinitionRepository,
+};
 
 pub use service::{CreatedWorkflow, WorkflowService, WorkflowServiceError, WorkflowServiceResult};

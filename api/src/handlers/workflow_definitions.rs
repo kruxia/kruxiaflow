@@ -32,6 +32,11 @@ pub struct DeployWorkflowDefinitionResponse {
 
     /// When the definition was deployed
     pub created_at: chrono::DateTime<chrono::Utc>,
+
+    /// True if definition was identical to existing version (no new version created)
+    /// Only present when unchanged is true.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unchanged: Option<bool>,
 }
 
 /// List workflow definitions response
@@ -84,12 +89,16 @@ pub struct GetWorkflowDefinitionQuery {
     pub version: Option<String>,
 }
 
-/// Deploy workflow definition
+/// Deploy workflow definition (idempotent)
 ///
 /// Endpoint: POST /api/v1/workflow_definitions
 ///
 /// Accepts workflow definitions in either JSON or YAML format (JSON is valid YAML).
 /// The version is automatically generated from the deployment timestamp.
+///
+/// **Idempotent behavior:**
+/// - If the definition is identical to an existing version, returns the existing version (200 OK)
+/// - If the definition is new or changed, creates a new version (201 Created)
 ///
 /// Validation includes:
 /// - Syntax validation (valid YAML/JSON structure)
@@ -109,6 +118,7 @@ pub struct GetWorkflowDefinitionQuery {
     tag = "Workflow Definitions",
     request_body(content = String, description = "Workflow definition in JSON or YAML format", content_type = "application/json"),
     responses(
+        (status = 200, description = "Definition unchanged (identical to existing version)", body = DeployWorkflowDefinitionResponse),
         (status = 201, description = "Workflow definition deployed successfully", body = DeployWorkflowDefinitionResponse),
         (status = 401, description = "Unauthorized"),
         (status = 409, description = "Workflow definition already exists"),
@@ -141,8 +151,8 @@ pub async fn deploy_workflow_definition(
         "Workflow parsed successfully, storing definition"
     );
 
-    // Store definition (includes validation)
-    let stored = repo.store(definition).await.map_err(|e| match e {
+    // Store definition (idempotent - returns existing if identical)
+    let result = repo.store(definition).await.map_err(|e| match e {
         RepositoryError::ValidationError(ve) => {
             tracing::warn!("Workflow definition validation failed: {:?}", ve);
             AppError::ValidationError(ValidationErrors::from_workflow_validation(ve))
@@ -173,12 +183,31 @@ pub async fn deploy_workflow_definition(
         }
     })?;
 
+    let status = if result.is_new {
+        tracing::info!(
+            workflow_name = %result.definition.name,
+            version = %result.definition.version,
+            "New workflow definition version created"
+        );
+        StatusCode::CREATED
+    } else {
+        tracing::info!(
+            workflow_name = %result.definition.name,
+            version = %result.definition.version,
+            "Identical workflow definition already exists, returning existing version"
+        );
+        StatusCode::OK
+    };
+
+    let unchanged = if result.is_new { None } else { Some(true) };
+
     Ok((
-        StatusCode::CREATED,
+        status,
         Json(DeployWorkflowDefinitionResponse {
-            name: stored.name.clone(),
-            version: stored.version.clone(),
-            created_at: stored.created_at,
+            name: result.definition.name.clone(),
+            version: result.definition.version.clone(),
+            created_at: result.definition.created_at,
+            unchanged,
         }),
     ))
 }

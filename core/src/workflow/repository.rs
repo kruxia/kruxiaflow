@@ -12,7 +12,17 @@ pub struct StoredWorkflowDefinition {
     pub name: String,
     pub version: String,
     pub activities: Vec<ActivityDefinition>,
+    pub content_hash: Option<Vec<u8>>,
     pub created_at: DateTime<Utc>,
+}
+
+/// Result of storing a workflow definition
+#[derive(Debug, Clone)]
+pub struct StoreResult {
+    /// The stored workflow definition
+    pub definition: StoredWorkflowDefinition,
+    /// True if a new version was created, false if an existing identical version was returned
+    pub is_new: bool,
 }
 
 /// Workflow definition repository
@@ -26,34 +36,48 @@ impl WorkflowDefinitionRepository {
         Self { pool }
     }
 
-    /// Store workflow definition
+    /// Store workflow definition (idempotent)
+    ///
+    /// If an identical definition (same name and content hash) already exists,
+    /// returns the existing version instead of creating a new one.
     ///
     /// Uses created_at timestamp as the version (microsecond precision prevents collisions).
     /// Returns error if definition with same (name, created_at) already exists (virtually impossible).
     pub async fn store(
         &self,
         mut definition: WorkflowDefinition,
-    ) -> Result<StoredWorkflowDefinition, RepositoryError> {
+    ) -> Result<StoreResult, RepositoryError> {
         // Validate definition before storing (validation is mutable to cache metadata)
         definition
             .validate()
             .map_err(RepositoryError::ValidationError)?;
 
-        let id = Uuid::now_v7();
         let name = definition.name.clone();
+        let content_hash = definition.content_hash();
+
+        // Check if an identical definition already exists
+        if let Some(existing) = self.find_by_content_hash(&name, &content_hash).await? {
+            return Ok(StoreResult {
+                definition: existing,
+                is_new: false,
+            });
+        }
+
+        let id = Uuid::now_v7();
 
         // Store only the activities array (not the full definition)
         let activities_json = serde_json::to_value(&definition.activities)?;
 
         let row = sqlx::query!(
             r#"
-            INSERT INTO workflow_definitions (id, name, activities, created_at)
-            VALUES ($1, $2, $3, NOW())
-            RETURNING id, name, activities, created_at
+            INSERT INTO workflow_definitions (id, name, activities, content_hash, created_at)
+            VALUES ($1, $2, $3, $4, NOW())
+            RETURNING id, name, activities, content_hash, created_at
             "#,
             id,
             name,
-            activities_json
+            activities_json,
+            content_hash
         )
         .fetch_one(&self.pool)
         .await
@@ -71,13 +95,52 @@ impl WorkflowDefinitionRepository {
             RepositoryError::DatabaseError(e)
         })?;
 
-        Ok(StoredWorkflowDefinition {
-            id: row.id,
-            name: row.name,
-            version: format_version(&row.created_at),
-            activities: serde_json::from_value(row.activities)?,
-            created_at: row.created_at,
+        Ok(StoreResult {
+            definition: StoredWorkflowDefinition {
+                id: row.id,
+                name: row.name,
+                version: format_version(&row.created_at),
+                activities: serde_json::from_value(row.activities)?,
+                content_hash: row.content_hash,
+                created_at: row.created_at,
+            },
+            is_new: true,
         })
+    }
+
+    /// Find a workflow definition by name and content hash.
+    /// Returns the existing definition if found, None otherwise.
+    ///
+    /// Used for idempotent deployment: if identical content already exists,
+    /// we return the existing version instead of creating a new one.
+    pub async fn find_by_content_hash(
+        &self,
+        name: &str,
+        content_hash: &[u8],
+    ) -> Result<Option<StoredWorkflowDefinition>, RepositoryError> {
+        let row = sqlx::query!(
+            r#"
+            SELECT id, name, activities, content_hash, created_at
+            FROM workflow_definitions
+            WHERE name = $1 AND content_hash = $2
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+            name,
+            content_hash
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|r| StoredWorkflowDefinition {
+            id: r.id,
+            name: r.name,
+            version: format_version(&r.created_at),
+            activities: serde_json::from_value(r.activities)
+                .expect("Failed to deserialize activities"),
+            content_hash: r.content_hash,
+            created_at: r.created_at,
+        }))
     }
 
     /// Get workflow definition by name and version
@@ -96,7 +159,7 @@ impl WorkflowDefinitionRepository {
 
         let row = sqlx::query!(
             r#"
-            SELECT id, name, activities, created_at
+            SELECT id, name, activities, content_hash, created_at
             FROM workflow_definitions
             WHERE name = $1 AND created_at = $2
             "#,
@@ -112,6 +175,7 @@ impl WorkflowDefinitionRepository {
             version: format_version(&r.created_at),
             activities: serde_json::from_value(r.activities)
                 .expect("Failed to deserialize activities"),
+            content_hash: r.content_hash,
             created_at: r.created_at,
         }))
     }
@@ -123,7 +187,7 @@ impl WorkflowDefinitionRepository {
     ) -> Result<Option<StoredWorkflowDefinition>, RepositoryError> {
         let row = sqlx::query!(
             r#"
-            SELECT id, name, activities, created_at
+            SELECT id, name, activities, content_hash, created_at
             FROM workflow_definitions
             WHERE name = $1
             ORDER BY created_at DESC
@@ -140,6 +204,7 @@ impl WorkflowDefinitionRepository {
             version: format_version(&r.created_at),
             activities: serde_json::from_value(r.activities)
                 .expect("Failed to deserialize activities"),
+            content_hash: r.content_hash,
             created_at: r.created_at,
         }))
     }
@@ -151,7 +216,7 @@ impl WorkflowDefinitionRepository {
     pub async fn list(&self) -> Result<Vec<StoredWorkflowDefinition>, RepositoryError> {
         let rows = sqlx::query!(
             r#"
-            SELECT id, name, activities, created_at
+            SELECT id, name, activities, content_hash, created_at
             FROM workflow_definitions
             ORDER BY name ASC, created_at DESC
             "#
@@ -167,6 +232,7 @@ impl WorkflowDefinitionRepository {
                 version: format_version(&r.created_at),
                 activities: serde_json::from_value(r.activities)
                     .expect("Failed to deserialize activities"),
+                content_hash: r.content_hash,
                 created_at: r.created_at,
             })
             .collect())
