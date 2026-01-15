@@ -65,7 +65,7 @@ Example: --activity-types builtin.echo,builtin.http_request,builtin.llm_prompt"
     /// Maximum activities per poll
     #[arg(
         long,
-        env = "KRUXIAFLOW_POLL_MAX_ACTIVITIES",
+        env = "KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES",
         default_value = "1",
         help = "Maximum activities to claim per poll",
         long_help = "Maximum number of activities each worker claims per poll\n\n\
@@ -80,7 +80,7 @@ Example: --poll-max-activities 5"
     /// Poll interval in milliseconds
     #[arg(
         long,
-        env = "KRUXIAFLOW_POLL_INTERVAL",
+        env = "KRUXIAFLOW_WORKER_POLL_INTERVAL_MS",
         default_value = "100",
         help = "Activity poll interval in milliseconds"
     )]

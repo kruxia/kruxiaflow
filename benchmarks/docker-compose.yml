@@ -28,7 +28,7 @@ services:
       KRUXIAFLOW_OAUTH_TOKEN_ISSUER: http://localhost:8080
       KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE: kruxiaflow-dev-audience
       KRUXIAFLOW_WORKER_COUNT: "1" # default = 4
-      KRUXIAFLOW_POLL_MAX_ACTIVITIES: "1" # default
+      KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES: "1" # default
       KRUXIAFLOW_LOG_LEVEL: info
       # OAuth RSA keys for JWT signing/validation (dev keys from ../dev-keys/)
       # TODO: make this seamless with dev setup

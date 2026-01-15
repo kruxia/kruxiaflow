@@ -399,7 +399,7 @@ Example: --activity-types echo,http_request,llm_complete"
     /// Maximum activities per poll
     #[arg(
         long,
-        env = "KRUXIAFLOW_POLL_MAX_ACTIVITIES",
+        env = "KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES",
         default_value = "1",
         help = "Maximum activities to claim per poll",
         long_help = "Maximum number of activities each worker claims per poll\n\n\
@@ -414,7 +414,7 @@ Example: --poll-max-activities 5"
     /// Poll interval in milliseconds
     #[arg(
         long,
-        env = "KRUXIAFLOW_POLL_INTERVAL",
+        env = "KRUXIAFLOW_WORKER_POLL_INTERVAL_MS",
         default_value = "100",
         help = "Activity poll interval in milliseconds"
     )]
@@ -755,8 +755,8 @@ pub mod worker;        // NEW
 | `KRUXIAFLOW_WORKER_ID`           | (auto-generated)            | Unique worker identifier          |
 | `KRUXIAFLOW_WORKER_COUNT`        | `4`                         | Number of concurrent tasks        |
 | `KRUXIAFLOW_WORKER_ACTIVITY_TYPES` | (all built-in)            | Activity types to handle          |
-| `KRUXIAFLOW_POLL_MAX_ACTIVITIES` | `1`                         | Max activities per poll           |
-| `KRUXIAFLOW_POLL_INTERVAL`       | `100`                       | Poll interval (ms)                |
+| `KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES` | `1`                  | Max activities per poll           |
+| `KRUXIAFLOW_WORKER_POLL_INTERVAL_MS`    | `100`                | Poll interval (ms)                |
 | `KRUXIAFLOW_ACTIVITY_TIMEOUT`    | `300`                       | Activity timeout (seconds)        |
 | `KRUXIAFLOW_HEARTBEAT_INTERVAL`  | `30`                        | Heartbeat interval (seconds)      |
 | `KRUXIAFLOW_CLIENT_ID`           | `kruxiaflow_worker`         | OAuth client ID                   |
