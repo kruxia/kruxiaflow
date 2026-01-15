@@ -5,11 +5,53 @@
 use chrono::{DateTime, Utc};
 use kruxiaflow_core::WorkflowStatus;
 use kruxiaflow_core::orchestrator::WorkflowActivityStatus;
+use kruxiaflow_core::storage::FileMetadata;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use utoipa::ToSchema;
 use uuid::Uuid;
+
+/// Response for POST /api/v1/workflows/{workflow_id}/activities/{activity_key}/files/{filename}
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UploadActivityFileResponse {
+    /// Workflow ID
+    #[schema(example = "550e8400-e29b-41d4-a716-446655440000")]
+    pub workflow_id: Uuid,
+
+    /// Activity key
+    #[schema(example = "extract_content")]
+    pub activity_key: String,
+
+    /// Uploaded filename
+    #[schema(example = "passages.jsonl")]
+    pub filename: String,
+
+    /// File size in bytes
+    #[schema(example = 102400)]
+    pub size: i64,
+
+    /// MIME content type
+    #[schema(example = "application/x-ndjson")]
+    pub content_type: Option<String>,
+
+    /// When the file was uploaded
+    #[schema(example = "2025-11-27T10:30:00Z")]
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<FileMetadata> for UploadActivityFileResponse {
+    fn from(metadata: FileMetadata) -> Self {
+        Self {
+            workflow_id: metadata.workflow_id,
+            activity_key: metadata.activity_key,
+            filename: metadata.filename,
+            size: metadata.size,
+            content_type: metadata.content_type,
+            created_at: metadata.created_at,
+        }
+    }
+}
 
 /// File information for activity output
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

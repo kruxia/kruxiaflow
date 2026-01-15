@@ -1,5 +1,6 @@
 use crate::dto::{
     ActivityOutputSummary, FileInfo, GetActivityOutputResponse, GetWorkflowOutputResponse,
+    UploadActivityFileResponse,
 };
 use crate::error::{ApiError, ApiErrorResponse, ErrorCode};
 use crate::handlers::cache::{InvalidatePatternRequest, InvalidateResponse};
@@ -72,6 +73,7 @@ use utoipa::OpenApi;
         crate::handlers::outputs::get_activity_output,
         crate::handlers::outputs::get_workflow_output,
         crate::handlers::outputs::download_activity_file,
+        crate::handlers::outputs::upload_activity_file,
 
         // Worker Activity APIs
         crate::handlers::workers::poll_activities,
@@ -132,6 +134,7 @@ use utoipa::OpenApi;
             GetWorkflowOutputResponse,
             ActivityOutputSummary,
             FileInfo,
+            UploadActivityFileResponse,
 
             // Worker Activity schemas
             PollActivitiesRequest,
@@ -180,7 +183,7 @@ use utoipa::OpenApi;
         (name = "OAuth 2.0", description = "OAuth 2.0 compliant token issuance (RFC 6749)"),
         (name = "Workflow Definitions", description = "Workflow definition deployment and management"),
         (name = "Workflows", description = "Workflow submission, query, and management"),
-        (name = "Outputs", description = "Activity and workflow output retrieval, file downloads"),
+        (name = "Outputs", description = "Activity and workflow output retrieval, file downloads and uploads"),
         (name = "Workers", description = "Worker activity polling and execution"),
         (name = "Streaming", description = "Real-time token streaming for LLM activities via WebSocket"),
         (name = "Cost Tracking", description = "LLM and activity cost tracking, budget enforcement, and analytics"),

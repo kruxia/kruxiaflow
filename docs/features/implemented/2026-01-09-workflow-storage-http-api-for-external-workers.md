@@ -1,8 +1,9 @@
 # Workflow Storage HTTP API for External Workers
 
 **Date**: 2026-01-09
-**Status**: Proposed
+**Status**: Implemented
 **Priority**: Medium
+**Implemented**: 2026-01-14
 
 ## Problem Statement
 
@@ -78,6 +79,14 @@ External workers processing images, audio, or other large data could stream resu
 2. Handler streams request body to `WorkflowStorage::upload_file()`
 3. Return file metadata on success
 4. External workers upload before completing activity, return file reference in output
+
+### Implemented Files
+
+- `api/src/handlers/outputs.rs` - Added `upload_activity_file` handler with streaming body support
+- `api/src/dto/output.rs` - Added `UploadActivityFileResponse` DTO
+- `api/src/routes.rs` - Added POST route alongside existing GET route
+- `api/src/openapi.rs` - Added endpoint and schema documentation
+- `api/src/handlers/mod.rs` - Exported the new handler
 
 ## Compatibility
 

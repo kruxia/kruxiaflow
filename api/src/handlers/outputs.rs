@@ -1,20 +1,25 @@
 //! Output Retrieval Handlers
 //!
-//! Handlers for activity output retrieval and file download endpoints.
+//! Handlers for activity output retrieval, file download, and file upload endpoints.
 
-use crate::dto::{GetActivityOutputResponse, GetWorkflowOutputResponse};
+use crate::dto::{
+    GetActivityOutputResponse, GetWorkflowOutputResponse, UploadActivityFileResponse,
+};
 use crate::error::{ApiResult, AppError};
 use crate::middleware::auth::ValidatedClaims;
 use crate::state::AppState;
+use axum::body::Bytes;
 use axum::{
     Extension, Json,
     body::Body,
     extract::{Path, State},
-    http::{StatusCode, header},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
 };
+use futures::StreamExt;
 use kruxiaflow_core::storage::StorageError;
 use kruxiaflow_core::workflow::{OutputQueryError, OutputQueryService};
+use std::pin::Pin;
 use uuid::Uuid;
 
 /// Get activity output
@@ -275,6 +280,115 @@ pub async fn download_activity_file(
         )
         .header(header::CONTENT_LENGTH, metadata.size.to_string())
         .body(body)
+        .unwrap()
+        .into_response())
+}
+
+/// Upload activity file
+///
+/// Endpoint: POST /api/v1/workflows/{workflow_id}/activities/{activity_key}/files/{filename}
+///
+/// Streams the request body directly to workflow storage without buffering the entire file in memory.
+/// Returns 201 Created with file metadata on success.
+///
+/// The Content-Type header from the request is preserved as the file's content type.
+/// If not provided, defaults to application/octet-stream.
+#[utoipa::path(
+    post,
+    path = "/api/v1/workflows/{workflow_id}/activities/{activity_key}/files/{filename}",
+    tag = "Outputs",
+    params(
+        ("workflow_id" = Uuid, Path, description = "Workflow ID"),
+        ("activity_key" = String, Path, description = "Activity key"),
+        ("filename" = String, Path, description = "Filename to store")
+    ),
+    request_body(
+        content = Vec<u8>,
+        content_type = "application/octet-stream",
+        description = "File content as streaming bytes"
+    ),
+    responses(
+        (status = 201, description = "File uploaded successfully", body = UploadActivityFileResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+#[tracing::instrument(
+    skip(state, claims, headers, body),
+    fields(
+        workflow_id = %workflow_id,
+        activity_key = %activity_key,
+        filename = %filename,
+        user = %claims.subject()
+    )
+)]
+pub async fn upload_activity_file(
+    State(state): State<AppState>,
+    Extension(claims): Extension<ValidatedClaims>,
+    Path((workflow_id, activity_key, filename)): Path<(Uuid, String, String)>,
+    headers: HeaderMap,
+    body: Body,
+) -> Result<Response, AppError> {
+    // Extract content type from request headers
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    tracing::debug!(
+        workflow_id = %workflow_id,
+        activity_key = %activity_key,
+        filename = %filename,
+        content_type = ?content_type,
+        "File upload started"
+    );
+
+    // Convert axum Body to a stream compatible with WorkflowStorage::upload_file
+    let body_stream = body.into_data_stream();
+    let stream = body_stream.map(|result| {
+        result.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+    });
+
+    // Pin the stream for upload_file
+    let pinned_stream: Pin<
+        Box<dyn futures::Stream<Item = std::result::Result<Bytes, std::io::Error>> + Send + Unpin>,
+    > = Box::pin(stream);
+
+    // Upload the file using streaming storage
+    let metadata = state
+        .workflow_storage
+        .upload_file(
+            workflow_id,
+            &activity_key,
+            &filename,
+            content_type.as_deref(),
+            pinned_stream,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("Storage error uploading file: {:?}", e);
+            AppError::InternalError(anyhow::anyhow!(e))
+        })?;
+
+    tracing::info!(
+        workflow_id = %workflow_id,
+        activity_key = %activity_key,
+        filename = %filename,
+        size = metadata.size,
+        content_type = ?metadata.content_type,
+        "File upload completed"
+    );
+
+    // Return success response with file metadata
+    let response = UploadActivityFileResponse::from(metadata);
+
+    Ok(Response::builder()
+        .status(StatusCode::CREATED)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_string(&response).unwrap()))
         .unwrap()
         .into_response())
 }
