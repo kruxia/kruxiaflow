@@ -5,6 +5,7 @@
 # User Guide
 
 - [Quick Start](quickstart.md)
+- [API Reference](api-reference.md)
 - [Architecture](architecture.md)
 - [Workflow Loops](loops-guide.md)
 
