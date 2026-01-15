@@ -19,20 +19,20 @@ async fn test_orchestrator_config_new_defaults() {
     let pool = mock_pool().await;
     let config = OrchestratorConfig::new(pool);
 
-    assert_eq!(config.poll_interval_min, Duration::from_millis(10));
-    assert_eq!(config.poll_interval_max, Duration::from_millis(500));
-    assert_eq!(config.backoff_multiplier, 1.3);
+    assert_eq!(config.poll_interval_min, Duration::from_millis(50));
+    assert_eq!(config.poll_interval_max, Duration::from_millis(1000));
+    assert_eq!(config.backoff_multiplier, 1.5);
 }
 
 #[tokio::test]
 async fn test_orchestrator_config_with_poll_interval() {
     let pool = mock_pool().await;
     let config = OrchestratorConfig::new(pool)
-        .with_poll_interval(Duration::from_millis(50), Duration::from_secs(10));
+        .with_poll_interval(Duration::from_millis(100), Duration::from_secs(10));
 
-    assert_eq!(config.poll_interval_min, Duration::from_millis(50));
+    assert_eq!(config.poll_interval_min, Duration::from_millis(100));
     assert_eq!(config.poll_interval_max, Duration::from_secs(10));
-    assert_eq!(config.backoff_multiplier, 1.3); // Should remain default
+    assert_eq!(config.backoff_multiplier, 1.5); // Should remain default
 }
 
 #[tokio::test]
@@ -40,8 +40,8 @@ async fn test_orchestrator_config_with_backoff_multiplier() {
     let pool = mock_pool().await;
     let config = OrchestratorConfig::new(pool).with_backoff_multiplier(2.0);
 
-    assert_eq!(config.poll_interval_min, Duration::from_millis(10)); // Should remain default
-    assert_eq!(config.poll_interval_max, Duration::from_millis(500)); // Should remain default
+    assert_eq!(config.poll_interval_min, Duration::from_millis(50)); // Should remain default
+    assert_eq!(config.poll_interval_max, Duration::from_millis(1000)); // Should remain default
     assert_eq!(config.backoff_multiplier, 2.0);
 }
 
@@ -110,8 +110,8 @@ async fn test_orchestrator_config_backoff_default() {
     let pool = mock_pool().await;
     let config = OrchestratorConfig::new(pool);
 
-    // Default uses optimized backoff multiplier
-    assert!((config.backoff_multiplier - 1.3).abs() < 0.01);
+    // Default uses moderate backoff multiplier
+    assert!((config.backoff_multiplier - 1.5).abs() < 0.01);
 }
 
 #[tokio::test]
@@ -121,7 +121,7 @@ async fn test_orchestrator_config_with_workflow_timeout() {
 
     assert_eq!(config.workflow_timeout, Duration::from_secs(600));
     // Other defaults should remain unchanged
-    assert_eq!(config.poll_interval_min, Duration::from_millis(10));
+    assert_eq!(config.poll_interval_min, Duration::from_millis(50));
     assert_eq!(config.timeout_check_interval, Duration::from_secs(30));
 }
 
