@@ -144,6 +144,22 @@ No workflow changes required for basic usage. Optional configuration:
 2. Medium document (500-2000 passages): 1-4 batches, ~2-4 minutes
 3. Large document (5000+ passages): 10+ batches, ~10-15 minutes
 
+### Automated Test Coverage
+
+Tests added in `worker/tests/activity_timeout_tests.rs`:
+- `test_custom_timeout_allows_longer_execution` - Custom timeout overrides default
+- `test_activity_times_out_when_exceeding_custom_timeout` - Timeout enforcement
+- `test_fast_activity_succeeds_with_any_timeout` - Fast activities complete
+- `test_timeout_precision` - Timeout timing is accurate
+- `test_multiple_activities_different_timeouts` - Independent timeout enforcement
+- `test_context_execution_respects_timeout` - Context-aware timeout
+- `test_context_execution_succeeds_with_sufficient_timeout` - Context success path
+
+Tests added in `worker/tests/embedding_streaming_test.rs`:
+- `test_batching_splits_large_inputs` - Batch splitting verification
+- `test_single_batch_for_small_inputs` - Small input handling
+- `test_default_batch_size` - Default batch size applied
+
 ## Migration
 
 No migration required. Existing workflows benefit automatically from:

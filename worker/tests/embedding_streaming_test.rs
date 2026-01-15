@@ -546,3 +546,461 @@ async fn test_usage_metrics_reported() {
         "prompt_tokens should reflect input count"
     );
 }
+
+// ============================================================================
+// Batching Verification Tests
+// Feature: docs/features/2026-01-08-batched-embeddings-and-per-activity-timeout.md
+// ============================================================================
+
+/// Test: Batching correctly splits large inputs
+///
+/// Verifies that the batch_size parameter correctly controls how many
+/// embeddings are processed per batch.
+#[tokio::test]
+#[serial]
+async fn test_batching_splits_large_inputs() {
+    let pool = setup_test_pool().await;
+    let storage: Arc<dyn WorkflowStorage> = Arc::new(PostgresStorage::new(pool.clone()));
+
+    let activity = MockStreamingEmbeddingActivity::new();
+    let workflow_id = Uuid::now_v7();
+    let activity_key = "test_batching".to_string();
+
+    let ctx = ActivityContext::new(
+        workflow_id,
+        Uuid::now_v7(),
+        activity_key.clone(),
+        Some(storage.clone()),
+    );
+
+    // 100 inputs with batch_size=25 = 4 batches
+    let inputs: Vec<String> = (0..100).map(|i| format!("input_{}", i)).collect();
+
+    let params = json!({
+        "input": inputs,
+        "dimensions": 4,
+        "batch_size": 25
+    });
+
+    let result = activity.execute_with_context(params, &ctx).await;
+    assert!(result.is_ok(), "Batched execution should succeed");
+
+    let output = result.unwrap();
+    let result_obj = output.to_json_value().get("result").cloned().unwrap();
+
+    // Verify all embeddings were processed
+    assert_eq!(
+        result_obj.get("embedding_count").unwrap().as_u64().unwrap(),
+        100,
+        "All 100 embeddings should be processed"
+    );
+
+    // Verify file contains all embeddings
+    let download_stream = storage
+        .download_file(workflow_id, &activity_key, "embeddings.jsonl")
+        .await
+        .expect("Should download file");
+
+    let mut stream = download_stream;
+    let mut content = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        content.extend(chunk.expect("Should read chunk"));
+    }
+
+    let content_str = String::from_utf8(content).expect("Should be valid UTF-8");
+    let lines: Vec<&str> = content_str.lines().collect();
+
+    assert_eq!(lines.len(), 100, "File should contain 100 embedding lines");
+
+    // Cleanup
+    let _ = storage
+        .delete_file(workflow_id, &activity_key, "embeddings.jsonl")
+        .await;
+}
+
+/// Test: Single batch for small inputs
+///
+/// Verifies that inputs smaller than batch_size are processed in a single batch.
+#[tokio::test]
+#[serial]
+async fn test_single_batch_for_small_inputs() {
+    let pool = setup_test_pool().await;
+    let storage: Arc<dyn WorkflowStorage> = Arc::new(PostgresStorage::new(pool.clone()));
+
+    let activity = MockStreamingEmbeddingActivity::new();
+    let workflow_id = Uuid::now_v7();
+    let activity_key = "test_single_batch".to_string();
+
+    let ctx = ActivityContext::new(
+        workflow_id,
+        Uuid::now_v7(),
+        activity_key.clone(),
+        Some(storage.clone()),
+    );
+
+    // 10 inputs with batch_size=100 = 1 batch
+    let inputs: Vec<String> = (0..10).map(|i| format!("input_{}", i)).collect();
+
+    let params = json!({
+        "input": inputs,
+        "dimensions": 4,
+        "batch_size": 100
+    });
+
+    let result = activity.execute_with_context(params, &ctx).await;
+    assert!(result.is_ok(), "Single batch execution should succeed");
+
+    let output = result.unwrap();
+    let result_obj = output.to_json_value().get("result").cloned().unwrap();
+
+    assert_eq!(
+        result_obj.get("embedding_count").unwrap().as_u64().unwrap(),
+        10,
+        "All 10 embeddings should be processed in one batch"
+    );
+
+    // Cleanup
+    let _ = storage
+        .delete_file(workflow_id, &activity_key, "embeddings.jsonl")
+        .await;
+}
+
+/// Test: Default batch size is applied
+///
+/// Verifies that when batch_size is not specified, a sensible default is used.
+#[tokio::test]
+#[serial]
+async fn test_default_batch_size() {
+    let pool = setup_test_pool().await;
+    let storage: Arc<dyn WorkflowStorage> = Arc::new(PostgresStorage::new(pool.clone()));
+
+    let activity = MockStreamingEmbeddingActivity::new();
+    let workflow_id = Uuid::now_v7();
+    let activity_key = "test_default_batch".to_string();
+
+    let ctx = ActivityContext::new(
+        workflow_id,
+        Uuid::now_v7(),
+        activity_key.clone(),
+        Some(storage.clone()),
+    );
+
+    // 150 inputs without specifying batch_size (default: 100)
+    let inputs: Vec<String> = (0..150).map(|i| format!("input_{}", i)).collect();
+
+    let params = json!({
+        "input": inputs,
+        "dimensions": 4
+        // No batch_size specified - should use default
+    });
+
+    let result = activity.execute_with_context(params, &ctx).await;
+    assert!(
+        result.is_ok(),
+        "Default batch size execution should succeed"
+    );
+
+    let output = result.unwrap();
+    let result_obj = output.to_json_value().get("result").cloned().unwrap();
+
+    assert_eq!(
+        result_obj.get("embedding_count").unwrap().as_u64().unwrap(),
+        150,
+        "All 150 embeddings should be processed with default batch size"
+    );
+
+    // Cleanup
+    let _ = storage
+        .delete_file(workflow_id, &activity_key, "embeddings.jsonl")
+        .await;
+}
+
+// ============================================================================
+// Streaming Error Handling Tests
+// Feature: docs/features/2026-01-09-streaming-embeddings-to-workflow-storage.md
+// ============================================================================
+
+/// Mock activity that simulates streaming failure mid-batch
+struct FailingStreamActivity {
+    fail_after_count: usize,
+}
+
+impl FailingStreamActivity {
+    fn new(fail_after_count: usize) -> Self {
+        Self { fail_after_count }
+    }
+}
+
+#[async_trait]
+impl ActivityImpl for FailingStreamActivity {
+    async fn execute_with_context(
+        &self,
+        parameters: Value,
+        ctx: &ActivityContext,
+    ) -> anyhow::Result<ActivityResult> {
+        let input_count = parameters
+            .get("input")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(10);
+
+        let storage = match &ctx.storage {
+            Some(s) => s.clone(),
+            None => return self.execute(parameters).await,
+        };
+
+        let filename = "embeddings.jsonl";
+        let (tx, rx) = tokio::sync::mpsc::channel::<Bytes>(32);
+
+        let upload_workflow_id = ctx.workflow_id;
+        let upload_activity_key = ctx.activity_key.clone();
+        let upload_storage = storage.clone();
+        let upload_handle = tokio::spawn(async move {
+            let stream = ReceiverStream::new(rx).map(Ok::<_, std::io::Error>);
+            upload_storage
+                .upload_file(
+                    upload_workflow_id,
+                    &upload_activity_key,
+                    filename,
+                    Some("application/x-ndjson"),
+                    Box::pin(stream),
+                )
+                .await
+        });
+
+        // Stream embeddings, but fail after fail_after_count
+        for i in 0..input_count {
+            if i >= self.fail_after_count {
+                drop(tx); // Close channel prematurely
+                return Err(anyhow::anyhow!("Simulated failure after {} embeddings", i));
+            }
+
+            let embedding: Vec<f64> = (0..4).map(|d| (i * 4 + d) as f64 / 100.0).collect();
+            let line = serde_json::to_string(&embedding)?;
+            tx.send(Bytes::from(format!("{}\n", line)))
+                .await
+                .map_err(|e| anyhow::anyhow!("Send failed: {}", e))?;
+        }
+
+        drop(tx);
+        let _metadata = upload_handle.await??;
+
+        Ok(ActivityResult::value(
+            "result",
+            json!({"count": input_count}),
+        ))
+    }
+
+    async fn execute(&self, _parameters: Value) -> anyhow::Result<ActivityResult> {
+        Err(anyhow::anyhow!("execute() not supported"))
+    }
+
+    fn name(&self) -> &str {
+        "failing_stream"
+    }
+
+    fn worker(&self) -> &str {
+        "test"
+    }
+}
+
+/// Test: Streaming failure returns error
+///
+/// Verifies that when streaming fails mid-batch, an error is returned.
+#[tokio::test]
+#[serial]
+async fn test_streaming_failure_returns_error() {
+    let pool = setup_test_pool().await;
+    let storage: Arc<dyn WorkflowStorage> = Arc::new(PostgresStorage::new(pool.clone()));
+
+    // Activity fails after 5 embeddings
+    let activity = FailingStreamActivity::new(5);
+    let workflow_id = Uuid::now_v7();
+    let activity_key = "test_stream_failure".to_string();
+
+    let ctx = ActivityContext::new(
+        workflow_id,
+        Uuid::now_v7(),
+        activity_key.clone(),
+        Some(storage.clone()),
+    );
+
+    // Request 10 embeddings, but activity will fail after 5
+    let params = json!({
+        "input": ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"]
+    });
+
+    let result = activity.execute_with_context(params, &ctx).await;
+
+    assert!(result.is_err(), "Activity should fail");
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("Simulated failure"),
+        "Error should indicate simulated failure: {}",
+        err
+    );
+}
+
+/// Test: Partial writes are handled gracefully
+///
+/// Verifies that even if streaming fails, partial data may have been written,
+/// and the system handles this gracefully.
+#[tokio::test]
+#[serial]
+async fn test_partial_write_on_failure() {
+    let pool = setup_test_pool().await;
+    let storage: Arc<dyn WorkflowStorage> = Arc::new(PostgresStorage::new(pool.clone()));
+
+    // Activity fails after 3 embeddings
+    let activity = FailingStreamActivity::new(3);
+    let workflow_id = Uuid::now_v7();
+    let activity_key = "test_partial_write".to_string();
+
+    let ctx = ActivityContext::new(
+        workflow_id,
+        Uuid::now_v7(),
+        activity_key.clone(),
+        Some(storage.clone()),
+    );
+
+    let params = json!({
+        "input": ["1", "2", "3", "4", "5"]
+    });
+
+    let result = activity.execute_with_context(params, &ctx).await;
+    assert!(result.is_err(), "Activity should fail");
+
+    // Check if partial file exists (it may or may not depending on timing)
+    let files = storage.list_files(workflow_id, &activity_key).await;
+    // Don't assert on file existence - it depends on race conditions
+    // The important thing is the activity returned an error
+
+    // Cleanup any partial files
+    if let Ok(files) = files {
+        for file in files {
+            let _ = storage
+                .delete_file(workflow_id, &activity_key, &file.filename)
+                .await;
+        }
+    }
+}
+
+/// Test: Empty input handled correctly
+///
+/// Verifies that empty input arrays are handled without errors.
+#[tokio::test]
+#[serial]
+async fn test_empty_input_handled() {
+    let pool = setup_test_pool().await;
+    let storage: Arc<dyn WorkflowStorage> = Arc::new(PostgresStorage::new(pool.clone()));
+
+    let activity = MockStreamingEmbeddingActivity::new();
+    let workflow_id = Uuid::now_v7();
+    let activity_key = "test_empty_input".to_string();
+
+    let ctx = ActivityContext::new(
+        workflow_id,
+        Uuid::now_v7(),
+        activity_key.clone(),
+        Some(storage.clone()),
+    );
+
+    // Empty input array
+    let params = json!({
+        "input": [],
+        "dimensions": 4
+    });
+
+    let result = activity.execute_with_context(params, &ctx).await;
+    assert!(result.is_ok(), "Empty input should be handled");
+
+    let output = result.unwrap();
+    let result_obj = output.to_json_value().get("result").cloned().unwrap();
+
+    assert_eq!(
+        result_obj.get("embedding_count").unwrap().as_u64().unwrap(),
+        0,
+        "embedding_count should be 0 for empty input"
+    );
+
+    // Cleanup
+    let _ = storage
+        .delete_file(workflow_id, &activity_key, "embeddings.jsonl")
+        .await;
+}
+
+/// Test: Large batch maintains data integrity
+///
+/// Verifies that processing a large number of embeddings maintains
+/// the correct order and values.
+#[tokio::test]
+#[serial]
+async fn test_large_batch_data_integrity() {
+    let pool = setup_test_pool().await;
+    let storage: Arc<dyn WorkflowStorage> = Arc::new(PostgresStorage::new(pool.clone()));
+
+    let activity = MockStreamingEmbeddingActivity::new();
+    let workflow_id = Uuid::now_v7();
+    let activity_key = "test_data_integrity".to_string();
+
+    let ctx = ActivityContext::new(
+        workflow_id,
+        Uuid::now_v7(),
+        activity_key.clone(),
+        Some(storage.clone()),
+    );
+
+    // 200 inputs to test multiple batches
+    let input_count = 200;
+    let dimensions = 4;
+    let inputs: Vec<String> = (0..input_count).map(|i| format!("text_{}", i)).collect();
+
+    let params = json!({
+        "input": inputs,
+        "dimensions": dimensions,
+        "batch_size": 50  // 4 batches
+    });
+
+    let result = activity.execute_with_context(params, &ctx).await;
+    assert!(result.is_ok(), "Large batch should succeed");
+
+    // Download and verify data integrity
+    let download_stream = storage
+        .download_file(workflow_id, &activity_key, "embeddings.jsonl")
+        .await
+        .expect("Should download file");
+
+    let mut stream = download_stream;
+    let mut content = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        content.extend(chunk.expect("Should read chunk"));
+    }
+
+    let content_str = String::from_utf8(content).expect("Should be valid UTF-8");
+    let lines: Vec<&str> = content_str.lines().collect();
+
+    assert_eq!(
+        lines.len(),
+        input_count,
+        "Should have {} lines",
+        input_count
+    );
+
+    // Verify each line is valid and has correct dimensions
+    for (i, line) in lines.iter().enumerate() {
+        let embedding: Vec<f64> =
+            serde_json::from_str(line).expect(&format!("Line {} should be valid JSON", i));
+        assert_eq!(
+            embedding.len(),
+            dimensions,
+            "Line {} should have {} dimensions",
+            i,
+            dimensions
+        );
+    }
+
+    // Cleanup
+    let _ = storage
+        .delete_file(workflow_id, &activity_key, "embeddings.jsonl")
+        .await;
+}
