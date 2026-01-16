@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, name, activities, created_at\n            FROM workflow_definitions\n            ORDER BY name ASC, created_at DESC\n            ",
+  "query": "\n            SELECT id, name, activities, content_hash, created_at\n            FROM workflow_definitions\n            WHERE name = $1 AND content_hash = $2\n            ORDER BY created_at DESC\n            LIMIT 1\n            ",
   "describe": {
     "columns": [
       {
@@ -20,19 +20,28 @@
       },
       {
         "ordinal": 3,
+        "name": "content_hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 4,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Text",
+        "Bytea"
+      ]
     },
     "nullable": [
       false,
       false,
       false,
+      true,
       false
     ]
   },
-  "hash": "53d79c0f8bcf88a88ed13efc3a5d551c3338e5715591c367dbbbd106aa670414"
+  "hash": "4b89c135ed092bb928962fda5e58cbe07ecc7c4769b8e46814df9e640f9dd06c"
 }
