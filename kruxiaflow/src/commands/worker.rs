@@ -66,7 +66,7 @@ Example: --activity-types builtin.echo,builtin.http_request,builtin.llm_prompt"
     #[arg(
         long,
         env = "KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES",
-        default_value = "1",
+        default_value = "5",
         help = "Maximum activities to claim per poll",
         long_help = "Maximum number of activities each worker claims per poll\n\n\
 Lower values (1-5) improve work distribution.\n\
