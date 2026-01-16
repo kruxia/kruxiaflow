@@ -42,19 +42,19 @@ async fn cleanup_queue(pool: &PgPool, workflow_id: Uuid) {
 }
 
 // ===========================================================================
-// Batched claiming tests (performance optimization)
-// Tests for the bugfix in docs/bugs/2026-01-15-inefficient-activity-polling-multiple-queries.md
+// Worker-level claiming tests
+// Tests for the worker-level filtering optimization
 // ===========================================================================
 
 #[tokio::test]
 #[serial]
-async fn test_claim_multiple_activities_single_type() {
+async fn test_claim_multiple_activities_single_worker() {
     let pool = setup_test_pool().await;
     let config = QueueConfig::default();
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
 
-    // Schedule 5 activities of the same type
+    // Schedule 5 activities of the same worker type
     let activities: Vec<Activity> = (0..5)
         .map(|i| Activity {
             key: format!("activity_{}", i),
@@ -75,11 +75,7 @@ async fn test_claim_multiple_activities_single_type() {
 
     // Claim up to 3 activities in a single call
     let claimed = queue
-        .claim_next(
-            "worker_test_01",
-            vec![("test".to_string(), "test_task".to_string())],
-            3,
-        )
+        .claim_next("worker_test_01", "test", 3)
         .await
         .expect("Failed to claim activities");
 
@@ -102,13 +98,13 @@ async fn test_claim_multiple_activities_single_type() {
 
 #[tokio::test]
 #[serial]
-async fn test_claim_multiple_activities_multiple_types() {
+async fn test_claim_multiple_activity_types_for_same_worker() {
     let pool = setup_test_pool().await;
     let config = QueueConfig::default();
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
 
-    // Schedule activities of different types
+    // Schedule activities of different types but same worker
     let activities = vec![
         Activity {
             key: "http_1".to_string(),
@@ -141,10 +137,10 @@ async fn test_claim_multiple_activities_multiple_types() {
             iteration: None,
         },
         Activity {
-            key: "custom_1".to_string(),
-            worker: "custom".to_string(),
-            activity_name: "process".to_string(),
-            parameters: json!({"data": "test"}),
+            key: "echo_1".to_string(),
+            worker: "builtin".to_string(),
+            activity_name: "echo".to_string(),
+            parameters: json!({"message": "test"}),
             settings: None,
             scheduled_for: None,
             output_definitions: None,
@@ -157,41 +153,33 @@ async fn test_claim_multiple_activities_multiple_types() {
         .await
         .expect("Failed to schedule activities");
 
-    // Claim up to 3 activities matching multiple types
+    // Claim up to 4 activities - should get all different types
     let claimed = queue
-        .claim_next(
-            "worker_test_01",
-            vec![
-                ("builtin".to_string(), "http_request".to_string()),
-                ("builtin".to_string(), "postgres_query".to_string()),
-                ("custom".to_string(), "process".to_string()),
-            ],
-            3,
-        )
+        .claim_next("worker_test_01", "builtin", 4)
         .await
         .expect("Failed to claim activities");
 
     assert_eq!(
         claimed.len(),
-        3,
-        "Should claim 3 activities from different types"
+        4,
+        "Should claim all 4 activities from same worker"
     );
 
-    // Verify we got activities from different types
-    let types: Vec<_> = claimed
-        .iter()
-        .map(|a| (&a.worker, &a.activity_name))
-        .collect();
+    // Verify we got activities from different activity types
+    let activity_names: Vec<_> = claimed.iter().map(|a| a.activity_name.as_str()).collect();
 
-    // All should be from the types we requested
-    for (worker, name) in &types {
-        assert!(
-            (worker.as_str() == "builtin" && name.as_str() == "http_request")
-                || (worker.as_str() == "builtin" && name.as_str() == "postgres_query")
-                || (worker.as_str() == "custom" && name.as_str() == "process"),
-            "Activity should match one of the requested types"
-        );
-    }
+    assert!(
+        activity_names.contains(&"http_request"),
+        "Should claim http_request activity"
+    );
+    assert!(
+        activity_names.contains(&"postgres_query"),
+        "Should claim postgres_query activity"
+    );
+    assert!(
+        activity_names.contains(&"echo"),
+        "Should claim echo activity"
+    );
 
     cleanup_queue(&pool, workflow_id).await;
 }
@@ -225,11 +213,7 @@ async fn test_claim_respects_max_activities_limit() {
 
     // Claim with max_activities=5
     let claimed = queue
-        .claim_next(
-            "worker_test_01",
-            vec![("test".to_string(), "test_task".to_string())],
-            5,
-        )
+        .claim_next("worker_test_01", "test", 5)
         .await
         .expect("Failed to claim activities");
 
@@ -237,11 +221,7 @@ async fn test_claim_respects_max_activities_limit() {
 
     // Verify remaining activities can still be claimed
     let remaining = queue
-        .claim_next(
-            "worker_test_02",
-            vec![("test".to_string(), "test_task".to_string())],
-            10,
-        )
+        .claim_next("worker_test_02", "test", 10)
         .await
         .expect("Failed to claim remaining activities");
 
@@ -252,21 +232,76 @@ async fn test_claim_respects_max_activities_limit() {
 
 #[tokio::test]
 #[serial]
-async fn test_claim_with_empty_activity_types() {
+async fn test_claim_only_returns_matching_worker() {
     let pool = setup_test_pool().await;
     let config = QueueConfig::default();
     let queue = PostgresQueue::new(pool.clone(), config);
+    let workflow_id = Uuid::now_v7();
 
-    // Claim with empty activity_types vector
+    // Schedule activities of different worker types
+    let activities = vec![
+        Activity {
+            key: "builtin_1".to_string(),
+            worker: "builtin".to_string(),
+            activity_name: "echo".to_string(),
+            parameters: json!({}),
+            settings: None,
+            scheduled_for: None,
+            output_definitions: None,
+            iteration: None,
+        },
+        Activity {
+            key: "builtin_2".to_string(),
+            worker: "builtin".to_string(),
+            activity_name: "echo".to_string(),
+            parameters: json!({}),
+            settings: None,
+            scheduled_for: None,
+            output_definitions: None,
+            iteration: None,
+        },
+        Activity {
+            key: "custom_1".to_string(),
+            worker: "custom".to_string(),
+            activity_name: "process".to_string(),
+            parameters: json!({}),
+            settings: None,
+            scheduled_for: None,
+            output_definitions: None,
+            iteration: None,
+        },
+    ];
+
+    queue
+        .schedule(workflow_id, activities)
+        .await
+        .expect("Failed to schedule activities");
+
+    // Claim only builtin activities
     let claimed = queue
-        .claim_next("worker_test_01", vec![], 10)
+        .claim_next("worker_test_01", "builtin", 10)
         .await
         .expect("Failed to claim activities");
 
-    assert!(
-        claimed.is_empty(),
-        "Should return empty vec when no activity types specified"
-    );
+    assert_eq!(claimed.len(), 2, "Should only claim builtin activities");
+
+    for activity in &claimed {
+        assert_eq!(
+            activity.worker, "builtin",
+            "All claimed activities should be builtin"
+        );
+    }
+
+    // Claim custom activities
+    let claimed_custom = queue
+        .claim_next("worker_test_02", "custom", 10)
+        .await
+        .expect("Failed to claim activities");
+
+    assert_eq!(claimed_custom.len(), 1, "Should claim custom activity");
+    assert_eq!(claimed_custom[0].worker, "custom");
+
+    cleanup_queue(&pool, workflow_id).await;
 }
 
 #[tokio::test]
@@ -298,11 +333,7 @@ async fn test_claim_when_fewer_available_than_requested() {
 
     // Request 10 but only 2 are available
     let claimed = queue
-        .claim_next(
-            "worker_test_01",
-            vec![("test".to_string(), "test_task".to_string())],
-            10,
-        )
+        .claim_next("worker_test_01", "test", 10)
         .await
         .expect("Failed to claim activities");
 
@@ -317,7 +348,7 @@ async fn test_claim_when_fewer_available_than_requested() {
 
 #[tokio::test]
 #[serial]
-async fn test_batched_claim_concurrent_workers() {
+async fn test_worker_level_claim_concurrent_workers() {
     let pool = setup_test_pool().await;
     let config = QueueConfig::default();
     let workflow_id = Uuid::now_v7();
@@ -352,21 +383,9 @@ async fn test_batched_claim_concurrent_workers() {
     let queue3 = PostgresQueue::new(pool.clone(), config);
 
     let (claimed1, claimed2, claimed3) = tokio::join!(
-        queue1.claim_next(
-            worker1_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            3
-        ),
-        queue2.claim_next(
-            worker2_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            3
-        ),
-        queue3.claim_next(
-            worker3_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            3
-        ),
+        queue1.claim_next(worker1_id, "test", 3),
+        queue2.claim_next(worker2_id, "test", 3),
+        queue3.claim_next(worker3_id, "test", 3),
     );
 
     let claimed1 = claimed1.expect("Worker 1 claim failed");

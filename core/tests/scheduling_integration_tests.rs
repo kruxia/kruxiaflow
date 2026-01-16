@@ -428,11 +428,7 @@ async fn test_worker_respects_scheduled_for() {
 
     // Try to claim the activity immediately - should return empty Vec
     let claimed = activity_queue
-        .claim_next(
-            "test_worker_id",
-            vec![("test".to_string(), "future_work".to_string())],
-            1,
-        )
+        .claim_next("test_worker_id", "test", 1)
         .await
         .expect("Failed to claim");
 

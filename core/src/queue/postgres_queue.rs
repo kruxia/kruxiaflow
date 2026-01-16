@@ -115,30 +115,28 @@ impl ActivityQueue for PostgresQueue {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self, activity_types), level = "debug", fields(num_types = activity_types.len(), max_activities = max_activities))]
+    #[tracing::instrument(skip(self), level = "debug", fields(worker = %worker, max_activities = max_activities))]
     async fn claim_next(
         &self,
         worker_id: &str,
-        activity_types: Vec<(String, String)>,
+        worker: &str,
         max_activities: usize,
     ) -> Result<Vec<QueuedActivity>> {
-        // Return early if no activity types requested
-        if activity_types.is_empty() {
+        // Return early if max_activities is 0
+        if max_activities == 0 {
             return Ok(vec![]);
         }
 
-        // Split activity types into parallel arrays for PostgreSQL
-        let workers: Vec<String> = activity_types.iter().map(|(w, _)| w.clone()).collect();
-        let names: Vec<String> = activity_types.iter().map(|(_, n)| n.clone()).collect();
-
         // This query:
-        // 1. Finds up to max_activities claimable activities matching ANY of the activity types
+        // 1. Finds up to max_activities claimable activities for the specified worker
         // 2. Updates them to running status
         // 3. Sets claimed_by, claimed_at
         // 4. Increments retry_count if reclaiming a stale activity
         // 5. Uses FOR UPDATE SKIP LOCKED for safe concurrency
+        // 6. Orders by scheduled_for for fair scheduling across all activity types
         //
-        // Uses unnest() to match (worker, name) pairs from parallel arrays
+        // Filtering by worker only (not activity name) ensures fair scheduling
+        // across all activity types that this worker handles.
         let activities = sqlx::query!(
             r#"
             UPDATE activity_queue
@@ -151,9 +149,7 @@ impl ActivityQueue for PostgresQueue {
                 END
             WHERE id = ANY(
                 SELECT id FROM activity_queue
-                WHERE (worker, name) IN (
-                    SELECT * FROM unnest($2::text[], $3::text[])
-                )
+                WHERE worker = $2
                 AND (
                     -- Fresh pending activities
                     (status = 'pending'::activity_status AND scheduled_for <= NOW())
@@ -164,15 +160,14 @@ impl ActivityQueue for PostgresQueue {
                      AND retry_count < max_retries)
                 )
                 ORDER BY scheduled_for ASC
-                LIMIT $4
+                LIMIT $3
                 FOR UPDATE SKIP LOCKED
             )
             RETURNING id, workflow_id, activity_key, worker, name as activity_name,
                       parameters, settings, retry_count, claimed_at, output_definitions, iteration
             "#,
             worker_id,
-            &workers[..],
-            &names[..],
+            worker,
             max_activities as i64
         )
         .fetch_all(&self.pool)
@@ -224,9 +219,9 @@ impl ActivityQueue for PostgresQueue {
         }
 
         if results.is_empty() {
-            debug!("No claimable activities");
+            debug!(worker = %worker, "No claimable activities for worker");
         } else {
-            debug!(claimed_count = results.len(), "Activities claimed");
+            debug!(worker = %worker, claimed_count = results.len(), "Activities claimed");
         }
 
         Ok(results)

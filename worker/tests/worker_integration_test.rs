@@ -143,7 +143,7 @@ async fn test_worker_poll_and_execute_echo() {
     let config = WorkerConfig {
         api_url: server_url,
         worker_id: "test_worker".to_string(),
-        activity_types: vec!["builtin.echo".to_string()],
+        worker: "builtin".to_string(),
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities: 16,
@@ -214,7 +214,7 @@ async fn test_worker_concurrency() {
     let config = WorkerConfig {
         api_url: server_url,
         worker_id: "test_worker_concurrent".to_string(),
-        activity_types: vec!["builtin.echo".to_string()],
+        worker: "builtin".to_string(),
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities: 16,
@@ -270,7 +270,7 @@ async fn test_worker_authentication_failure() {
     let config = WorkerConfig {
         api_url: server_url,
         worker_id: "test_worker_badauth".to_string(),
-        activity_types: vec!["default.echo".to_string()],
+        worker: "default".to_string(),
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities: 16,

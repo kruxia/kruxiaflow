@@ -88,14 +88,7 @@ async fn test_poll_activities_success() {
     schedule_test_activity(&pool, workflow_id, "activity_2", "payments", "capture").await;
 
     // Poll for activities
-    let activity_types = vec![
-        ("payments".to_string(), "authorize".to_string()),
-        ("payments".to_string(), "capture".to_string()),
-    ];
-
-    let result = service
-        .poll_activities(activity_types, "worker_01".to_string(), 10)
-        .await;
+    let result = service.poll_activities("payments", "worker_01", 10).await;
 
     assert!(result.is_ok());
     let activities = result.unwrap();
@@ -114,11 +107,9 @@ async fn test_poll_activities_empty() {
     let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
     let service = ActivityWorkerService::new(queue, event_source);
 
-    // Poll for non-existent activity type
-    let activity_types = vec![("nonexistent".to_string(), "type".to_string())];
-
+    // Poll for non-existent worker type
     let result = service
-        .poll_activities(activity_types, "worker_01".to_string(), 10)
+        .poll_activities("nonexistent", "worker_01", 10)
         .await;
 
     assert!(result.is_ok());
@@ -153,11 +144,9 @@ async fn test_poll_activities_concurrent_workers() {
     }
 
     // Two workers poll concurrently
-    let activity_types = vec![("payments".to_string(), "authorize".to_string())];
-
     let (result1, result2) = tokio::join!(
-        service1.poll_activities(activity_types.clone(), "worker_01".to_string(), 10),
-        service2.poll_activities(activity_types.clone(), "worker_02".to_string(), 10)
+        service1.poll_activities("payments", "worker_01", 10),
+        service2.poll_activities("payments", "worker_02", 10)
     );
 
     assert!(result1.is_ok());
@@ -201,11 +190,7 @@ async fn test_poll_activities_max_limit() {
     }
 
     // Poll with max_activities = 5
-    let activity_types = vec![("payments".to_string(), "authorize".to_string())];
-
-    let result = service
-        .poll_activities(activity_types, "worker_01".to_string(), 5)
-        .await;
+    let result = service.poll_activities("payments", "worker_01", 5).await;
 
     assert!(result.is_ok());
     let activities = result.unwrap();
@@ -227,9 +212,8 @@ async fn test_heartbeat_activity_success() {
     // Schedule and claim an activity
     schedule_test_activity(&pool, workflow_id, "activity_1", "payments", "authorize").await;
 
-    let activity_types = vec![("payments".to_string(), "authorize".to_string())];
     let activities = service
-        .poll_activities(activity_types, "worker_01".to_string(), 1)
+        .poll_activities("payments", "worker_01", 1)
         .await
         .unwrap();
 
@@ -259,9 +243,8 @@ async fn test_heartbeat_wrong_worker() {
     // Schedule and claim with worker_01
     schedule_test_activity(&pool, workflow_id, "activity_1", "payments", "authorize").await;
 
-    let activity_types = vec![("payments".to_string(), "authorize".to_string())];
     let activities = service
-        .poll_activities(activity_types, "worker_01".to_string(), 1)
+        .poll_activities("payments", "worker_01", 1)
         .await
         .unwrap();
 
@@ -314,9 +297,8 @@ async fn test_complete_activity_success() {
     // Schedule and claim an activity
     schedule_test_activity(&pool, workflow_id, "activity_1", "payments", "authorize").await;
 
-    let activity_types = vec![("payments".to_string(), "authorize".to_string())];
     let activities = service
-        .poll_activities(activity_types, "worker_01".to_string(), 1)
+        .poll_activities("payments", "worker_01", 1)
         .await
         .unwrap();
 
@@ -381,9 +363,8 @@ async fn test_complete_activity_idempotency() {
     // Schedule and claim an activity
     schedule_test_activity(&pool, workflow_id, "activity_1", "payments", "authorize").await;
 
-    let activity_types = vec![("payments".to_string(), "authorize".to_string())];
     let activities = service
-        .poll_activities(activity_types, "worker_01".to_string(), 1)
+        .poll_activities("payments", "worker_01", 1)
         .await
         .unwrap();
 
@@ -419,9 +400,8 @@ async fn test_complete_activity_wrong_worker() {
     // Schedule and claim with worker_01
     schedule_test_activity(&pool, workflow_id, "activity_1", "payments", "authorize").await;
 
-    let activity_types = vec![("payments".to_string(), "authorize".to_string())];
     let activities = service
-        .poll_activities(activity_types, "worker_01".to_string(), 1)
+        .poll_activities("payments", "worker_01", 1)
         .await
         .unwrap();
 
@@ -455,9 +435,8 @@ async fn test_fail_activity_success() {
     // Schedule and claim an activity
     schedule_test_activity(&pool, workflow_id, "activity_1", "payments", "authorize").await;
 
-    let activity_types = vec![("payments".to_string(), "authorize".to_string())];
     let activities = service
-        .poll_activities(activity_types, "worker_01".to_string(), 1)
+        .poll_activities("payments", "worker_01", 1)
         .await
         .unwrap();
 
@@ -524,9 +503,8 @@ async fn test_fail_activity_wrong_worker() {
     // Schedule and claim with worker_01
     schedule_test_activity(&pool, workflow_id, "activity_1", "payments", "authorize").await;
 
-    let activity_types = vec![("payments".to_string(), "authorize".to_string())];
     let activities = service
-        .poll_activities(activity_types, "worker_01".to_string(), 1)
+        .poll_activities("payments", "worker_01", 1)
         .await
         .unwrap();
 
