@@ -250,7 +250,7 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
     let config = WorkerConfig {
         api_url: cmd.api_url.clone(),
         worker_id: worker_id.clone(),
-        activity_types: registry.activity_types(),
+        worker: "builtin".to_string(),
         poll_max_activities: cmd.poll_max_activities,
         poll_interval: Duration::from_millis(cmd.poll_interval),
         max_concurrent_activities: cmd.max_activities,

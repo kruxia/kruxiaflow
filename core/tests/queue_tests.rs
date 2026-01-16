@@ -129,21 +129,9 @@ async fn test_concurrent_claiming() {
     let queue3 = PostgresQueue::new(pool.clone(), config);
 
     let (claimed1, claimed2, claimed3) = tokio::join!(
-        queue1.claim_next(
-            worker1_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            1
-        ),
-        queue2.claim_next(
-            worker2_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            1
-        ),
-        queue3.claim_next(
-            worker3_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            1
-        ),
+        queue1.claim_next(worker1_id, "test", 1),
+        queue2.claim_next(worker2_id, "test", 1),
+        queue3.claim_next(worker3_id, "test", 1),
     );
 
     let claimed1 = claimed1.expect("Worker 1 claim failed");
@@ -220,11 +208,7 @@ async fn test_stale_activity_recovery() {
 
     // Worker 1 claims activity
     let claimed1 = queue
-        .claim_next(
-            worker1_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            1,
-        )
+        .claim_next(worker1_id, "test", 1)
         .await
         .expect("Failed to claim activity");
 
@@ -241,11 +225,7 @@ async fn test_stale_activity_recovery() {
 
     // Worker 2 claims activity (should reclaim stale activity)
     let claimed2 = queue
-        .claim_next(
-            worker2_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            1,
-        )
+        .claim_next(worker2_id, "test", 1)
         .await
         .expect("Failed to reclaim activity");
 
@@ -307,11 +287,7 @@ async fn test_heartbeat_conflict_detection() {
 
     // Worker 1 claims activity
     let claimed = queue
-        .claim_next(
-            worker1_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            1,
-        )
+        .claim_next(worker1_id, "test", 1)
         .await
         .expect("Failed to claim activity");
 
@@ -323,11 +299,7 @@ async fn test_heartbeat_conflict_detection() {
 
     // Worker 2 reclaims stale activity
     let reclaimed = queue
-        .claim_next(
-            worker2_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            1,
-        )
+        .claim_next(worker2_id, "test", 1)
         .await
         .expect("Failed to reclaim activity");
 
@@ -403,11 +375,7 @@ async fn test_max_retries_exhaustion() {
     for i in 0..3 {
         let worker_id = format!("worker_test_{:02}", i);
         let claimed = queue
-            .claim_next(
-                &worker_id,
-                vec![("test".to_string(), "test_task".to_string())],
-                1,
-            )
+            .claim_next(&worker_id, "test", 1)
             .await
             .expect("Failed to claim activity");
 
@@ -429,11 +397,7 @@ async fn test_max_retries_exhaustion() {
     // Try to claim again - should not return activity (retry_count >= max_retries)
     let worker_id = "worker_test_final";
     let no_claim = queue
-        .claim_next(
-            worker_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            1,
-        )
+        .claim_next(worker_id, "test", 1)
         .await
         .expect("Claim call should succeed");
 
@@ -511,11 +475,7 @@ async fn test_completion_idempotency() {
 
     // Claim activity
     let claimed = queue
-        .claim_next(
-            worker_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            1,
-        )
+        .claim_next(worker_id, "test", 1)
         .await
         .expect("Failed to claim activity");
 
@@ -594,11 +554,7 @@ async fn test_sequential_ordering() {
 
     // Claim and complete step 1
     let claimed1 = queue
-        .claim_next(
-            worker_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            1,
-        )
+        .claim_next(worker_id, "test", 1)
         .await
         .expect("Failed to claim");
 
@@ -641,11 +597,7 @@ async fn test_sequential_ordering() {
 
     // Claim step 2
     let claimed2 = queue
-        .claim_next(
-            worker_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            1,
-        )
+        .claim_next(worker_id, "test", 1)
         .await
         .expect("Failed to claim");
 
@@ -705,21 +657,9 @@ async fn test_parallel_execution() {
     let queue3 = PostgresQueue::new(pool.clone(), QueueConfig::default());
 
     let (claimed1, claimed2, claimed3) = tokio::join!(
-        queue1.claim_next(
-            worker1_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            1
-        ),
-        queue2.claim_next(
-            worker2_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            1
-        ),
-        queue3.claim_next(
-            worker3_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            1
-        ),
+        queue1.claim_next(worker1_id, "test", 1),
+        queue2.claim_next(worker2_id, "test", 1),
+        queue3.claim_next(worker3_id, "test", 1),
     );
 
     assert!(
@@ -789,11 +729,7 @@ async fn test_reclaim_stale_activities_resets_to_pending() {
 
     // Worker claims activity
     let claimed = queue
-        .claim_next(
-            worker_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            1,
-        )
+        .claim_next(worker_id, "test", 1)
         .await
         .expect("Failed to claim");
 
@@ -833,11 +769,7 @@ async fn test_reclaim_stale_activities_resets_to_pending() {
 
     // Verify activity can be claimed again
     let reclaimed_claimed = queue
-        .claim_next(
-            worker_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            1,
-        )
+        .claim_next(worker_id, "test", 1)
         .await
         .expect("Failed to claim");
 
@@ -900,11 +832,7 @@ async fn test_reclaim_stale_activities_marks_failed_when_retries_exhausted() {
 
     // Worker claims activity
     let claimed = queue
-        .claim_next(
-            "worker_test_01",
-            vec![("test".to_string(), "test_task".to_string())],
-            1,
-        )
+        .claim_next("worker_test_01", "test", 1)
         .await
         .expect("Failed to claim");
 
@@ -945,11 +873,7 @@ async fn test_reclaim_stale_activities_marks_failed_when_retries_exhausted() {
 
     // Verify activity cannot be claimed again
     let no_claim = queue
-        .claim_next(
-            "worker_test_02",
-            vec![("test".to_string(), "test_task".to_string())],
-            1,
-        )
+        .claim_next("worker_test_02", "test", 1)
         .await
         .expect("Claim call should succeed");
 
@@ -1003,11 +927,7 @@ async fn test_reclaim_stale_activities_does_not_affect_non_stale() {
 
     // Worker claims activity
     let claimed = queue
-        .claim_next(
-            worker_id,
-            vec![("test".to_string(), "test_task".to_string())],
-            1,
-        )
+        .claim_next(worker_id, "test", 1)
         .await
         .expect("Failed to claim");
 
@@ -1152,11 +1072,7 @@ async fn test_reclaim_stale_activities_multiple_activities() {
     for i in 0..3 {
         let worker_id = format!("worker_test_{:02}", i);
         let claimed = queue
-            .claim_next(
-                &worker_id,
-                vec![("test".to_string(), "test_task".to_string())],
-                1,
-            )
+            .claim_next(&worker_id, "test", 1)
             .await
             .expect("Failed to claim");
         assert!(!claimed.is_empty(), "Should have claimed");

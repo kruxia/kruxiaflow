@@ -209,7 +209,7 @@ pub mod tests {
         async fn claim_next(
             &self,
             _worker_id: &str,
-            _activity_types: Vec<(String, String)>,
+            _worker: &str,
             _max_activities: usize,
         ) -> kruxiaflow_core::queue::Result<Vec<QueuedActivity>> {
             Ok(vec![])
