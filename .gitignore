@@ -47,3 +47,4 @@ var/
 .cargo/.package-cache
 .cargo/.package-cache-mutate
 *.log
+*.pyc
