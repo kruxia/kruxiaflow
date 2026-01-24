@@ -8,7 +8,7 @@ This example demonstrates:
 - Fan-out to parallel conditional branches
 """
 
-from kruxiaflow import Activity, Dependency, Input, SecretRef, Workflow
+from kruxiaflow import Activity, Dependency, Input, SecretRef, Workflow, workflow
 
 # Define workflow inputs
 email = Input("email", type=str, required=True)
@@ -68,15 +68,15 @@ send_notification = (
         headers={"Content-Type": "application/json"},
         body={
             "email": email,
-            "status": f"{check_email['response.success']}",
-            "workflow_id": "{{WORKFLOW.id}}",
+            "status": check_email["response.success"],
+            "workflow_id": workflow.id,
         },
     )
     .with_dependencies(store_valid_user, store_invalid_user)
 )
 
 # Build the workflow
-workflow = (
+validation_workflow = (
     Workflow(name="validate_user")
     .with_inputs(email, notification_webhook_url)
     .with_activities(
@@ -86,4 +86,4 @@ workflow = (
 
 if __name__ == "__main__":
     # Print the compiled YAML to verify
-    print(workflow.to_yaml())
+    print(validation_workflow.to_yaml())

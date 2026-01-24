@@ -231,19 +231,20 @@ services:
         condition: service_healthy
       temporal:
         condition: service_healthy
-      # airflow-api-server:
-      #   condition: service_healthy
-      # airflow-scheduler:
-      #   condition: service_healthy
-      # airflow-dag-processor:
-      #   condition: service_started
-      # airflow-worker:
-      #   condition: service_started
+      airflow-api-server:
+        condition: service_healthy
+      airflow-scheduler:
+        condition: service_healthy
+      airflow-dag-processor:
+        condition: service_started
+      airflow-worker:
+        condition: service_started
     volumes:
       - ./:/app/
       - /var/run/docker.sock:/var/run/docker.sock  # For resource monitoring
-    # NOTE: Airflow benchmarking is currently disabled due to performance issues in Airflow 3
-    command: [ "python", "run_benchmark.py", "run", "-p", "kruxiaflow", "-p", "temporal" ]
+    # NOTE: Airflow benchmarking can be disabled:
+    # command: [ "python", "run_benchmark.py", "run", "-p", "kruxiaflow", "-p", "temporal" ]
+    command: [ "python", "run_benchmark.py", "run" ]
 
 volumes:
   kruxiaflow_pg_data:

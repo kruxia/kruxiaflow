@@ -632,9 +632,9 @@ def _serialize_parameters(params: dict[str, Any]) -> dict[str, Any]:
 
 def _serialize_value(value: Any) -> Any:
     """Serialize a single value, handling nested structures."""
-    from .expressions import EnvRef, Input, OutputRef, SecretRef
+    from .expressions import Expression
 
-    if isinstance(value, (Input, OutputRef, SecretRef, EnvRef)):
+    if isinstance(value, Expression):
         return str(value)
     if isinstance(value, dict):
         return {k: _serialize_value(v) for k, v in value.items()}

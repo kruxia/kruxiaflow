@@ -2,7 +2,7 @@
 
 **Version**: 1.1
 **Date**: 2026-01-24
-**Status**: In Progress (Component 1 implemented)
+**Status**: In Progress (Component 1 COMPLETE with 159 tests, 95%+ coverage)
 **Priority**: P1 (High - Critical for developer onboarding)
 
 ---
@@ -112,10 +112,76 @@ The workflow definition SDK has been implemented with a unified Pydantic model a
 
 **Implemented Files**:
 - `pysdk/kruxiaflow/models.py` - Pydantic models with fluent methods
-- `pysdk/kruxiaflow/expressions.py` - Template expressions (Input, OutputRef, SecretRef, EnvRef)
+- `pysdk/kruxiaflow/expressions.py` - SQLAlchemy-style expression tree system with operator overloading
 - `pysdk/kruxiaflow/client.py` - API client (KruxiaFlow, AsyncKruxiaFlow)
 - `pysdk/kruxiaflow/__init__.py` - Public API exports
 - `pysdk/examples/` - Three example workflows
+- `pysdk/tests/` - Comprehensive test suite (159 tests, 95%+ coverage)
+
+### Expression Tree System (2026-01-24)
+
+The SDK implements an SQLAlchemy-style expression tree system that provides:
+- **Type-safe comparisons**: Operator overloading (`==`, `!=`, `>`, `<`, `>=`, `<=`)
+- **Composable logic**: Boolean operators (`&` for AND, `|` for OR, `~` for NOT)
+- **Workflow metadata access**: `workflow.id`, `workflow.name` singleton accessors
+- **Automatic serialization**: All expressions serialize to template strings `{{...}}`
+
+**Expression Types**:
+```python
+from kruxiaflow import (
+    # Value expressions
+    Input, SecretRef, EnvRef, Literal, OutputRef,
+    # Comparison expressions
+    Eq, Ne, Gt, Lt, Ge, Le,
+    # Logical expressions
+    And, Or, Not, IsNull, IsNotNull, Contains, In,
+    # Helper functions
+    and_, or_, not_, is_null, is_not_null, contains, in_,
+    # Workflow metadata
+    workflow,
+)
+
+# Example usage:
+activity = Activity(key="analyze")
+
+# Comparisons (via operator overloading)
+condition1 = activity["confidence"] > 0.8      # Returns Gt expression
+condition2 = activity["status"] == "success"   # Returns Eq expression
+
+# Logical combinations (via & | ~ operators)
+combined = (condition1 & condition2)           # Returns And expression
+negated = ~condition1                          # Returns Not expression
+
+# Workflow metadata
+body = {
+    "workflow_id": workflow.id,    # Serializes to {{WORKFLOW.id}}
+    "workflow_name": workflow.name # Serializes to {{WORKFLOW.name}}
+}
+
+# All expressions serialize automatically
+str(combined)  # "{{(analyze.confidence > 0.8) && (analyze.status == 'success')}}"
+```
+
+**Expression Class Hierarchy**:
+```
+Expression (ABC)
+├── Literal            # Static values (auto-wrapped)
+├── Input              # Workflow inputs: {{INPUT.name}}
+├── SecretRef          # Secrets: {{SECRET.name}}
+├── EnvRef             # Environment: ${NAME}
+├── WorkflowRef        # Workflow metadata: {{WORKFLOW.id}}
+├── OutputRef          # Activity outputs: {{activity.field}}
+│   └── Supports comparison operators → Comparison subclasses
+├── Comparison (ABC)
+│   ├── Eq, Ne, Gt, Lt, Ge, Le
+│   ├── IsNull, IsNotNull
+│   ├── Contains, In
+│   └── Supports logical operators → And, Or, Not
+└── Logical
+    ├── And            # (expr) && (expr)
+    ├── Or             # (expr) || (expr)
+    └── Not            # !(expr)
+```
 
 ### Scope
 
@@ -358,14 +424,41 @@ pysdk/
     └── ...
 ```
 
-**Dependencies**:
+**Dependencies** (pyproject.toml):
 ```toml
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
+name = "kruxiaflow"
+requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2.0",
     "httpx>=0.24",
     "pyyaml>=6.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pytest-cov>=4.0",
+    "ruff>=0.9",
+    "ty",
+]
+
+[tool.pytest.ini_options]
+addopts = [
+    "--cov=kruxiaflow",
+    "--cov-branch",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-fail-under=95",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
 ```
 
 **Pydantic Models** (`models.py`):
@@ -564,40 +657,95 @@ class Workflow:
         return self.build().to_yaml()
 
 
-class OutputRef:
+class Expression(ABC):
+    """Base class for all expressions with logical operators."""
+
+    @abstractmethod
+    def _to_template(self) -> str:
+        """Convert to template string (without {{ }})."""
+        pass
+
+    def __str__(self) -> str:
+        return f"{{{{{self._to_template()}}}}}"
+
+    def __and__(self, other: Expression) -> And:
+        return And(self, _to_expr(other))
+
+    def __or__(self, other: Expression) -> Or:
+        return Or(self, _to_expr(other))
+
+    def __invert__(self) -> Not:
+        return Not(self)
+
+
+class OutputRef(Expression):
     """Reference to an activity output field. Supports comparison operators."""
 
-    def __init__(self, activity: WorkflowActivity, key: str):
-        self._activity = activity
-        self._key = key
+    def __init__(self, activity: Activity, output_key: str):
+        self._activity_key = activity.key
+        self._output_key = output_key
 
-    def __str__(self) -> str:
-        return f"{{{{ {self._activity.key}.{self._key} }}}}"
+    def _to_template(self) -> str:
+        return f"{self._activity_key}.{self._output_key}"
 
-    def __eq__(self, other) -> 'OutputComparison':
-        return OutputComparison(f"{self._activity.key}.{self._key} == {repr(other)}")
+    def __eq__(self, other: object) -> Eq:
+        return Eq(self, _to_expr(other))
 
-    def __gt__(self, other) -> 'OutputComparison':
-        return OutputComparison(f"{self._activity.key}.{self._key} > {other}")
+    def __ne__(self, other: object) -> Ne:
+        return Ne(self, _to_expr(other))
 
-    def __lt__(self, other) -> 'OutputComparison':
-        return OutputComparison(f"{self._activity.key}.{self._key} < {other}")
+    def __gt__(self, other: object) -> Gt:
+        return Gt(self, _to_expr(other))
 
-    def __ge__(self, other) -> 'OutputComparison':
-        return OutputComparison(f"{self._activity.key}.{self._key} >= {other}")
+    def __lt__(self, other: object) -> Lt:
+        return Lt(self, _to_expr(other))
 
-    def __le__(self, other) -> 'OutputComparison':
-        return OutputComparison(f"{self._activity.key}.{self._key} <= {other}")
+    def __ge__(self, other: object) -> Ge:
+        return Ge(self, _to_expr(other))
+
+    def __le__(self, other: object) -> Le:
+        return Le(self, _to_expr(other))
 
 
-class OutputComparison:
-    """Comparison expression for use in .when() conditions."""
+class Comparison(Expression):
+    """Base class for binary comparisons."""
 
-    def __init__(self, expr: str):
-        self._expr = expr
+    def __init__(self, left: Expression, right: Expression, operator: str):
+        self.left = left
+        self.right = right
+        self.operator = operator
 
-    def __str__(self) -> str:
-        return f"{{{{ {self._expr} }}}}"
+    def _to_template(self) -> str:
+        return f"{self.left._to_template()} {self.operator} {self.right._to_template()}"
+
+
+class Eq(Comparison):
+    def __init__(self, left: Expression, right: Expression):
+        super().__init__(left, right, "==")
+
+
+class And(Expression):
+    """Logical AND of two expressions."""
+
+    def __init__(self, left: Expression, right: Expression):
+        self.left = left
+        self.right = right
+
+    def _to_template(self) -> str:
+        return f"({self.left._to_template()}) && ({self.right._to_template()})"
+
+
+# Workflow metadata singleton
+class _WorkflowMeta:
+    @property
+    def id(self) -> WorkflowRef:
+        return WorkflowRef("id")
+
+    @property
+    def name(self) -> WorkflowRef:
+        return WorkflowRef("name")
+
+workflow = _WorkflowMeta()
 ```
 
 **API Client** (`client.py`):
@@ -659,7 +807,11 @@ class KruxiaFlow:
 - ✅ Fluent builder methods on models (2 days)
 - ✅ YAML compilation (0.5 day)
 - ✅ API client (0.5 day)
-- 🔄 Tests + documentation (1-2 days) - in progress
+- ✅ Tests + documentation (1-2 days) - COMPLETE
+  - 159 tests passing
+  - 95.80% branch coverage (95% required threshold)
+  - SQLAlchemy-style expression tree system implemented
+  - Three example workflows demonstrating different patterns
 
 ---
 
