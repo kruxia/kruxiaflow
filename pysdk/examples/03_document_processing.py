@@ -7,7 +7,7 @@ This example demonstrates:
 - HTTP POST requests with body data
 """
 
-from kruxiaflow import Activity, Input, Workflow
+from kruxiaflow import Activity, Input, Workflow, workflow
 
 # Define workflow inputs
 doc1_url = Input("doc1_url", type=str, required=True)
@@ -51,7 +51,7 @@ process_doc1 = (
         method="POST",
         url=processing_service_url,
         body={
-            "document_data": f"{fetch_doc1['response.body']}",
+            "document_data": fetch_doc1["response.body"],
             "operation": "extract_text",
             "language": "en",
         },
@@ -66,7 +66,7 @@ process_doc2 = (
         method="POST",
         url=processing_service_url,
         body={
-            "document_data": f"{fetch_doc2['response.body']}",
+            "document_data": fetch_doc2["response.body"],
             "operation": "extract_text",
             "language": "en",
         },
@@ -81,7 +81,7 @@ process_doc3 = (
         method="POST",
         url=processing_service_url,
         body={
-            "document_data": f"{fetch_doc3['response.body']}",
+            "document_data": fetch_doc3["response.body"],
             "operation": "extract_text",
             "language": "en",
         },
@@ -100,10 +100,10 @@ aggregate_results = (
         method="POST",
         url=aggregator_url,
         body={
-            "workflow_id": "{{WORKFLOW.id}}",
-            "doc1_result": f"{process_doc1['response.body']}",
-            "doc2_result": f"{process_doc2['response.body']}",
-            "doc3_result": f"{process_doc3['response.body']}",
+            "workflow_id": workflow.id,
+            "doc1_result": process_doc1["response.body"],
+            "doc2_result": process_doc2["response.body"],
+            "doc3_result": process_doc3["response.body"],
             "operation": "summarize",
         },
     )
@@ -123,8 +123,8 @@ store_summary = (
         method="POST",
         url=storage_webhook_url,
         body={
-            "workflow_id": "{{WORKFLOW.id}}",
-            "summary": f"{aggregate_results['response.body']}",
+            "workflow_id": workflow.id,
+            "summary": aggregate_results["response.body"],
             "document_count": 3,
         },
     )
@@ -133,7 +133,7 @@ store_summary = (
 
 
 # Build the workflow
-workflow = (
+document_workflow = (
     Workflow(name="process_documents")
     .with_inputs(
         doc1_url,
@@ -160,4 +160,4 @@ workflow = (
 
 if __name__ == "__main__":
     # Print the compiled YAML to verify
-    print(workflow.to_yaml())
+    print(document_workflow.to_yaml())

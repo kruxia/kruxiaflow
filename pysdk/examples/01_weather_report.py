@@ -5,9 +5,10 @@ This example demonstrates:
 - Activity dependencies (sequential execution)
 - Referencing activity outputs in subsequent activities
 - Referencing workflow inputs
+- Using workflow metadata (workflow.id)
 """
 
-from kruxiaflow import Activity, Input, Workflow
+from kruxiaflow import Activity, Input, Workflow, workflow
 
 # Define workflow inputs
 webhook_url = Input("webhook_url", type=str, required=True)
@@ -32,16 +33,16 @@ send_notification = (
         url=webhook_url,
         headers={"Content-Type": "application/json"},
         body={
-            "temperature": f"{fetch_weather['response.json.properties.periods[0].temperature']}",
-            "conditions": f"{fetch_weather['response.json.properties.periods[0].shortForecast']}",
-            "workflow_id": "{{WORKFLOW.id}}",
+            "temperature": fetch_weather["response.json.properties.periods[0].temperature"],
+            "conditions": fetch_weather["response.json.properties.periods[0].shortForecast"],
+            "workflow_id": workflow.id,  # Use workflow metadata accessor
         },
     )
     .with_dependencies(fetch_weather)
 )
 
 # Build the workflow
-workflow = (
+weather_workflow = (
     Workflow(name="weather_report")
     .with_inputs(webhook_url)
     .with_activities(fetch_weather, send_notification)
@@ -49,4 +50,4 @@ workflow = (
 
 if __name__ == "__main__":
     # Print the compiled YAML to verify
-    print(workflow.to_yaml())
+    print(weather_workflow.to_yaml())

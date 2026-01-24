@@ -1,13 +1,33 @@
 """Tests for kruxiaflow.expressions module."""
 
-import pytest
-
 from kruxiaflow.expressions import (
+    And,
+    Comparison,
     EnvRef,
+    Eq,
+    Expression,
+    Ge,
+    Gt,
     Input,
-    OutputComparison,
+    IsNotNull,
+    IsNull,
+    Le,
+    Literal,
+    Lt,
+    Ne,
+    Not,
+    Or,
     OutputRef,
     SecretRef,
+    WorkflowRef,
+    and_,
+    contains,
+    in_,
+    is_not_null,
+    is_null,
+    not_,
+    or_,
+    workflow,
 )
 from kruxiaflow.models import Activity
 
@@ -131,42 +151,42 @@ class TestOutputRef:
         activity = Activity(key="analyze")
         ref = activity["status"]
         comparison = ref == "success"
-        assert isinstance(comparison, OutputComparison)
+        assert isinstance(comparison, Eq)
         assert "analyze.status == 'success'" in str(comparison)
 
     def test_output_ref_inequality_comparison(self):
         activity = Activity(key="analyze")
         ref = activity["status"]
         comparison = ref != "failed"
-        assert isinstance(comparison, OutputComparison)
+        assert isinstance(comparison, Ne)
         assert "analyze.status != 'failed'" in str(comparison)
 
     def test_output_ref_greater_than(self):
         activity = Activity(key="analyze")
         ref = activity["confidence"]
         comparison = ref > 0.8
-        assert isinstance(comparison, OutputComparison)
+        assert isinstance(comparison, Gt)
         assert "analyze.confidence > 0.8" in str(comparison)
 
     def test_output_ref_less_than(self):
         activity = Activity(key="analyze")
         ref = activity["confidence"]
         comparison = ref < 0.5
-        assert isinstance(comparison, OutputComparison)
+        assert isinstance(comparison, Lt)
         assert "analyze.confidence < 0.5" in str(comparison)
 
     def test_output_ref_greater_equal(self):
         activity = Activity(key="analyze")
         ref = activity["confidence"]
         comparison = ref >= 0.8
-        assert isinstance(comparison, OutputComparison)
+        assert isinstance(comparison, Ge)
         assert "analyze.confidence >= 0.8" in str(comparison)
 
     def test_output_ref_less_equal(self):
         activity = Activity(key="analyze")
         ref = activity["confidence"]
         comparison = ref <= 0.5
-        assert isinstance(comparison, OutputComparison)
+        assert isinstance(comparison, Le)
         assert "analyze.confidence <= 0.5" in str(comparison)
 
     def test_output_ref_comparison_with_string(self):
@@ -194,49 +214,56 @@ class TestOutputRef:
         assert "null" in str(comparison)
 
 
-class TestOutputComparison:
-    """Tests for OutputComparison expression class."""
+class TestComparison:
+    """Tests for Comparison expression classes."""
 
-    def test_comparison_str(self):
-        comparison = OutputComparison("x > 5")
-        assert str(comparison) == "{{ x > 5 }}"
+    def test_eq_comparison_str(self):
+        activity = Activity(key="test")
+        comparison = activity["x"] == 5
+        assert str(comparison) == "{{test.x == 5}}"
+
+    def test_gt_comparison_str(self):
+        activity = Activity(key="test")
+        comparison = activity["x"] > 5
+        assert str(comparison) == "{{test.x > 5}}"
 
     def test_comparison_repr(self):
-        comparison = OutputComparison("x > 5")
-        assert repr(comparison) == "OutputComparison('x > 5')"
-
-    def test_comparison_expression_property(self):
-        comparison = OutputComparison("x > 5")
-        assert comparison.expression == "x > 5"
+        activity = Activity(key="test")
+        comparison = activity["x"] > 5
+        assert "Gt(" in repr(comparison)
 
     def test_comparison_and(self):
-        c1 = OutputComparison("x > 5")
-        c2 = OutputComparison("y < 10")
+        activity = Activity(key="test")
+        c1 = activity["x"] > 5
+        c2 = activity["y"] < 10
         combined = c1 & c2
-        assert isinstance(combined, OutputComparison)
-        assert "(x > 5) && (y < 10)" in combined.expression
+        assert isinstance(combined, And)
+        assert "(test.x > 5) && (test.y < 10)" in str(combined)
 
     def test_comparison_or(self):
-        c1 = OutputComparison("x > 5")
-        c2 = OutputComparison("y < 10")
+        activity = Activity(key="test")
+        c1 = activity["x"] > 5
+        c2 = activity["y"] < 10
         combined = c1 | c2
-        assert isinstance(combined, OutputComparison)
-        assert "(x > 5) || (y < 10)" in combined.expression
+        assert isinstance(combined, Or)
+        assert "(test.x > 5) || (test.y < 10)" in str(combined)
 
     def test_comparison_not(self):
-        c = OutputComparison("x > 5")
+        activity = Activity(key="test")
+        c = activity["x"] > 5
         negated = ~c
-        assert isinstance(negated, OutputComparison)
-        assert "!(x > 5)" in negated.expression
+        assert isinstance(negated, Not)
+        assert "!(test.x > 5)" in str(negated)
 
     def test_complex_combined_condition(self):
         activity = Activity(key="analyze")
         c1 = activity["confidence"] > 0.8
         c2 = activity["sentiment"] == "positive"
         combined = c1 & c2
-        assert "confidence > 0.8" in combined.expression
-        assert "sentiment == 'positive'" in combined.expression
-        assert "&&" in combined.expression
+        combined_str = str(combined)
+        assert "confidence > 0.8" in combined_str
+        assert "sentiment == 'positive'" in combined_str
+        assert "&&" in combined_str
 
 
 class TestSecretRef:
@@ -336,3 +363,162 @@ class TestExpressionInParameters:
         )
         assert activity.parameters["config"]["input"] == "{{INPUT.text}}"
         assert activity.parameters["config"]["nested"]["value"] == "{{INPUT.text}}"
+
+
+class TestLiteral:
+    """Tests for Literal expression class."""
+
+    def test_literal_string(self):
+        lit = Literal("hello")
+        assert lit._to_template() == "'hello'"
+
+    def test_literal_int(self):
+        lit = Literal(42)
+        assert lit._to_template() == "42"
+
+    def test_literal_float(self):
+        lit = Literal(3.14)
+        assert lit._to_template() == "3.14"
+
+    def test_literal_bool_true(self):
+        lit = Literal(True)
+        assert lit._to_template() == "true"
+
+    def test_literal_bool_false(self):
+        lit = Literal(False)
+        assert lit._to_template() == "false"
+
+    def test_literal_none(self):
+        lit = Literal(None)
+        assert lit._to_template() == "null"
+
+    def test_literal_escapes_quotes(self):
+        lit = Literal("it's a test")
+        assert lit._to_template() == "'it\\'s a test'"
+
+
+class TestWorkflowRef:
+    """Tests for WorkflowRef expression class."""
+
+    def test_workflow_id(self):
+        ref = workflow.id
+        assert isinstance(ref, WorkflowRef)
+        assert str(ref) == "{{WORKFLOW.id}}"
+
+    def test_workflow_name(self):
+        ref = workflow.name
+        assert str(ref) == "{{WORKFLOW.name}}"
+
+    def test_workflow_ref_in_params(self):
+        activity = Activity(key="log").with_params(
+            workflow_id=workflow.id,
+            workflow_name=workflow.name,
+        )
+        assert activity.parameters["workflow_id"] == "{{WORKFLOW.id}}"
+        assert activity.parameters["workflow_name"] == "{{WORKFLOW.name}}"
+
+
+class TestHelperFunctions:
+    """Tests for helper functions (and_, or_, not_, etc.)."""
+
+    def test_and_two_expressions(self):
+        activity = Activity(key="test")
+        result = and_(activity["a"] > 1, activity["b"] < 10)
+        assert isinstance(result, And)
+        assert "&&" in str(result)
+
+    def test_and_three_expressions(self):
+        activity = Activity(key="test")
+        result = and_(
+            activity["a"] > 1,
+            activity["b"] < 10,
+            activity["c"] == "ok",
+        )
+        # Should create nested And: And(And(a, b), c)
+        assert "&&" in str(result)
+        assert "test.a > 1" in str(result)
+        assert "test.c == 'ok'" in str(result)
+
+    def test_and_single_expression(self):
+        activity = Activity(key="test")
+        result = and_(activity["a"] > 1)
+        # Single expression should return the expression itself (wrapped)
+        assert "test.a > 1" in str(result)
+
+    def test_or_two_expressions(self):
+        activity = Activity(key="test")
+        result = or_(activity["a"] > 1, activity["b"] < 10)
+        assert isinstance(result, Or)
+        assert "||" in str(result)
+
+    def test_or_three_expressions(self):
+        activity = Activity(key="test")
+        result = or_(
+            activity["a"] > 1,
+            activity["b"] < 10,
+            activity["c"] == "ok",
+        )
+        assert "||" in str(result)
+
+    def test_not_expression(self):
+        activity = Activity(key="test")
+        result = not_(activity["valid"])
+        assert isinstance(result, Not)
+        assert "!(test.valid)" in str(result)
+
+    def test_is_null(self):
+        activity = Activity(key="test")
+        result = is_null(activity["result"])
+        assert isinstance(result, IsNull)
+        assert "test.result == null" in str(result)
+
+    def test_is_not_null(self):
+        activity = Activity(key="test")
+        result = is_not_null(activity["result"])
+        assert isinstance(result, IsNotNull)
+        assert "test.result != null" in str(result)
+
+    def test_contains(self):
+        activity = Activity(key="test")
+        result = contains(activity["tags"], "urgent")
+        assert "test.tags contains 'urgent'" in str(result)
+
+    def test_in_(self):
+        activity = Activity(key="test")
+        result = in_(activity["status"], ["ok", "done"])
+        assert "test.status in" in str(result)
+
+
+class TestExpressionBase:
+    """Tests for Expression base class functionality."""
+
+    def test_all_expressions_inherit_from_expression(self):
+        assert issubclass(Input, Expression)
+        assert issubclass(OutputRef, Expression)
+        assert issubclass(SecretRef, Expression)
+        assert issubclass(EnvRef, Expression)
+        assert issubclass(WorkflowRef, Expression)
+        assert issubclass(Literal, Expression)
+        assert issubclass(And, Expression)
+        assert issubclass(Or, Expression)
+        assert issubclass(Not, Expression)
+
+    def test_expression_and_operator(self):
+        activity = Activity(key="test")
+        e1 = activity["a"] > 1
+        e2 = activity["b"] < 10
+        result = e1 & e2
+        assert isinstance(result, And)
+
+    def test_expression_or_operator(self):
+        activity = Activity(key="test")
+        e1 = activity["a"] > 1
+        e2 = activity["b"] < 10
+        result = e1 | e2
+        assert isinstance(result, Or)
+
+    def test_expression_invert_operator(self):
+        activity = Activity(key="test")
+        e = activity["valid"]
+        result = ~(e == True)  # noqa: E712
+        assert isinstance(result, Not)
