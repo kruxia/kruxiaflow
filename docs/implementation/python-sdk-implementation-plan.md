@@ -1,8 +1,8 @@
 # Python SDK Implementation Plan
 
-**Version**: 1.0
-**Date**: 2026-01-15
-**Status**: Planning
+**Version**: 1.1
+**Date**: 2026-01-24
+**Status**: In Progress (Component 1 implemented)
 **Priority**: P1 (High - Critical for developer onboarding)
 
 ---
@@ -100,6 +100,23 @@ flowchart TB
 
 **Status in Roadmap**: `docs/post-mvp.md` Story 4.1 (P1)
 
+**Implementation Status**: ✅ IMPLEMENTED (2026-01-24)
+
+The workflow definition SDK has been implemented with a unified Pydantic model approach. Key implementation decisions:
+
+1. **Single model system**: Pydantic models (`Activity`, `Workflow`) serve as both the data model and the fluent builder interface (no separate builder classes)
+2. **`with_*` method prefix**: All fluent methods use `with_` prefix (e.g., `with_worker()`, `with_params()`, `with_timeout()`)
+3. **`Activity` naming**: Reserved for workflow definitions; future activity implementations will use `ActivityImplementation` with `@activity` decorator
+4. **`Dependency.on()` factory**: Creates conditional dependencies with a class method
+5. **Direct YAML field alignment**: Model fields match YAML DSL structure
+
+**Implemented Files**:
+- `pysdk/kruxiaflow/models.py` - Pydantic models with fluent methods
+- `pysdk/kruxiaflow/expressions.py` - Template expressions (Input, OutputRef, SecretRef, EnvRef)
+- `pysdk/kruxiaflow/client.py` - API client (KruxiaFlow, AsyncKruxiaFlow)
+- `pysdk/kruxiaflow/__init__.py` - Public API exports
+- `pysdk/examples/` - Three example workflows
+
 ### Scope
 
 Fluent Python API for building workflows programmatically, with compilation to YAML at deployment time.
@@ -115,148 +132,188 @@ Fluent Python API for building workflows programmatically, with compilation to Y
 - Compilation to validated YAML
 - Direct deployment to Kruxia Flow server
 
-**Example API** (Fluent Style):
+**Example API** (Implemented Fluent Style):
 ```python
-from kruxiaflow import KruxiaFlow, Workflow, WorkflowActivity, Input
+from kruxiaflow import KruxiaFlow, Workflow, Activity, Input, Dependency
 
 user_text = Input("text", type=str, required=True)
 
-# Fluent activity definition - all methods return self for chaining
-analyze = WorkflowActivity("analyze_sentiment") \
-    .worker("standard", "llm_prompt") \
-    .params(
+# Fluent activity definition - all with_* methods return self for chaining
+analyze = (
+    Activity(key="analyze_sentiment")
+    .with_worker("builtin", "llm_prompt")
+    .with_params(
         provider="anthropic",
         model="claude-3-haiku-20240307",
         prompt=f"Analyze sentiment: {user_text}",
         temperature=0.0
-    ) \
-    .cache(ttl=3600) \
-    .budget(limit=0.10)
+    )
+    .with_cache(ttl=3600)
+    .with_budget(limit_usd=0.10)
+)
 
-save = WorkflowActivity("save_results") \
-    .worker("standard", "postgres_query") \
-    .params(
+save = (
+    Activity(key="save_results")
+    .with_worker("builtin", "postgres_query")
+    .with_params(
         database_url="${DATABASE_URL}",
         query="""
             INSERT INTO sentiment_results (text, sentiment, confidence)
             VALUES ($1, $2, $3)
         """,
         params=[user_text, analyze["sentiment"], analyze["confidence"]]
-    ) \
-    .depends_on(analyze)
+    )
+    .with_dependencies(analyze)
+)
 
-# Build workflow - .append() accepts multiple activities
-wf = Workflow("sentiment_analysis", version="1.0.0", namespace="ai_pipeline") \
-    .append(analyze, save)
+# Build workflow
+wf = (
+    Workflow(name="sentiment_analysis")
+    .with_version("1.0.0")
+    .with_namespace("ai_pipeline")
+    .with_inputs(user_text)
+    .with_activities(analyze, save)
+)
 
 # Deploy via API client
 client = KruxiaFlow(api_url="http://localhost:8080", api_token="${KRUXIAFLOW_TOKEN}")
 client.deploy(wf)
 ```
 
-**Fluent Chaining Pattern**:
+**Fluent Chaining Pattern** (Implemented):
 ```python
 # Define activities with full configuration
-extract = WorkflowActivity("extract").worker("standard", "http_request").params(url="${API_URL}")
+extract = (
+    Activity(key="extract")
+    .with_worker("builtin", "http_request")
+    .with_params(url="${API_URL}")
+)
 
-transform = WorkflowActivity("transform") \
-    .worker("python", "script") \
-    .params(script="...") \
-    .timeout(300) \
-    .retries(3) \
-    .depends_on(extract)
+transform = (
+    Activity(key="transform")
+    .with_worker("python", "script")
+    .with_params(script="...")
+    .with_timeout(300)
+    .with_retry(max_attempts=3)
+    .with_dependencies(extract)
+)
 
-validate = WorkflowActivity("validate") \
-    .worker("python", "script") \
-    .params(script="...") \
-    .depends_on(transform)
+validate = (
+    Activity(key="validate")
+    .with_worker("python", "script")
+    .with_params(script="...")
+    .with_dependencies(transform)
+)
 
-load = WorkflowActivity("load") \
-    .worker("standard", "postgres_query") \
-    .params(query="...") \
-    .depends_on(transform)  # Parallel with validate - both depend on transform
+load = (
+    Activity(key="load")
+    .with_worker("builtin", "postgres_query")
+    .with_params(query="...")
+    .with_dependencies(transform)  # Parallel with validate - both depend on transform
+)
 
 # Fan-in: notify depends on multiple activities
-notify = WorkflowActivity("notify") \
-    .worker("standard", "http_request") \
-    .params(url="${SLACK_URL}") \
-    .depends_on(validate, load)  # Waits for both to complete
+notify = (
+    Activity(key="notify")
+    .with_worker("builtin", "http_request")
+    .with_params(url="${SLACK_URL}")
+    .with_dependencies(validate, load)  # Waits for both to complete
+)
 
-# Build workflow - append all activities at once
-wf = Workflow("data_pipeline").append(extract, transform, validate, load, notify)
+# Build workflow
+wf = (
+    Workflow(name="data_pipeline")
+    .with_activities(extract, transform, validate, load, notify)
+)
 ```
 
-**Subscript Access for Outputs**:
+**Subscript Access for Outputs** (Implemented):
 ```python
-# Instead of: analyze.outputs["sentiment"]
 # Use subscript: analyze["sentiment"]
 
-save = WorkflowActivity("save") \
-    .worker("standard", "postgres_query") \
-    .params(
+save = (
+    Activity(key="save")
+    .with_worker("builtin", "postgres_query")
+    .with_params(
         sentiment=analyze["sentiment"],       # Activity output reference
         confidence=analyze["confidence"],
         raw_response=analyze["response.text"] # Nested path access
-    ) \
-    .depends_on(analyze)
+    )
+    .with_dependencies(analyze)
+)
 
-# Conditions with output references
-notify = WorkflowActivity("notify") \
-    .worker("standard", "http_request") \
-    .when(analyze["confidence"] > 0.8) \
-    .depends_on(analyze)
+# Conditional dependencies with output references
+notify = (
+    Activity(key="notify")
+    .with_worker("builtin", "http_request")
+    .with_dependencies(
+        Dependency.on(analyze, analyze["confidence"] > 0.8)
+    )
+)
 
-retry = WorkflowActivity("retry") \
-    .worker("standard", "llm_prompt") \
-    .when(analyze["status"] == "failed") \
-    .depends_on(analyze)
+# Run on failure
+retry = (
+    Activity(key="retry")
+    .with_worker("builtin", "llm_prompt")
+    .with_dependencies(
+        Dependency.on(analyze, analyze["status"] == "failed")
+    )
+)
 ```
 
-**Dynamic Workflow Generation**:
+**Dynamic Workflow Generation** (Implemented):
 ```python
 search_queries = ["AI workflows", "ML pipelines", "LLM orchestration"]
 
 # Generate N parallel search activities with list comprehension
 searches = [
-    WorkflowActivity(f"search_{i}")
-        .worker("standard", "http_request")
-        .params(method="GET", url=f"https://api.search.com/q={query}")
+    Activity(key=f"search_{i}")
+    .with_worker("builtin", "http_request")
+    .with_params(method="GET", url=f"https://api.search.com/q={query}")
     for i, query in enumerate(search_queries)
 ]
 
 # Fan-in: aggregate depends on all searches
-aggregate = WorkflowActivity("aggregate") \
-    .worker("python", "script") \
-    .params(results=[s["response"] for s in searches]) \
-    .depends_on(*searches)  # Unpack list as dependencies
+aggregate = (
+    Activity(key="aggregate")
+    .with_worker("python", "script")
+    .with_params(results=[s["response"] for s in searches])
+    .with_dependencies(*searches)  # Unpack list as dependencies
+)
 
 # Build workflow - unpack list with *
-wf = Workflow("parallel_search").append(*searches, aggregate)
+wf = (
+    Workflow(name="parallel_search")
+    .with_activities(*searches, aggregate)
+)
 ```
 
-**Reusable Components**:
+**Reusable Components** (Implemented):
 ```python
-def create_llm_fallback_chain(name: str, prompt: str, budget: float) -> list[WorkflowActivity]:
+def create_llm_fallback_chain(name: str, prompt: str, budget: float) -> list[Activity]:
     """Create activity group with Claude → GPT-4 fallback."""
-    primary = WorkflowActivity(f"{name}_claude") \
-        .worker("standard", "llm_prompt") \
-        .params(
+    primary = (
+        Activity(key=f"{name}_claude")
+        .with_worker("builtin", "llm_prompt")
+        .with_params(
             provider="anthropic",
             model="claude-3-haiku-20240307",
             prompt=prompt
-        ) \
-        .budget(limit=budget * 0.7)
+        )
+        .with_budget(limit_usd=budget * 0.7)
+    )
 
-    fallback = WorkflowActivity(f"{name}_gpt4") \
-        .worker("standard", "llm_prompt") \
-        .params(
+    fallback = (
+        Activity(key=f"{name}_gpt4")
+        .with_worker("builtin", "llm_prompt")
+        .with_params(
             provider="openai",
             model="gpt-4o-mini",
             prompt=prompt
-        ) \
-        .budget(limit=budget * 0.3) \
-        .when(primary.failed) \
-        .depends_on(primary)
+        )
+        .with_budget(limit_usd=budget * 0.3)
+        .with_dependencies(Dependency.on(primary, primary.failed))
+    )
 
     return [primary, fallback]
 
@@ -267,33 +324,38 @@ activities = create_llm_fallback_chain(
     budget=1.00
 )
 
-notify = WorkflowActivity("notify") \
-    .worker("standard", "http_request") \
-    .params(url="${SLACK_URL}") \
-    .depends_on(*activities)  # Depends on both primary and fallback
+notify = (
+    Activity(key="notify")
+    .with_worker("builtin", "http_request")
+    .with_params(url="${SLACK_URL}")
+    .with_dependencies(*activities)  # Depends on both primary and fallback
+)
 
 # Build workflow - unpack list with *
-wf = Workflow("summarization").append(*activities, notify)
+wf = (
+    Workflow(name="summarization")
+    .with_activities(*activities, notify)
+)
 ```
 
 ### Implementation Details
 
-**Package Structure**:
+**Implemented Package Structure**:
 ```
-kruxiaflow-python/
+pysdk/
 ├── pyproject.toml
-├── README.md
-├── src/kruxiaflow/
-│   ├── __init__.py
-│   ├── models.py        # Pydantic models (validated, immutable)
-│   ├── builders.py      # Fluent builders (WorkflowActivity, Workflow)
-│   ├── expressions.py   # Template expressions (OutputRef, OutputComparison)
-│   ├── client.py        # API client (KruxiaFlow)
-│   └── types.py         # Type definitions
-└── tests/
-    ├── test_models.py
-    ├── test_builders.py
-    └── test_client.py
+├── kruxiaflow/
+│   ├── __init__.py      # Public API exports
+│   ├── models.py        # Pydantic models with fluent methods (Activity, Workflow, Dependency)
+│   ├── expressions.py   # Template expressions (Input, OutputRef, SecretRef, EnvRef)
+│   ├── client.py        # API client (KruxiaFlow, AsyncKruxiaFlow)
+│   └── py.typed         # PEP 561 marker
+├── examples/
+│   ├── 01_weather_report.py
+│   ├── 02_user_validation.py
+│   └── 03_document_processing.py
+└── tests/               # pytest tests
+    └── ...
 ```
 
 **Dependencies**:
@@ -591,13 +653,13 @@ class KruxiaFlow:
 - E2E tests for client deployment
 - All 10 MVP examples implemented in Python
 
-### Estimated Time: 5-7 days
+### Estimated Time: 5-7 days ✅ COMPLETE
 
-- Pydantic models + validation (1 day)
-- Fluent builders (2 days)
-- YAML compilation (0.5 day)
-- API client (0.5 day)
-- Tests + documentation (1-2 days)
+- ✅ Pydantic models + validation (1 day)
+- ✅ Fluent builder methods on models (2 days)
+- ✅ YAML compilation (0.5 day)
+- ✅ API client (0.5 day)
+- 🔄 Tests + documentation (1-2 days) - in progress
 
 ---
 

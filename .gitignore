@@ -48,3 +48,5 @@ var/
 .cargo/.package-cache-mutate
 *.log
 *.pyc
+*.egg-info
+pysdk/.coverage
