@@ -95,9 +95,9 @@ The `llm_prompt` activity provides production-grade LLM integration:
   activity_name: llm_prompt
   parameters:
     model:
-      - anthropic/claude-opus-4-1-20250514      # Try premium first
-      - anthropic/claude-sonnet-4-5-20250929    # Fall back to mid-tier
-      - anthropic/claude-haiku-4-20250415       # Last resort: cheapest
+      - anthropic/claude-opus-4-5      # Try premium first: $5/M
+      - anthropic/claude-sonnet-4-5    # Fall back to mid-tier: $3/M
+      - anthropic/claude-haiku-4-5     # Last resort: cheapest: $1/M
     prompt: "{{INPUT.query}}"
     max_tokens: 1000
   settings:
