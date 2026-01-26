@@ -112,6 +112,8 @@ from .expressions import (
 from .models import (
     Activity,
     ActivitySettings,
+    BackoffStrategy,
+    BudgetAction,
     BudgetSettings,
     CacheSettings,
     Dependency,
@@ -134,6 +136,8 @@ __all__ = [
     # Client
     "AsyncKruxiaFlow",
     "AuthenticationError",
+    "BackoffStrategy",
+    "BudgetAction",
     "BudgetSettings",
     "CacheSettings",
     "Comparison",

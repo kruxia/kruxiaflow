@@ -4,7 +4,13 @@ import pytest
 import yaml
 
 from kruxiaflow.expressions import Input, SecretRef
-from kruxiaflow.models import Activity, Dependency, Workflow
+from kruxiaflow.models import (
+    Activity,
+    BackoffStrategy,
+    BudgetAction,
+    Dependency,
+    Workflow,
+)
 
 
 class TestSimpleWorkflowYAML:
@@ -186,7 +192,7 @@ class TestActivitySettingsYAML:
             Activity(key="retry")
             .with_worker("builtin", "http_request")
             .with_params(url="https://flaky.api.com")
-            .with_retry(max_attempts=5, strategy="exponential")
+            .with_retry(max_attempts=5, strategy=BackoffStrategy.EXPONENTIAL)
         )
         wf = Workflow(name="retry").with_activities(activity)
         yaml_str = wf.to_yaml()
@@ -217,7 +223,7 @@ class TestActivitySettingsYAML:
             Activity(key="llm")
             .with_worker("builtin", "llm_prompt")
             .with_params(prompt="Hello")
-            .with_budget(limit_usd=1.0, action="abort")
+            .with_budget(limit_usd=1.0, action=BudgetAction.ABORT)
         )
         wf = Workflow(name="budget").with_activities(activity)
         yaml_str = wf.to_yaml()
