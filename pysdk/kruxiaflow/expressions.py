@@ -31,8 +31,6 @@ Example:
     )
 """
 
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
 
@@ -70,23 +68,23 @@ class Expression(ABC):
         """Support f-string formatting."""
         return str(self)
 
-    def __and__(self, other: Expression) -> And:
+    def __and__(self, other: "Expression") -> "And":
         """Combine expressions with AND."""
         return And(self, _to_expr(other))
 
-    def __rand__(self, other: Any) -> And:
+    def __rand__(self, other: Any) -> "And":
         """Support reversed AND for non-Expression left operands."""
         return And(_to_expr(other), self)
 
-    def __or__(self, other: Expression) -> Or:
+    def __or__(self, other: "Expression") -> "Or":
         """Combine expressions with OR."""
         return Or(self, _to_expr(other))
 
-    def __ror__(self, other: Any) -> Or:
+    def __ror__(self, other: Any) -> "Or":
         """Support reversed OR for non-Expression left operands."""
         return Or(_to_expr(other), self)
 
-    def __invert__(self) -> Not:
+    def __invert__(self) -> "Not":
         """Negate the expression."""
         return Not(self)
 
@@ -299,7 +297,7 @@ class _WorkflowMeta:
         )
     """
 
-    def __getattr__(self, name: str) -> WorkflowRef:
+    def __getattr__(self, name: str) -> "WorkflowRef":
         """Get a workflow metadata field."""
         return WorkflowRef(name)
 
@@ -398,27 +396,27 @@ class OutputRef(Expression):
 
     # Comparison operators return expression objects
 
-    def __eq__(self, other: object) -> Eq:  # type: ignore[override]
+    def __eq__(self, other: object) -> "Eq":  # type: ignore[override]
         """Create equality comparison."""
         return Eq(self, _to_expr(other))
 
-    def __ne__(self, other: object) -> Ne:  # type: ignore[override]
+    def __ne__(self, other: object) -> "Ne":  # type: ignore[override]
         """Create inequality comparison."""
         return Ne(self, _to_expr(other))
 
-    def __gt__(self, other: object) -> Gt:
+    def __gt__(self, other: object) -> "Gt":
         """Create greater-than comparison."""
         return Gt(self, _to_expr(other))
 
-    def __lt__(self, other: object) -> Lt:
+    def __lt__(self, other: object) -> "Lt":
         """Create less-than comparison."""
         return Lt(self, _to_expr(other))
 
-    def __ge__(self, other: object) -> Ge:
+    def __ge__(self, other: object) -> "Ge":
         """Create greater-than-or-equal comparison."""
         return Ge(self, _to_expr(other))
 
-    def __le__(self, other: object) -> Le:
+    def __le__(self, other: object) -> "Le":
         """Create less-than-or-equal comparison."""
         return Le(self, _to_expr(other))
 

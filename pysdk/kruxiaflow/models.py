@@ -4,13 +4,29 @@ This module provides the primary interface for constructing workflows programmat
 Models can be constructed declaratively (by passing arguments) or using fluent method chaining.
 """
 
-from __future__ import annotations
-
 import sys
+from enum import Enum
 from typing import TYPE_CHECKING, Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
+
+from .types import ActivityKey, ActivityNameOptional, WorkerName
+
+
+class BackoffStrategy(str, Enum):
+    """Retry backoff strategy."""
+
+    EXPONENTIAL = "exponential"
+    FIXED = "fixed"
+
+
+class BudgetAction(str, Enum):
+    """Action to take when budget is exceeded."""
+
+    ABORT = "abort"
+    CONTINUE = "continue"
+
 
 if sys.version_info >= (3, 11):
     from typing import Self
@@ -32,7 +48,7 @@ class RetrySettings(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     max_attempts: int = 3
-    strategy: str = "exponential"
+    strategy: BackoffStrategy = BackoffStrategy.EXPONENTIAL
     base_seconds: float | None = None
     factor: float | None = None
     max_seconds: float | None = None
@@ -54,7 +70,7 @@ class BudgetSettings(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     limit_usd: float
-    action: str = "abort"
+    action: BudgetAction = BudgetAction.ABORT
 
 
 class ActivitySettings(BaseModel):
@@ -96,15 +112,15 @@ class Dependency(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
-    activity_key: str
+    activity_key: ActivityKey
     conditions: list[str] = Field(default_factory=list)
 
     @classmethod
     def on(
         cls,
-        activity: Activity | str,
-        *conditions: str | OutputComparison,
-    ) -> Dependency:
+        activity: "Activity | str",
+        *conditions: "str | OutputComparison",
+    ) -> "Dependency":
         """Create a dependency with optional conditions.
 
         Args:
@@ -155,9 +171,11 @@ class Activity(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
-    key: str
-    worker: str = "builtin"
-    activity_name: str = ""
+    key: ActivityKey
+    worker: WorkerName
+    # activity_name allows empty during construction for fluent API,
+    # validated non-empty at serialization in to_dict()
+    activity_name: ActivityNameOptional
     parameters: dict[str, Any] = Field(default_factory=dict)
     settings: ActivitySettings = Field(default_factory=ActivitySettings)
     depends_on: list[str | Dependency] = Field(default_factory=list)
@@ -210,7 +228,7 @@ class Activity(BaseModel):
     def with_retry(
         self,
         max_attempts: int = 3,
-        strategy: str = "exponential",
+        strategy: BackoffStrategy = BackoffStrategy.EXPONENTIAL,
         base_seconds: float | None = None,
         factor: float | None = None,
         max_seconds: float | None = None,
@@ -219,7 +237,7 @@ class Activity(BaseModel):
 
         Args:
             max_attempts: Maximum number of retry attempts
-            strategy: Backoff strategy ("exponential", "linear", "fixed")
+            strategy: Backoff strategy (exponential or fixed)
             base_seconds: Initial backoff duration
             factor: Multiplier for exponential backoff
             max_seconds: Maximum backoff duration
@@ -249,12 +267,14 @@ class Activity(BaseModel):
         self.settings.cache = CacheSettings(ttl=ttl, key=key)
         return self
 
-    def with_budget(self, limit_usd: float, action: str = "abort") -> Self:
+    def with_budget(
+        self, limit_usd: float, action: BudgetAction = BudgetAction.ABORT
+    ) -> Self:
         """Set cost budget limit.
 
         Args:
             limit_usd: Maximum cost in USD
-            action: Action when budget exceeded ("abort")
+            action: Action when budget exceeded (abort or continue)
 
         Returns:
             self for chaining
@@ -286,7 +306,7 @@ class Activity(BaseModel):
         self.settings.streaming = enabled
         return self
 
-    def with_dependencies(self, *dependencies: Activity | Dependency | str) -> Self:
+    def with_dependencies(self, *dependencies: "Activity | Dependency | str") -> Self:
         """Add activity dependencies.
 
         Activities listed here must complete before this activity runs.
@@ -379,7 +399,17 @@ class Activity(BaseModel):
     # -------------------------------------------------------------------------
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to YAML-compatible dictionary format."""
+        """Convert to YAML-compatible dictionary format.
+
+        Raises:
+            ValueError: If activity_name is empty (required for serialization)
+        """
+        if not self.activity_name:
+            raise ValueError(
+                f"Activity '{self.key}' has no activity_name. "
+                "Use .with_worker(worker, activity_name) or set activity_name directly."
+            )
+
         result: dict[str, Any] = {
             "key": self.key,
             "worker": self.worker,
@@ -396,7 +426,7 @@ class Activity(BaseModel):
         if self.settings.retry is not None:
             retry_dict: dict[str, Any] = {
                 "max_attempts": self.settings.retry.max_attempts,
-                "strategy": self.settings.retry.strategy,
+                "strategy": self.settings.retry.strategy.value,
             }
             if self.settings.retry.base_seconds is not None:
                 retry_dict["base_seconds"] = self.settings.retry.base_seconds
@@ -416,7 +446,7 @@ class Activity(BaseModel):
         if self.settings.budget is not None:
             settings_dict["budget"] = {
                 "limit_usd": self.settings.budget.limit_usd,
-                "action": self.settings.budget.action,
+                "action": self.settings.budget.action.value,
             }
         if self.settings.delay is not None:
             settings_dict["delay"] = self.settings.delay

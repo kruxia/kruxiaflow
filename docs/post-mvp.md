@@ -1847,6 +1847,49 @@ orjson>=3.9.0          # Fast JSON
 
 ---
 
+### Story 4.1d: Python Worker True Parallelism
+
+**Priority**: P3 (Low - current asyncio model handles I/O-bound workloads well)
+
+**As** a Python developer running CPU-intensive activities
+**I want** the option to execute activities with true parallelism
+**So that** CPU-bound work doesn't block other activities
+
+**Current Implementation**: The Python worker uses `asyncio.create_task()` for concurrent activity execution. This is single-threaded cooperative multitasking - tasks yield at `await` points but cannot run simultaneously.
+
+**Why Current Model Works**: Activity execution is primarily I/O-bound (HTTP calls, file transfers). Multiple activities progress concurrently as they take turns waiting on I/O.
+
+**Scope (if needed)**:
+
+**Option 1: ThreadPoolExecutor**
+- Add `offload_to_thread=True` option to `@activity` decorator
+- Activity handlers run in thread pool
+- Parallelism for C extensions that release GIL (numpy, pandas)
+- Does NOT help pure Python CPU-bound code (GIL limitation)
+
+**Option 2: ProcessPoolExecutor**
+- True parallelism (each process has own GIL)
+- Requires serializable parameters and results (pickle)
+- Cannot share `WorkerApiClient`, `ActivityContext` across processes
+- Significant architecture changes required
+- Higher memory footprint (~30-50MB per process)
+
+**Option 3: Python 3.13+ Free-threaded Mode**
+- Experimental `--disable-gil` flag
+- Would make ThreadPoolExecutor achieve true parallelism
+- Monitor for stability before adoption
+
+**Decision Criteria**:
+- Only implement if users report CPU-bound bottlenecks
+- Measured latency improvements must justify added complexity
+- I/O-bound workloads (common case) already well-served by asyncio
+
+**Analysis Document**: See `pysdk/docs/concurrency-parallelism-analysis.md`
+
+**Estimated Time**: 3-5 days (ThreadPoolExecutor), 7-10 days (ProcessPoolExecutor)
+
+---
+
 ### Story 4.1d: Built-in Python Worker
 
 **Priority**: P1 (High - Zero-setup experience)

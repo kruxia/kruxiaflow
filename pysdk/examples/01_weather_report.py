@@ -33,8 +33,12 @@ send_notification = (
         url=webhook_url,
         headers={"Content-Type": "application/json"},
         body={
-            "temperature": fetch_weather["response.json.properties.periods[0].temperature"],
-            "conditions": fetch_weather["response.json.properties.periods[0].shortForecast"],
+            "temperature": fetch_weather[
+                "response.json.properties.periods[0].temperature"
+            ],
+            "conditions": fetch_weather[
+                "response.json.properties.periods[0].shortForecast"
+            ],
             "workflow_id": workflow.id,  # Use workflow metadata accessor
         },
     )

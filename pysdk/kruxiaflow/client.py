@@ -1,7 +1,5 @@
 """API client for Kruxia Flow server."""
 
-from __future__ import annotations
-
 import os
 from typing import Any
 
@@ -288,7 +286,7 @@ class KruxiaFlow:
         """Close the client connection."""
         self._client.close()
 
-    def __enter__(self) -> KruxiaFlow:
+    def __enter__(self) -> "KruxiaFlow":
         """Context manager entry."""
         return self
 
@@ -431,7 +429,7 @@ class AsyncKruxiaFlow:
         """Close the client connection."""
         await self._client.aclose()
 
-    async def __aenter__(self) -> AsyncKruxiaFlow:
+    async def __aenter__(self) -> "AsyncKruxiaFlow":
         """Async context manager entry."""
         return self
 
