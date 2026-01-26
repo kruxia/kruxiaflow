@@ -567,6 +567,17 @@ class TestWorkflowSerialization:
         # Unknown types fall back to "string"
         assert d["inputs"]["data"]["type"] == "string"
 
+    def test_workflow_with_input_no_type(self):
+        """Input without type should default to 'string' in schema."""
+        from kruxiaflow.expressions import Input
+
+        # No type specified (type=None internally)
+        inp = Input("text")
+        wf = Workflow(name="test").with_inputs(inp)
+        d = wf.to_dict()
+        # None type defaults to "string"
+        assert d["inputs"]["text"]["type"] == "string"
+
 
 class TestInputSchema:
     """Tests for InputSchema model."""

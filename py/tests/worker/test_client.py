@@ -747,3 +747,120 @@ class TestWorkerApiClientCleanup:
 
         assert client._api_url == "http://localhost:8080"
         await client.close()
+
+
+class TestWorkerApiClientConcurrentToken:
+    """Test WorkerApiClient token acquisition concurrency."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_token_requests_reuse_cached_token(
+        self, httpx_mock: HTTPXMock
+    ):
+        """Test that concurrent requests share a single token fetch."""
+        import asyncio
+
+        # Only one token response
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8080/api/v1/oauth/token",
+            json={"access_token": "shared_token"},
+        )
+        # Two poll responses
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8080/api/v1/workers/poll",
+            json={"activities": [], "count": 0},
+        )
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8080/api/v1/workers/poll",
+            json={"activities": [], "count": 0},
+        )
+
+        client = WorkerApiClient(
+            api_url="http://localhost:8080",
+            client_id="test",
+            client_secret="secret",
+        )
+
+        try:
+            # Make concurrent requests that will both try to get a token
+            results = await asyncio.gather(
+                client.poll_activities("python", "worker1", 10),
+                client.poll_activities("python", "worker2", 10),
+            )
+
+            assert results[0] == []
+            assert results[1] == []
+
+            # Should only have one token request due to double-check locking
+            token_requests = [
+                r for r in httpx_mock.get_requests() if "oauth/token" in str(r.url)
+            ]
+            assert len(token_requests) == 1
+        finally:
+            await client.close()
+
+    @pytest.mark.asyncio
+    async def test_double_check_locking_second_check(self, httpx_mock: HTTPXMock):
+        """Test that the second token check inside the lock returns cached token.
+
+        This tests line 81: return self._token (inside the lock)
+        """
+        import asyncio
+
+        # Only need token response - we're calling _get_token directly
+        httpx_mock.add_response(
+            method="POST",
+            url="http://localhost:8080/api/v1/oauth/token",
+            json={"access_token": "token1"},
+        )
+
+        client = WorkerApiClient(
+            api_url="http://localhost:8080",
+            client_id="test",
+            client_secret="secret",
+        )
+
+        try:
+            # To reliably hit the double-check, we need to:
+            # 1. Have one request get the token
+            # 2. Have another request pass the first check (token=None)
+            #    before the first request finishes getting the token
+            # 3. Then wait at the lock until the first request releases it
+            # 4. When it acquires the lock, it finds token is now set
+
+            # Create an event to synchronize the test
+            first_call_started = asyncio.Event()
+            original_obtain = client._obtain_token
+
+            async def slow_obtain_token():
+                first_call_started.set()
+                await asyncio.sleep(0.01)  # Small delay to allow second call to start
+                return await original_obtain()
+
+            # Temporarily patch to add delay
+            client._obtain_token = slow_obtain_token
+
+            # Now make concurrent calls to _get_token
+            async def get_token_1():
+                return await client._get_token()
+
+            async def get_token_2():
+                await first_call_started.wait()
+                # Now the first call has started but not finished
+                # Both should get the same token
+                return await client._get_token()
+
+            token1, token2 = await asyncio.gather(get_token_1(), get_token_2())
+
+            assert token1 == "token1"
+            assert token2 == "token1"
+
+            # Only one token request should have been made
+            token_requests = [
+                r for r in httpx_mock.get_requests() if "oauth/token" in str(r.url)
+            ]
+            assert len(token_requests) == 1
+        finally:
+            await client.close()

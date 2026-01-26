@@ -49,4 +49,4 @@ var/
 *.log
 *.pyc
 *.egg-info
-pysdk/.coverage
+py/.coverage

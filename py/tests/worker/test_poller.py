@@ -400,3 +400,123 @@ class TestWorkerPollerSemaphore:
         # Permit should still be released even on failure
         assert poller._semaphore._value == 2
         assert poller._active_count == 0
+
+
+class TestWorkerPollerRun:
+    """Test WorkerPoller run loop."""
+
+    @pytest.mark.asyncio
+    async def test_run_sleeps_when_no_activities(self):
+        """Test that run() sleeps when poll returns no activities."""
+        config = create_config(poll_interval=0.01)
+        client = mock.AsyncMock()
+        client.poll_activities.return_value = []
+        registry = ActivityRegistry()
+
+        poller = WorkerPoller(config, client, registry)
+
+        # Run for a short time then shutdown
+        async def shutdown_after_delay():
+            await asyncio.sleep(0.05)
+            poller.shutdown()
+
+        shutdown_task = asyncio.create_task(shutdown_after_delay())
+
+        await poller.run()
+
+        await shutdown_task
+
+        # Should have polled multiple times due to sleep interval
+        assert client.poll_activities.call_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_run_handles_poll_error(self):
+        """Test that run() handles errors during polling."""
+        config = create_config(poll_interval=0.01)
+        client = mock.AsyncMock()
+        # First call raises, subsequent calls return empty
+        client.poll_activities.side_effect = [
+            RuntimeError("Connection error"),
+            [],
+            [],
+        ]
+        registry = ActivityRegistry()
+
+        poller = WorkerPoller(config, client, registry)
+
+        # Run for a short time then shutdown
+        async def shutdown_after_delay():
+            await asyncio.sleep(0.1)
+            poller.shutdown()
+
+        shutdown_task = asyncio.create_task(shutdown_after_delay())
+
+        # Should not raise despite the error
+        await poller.run()
+
+        await shutdown_task
+
+    @pytest.mark.asyncio
+    async def test_run_polls_immediately_when_work_found(self):
+        """Test that run() polls immediately when activities are found."""
+        config = create_config(poll_interval=1.0)  # Long interval
+        client = mock.AsyncMock()
+        # Return one activity, then empty
+        activity = create_pending_activity()
+        client.poll_activities.side_effect = [
+            [activity],
+            [],
+            [],
+        ]
+        registry = ActivityRegistry()
+        registry.register(success_activity, "test")
+
+        poller = WorkerPoller(config, client, registry)
+
+        # Run for a short time then shutdown
+        async def shutdown_after_delay():
+            await asyncio.sleep(0.15)
+            poller.shutdown()
+
+        shutdown_task = asyncio.create_task(shutdown_after_delay())
+
+        await poller.run()
+
+        await shutdown_task
+
+        # Should have polled at least twice quickly (not waiting for 1s interval)
+        assert client.poll_activities.call_count >= 2
+
+
+class TestWorkerPollerHeartbeatFailure:
+    """Test WorkerPoller heartbeat failure handling."""
+
+    @pytest.mark.asyncio
+    async def test_heartbeat_failure_is_logged_not_raised(self):
+        """Test that heartbeat failure is logged but doesn't crash the activity."""
+        config = create_config(
+            activity_timeout=120.0,  # > 60s to spawn heartbeat
+            heartbeat_interval=0.02,  # Short interval for testing
+        )
+        client = mock.AsyncMock()
+        # Heartbeat will fail
+        client.heartbeat.side_effect = RuntimeError("Connection lost")
+        registry = ActivityRegistry()
+
+        @activity_decorator(name="medium_activity")
+        async def medium_activity(params: dict, ctx: ActivityContext) -> ActivityResult:
+            await asyncio.sleep(0.1)  # Long enough for heartbeat to be attempted
+            return ActivityResult.value("result", "done")
+
+        registry.register(medium_activity, "test")
+
+        poller = WorkerPoller(config, client, registry)
+        activity = create_pending_activity(activity_name="medium_activity")
+
+        # Should complete despite heartbeat failures
+        await poller._execute_activity(activity)
+
+        # Heartbeat should have been attempted and failed
+        assert client.heartbeat.call_count >= 1
+        # Activity should still complete
+        client.complete_activity.assert_called_once()

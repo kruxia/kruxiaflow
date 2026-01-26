@@ -9,6 +9,13 @@
 - [Architecture](architecture.md)
 - [Workflow Loops](loops-guide.md)
 
+# Python SDK
+
+- [Quick Start](python-sdk/quickstart.md)
+- [Workflow Definitions](python-sdk/workflow-definitions.md)
+- [Standard Workers](python-sdk/standard-workers.md)
+- [Custom Workers](python-sdk/custom-workers.md)
+
 # Features
 
 - [Budget Configuration](budget-configuration.md)

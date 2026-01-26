@@ -172,11 +172,10 @@ class TestFileReference:
 
     def test_from_string_uuid_matches_pattern_but_invalid(self):
         """Test UUID that matches the hex pattern but is invalid as UUID."""
-        # This UUID-like string matches the regex but UUID() will raise ValueError
+        # This string matches the regex [0-9a-f-]+ but is not a valid UUID format
+        # (too short - UUID requires 32 hex chars plus 4 dashes)
         with pytest.raises(InvalidFileReferenceError):
-            FileReference.from_string(
-                "postgres://zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz/activity/file.txt"
-            )
+            FileReference.from_string("postgres://abcdef00-1234/activity/file.txt")
 
     def test_from_string_invalid_missing_parts(self):
         with pytest.raises(InvalidFileReferenceError):

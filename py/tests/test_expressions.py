@@ -522,3 +522,148 @@ class TestExpressionBase:
         e = activity["valid"]
         result = ~(e == True)  # noqa: E712
         assert isinstance(result, Not)
+
+    def test_expression_rand_operator(self):
+        """Test reversed AND operator (__rand__)."""
+        activity = Activity(key="test")
+        e = activity["a"] > 1
+        # To trigger __rand__, the left operand must NOT be an Expression
+        # and its __and__ must return NotImplemented
+        # Using True (bool) - bool.__and__ returns NotImplemented for non-bool types
+        result = True & e  # This calls e.__rand__(True)
+        assert isinstance(result, And)
+
+    def test_expression_ror_operator(self):
+        """Test reversed OR operator (__ror__)."""
+        activity = Activity(key="test")
+        e = activity["a"] > 1
+        # To trigger __ror__, similar to __rand__
+        # Using True (bool) - bool.__or__ returns NotImplemented for non-bool types
+        result = True | e  # This calls e.__ror__(True)
+        assert isinstance(result, Or)
+
+
+class TestLiteralProperty:
+    """Tests for Literal value property."""
+
+    def test_literal_value_property(self):
+        """Test that Literal.value property returns the stored value."""
+        lit = Literal(42)
+        assert lit.value == 42
+
+    def test_literal_value_property_string(self):
+        lit = Literal("hello")
+        assert lit.value == "hello"
+
+    def test_literal_value_property_none(self):
+        lit = Literal(None)
+        assert lit.value is None
+
+
+class TestWorkflowRefProperties:
+    """Tests for WorkflowRef field property and repr."""
+
+    def test_workflow_ref_field_property(self):
+        """Test WorkflowRef.field property."""
+        ref = workflow.id
+        assert ref.field == "id"
+
+    def test_workflow_ref_repr(self):
+        """Test WorkflowRef __repr__."""
+        ref = workflow.name
+        assert repr(ref) == "WorkflowRef('name')"
+
+
+class TestExpressionRepr:
+    """Tests for __repr__ methods of expression classes."""
+
+    def test_and_repr(self):
+        """Test And.__repr__."""
+        activity = Activity(key="test")
+        e1 = activity["a"] > 1
+        e2 = activity["b"] < 10
+        result = e1 & e2
+        repr_str = repr(result)
+        assert "And(" in repr_str
+
+    def test_or_repr(self):
+        """Test Or.__repr__."""
+        activity = Activity(key="test")
+        e1 = activity["a"] > 1
+        e2 = activity["b"] < 10
+        result = e1 | e2
+        repr_str = repr(result)
+        assert "Or(" in repr_str
+
+    def test_not_repr(self):
+        """Test Not.__repr__."""
+        activity = Activity(key="test")
+        e = activity["valid"]
+        result = ~(e == True)  # noqa: E712
+        repr_str = repr(result)
+        assert "Not(" in repr_str
+
+    def test_is_null_repr(self):
+        """Test IsNull.__repr__."""
+        activity = Activity(key="test")
+        result = is_null(activity["result"])
+        repr_str = repr(result)
+        assert "IsNull(" in repr_str
+
+    def test_is_not_null_repr(self):
+        """Test IsNotNull.__repr__."""
+        activity = Activity(key="test")
+        result = is_not_null(activity["result"])
+        repr_str = repr(result)
+        assert "IsNotNull(" in repr_str
+
+    def test_contains_repr(self):
+        """Test Contains.__repr__."""
+        activity = Activity(key="test")
+        result = contains(activity["tags"], "urgent")
+        repr_str = repr(result)
+        assert "Contains(" in repr_str
+
+    def test_in_repr(self):
+        """Test In.__repr__."""
+        activity = Activity(key="test")
+        result = in_(activity["status"], ["ok", "done"])
+        repr_str = repr(result)
+        assert "In(" in repr_str
+
+
+class TestHelperFunctionsEdgeCases:
+    """Tests for edge cases in helper functions."""
+
+    def test_and_no_args_raises_error(self):
+        """Test that and_() with no args raises ValueError."""
+        import pytest
+
+        with pytest.raises(ValueError, match="at least one expression"):
+            and_()
+
+    def test_or_no_args_raises_error(self):
+        """Test that or_() with no args raises ValueError."""
+        import pytest
+
+        with pytest.raises(ValueError, match="at least one expression"):
+            or_()
+
+    def test_or_single_expression(self):
+        """Test or_() with single expression returns that expression."""
+        activity = Activity(key="test")
+        expr = activity["a"] > 1
+        result = or_(expr)
+        # Should return the expression itself (not wrapped in Or)
+        assert "test.a > 1" in str(result)
+
+
+class TestEnvRefToTemplate:
+    """Tests for EnvRef _to_template method."""
+
+    def test_env_ref_to_template(self):
+        """Test EnvRef._to_template() returns just the name."""
+        env = EnvRef("DATABASE_URL")
+        # _to_template is called internally but returns just the name
+        # The __str__ method wraps it differently
+        assert env._to_template() == "DATABASE_URL"

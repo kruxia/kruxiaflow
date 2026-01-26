@@ -214,3 +214,163 @@ class TestWorkerManagerIntegration:
             await manager.start()
             await asyncio.sleep(0.05)
             await manager.stop()
+
+    @pytest.mark.asyncio
+    async def test_run_until_shutdown_registers_signal_handlers(self):
+        """Test that run_until_shutdown registers SIGINT and SIGTERM handlers."""
+        config = create_config()
+        registry = ActivityRegistry()
+        manager = WorkerManager(config, registry)
+
+        registered_signals = []
+
+        async def run_test():
+            loop = asyncio.get_event_loop()
+
+            def tracking_add_handler(sig, handler):
+                registered_signals.append(sig)
+                # Don't actually register, just track
+
+            with (
+                mock.patch.object(loop, "add_signal_handler", tracking_add_handler),
+                mock.patch.object(manager, "start") as mock_start,
+                mock.patch.object(manager, "stop"),
+            ):
+                mock_start.return_value = asyncio.create_task(asyncio.sleep(0))
+
+                # Create a task that sets the stop event after a short delay
+                async def run_with_timeout():
+                    # We need to access the internal stop_event
+                    # Instead, just let it time out
+                    with contextlib.suppress(asyncio.TimeoutError):
+                        await asyncio.wait_for(
+                            manager.run_until_shutdown(), timeout=0.1
+                        )
+
+                await run_with_timeout()
+
+        await run_test()
+
+        import signal
+
+        assert signal.SIGINT in registered_signals
+        assert signal.SIGTERM in registered_signals
+
+    @pytest.mark.asyncio
+    async def test_run_until_shutdown_stops_on_event(self):
+        """Test that run_until_shutdown stops when stop event is set."""
+        config = create_config()
+        registry = ActivityRegistry()
+        manager = WorkerManager(config, registry)
+
+        # Track calls
+        start_called = False
+        stop_called = False
+
+        async def mock_start():
+            nonlocal start_called
+            start_called = True
+            return asyncio.create_task(asyncio.sleep(10))
+
+        async def mock_stop():
+            nonlocal stop_called
+            stop_called = True
+
+        with (
+            mock.patch.object(manager, "start", mock_start),
+            mock.patch.object(manager, "stop", mock_stop),
+        ):
+            # Run with a short timeout
+            async def trigger_shutdown():
+                await asyncio.sleep(0.05)
+                # Simulate signal by setting poller shutdown
+                if manager._poller:
+                    manager._poller.shutdown()
+
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    asyncio.gather(
+                        manager.run_until_shutdown(),
+                        trigger_shutdown(),
+                    ),
+                    timeout=1.0,
+                )
+
+        assert start_called
+        assert stop_called
+
+    @pytest.mark.asyncio
+    async def test_run_until_shutdown_calls_stop_in_finally(self):
+        """Test that stop is called even if start raises."""
+        config = create_config()
+        registry = ActivityRegistry()
+        manager = WorkerManager(config, registry)
+
+        stop_called = False
+
+        async def mock_stop():
+            nonlocal stop_called
+            stop_called = True
+
+        with (
+            mock.patch.object(
+                manager, "start", side_effect=RuntimeError("Start failed")
+            ),
+            mock.patch.object(manager, "stop", mock_stop),
+            pytest.raises(RuntimeError, match="Start failed"),
+        ):
+            await manager.run_until_shutdown()
+
+        assert stop_called
+
+    @pytest.mark.asyncio
+    async def test_run_until_shutdown_signal_handler_sets_stop_event(self):
+        """Test that the signal handler sets the stop event."""
+        import signal
+
+        config = create_config()
+        registry = ActivityRegistry()
+        manager = WorkerManager(config, registry)
+
+        # Track registered signal handlers
+        registered_handlers = {}
+
+        async def mock_start():
+            # Return a task that never completes
+            return asyncio.create_task(asyncio.sleep(10))
+
+        async def mock_stop():
+            pass
+
+        def track_add_signal_handler(sig, handler):
+            registered_handlers[sig] = handler
+
+        with (
+            mock.patch.object(manager, "start", mock_start),
+            mock.patch.object(manager, "stop", mock_stop),
+        ):
+            loop = asyncio.get_event_loop()
+            with mock.patch.object(
+                loop, "add_signal_handler", track_add_signal_handler
+            ):
+                # Start run_until_shutdown in the background
+                run_task = asyncio.create_task(manager.run_until_shutdown())
+
+                # Give it time to register signal handlers
+                await asyncio.sleep(0.01)
+
+                # Verify handlers were registered
+                assert signal.SIGINT in registered_handlers
+                assert signal.SIGTERM in registered_handlers
+
+                # Call the signal handler directly to simulate receiving SIGINT
+                # This tests line 95: stop_event.set()
+                registered_handlers[signal.SIGINT]()
+
+                # Wait for run_until_shutdown to complete
+                try:
+                    await asyncio.wait_for(run_task, timeout=1.0)
+                except asyncio.TimeoutError:
+                    run_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await run_task

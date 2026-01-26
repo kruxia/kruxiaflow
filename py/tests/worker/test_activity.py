@@ -268,3 +268,26 @@ class TestActivityABC:
         )
         result = await activity_impl.execute({"x": 10}, ctx)
         assert result.to_output_dict() == {"result": 11}
+
+
+class TestActivityDecoratorEdgeCases:
+    """Test edge cases for activity decorator."""
+
+    def test_activity_decorator_raises_when_name_not_determined(self):
+        """Test that decorator raises ValueError when activity name cannot be determined."""
+
+        # Create a callable object without __name__ attribute
+        class NoNameCallable:
+            async def __call__(
+                self, params: dict, ctx: ActivityContext
+            ) -> ActivityResult:
+                return ActivityResult.value("result", "done")
+
+        # Remove __name__ if it exists (class instances don't have __name__ by default)
+        callable_without_name = NoNameCallable()
+
+        # Verify it doesn't have __name__
+        assert not hasattr(callable_without_name, "__name__")
+
+        with pytest.raises(ValueError, match="Activity name could not be determined"):
+            activity()(callable_without_name)
