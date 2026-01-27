@@ -1884,7 +1884,7 @@ orjson>=3.9.0          # Fast JSON
 - Measured latency improvements must justify added complexity
 - I/O-bound workloads (common case) already well-served by asyncio
 
-**Analysis Document**: See `pysdk/docs/concurrency-parallelism-analysis.md`
+**Analysis Document**: See `py/docs/concurrency-parallelism-analysis.md`
 
 **Estimated Time**: 3-5 days (ThreadPoolExecutor), 7-10 days (ProcessPoolExecutor)
 
