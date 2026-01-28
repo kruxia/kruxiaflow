@@ -252,6 +252,7 @@ mod tests {
             settings: None,
             timeout_seconds: Some(30),
             output_definitions: None,
+            signal_data: None,
         };
 
         // Verify Debug trait is implemented
