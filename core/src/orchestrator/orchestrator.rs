@@ -968,7 +968,11 @@ pub async fn process_workflow_event(
         let current_status = state.activities.get(activity_key).map(|a| a.status);
 
         match current_status {
-            Some(WorkflowActivityStatus::Running | WorkflowActivityStatus::Waiting) => {
+            Some(
+                WorkflowActivityStatus::Running
+                | WorkflowActivityStatus::Waiting
+                | WorkflowActivityStatus::Pending,
+            ) => {
                 // Expected states for a failure event — proceed with retry logic
             }
             Some(status) => {

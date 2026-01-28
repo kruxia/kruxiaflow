@@ -619,6 +619,7 @@ mod tests {
             settings: None,
             timeout_seconds: Some(10), // Custom timeout overrides config
             output_definitions: None,
+            signal_data: None,
         };
 
         // This test verifies the timeout determination logic
@@ -660,6 +661,7 @@ mod tests {
             settings: None,
             timeout_seconds: None, // Use default timeout
             output_definitions: None,
+            signal_data: None,
         };
 
         // This test verifies the timeout determination logic

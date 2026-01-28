@@ -310,6 +310,8 @@ pub struct PendingActivity {
     pub settings: Option<Value>,
     pub timeout_seconds: Option<i64>,
     pub output_definitions: Option<Value>,
+    /// Signal data for activities that were waiting for an external signal
+    pub signal_data: Option<Value>,
 }
 
 #[cfg(test)]
