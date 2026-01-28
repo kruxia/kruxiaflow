@@ -152,8 +152,10 @@ fn is_activity_ready(
                 }
                 // Fall through to check loop conditions and iteration limits
             }
-            WorkflowActivityStatus::Running | WorkflowActivityStatus::Pending => {
-                return Ok(false); // Already scheduled/running
+            WorkflowActivityStatus::Running
+            | WorkflowActivityStatus::Pending
+            | WorkflowActivityStatus::Waiting => {
+                return Ok(false); // Already scheduled/running/waiting
             }
             WorkflowActivityStatus::Failed | WorkflowActivityStatus::Skipped => {
                 return Ok(false); // Terminal states
@@ -427,6 +429,7 @@ fn get_dependencies(activity: &ActivityDefinition) -> Vec<&ActivityRelationship>
 pub fn status_to_string(status: WorkflowActivityStatus) -> String {
     match status {
         WorkflowActivityStatus::NotScheduled => "not_scheduled".to_string(),
+        WorkflowActivityStatus::Waiting => "waiting".to_string(),
         WorkflowActivityStatus::Pending => "pending".to_string(),
         WorkflowActivityStatus::Running => "running".to_string(),
         WorkflowActivityStatus::Completed => "completed".to_string(),
@@ -617,6 +620,7 @@ mod tests {
                 accumulated_cost_usd: Decimal::ZERO,
                 iteration: 0,
                 iteration_outputs: None,
+                signal_data: None,
             },
         )
     }

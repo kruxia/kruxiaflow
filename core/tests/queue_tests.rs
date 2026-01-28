@@ -64,6 +64,7 @@ async fn test_idempotent_scheduling() {
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     // Schedule activity first time
@@ -111,6 +112,7 @@ async fn test_concurrent_claiming() {
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         })
         .collect();
 
@@ -195,10 +197,12 @@ async fn test_stale_activity_recovery() {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         }),
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -274,10 +278,12 @@ async fn test_heartbeat_conflict_detection() {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         }),
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -359,10 +365,12 @@ async fn test_max_retries_exhaustion() {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         }),
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -466,6 +474,7 @@ async fn test_completion_idempotency() {
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -545,6 +554,7 @@ async fn test_sequential_ordering() {
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -588,6 +598,7 @@ async fn test_sequential_ordering() {
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -628,6 +639,7 @@ async fn test_parallel_execution() {
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         })
         .collect();
 
@@ -716,10 +728,12 @@ async fn test_reclaim_stale_activities_resets_to_pending() {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         }),
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -819,10 +833,12 @@ async fn test_reclaim_stale_activities_marks_failed_when_retries_exhausted() {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         }),
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -914,10 +930,12 @@ async fn test_reclaim_stale_activities_does_not_affect_non_stale() {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         }),
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -1006,10 +1024,12 @@ async fn test_reclaim_stale_activities_multiple_activities() {
                 iteration_limit: None,
                 delay: None,
                 scheduled_for: None,
+                wait_for_signal: None,
             }),
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         },
         Activity {
             key: "stale_no_retry".to_string(),
@@ -1031,10 +1051,12 @@ async fn test_reclaim_stale_activities_multiple_activities() {
                 iteration_limit: None,
                 delay: None,
                 scheduled_for: None,
+                wait_for_signal: None,
             }),
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         },
         Activity {
             key: "non_stale".to_string(),
@@ -1056,10 +1078,12 @@ async fn test_reclaim_stale_activities_multiple_activities() {
                 iteration_limit: None,
                 delay: None,
                 scheduled_for: None,
+                wait_for_signal: None,
             }),
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         },
     ];
 

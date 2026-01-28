@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM activity_event_subscriptions\n            WHERE workflow_id = $1 AND activity_key = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "def49b167465bc7e60712e5a450c46bf44293c45a307d71a37059e8584259759"
+}

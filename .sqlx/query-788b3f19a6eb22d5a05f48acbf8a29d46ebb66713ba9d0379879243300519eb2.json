@@ -29,7 +29,8 @@
                 "pending",
                 "running",
                 "completed",
-                "failed"
+                "failed",
+                "waiting"
               ]
             }
           }

@@ -1,6 +1,7 @@
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum_test::TestServer;
 use kruxiaflow_api::{routes::app_router, state::AppState};
+use kruxiaflow_core::PostgresSubscriptionService;
 use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{Activity, ActivityQueue, PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
@@ -66,6 +67,7 @@ async fn create_test_server() -> (TestServer, PgPool) {
     let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
     let shutdown_token = CancellationToken::new();
 
+    let subscription_service = Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let state = AppState::new(
         pool.clone(),
         Arc::new(auth_service),
@@ -73,6 +75,7 @@ async fn create_test_server() -> (TestServer, PgPool) {
         event_source,
         workflow_storage,
         cache_service,
+        subscription_service,
         shutdown_token,
     );
     let app = app_router(state);
@@ -109,6 +112,7 @@ async fn schedule_test_activities(pool: &PgPool, workflow_id: Uuid, count: usize
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         })
         .collect();
 
@@ -710,10 +714,12 @@ async fn schedule_activity_with_timeout(
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         }),
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -901,10 +907,12 @@ async fn test_poll_returns_null_timeout_when_settings_has_no_timeout() {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         }),
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue

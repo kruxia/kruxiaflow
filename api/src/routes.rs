@@ -58,6 +58,7 @@ pub fn public_routes() -> Router<AppState> {
 /// - GET /api/v1/workflows - List workflows with filters
 /// - GET /api/v1/workflows/{id} - Get workflow by ID
 /// - GET /api/v1/workflows/{workflow_id}/output - Get workflow output
+/// - POST /api/v1/workflows/:workflow_id/signal - Signal a workflow activity
 /// - GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/output - Get activity output
 /// - GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/files/{filename} - Download file
 /// - POST /api/v1/workflows/{workflow_id}/activities/{activity_key}/files/{filename} - Upload file
@@ -94,6 +95,11 @@ pub fn protected_routes() -> Router<AppState> {
         .route(
             "/api/v1/workflows/:workflow_id",
             get(handlers::get_workflow),
+        )
+        // Workflow Signals
+        .route(
+            "/api/v1/workflows/:workflow_id/signal",
+            post(handlers::signal_activity),
         )
         // Workflow Cost Tracking
         .route(
@@ -224,6 +230,7 @@ pub fn app_router(state: AppState) -> Router {
 mod tests {
     use super::*;
     use axum_test::TestServer;
+    use kruxiaflow_core::PostgresSubscriptionService;
     use kruxiaflow_core::events::PostgresEventSource;
     use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
     use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
@@ -295,6 +302,7 @@ mod tests {
         let cache_service = Arc::new(kruxiaflow_core::NoOpCache::new());
         let shutdown_token = CancellationToken::new();
 
+        let subscription_service = Arc::new(PostgresSubscriptionService::new(pool.clone()));
         let state = AppState::new(
             pool,
             Arc::new(auth_service),
@@ -302,6 +310,7 @@ mod tests {
             event_source,
             workflow_storage,
             cache_service,
+            subscription_service,
             shutdown_token,
         );
         let router = app_router(state);
@@ -347,6 +356,7 @@ mod tests {
         let cache_service = Arc::new(kruxiaflow_core::NoOpCache::new());
         let shutdown_token = CancellationToken::new();
 
+        let subscription_service = Arc::new(PostgresSubscriptionService::new(pool.clone()));
         let state = AppState::new(
             pool,
             Arc::new(auth_service),
@@ -354,6 +364,7 @@ mod tests {
             event_source,
             workflow_storage,
             cache_service,
+            subscription_service,
             shutdown_token,
         );
         let app = app_router(state);
@@ -387,6 +398,7 @@ mod tests {
         let cache_service = Arc::new(kruxiaflow_core::NoOpCache::new());
         let shutdown_token = CancellationToken::new();
 
+        let subscription_service = Arc::new(PostgresSubscriptionService::new(pool.clone()));
         let state = AppState::new(
             pool,
             Arc::new(auth_service),
@@ -394,6 +406,7 @@ mod tests {
             event_source,
             workflow_storage,
             cache_service,
+            subscription_service,
             shutdown_token,
         );
         let app = app_router(state);

@@ -52,6 +52,10 @@ pub struct ActivityState {
     /// This matches the template access pattern: {{activity.output_name}} returns the array
     #[serde(skip_serializing_if = "Option::is_none")]
     pub iteration_outputs: Option<HashMap<String, Vec<Value>>>,
+
+    /// Signal data received when activity was signaled (only for activities with wait_for_signal)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal_data: Option<Value>,
 }
 
 fn default_attempt() -> u32 {
@@ -110,6 +114,7 @@ impl ActivityState {
 #[serde(rename_all = "snake_case")]
 pub enum WorkflowActivityStatus {
     NotScheduled, // Not yet in queue
+    Waiting,      // Waiting for external signal before scheduling
     Pending,      // In queue, waiting for worker
     Running,      // Worker executing
     Completed,    // Finished successfully
@@ -255,6 +260,7 @@ pub async fn initialize_workflow_state(
                 } else {
                     None
                 },
+                signal_data: None,
             },
         );
     }
@@ -367,13 +373,27 @@ pub fn apply_event_to_state(state: &mut WorkflowState, event: &WorkflowEvent) ->
                 .ok_or(OrchestratorError::MissingActivityKey)?;
 
             if let Some(activity) = state.activities.get_mut(activity_key) {
-                activity.status = WorkflowActivityStatus::Failed;
-                activity.error = event
-                    .payload
-                    .get("error")
-                    .and_then(|e| e.as_str())
-                    .map(String::from);
-                activity.completed_at = Some(Utc::now());
+                // Only apply if the activity is in a state where failure is valid.
+                // The orchestrator's retry logic already guards against duplicates,
+                // but this protects against re-applying during event replay as well.
+                if matches!(
+                    activity.status,
+                    WorkflowActivityStatus::Running | WorkflowActivityStatus::Waiting
+                ) {
+                    activity.status = WorkflowActivityStatus::Failed;
+                    activity.error = event
+                        .payload
+                        .get("error")
+                        .and_then(|e| e.as_str())
+                        .map(String::from);
+                    activity.completed_at = Some(Utc::now());
+                } else {
+                    tracing::debug!(
+                        activity_key = %activity_key,
+                        status = ?activity.status,
+                        "Ignoring duplicate ActivityFailed in apply_event_to_state"
+                    );
+                }
             }
         }
         WorkflowEventType::WorkflowCompleted => {
@@ -385,6 +405,44 @@ pub fn apply_event_to_state(state: &mut WorkflowState, event: &WorkflowEvent) ->
         WorkflowEventType::WorkflowUpdated => {
             // WorkflowUpdated doesn't modify state directly
             // State is updated by individual activity events
+        }
+        WorkflowEventType::ActivityWaiting => {
+            let activity_key = event
+                .activity_key
+                .as_ref()
+                .ok_or(OrchestratorError::MissingActivityKey)?;
+
+            if let Some(activity) = state.activities.get_mut(activity_key) {
+                activity.status = WorkflowActivityStatus::Waiting;
+                activity.started_at = Some(Utc::now());
+            }
+        }
+        WorkflowEventType::ActivitySignaled => {
+            let activity_key = event
+                .activity_key
+                .as_ref()
+                .ok_or(OrchestratorError::MissingActivityKey)?;
+
+            if let Some(activity) = state.activities.get_mut(activity_key) {
+                // Only process if activity is still waiting — a duplicate event
+                // (e.g., from crash recovery) should not revert an activity that
+                // has already moved past the Waiting state.
+                if activity.status == WorkflowActivityStatus::Waiting {
+                    let on_timeout = event.payload.get("on_timeout").and_then(|v| v.as_str());
+                    if on_timeout == Some("skip") {
+                        activity.status = WorkflowActivityStatus::Skipped;
+                    } else {
+                        activity.signal_data = event.payload.get("signal_data").cloned();
+                        activity.status = WorkflowActivityStatus::NotScheduled;
+                    }
+                } else {
+                    tracing::debug!(
+                        activity_key = %activity_key,
+                        status = ?activity.status,
+                        "Ignoring duplicate ActivitySignaled event, activity is no longer waiting"
+                    );
+                }
+            }
         }
     }
 
@@ -410,6 +468,7 @@ mod tests {
             accumulated_cost_usd: Decimal::from(5),
             iteration: 0,
             iteration_outputs: Some(HashMap::new()),
+            signal_data: None,
         };
 
         assert_eq!(state.iteration, 0);
@@ -436,6 +495,7 @@ mod tests {
             accumulated_cost_usd: Decimal::ZERO,
             iteration: 0,
             iteration_outputs: Some(HashMap::new()),
+            signal_data: None,
         };
 
         // Archive first iteration
@@ -473,6 +533,7 @@ mod tests {
             accumulated_cost_usd: Decimal::ZERO,
             iteration: 0,
             iteration_outputs: Some(HashMap::new()),
+            signal_data: None,
         };
 
         state.archive_iteration_outputs(vec![ActivityOutput::value(
@@ -502,6 +563,7 @@ mod tests {
             accumulated_cost_usd: Decimal::ZERO,
             iteration: 0,
             iteration_outputs: Some(HashMap::new()),
+            signal_data: None,
         };
 
         state.archive_iteration_outputs(vec![ActivityOutput::value(
@@ -531,6 +593,7 @@ mod tests {
             accumulated_cost_usd: Decimal::ZERO,
             iteration: 0,
             iteration_outputs: None, // Not iteration-scoped
+            signal_data: None,
         };
 
         // Archive should do nothing for non-iteration-scoped activities
@@ -558,6 +621,7 @@ mod tests {
             accumulated_cost_usd: Decimal::ZERO,
             iteration: 0,
             iteration_outputs: None, // Not iteration-scoped
+            signal_data: None,
         };
 
         // Iteration counter should still work even without iteration_outputs

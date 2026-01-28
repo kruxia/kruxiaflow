@@ -67,6 +67,10 @@ pub struct TemplateContext {
 
     /// Budget settings for current activity (used for remaining_budget_usd calculation)
     pub current_activity_budget_limit: Option<rust_decimal::Decimal>,
+
+    /// Signal data for current activity (when wait_for_signal is configured)
+    /// Available as {{SIGNAL}} or {{SIGNAL.field}} in templates
+    pub signal: Option<Value>,
 }
 
 impl TemplateContext {
@@ -78,6 +82,7 @@ impl TemplateContext {
             workflow: HashMap::new(),
             current_activity_key: None,
             current_activity_budget_limit: None,
+            signal: None,
         }
     }
 
@@ -313,6 +318,11 @@ impl TemplateContext {
                 "ACTIVITY".to_string(),
                 serde_json_to_minijinja(&activity_context),
             );
+        }
+
+        // Add SIGNAL context (for activities that received an external signal)
+        if let Some(signal_data) = &self.signal {
+            context_map.insert("SIGNAL".to_string(), serde_json_to_minijinja(signal_data));
         }
 
         MiniValue::from_object(context_map)

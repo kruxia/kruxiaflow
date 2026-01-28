@@ -286,6 +286,7 @@ mod tests {
         let cache_service = Arc::new(NoOpCache::new());
         let shutdown_token = CancellationToken::new();
 
+        let subscription_service = Arc::new(crate::state::tests::MockSubscriptionService);
         AppState::new(
             pool,
             auth_service,
@@ -293,6 +294,7 @@ mod tests {
             event_source,
             workflow_storage,
             cache_service,
+            subscription_service,
             shutdown_token,
         )
     }
