@@ -98,6 +98,11 @@ pub struct PendingActivity {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(example = json!([{"name": "document", "type": "file"}]))]
     pub output_definitions: Option<serde_json::Value>,
+
+    /// Signal data (for activities that were waiting for a signal)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(example = json!({"approved": true, "approver": "admin@example.com"}))]
+    pub signal_data: Option<serde_json::Value>,
 }
 
 /// Poll for activities response
@@ -338,6 +343,7 @@ pub async fn poll_activities(
                     settings: a.settings,
                     timeout_seconds,
                     output_definitions: a.output_definitions,
+                    signal_data: a.signal_data,
                 }
             })
             .collect(),

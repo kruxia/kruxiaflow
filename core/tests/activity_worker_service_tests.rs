@@ -65,6 +65,7 @@ async fn schedule_test_activity(
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue

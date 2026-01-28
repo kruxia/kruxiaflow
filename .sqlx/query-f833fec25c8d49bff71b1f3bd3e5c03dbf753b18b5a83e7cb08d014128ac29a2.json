@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO activity_event_subscriptions\n                (workflow_id, activity_key, event_name, on_timeout, timeout_at)\n            VALUES ($1, $2, $3, $4, $5)\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f833fec25c8d49bff71b1f3bd3e5c03dbf753b18b5a83e7cb08d014128ac29a2"
+}

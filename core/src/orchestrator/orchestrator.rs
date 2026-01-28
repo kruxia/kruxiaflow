@@ -15,8 +15,9 @@ use crate::events::{
     EventSource, NewWorkflowEvent, WorkflowEvent, WorkflowEventType, WorkflowStatus,
 };
 use crate::queue::{Activity, ActivityQueue, StaleActivityAction};
+use crate::subscription::{ExpiredSubscription, NewSubscription, SubscriptionService};
 use crate::workflow::template::{TemplateContext, resolve_template_value};
-use crate::workflow::{BudgetAction, apply_duration, parse_scheduled_for};
+use crate::workflow::{BudgetAction, OnTimeout, apply_duration, parse_scheduled_for};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde_json::json;
@@ -51,10 +52,17 @@ macro_rules! profile_span {
 /// * `activity_queue` - Activity queue for scheduling activities
 /// * `config` - Orchestrator configuration
 /// * `shutdown_token` - Optional cancellation token for graceful shutdown
-#[tracing::instrument(skip(event_source, activity_queue, config, shutdown_token))]
+#[tracing::instrument(skip(
+    event_source,
+    activity_queue,
+    subscription_service,
+    config,
+    shutdown_token
+))]
 pub async fn run_orchestrator(
     event_source: Arc<dyn EventSource>,
     activity_queue: Arc<dyn ActivityQueue>,
+    subscription_service: Arc<dyn SubscriptionService>,
     config: OrchestratorConfig,
     shutdown_token: Option<CancellationToken>,
 ) -> Result<()> {
@@ -78,12 +86,14 @@ pub async fn run_orchestrator(
     let timeout_config = config.clone();
     let timeout_event_source = event_source.clone();
     let timeout_activity_queue = activity_queue.clone();
+    let timeout_subscription_service = subscription_service.clone();
     let timeout_shutdown = shutdown_token.clone();
     tokio::spawn(async move {
         timeout_checker_task(
             timeout_config,
             timeout_event_source,
             timeout_activity_queue,
+            timeout_subscription_service,
             timeout_shutdown,
         )
         .await;
@@ -122,8 +132,14 @@ pub async fn run_orchestrator(
                 return Ok(());
             }
 
-            if let Err(e) =
-                process_workflow_event(event, &event_source, &activity_queue, &config).await
+            if let Err(e) = process_workflow_event(
+                event,
+                &event_source,
+                &activity_queue,
+                &subscription_service,
+                &config,
+            )
+            .await
             {
                 // Track failure count for this event
                 let failure_count = event_failures.entry(event.id).or_insert(0);
@@ -511,6 +527,7 @@ async fn handle_activity_failed(
         } else {
             None
         },
+        signal_data: activity_state.signal_data.clone(),
     };
 
     // Log info when retry activity is started
@@ -800,7 +817,7 @@ async fn handle_activity_failed(
 /// **Cost Recording Failures**:
 /// - Logged but don't fail workflow (non-critical)
 #[tracing::instrument(
-    skip(event, event_source, activity_queue, config),
+    skip(event, event_source, activity_queue, subscription_service, config),
     fields(
         workflow_id = %event.workflow_id,
         event_type = ?event.event_type
@@ -810,13 +827,17 @@ pub async fn process_workflow_event(
     event: &WorkflowEvent,
     event_source: &Arc<dyn EventSource>,
     activity_queue: &Arc<dyn ActivityQueue>,
+    subscription_service: &Arc<dyn SubscriptionService>,
     config: &OrchestratorConfig,
 ) -> Result<()> {
-    // Skip ActivityScheduled events - they are for observability only, not orchestration
+    // Skip ActivityScheduled and ActivityWaiting events - they are for observability only, not orchestration
     // Processing them causes duplicate scheduling and performance issues
-    if event.event_type == WorkflowEventType::ActivityScheduled {
+    if event.event_type == WorkflowEventType::ActivityScheduled
+        || event.event_type == WorkflowEventType::ActivityWaiting
+    {
         tracing::trace!(
-            "Skipping ActivityScheduled event for workflow {} (observability only)",
+            "Skipping {:?} event for workflow {}",
+            event.event_type,
             event.workflow_id
         );
         return Ok(());
@@ -937,6 +958,34 @@ pub async fn process_workflow_event(
 
     // 3. Handle ActivityFailed event with retry logic BEFORE applying to state
     if event.event_type == WorkflowEventType::ActivityFailed {
+        // Only process if the activity is in a state where failure makes sense.
+        // A duplicate event (e.g., from event replay) should not trigger another
+        // retry or re-fail an activity that has already moved on.
+        let activity_key = event
+            .activity_key
+            .as_ref()
+            .ok_or_else(|| super::OrchestratorError::MissingActivityKey)?;
+        let current_status = state.activities.get(activity_key).map(|a| a.status);
+
+        match current_status {
+            Some(WorkflowActivityStatus::Running | WorkflowActivityStatus::Waiting) => {
+                // Expected states for a failure event — proceed with retry logic
+            }
+            Some(status) => {
+                tracing::debug!(
+                    activity_key = %activity_key,
+                    status = ?status,
+                    "Ignoring duplicate ActivityFailed event, activity is not running or waiting"
+                );
+                tx.commit().await?;
+                return Ok(());
+            }
+            None => {
+                // Activity not in state — shouldn't happen, but let it fall through
+                // to apply_event_to_state which will handle the missing key
+            }
+        }
+
         let retry_start = std::time::Instant::now();
         let retry_handled = handle_activity_failed(
             &mut state,
@@ -1270,8 +1319,79 @@ pub async fn process_workflow_event(
                     None
                 };
 
+                // Check if activity has wait_for_signal setting
+                if let Some(ref wait_settings) =
+                    a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref())
+                {
+                    // Activity needs to wait for an external signal before executing
+                    // Create a subscription instead of scheduling to queue
+                    let new_sub = NewSubscription {
+                        workflow_id: event.workflow_id,
+                        activity_key: a.key.clone(),
+                        event_name: wait_settings.event_name.clone(),
+                        on_timeout: wait_settings.on_timeout.clone(),
+                        timeout_seconds: wait_settings.timeout_seconds,
+                    };
+
+                    match subscription_service.create_subscription(new_sub).await {
+                        Ok(sub_id) => {
+                            tracing::info!(
+                                workflow_id = %event.workflow_id,
+                                activity_key = %a.key,
+                                event_name = %wait_settings.event_name,
+                                timeout_seconds = wait_settings.timeout_seconds,
+                                subscription_id = %sub_id,
+                                "Activity now waiting for signal"
+                            );
+
+                            // Mark activity as Waiting in state
+                            if let Some(activity_state) = state.activities.get_mut(&a.key) {
+                                activity_state.status = WorkflowActivityStatus::Waiting;
+                                activity_state.started_at = Some(chrono::Utc::now());
+                            }
+
+                            // Publish ActivityWaiting event
+                            let waiting_event = NewWorkflowEvent {
+                                workflow_id: event.workflow_id,
+                                event_type: WorkflowEventType::ActivityWaiting,
+                                activity_key: Some(a.key.clone()),
+                                payload: json!({
+                                    "event_name": wait_settings.event_name,
+                                    "timeout_seconds": wait_settings.timeout_seconds,
+                                    "on_timeout": format!("{:?}", wait_settings.on_timeout),
+                                }),
+                                iteration,
+                            };
+                            event_source.publish(waiting_event).await?;
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                workflow_id = %event.workflow_id,
+                                activity_key = %a.key,
+                                "Failed to create subscription: {}",
+                                e
+                            );
+                            // Mark activity as failed
+                            if let Some(activity_state) = state.activities.get_mut(&a.key) {
+                                activity_state.status = WorkflowActivityStatus::Failed;
+                                activity_state.set_error(format!(
+                                    "Failed to create signal subscription: {}",
+                                    e
+                                ));
+                            }
+                        }
+                    }
+                    continue;
+                }
+
                 // Compute scheduled_for based on activity settings
                 let scheduled_for = compute_scheduled_for(a, &template_context, iteration)?;
+
+                // Get signal_data from activity state if present
+                let signal_data = state
+                    .activities
+                    .get(&a.key)
+                    .and_then(|s| s.signal_data.clone());
 
                 activities_to_schedule.push(Activity {
                     key: a.key.clone(),
@@ -1282,6 +1402,7 @@ pub async fn process_workflow_event(
                     scheduled_for,
                     output_definitions: a.output_definitions.clone(),
                     iteration,
+                    signal_data,
                 });
             }
 
@@ -1303,8 +1424,18 @@ pub async fn process_workflow_event(
 
             // Update state immediately to mark activities as Pending
             // This prevents race condition where activity completes before ActivityScheduled event is processed
+            // (Only for activities that were actually scheduled, not those entering Waiting state)
             for activity in &ready_activities {
                 if let Some(activity_state) = state.activities.get_mut(&activity.key) {
+                    // Skip activities that entered Waiting state (already handled above)
+                    if activity_state.status == WorkflowActivityStatus::Waiting {
+                        continue;
+                    }
+                    // Skip activities that failed (e.g., budget or subscription error)
+                    if activity_state.status == WorkflowActivityStatus::Failed {
+                        continue;
+                    }
+
                     // Check if this is a loop-back (re-execution)
                     let is_loop_back = activity_state.status == WorkflowActivityStatus::Completed;
 
@@ -1343,6 +1474,16 @@ pub async fn process_workflow_event(
             // Publish ActivityScheduled events (for external observers)
             // Note: Orchestrator skips these events to avoid duplicate processing
             for activity in &ready_activities {
+                // Skip activities that entered Waiting state (they got ActivityWaiting events instead)
+                if let Some(activity_state) = state.activities.get(&activity.key) {
+                    if activity_state.status == WorkflowActivityStatus::Waiting {
+                        continue;
+                    }
+                    if activity_state.status == WorkflowActivityStatus::Failed {
+                        continue;
+                    }
+                }
+
                 tracing::debug!(
                     "Publishing ActivityScheduled event for {} in workflow {}",
                     activity.key,
@@ -1894,6 +2035,7 @@ async fn timeout_checker_task(
     config: OrchestratorConfig,
     event_source: Arc<dyn EventSource>,
     activity_queue: Arc<dyn ActivityQueue>,
+    subscription_service: Arc<dyn SubscriptionService>,
     shutdown_token: Option<CancellationToken>,
 ) {
     tracing::info!(
@@ -1922,6 +2064,13 @@ async fn timeout_checker_task(
         // Check for stale activities (activity-level timeout)
         if let Err(e) = check_and_reclaim_stale_activities(&activity_queue, &event_source).await {
             tracing::error!("Failed to check for stale activities: {}", e);
+        }
+
+        // Check for expired signal subscriptions
+        if let Err(e) =
+            check_and_handle_expired_subscriptions(&subscription_service, &event_source).await
+        {
+            tracing::error!("Failed to check for expired subscriptions: {}", e);
         }
     }
 }
@@ -2061,6 +2210,146 @@ async fn check_and_reclaim_stale_activities(
     Ok(())
 }
 
+/// Check for expired signal subscriptions and handle them based on their on_timeout action
+///
+/// When an activity is waiting for a signal and the timeout expires:
+/// - Continue: Publish ActivitySignaled event with null data (activity proceeds without signal)
+/// - Skip: Publish ActivitySignaled event with on_timeout=skip (activity is skipped)
+/// - Fail: Publish ActivityFailed event (activity fails)
+///
+/// Also recovers any subscriptions that were marked expired but not fully processed
+/// (e.g., due to a server crash between marking expired and publishing events).
+async fn check_and_handle_expired_subscriptions(
+    subscription_service: &Arc<dyn SubscriptionService>,
+    event_source: &Arc<dyn EventSource>,
+) -> Result<()> {
+    // First, recover any previously-expired-but-unprocessed subscriptions (crash recovery)
+    let recovered = subscription_service
+        .recover_expired(100)
+        .await
+        .map_err(|e| {
+            super::OrchestratorError::InternalError(format!(
+                "Failed to recover expired subscriptions: {}",
+                e
+            ))
+        })?;
+
+    if !recovered.is_empty() {
+        tracing::warn!(
+            "Recovering {} expired-but-unprocessed signal subscriptions",
+            recovered.len()
+        );
+        process_expired_subscriptions(&recovered, subscription_service, event_source).await;
+    }
+
+    // Then, mark newly expired subscriptions
+    let expired = subscription_service
+        .expire_subscriptions(100)
+        .await
+        .map_err(|e| {
+            super::OrchestratorError::InternalError(format!(
+                "Failed to expire subscriptions: {}",
+                e
+            ))
+        })?;
+
+    if !expired.is_empty() {
+        tracing::info!("Found {} expired signal subscriptions", expired.len());
+        process_expired_subscriptions(&expired, subscription_service, event_source).await;
+    }
+
+    Ok(())
+}
+
+/// Publish timeout events for expired subscriptions and delete them on success.
+async fn process_expired_subscriptions(
+    expired: &[ExpiredSubscription],
+    subscription_service: &Arc<dyn SubscriptionService>,
+    event_source: &Arc<dyn EventSource>,
+) {
+    for sub in expired {
+        let event = match sub.on_timeout {
+            OnTimeout::Continue => {
+                tracing::info!(
+                    workflow_id = %sub.workflow_id,
+                    activity_key = %sub.activity_key,
+                    event_name = %sub.event_name,
+                    "Signal subscription timed out, continuing without signal data"
+                );
+                NewWorkflowEvent {
+                    workflow_id: sub.workflow_id,
+                    event_type: WorkflowEventType::ActivitySignaled,
+                    activity_key: Some(sub.activity_key.clone()),
+                    payload: json!({
+                        "event_name": sub.event_name,
+                        "reason": "timeout",
+                        "on_timeout": "continue",
+                    }),
+                    iteration: None,
+                }
+            }
+            OnTimeout::Skip => {
+                tracing::info!(
+                    workflow_id = %sub.workflow_id,
+                    activity_key = %sub.activity_key,
+                    event_name = %sub.event_name,
+                    "Signal subscription timed out, skipping activity"
+                );
+                NewWorkflowEvent {
+                    workflow_id: sub.workflow_id,
+                    event_type: WorkflowEventType::ActivitySignaled,
+                    activity_key: Some(sub.activity_key.clone()),
+                    payload: json!({
+                        "event_name": sub.event_name,
+                        "reason": "timeout",
+                        "on_timeout": "skip",
+                    }),
+                    iteration: None,
+                }
+            }
+            OnTimeout::Fail => {
+                tracing::warn!(
+                    workflow_id = %sub.workflow_id,
+                    activity_key = %sub.activity_key,
+                    event_name = %sub.event_name,
+                    "Signal subscription timed out, failing activity"
+                );
+                NewWorkflowEvent {
+                    workflow_id: sub.workflow_id,
+                    event_type: WorkflowEventType::ActivityFailed,
+                    activity_key: Some(sub.activity_key.clone()),
+                    payload: json!({
+                        "error": format!("Signal '{}' not received before timeout", sub.event_name),
+                        "error_code": "SIGNAL_TIMEOUT",
+                        "event_name": sub.event_name,
+                        "on_timeout": "fail",
+                    }),
+                    iteration: None,
+                }
+            }
+        };
+
+        // Only delete the subscription after the event is successfully published.
+        // If publish fails, the subscription stays marked as expired and will be
+        // retried on the next cycle via recover_expired.
+        match event_source.publish(event).await {
+            Ok(_) => {
+                let _ = subscription_service
+                    .delete_subscription(sub.workflow_id, &sub.activity_key)
+                    .await;
+            }
+            Err(e) => {
+                tracing::error!(
+                    workflow_id = %sub.workflow_id,
+                    activity_key = %sub.activity_key,
+                    "Failed to publish timeout event, will retry on next cycle: {}",
+                    e
+                );
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2112,6 +2401,7 @@ mod tests {
                         accumulated_cost_usd: Decimal::ZERO,
                         iteration: 0,
                         iteration_outputs: None,
+                        signal_data: None,
                     },
                 )
             })
@@ -2154,6 +2444,7 @@ mod tests {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -2176,6 +2467,7 @@ mod tests {
             iteration_limit: None,
             delay: Some("10s".to_string()),
             scheduled_for: None,
+            wait_for_signal: None,
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -2209,6 +2501,7 @@ mod tests {
             iteration_limit: None,
             delay: Some("5m".to_string()),
             scheduled_for: None,
+            wait_for_signal: None,
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -2242,6 +2535,7 @@ mod tests {
             iteration_limit: None,
             delay: Some("1h".to_string()), // 1 hour delay
             scheduled_for: None,
+            wait_for_signal: None,
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -2268,6 +2562,7 @@ mod tests {
             iteration_limit: None,
             delay: None,
             scheduled_for: Some(iso_time.clone()),
+            wait_for_signal: None,
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -2296,6 +2591,7 @@ mod tests {
             iteration_limit: None,
             delay: Some("{{INPUT.delay_value}}".to_string()),
             scheduled_for: None,
+            wait_for_signal: None,
         };
         let activity_def = create_activity_def("test", Some(settings));
 
@@ -2462,6 +2758,7 @@ mod tests {
                     );
                     map
                 }),
+                signal_data: None,
             },
         );
 

@@ -32,6 +32,8 @@ class PendingActivity(BaseModel):
     settings: dict[str, Any] | None = None
     timeout_seconds: int | None = None
     output_definitions: list[dict[str, Any]] | None = None
+    signal_data: dict[str, Any] | None = None
+    """Signal data if activity was waiting for an external signal."""
 
 
 class WorkerApiClient:

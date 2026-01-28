@@ -1,4 +1,5 @@
 use kruxiaflow_api::{routes::app_router, state::AppState};
+use kruxiaflow_core::PostgresSubscriptionService;
 use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{Activity, ActivityQueue as _, PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
@@ -66,6 +67,7 @@ async fn create_real_server() -> (String, PgPool, tokio::task::JoinHandle<()>) {
     let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
     let shutdown_token = CancellationToken::new();
 
+    let subscription_service = Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let state = AppState::new(
         pool.clone(),
         Arc::new(auth_service),
@@ -73,6 +75,7 @@ async fn create_real_server() -> (String, PgPool, tokio::task::JoinHandle<()>) {
         event_source,
         workflow_storage.clone(),
         cache_service,
+        subscription_service,
         shutdown_token,
     );
     let app = app_router(state);
@@ -110,6 +113,7 @@ async fn schedule_test_activities(pool: &PgPool, workflow_id: Uuid, count: usize
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         })
         .collect();
 

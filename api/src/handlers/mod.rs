@@ -4,6 +4,7 @@ pub mod health;
 pub mod llm_catalog;
 pub mod oauth;
 pub mod outputs;
+pub mod signals;
 pub mod streaming;
 pub mod websocket;
 pub mod workers;
@@ -18,6 +19,7 @@ pub use oauth::token_handler;
 pub use outputs::{
     download_activity_file, get_activity_output, get_workflow_output, upload_activity_file,
 };
+pub use signals::signal_activity;
 pub use streaming::{
     get_subscriber_count, publish_stream_complete, publish_stream_error, publish_stream_token,
 };

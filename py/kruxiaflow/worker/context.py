@@ -4,7 +4,7 @@ Mirrors Rust ActivityContext for interface compatibility.
 """
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, PrivateAttr
@@ -29,6 +29,10 @@ class ActivityContext(BaseModel):
     workflow_id: UUID
     activity_id: UUID
     activity_key: ActivityKey
+
+    # Signal data (for activities that waited for an external signal)
+    signal: dict[str, Any] | None = None
+    """Data received from an external signal (when wait_for_signal is configured)."""
 
     # Internal references (not part of public interface)
     _client: WorkerApiClient | None = PrivateAttr(default=None)

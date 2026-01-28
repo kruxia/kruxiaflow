@@ -3,7 +3,8 @@ use clap::Args;
 use kruxiaflow_api::{AppState, app_router};
 use kruxiaflow_core::{
     ActivityQueue, CacheService, EventSource, OrchestratorConfig, PostgresEventSource,
-    PostgresQueue, QueueConfig, RedisCache, orchestrator::OrchestratorError, run_orchestrator,
+    PostgresQueue, PostgresSubscriptionService, QueueConfig, RedisCache, SubscriptionService,
+    orchestrator::OrchestratorError, run_orchestrator,
 };
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use kruxiaflow_worker::{WorkerConfig, WorkerManager};
@@ -225,6 +226,7 @@ impl ServeCommand {
 async fn spawn_orchestrator(
     event_source: Arc<dyn EventSource>,
     activity_queue: Arc<dyn ActivityQueue>,
+    subscription_service: Arc<dyn SubscriptionService>,
     pool: PgPool,
     shutdown_token: CancellationToken,
 ) -> Result<(JoinHandle<Result<()>>, Arc<Notify>)> {
@@ -242,9 +244,15 @@ async fn spawn_orchestrator(
 
         // Run orchestrator (polls events and schedules activities)
         // Note: run_orchestrator will check shutdown_token in its loop
-        run_orchestrator(event_source, activity_queue, config, Some(shutdown_token))
-            .await
-            .map_err(|e: OrchestratorError| anyhow::anyhow!("Orchestrator error: {}", e))
+        run_orchestrator(
+            event_source,
+            activity_queue,
+            subscription_service,
+            config,
+            Some(shutdown_token),
+        )
+        .await
+        .map_err(|e: OrchestratorError| anyhow::anyhow!("Orchestrator error: {}", e))
     });
 
     // Wait for orchestrator to signal ready (or timeout)
@@ -532,6 +540,10 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
             .map_err(|e| anyhow::anyhow!("Failed to connect to Redis: {}", e))?,
     );
 
+    // Create subscription service for activities waiting for signals
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
+
     // Create API state with shutdown token
     let state = AppState::new(
         pool.clone(),
@@ -540,6 +552,7 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         event_source.clone(),
         workflow_storage.clone(),
         cache_service.clone(),
+        subscription_service.clone(),
         shutdown_token.clone(),
     );
 
@@ -549,6 +562,7 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     let (orchestrator_handle, _) = spawn_orchestrator(
         event_source.clone(),
         activity_queue.clone(),
+        subscription_service,
         pool.clone(),
         shutdown_token.clone(),
     )

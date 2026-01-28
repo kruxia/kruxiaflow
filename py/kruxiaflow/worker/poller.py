@@ -178,6 +178,7 @@ class WorkerPoller:
             workflow_id=activity.workflow_id,
             activity_id=activity.activity_id,
             activity_key=activity.activity_key,
+            signal=activity.signal_data,
         )
         ctx._client = self._client
         ctx._worker_id = self._config.worker_id

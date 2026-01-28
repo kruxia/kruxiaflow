@@ -18,7 +18,9 @@
                 "ActivityCompleted",
                 "ActivityFailed",
                 "WorkflowCompleted",
-                "WorkflowFailed"
+                "WorkflowFailed",
+                "ActivityWaiting",
+                "ActivitySignaled"
               ]
             }
           }

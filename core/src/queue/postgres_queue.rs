@@ -75,11 +75,11 @@ impl ActivityQueue for PostgresQueue {
                 r#"
                 INSERT INTO activity_queue (
                     workflow_id, activity_key, worker, name,
-                    parameters, settings, scheduled_for, timeout_duration, 
-                    max_retries, output_definitions, iteration
-                ) VALUES ($1, $2, $3, $4, 
-                          $5, $6, COALESCE($7, NOW()), make_interval(secs => $8), 
-                          $9, $10, $11)
+                    parameters, settings, scheduled_for, timeout_duration,
+                    max_retries, output_definitions, iteration, signal_data
+                ) VALUES ($1, $2, $3, $4,
+                          $5, $6, COALESCE($7, NOW()), make_interval(secs => $8),
+                          $9, $10, $11, $12)
                 ON CONFLICT (workflow_id, activity_key, iteration) DO NOTHING
                 "#,
                 workflow_id,
@@ -92,7 +92,8 @@ impl ActivityQueue for PostgresQueue {
                 timeout as f64,
                 max_retries,
                 output_definitions_json,
-                activity.iteration
+                activity.iteration,
+                activity.signal_data
             )
             .execute(&self.pool)
             .await?;
@@ -163,8 +164,8 @@ impl ActivityQueue for PostgresQueue {
                 LIMIT $3
                 FOR UPDATE SKIP LOCKED
             )
-            RETURNING id, workflow_id, activity_key, worker, name as activity_name,
-                      parameters, settings, retry_count, claimed_at, output_definitions, iteration
+            RETURNING id, workflow_id, activity_key, worker, name as activity_name, parameters, 
+                      settings, retry_count, claimed_at, output_definitions, iteration, signal_data
             "#,
             worker_id,
             worker,
@@ -198,6 +199,7 @@ impl ActivityQueue for PostgresQueue {
                 claimed_at: row.claimed_at.unwrap(),
                 output_definitions,
                 iteration: row.iteration,
+                signal_data: row.signal_data,
             };
 
             if queued.retry_count > 0 {

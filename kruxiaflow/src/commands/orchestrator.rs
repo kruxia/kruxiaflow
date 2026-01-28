@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Args;
 use kruxiaflow_core::{
     ActivityQueue, EventSource, OrchestratorConfig, PostgresEventSource, PostgresQueue,
-    QueueConfig, run_orchestrator,
+    PostgresSubscriptionService, QueueConfig, SubscriptionService, run_orchestrator,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -135,6 +135,10 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
     // Create event source
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
 
+    // Create subscription service
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
+
     // Create orchestrator config from CLI parameters
     let config = OrchestratorConfig::new(pool.clone())
         .with_poll_interval(
@@ -154,6 +158,7 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
         run_orchestrator(
             event_source,
             activity_queue,
+            subscription_service,
             config,
             Some(orch_shutdown_token),
         )

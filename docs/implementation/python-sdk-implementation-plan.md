@@ -2595,29 +2595,29 @@ RUN pip install "kruxiaflow[std]"
 ENV WORKER_TYPE=python
 CMD ["kruxiaflow-worker"]
 
-# pydata: ETL and transformation
-FROM base AS pydata
+# py-data: ETL and transformation
+FROM base AS py-data
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install "kruxiaflow[data]"
-ENV WORKER_TYPE=pydata
+ENV WORKER_TYPE=py-data
 CMD ["kruxiaflow-worker"]
 
-# pyml: Machine learning
-FROM base AS pyml
+# py-ml: Machine learning
+FROM base AS py-ml
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install "kruxiaflow[ml]"
-ENV WORKER_TYPE=pyml
+ENV WORKER_TYPE=py-ml
 CMD ["kruxiaflow-worker"]
 
-# pynlp: Natural language processing
-FROM base AS pynlp
+# py-nlp: Natural language processing
+FROM base AS py-nlp
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install "kruxiaflow[nlp]"
 RUN python -m spacy download en_core_web_sm
-ENV WORKER_TYPE=pynlp
+ENV WORKER_TYPE=py-nlp
 CMD ["kruxiaflow-worker"]
 ```
 
@@ -2625,9 +2625,9 @@ CMD ["kruxiaflow-worker"]
 ```bash
 # Build worker images using --target
 docker build -f py/Dockerfile --target python -t ghcr.io/kruxia/kruxiaflow-worker-python .
-docker build -f py/Dockerfile --target pydata -t ghcr.io/kruxia/kruxiaflow-worker-pydata .
-docker build -f py/Dockerfile --target pyml -t ghcr.io/kruxia/kruxiaflow-worker-pyml .
-docker build -f py/Dockerfile --target pynlp -t ghcr.io/kruxia/kruxiaflow-worker-pynlp .
+docker build -f py/Dockerfile --target py-data -t ghcr.io/kruxia/kruxiaflow-worker-py-data .
+docker build -f py/Dockerfile --target py-ml -t ghcr.io/kruxia/kruxiaflow-worker-py-ml .
+docker build -f py/Dockerfile --target py-nlp -t ghcr.io/kruxia/kruxiaflow-worker-py-nlp .
 ```
 
 ### Usage Examples
@@ -2650,10 +2650,10 @@ docker build -f py/Dockerfile --target pynlp -t ghcr.io/kruxia/kruxiaflow-worker
       OUTPUT = {"data": data, "count": len(data)}
 ```
 
-**Data Transformation (pydata worker)**:
+**Data Transformation (py-data worker)**:
 ```yaml
 - key: process_data
-  worker: pydata
+  worker: py-data
   activity_name: script
   parameters:
     inputs:
@@ -2671,10 +2671,10 @@ docker build -f py/Dockerfile --target pynlp -t ghcr.io/kruxia/kruxiaflow-worker
       OUTPUT = {"rows": len(result), "summary": result.describe().to_dict()}
 ```
 
-**ML Training (pyml worker)**:
+**ML Training (py-ml worker)**:
 ```yaml
 - key: train_model
-  worker: pyml
+  worker: py-ml
   activity_name: script
   parameters:
     inputs:
@@ -2701,10 +2701,10 @@ docker build -f py/Dockerfile --target pynlp -t ghcr.io/kruxia/kruxiaflow-worker
       }
 ```
 
-**NLP with Transformers (pynlp worker)**:
+**NLP with Transformers (py-nlp worker)**:
 ```yaml
 - key: classify_text
-  worker: pynlp
+  worker: py-nlp
   activity_name: script
   parameters:
     inputs:
@@ -2723,9 +2723,9 @@ docker build -f py/Dockerfile --target pynlp -t ghcr.io/kruxia/kruxiaflow-worker
 | Use Case                    | Recommended Worker |
 |-----------------------------|-------------------|
 | API calls, JSON processing  | `python`          |
-| DataFrames, SQL, ETL        | `pydata`         |
-| Model training, inference   | `pyml`           |
-| Text processing, embeddings | `pynlp`          |
+| DataFrames, SQL, ETL        | `py-data`         |
+| Model training, inference   | `py-ml`           |
+| Text processing, embeddings | `py-nlp`          |
 
 ### When to Use Custom Workers Instead
 
@@ -2833,7 +2833,7 @@ Use **Component 2 (Worker SDK)** to build custom workers when you need:
 **Completion Summary** (2026-01-26):
 - All 3 components implemented with 99% test coverage
 - 399+ tests across workflow SDK, worker SDK, and standard workers
-- Docker images: python, pydata, pyml, pynlp built via CI/CD
+- Docker images: py-std, py-data, py-ml, py-nlp built via CI/CD
 - Images pushed to ghcr.io/kruxia/kruxiaflow-worker-py-* on main branch
 
 ---
@@ -2847,7 +2847,7 @@ Use **Component 2 (Worker SDK)** to build custom workers when you need:
 - 📋 Time to first Python workflow <10 minutes
 
 ### Phase 2 (Standard Worker) - ✅ COMPLETE
-- ✅ Standard Python workers available on GHCR (python, pydata, pyml, pynlp)
+- ✅ Standard Python workers available on GHCR (py-std, py-data, py-ml, py-nlp)
 - ✅ 15+ essential packages defined in pyproject.toml extras
 - ✅ `script` activity implemented with 99% coverage
 - ✅ Helper functions (upload_file, download_file) functional
@@ -2926,8 +2926,8 @@ Use **Component 2 (Worker SDK)** to build custom workers when you need:
    - Policy: Drop support when versions move to "end of life"
 
 4. **Specialized workers (post-MVP)**: One standard worker or multiple specialized?
-   - **Option A**: Single `kruxiaflow-worker-python` with all packages (~500MB image) ← Current plan
-   - **Option B**: Multiple official workers by domain (post-MVP consideration)
+   - **Option A**: Single `kruxiaflow-worker-python` with all packages (~500MB image)
+   - **Option B**: Multiple official workers by domain  ← Current plan
    - **Option C**: Community/contrib ecosystem (post-MVP consideration)
    - Decision: Start with Option A, evaluate B/C based on user feedback
 

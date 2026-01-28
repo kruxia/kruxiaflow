@@ -9,6 +9,7 @@ use axum::middleware as axum_middleware;
 use axum::routing::get;
 use axum_test::TestServer;
 use kruxiaflow_api::{AppState, AppStateBuild, middleware::shutdown::shutdown_check};
+use kruxiaflow_core::PostgresSubscriptionService;
 use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
@@ -65,6 +66,7 @@ async fn setup_test_state(shutdown_token: CancellationToken) -> AppState {
     let workflow_storage = Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone()));
     let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
 
+    let subscription_service = Arc::new(PostgresSubscriptionService::new(pool.clone()));
     AppState::with_metadata(
         pool,
         Arc::new(auth_service),
@@ -72,6 +74,7 @@ async fn setup_test_state(shutdown_token: CancellationToken) -> AppState {
         event_source,
         workflow_storage,
         cache_service,
+        subscription_service,
         shutdown_token,
         "0.2.0-test".to_string(),
         AppStateBuild {

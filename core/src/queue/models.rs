@@ -22,6 +22,9 @@ pub struct Activity {
     /// Iteration number for looping activities (0-based)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iteration: Option<i32>,
+    /// Signal data for activities that were waiting for an external signal
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal_data: Option<serde_json::Value>,
 }
 
 /// Queued activity returned to worker
@@ -42,6 +45,9 @@ pub struct QueuedActivity {
     /// Iteration number for looping activities (0-based)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iteration: Option<i32>,
+    /// Signal data for activities that were waiting for an external signal
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signal_data: Option<serde_json::Value>,
 }
 
 /// Activity result from worker
@@ -124,6 +130,7 @@ pub struct TokenUsage {
 #[sqlx(type_name = "activity_status", rename_all = "lowercase")]
 #[serde(rename_all = "lowercase")]
 pub enum ActivityStatus {
+    Waiting,
     Pending,
     Running,
     Completed,
@@ -133,6 +140,7 @@ pub enum ActivityStatus {
 impl std::fmt::Display for ActivityStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            ActivityStatus::Waiting => write!(f, "waiting"),
             ActivityStatus::Pending => write!(f, "pending"),
             ActivityStatus::Running => write!(f, "running"),
             ActivityStatus::Completed => write!(f, "completed"),
@@ -436,6 +444,7 @@ mod tests {
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         };
 
         let json = serde_json::to_string(&activity).unwrap();
@@ -454,6 +463,7 @@ mod tests {
             scheduled_for: None,
             output_definitions: None,
             iteration: Some(5),
+            signal_data: None,
         };
 
         let json = serde_json::to_string(&activity).unwrap();
@@ -474,6 +484,7 @@ mod tests {
             claimed_at: Utc::now(),
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         };
 
         let json = serde_json::to_string(&queued).unwrap();

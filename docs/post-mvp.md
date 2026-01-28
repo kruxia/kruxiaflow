@@ -2847,11 +2847,15 @@ healthcheck:
 
 ### Story 6.0: Event-Based Activity Waiting (Core Primitive)
 
+**Status**: 🔄 In Progress - Core implementation complete, orchestrator scheduling logic pending
+
+**Implementation Plan**: See [`docs/implementation/post-mvp-6.0-waiting.md`](implementation/post-mvp-6.0-waiting.md)
+
 **Priority**: P1 (High - Foundational primitive for multiple features)
 
-**As** a platform developer
-**I want** a core primitive for activities to wait for external events without consuming worker resources
-**So that** we can enable human-in-the-loop workflows, workflow chaining, webhook integration, and other async patterns
+**As** a workflow developer
+**I want** any activity to wait for an external signal before running
+**So that** I can enable human-in-the-loop workflows, workflow chaining, webhook integration, and other async patterns
 
 **Rationale**:
 
@@ -2863,65 +2867,108 @@ This is a foundational infrastructure primitive that unifies multiple high-value
 
 Without this primitive, these patterns require polling (wasteful) or application-level coordination (complex).
 
-**Core Scope** (Primitives Only):
+**Design**: Any activity can wait for a signal via `settings.wait_for_signal`. This is cleaner than a special built-in activity because:
+- No special activity type needed
+- Waiting is just a setting on any activity
+- The activity still runs after receiving the signal
+- Flexible timeout behavior (continue, skip, or fail)
 
-1. **New activity state**: `waiting`
-   - Activities can enter waiting state without blocking workers
-   - Orchestrator skips waiting activities during DAG evaluation
-   - Waiting activities resume when matching event arrives
+**Core Scope**:
 
-2. **Event subscription mechanism**:
+1. **Activity setting**: `wait_for_signal`
+   ```yaml
+   activities:
+     - key: process_document
+       worker: my-worker
+       activity_name: analyze
+       settings:
+         wait_for_signal:
+           event_name: "approval_granted"    # Required: signal to wait for
+           timeout_seconds: 86400            # Required: max wait time (24 hours)
+           on_timeout: fail                  # Required: continue | skip | fail
+       depends_on: [previous_step]
+   ```
+
+2. **Timeout behavior options**:
+   - `continue`: Proceed to run the activity (signal data will be null)
+   - `skip`: Skip the activity entirely (mark as skipped)
+   - `fail`: Fail the activity with timeout error
+
+3. **New activity state**: `waiting`
+   - When dependencies are met, activity enters `waiting` state (not `pending`)
+   - Orchestrator skips scheduling waiting activities to workers
+   - When signal arrives, activity transitions to `pending` and gets scheduled
+   - Signal data is available to the activity via `{{SIGNAL.event_name}}`
+
+4. **Event subscription mechanism**:
    ```sql
    CREATE TABLE activity_event_subscriptions (
        id UUID PRIMARY KEY,
        workflow_id UUID NOT NULL,
        activity_key TEXT NOT NULL,
-       event_type TEXT NOT NULL,          -- 'signal', 'workflow_completed', 'webhook', etc.
-       event_filter JSONB,                 -- Match criteria (e.g., workflow_id, event_name)
+       event_name TEXT NOT NULL,
+       on_timeout TEXT NOT NULL,            -- 'continue', 'skip', 'fail'
        timeout_at TIMESTAMPTZ NOT NULL,
+       signal_data JSONB,                   -- Populated when signal received
        created_at TIMESTAMPTZ DEFAULT NOW(),
 
        UNIQUE(workflow_id, activity_key),
-       INDEX idx_subscriptions_timeout (timeout_at) WHERE timeout_at IS NOT NULL
+       INDEX idx_subscriptions_timeout (timeout_at)
    );
    ```
 
-3. **Signal API endpoint**:
+5. **Signal API endpoint**:
    ```bash
-   # Generic event signaling
    POST /api/v1/workflows/{workflow_id}/signal
    {
-     "activity_key": "wait_for_approval",
+     "activity_key": "process_document",
      "event_name": "approval_granted",
      "data": {"approved_by": "user@example.com", "comment": "LGTM"}
    }
    ```
 
-4. **Built-in wait activity** (`wait_for_signal`):
-   ```yaml
-   activities:
-     - key: wait_for_approval
-       worker: builtin
-       activity_name: wait_for_signal
-       parameters:
-         event_name: "approval_granted"  # Required
-         timeout: 86400                  # 24 hours (required)
-       depends_on: [analyze_document]
-   ```
+6. **Orchestrator changes**:
+   - When activity dependencies are met AND has `wait_for_signal`:
+     - Create subscription record
+     - Set activity status to `waiting`
+   - When signal received for waiting activity:
+     - Store signal data in subscription
+     - Transition activity to `pending`
+     - Schedule activity to worker (signal data available via `{{SIGNAL.*}}`)
+   - Skip waiting activities during normal DAG evaluation
 
-5. **Orchestrator changes**:
-   - Recognize `waiting` status during DAG evaluation
-   - Skip scheduling waiting activities to workers
-   - Check subscription timeouts (fail expired waits)
-   - Resume DAG evaluation when waiting activity completes
-
-6. **Timeout handler** (background task):
-   - Periodically check for expired subscriptions
-   - Fail waiting activities that exceed timeout
+7. **Timeout handler** (extend existing `timeout_checker_task`):
+   - Add `check_and_expire_subscriptions()` to existing background task in
+     `core/src/orchestrator/orchestrator.rs` (runs every 30 seconds alongside
+     `check_and_timeout_stuck_workflows()` and `check_and_reclaim_stale_activities()`)
+   - Query expired subscriptions: `WHERE timeout_at < NOW() AND signal_data IS NULL`
+   - Apply `on_timeout` behavior:
+     - `continue`: Transition to `pending`, schedule with null signal data
+     - `skip`: Transition to `skipped`
+     - `fail`: Transition to `failed` with timeout error
    - Cleanup subscription records
+   - Limit to 100 subscriptions per check (consistent with existing patterns)
+
+8. **Built-in Rust worker support**:
+   - Activities executed by the built-in worker receive signal data in `ActivityContext`
+   - Signal data accessible via standard template expressions `{{SIGNAL.*}}`
+   - No special handling needed in activity implementations
+
+9. **Python Worker SDK support**:
+   - `ActivityContext` includes `signal: Optional[dict]` field
+   - Signal data accessible in activity handlers:
+     ```python
+     @worker.activity("process_document")
+     async def process_document(ctx: ActivityContext, params: dict) -> dict:
+         # Signal data available when activity was waiting
+         if ctx.signal:
+             approved_by = ctx.signal.get("approved_by")
+             comment = ctx.signal.get("comment")
+         # ... process document
+     ```
+   - Documentation and examples for wait_for_signal workflows
 
 **What This Story Does NOT Include** (defer to other stories):
-- ❌ Specific built-in activities (`wait_for_workflow`, `wait_for_webhook`) - build on this primitive later
 - ❌ Workflow pause/resume API - Story 6.4 uses this primitive
 - ❌ Workflow chaining syntax - can be implemented as HTTP activity + wait_for_signal
 - ❌ UI for approval workflows - just primitives for now
@@ -2933,11 +2980,29 @@ Without this primitive, these patterns require polling (wasteful) or application
 ```rust
 pub enum ActivityStatus {
     Pending,
+    Waiting,      // NEW: Waiting for external signal before running
     Running,
-    Waiting,      // NEW: Waiting for external event
     Completed,
     Failed,
     Skipped,
+}
+```
+
+**Wait Settings Struct**:
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WaitForSignalSettings {
+    pub event_name: String,
+    pub timeout_seconds: u64,
+    pub on_timeout: OnTimeout,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnTimeout {
+    Continue,
+    Skip,
+    Fail,
 }
 ```
 
@@ -2948,103 +3013,62 @@ pub async fn signal_workflow(
     pool: &PgPool,
     workflow_id: Uuid,
     payload: SignalPayload,
-) -> Result<()> {
+) -> Result<SignalResponse> {
     // Find matching subscription
     let subscription = sqlx::query!(
         r#"
-        SELECT workflow_id, activity_key, event_filter
+        SELECT id, activity_key
         FROM activity_event_subscriptions
         WHERE workflow_id = $1
-        AND (
-            event_filter IS NULL
-            OR event_filter @> $2::jsonb
-        )
+        AND activity_key = $2
+        AND event_name = $3
         "#,
         workflow_id,
-        json!({"event_name": payload.event_name}),
+        payload.activity_key,
+        payload.event_name,
     )
     .fetch_optional(pool)
     .await?;
 
-    if let Some(sub) = subscription {
-        // Complete waiting activity with event data
-        complete_waiting_activity(
-            pool,
-            sub.workflow_id,
-            &sub.activity_key,
-            payload.data,
-        ).await?;
+    let Some(sub) = subscription else {
+        return Err(anyhow!("No waiting activity found for signal"));
+    };
 
-        // Delete subscription
-        sqlx::query!(
-            "DELETE FROM activity_event_subscriptions
-             WHERE workflow_id = $1 AND activity_key = $2",
-            workflow_id,
-            sub.activity_key
-        )
-        .execute(pool)
-        .await?;
-    }
+    // Store signal data and transition activity to pending
+    sqlx::query!(
+        r#"
+        UPDATE activity_event_subscriptions
+        SET signal_data = $2
+        WHERE id = $1
+        "#,
+        sub.id,
+        payload.data,
+    )
+    .execute(pool)
+    .await?;
 
-    Ok(())
-}
-
-async fn complete_waiting_activity(
-    pool: &PgPool,
-    workflow_id: Uuid,
-    activity_key: &str,
-    event_data: Value,
-) -> Result<()> {
-    // Update activity status to completed
+    // Transition activity from waiting to pending
     sqlx::query!(
         r#"
         UPDATE activity_queue
-        SET status = 'completed',
-            result = $3,
-            completed_at = NOW()
+        SET status = 'pending'
         WHERE workflow_id = $1
         AND activity_key = $2
         AND status = 'waiting'
         "#,
         workflow_id,
-        activity_key,
-        json!({"event_data": event_data})
+        sub.activity_key
     )
     .execute(pool)
     .await?;
 
     // Trigger orchestrator to continue DAG evaluation
-    // (via ActivityCompleted event or direct notification)
+    publish_workflow_event(WorkflowEvent::ActivityReady {
+        workflow_id,
+        activity_key: sub.activity_key,
+    }).await?;
 
-    Ok(())
-}
-```
-
-**Built-in `wait_for_signal` Activity**:
-```rust
-pub struct WaitForSignalActivity;
-
-#[async_trait]
-impl ActivityImpl for WaitForSignalActivity {
-    async fn execute(&self, parameters: Value) -> Result<ActivityResult> {
-        let event_name: String = parameters["event_name"]
-            .as_str()
-            .ok_or(anyhow!("event_name required"))?
-            .to_string();
-
-        let timeout_secs: i64 = parameters["timeout"]
-            .as_i64()
-            .ok_or(anyhow!("timeout required"))?;
-
-        // Return special result indicating waiting state
-        Ok(ActivityResult::Waiting {
-            event_filter: json!({"event_name": event_name}),
-            timeout: Duration::from_secs(timeout_secs as u64),
-        })
-    }
-
-    fn name(&self) -> &str { "wait_for_signal" }
-    fn worker(&self) -> &str { "builtin" }
+    Ok(SignalResponse { accepted: true })
 }
 ```
 
@@ -3054,99 +3078,151 @@ impl ActivityImpl for WaitForSignalActivity {
 for activity in &workflow.activities {
     match activity.status {
         ActivityStatus::Waiting => {
-            // Skip - waiting for external event
-            // Check timeout (handled by background task)
+            // Skip - waiting for external signal
             continue;
         }
         ActivityStatus::Pending => {
             if dependencies_met(activity) {
-                schedule_activity(activity).await?;
+                if let Some(wait_settings) = &activity.settings.wait_for_signal {
+                    // Activity needs to wait for signal before running
+                    create_subscription(workflow_id, activity, wait_settings).await?;
+                    set_activity_status(activity, ActivityStatus::Waiting).await?;
+                } else {
+                    // Normal scheduling
+                    schedule_activity(activity).await?;
+                }
             }
         }
         // ... existing logic
     }
 }
-```
 
-**Timeout Handler** (background task):
-```rust
-async fn check_waiting_activity_timeouts(pool: &PgPool) {
-    loop {
-        tokio::time::sleep(Duration::from_secs(10)).await;
-
-        // Find expired subscriptions
-        let expired = sqlx::query!(
-            r#"
-            SELECT workflow_id, activity_key
-            FROM activity_event_subscriptions
-            WHERE timeout_at < NOW()
-            "#
-        )
-        .fetch_all(pool)
-        .await?;
-
-        for sub in expired {
-            // Fail activity with timeout error
-            sqlx::query!(
-                r#"
-                UPDATE activity_queue
-                SET status = 'failed',
-                    error = 'Event timeout exceeded',
-                    completed_at = NOW()
-                WHERE workflow_id = $1 AND activity_key = $2
-                "#,
-                sub.workflow_id,
-                sub.activity_key
-            )
-            .execute(pool)
-            .await?;
-
-            // Delete subscription
-            sqlx::query!(
-                "DELETE FROM activity_event_subscriptions
-                 WHERE workflow_id = $1 AND activity_key = $2",
-                sub.workflow_id,
-                sub.activity_key
-            )
-            .execute(pool)
-            .await?;
-        }
-    }
+// When scheduling activity that was waiting, include signal data
+async fn schedule_activity(activity: &Activity) -> Result<()> {
+    let signal_data = get_signal_data(workflow_id, &activity.key).await?;
+    // Signal data available to activity via {{SIGNAL.*}} template expressions
+    let context = ActivityContext {
+        signal: signal_data,
+        // ... other context
+    };
+    queue_activity_for_worker(activity, context).await
 }
 ```
 
+**Timeout Handler** (add to existing `timeout_checker_task` in orchestrator.rs):
+```rust
+// Called from timeout_checker_task alongside existing checks:
+//   check_and_timeout_stuck_workflows(...)
+//   check_and_reclaim_stale_activities(...)
+//   check_and_expire_subscriptions(...)  // NEW
+
+async fn check_and_expire_subscriptions(
+    activity_queue: &Arc<dyn ActivityQueue>,
+    event_source: &Arc<dyn EventSource>,
+) -> Result<()> {
+    // Find expired subscriptions (limit 100 per check)
+    let expired = sqlx::query_as!(
+        ExpiredSubscription,
+        r#"
+        SELECT workflow_id, activity_key, on_timeout
+        FROM activity_event_subscriptions
+        WHERE timeout_at < NOW()
+        AND signal_data IS NULL
+        LIMIT 100
+        "#
+    )
+    .fetch_all(pool)
+    .await?;
+
+    for sub in expired {
+        match sub.on_timeout.as_str() {
+            "continue" => {
+                // Transition to pending, schedule with null signal
+                set_activity_status(&sub, ActivityStatus::Pending).await?;
+                event_source.publish(WorkflowEvent::ActivityReady {
+                    workflow_id: sub.workflow_id,
+                    activity_key: sub.activity_key.clone(),
+                }).await?;
+            }
+            "skip" => {
+                set_activity_status(&sub, ActivityStatus::Skipped).await?;
+            }
+            "fail" => {
+                fail_activity(&sub, "Signal timeout exceeded").await?;
+            }
+        }
+
+        // Delete subscription
+        delete_subscription(&sub).await?;
+    }
+
+    Ok(())
+}
+```
+
+**Example: Human Approval Workflow**:
+```yaml
+name: document_review
+activities:
+  - key: analyze_document
+    worker: ml-worker
+    activity_name: extract_info
+    parameters:
+      document_id: "{{INPUT.document_id}}"
+
+  - key: apply_changes
+    worker: api-worker
+    activity_name: update_document
+    parameters:
+      document_id: "{{INPUT.document_id}}"
+      analysis: "{{analyze_document.result}}"
+      approved_by: "{{SIGNAL.approved_by}}"  # From signal data
+      comment: "{{SIGNAL.comment}}"
+    settings:
+      wait_for_signal:
+        event_name: "approval_granted"
+        timeout_seconds: 86400              # 24 hours
+        on_timeout: fail                    # Fail if no approval in time
+    depends_on: [analyze_document]
+
+  - key: notify_complete
+    worker: notification-worker
+    activity_name: send_email
+    depends_on: [apply_changes]
+```
+
 **Testing**:
-- Unit test: `wait_for_signal` activity returns `Waiting` result
-- Integration test: Signal API completes waiting activity
-- Integration test: Timeout fails waiting activity after deadline
-- Integration test: Workflow continues after waiting activity completes
-- E2E test: Human approval workflow (submit → wait → signal → complete)
+- Unit test: Activity with `wait_for_signal` enters `waiting` state
+- Unit test: Signal API transitions waiting activity to `pending`
+- Integration test: Activity runs with signal data after receiving signal
+- Integration test: `on_timeout: continue` schedules activity with null signal
+- Integration test: `on_timeout: skip` skips the activity
+- Integration test: `on_timeout: fail` fails the activity
+- Integration test: Built-in Rust worker receives signal data in ActivityContext
+- Integration test: Python worker receives signal data via `ctx.signal`
+- E2E test: Human approval workflow (submit → wait → signal → run → complete)
+- E2E test: Python worker activity with wait_for_signal
 
 **Success Criteria**:
-- ✅ Activities can enter `waiting` state without blocking workers
-- ✅ Signal API completes waiting activities with event data
-- ✅ Timeouts fail activities that wait too long
-- ✅ Orchestrator correctly resumes DAG evaluation after event
+- ✅ Any activity can wait for signal via `settings.wait_for_signal`
+- ✅ Signal API triggers waiting activity to run with signal data
+- ✅ Three timeout behaviors work correctly (continue, skip, fail)
+- ✅ Signal data accessible via `{{SIGNAL.*}}` template expressions
 - ✅ No worker slots consumed by waiting activities
-- ✅ Database schema supports event subscriptions
+- ✅ Orchestrator correctly handles waiting → pending transitions
+- ✅ Built-in Rust worker activities receive signal data
+- ✅ Python Worker SDK activities receive signal data via `ctx.signal`
 
 **Benefits**:
-- **Foundational primitive**: Enables multiple high-value features
+- **Universal**: Any activity can wait, not just special built-in activities
+- **Flexible**: Three timeout behaviors cover all use cases
 - **Resource efficient**: No worker slots consumed while waiting
-- **Scalable**: Thousands of concurrent waits with minimal overhead
-- **Simple API**: Clean primitives, not overengineered
-- **Event-driven**: Instant resume when event arrives (no polling)
-
-**Estimated Implementation Time**: 5-7 days
-- Core infrastructure (2-3 days)
-- Signal API + built-in activity (1-2 days)
-- Orchestrator changes (1 day)
-- Timeout handler (1 day)
-- Tests + documentation (1 day)
+- **Composable**: Signal data flows into activity parameters
+- **Simple API**: Clean design, no special activity types
 
 **Unlocks These Features** (built on this primitive):
 - Story 6.4: Workflow Pause/Resume (uses this primitive)
-- Workflow chaining with wait semantics (HTTP + `wait_for_signal`)
+- Workflow chaining with wait semantics
 - External webhook integration (webhook → signal API)
 - Human-in-the-loop workflows (UI → signal API)
 - Long-running async operations (external job → signal when done)
@@ -3190,6 +3266,24 @@ POST /api/v1/workflows
 - A/B testing (run two versions side-by-side)
 - Gradual rollout (canary deployments)
 - Quick rollback on issues
+
+**Implementation Status** (as of 2026-01-26):
+
+| Scope Item                                | Status           | Notes                                                    |
+|-------------------------------------------|------------------|----------------------------------------------------------|
+| Version field in workflow definitions     | ⚠️ Partial       | Uses timestamp-based (`YYYYmmdd.HHMMSS.uuuuuu`) not semver |
+| Running workflows pin to deployed version | ✅ Implemented   | Workflows store `workflow_definition_id` FK at creation  |
+| New workflows use latest version          | ✅ Implemented   | `WorkflowService.submit_workflow()` defaults to latest   |
+| Version selection at workflow start       | ✅ Implemented   | Optional `version` param in POST /api/v1/workflows       |
+| Workflow migration tools                  | ❌ Not started   | No upgrade running workflows functionality               |
+| Rollback support                          | ⚠️ Partial       | Can redeploy old versions, but no explicit rollback API  |
+| Version comparison UI (diff views)        | ❌ Not started   | No comparison endpoints                                  |
+
+**Remaining Work**:
+- Add semantic versioning support (user-specified versions like "2.0.0")
+- Migration API to upgrade running workflows to new version
+- Explicit rollback API endpoint
+- Version diff/comparison endpoints
 
 ---
 

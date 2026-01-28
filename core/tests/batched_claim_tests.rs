@@ -65,6 +65,7 @@ async fn test_claim_multiple_activities_single_worker() {
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         })
         .collect();
 
@@ -115,6 +116,7 @@ async fn test_claim_multiple_activity_types_for_same_worker() {
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         },
         Activity {
             key: "http_2".to_string(),
@@ -125,6 +127,7 @@ async fn test_claim_multiple_activity_types_for_same_worker() {
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         },
         Activity {
             key: "db_1".to_string(),
@@ -135,6 +138,7 @@ async fn test_claim_multiple_activity_types_for_same_worker() {
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         },
         Activity {
             key: "echo_1".to_string(),
@@ -145,6 +149,7 @@ async fn test_claim_multiple_activity_types_for_same_worker() {
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         },
     ];
 
@@ -203,6 +208,7 @@ async fn test_claim_respects_max_activities_limit() {
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         })
         .collect();
 
@@ -249,6 +255,7 @@ async fn test_claim_only_returns_matching_worker() {
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         },
         Activity {
             key: "builtin_2".to_string(),
@@ -259,6 +266,7 @@ async fn test_claim_only_returns_matching_worker() {
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         },
         Activity {
             key: "custom_1".to_string(),
@@ -269,6 +277,7 @@ async fn test_claim_only_returns_matching_worker() {
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         },
     ];
 
@@ -323,6 +332,7 @@ async fn test_claim_when_fewer_available_than_requested() {
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         })
         .collect();
 
@@ -365,6 +375,7 @@ async fn test_worker_level_claim_concurrent_workers() {
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         })
         .collect();
 

@@ -182,6 +182,7 @@ mod tests {
     use axum::http::StatusCode;
     use axum_test::TestServer;
     use bcrypt;
+    use kruxiaflow_core::PostgresSubscriptionService;
     use kruxiaflow_core::cache::NoOpCache;
     use kruxiaflow_core::events::PostgresEventSource;
     use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
@@ -255,6 +256,7 @@ mod tests {
         let cache_service = Arc::new(NoOpCache::new());
         let shutdown_token = CancellationToken::new();
 
+        let subscription_service = Arc::new(PostgresSubscriptionService::new(pool.clone()));
         let state = AppState::new(
             pool,
             auth_service,
@@ -262,6 +264,7 @@ mod tests {
             event_source,
             workflow_storage,
             cache_service,
+            subscription_service,
             shutdown_token,
         );
 
