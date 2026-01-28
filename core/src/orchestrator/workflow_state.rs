@@ -378,7 +378,9 @@ pub fn apply_event_to_state(state: &mut WorkflowState, event: &WorkflowEvent) ->
                 // but this protects against re-applying during event replay as well.
                 if matches!(
                     activity.status,
-                    WorkflowActivityStatus::Running | WorkflowActivityStatus::Waiting
+                    WorkflowActivityStatus::Running
+                        | WorkflowActivityStatus::Waiting
+                        | WorkflowActivityStatus::Pending
                 ) {
                     activity.status = WorkflowActivityStatus::Failed;
                     activity.error = event
