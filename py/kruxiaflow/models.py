@@ -4,6 +4,8 @@ This module provides the primary interface for constructing workflows programmat
 Models can be constructed declaratively (by passing arguments) or using fluent method chaining.
 """
 
+from __future__ import annotations
+
 import sys
 from enum import Enum
 from typing import TYPE_CHECKING, Any

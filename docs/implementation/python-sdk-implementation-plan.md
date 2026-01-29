@@ -12,6 +12,7 @@
 | 1. Workflow Definitions SDK      | ✅ **COMPLETE**            | 221 tests, 95%+ coverage                     |
 | 2. Worker SDK                    | ✅ **COMPLETE**            | 178 tests, mirrors Rust SDK                  |
 | 3. Standard Python Worker        | ✅ **COMPLETE**            | 99% coverage, Docker images in CI/CD         |
+| 4. Benchmark (py-std vs builtin) | ✅ **COMPLETE**            | Same scenarios, separate metrics             |
 
 ---
 
@@ -2757,6 +2758,25 @@ Use **Component 2 (Worker SDK)** to build custom workers when you need:
 | Unit tests for workers module   | ✅ Complete  | 99% coverage achieved                       |
 | Docker image builds             | ✅ Complete  | ghcr.io/kruxia/kruxiaflow-worker-py-*       |
 | CI/CD integration               | ✅ Complete  | `.github/workflows/pysdk-ci.yml`            |
+| Benchmark (py-std vs builtin)   | ✅ Complete  | `benchmarks/` docker-compose + runner       |
+
+### Benchmarking: py-std vs Builtin Worker
+
+**Goal**: Measure the performance overhead of the Python worker compared to the builtin Rust worker using identical echo workflows and benchmark scenarios.
+
+**Approach**:
+- Add a `kruxiaflow-py-std` service to `benchmarks/docker-compose.yml` that builds from `py/Dockerfile` (target `py-std`) and connects to the same Kruxia Flow API server
+- Define py-std echo workflows that use `worker: "py-std"` with a script activity that echoes input (equivalent to the builtin echo activity)
+- Run the same benchmark scenarios (Sequential-5, Parallel-10, High-Concurrency-3) against the py-std worker
+- Capture CPU, memory, throughput, and latency metrics separately using Docker resource monitoring
+- Report as a separate platform ("Kruxia Flow (py-std)") alongside the existing builtin results
+
+**Key files**:
+- `benchmarks/docker-compose.yml` — py-std worker service
+- `benchmarks/kruxiaflow/workflows.py` — py-std workflow definitions
+- `benchmarks/kruxiaflow/benchmark.py` — reused for py-std (same API, different workflow names)
+- `benchmarks/run_benchmark.py` — `kruxiaflow-py-std` platform option
+- `benchmarks/shared/resource_monitor.py` — container patterns for py-std
 
 ---
 

@@ -27,7 +27,6 @@ class WorkerConfig(BaseSettings):
 
     Required environment variables:
         KRUXIAFLOW_API_URL: API server base URL (e.g., "http://localhost:8080")
-        KRUXIAFLOW_WORKER: Worker type (e.g., "python")
         KRUXIAFLOW_CLIENT_ID: OAuth client ID
         KRUXIAFLOW_CLIENT_SECRET: OAuth client secret
 
@@ -52,8 +51,9 @@ class WorkerConfig(BaseSettings):
     # Worker unique identifier
     worker_id: str = Field(default_factory=_default_worker_id)
 
-    # Worker type (e.g., "python", "custom") - required, valid slug
-    worker: WorkerSlug
+    # Worker type (e.g., "py-std", "py-data") - defaults to "py-std",
+    # can be overridden by KRUXIAFLOW_WORKER or WORKER_TYPE env var
+    worker: WorkerSlug = "py-std"
 
     # Maximum activities to poll per request
     poll_max_activities: int = Field(

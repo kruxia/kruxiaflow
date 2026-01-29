@@ -59,13 +59,13 @@ class TestWorkerConfigRequiredFields:
         with pytest.raises(ValidationError):
             WorkerConfig(worker="python", client_id="test_client", client_secret="test")
 
-    def test_worker_is_required(self):
-        with pytest.raises(ValidationError):
-            WorkerConfig(
-                api_url="http://localhost:8080",
-                client_id="test_client",
-                client_secret="test",
-            )
+    def test_worker_has_default(self):
+        config = WorkerConfig(
+            api_url="http://localhost:8080",
+            client_id="test_client",
+            client_secret="test",
+        )
+        assert config.worker == "py-std"
 
     def test_client_id_is_required(self):
         with pytest.raises(ValidationError):
@@ -256,13 +256,11 @@ class TestWorkerConfigFromEnvironment:
         ):
             WorkerConfig()
 
-    def test_raises_on_missing_worker(self):
+    def test_defaults_worker_when_missing(self):
         env = {k: v for k, v in self.REQUIRED_ENV.items() if k != "KRUXIAFLOW_WORKER"}
-        with (
-            mock.patch.dict(os.environ, env, clear=True),
-            pytest.raises(ValidationError),
-        ):
-            WorkerConfig()
+        with mock.patch.dict(os.environ, env, clear=True):
+            config = WorkerConfig()
+        assert config.worker == "py-std"
 
     def test_raises_on_missing_client_id(self):
         env = {

@@ -148,7 +148,7 @@ class WorkerPoller:
                 "activity_id": str(activity.activity_id),
                 "activity_key": activity.activity_key,
                 "worker": activity.worker,
-                "name": activity.activity_name,
+                "activity_name": activity.activity_name,
             },
         )
 
