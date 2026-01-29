@@ -1,6 +1,7 @@
 """Resource monitoring using Docker Stats API"""
 
 import asyncio
+import re
 import docker
 from dataclasses import dataclass, field
 from typing import Optional
@@ -40,6 +41,11 @@ PLATFORM_CONTAINERS = {
         "kruxiaflow-postgres-1",
         "kruxiaflow_kruxiaflow-postgres_1",
         "kruxiaflow-postgres",
+    ],
+    "Kruxia Flow (py-std)": [
+        "kruxiaflow-py-std-1",
+        "kruxiaflow_kruxiaflow-py-std_1",
+        "kruxiaflow-py-std",
     ],
     "Temporal": [
         "temporal-1",
@@ -120,9 +126,13 @@ class ResourceMonitor:
         self.containers = []
         for container in all_containers:
             container_name = container.name
-            # Check if container name matches any pattern for this platform
+            # Check if container name matches any pattern for this platform.
+            # Match pattern as a complete service name segment — the pattern must
+            # be followed by end-of-string, or a separator + replica number (e.g.
+            # "-1", "_1"), NOT by more name segments like "-py-std".
             for pattern in container_patterns:
-                if pattern in container_name or container_name.startswith(pattern.replace("-1", "")):
+                escaped = re.escape(pattern)
+                if re.search(rf'(^|[-_]){escaped}([-_]\d+)?$', container_name):
                     self.containers.append(container)
                     break
 

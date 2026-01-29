@@ -5,6 +5,8 @@ Mirrors Rust FileExecutor for interface compatibility.
 Uses the Kruxia Flow API for file storage operations (not direct database access).
 """
 
+from __future__ import annotations
+
 import shutil
 import tempfile
 from collections.abc import AsyncIterator

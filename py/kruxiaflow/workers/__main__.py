@@ -45,6 +45,10 @@ def main() -> None:
         stream=sys.stderr,
     )
 
+    # Suppress httpx request logging (polls every 100ms at INFO level)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
     # Load config from environment
     try:
         config = WorkerConfig()  # type: ignore[call-arg]  # pydantic-settings loads from env
