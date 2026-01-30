@@ -1,0 +1,132 @@
+[project]
+name = "kruxiaflow-mcp"
+version = "0.1.0"
+description = "MCP Server for Kruxia Flow Workflow Orchestration"
+requires-python = ">=3.11"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Kruxia Flow Team", email = "team@kruxia.com"}
+]
+keywords = ["mcp", "workflow", "orchestration", "ai", "agents"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "fastmcp>=0.4.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "pyyaml>=6.0.0",
+    "websockets>=12.0",
+    "python-dotenv>=1.0.0",
+    "prometheus-client>=0.20.0",
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp>=1.20.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-httpx>=0.30.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.9",
+    "ty",
+]
+
+[project.scripts]
+kruxiaflow-mcp = "kruxiaflow_mcp.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kruxiaflow_mcp"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/kruxiaflow_mcp", "tests"]
+
+# Ruff configuration - replaces flake8, isort, and black
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src/kruxiaflow_mcp", "tests"]
+
+[tool.ruff.lint]
+select = [
+    # pycodestyle (flake8)
+    "E",      # Error
+    "W",      # Warning
+    # pyflakes (flake8)
+    "F",      # Pyflakes
+    # isort
+    "I",      # Import sorting
+    # flake8-bugbear
+    "B",      # Bugbear
+    # flake8-simplify
+    "SIM",    # Simplify
+    # flake8-comprehensions
+    "C4",     # Comprehensions
+    # flake8-pie
+    "PIE",    # Pie
+    # flake8-return
+    "RET",    # Return
+    # flake8-quotes
+    "Q",      # Quotes
+    # Ruff-specific
+    "RUF",    # Ruff
+    # pyupgrade
+    "UP",     # Pyupgrade
+]
+ignore = [
+    "E501",   # Line too long (handled by formatter)
+    "RET504", # Unnecessary variable assignment before return
+    "B008",   # Do not perform function calls in argument defaults (FastMCP uses this pattern)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F401"]  # Allow unused imports in tests
+"__init__.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["kruxiaflow_mcp"]
+force-single-line = false
+combine-as-imports = true
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = "double"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = true
+
+[tool.ty.src]
+exclude = ["tests/"]
+
+[tool.ty.environment]
+python-version = "3.11"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--cov=kruxiaflow_mcp",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+]
