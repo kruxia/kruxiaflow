@@ -69,107 +69,108 @@ This section contains example prompts an AI agent would process, along with the 
 
 ### 2.1 Esoteric/Creative Prompts
 
-#### Prompt 1: Astrology Chart Generator
+#### Prompt 1: Moon Phase and Location Tracker
 
-> "Create a workflow that fetches astronomical data for a person's birth date/time/location, calculates planetary positions, generates a natal chart interpretation using an LLM, and emails the results."
+> "Create a workflow that fetches the current moon phase and illumination data for a given location, retrieves weather conditions, generates a summary using an LLM with visibility recommendations, and emails the results."
 
 **Expected Workflow Structure**:
 
 ```yaml
-name: astrology_natal_chart
-description: Generate personalized natal chart with AI interpretation
+name: moon_phase_tracker
+description: Track moon phase and visibility conditions for a location
 
 activities:
-  - key: fetch_astronomy_data
+  - key: fetch_moon_data
     activity_name: http_request
     parameters:
       method: GET
-      url: "https://api.astronomyapi.com/v2/bodies/positions"
+      url: "https://api.astronomyapi.com/v2/bodies/positions/moon"
       headers:
         Authorization: "Bearer {{SECRET.astronomy_api_key}}"
       query_params:
-        latitude: "{{INPUT.birth_latitude}}"
-        longitude: "{{INPUT.birth_longitude}}"
-        elevation: "0"
-        from_date: "{{INPUT.birth_date}}"
-        to_date: "{{INPUT.birth_date}}"
-        time: "{{INPUT.birth_time}}"
+        latitude: "{{INPUT.latitude}}"
+        longitude: "{{INPUT.longitude}}"
+        elevation: "{{INPUT.elevation | default(0)}}"
+        from_date: "{{INPUT.date}}"
+        to_date: "{{INPUT.date}}"
+        time: "{{INPUT.time | default('20:00:00')}}"
     outputs:
       - response
 
-  - key: calculate_houses
+  - key: fetch_weather
     activity_name: http_request
     parameters:
-      method: POST
-      url: "https://astro-calculator.example.com/houses"
-      body:
-        latitude: "{{INPUT.birth_latitude}}"
-        longitude: "{{INPUT.birth_longitude}}"
-        datetime: "{{INPUT.birth_date}}T{{INPUT.birth_time}}Z"
+      method: GET
+      url: "https://api.openweathermap.org/data/2.5/weather"
+      query_params:
+        lat: "{{INPUT.latitude}}"
+        lon: "{{INPUT.longitude}}"
+        appid: "{{SECRET.openweather_api_key}}"
+        units: "metric"
     outputs:
       - response
     depends_on:
-      - fetch_astronomy_data
+      - fetch_moon_data
 
-  - key: interpret_chart
+  - key: generate_summary
     activity_name: llm_prompt
     parameters:
       model: anthropic/claude-sonnet-4-5-20250929
       system_prompt: |
-        You are an expert astrologer. Interpret the natal chart data
-        provided and generate a detailed, personalized reading.
+        You are an astronomy assistant. Provide helpful information about
+        moon phases and viewing conditions for stargazers and photographers.
       prompt: |
-        Birth Details:
-        - Date: {{INPUT.birth_date}}
-        - Time: {{INPUT.birth_time}}
-        - Location: {{INPUT.birth_city}}
+        Location: {{INPUT.location_name}}
+        Coordinates: {{INPUT.latitude}}, {{INPUT.longitude}}
+        Date/Time: {{INPUT.date}} at {{INPUT.time | default('20:00:00')}}
 
-        Planetary Positions:
-        {{fetch_astronomy_data.response.body | tojson}}
+        Moon Data:
+        {{fetch_moon_data.response.body | tojson}}
 
-        House Placements:
-        {{calculate_houses.response.body | tojson}}
+        Weather Conditions:
+        {{fetch_weather.response.body | tojson}}
 
-        Generate a comprehensive natal chart interpretation covering:
-        1) Sun, Moon, and Rising sign analysis
-        2) Key planetary aspects
-        3) House placements and their meanings
-        4) Life themes and potential challenges
-      max_tokens: 3000
+        Generate a summary covering:
+        1) Current moon phase and illumination percentage
+        2) Moonrise and moonset times
+        3) Weather conditions affecting visibility
+        4) Recommendations for moon observation or photography
+      max_tokens: 1500
     outputs:
       - result
     settings:
       budget:
-        limit_usd: 0.10
+        limit_usd: 0.05
     depends_on:
-      - calculate_houses
+      - fetch_weather
 
-  - key: send_reading
+  - key: send_report
     activity_name: send_email
     parameters:
       to: "{{INPUT.email}}"
-      subject: "Your Personalized Natal Chart Reading"
+      subject: "Moon Phase Report for {{INPUT.location_name}}"
       html_body: |
-        <h1>Your Natal Chart</h1>
-        <p>Birth: {{INPUT.birth_date}} at {{INPUT.birth_time}} in {{INPUT.birth_city}}</p>
+        <h1>Moon Phase Report</h1>
+        <p>Location: {{INPUT.location_name}}</p>
+        <p>Date: {{INPUT.date}}</p>
         <hr/>
-        {{interpret_chart.result.content | markdown_to_html}}
+        {{generate_summary.result.content | markdown_to_html}}
     depends_on:
-      - interpret_chart
+      - generate_summary
 ```
 
 **Expected Mermaid Diagram**:
 
 ```mermaid
 flowchart TB
-    fetch_astronomy_data[fetch_astronomy_data<br/>HTTP: GET astronomyapi.com]
-    calculate_houses[calculate_houses<br/>HTTP: POST astro-calculator]
-    interpret_chart[interpret_chart<br/>LLM: claude-sonnet-4-5]
-    send_reading[send_reading<br/>Email]
+    fetch_moon_data[fetch_moon_data<br/>HTTP: GET astronomyapi.com]
+    fetch_weather[fetch_weather<br/>HTTP: GET openweathermap]
+    generate_summary[generate_summary<br/>LLM: claude-sonnet-4-5]
+    send_report[send_report<br/>Email]
 
-    fetch_astronomy_data --> calculate_houses
-    calculate_houses --> interpret_chart
-    interpret_chart --> send_reading
+    fetch_moon_data --> fetch_weather
+    fetch_weather --> generate_summary
+    generate_summary --> send_report
 ```
 
 ---
