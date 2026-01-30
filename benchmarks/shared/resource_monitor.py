@@ -46,6 +46,12 @@ PLATFORM_CONTAINERS = {
         "kruxiaflow-py-std-1",
         "kruxiaflow_kruxiaflow-py-std_1",
         "kruxiaflow-py-std",
+        "kruxiaflow-py-std-server-1",
+        "kruxiaflow_kruxiaflow-py-std-server_1",
+        "kruxiaflow-py-std-server",
+        "kruxiaflow-postgres-1",
+        "kruxiaflow_kruxiaflow-postgres_1",
+        "kruxiaflow-postgres",
     ],
     "Temporal": [
         "temporal-1",

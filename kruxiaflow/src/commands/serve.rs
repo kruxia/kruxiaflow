@@ -191,6 +191,18 @@ Default: 60 seconds\n\
 Example: --db-connect-timeout 120"
     )]
     pub db_connect_timeout: u64,
+
+    /// Disable built-in worker (run API + orchestrator only)
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_NO_WORKER",
+        help = "Disable built-in worker (API + orchestrator only)",
+        long_help = "Disable the built-in activity worker.\n\
+Runs only the API server and orchestrator. Use this when external\n\
+workers (e.g. Python SDK workers) handle activity execution.\n\n\
+Example: kruxiaflow serve --no-worker"
+    )]
+    pub no_worker: bool,
 }
 
 impl ServeCommand {
@@ -573,17 +585,22 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     let (api_handle, _) =
         spawn_api_server(state, cmd.bind.clone(), cmd.port, shutdown_token.clone()).await?;
 
-    // 5. Spawn workers (workers will be gracefully stopped via manager)
-    let worker_handles = spawn_workers(
-        cmd.max_activities,
-        cmd.poll_max_activities,
-        api_url.clone(),
-        cmd.client_id.clone(),
-        cmd.client_secret.unwrap(),
-        workflow_storage.clone(),
-        cmd.activity_timeout,
-    )
-    .await?;
+    // 5. Spawn workers (unless --no-worker)
+    let worker_handles = if cmd.no_worker {
+        tracing::info!("Built-in worker disabled (--no-worker), skipping worker startup");
+        vec![]
+    } else {
+        spawn_workers(
+            cmd.max_activities,
+            cmd.poll_max_activities,
+            api_url.clone(),
+            cmd.client_id.clone(),
+            cmd.client_secret.unwrap(),
+            workflow_storage.clone(),
+            cmd.activity_timeout,
+        )
+        .await?
+    };
 
     tracing::info!("All services started successfully");
     tracing::info!(
@@ -704,6 +721,7 @@ mod tests {
             seed_client: false,
             db_connect_timeout: 60,
             activity_timeout: 300,
+            no_worker: false,
         }
     }
 
@@ -900,6 +918,7 @@ mod tests {
             seed_client: true,
             db_connect_timeout: 120,
             activity_timeout: 300,
+            no_worker: false,
         };
 
         assert!(cmd.validate().is_ok());
