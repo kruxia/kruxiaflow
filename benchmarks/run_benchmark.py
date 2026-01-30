@@ -312,7 +312,7 @@ async def run_kruxiaflow_py_benchmarks(timestamp: str):
     print("Running Kruxia Flow (py-std) Benchmarks")
     print("=" * 60)
 
-    benchmark = StreamFlowBenchmark()
+    benchmark = StreamFlowBenchmark(base_url="http://kruxiaflow-py-std-server:8080")
     await benchmark.setup(extra_workflows=[
         PY_STD_SEQUENTIAL_5,
         PY_STD_SEQUENTIAL_3,
