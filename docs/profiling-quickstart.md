@@ -6,10 +6,10 @@ This guide shows you how to run comprehensive performance profiling to identify 
 
 1. **Environment variables set** (source .envrc or set manually):
    ```bash
-   export KRUXIAFLOW_CLIENT_ID="kruxiaflow-dev-client"
+   export KRUXIAFLOW_CLIENT_ID="kruxiaflow-docker-client"
    export KRUXIAFLOW_CLIENT_SECRET="dev-secret-key"
-   export KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM="$(cat dev-keys/public.pem)"
-   export KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="$(cat dev-keys/private.pem)"
+   export KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM="$(cat docker-keys/public.pem)"
+   export KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM="$(cat docker-keys/private.pem)"
    ```
 
 2. **Install cargo-flamegraph** (if not already installed):

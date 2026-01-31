@@ -33,10 +33,10 @@ generate_secret() {
 
 # Generate RSA key pair for OAuth
 generate_rsa_keys() {
-    key_dir="$PROJECT_DIR/dev-keys"
+    key_dir="$PROJECT_DIR/docker-keys"
 
     if [ -f "$key_dir/private.pem" ] && [ -f "$key_dir/public.pem" ]; then
-        log_info "RSA keys already exist in dev-keys/"
+        log_info "RSA keys already exist in docker-keys/"
         return 0
     fi
 
@@ -46,7 +46,7 @@ generate_rsa_keys() {
     openssl rsa -in "$key_dir/private.pem" -pubout -out "$key_dir/public.pem" 2>/dev/null
     chmod 600 "$key_dir/private.pem"
     chmod 644 "$key_dir/public.pem"
-    log_info "RSA keys generated in dev-keys/"
+    log_info "RSA keys generated in docker-keys/"
 }
 
 # Initialize .env file with secure secrets
@@ -72,7 +72,7 @@ init_env() {
 POSTGRES_PASSWORD=${postgres_password}
 
 # OAuth client credentials
-KRUXIAFLOW_CLIENT_ID=kruxiaflow-local
+KRUXIAFLOW_CLIENT_ID=kruxiaflow-docker
 KRUXIAFLOW_CLIENT_SECRET=${client_secret}
 
 # Logging (info default, use debug for profiling)
@@ -97,10 +97,10 @@ main() {
     echo "Next steps:"
     echo "  1. Review/edit .env if needed"
     echo "  2. Start Kruxia Flow:"
-    echo "     docker compose --profile deploy up"
+    echo "     ./docker up"
     echo
     echo "Or for development:"
-    echo "     ./dev up"
+    echo "     ./docker up --develop"
     echo
 }
 

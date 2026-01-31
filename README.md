@@ -2,15 +2,15 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.90%2B-orange.svg)](https://www.rust-lang.org/)
-[![Docker](https://img.shields.io/docker/v/kruxia/kruxiaflow?label=docker&color=2496ED)](https://hub.docker.com/r/kruxia/kruxiaflow)
-[![Docker Image Size](https://img.shields.io/docker/image-size/kruxia/kruxiaflow/latest?label=image%20size)](https://hub.docker.com/r/kruxia/kruxiaflow)
+[![Docker](https://img.shields.io/docker/v/kruxia/kruxia-flow?label=docker&color=2496ED)](https://hub.docker.com/r/kruxia/kruxia-flow)
+[![Docker Image Size](https://img.shields.io/docker/image-size/kruxia/kruxia-flow/latest?label=image%20size)](https://hub.docker.com/r/kruxia/kruxia-flow)
 
-**AI-Native durable Workflow Orchestration with Built-in Cost Control**
+**AI-native durable workflows that run everywhere**
 
 A lightweight, high-performance workflow engine designed for AI applications. Track every token, cache intelligently, and never exceed your LLM budget.
 
 ```
-7.5MB binary | 63MB image | PostgreSQL-only | 24x faster than Airflow | 20x less memory
+Single 8MB binary | 24x faster than Airflow | 20x less memory
 ```
 
 ## Quick Start
@@ -19,10 +19,10 @@ Get Kruxia Flow running in 60 seconds:
 
 ```bash
 # Clone and start
-git clone https://github.com/kruxia/kruxiaflow.git
-cd kruxiaflow
-./dev up -d
-./dev logs -f
+git clone https://github.com/kruxia/kruxia-flow.git
+cd kruxia-flow
+./docker up -d
+./docker logs -f
 
 # Wait for services to be healthy (~30 seconds)
 docker compose ps
@@ -212,13 +212,13 @@ Benchmark methodology: Identical echo workflows (sequential, parallel, high-conc
 
 ```bash
 # Start development environment (hot reload)
-./dev up
+./docker up --develop
 
 # View logs
-./dev logs -f
+./docker logs -f
 
 # Stop services
-./dev down
+./docker down
 ```
 
 ### Running Tests
@@ -242,13 +242,13 @@ cargo install sqlx-cli --no-default-features --features postgres
 docker run -d --name pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:17
 
 # Run migrations
-export DATABASE_URL='postgres://postgres:dev@localhost:5432/kruxiaflow'
+export DATABASE_URL='postgres://postgres:dev@localhost:5432/kruxia-flow'
 sqlx database create
 sqlx migrate run
 
 # Build and run
 cargo build --release
-./target/release/kruxiaflow serve
+./target/release/kruxia-flow serve
 ```
 
 ## Roadmap
@@ -262,7 +262,7 @@ cargo build --release
 - Token streaming
 
 ### Next
-- Python SDK (`pip install kruxiaflow`)
+- Python SDK (`pip install kruxia-flow`)
 - Web dashboard for cost visualization
 - Airflow migration guide
 - Kubernetes Helm chart
@@ -276,8 +276,8 @@ See [Post-MVP Roadmap](docs/post-mvp.md) for details.
 
 ## Community
 
-- **GitHub Issues**: [Report bugs and request features](https://github.com/kruxia/kruxiaflow/issues)
-- **Discussions**: [Ask questions and share ideas](https://github.com/kruxia/kruxiaflow/discussions)
+- **GitHub Issues**: [Report bugs and request features](https://github.com/kruxia/kruxia-flow/issues)
+- **Discussions**: [Ask questions and share ideas](https://github.com/kruxia/kruxia-flow/discussions)
 - **Code of Conduct**: [Community guidelines](CODE_OF_CONDUCT.md)
 - **Security**: [Report vulnerabilities](SECURITY.md)
 
@@ -287,7 +287,7 @@ Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTIN
 
 ```bash
 # Fork and clone
-git clone https://github.com/YOUR_USERNAME/kruxiaflow.git
+git clone https://github.com/YOUR_USERNAME/kruxia-flow.git
 
 # Create a branch
 git checkout -b feature/your-feature
