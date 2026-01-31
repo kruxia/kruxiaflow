@@ -1,16 +1,11 @@
-# Kruxia Flow Docker Compose Configuration
+# Kruxia Flow Docker Compose - Production Base
 #
-# Profiles:
-#   - develop: Development with hot reload and source mounting
-#   - profiling: Memory profiling with jemalloc
-#   - deploy: Production deployment with prebuilt image
+# This file defines the production-ready configuration.
 #
-# Quick Start (development):
-#   ./dev up                           # Auto-initializes on first run
-#
-# Quick Start (production-like):
-#   ./scripts/init.sh                  # One-time: generate secrets
-#   docker compose --profile deploy up
+# Usage:
+#   ./docker up                                      # Production (default)
+#   ./docker up --develop                            # Development
+#   ./docker up --profiling                          # Profiling
 #
 # Required environment variables (see .env.example):
 #   - POSTGRES_PASSWORD: Database password
@@ -114,181 +109,9 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  # Mailhog for email testing (US-5.7a email_send activity)
-  mailhog:
-    image: mailhog/mailhog:v1.0.1
-    container_name: kruxiaflow-mailhog
-    ports:
-      - "127.0.0.1:1025:1025"   # SMTP server
-      - "127.0.0.1:8025:8025"   # Web UI for viewing emails
-    networks:
-      - backend
-      - frontend
-    profiles:
-      - develop
-    # healthcheck:
-    #   <<: *healthcheck-defaults
-    #   # Use HTTP API instead of SMTP to avoid noisy session logs
-    #   test: ["CMD", "wget", "-q", "--spider", "http://localhost:8025/api/v2/messages?limit=1"]
-    restart: unless-stopped
-    # Suppress logs - mailhog is a dev tool, check UI at http://localhost:8025
-    logging:
-      driver: "none"
-    deploy:
-      resources:
-        limits:
-          cpus: '0.5'
-          memory: 128M
-        reservations:
-          cpus: '0.25'
-          memory: 128M
-    labels:
-      com.kruxiaflow.service: "email"
-      com.kruxiaflow.component: "mailhog"
-      com.kruxiaflow.profile: "develop"
-
-  # Kruxia Flow API server in develop mode
-  kruxiaflow-develop:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: develop
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    ports:
-      - "${KRUXIAFLOW_PORT:-127.0.0.1:8080}:8080"
-    networks:
-      - frontend
-      - backend
-    profiles:
-      - develop
-    init: true
-    stop_grace_period: 30s
-    environment:
-      # Database connection
-      DATABASE_URL: postgres://${POSTGRES_USER:-kruxiaflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-kruxiaflow}
-      # Rust build settings
-      CARGO_HOME: /opt/.cargo
-      CARGO_TARGET_DIR: /opt/target
-      # OAuth configuration (required)
-      KRUXIAFLOW_CLIENT_ID: ${KRUXIAFLOW_CLIENT_ID:?KRUXIAFLOW_CLIENT_ID is required}
-      KRUXIAFLOW_CLIENT_SECRET: ${KRUXIAFLOW_CLIENT_SECRET:?KRUXIAFLOW_CLIENT_SECRET is required}
-      KRUXIAFLOW_OAUTH_TOKEN_ISSUER: ${KRUXIAFLOW_OAUTH_TOKEN_ISSUER:-http://localhost:8080}
-      KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE: ${KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE:-kruxiaflow-api}
-      # Worker configuration
-      KRUXIAFLOW_WORKER_COUNT: ${KRUXIAFLOW_WORKER_COUNT:-20}
-      KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES: ${KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES:-1}
-      # Cache configuration
-      KRUXIAFLOW_CACHE_PROVIDER: ${KRUXIAFLOW_CACHE_PROVIDER:-redis}
-      KRUXIAFLOW_REDIS_URL: redis://redis:6379
-      # Logging configuration
-      KRUXIAFLOW_LOG_LEVEL: ${KRUXIAFLOW_LOG_LEVEL:-info}
-    # No health check for develop - Rust build during startup takes several minutes
-    # Use ./dev logs -f to monitor startup progress
-    restart: unless-stopped
-    logging: *default-logging
-    deploy:
-      resources:
-        limits:
-          cpus: '4'
-          memory: 2G
-        reservations:
-          cpus: '0.5'
-          memory: 512M
-    labels:
-      com.kruxiaflow.service: "api"
-      com.kruxiaflow.component: "kruxiaflow"
-      com.kruxiaflow.profile: "develop"
-    ulimits:
-      nofile:
-        soft: 65536
-        hard: 65536
-    volumes:
-      # Mount source code
-      - ./:/opt/
-      # Persist cargo cache for faster rebuilds
-      - cargo_cache:/opt/.cargo/registry
-      - cargo_git_cache:/opt/.cargo/git
-      - cargo_target_cache:/opt/target
-
-  # Kruxia Flow profiling mode - saves jemalloc profiles and memory tracking to /opt/var/
-  kruxiaflow-profiling:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: profiling
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    ports:
-      - "${KRUXIAFLOW_PORT:-127.0.0.1:8080}:8080"
-    networks:
-      - frontend
-      - backend
-    profiles:
-      - profiling
-    init: true
-    stop_grace_period: 30s
-    environment:
-      # Database connection (separate database for profiling)
-      DATABASE_URL: postgres://${POSTGRES_USER:-kruxiaflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/kruxiaflow_profiling
-      DATABASE_ADMIN_URL: postgres://${POSTGRES_USER:-kruxiaflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-kruxiaflow}
-      # Rust build settings
-      CARGO_HOME: /opt/.cargo
-      CARGO_TARGET_DIR: /opt/target
-      # OAuth configuration (required)
-      KRUXIAFLOW_CLIENT_ID: ${KRUXIAFLOW_CLIENT_ID:?KRUXIAFLOW_CLIENT_ID is required}
-      KRUXIAFLOW_CLIENT_SECRET: ${KRUXIAFLOW_CLIENT_SECRET:?KRUXIAFLOW_CLIENT_SECRET is required}
-      KRUXIAFLOW_OAUTH_TOKEN_ISSUER: ${KRUXIAFLOW_OAUTH_TOKEN_ISSUER:-http://localhost:8080}
-      KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE: ${KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE:-kruxiaflow-api}
-      # Profiling uses minimal workers
-      KRUXIAFLOW_WORKER_COUNT: "1"
-      KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES: "1"
-      # Cache configuration
-      KRUXIAFLOW_CACHE_PROVIDER: ${KRUXIAFLOW_CACHE_PROVIDER:-redis}
-      KRUXIAFLOW_REDIS_URL: redis://redis:6379
-      # Logging configuration
-      KRUXIAFLOW_LOG_LEVEL: ${KRUXIAFLOW_LOG_LEVEL:-info}
-    healthcheck:
-      <<: *healthcheck-defaults
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
-      start_period: 120s
-    restart: unless-stopped
-    logging: *default-logging
-    deploy:
-      resources:
-        limits:
-          cpus: '4'
-          memory: 6G
-        reservations:
-          cpus: '1'
-          memory: 6G
-    labels:
-      com.kruxiaflow.service: "api"
-      com.kruxiaflow.component: "kruxiaflow"
-      com.kruxiaflow.profile: "profiling"
-    ulimits:
-      nofile:
-        soft: 65536
-        hard: 65536
-    volumes:
-      # Mount source code
-      - ./:/opt/
-      # Persist cargo cache for faster rebuilds
-      - cargo_cache:/opt/.cargo/registry
-      - cargo_git_cache:/opt/.cargo/git
-      - cargo_target_cache:/opt/target
-
-  # Production deployment
-  # Uses kruxia/kruxiaflow from Docker Hub if available, builds locally otherwise
-  # Run scripts/init.sh first to generate secrets
-  kruxiaflow-deploy:
+  kruxiaflow:
     image: kruxia/kruxiaflow:latest
+    container_name: kruxiaflow-server
     build:
       context: .
       dockerfile: Dockerfile
@@ -303,8 +126,6 @@ services:
     networks:
       - frontend
       - backend
-    profiles:
-      - deploy
     init: true
     stop_grace_period: 30s
     environment:
@@ -314,6 +135,9 @@ services:
       KRUXIAFLOW_CLIENT_SECRET: ${KRUXIAFLOW_CLIENT_SECRET:?KRUXIAFLOW_CLIENT_SECRET is required}
       KRUXIAFLOW_OAUTH_TOKEN_ISSUER: ${KRUXIAFLOW_OAUTH_TOKEN_ISSUER:-http://localhost:8080}
       KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE: ${KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE:-kruxiaflow-api}
+      # OAuth RSA keys (loaded from mounted secrets via _FILE pattern)
+      KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM_FILE: /secrets/private.pem
+      KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM_FILE: /secrets/public.pem
       # Worker configuration
       KRUXIAFLOW_WORKER_COUNT: ${KRUXIAFLOW_WORKER_COUNT:-20}
       KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES: ${KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES:-1}
@@ -340,7 +164,6 @@ services:
     labels:
       com.kruxiaflow.service: "api"
       com.kruxiaflow.component: "kruxiaflow"
-      com.kruxiaflow.profile: "deploy"
     security_opt:
       - no-new-privileges:true
     ulimits:
@@ -348,7 +171,7 @@ services:
         soft: 65536
         hard: 65536
     volumes:
-      - ./dev-keys:/secrets:ro
+      - ./docker-keys:/secrets:ro
 
 volumes:
   postgres_data:
@@ -359,15 +182,3 @@ volumes:
     name: kruxiaflow-redis-data
     labels:
       com.kruxiaflow.volume: "cache"
-  cargo_cache:
-    name: kruxiaflow-cargo-cache
-    labels:
-      com.kruxiaflow.volume: "build-cache"
-  cargo_git_cache:
-    name: kruxiaflow-cargo-git
-    labels:
-      com.kruxiaflow.volume: "build-cache"
-  cargo_target_cache:
-    name: kruxiaflow-cargo-target
-    labels:
-      com.kruxiaflow.volume: "build-cache"

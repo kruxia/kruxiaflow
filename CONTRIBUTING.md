@@ -34,10 +34,10 @@ git clone https://github.com/kruxia/kruxiaflow.git
 cd kruxiaflow
 
 # Start the development environment
-./dev up -d
+./docker up --develop -d
 
 # View logs
-./dev logs -f
+./docker logs -f
 
 # Verify everything is working
 curl http://localhost:8080/health
@@ -51,16 +51,16 @@ The easiest way to develop is using the included Docker Compose configuration:
 
 ```bash
 # Start all services with hot reload
-./dev up
+./docker up --develop
 
 # Run in background
-./dev up -d
+./docker up --develop -d
 
 # View logs
-./dev logs -f
+./docker logs -f
 
 # Stop services
-./dev down
+./docker down
 ```
 
 ### Local Development (Without Docker)

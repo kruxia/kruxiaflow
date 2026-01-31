@@ -1,0 +1,173 @@
+#!/bin/sh
+#
+# Kruxia Flow Docker Compose Launcher
+#
+# Single-command local deployment with automatic secret generation.
+# Secrets are generated on first run and stored in .env (gitignored).
+#
+# Usage:
+#   ./docker up                    # Production (base only)
+#   ./docker up --develop          # Development (base + develop)
+#   ./docker up --profiling        # Profiling (base + profiling override)
+#   ./docker down
+#   ./docker logs [-f]
+#   ./docker ps
+#   ./docker <any docker compose command>
+#
+# First run automatically:
+#   1. Generates .env with secure random secrets
+#   2. Generates RSA key pair for OAuth in docker-keys/
+
+set -eu
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Colors for output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+log_info() { printf "${GREEN}[docker]${NC} %s\n" "$1"; }
+log_warn() { printf "${YELLOW}[docker]${NC} %s\n" "$1"; }
+
+# Ensure environment is initialized
+ensure_init() {
+    if [ ! -f "$SCRIPT_DIR/.env" ] || [ ! -f "$SCRIPT_DIR/docker-keys/private.pem" ]; then
+        log_info "First run detected - initializing environment..."
+        "$SCRIPT_DIR/scripts/init.sh"
+        echo
+    fi
+}
+
+# Show help
+show_help() {
+    cat << 'EOF'
+Kruxia Flow Docker Compose Launcher
+
+Usage: ./docker <command> [options]
+
+Commands:
+  up [--develop|--profiling]  Start Kruxia Flow (default: production)
+  down                        Stop all services
+  logs [-f]                   Show logs (use -f to follow)
+  ps                          Show running containers
+  build                       Build images
+  pull                        Pull latest images
+  restart                     Restart services
+  clean                       Stop and remove volumes (WARNING: deletes data)
+  init                        Re-generate secrets and keys
+  *                           Any other docker compose command
+
+Modes:
+  (default)    Production with prebuilt image (target = deploy)
+  --develop    Development with hot reload (target = develop)
+  --profiling  Memory profiling with jemalloc (target = profiling)
+
+Examples:
+  ./docker up                        # Start production environment
+  ./docker up --develop              # Start development environment
+  ./docker up --profiling            # Start profiling environment
+  ./docker up -d                     # Start detached
+  ./docker logs -f                   # Follow logs
+  ./docker down                      # Stop everything
+  ./docker clean                     # Stop and delete all data
+
+First run automatically generates:
+  - .env with secure random secrets
+  - docker-keys/ with RSA key pair for OAuth
+
+EOF
+}
+
+# Main entrypoint
+main() {
+    cmd="${1:-}"
+
+    case "$cmd" in
+        -h|--help|help|"")
+            show_help
+            exit 0
+            ;;
+        up)
+            ensure_init
+            shift
+            # Extract mode flags
+            mode=""
+            other_args=""
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    --develop)
+                        mode="develop"
+                        shift
+                        ;;
+                    --profiling)
+                        mode="profiling"
+                        shift
+                        ;;
+                    *)
+                        other_args="$other_args $1"
+                        shift
+                        ;;
+                esac
+            done
+            case "$mode" in
+                develop)
+                    log_info "Starting development environment"
+                    exec docker compose -f docker-compose.yml -f docker-compose.develop.yml up $other_args
+                    ;;
+                profiling)
+                    log_info "Starting profiling environment"
+                    exec docker compose -f docker-compose.yml -f docker-compose.profiling.yml up $other_args
+                    ;;
+                *)
+                    log_info "Starting production environment"
+                    exec docker compose -f docker-compose.yml up $other_args
+                    ;;
+            esac
+            ;;
+        down|stop)
+            shift
+            exec docker compose down "$@"
+            ;;
+        logs)
+            shift
+            exec docker compose logs "$@"
+            ;;
+        ps|status)
+            shift
+            exec docker compose ps "$@"
+            ;;
+        build)
+            ensure_init
+            shift
+            exec docker compose build "$@"
+            ;;
+        clean)
+            log_warn "This will delete all data volumes!"
+            printf "Are you sure? [y/N] "
+            read -r reply
+            case "$reply" in
+                [Yy]|[Yy][Ee][Ss])
+                    docker compose down -v
+                    log_info "Volumes removed"
+                    ;;
+                *)
+                    log_info "Cancelled"
+                    ;;
+            esac
+            ;;
+        init)
+            # Force re-initialization
+            rm -f "$SCRIPT_DIR/.env"
+            rm -rf "$SCRIPT_DIR/docker-keys"
+            "$SCRIPT_DIR/scripts/init.sh"
+            ;;
+        *)
+            ensure_init
+            exec docker compose "$@"
+            ;;
+    esac
+}
+
+main "$@"
