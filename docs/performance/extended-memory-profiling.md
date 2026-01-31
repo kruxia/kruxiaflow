@@ -19,7 +19,7 @@ docker compose logs -f kruxiaflow-profiling
 # Wait for "Kruxia Flow server started" message
 
 # 3. Set OAuth credentials
-export KRUXIAFLOW_CLIENT_ID=kruxiaflow-dev-client
+export KRUXIAFLOW_CLIENT_ID=kruxiaflow-docker-client
 export KRUXIAFLOW_CLIENT_SECRET=a_zBZWlw8IsQaQm5C2xJPMgunAj4jkjzp4iTafATVcD8RU02yNEYqwCdLsoXIe8g
 export DATABASE_URL=postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow_profiling
 

@@ -6,7 +6,7 @@ target/
 .env.*
 !.env.example
 .envrc
-dev-keys/
+docker-keys/
 
 # Git
 .git/

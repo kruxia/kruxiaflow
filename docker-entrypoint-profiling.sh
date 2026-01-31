@@ -10,9 +10,9 @@ fi
 # Load private and public keys if they haven't been provided (this is a development
 # and testing container!)
 if [ -z "$KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM" ] || [ -z "$KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM" ]; then
-    echo "Loading development OAuth RSA key pair from ./dev-keys for development/testing..."
-    export KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM=$(cat dev-keys/private.pem | tr -d '\n')
-    export KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM=$(cat dev-keys/public.pem | tr -d '\n')
+    echo "Loading development OAuth RSA key pair from ./docker-keys for development/testing..."
+    export KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM=$(cat docker-keys/private.pem | tr -d '\n')
+    export KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM=$(cat docker-keys/public.pem | tr -d '\n')
 fi
 
 # Set up profiling environment variables
