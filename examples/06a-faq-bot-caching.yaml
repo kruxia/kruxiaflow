@@ -76,7 +76,7 @@ activities:
   - key: answer_question
     activity_name: llm_prompt
     parameters:
-      model: anthropic/claude-haiku-4-20250415
+      model: anthropic/claude-haiku-4-5-20251001
       prompt: |
         You are a helpful FAQ assistant. Answer questions concisely and accurately.
 
@@ -94,7 +94,7 @@ activities:
           - "{{parameters.model}}"
           - "{{parameters.prompt}}"
       budget:
-        limit_usd: 0.10
+        limit: 0.10
         action: abort
 
   # Step 2: Store answer with cache metrics for analytics

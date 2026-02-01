@@ -13,7 +13,7 @@ Example:
     # Build activity definitions with fluent API
     analyze = (
         Activity(key="analyze_sentiment")
-        .with_worker("builtin", "llm_prompt")
+        .with_worker("std", "llm_prompt")
         .with_params(
             provider="anthropic",
             model="claude-3-haiku-20240307",
@@ -25,7 +25,7 @@ Example:
     # Use expression conditions for dependencies
     save = (
         Activity(key="save_results")
-        .with_worker("builtin", "postgres_query")
+        .with_worker("std", "postgres_query")
         .with_params(
             query="INSERT INTO results VALUES ($1, $2)",
             params=[user_text, analyze["sentiment"]],
@@ -39,7 +39,7 @@ Example:
 
     notify = (
         Activity(key="notify")
-        .with_worker("builtin", "http_request")
+        .with_worker("std", "http_request")
         .with_params(
             method="POST",
             body={"workflow_id": workflow.id, "result": analyze["sentiment"]},

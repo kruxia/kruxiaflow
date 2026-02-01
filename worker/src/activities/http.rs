@@ -327,7 +327,7 @@ impl ActivityImpl for HttpRequestActivity {
         } else if let Some(content_type) = response.headers().get("content-type") {
             // Body requested - parse based on content type
             let content_type_str = content_type.to_str().unwrap_or("");
-            if content_type_str.contains("application/json") {
+            if content_type_str.contains("application/json") || content_type_str.ends_with("+json") {
                 HttpResponse::from_response_json(response).await?
             } else {
                 HttpResponse::from_response_text(response).await?
@@ -368,7 +368,7 @@ impl ActivityImpl for HttpRequestActivity {
     }
 
     fn worker(&self) -> &str {
-        "builtin"
+        "std"
     }
 }
 
@@ -435,6 +435,136 @@ mod tests {
         let activity = HttpRequestActivity::new();
 
         assert_eq!(activity.name(), "http_request");
-        assert_eq!(activity.worker(), "builtin");
+        assert_eq!(activity.worker(), "std");
+    }
+
+    /// Test that JSON-based content types (e.g. application/geo+json) are parsed as JSON.
+    /// Regression test for: weather.gov returns application/geo+json which was being
+    /// stored as a string instead of parsed JSON, causing template resolution failures.
+    #[tokio::test]
+    async fn test_json_suffix_content_type_parsed_as_json() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        let body = json!({
+            "type": "Feature",
+            "properties": {
+                "periods": [
+                    {"temperature": 72, "shortForecast": "Sunny"}
+                ]
+            }
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/forecast"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(&body)
+                    .insert_header("content-type", "application/geo+json"),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let activity = HttpRequestActivity::new();
+        let params = json!({
+            "method": "GET",
+            "url": format!("{}/forecast", mock_server.uri()),
+        });
+
+        let result = activity
+            .execute(params)
+            .await
+            .expect("Activity should succeed");
+
+        let outputs = result.outputs;
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(outputs[0].name, "response");
+
+        let response = &outputs[0].value;
+        assert_eq!(response["status"], 200);
+        assert_eq!(response["success"], true);
+
+        // The body should be a parsed JSON object, not a string
+        let body_value = &response["body"];
+        assert!(body_value.is_object(), "body should be a JSON object, not a string");
+        assert_eq!(body_value["properties"]["periods"][0]["temperature"], 72);
+        assert_eq!(
+            body_value["properties"]["periods"][0]["shortForecast"],
+            "Sunny"
+        );
+    }
+
+    /// Test that standard application/json content type is still parsed as JSON.
+    #[tokio::test]
+    async fn test_application_json_content_type_parsed_as_json() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        let body = json!({"key": "value"});
+
+        Mock::given(method("GET"))
+            .and(path("/api"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(&body)
+                    .insert_header("content-type", "application/json"),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let activity = HttpRequestActivity::new();
+        let params = json!({
+            "method": "GET",
+            "url": format!("{}/api", mock_server.uri()),
+        });
+
+        let result = activity
+            .execute(params)
+            .await
+            .expect("Activity should succeed");
+
+        let response = &result.outputs[0].value;
+        let body_value = &response["body"];
+        assert!(body_value.is_object(), "body should be a JSON object");
+        assert_eq!(body_value["key"], "value");
+    }
+
+    /// Test that non-JSON content types are stored as text strings.
+    #[tokio::test]
+    async fn test_text_content_type_stored_as_string() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/text"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string("Hello, world!")
+                    .insert_header("content-type", "text/plain"),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let activity = HttpRequestActivity::new();
+        let params = json!({
+            "method": "GET",
+            "url": format!("{}/text", mock_server.uri()),
+        });
+
+        let result = activity
+            .execute(params)
+            .await
+            .expect("Activity should succeed");
+
+        let response = &result.outputs[0].value;
+        let body_value = &response["body"];
+        assert!(body_value.is_string(), "body should be a string for text/plain");
+        assert_eq!(body_value.as_str().unwrap(), "Hello, world!");
     }
 }

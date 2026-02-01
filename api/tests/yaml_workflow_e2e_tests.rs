@@ -176,7 +176,7 @@ async fn test_yaml_workflow_end_to_end_with_healthcheck() {
     let worker_config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("test_worker_{}", Uuid::now_v7()),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities: 16,
@@ -199,7 +199,7 @@ async fn test_yaml_workflow_end_to_end_with_healthcheck() {
 name: healthcheck_test
 activities:
   - key: check_liveness
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: GET
@@ -208,7 +208,7 @@ activities:
       - response
 
   - key: check_readiness
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: GET
@@ -511,7 +511,7 @@ async fn test_conditional_branching_workflow() {
     let worker_config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("test_worker_{}", Uuid::now_v7()),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities: 16,
@@ -539,7 +539,7 @@ async fn test_conditional_branching_workflow() {
 name: conditional_test
 activities:
   - key: check_health
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: GET
@@ -548,7 +548,7 @@ activities:
       - response
 
   - key: store_success
-    worker: builtin
+    worker: std
     activity_name: postgres_query
     parameters:
       db_url: "{}"

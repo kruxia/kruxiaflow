@@ -277,9 +277,9 @@ For users who only have **one API key**, we provide single-provider variants tha
 #### Example 5a: Anthropic Only (`05a-research-assistant-anthropic.yaml`)
 
 **Fallback chain** (with $0.01 budget):
-1. **Claude Opus 4.1** ($15/$75 per M) → SKIPPED (~$0.076)
+1. **Claude Opus 4.5** ($5/$25 per M) → SKIPPED (~$0.0255)
 2. **Claude Sonnet 4.5** ($3/$15 per M) → SKIPPED (~$0.0153)
-3. **Claude Haiku 3.5** ($0.80/$4 per M) → USED (~$0.0041)
+3. **Claude Haiku 4.5** ($1/$5 per M) → USED (~$0.0051)
 
 ```bash
 export ANTHROPIC_API_KEY=your-key

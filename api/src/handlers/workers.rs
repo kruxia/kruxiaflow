@@ -14,8 +14,8 @@ use uuid::Uuid;
 /// scheduled_for for fair scheduling across all activity types.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct PollActivitiesRequest {
-    /// Worker type this worker handles (e.g., "builtin", "custom")
-    #[schema(example = "builtin")]
+    /// Worker type this worker handles (e.g., "std", "custom")
+    #[schema(example = "std")]
     pub worker: String,
 
     /// Worker instance ID (for tracking which worker claimed the activity)
@@ -75,7 +75,7 @@ pub struct PendingActivity {
     pub activity_key: String,
 
     /// Activity worker type
-    #[schema(example = "builtin")]
+    #[schema(example = "std")]
     pub worker: String,
 
     /// Activity name

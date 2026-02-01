@@ -11,7 +11,7 @@ activities:
   # These three activities have no dependencies and execute in parallel
 
   - key: fetch_doc1
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: GET
@@ -20,7 +20,7 @@ activities:
       - response
 
   - key: fetch_doc2
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: GET
@@ -29,7 +29,7 @@ activities:
       - response
 
   - key: fetch_doc3
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: GET
@@ -42,7 +42,7 @@ activities:
   # These also execute in parallel (independent dependencies)
 
   - key: process_doc1
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -57,7 +57,7 @@ activities:
       - fetch_doc1
 
   - key: process_doc2
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -72,7 +72,7 @@ activities:
       - fetch_doc2
 
   - key: process_doc3
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -90,7 +90,7 @@ activities:
   # This activity waits for ALL three process activities to complete
 
   - key: aggregate_results
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -112,7 +112,7 @@ activities:
   # Store the final summary
 
   - key: store_summary
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST

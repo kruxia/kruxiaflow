@@ -3,12 +3,13 @@ description: Use LLM to moderate user content with cost control and retry
 
 activities:
   - key: analyze_content
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     parameters:
-      model: anthropic/claude-3-5-haiku-20241022
+      model: anthropic/claude-haiku-4-5-20251001
       prompt: |
-        You are a content moderation assistant. Analyze the following text and determine if it violates community guidelines.
+        You are a content moderation assistant. Analyze the following text and determine
+        if it violates community guidelines.
 
         Text to moderate:
         {{INPUT.user_content}}
@@ -30,21 +31,22 @@ activities:
         factor: 2
         max_seconds: 60
       budget:
-        limit_usd: 0.50
+        limit: 0.50
         action: abort
 
-  - key: store_moderation_result
-    worker: builtin
-    activity_name: postgres_query
-    parameters:
-      query: |
-        INSERT INTO moderation_log
-        (content_id, decision, cost, tokens, moderated_at)
-        VALUES ($1, $2, $3, $4, NOW())
-      params:
-        - "{{INPUT.content_id}}"
-        - "{{analyze_content.result.content}}"
-        - "{{analyze_content.result.usage.total_tokens}}"
-        - "{{analyze_content.result.usage.total_tokens}}"
-    depends_on:
-      - analyze_content
+  # # TODO: Store moderation result in database
+  # - key: store_moderation_result
+  #   worker: std
+  #   activity_name: postgres_query
+  #   parameters:
+  #     query: |
+  #       INSERT INTO moderation_log
+  #       (content_id, decision, cost, tokens, moderated_at)
+  #       VALUES ($1, $2, $3, $4, NOW())
+  #     params:
+  #       - "{{INPUT.content_id}}"
+  #       - "{{analyze_content.result.content}}"
+  #       - "{{analyze_content.result.usage.total_tokens}}"
+  #       - "{{analyze_content.result.usage.total_tokens}}"
+  #   depends_on:
+  #     - analyze_content

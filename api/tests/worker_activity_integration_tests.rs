@@ -702,7 +702,7 @@ async fn schedule_activity_with_timeout(
 
     let activity = Activity {
         key: activity_key.clone(),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         activity_name: "http_request".to_string(),
         parameters: json!({"url": "https://example.com"}),
         settings: Some(kruxiaflow_core::workflow::definition::ActivitySettings {
@@ -753,7 +753,7 @@ async fn test_poll_returns_timeout_seconds_from_settings() {
             HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
         )
         .json(&json!({
-            "worker": "builtin",
+            "worker": "std",
             "worker_id": "worker_timeout_test",
             "max_activities": 1
         }))
@@ -817,7 +817,7 @@ async fn test_poll_returns_various_timeout_values() {
                 HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
             )
             .json(&json!({
-                "worker": "builtin",
+                "worker": "std",
                 "worker_id": &format!("worker_timeout_{}", timeout),
                 "max_activities": 1
             }))
@@ -895,7 +895,7 @@ async fn test_poll_returns_null_timeout_when_settings_has_no_timeout() {
     let queue = PostgresQueue::new(pool.clone(), QueueConfig::default());
     let activity = Activity {
         key: "activity_no_timeout".to_string(),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         activity_name: "http_request".to_string(),
         parameters: json!({"url": "https://example.com"}),
         settings: Some(kruxiaflow_core::workflow::definition::ActivitySettings {
@@ -927,7 +927,7 @@ async fn test_poll_returns_null_timeout_when_settings_has_no_timeout() {
             HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
         )
         .json(&json!({
-            "worker": "builtin",
+            "worker": "std",
             "worker_id": "worker_settings_no_timeout",
             "max_activities": 1
         }))

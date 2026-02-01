@@ -191,7 +191,7 @@ def print_summary(all_results):
 
     if kruxiaflow_results:
         sf_avg = sum(r.throughput_wf_per_sec for r in kruxiaflow_results) / len(kruxiaflow_results)
-        click.echo(f"Kruxia Flow (builtin) avg throughput: {sf_avg:.2f} wf/sec")
+        click.echo(f"Kruxia Flow (std) avg throughput: {sf_avg:.2f} wf/sec")
 
         if sf_avg >= 1000:
             click.secho("🎉 Kruxia Flow target achieved: >1,000 wf/sec!", fg="green", bold=True)
@@ -206,7 +206,7 @@ def print_summary(all_results):
         sf_avg = sum(r.throughput_wf_per_sec for r in kruxiaflow_results) / len(kruxiaflow_results)
         py_avg = sum(r.throughput_wf_per_sec for r in py_std_results) / len(py_std_results)
         ratio = sf_avg / py_avg if py_avg > 0 else 0
-        click.secho(f"Builtin vs py-std: {ratio:.1f}x", fg="cyan", bold=True)
+        click.secho(f"Std vs py-std: {ratio:.1f}x", fg="cyan", bold=True)
 
     if temporal_results:
         temp_avg = sum(r.throughput_wf_per_sec for r in temporal_results) / len(temporal_results)

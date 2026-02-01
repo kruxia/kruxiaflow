@@ -467,5 +467,5 @@ async fn test_email_activity_name_and_worker() {
     let activity = EmailSendActivity::new();
 
     assert_eq!(activity.name(), "email_send");
-    assert_eq!(activity.worker(), "builtin");
+    assert_eq!(activity.worker(), "std");
 }

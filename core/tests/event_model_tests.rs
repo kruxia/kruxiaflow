@@ -282,7 +282,7 @@ fn test_workflow_definition_with_activities() {
     let id = test_uuid();
     let activity = ActivityDefinition {
         key: "act1".to_string(),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         activity_name: "TestActivity".to_string(),
         parameters: json!({"param": "value"}),
         settings: None,
@@ -331,7 +331,7 @@ fn test_activity_definition_serialization() {
 fn test_activity_definition_with_dependencies() {
     let activity = ActivityDefinition {
         key: "act2".to_string(),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         activity_name: "DependentActivity".to_string(),
         parameters: json!({}),
         settings: None,

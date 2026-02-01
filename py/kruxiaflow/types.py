@@ -28,7 +28,7 @@ ActivityName = Annotated[str, Field(min_length=1, pattern=IDENTIFIER_PATTERN)]
 ActivityNameOptional = Annotated[str, Field(default="", pattern=r"^[a-zA-Z0-9_-]*$")]
 
 # Worker name - simple non-empty string for worker field in activities (with default)
-WorkerName = Annotated[str, Field(default="builtin", min_length=1)]
+WorkerName = Annotated[str, Field(default="std", min_length=1)]
 
 # Worker name - required (no default), for use in API responses
 WorkerNameRequired = Annotated[str, Field(min_length=1)]

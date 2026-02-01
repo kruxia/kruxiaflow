@@ -665,7 +665,7 @@ impl ActivityImpl for LLMPromptActivity {
     }
 
     fn worker(&self) -> &str {
-        "builtin"
+        "std"
     }
 }
 
@@ -1099,7 +1099,7 @@ impl ActivityImpl for EmbeddingActivity {
     }
 
     fn worker(&self) -> &str {
-        "builtin"
+        "std"
     }
 }
 
@@ -1156,14 +1156,14 @@ mod tests {
     fn test_llm_prompt_activity_name() {
         let activity = LLMPromptActivity::new();
         assert_eq!(activity.name(), "llm_prompt");
-        assert_eq!(activity.worker(), "builtin");
+        assert_eq!(activity.worker(), "std");
     }
 
     #[test]
     fn test_embedding_activity_name() {
         let activity = EmbeddingActivity::new();
         assert_eq!(activity.name(), "embedding");
-        assert_eq!(activity.worker(), "builtin");
+        assert_eq!(activity.worker(), "std");
     }
 
     // ============================================================================

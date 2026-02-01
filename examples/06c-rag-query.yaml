@@ -182,7 +182,7 @@ activities:
       - result  # Contains answer in result.content
     settings:
       budget:
-        limit_usd: 0.50
+        limit: 0.50
         action: abort
     depends_on:
       - search_similar_chunks

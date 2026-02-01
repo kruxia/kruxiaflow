@@ -12,7 +12,7 @@
 | 1. Workflow Definitions SDK      | ✅ **COMPLETE**            | 221 tests, 95%+ coverage                     |
 | 2. Worker SDK                    | ✅ **COMPLETE**            | 178 tests, mirrors Rust SDK                  |
 | 3. Standard Python Worker        | ✅ **COMPLETE**            | 99% coverage, Docker images in CI/CD         |
-| 4. Benchmark (py-std vs builtin) | ✅ **COMPLETE**            | Same scenarios, separate metrics             |
+| 4. Benchmark (py-std vs std)     | ✅ **COMPLETE**            | Same scenarios, separate metrics             |
 
 ---
 
@@ -220,7 +220,7 @@ user_text = Input("text", type=str, required=True)
 # Fluent activity definition - all with_* methods return self for chaining
 analyze = (
     Activity(key="analyze_sentiment")
-    .with_worker("builtin", "llm_prompt")
+    .with_worker("std", "llm_prompt")
     .with_params(
         provider="anthropic",
         model="claude-3-haiku-20240307",
@@ -233,7 +233,7 @@ analyze = (
 
 save = (
     Activity(key="save_results")
-    .with_worker("builtin", "postgres_query")
+    .with_worker("std", "postgres_query")
     .with_params(
         database_url="${DATABASE_URL}",
         query="""
@@ -264,7 +264,7 @@ client.deploy(wf)
 # Define activities with full configuration
 extract = (
     Activity(key="extract")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(url="${API_URL}")
 )
 
@@ -286,7 +286,7 @@ validate = (
 
 load = (
     Activity(key="load")
-    .with_worker("builtin", "postgres_query")
+    .with_worker("std", "postgres_query")
     .with_params(query="...")
     .with_dependencies(transform)  # Parallel with validate - both depend on transform
 )
@@ -294,7 +294,7 @@ load = (
 # Fan-in: notify depends on multiple activities
 notify = (
     Activity(key="notify")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(url="${SLACK_URL}")
     .with_dependencies(validate, load)  # Waits for both to complete
 )
@@ -312,7 +312,7 @@ wf = (
 
 save = (
     Activity(key="save")
-    .with_worker("builtin", "postgres_query")
+    .with_worker("std", "postgres_query")
     .with_params(
         sentiment=analyze["sentiment"],       # Activity output reference
         confidence=analyze["confidence"],
@@ -324,7 +324,7 @@ save = (
 # Conditional dependencies with output references
 notify = (
     Activity(key="notify")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_dependencies(
         Dependency.on(analyze, analyze["confidence"] > 0.8)
     )
@@ -333,7 +333,7 @@ notify = (
 # Run on failure
 retry = (
     Activity(key="retry")
-    .with_worker("builtin", "llm_prompt")
+    .with_worker("std", "llm_prompt")
     .with_dependencies(
         Dependency.on(analyze, analyze["status"] == "failed")
     )
@@ -347,7 +347,7 @@ search_queries = ["AI workflows", "ML pipelines", "LLM orchestration"]
 # Generate N parallel search activities with list comprehension
 searches = [
     Activity(key=f"search_{i}")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(method="GET", url=f"https://api.search.com/q={query}")
     for i, query in enumerate(search_queries)
 ]
@@ -373,7 +373,7 @@ def create_llm_fallback_chain(name: str, prompt: str, budget: float) -> list[Act
     """Create activity group with Claude → GPT-4 fallback."""
     primary = (
         Activity(key=f"{name}_claude")
-        .with_worker("builtin", "llm_prompt")
+        .with_worker("std", "llm_prompt")
         .with_params(
             provider="anthropic",
             model="claude-3-haiku-20240307",
@@ -384,7 +384,7 @@ def create_llm_fallback_chain(name: str, prompt: str, budget: float) -> list[Act
 
     fallback = (
         Activity(key=f"{name}_gpt4")
-        .with_worker("builtin", "llm_prompt")
+        .with_worker("std", "llm_prompt")
         .with_params(
             provider="openai",
             model="gpt-4o-mini",
@@ -405,7 +405,7 @@ activities = create_llm_fallback_chain(
 
 notify = (
     Activity(key="notify")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(url="${SLACK_URL}")
     .with_dependencies(*activities)  # Depends on both primary and fallback
 )
@@ -2758,18 +2758,18 @@ Use **Component 2 (Worker SDK)** to build custom workers when you need:
 | Unit tests for workers module   | ✅ Complete  | 99% coverage achieved                       |
 | Docker image builds             | ✅ Complete  | ghcr.io/kruxia/kruxiaflow-worker-py-*       |
 | CI/CD integration               | ✅ Complete  | `.github/workflows/pysdk-ci.yml`            |
-| Benchmark (py-std vs builtin)   | ✅ Complete  | `benchmarks/` docker-compose + runner       |
+| Benchmark (py-std vs std)       | ✅ Complete  | `benchmarks/` docker-compose + runner       |
 
-### Benchmarking: py-std vs Builtin Worker
+### Benchmarking: py-std vs Std Worker
 
-**Goal**: Measure the performance overhead of the Python worker compared to the builtin Rust worker using identical echo workflows and benchmark scenarios.
+**Goal**: Measure the performance overhead of the Python worker compared to the std Rust worker using identical echo workflows and benchmark scenarios.
 
 **Approach**:
 - Add a `kruxiaflow-py-std` service to `benchmarks/docker-compose.yml` that builds from `py/Dockerfile` (target `py-std`) and connects to the same Kruxia Flow API server
-- Define py-std echo workflows that use `worker: "py-std"` with a script activity that echoes input (equivalent to the builtin echo activity)
+- Define py-std echo workflows that use `worker: "py-std"` with a script activity that echoes input (equivalent to the std echo activity)
 - Run the same benchmark scenarios (Sequential-5, Parallel-10, High-Concurrency-3) against the py-std worker
 - Capture CPU, memory, throughput, and latency metrics separately using Docker resource monitoring
-- Report as a separate platform ("Kruxia Flow (py-std)") alongside the existing builtin results
+- Report as a separate platform ("Kruxia Flow (py-std)") alongside the existing std results
 
 **Key files**:
 - `benchmarks/docker-compose.yml` — py-std worker service

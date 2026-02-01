@@ -30,11 +30,11 @@ description: Research assistant with streaming analysis output
 activities:
   # Step 1: Generate a topic summary (non-streaming for speed)
   - key: summarize_topic
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     streaming: false  # Explicit: non-streaming for efficiency
     parameters:
-      model: anthropic/claude-3-5-haiku-20241022
+      model: anthropic/claude-haiku-4-5-20251001
       prompt: |
         Provide a brief 2-3 sentence overview of the topic: {{INPUT.topic}}
         Focus on the key aspects that would be relevant for a research report.
@@ -46,11 +46,11 @@ activities:
 
   # Step 2: Generate research questions (non-streaming)
   - key: gather_sources
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     streaming: false
     parameters:
-      model: anthropic/claude-3-5-haiku-20241022
+      model: anthropic/claude-haiku-4-5-20251001
       prompt: |
         Based on the topic "{{INPUT.topic}}", generate 3 key research questions
         that would help provide a comprehensive analysis.
@@ -63,13 +63,13 @@ activities:
 
   # Step 3: Comprehensive analysis (STREAMING for real-time output)
   - key: analyze_findings
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     streaming: true  # Enable streaming for this long-form output
     parameters:
       model:
-        - anthropic/claude-3-5-sonnet-20241022  # Higher quality for analysis
-        - anthropic/claude-3-5-haiku-20241022   # Fallback
+        - anthropic/claude-sonnet-4-5-20250929   # Higher quality for analysis
+        - anthropic/claude-haiku-4-5-20251001   # Fallback
       prompt: |
         Write a comprehensive research analysis on: {{INPUT.topic}}
 
@@ -99,5 +99,5 @@ activities:
     settings:
       timeout_seconds: 180
       budget:
-        limit_usd: 0.10
+        limit: 0.10
         action: warn

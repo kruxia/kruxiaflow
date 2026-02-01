@@ -370,7 +370,7 @@ impl ActivityImpl for EmailSendActivity {
     }
 
     fn worker(&self) -> &str {
-        "builtin"
+        "std"
     }
 }
 
@@ -593,6 +593,6 @@ mod tests {
         let activity = EmailSendActivity::new();
 
         assert_eq!(activity.name(), "email_send");
-        assert_eq!(activity.worker(), "builtin");
+        assert_eq!(activity.worker(), "std");
     }
 }

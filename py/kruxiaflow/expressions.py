@@ -8,7 +8,7 @@ Example:
     from kruxiaflow import Activity, Dependency
     from kruxiaflow.expressions import Input, workflow, and_, is_null
 
-    check = Activity(key="check").with_worker("builtin", "http_request")
+    check = Activity(key="check").with_worker("std", "http_request")
 
     # Simple condition
     success = Activity(key="success").with_dependencies(
@@ -135,7 +135,7 @@ class Input(Expression):
 
         analyze = (
             Activity(key="analyze")
-            .with_worker("builtin", "llm_prompt")
+            .with_worker("std", "llm_prompt")
             .with_params(prompt=f"Analyze: {user_text}")
         )
     """
@@ -217,7 +217,7 @@ class SecretRef(Expression):
 
         call_api = (
             Activity(key="call_api")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(headers={"Authorization": f"Bearer {api_key}"})
         )
     """
@@ -252,7 +252,7 @@ class EnvRef(Expression):
 
         query = (
             Activity(key="query")
-            .with_worker("builtin", "postgres_query")
+            .with_worker("std", "postgres_query")
             .with_params(database_url=db_url)
         )
     """
@@ -350,7 +350,7 @@ class OutputRef(Expression):
     Supports comparison operators for use in Dependency conditions.
 
     Example:
-        analyze = Activity(key="analyze").with_worker("builtin", "llm_prompt")
+        analyze = Activity(key="analyze").with_worker("std", "llm_prompt")
 
         # Access output field
         sentiment = analyze["sentiment"]

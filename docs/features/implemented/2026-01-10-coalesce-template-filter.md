@@ -15,7 +15,7 @@ The built-in `default` filter in minijinja follows Jinja2 semantics where it onl
 **Problem scenario:**
 ```yaml
 - key: check_source
-  worker: builtin
+  worker: std
   activity_name: postgres_query
   parameters:
     query: "SELECT doi FROM sources WHERE id = $1"

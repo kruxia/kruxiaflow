@@ -683,7 +683,7 @@ This story enhances file handling with production features deferred from the MVP
 ```yaml
 activities:
   - key: process_document
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -707,7 +707,7 @@ activities:
         type: folder  # Directory of PDF files
 
   - key: upload_reports
-    worker: builtin
+    worker: std
     activity_name: s3_upload_folder
     parameters:
       folder: "{{FOLDER.generate_reports.reports}}"
@@ -731,7 +731,7 @@ let versions = storage.list_file_versions(workflow_id, activity_key, filename).a
 ```yaml
 activities:
   - key: generate_upload_url
-    worker: builtin
+    worker: std
     activity_name: generate_presigned_url
     parameters:
       operation: put_object
@@ -2241,7 +2241,7 @@ class TestPaymentWorkflow(WorkflowTest):
 ```yaml
 # Create a new SQLite database
 - key: create_db
-  worker: builtin
+  worker: std
   name: sqlite_create
   parameters:
     schema: |
@@ -2252,7 +2252,7 @@ class TestPaymentWorkflow(WorkflowTest):
 
 # Execute queries on an existing SQLite database
 - key: process_data
-  worker: builtin
+  worker: std
   name: sqlite_execute
   parameters:
     database: "{{create_db.outputs.database}}"
@@ -2265,7 +2265,7 @@ class TestPaymentWorkflow(WorkflowTest):
 
 # Query and return results
 - key: get_results
-  worker: builtin
+  worker: std
   name: sqlite_query
   parameters:
     database: "{{process_data.outputs.database}}"

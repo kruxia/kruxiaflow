@@ -19,13 +19,13 @@ webhook_url = Input("webhook_url", type=str, required=True)
 # Define activities with fluent API
 fetch_data = (
     Activity(key="fetch_data")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(method="GET", url="https://api.example.com/data")
 )
 
 process_data = (
     Activity(key="process_data")
-    .with_worker("builtin", "transform")
+    .with_worker("std", "transform")
     .with_params(data=fetch_data["response"])
     .with_dependencies(fetch_data)
 )

@@ -20,7 +20,7 @@ db_url = SecretRef("db_url")
 # Step 1: Check if email is valid using a validation service
 check_email = (
     Activity(key="check_email")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(
         method="GET",
         url="https://httpbin.org/json",  # Mock validation endpoint
@@ -30,7 +30,7 @@ check_email = (
 # Step 2a: Store valid user (only runs if validation succeeded)
 store_valid_user = (
     Activity(key="store_valid_user")
-    .with_worker("builtin", "postgres_query")
+    .with_worker("std", "postgres_query")
     .with_params(
         db_url=db_url,
         query="""INSERT INTO valid_users (email, validated_at) VALUES ($1, NOW())
@@ -45,7 +45,7 @@ store_valid_user = (
 # Step 2b: Store invalid user (only runs if validation failed)
 store_invalid_user = (
     Activity(key="store_invalid_user")
-    .with_worker("builtin", "postgres_query")
+    .with_worker("std", "postgres_query")
     .with_params(
         db_url=db_url,
         query="""INSERT INTO invalid_users (email, reason, checked_at)
@@ -61,7 +61,7 @@ store_invalid_user = (
 # Note: Both dependencies are listed; one will be skipped based on its condition
 send_notification = (
     Activity(key="send_notification")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(
         method="POST",
         url=notification_webhook_url,

@@ -468,12 +468,12 @@ impl ActivityImpl for EmailSendActivity {
     }
 
     fn worker(&self) -> &str {
-        "builtin"
+        "std"
     }
 }
 ```
 
-### Registration in builtin.rs
+### Registration in std.rs
 
 ```rust
 use crate::activities::{
@@ -481,7 +481,7 @@ use crate::activities::{
     PostgresQueryActivity, EmailSendActivity,
 };
 
-pub fn register_builtin_activities(cache_service: Arc<dyn CacheService>) -> ActivityRegistry {
+pub fn register_std_activities(cache_service: Arc<dyn CacheService>) -> ActivityRegistry {
     let mut registry = ActivityRegistry::new(cache_service);
 
     // Register activities
@@ -843,7 +843,7 @@ async fn test_email_send_integration() {
 
 3. **Register activity** ✅
    - Exported from `activities/mod.rs`
-   - Registered in `builtin.rs`
+   - Registered in `std.rs`
 
 4. **Tests** ✅
    - 16 unit tests for SmtpConfig URL parsing, EmailParams serialization (text-only, html-only, multipart), activity metadata
