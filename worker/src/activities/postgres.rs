@@ -2253,6 +2253,316 @@ mod tests {
         assert_eq!(rows[2].get("content").unwrap(), "Third passage");
     }
 
+    // ========================================================================
+    // Unit Tests: PoolConfig (No Database Required)
+    // ========================================================================
+
+    #[test]
+    fn test_pool_config_from_env_loads() {
+        // Just verify the function doesn't panic and returns a valid config
+        let config = PoolConfig::from_env();
+        // max_connections should be at least 1 (either default 5 or from env)
+        assert!(config.max_connections >= 1);
+        // acquire_timeout should be positive
+        assert!(config.acquire_timeout_secs > 0);
+    }
+
+    #[test]
+    fn test_pool_config_debug() {
+        let config = PoolConfig {
+            max_connections: 10,
+            min_connections: Some(2),
+            acquire_timeout_secs: 60,
+            max_lifetime_secs: Some(3600),
+            idle_timeout_secs: Some(300),
+        };
+        let debug_str = format!("{:?}", config);
+        assert!(debug_str.contains("max_connections: 10"));
+        assert!(debug_str.contains("min_connections: Some(2)"));
+    }
+
+    // ========================================================================
+    // Unit Tests: Query Type Detection Edge Cases
+    // ========================================================================
+
+    #[test]
+    fn test_determine_query_type_ddl() {
+        // CREATE, DROP, ALTER default to Insert (DML) behavior
+        assert!(matches!(
+            determine_query_type("CREATE TABLE test (id INT)"),
+            QueryType::Insert
+        ));
+        assert!(matches!(
+            determine_query_type("DROP TABLE test"),
+            QueryType::Insert
+        ));
+        assert!(matches!(
+            determine_query_type("ALTER TABLE test ADD COLUMN x INT"),
+            QueryType::Insert
+        ));
+    }
+
+    #[test]
+    fn test_determine_query_type_case_insensitive() {
+        assert!(matches!(
+            determine_query_type("select 1"),
+            QueryType::Select
+        ));
+        assert!(matches!(
+            determine_query_type("Select * from foo"),
+            QueryType::Select
+        ));
+        assert!(matches!(
+            determine_query_type("insert into foo values (1)"),
+            QueryType::Insert
+        ));
+        assert!(matches!(
+            determine_query_type("update foo set x = 1"),
+            QueryType::Update
+        ));
+        assert!(matches!(
+            determine_query_type("delete from foo"),
+            QueryType::Delete
+        ));
+    }
+
+    #[test]
+    fn test_determine_query_type_with_leading_whitespace() {
+        assert!(matches!(
+            determine_query_type("  SELECT 1"),
+            QueryType::Select
+        ));
+        assert!(matches!(
+            determine_query_type("\n\tINSERT INTO foo VALUES (1)"),
+            QueryType::Insert
+        ));
+    }
+
+    #[test]
+    fn test_determine_query_type_delete_with_returning() {
+        // DELETE with RETURNING on same line
+        assert!(matches!(
+            determine_query_type("DELETE FROM foo WHERE id = 1 RETURNING *"),
+            QueryType::Select
+        ));
+        // DELETE with RETURNING on new line
+        assert!(matches!(
+            determine_query_type("DELETE FROM foo WHERE id = 1\nRETURNING id, name"),
+            QueryType::Select
+        ));
+    }
+
+    #[test]
+    fn test_determine_query_type_update_with_multiline_returning() {
+        let sql = r#"UPDATE orders
+            SET status = 'shipped'
+            WHERE id = $1
+            RETURNING id, status"#;
+        assert!(matches!(determine_query_type(sql), QueryType::Select));
+    }
+
+    #[test]
+    fn test_has_returning_clause_edge_cases() {
+        // RETURNING at end of string with newline before
+        assert!(has_returning_clause(
+            &"INSERT INTO X\nRETURNING".to_uppercase()
+        ));
+        // RETURNING followed by newline
+        assert!(has_returning_clause(
+            &"INSERT INTO X RETURNING\nid".to_uppercase()
+        ));
+        // No RETURNING at all
+        assert!(!has_returning_clause(
+            &"INSERT INTO X VALUES (1)".to_uppercase()
+        ));
+        // RETURNING as part of column name (no space before)
+        assert!(!has_returning_clause(
+            &"SELECT NOT_RETURNING FROM FOO".to_uppercase()
+        ));
+    }
+
+    // ========================================================================
+    // Unit Tests: Serde for Transaction Types (No Database Required)
+    // ========================================================================
+
+    #[test]
+    fn test_transaction_statement_serde() {
+        let stmt = TransactionStatement {
+            query: "SELECT $1::int".to_string(),
+            params: Some(vec![json!(42)]),
+        };
+        let json_str = serde_json::to_string(&stmt).unwrap();
+        let parsed: TransactionStatement = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(parsed.query, "SELECT $1::int");
+        assert!(parsed.params.is_some());
+        assert_eq!(parsed.params.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_transaction_statement_no_params() {
+        let stmt = TransactionStatement {
+            query: "SELECT 1".to_string(),
+            params: None,
+        };
+        let json_str = serde_json::to_string(&stmt).unwrap();
+        let parsed: Value = serde_json::from_str(&json_str).unwrap();
+        // params should be absent (skip_serializing_if)
+        assert!(parsed.get("params").is_none());
+    }
+
+    #[test]
+    fn test_isolation_level_serde() {
+        // Default is ReadCommitted
+        let level: IsolationLevel = serde_json::from_str("\"read_committed\"").unwrap();
+        assert!(matches!(level, IsolationLevel::ReadCommitted));
+
+        let level: IsolationLevel = serde_json::from_str("\"repeatable_read\"").unwrap();
+        assert!(matches!(level, IsolationLevel::RepeatableRead));
+
+        let level: IsolationLevel = serde_json::from_str("\"serializable\"").unwrap();
+        assert!(matches!(level, IsolationLevel::Serializable));
+    }
+
+    #[test]
+    fn test_isolation_level_default() {
+        let level = IsolationLevel::default();
+        assert!(matches!(level, IsolationLevel::ReadCommitted));
+    }
+
+    #[test]
+    fn test_transaction_params_serde() {
+        let params = TransactionParams {
+            db_url: "postgres://localhost/test".to_string(),
+            statements: vec![TransactionStatement {
+                query: "SELECT 1".to_string(),
+                params: None,
+            }],
+            isolation_level: IsolationLevel::Serializable,
+        };
+        let json_str = serde_json::to_string(&params).unwrap();
+        let parsed: TransactionParams = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(parsed.db_url, "postgres://localhost/test");
+        assert_eq!(parsed.statements.len(), 1);
+        assert!(matches!(
+            parsed.isolation_level,
+            IsolationLevel::Serializable
+        ));
+    }
+
+    #[test]
+    fn test_transaction_result_serde() {
+        let result = TransactionResult {
+            success: true,
+            statements_executed: 3,
+            results: vec![
+                StatementResult {
+                    rows: Some(vec![json!({"id": 1})]),
+                    rows_affected: None,
+                },
+                StatementResult {
+                    rows: None,
+                    rows_affected: Some(2),
+                },
+            ],
+        };
+        let json_str = serde_json::to_string(&result).unwrap();
+        let parsed: TransactionResult = serde_json::from_str(&json_str).unwrap();
+        assert!(parsed.success);
+        assert_eq!(parsed.statements_executed, 3);
+        assert_eq!(parsed.results.len(), 2);
+    }
+
+    #[test]
+    fn test_postgres_query_params_serde() {
+        let params = PostgresQueryParams {
+            db_url: "postgres://localhost/test".to_string(),
+            query: "SELECT $1::text".to_string(),
+            params: Some(vec![json!("hello")]),
+        };
+        let json_str = serde_json::to_string(&params).unwrap();
+        let parsed: PostgresQueryParams = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(parsed.db_url, "postgres://localhost/test");
+        assert_eq!(parsed.query, "SELECT $1::text");
+        assert!(parsed.params.is_some());
+    }
+
+    #[test]
+    fn test_postgres_query_params_no_params() {
+        let params = PostgresQueryParams {
+            db_url: "postgres://localhost/test".to_string(),
+            query: "SELECT 1".to_string(),
+            params: None,
+        };
+        let json_str = serde_json::to_string(&params).unwrap();
+        let parsed: Value = serde_json::from_str(&json_str).unwrap();
+        assert!(parsed.get("params").is_none());
+    }
+
+    // ========================================================================
+    // Unit Tests: Activity Trait Methods (No Database Required)
+    // ========================================================================
+
+    #[test]
+    fn test_postgres_query_activity_name() {
+        let activity = PostgresQueryActivity::new(test_pool_cache());
+        assert_eq!(activity.name(), "postgres_query");
+        assert_eq!(activity.worker(), "std");
+    }
+
+    #[test]
+    fn test_postgres_transaction_activity_name() {
+        let activity = PostgresTransactionActivity::new(test_pool_cache());
+        assert_eq!(activity.name(), "postgres_transaction");
+        assert_eq!(activity.worker(), "std");
+    }
+
+    #[test]
+    fn test_new_pool_cache_is_empty() {
+        let cache = new_pool_cache();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let read = cache.read().await;
+            assert!(read.is_empty());
+        });
+    }
+
+    #[test]
+    fn test_statement_result_both_none() {
+        let result = StatementResult {
+            rows: None,
+            rows_affected: None,
+        };
+        let json_str = serde_json::to_string(&result).unwrap();
+        let parsed: Value = serde_json::from_str(&json_str).unwrap();
+        // Both should be absent due to skip_serializing_if
+        assert!(parsed.get("rows").is_none());
+        assert!(parsed.get("rows_affected").is_none());
+    }
+
+    #[test]
+    fn test_statement_result_deserialization() {
+        // Test deserializing from raw JSON (simulating what we'd get from storage)
+        let json = r#"{"rows":[{"id":1,"name":"test"}]}"#;
+        let result: StatementResult = serde_json::from_str(json).unwrap();
+        assert!(result.rows.is_some());
+        assert!(result.rows_affected.is_none());
+        let rows = result.rows.unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].get("name").unwrap(), "test");
+    }
+
+    #[test]
+    fn test_statement_result_deserialization_rows_affected() {
+        let json = r#"{"rows_affected":5}"#;
+        let result: StatementResult = serde_json::from_str(json).unwrap();
+        assert!(result.rows.is_none());
+        assert_eq!(result.rows_affected, Some(5));
+    }
+
+    // ========================================================================
+    // Integration Test Helpers (Database Required)
+    // ========================================================================
+
     #[tokio::test]
     async fn test_postgres_transaction_json_parameters() {
         let pool_cache = test_pool_cache();

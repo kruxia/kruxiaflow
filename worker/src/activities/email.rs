@@ -595,4 +595,120 @@ mod tests {
         assert_eq!(activity.name(), "email_send");
         assert_eq!(activity.worker(), "std");
     }
+
+    #[test]
+    fn test_email_send_activity_default() {
+        let activity = EmailSendActivity::default();
+        assert_eq!(activity.name(), "email_send");
+    }
+
+    #[test]
+    fn test_email_executor_default() {
+        let executor = EmailExecutor::default();
+        // Just verify it can be created
+        let _ = executor;
+    }
+
+    #[tokio::test]
+    async fn test_email_send_activity_empty_recipients() {
+        use crate::registry::ActivityImpl;
+        let activity = EmailSendActivity::new();
+
+        let params = serde_json::json!({
+            "smtp_url": "smtp://localhost:25",
+            "from": "sender@example.com",
+            "to": [],
+            "subject": "Test",
+            "text_body": "Hello"
+        });
+
+        let result = activity.execute(params).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("At least one recipient")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_email_send_activity_invalid_params() {
+        use crate::registry::ActivityImpl;
+        let activity = EmailSendActivity::new();
+
+        let result = activity.execute(serde_json::json!({"bad": "params"})).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to parse email parameters")
+        );
+    }
+
+    #[test]
+    fn test_email_params_with_cc_bcc_reply_to() {
+        let json = r#"{
+            "smtp_url": "smtp://localhost:25",
+            "from": "sender@example.com",
+            "to": ["recipient@example.com"],
+            "subject": "Test",
+            "text_body": "Hello",
+            "cc": ["cc1@example.com", "cc2@example.com"],
+            "bcc": ["bcc@example.com"],
+            "reply_to": "reply@example.com"
+        }"#;
+
+        let params: EmailParams = serde_json::from_str(json).unwrap();
+        assert_eq!(params.cc.len(), 2);
+        assert_eq!(params.bcc.len(), 1);
+        assert_eq!(params.reply_to, Some("reply@example.com".to_string()));
+    }
+
+    #[test]
+    fn test_email_params_defaults_for_optional_lists() {
+        let json = r#"{
+            "smtp_url": "smtp://localhost:25",
+            "from": "sender@example.com",
+            "to": ["recipient@example.com"],
+            "subject": "Test",
+            "text_body": "Hello"
+        }"#;
+
+        let params: EmailParams = serde_json::from_str(json).unwrap();
+        assert!(params.cc.is_empty());
+        assert!(params.bcc.is_empty());
+        assert!(params.reply_to.is_none());
+    }
+
+    #[test]
+    fn test_smtp_config_from_url_tls_true() {
+        let config =
+            SmtpConfig::from_url("smtp://user:pass@smtp.example.com:587?tls=true").unwrap();
+        assert!(matches!(config.tls_mode, TlsMode::StartTls));
+    }
+
+    #[test]
+    fn test_tls_mode_default() {
+        let mode = TlsMode::default();
+        assert!(matches!(mode, TlsMode::StartTls));
+    }
+
+    #[test]
+    fn test_email_result_failed() {
+        let result = EmailResult {
+            success: false,
+            message_id: None,
+            recipients_accepted: 0,
+            recipients_rejected: 1,
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        let deserialized: EmailResult = serde_json::from_str(&json).unwrap();
+
+        assert!(!deserialized.success);
+        assert!(deserialized.message_id.is_none());
+        assert_eq!(deserialized.recipients_rejected, 1);
+    }
 }

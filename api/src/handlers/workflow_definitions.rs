@@ -89,6 +89,100 @@ pub struct GetWorkflowDefinitionQuery {
     pub version: Option<String>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_deploy_response_serialize() {
+        let response = DeployWorkflowDefinitionResponse {
+            name: "my-workflow".to_string(),
+            version: "20260201.120000.000000".to_string(),
+            created_at: chrono::Utc::now(),
+            unchanged: None,
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["name"], "my-workflow");
+        assert!(json.get("unchanged").is_none()); // skip_serializing_if
+    }
+
+    #[test]
+    fn test_deploy_response_serialize_unchanged() {
+        let response = DeployWorkflowDefinitionResponse {
+            name: "wf".to_string(),
+            version: "v1".to_string(),
+            created_at: chrono::Utc::now(),
+            unchanged: Some(true),
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["unchanged"], true);
+    }
+
+    #[test]
+    fn test_deploy_response_deserialize() {
+        let json = r#"{"name":"wf","version":"v1","created_at":"2026-01-01T00:00:00Z"}"#;
+        let response: DeployWorkflowDefinitionResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(response.name, "wf");
+        assert!(response.unchanged.is_none());
+    }
+
+    #[test]
+    fn test_list_response_serialize() {
+        let response = ListWorkflowDefinitionsResponse {
+            definitions: vec![WorkflowDefinitionSummary {
+                name: "wf1".to_string(),
+                version: "v1".to_string(),
+                activity_count: 5,
+                created_at: chrono::Utc::now(),
+            }],
+            total: 1,
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["total"], 1);
+        assert_eq!(json["definitions"][0]["activity_count"], 5);
+    }
+
+    #[test]
+    fn test_get_definition_query_no_version() {
+        let json = r#"{}"#;
+        let query: GetWorkflowDefinitionQuery = serde_json::from_str(json).unwrap();
+        assert!(query.version.is_none());
+    }
+
+    #[test]
+    fn test_get_definition_query_with_version() {
+        let json = r#"{"version": "20260201.120000.000000"}"#;
+        let query: GetWorkflowDefinitionQuery = serde_json::from_str(json).unwrap();
+        assert_eq!(query.version, Some("20260201.120000.000000".to_string()));
+    }
+
+    #[test]
+    fn test_get_definition_response_serialize() {
+        let response = GetWorkflowDefinitionResponse {
+            name: "test-wf".to_string(),
+            version: "v1".to_string(),
+            activities: vec![],
+            created_at: chrono::Utc::now(),
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["name"], "test-wf");
+        assert_eq!(json["activities"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_workflow_definition_summary_serialize() {
+        let summary = WorkflowDefinitionSummary {
+            name: "wf".to_string(),
+            version: "v1".to_string(),
+            activity_count: 3,
+            created_at: chrono::Utc::now(),
+        };
+        let json = serde_json::to_value(&summary).unwrap();
+        assert_eq!(json["name"], "wf");
+        assert_eq!(json["activity_count"], 3);
+    }
+}
+
 /// Deploy workflow definition (idempotent)
 ///
 /// Endpoint: POST /api/v1/workflow_definitions

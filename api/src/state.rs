@@ -752,6 +752,41 @@ pub mod tests {
         assert_eq!(result.unwrap().len(), 0);
     }
 
+    #[tokio::test]
+    async fn test_is_shutting_down_initially_false() {
+        let pool = mock_pool().await;
+        let state = AppState::new(
+            pool,
+            Arc::new(MockAuthService),
+            Arc::new(MockActivityQueue),
+            Arc::new(MockEventSource),
+            Arc::new(MockWorkflowStorage),
+            Arc::new(MockCacheService),
+            Arc::new(MockSubscriptionService),
+            CancellationToken::new(),
+        );
+        assert!(!state.is_shutting_down());
+    }
+
+    #[tokio::test]
+    async fn test_is_shutting_down_after_cancel() {
+        let pool = mock_pool().await;
+        let shutdown_token = CancellationToken::new();
+        let state = AppState::new(
+            pool,
+            Arc::new(MockAuthService),
+            Arc::new(MockActivityQueue),
+            Arc::new(MockEventSource),
+            Arc::new(MockWorkflowStorage),
+            Arc::new(MockCacheService),
+            Arc::new(MockSubscriptionService),
+            shutdown_token.clone(),
+        );
+        assert!(!state.is_shutting_down());
+        shutdown_token.cancel();
+        assert!(state.is_shutting_down());
+    }
+
     #[test]
     fn test_mock_pool_uses_default_database_url() {
         // Test that mock_pool falls back to default when DATABASE_URL is not set

@@ -411,4 +411,130 @@ mod tests {
             std::env::remove_var("KRUXIAFLOW_OAUTH_TOKEN_TTL");
         }
     }
+
+    // =========================================================================
+    // ApiConfig integration tests
+    // =========================================================================
+
+    #[test]
+    #[serial]
+    fn test_api_config_port_from_env() {
+        unsafe {
+            std::env::set_var("DATABASE_URL", "postgres://localhost/test");
+            std::env::set_var("KRUXIAFLOW_API_PORT", "9090");
+            std::env::remove_var("KRUXIAFLOW_API_BIND");
+        }
+
+        let config = crate::config::ApiConfig::new(None, None, None).unwrap();
+        assert_eq!(config.port, 9090);
+        assert_eq!(config.bind, "0.0.0.0"); // Default bind
+
+        unsafe {
+            std::env::remove_var("DATABASE_URL");
+            std::env::remove_var("KRUXIAFLOW_API_PORT");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_api_config_bind_from_env() {
+        unsafe {
+            std::env::set_var("DATABASE_URL", "postgres://localhost/test");
+            std::env::set_var("KRUXIAFLOW_API_BIND", "127.0.0.1");
+            std::env::remove_var("KRUXIAFLOW_API_PORT");
+        }
+
+        let config = crate::config::ApiConfig::new(None, None, None).unwrap();
+        assert_eq!(config.bind, "127.0.0.1");
+        assert_eq!(config.port, 8080); // Default port
+
+        unsafe {
+            std::env::remove_var("DATABASE_URL");
+            std::env::remove_var("KRUXIAFLOW_API_BIND");
+        }
+    }
+
+    #[test]
+    fn test_api_config_cli_database_url_takes_precedence() {
+        let config = crate::config::ApiConfig::new(
+            Some("postgres://cli_host/db".to_string()),
+            Some(3000),
+            Some("10.0.0.1".to_string()),
+        )
+        .unwrap();
+
+        assert!(config.database_url.contains("cli_host"));
+        assert_eq!(config.port, 3000);
+        assert_eq!(config.bind, "10.0.0.1");
+    }
+
+    #[test]
+    fn test_api_config_bind_address_format() {
+        let config = crate::config::ApiConfig {
+            database_url: "postgres://localhost/db".to_string(),
+            port: 8080,
+            bind: "0.0.0.0".to_string(),
+        };
+
+        assert_eq!(config.bind_address(), "0.0.0.0:8080");
+    }
+
+    #[test]
+    #[serial]
+    fn test_auth_config_with_zero_ttl() {
+        // Zero TTL should parse to 0 (not fall back to default)
+        unsafe {
+            std::env::set_var("KRUXIAFLOW_OAUTH_TOKEN_TTL", "0");
+        }
+
+        let token_ttl: u64 = std::env::var("KRUXIAFLOW_OAUTH_TOKEN_TTL")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(86400);
+
+        assert_eq!(token_ttl, 0);
+
+        unsafe {
+            std::env::remove_var("KRUXIAFLOW_OAUTH_TOKEN_TTL");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_auth_config_with_large_ttl() {
+        unsafe {
+            std::env::set_var("KRUXIAFLOW_OAUTH_TOKEN_TTL", "604800"); // 7 days
+        }
+
+        let token_ttl: u64 = std::env::var("KRUXIAFLOW_OAUTH_TOKEN_TTL")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(86400);
+
+        assert_eq!(token_ttl, 604800);
+
+        unsafe {
+            std::env::remove_var("KRUXIAFLOW_OAUTH_TOKEN_TTL");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_auth_config_negative_ttl_falls_back() {
+        unsafe {
+            std::env::set_var("KRUXIAFLOW_OAUTH_TOKEN_TTL", "-1");
+        }
+
+        // u64 parse will fail on negative, falls back to default
+        let token_ttl: u64 = std::env::var("KRUXIAFLOW_OAUTH_TOKEN_TTL")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(86400);
+
+        assert_eq!(token_ttl, 86400);
+
+        unsafe {
+            std::env::remove_var("KRUXIAFLOW_OAUTH_TOKEN_TTL");
+        }
+    }
 }

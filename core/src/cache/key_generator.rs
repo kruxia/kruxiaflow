@@ -210,4 +210,131 @@ mod tests {
         // Arrays should serialize normally
         assert_eq!(normalized, "[1,2,3]");
     }
+
+    #[test]
+    fn test_cache_key_empty_object() {
+        let params = json!({});
+        let key = generate_cache_key("test", &params).unwrap();
+        assert_eq!(key.len(), 64);
+    }
+
+    #[test]
+    fn test_cache_key_null_value() {
+        let params = json!(null);
+        let key = generate_cache_key("test", &params).unwrap();
+        assert_eq!(key.len(), 64);
+    }
+
+    #[test]
+    fn test_cache_key_string_value() {
+        let params = json!("just a string");
+        let key = generate_cache_key("test", &params).unwrap();
+        assert_eq!(key.len(), 64);
+    }
+
+    #[test]
+    fn test_cache_key_number_value() {
+        let params = json!(42);
+        let key = generate_cache_key("test", &params).unwrap();
+        assert_eq!(key.len(), 64);
+    }
+
+    #[test]
+    fn test_cache_key_boolean_value() {
+        let params = json!(true);
+        let key = generate_cache_key("test", &params).unwrap();
+        assert_eq!(key.len(), 64);
+    }
+
+    #[test]
+    fn test_cache_key_array_with_nested_objects() {
+        let params1 = json!([{"b": 2, "a": 1}, {"d": 4, "c": 3}]);
+        let params2 = json!([{"a": 1, "b": 2}, {"c": 3, "d": 4}]);
+
+        let key1 = generate_cache_key("test", &params1).unwrap();
+        let key2 = generate_cache_key("test", &params2).unwrap();
+
+        // Array element objects should be normalized
+        assert_eq!(key1, key2);
+    }
+
+    #[test]
+    fn test_cache_key_deeply_nested() {
+        let params1 = json!({"a": {"b": {"d": 4, "c": 3}}});
+        let params2 = json!({"a": {"b": {"c": 3, "d": 4}}});
+
+        let key1 = generate_cache_key("test", &params1).unwrap();
+        let key2 = generate_cache_key("test", &params2).unwrap();
+
+        assert_eq!(key1, key2);
+    }
+
+    #[test]
+    fn test_cache_key_empty_activity_name() {
+        let params = json!({"key": "value"});
+        let key = generate_cache_key("", &params).unwrap();
+        assert_eq!(key.len(), 64);
+    }
+
+    #[test]
+    fn test_cache_key_same_params_different_null_vs_missing() {
+        // null value vs missing key should produce different keys
+        let params1 = json!({"a": null});
+        let params2 = json!({});
+
+        let key1 = generate_cache_key("test", &params1).unwrap();
+        let key2 = generate_cache_key("test", &params2).unwrap();
+
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn test_normalize_json_null() {
+        let value = json!(null);
+        let normalized = normalize_json(&value).unwrap();
+        assert_eq!(normalized, "null");
+    }
+
+    #[test]
+    fn test_normalize_json_string() {
+        let value = json!("hello");
+        let normalized = normalize_json(&value).unwrap();
+        assert_eq!(normalized, "\"hello\"");
+    }
+
+    #[test]
+    fn test_normalize_json_number() {
+        let value = json!(42);
+        let normalized = normalize_json(&value).unwrap();
+        assert_eq!(normalized, "42");
+    }
+
+    #[test]
+    fn test_normalize_json_boolean() {
+        let value = json!(false);
+        let normalized = normalize_json(&value).unwrap();
+        assert_eq!(normalized, "false");
+    }
+
+    #[test]
+    fn test_normalize_json_nested_array_with_objects() {
+        let value = json!({"items": [{"z": 1, "a": 2}]});
+        let normalized = normalize_json(&value).unwrap();
+        // The outer object key "items" is sorted, inner object keys "a","z" are sorted
+        assert_eq!(normalized, r#"{"items":[{"a":2,"z":1}]}"#);
+    }
+
+    #[test]
+    fn test_normalize_json_empty_object() {
+        let value = json!({});
+        let normalized = normalize_json(&value).unwrap();
+        assert_eq!(normalized, "{}");
+    }
+
+    #[test]
+    fn test_normalize_json_empty_array() {
+        let value = json!([]);
+        let normalized = normalize_json(&value).unwrap();
+        assert_eq!(normalized, "[]");
+    }
 }

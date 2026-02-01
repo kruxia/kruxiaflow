@@ -2801,4 +2801,691 @@ mod tests {
         );
         assert_eq!(context.secrets.get("api_key").unwrap(), "sk-12345");
     }
+
+    // =========================================================================
+    // Mock definitions
+    // =========================================================================
+
+    use crate::queue::{
+        ActivityResult as QueueActivityResult, ActivitySummary, QueuedActivity, StaleActivityInfo,
+    };
+    use crate::subscription::{ActivitySubscription, SignalRequest};
+    use async_trait::async_trait;
+    use mockall::mock;
+
+    mock! {
+        pub EventSrc {}
+
+        #[async_trait]
+        impl EventSource for EventSrc {
+            async fn publish(&self, event: NewWorkflowEvent) -> std::result::Result<(), crate::events::EventError>;
+            async fn poll(&self, consumer_id: &str) -> std::result::Result<Vec<WorkflowEvent>, crate::events::EventError>;
+            async fn update_position(&self, consumer_id: &str, last_event_id: Uuid) -> std::result::Result<(), crate::events::EventError>;
+        }
+    }
+
+    mock! {
+        pub ActivityQ {}
+
+        #[async_trait]
+        impl ActivityQueue for ActivityQ {
+            async fn schedule(&self, workflow_id: Uuid, activities: Vec<Activity>) -> std::result::Result<(), crate::queue::QueueError>;
+            async fn claim_next(&self, worker_id: &str, worker: &str, max_activities: usize) -> std::result::Result<Vec<QueuedActivity>, crate::queue::QueueError>;
+            async fn get_activity_summary(&self, activity_id: Uuid) -> std::result::Result<ActivitySummary, crate::queue::QueueError>;
+            async fn complete(&self, activity_id: Uuid, worker_id: &str, result: QueueActivityResult) -> std::result::Result<(), crate::queue::QueueError>;
+            async fn fail(&self, activity_id: Uuid, worker_id: &str, retryable: bool, result: QueueActivityResult) -> std::result::Result<bool, crate::queue::QueueError>;
+            async fn heartbeat(&self, activity_id: Uuid, worker_id: &str) -> std::result::Result<(), crate::queue::QueueError>;
+            async fn reclaim_stale_activities(&self, limit: i64) -> std::result::Result<Vec<StaleActivityInfo>, crate::queue::QueueError>;
+        }
+    }
+
+    mock! {
+        pub SubSvc {}
+
+        #[async_trait]
+        impl SubscriptionService for SubSvc {
+            async fn create_subscription(&self, subscription: NewSubscription) -> std::result::Result<Uuid, crate::subscription::SubscriptionError>;
+            async fn signal_activity(&self, request: SignalRequest) -> std::result::Result<Option<ActivitySubscription>, crate::subscription::SubscriptionError>;
+            async fn get_signal_data(&self, workflow_id: Uuid, activity_key: &str) -> std::result::Result<Option<serde_json::Value>, crate::subscription::SubscriptionError>;
+            async fn expire_subscriptions(&self, limit: i64) -> std::result::Result<Vec<ExpiredSubscription>, crate::subscription::SubscriptionError>;
+            async fn recover_expired(&self, limit: i64) -> std::result::Result<Vec<ExpiredSubscription>, crate::subscription::SubscriptionError>;
+            async fn delete_subscription(&self, workflow_id: Uuid, activity_key: &str) -> std::result::Result<(), crate::subscription::SubscriptionError>;
+        }
+    }
+
+    fn create_test_event(
+        event_type: WorkflowEventType,
+        activity_key: Option<&str>,
+    ) -> WorkflowEvent {
+        WorkflowEvent {
+            id: Uuid::now_v7(),
+            workflow_id: Uuid::now_v7(),
+            event_type,
+            activity_key: activity_key.map(|k| k.to_string()),
+            payload: json!({}),
+            timestamp: Utc::now(),
+            iteration: None,
+        }
+    }
+
+    // =========================================================================
+    // publish_failure_for_poison_event tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_publish_failure_with_activity_key() {
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(1).returning(|event| {
+            assert_eq!(event.event_type, WorkflowEventType::ActivityFailed);
+            assert_eq!(event.activity_key, Some("step_a".to_string()));
+            let error_str = event.payload["error"].as_str().unwrap();
+            assert!(error_str.contains("ORCHESTRATOR_ERROR"));
+            assert!(error_str.contains("test error"));
+            Ok(())
+        });
+
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+        let event = create_test_event(WorkflowEventType::ActivityCompleted, Some("step_a"));
+
+        let result = publish_failure_for_poison_event(&event, &arc_es, "test error").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_publish_failure_without_activity_key() {
+        let mut mock_es = MockEventSrc::new();
+        // publish should NOT be called
+        mock_es.expect_publish().times(0);
+
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+        let event = create_test_event(WorkflowEventType::WorkflowCreated, None);
+
+        let result = publish_failure_for_poison_event(&event, &arc_es, "some error").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_publish_failure_payload_content() {
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(1).returning(|event| {
+            assert_eq!(
+                event.payload["error_code"].as_str().unwrap(),
+                "ORCHESTRATOR_PROCESSING_ERROR"
+            );
+            assert!(event.payload["poison_event_id"].as_str().is_some());
+            assert!(event.payload["original_event_type"].as_str().is_some());
+            Ok(())
+        });
+
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+        let event = create_test_event(WorkflowEventType::ActivityCompleted, Some("step_b"));
+
+        publish_failure_for_poison_event(&event, &arc_es, "error details")
+            .await
+            .unwrap();
+    }
+
+    // =========================================================================
+    // check_and_reclaim_stale_activities tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_reclaim_stale_empty() {
+        let mut mock_q = MockActivityQ::new();
+        mock_q
+            .expect_reclaim_stale_activities()
+            .times(1)
+            .returning(|_| Ok(vec![]));
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(0);
+
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        let result = check_and_reclaim_stale_activities(&arc_q, &arc_es).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_reclaim_stale_reset_to_pending() {
+        let mut mock_q = MockActivityQ::new();
+        mock_q
+            .expect_reclaim_stale_activities()
+            .times(1)
+            .returning(|_| {
+                Ok(vec![StaleActivityInfo {
+                    workflow_id: Uuid::now_v7(),
+                    activity_key: "step_a".to_string(),
+                    iteration: None,
+                    action: StaleActivityAction::ResetToPending,
+                    retry_count: 1,
+                    max_retries: 3,
+                }])
+            });
+
+        let mut mock_es = MockEventSrc::new();
+        // ResetToPending does NOT publish events
+        mock_es.expect_publish().times(0);
+
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        let result = check_and_reclaim_stale_activities(&arc_q, &arc_es).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_reclaim_stale_marked_failed() {
+        let workflow_id = Uuid::now_v7();
+        let mut mock_q = MockActivityQ::new();
+        mock_q
+            .expect_reclaim_stale_activities()
+            .times(1)
+            .returning(move |_| {
+                Ok(vec![StaleActivityInfo {
+                    workflow_id,
+                    activity_key: "step_b".to_string(),
+                    iteration: None,
+                    action: StaleActivityAction::MarkedFailed,
+                    retry_count: 3,
+                    max_retries: 3,
+                }])
+            });
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(1).returning(|event| {
+            assert_eq!(event.event_type, WorkflowEventType::ActivityFailed);
+            assert_eq!(event.activity_key, Some("step_b".to_string()));
+            assert_eq!(
+                event.payload["error_code"].as_str().unwrap(),
+                "ACTIVITY_TIMEOUT"
+            );
+            Ok(())
+        });
+
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        let result = check_and_reclaim_stale_activities(&arc_q, &arc_es).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_reclaim_stale_mixed_actions() {
+        let mut mock_q = MockActivityQ::new();
+        mock_q
+            .expect_reclaim_stale_activities()
+            .times(1)
+            .returning(|_| {
+                Ok(vec![
+                    StaleActivityInfo {
+                        workflow_id: Uuid::now_v7(),
+                        activity_key: "reset_me".to_string(),
+                        iteration: None,
+                        action: StaleActivityAction::ResetToPending,
+                        retry_count: 1,
+                        max_retries: 3,
+                    },
+                    StaleActivityInfo {
+                        workflow_id: Uuid::now_v7(),
+                        activity_key: "fail_me".to_string(),
+                        iteration: Some(2),
+                        action: StaleActivityAction::MarkedFailed,
+                        retry_count: 5,
+                        max_retries: 5,
+                    },
+                ])
+            });
+
+        let mut mock_es = MockEventSrc::new();
+        // Only MarkedFailed publishes an event
+        mock_es.expect_publish().times(1).returning(|event| {
+            assert_eq!(event.activity_key, Some("fail_me".to_string()));
+            assert_eq!(event.iteration, Some(2));
+            Ok(())
+        });
+
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        check_and_reclaim_stale_activities(&arc_q, &arc_es)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_reclaim_stale_publish_error_is_not_fatal() {
+        let mut mock_q = MockActivityQ::new();
+        mock_q
+            .expect_reclaim_stale_activities()
+            .times(1)
+            .returning(|_| {
+                Ok(vec![StaleActivityInfo {
+                    workflow_id: Uuid::now_v7(),
+                    activity_key: "step_c".to_string(),
+                    iteration: None,
+                    action: StaleActivityAction::MarkedFailed,
+                    retry_count: 3,
+                    max_retries: 3,
+                }])
+            });
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(1).returning(|_| {
+            Err(crate::events::EventError::Database(sqlx::Error::Protocol(
+                "publish failed".to_string(),
+            )))
+        });
+
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        // Should not propagate publish error (it's logged but ignored)
+        let result = check_and_reclaim_stale_activities(&arc_q, &arc_es).await;
+        assert!(result.is_ok());
+    }
+
+    // =========================================================================
+    // check_and_handle_expired_subscriptions tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_expired_subscriptions_none() {
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub
+            .expect_recover_expired()
+            .times(1)
+            .returning(|_| Ok(vec![]));
+        mock_sub
+            .expect_expire_subscriptions()
+            .times(1)
+            .returning(|_| Ok(vec![]));
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(0);
+
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        let result = check_and_handle_expired_subscriptions(&arc_sub, &arc_es).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_expired_subscriptions_recovered_and_new() {
+        let wf_id = Uuid::now_v7();
+        let mut mock_sub = MockSubSvc::new();
+
+        // Return one recovered subscription
+        mock_sub
+            .expect_recover_expired()
+            .times(1)
+            .returning(move |_| {
+                Ok(vec![ExpiredSubscription {
+                    id: Uuid::now_v7(),
+                    workflow_id: wf_id,
+                    activity_key: "recovered_step".to_string(),
+                    event_name: "approval".to_string(),
+                    on_timeout: OnTimeout::Fail,
+                }])
+            });
+
+        // Return one newly expired subscription
+        let wf_id2 = Uuid::now_v7();
+        mock_sub
+            .expect_expire_subscriptions()
+            .times(1)
+            .returning(move |_| {
+                Ok(vec![ExpiredSubscription {
+                    id: Uuid::now_v7(),
+                    workflow_id: wf_id2,
+                    activity_key: "new_expired".to_string(),
+                    event_name: "signal".to_string(),
+                    on_timeout: OnTimeout::Continue,
+                }])
+            });
+
+        // delete_subscription called once per successful publish
+        mock_sub
+            .expect_delete_subscription()
+            .times(2)
+            .returning(|_, _| Ok(()));
+
+        let mut mock_es = MockEventSrc::new();
+        // Two publishes: one for recovered, one for newly expired
+        mock_es.expect_publish().times(2).returning(|_| Ok(()));
+
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        check_and_handle_expired_subscriptions(&arc_sub, &arc_es)
+            .await
+            .unwrap();
+    }
+
+    // =========================================================================
+    // process_expired_subscriptions tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_process_expired_continue() {
+        let wf_id = Uuid::now_v7();
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub
+            .expect_delete_subscription()
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(1).returning(|event| {
+            assert_eq!(event.event_type, WorkflowEventType::ActivitySignaled);
+            assert_eq!(event.payload["on_timeout"].as_str().unwrap(), "continue");
+            assert_eq!(event.payload["reason"].as_str().unwrap(), "timeout");
+            Ok(())
+        });
+
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        let expired = vec![ExpiredSubscription {
+            id: Uuid::now_v7(),
+            workflow_id: wf_id,
+            activity_key: "wait_step".to_string(),
+            event_name: "approval".to_string(),
+            on_timeout: OnTimeout::Continue,
+        }];
+
+        process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
+    }
+
+    #[tokio::test]
+    async fn test_process_expired_skip() {
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub
+            .expect_delete_subscription()
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(1).returning(|event| {
+            assert_eq!(event.event_type, WorkflowEventType::ActivitySignaled);
+            assert_eq!(event.payload["on_timeout"].as_str().unwrap(), "skip");
+            Ok(())
+        });
+
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        let expired = vec![ExpiredSubscription {
+            id: Uuid::now_v7(),
+            workflow_id: Uuid::now_v7(),
+            activity_key: "skip_step".to_string(),
+            event_name: "signal".to_string(),
+            on_timeout: OnTimeout::Skip,
+        }];
+
+        process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
+    }
+
+    #[tokio::test]
+    async fn test_process_expired_fail() {
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub
+            .expect_delete_subscription()
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(1).returning(|event| {
+            assert_eq!(event.event_type, WorkflowEventType::ActivityFailed);
+            assert_eq!(
+                event.payload["error_code"].as_str().unwrap(),
+                "SIGNAL_TIMEOUT"
+            );
+            let error_msg = event.payload["error"].as_str().unwrap();
+            assert!(error_msg.contains("not received before timeout"));
+            Ok(())
+        });
+
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        let expired = vec![ExpiredSubscription {
+            id: Uuid::now_v7(),
+            workflow_id: Uuid::now_v7(),
+            activity_key: "fail_step".to_string(),
+            event_name: "required_signal".to_string(),
+            on_timeout: OnTimeout::Fail,
+        }];
+
+        process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
+    }
+
+    #[tokio::test]
+    async fn test_process_expired_publish_error_skips_delete() {
+        let mut mock_sub = MockSubSvc::new();
+        // delete should NOT be called when publish fails
+        mock_sub.expect_delete_subscription().times(0);
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(1).returning(|_| {
+            Err(crate::events::EventError::Database(sqlx::Error::Protocol(
+                "connection lost".to_string(),
+            )))
+        });
+
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        let expired = vec![ExpiredSubscription {
+            id: Uuid::now_v7(),
+            workflow_id: Uuid::now_v7(),
+            activity_key: "step".to_string(),
+            event_name: "signal".to_string(),
+            on_timeout: OnTimeout::Fail,
+        }];
+
+        // Should not panic — error is logged and subscription is retained for retry
+        process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
+    }
+
+    #[tokio::test]
+    async fn test_process_expired_multiple_subscriptions() {
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub
+            .expect_delete_subscription()
+            .times(3)
+            .returning(|_, _| Ok(()));
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(3).returning(|_| Ok(()));
+
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        let expired = vec![
+            ExpiredSubscription {
+                id: Uuid::now_v7(),
+                workflow_id: Uuid::now_v7(),
+                activity_key: "a".to_string(),
+                event_name: "sig".to_string(),
+                on_timeout: OnTimeout::Continue,
+            },
+            ExpiredSubscription {
+                id: Uuid::now_v7(),
+                workflow_id: Uuid::now_v7(),
+                activity_key: "b".to_string(),
+                event_name: "sig".to_string(),
+                on_timeout: OnTimeout::Skip,
+            },
+            ExpiredSubscription {
+                id: Uuid::now_v7(),
+                workflow_id: Uuid::now_v7(),
+                activity_key: "c".to_string(),
+                event_name: "sig".to_string(),
+                on_timeout: OnTimeout::Fail,
+            },
+        ];
+
+        process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
+    }
+
+    // =========================================================================
+    // compute_scheduled_for error path tests
+    // =========================================================================
+
+    #[test]
+    fn test_compute_scheduled_for_invalid_delay_format() {
+        let settings = ActivitySettings {
+            timeout_seconds: None,
+            retry: None,
+            budget: None,
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: Some("invalid_duration".to_string()),
+            scheduled_for: None,
+            wait_for_signal: None,
+        };
+        let activity_def = create_activity_def("test", Some(settings));
+        let context = TemplateContext::new();
+
+        let result = compute_scheduled_for(&activity_def, &context, None);
+        assert!(result.is_err(), "Invalid delay format should return error");
+    }
+
+    #[test]
+    fn test_compute_scheduled_for_invalid_scheduled_for_format() {
+        let settings = ActivitySettings {
+            timeout_seconds: None,
+            retry: None,
+            budget: None,
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: None,
+            scheduled_for: Some("not-a-timestamp".to_string()),
+            wait_for_signal: None,
+        };
+        let activity_def = create_activity_def("test", Some(settings));
+        let context = TemplateContext::new();
+
+        let result = compute_scheduled_for(&activity_def, &context, None);
+        assert!(
+            result.is_err(),
+            "Invalid timestamp format should return error"
+        );
+    }
+
+    #[test]
+    fn test_compute_scheduled_for_past_scheduled_time() {
+        let past_time = Utc::now() - chrono::Duration::hours(1);
+        let settings = ActivitySettings {
+            timeout_seconds: None,
+            retry: None,
+            budget: None,
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: None,
+            scheduled_for: Some(past_time.to_rfc3339()),
+            wait_for_signal: None,
+        };
+        let activity_def = create_activity_def("test", Some(settings));
+        let context = TemplateContext::new();
+
+        // Past time is a warning, not an error — should return Ok with the past time
+        let result = compute_scheduled_for(&activity_def, &context, None).unwrap();
+        assert!(result.is_some());
+        let scheduled = result.unwrap();
+        assert!(scheduled < Utc::now());
+    }
+
+    #[test]
+    fn test_compute_scheduled_for_delay_precedence_over_scheduled_for() {
+        // When both delay and scheduled_for are set, delay takes precedence
+        let future_time = Utc::now() + chrono::Duration::hours(5);
+        let settings = ActivitySettings {
+            timeout_seconds: None,
+            retry: None,
+            budget: None,
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: Some("2s".to_string()),
+            scheduled_for: Some(future_time.to_rfc3339()),
+            wait_for_signal: None,
+        };
+        let activity_def = create_activity_def("test", Some(settings));
+        let context = TemplateContext::new();
+
+        let before = Utc::now();
+        let result = compute_scheduled_for(&activity_def, &context, None)
+            .unwrap()
+            .unwrap();
+
+        // Should be ~2 seconds from now (from delay), not ~5 hours (from scheduled_for)
+        let max_expected = before + chrono::Duration::seconds(5);
+        assert!(
+            result < max_expected,
+            "delay should take precedence over scheduled_for"
+        );
+    }
+
+    // =========================================================================
+    // build_template_context edge case tests
+    // =========================================================================
+
+    #[test]
+    fn test_build_template_context_with_non_object_input() {
+        // If input is not a JSON object, inputs should be empty
+        let state = create_test_workflow_state(vec![], json!("just a string"));
+        let workflow_id = state.workflow_id;
+        let secrets = HashMap::new();
+
+        let context = build_template_context(&state, workflow_id, &secrets);
+        assert!(
+            context.inputs.is_empty(),
+            "Non-object input should result in empty inputs"
+        );
+    }
+
+    #[test]
+    fn test_build_template_context_with_error_state() {
+        let mut activities_map = HashMap::new();
+        activities_map.insert(
+            "failed_step".to_string(),
+            ActivityState {
+                key: "failed_step".to_string(),
+                status: WorkflowActivityStatus::Failed,
+                outputs: None,
+                error: Some("something went wrong".to_string()),
+                started_at: None,
+                completed_at: None,
+                attempt: 3,
+                last_error: Some("something went wrong".to_string()),
+                accumulated_cost_usd: Decimal::new(250, 4), // $0.0250
+                iteration: 0,
+                iteration_outputs: None,
+                signal_data: None,
+            },
+        );
+
+        let state = WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: WorkflowStatus::Running,
+            activities: activities_map,
+            state_data: json!({}),
+            input: json!({}),
+        };
+        let workflow_id = state.workflow_id;
+        let secrets = HashMap::new();
+
+        let context = build_template_context(&state, workflow_id, &secrets);
+
+        // Failed activities should still be present in context
+        assert!(context.activity_states.contains_key("failed_step"));
+    }
 }

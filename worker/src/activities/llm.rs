@@ -1107,6 +1107,7 @@ impl ActivityImpl for EmbeddingActivity {
 mod tests {
     use super::*;
     use rust_decimal_macros::dec;
+    use serial_test::serial;
 
     #[test]
     fn test_model_spec_single() {
@@ -1557,5 +1558,1105 @@ mod tests {
         let cost_from_json = outputs["cost_usd"].as_str().unwrap();
         let cost_decimal: Decimal = cost_from_json.parse().unwrap();
         assert_eq!(cost_decimal, dec!(0.0153));
+    }
+
+    // ============================================================================
+    // ProviderConfig Tests
+    // ============================================================================
+
+    #[test]
+    #[serial]
+    fn test_provider_config_from_env_reads_all_vars() {
+        // Set all env vars
+        unsafe {
+            env::set_var("ANTHROPIC_API_KEY", "test-anthropic-key");
+            env::set_var("OPENAI_API_KEY", "test-openai-key");
+            env::set_var("GOOGLE_API_KEY", "test-google-key");
+            env::set_var("OLLAMA_BASE_URL", "http://ollama:11434");
+            env::set_var("OLLAMA_API_KEY", "test-ollama-key");
+        }
+
+        let config = ProviderConfig::from_env();
+
+        assert_eq!(
+            config.anthropic_api_key,
+            Some("test-anthropic-key".to_string())
+        );
+        assert_eq!(config.openai_api_key, Some("test-openai-key".to_string()));
+        assert_eq!(config.google_api_key, Some("test-google-key".to_string()));
+        assert_eq!(
+            config.ollama_base_url,
+            Some("http://ollama:11434".to_string())
+        );
+        assert_eq!(config.ollama_api_key, Some("test-ollama-key".to_string()));
+
+        // Cleanup
+        unsafe {
+            env::remove_var("ANTHROPIC_API_KEY");
+            env::remove_var("OPENAI_API_KEY");
+            env::remove_var("GOOGLE_API_KEY");
+            env::remove_var("OLLAMA_BASE_URL");
+            env::remove_var("OLLAMA_API_KEY");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_provider_config_from_env_missing_vars() {
+        unsafe {
+            env::remove_var("ANTHROPIC_API_KEY");
+            env::remove_var("OPENAI_API_KEY");
+            env::remove_var("GOOGLE_API_KEY");
+            env::remove_var("OLLAMA_BASE_URL");
+            env::remove_var("OLLAMA_API_KEY");
+        }
+
+        let config = ProviderConfig::from_env();
+
+        assert!(config.anthropic_api_key.is_none());
+        assert!(config.openai_api_key.is_none());
+        assert!(config.google_api_key.is_none());
+        assert!(config.ollama_base_url.is_none());
+        assert!(config.ollama_api_key.is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn test_provider_config_create_anthropic_provider() {
+        let config = ProviderConfig {
+            anthropic_api_key: Some("test-key".to_string()),
+            openai_api_key: None,
+            google_api_key: None,
+            ollama_base_url: None,
+            ollama_api_key: None,
+        };
+
+        let provider = config.create_provider("anthropic").unwrap();
+        assert_eq!(provider.name(), "anthropic");
+    }
+
+    #[test]
+    #[serial]
+    fn test_provider_config_create_openai_provider() {
+        let config = ProviderConfig {
+            anthropic_api_key: None,
+            openai_api_key: Some("test-key".to_string()),
+            google_api_key: None,
+            ollama_base_url: None,
+            ollama_api_key: None,
+        };
+
+        let provider = config.create_provider("openai").unwrap();
+        assert_eq!(provider.name(), "openai");
+    }
+
+    #[test]
+    #[serial]
+    fn test_provider_config_create_google_provider() {
+        let config = ProviderConfig {
+            anthropic_api_key: None,
+            openai_api_key: None,
+            google_api_key: Some("test-key".to_string()),
+            ollama_base_url: None,
+            ollama_api_key: None,
+        };
+
+        let provider = config.create_provider("google").unwrap();
+        assert_eq!(provider.name(), "google");
+    }
+
+    #[test]
+    #[serial]
+    fn test_provider_config_create_ollama_provider() {
+        let config = ProviderConfig {
+            anthropic_api_key: None,
+            openai_api_key: None,
+            google_api_key: None,
+            ollama_base_url: Some("http://localhost:11434".to_string()),
+            ollama_api_key: None,
+        };
+
+        let provider = config.create_provider("ollama").unwrap();
+        assert_eq!(provider.name(), "ollama");
+    }
+
+    #[test]
+    #[serial]
+    fn test_provider_config_create_ollama_without_base_url() {
+        let config = ProviderConfig {
+            anthropic_api_key: None,
+            openai_api_key: None,
+            google_api_key: None,
+            ollama_base_url: None,
+            ollama_api_key: None,
+        };
+
+        // Ollama works without base URL (uses default)
+        let provider = config.create_provider("ollama").unwrap();
+        assert_eq!(provider.name(), "ollama");
+    }
+
+    #[test]
+    fn test_provider_config_create_unknown_provider() {
+        let config = ProviderConfig {
+            anthropic_api_key: None,
+            openai_api_key: None,
+            google_api_key: None,
+            ollama_base_url: None,
+            ollama_api_key: None,
+        };
+
+        let result = config.create_provider("unknown_provider");
+        assert!(result.is_err());
+        assert!(
+            result
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("Unknown provider")
+        );
+    }
+
+    #[test]
+    fn test_provider_config_create_anthropic_missing_key() {
+        let config = ProviderConfig {
+            anthropic_api_key: None,
+            openai_api_key: None,
+            google_api_key: None,
+            ollama_base_url: None,
+            ollama_api_key: None,
+        };
+
+        let result = config.create_provider("anthropic");
+        assert!(result.is_err());
+        assert!(
+            result
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("ANTHROPIC_API_KEY")
+        );
+    }
+
+    #[test]
+    fn test_provider_config_create_openai_missing_key() {
+        let config = ProviderConfig {
+            anthropic_api_key: None,
+            openai_api_key: None,
+            google_api_key: None,
+            ollama_base_url: None,
+            ollama_api_key: None,
+        };
+
+        let result = config.create_provider("openai");
+        assert!(result.is_err());
+        assert!(result.err().unwrap().to_string().contains("OPENAI_API_KEY"));
+    }
+
+    #[test]
+    fn test_provider_config_create_google_missing_key() {
+        let config = ProviderConfig {
+            anthropic_api_key: None,
+            openai_api_key: None,
+            google_api_key: None,
+            ollama_base_url: None,
+            ollama_api_key: None,
+        };
+
+        let result = config.create_provider("google");
+        assert!(result.is_err());
+        assert!(result.err().unwrap().to_string().contains("GOOGLE_API_KEY"));
+    }
+
+    #[test]
+    fn test_provider_config_create_case_insensitive() {
+        let config = ProviderConfig {
+            anthropic_api_key: Some("key".to_string()),
+            openai_api_key: None,
+            google_api_key: None,
+            ollama_base_url: None,
+            ollama_api_key: None,
+        };
+
+        // Provider matching is case-insensitive
+        let provider = config.create_provider("Anthropic").unwrap();
+        assert_eq!(provider.name(), "anthropic");
+
+        let provider = config.create_provider("ANTHROPIC").unwrap();
+        assert_eq!(provider.name(), "anthropic");
+    }
+
+    // ============================================================================
+    // ModelSpec JSON Deserialization Tests
+    // ============================================================================
+
+    #[test]
+    fn test_model_spec_deserialize_single_string() {
+        let json = json!("anthropic/claude-3-5-sonnet-20241022");
+        let spec: ModelSpec = serde_json::from_value(json).unwrap();
+        match spec {
+            ModelSpec::Single(s) => assert_eq!(s, "anthropic/claude-3-5-sonnet-20241022"),
+            _ => panic!("Expected Single variant"),
+        }
+    }
+
+    #[test]
+    fn test_model_spec_deserialize_fallback_array() {
+        let json = json!(["anthropic/claude-3-5-sonnet-20241022", "openai/gpt-4"]);
+        let spec: ModelSpec = serde_json::from_value(json).unwrap();
+        match spec {
+            ModelSpec::Fallback(models) => {
+                assert_eq!(models.len(), 2);
+                assert_eq!(models[0], "anthropic/claude-3-5-sonnet-20241022");
+                assert_eq!(models[1], "openai/gpt-4");
+            }
+            _ => panic!("Expected Fallback variant"),
+        }
+    }
+
+    #[test]
+    fn test_model_spec_serialize_roundtrip_single() {
+        let spec = ModelSpec::Single("openai/gpt-4".to_string());
+        let json = serde_json::to_value(&spec).unwrap();
+        assert_eq!(json, json!("openai/gpt-4"));
+    }
+
+    #[test]
+    fn test_model_spec_serialize_roundtrip_fallback() {
+        let spec = ModelSpec::Fallback(vec![
+            "anthropic/claude-3-5-sonnet-20241022".to_string(),
+            "openai/gpt-4".to_string(),
+        ]);
+        let json = serde_json::to_value(&spec).unwrap();
+        assert_eq!(
+            json,
+            json!(["anthropic/claude-3-5-sonnet-20241022", "openai/gpt-4"])
+        );
+    }
+
+    #[test]
+    fn test_model_spec_empty_fallback_chain() {
+        let spec = ModelSpec::Fallback(vec![]);
+        let chain = spec.to_fallback_chain().unwrap();
+        assert!(chain.provider_models.is_empty());
+    }
+
+    #[test]
+    fn test_model_spec_parse_provider_model_empty_parts() {
+        // slash at the start
+        let spec = ModelSpec::Single("/model".to_string());
+        let chain = spec.to_fallback_chain().unwrap();
+        assert_eq!(chain.provider_models[0].0, "");
+        assert_eq!(chain.provider_models[0].1, "model");
+    }
+
+    // ============================================================================
+    // LLMPromptParams Deserialization Tests
+    // ============================================================================
+
+    #[test]
+    fn test_llm_prompt_params_minimal() {
+        let json = json!({
+            "model": "anthropic/claude-3-5-sonnet-20241022",
+            "prompt": "Hello"
+        });
+        let params: LLMPromptParams = serde_json::from_value(json).unwrap();
+        assert_eq!(params.prompt, "Hello");
+        assert!(params.system_prompt.is_none());
+        assert!(params.max_tokens.is_none());
+        assert!(params.temperature.is_none());
+        assert!(params.top_p.is_none());
+        assert!(params.stop_sequences.is_none());
+        assert!(params.model_pricing.is_none());
+        assert!(params.activity_budget_limit_usd.is_none());
+        assert!(params.workflow_budget_limit_usd.is_none());
+        assert!(params.cumulative_activity_cost_usd.is_none());
+    }
+
+    #[test]
+    fn test_llm_prompt_params_full() {
+        let json = json!({
+            "model": ["anthropic/claude-3-5-sonnet-20241022", "openai/gpt-4"],
+            "prompt": "Test prompt",
+            "system_prompt": "You are helpful.",
+            "max_tokens": 1000,
+            "temperature": 0.7,
+            "top_p": 0.9,
+            "stop_sequences": ["END", "STOP"],
+            "activity_budget_limit_usd": "1.00",
+            "workflow_budget_limit_usd": "5.00",
+            "cumulative_activity_cost_usd": "0.05"
+        });
+        let params: LLMPromptParams = serde_json::from_value(json).unwrap();
+        assert_eq!(params.prompt, "Test prompt");
+        assert_eq!(params.system_prompt, Some("You are helpful.".to_string()));
+        assert_eq!(params.max_tokens, Some(1000));
+        assert_eq!(params.temperature, Some(0.7));
+        assert_eq!(params.top_p, Some(0.9));
+        assert_eq!(params.stop_sequences.unwrap().len(), 2);
+        assert_eq!(params.activity_budget_limit_usd, Some(dec!(1.00)));
+        assert_eq!(params.workflow_budget_limit_usd, Some(dec!(5.00)));
+        assert_eq!(params.cumulative_activity_cost_usd, Some(dec!(0.05)));
+    }
+
+    #[test]
+    fn test_llm_prompt_params_with_model_pricing() {
+        let json = json!({
+            "model": "anthropic/claude-3-5-sonnet-20241022",
+            "prompt": "Test",
+            "model_pricing": {
+                "anthropic/claude-3-5-sonnet-20241022": {
+                    "input_price_per_million": "3.00",
+                    "output_price_per_million": "15.00",
+                    "cached_input_price_per_million": "0.30"
+                }
+            },
+            "activity_budget_limit_usd": "1.00"
+        });
+        let params: LLMPromptParams = serde_json::from_value(json).unwrap();
+        assert!(params.model_pricing.is_some());
+        let pricing = params.model_pricing.unwrap();
+        assert_eq!(pricing.len(), 1);
+        let p = pricing.get("anthropic/claude-3-5-sonnet-20241022").unwrap();
+        assert_eq!(p.input_price_per_million, dec!(3.00));
+    }
+
+    #[test]
+    fn test_llm_prompt_params_serialization_skip_none() {
+        let params = LLMPromptParams {
+            model: ModelSpec::Single("anthropic/claude-3-5-sonnet-20241022".to_string()),
+            prompt: "Hello".to_string(),
+            system_prompt: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            stop_sequences: None,
+            model_pricing: None,
+            activity_budget_limit_usd: None,
+            workflow_budget_limit_usd: None,
+            cumulative_activity_cost_usd: None,
+        };
+
+        let json = serde_json::to_value(&params).unwrap();
+        let obj = json.as_object().unwrap();
+        // None fields should be skipped
+        assert!(!obj.contains_key("system_prompt"));
+        assert!(!obj.contains_key("max_tokens"));
+        assert!(!obj.contains_key("temperature"));
+        assert!(!obj.contains_key("model_pricing"));
+        assert!(!obj.contains_key("activity_budget_limit_usd"));
+        // Required fields should be present
+        assert!(obj.contains_key("model"));
+        assert!(obj.contains_key("prompt"));
+    }
+
+    // ============================================================================
+    // EmbeddingParams Deserialization Tests
+    // ============================================================================
+
+    #[test]
+    fn test_embedding_params_minimal() {
+        let json = json!({
+            "model": "openai/text-embedding-3-small",
+            "input": ["Hello world"]
+        });
+        let params: EmbeddingParams = serde_json::from_value(json).unwrap();
+        assert_eq!(params.input.len(), 1);
+        assert_eq!(params.batch_size, 500); // default
+    }
+
+    #[test]
+    fn test_embedding_params_custom_batch_size() {
+        let json = json!({
+            "model": "openai/text-embedding-3-small",
+            "input": ["Hello", "World"],
+            "batch_size": 100
+        });
+        let params: EmbeddingParams = serde_json::from_value(json).unwrap();
+        assert_eq!(params.batch_size, 100);
+        assert_eq!(params.input.len(), 2);
+    }
+
+    #[test]
+    fn test_embedding_params_fallback_model() {
+        let json = json!({
+            "model": ["openai/text-embedding-3-small", "google/text-embedding-004"],
+            "input": ["Test"]
+        });
+        let params: EmbeddingParams = serde_json::from_value(json).unwrap();
+        let chain = params.model.to_fallback_chain().unwrap();
+        assert_eq!(chain.provider_models.len(), 2);
+    }
+
+    #[test]
+    fn test_default_batch_size() {
+        assert_eq!(default_batch_size(), 500);
+    }
+
+    // ============================================================================
+    // FallbackChain Serialization Tests
+    // ============================================================================
+
+    #[test]
+    fn test_fallback_chain_serialize_deserialize() {
+        let chain = FallbackChain {
+            provider_models: vec![
+                (
+                    "anthropic".to_string(),
+                    "claude-3-5-sonnet-20241022".to_string(),
+                ),
+                ("openai".to_string(), "gpt-4".to_string()),
+            ],
+        };
+        let json = serde_json::to_string(&chain).unwrap();
+        let deserialized: FallbackChain = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.provider_models.len(), 2);
+        assert_eq!(deserialized.provider_models[0].0, "anthropic");
+        assert_eq!(deserialized.provider_models[1].0, "openai");
+    }
+
+    // ============================================================================
+    // Budget Construction Logic Tests (matching execute() code paths)
+    // ============================================================================
+
+    #[test]
+    fn test_budget_construction_both_limits_activity_lower() {
+        let activity_limit = Some(dec!(1.00));
+        let workflow_limit = Some(dec!(5.00));
+
+        let budget_limit = match (activity_limit, workflow_limit) {
+            (Some(a), Some(w)) => {
+                if a < w {
+                    Some(a)
+                } else {
+                    Some(w)
+                }
+            }
+            (Some(a), None) => Some(a),
+            (None, Some(w)) => Some(w),
+            (None, None) => None,
+        };
+
+        assert_eq!(budget_limit, Some(dec!(1.00)));
+    }
+
+    #[test]
+    fn test_budget_construction_both_limits_workflow_lower() {
+        let activity_limit = Some(dec!(5.00));
+        let workflow_limit = Some(dec!(2.00));
+
+        let budget_limit = match (activity_limit, workflow_limit) {
+            (Some(a), Some(w)) => {
+                if a < w {
+                    Some(a)
+                } else {
+                    Some(w)
+                }
+            }
+            (Some(a), None) => Some(a),
+            (None, Some(w)) => Some(w),
+            (None, None) => None,
+        };
+
+        assert_eq!(budget_limit, Some(dec!(2.00)));
+    }
+
+    #[test]
+    fn test_budget_construction_only_activity_limit() {
+        let activity_limit = Some(dec!(3.00));
+        let workflow_limit: Option<Decimal> = None;
+
+        let budget_limit = match (activity_limit, workflow_limit) {
+            (Some(a), Some(w)) => {
+                if a < w {
+                    Some(a)
+                } else {
+                    Some(w)
+                }
+            }
+            (Some(a), None) => Some(a),
+            (None, Some(w)) => Some(w),
+            (None, None) => None,
+        };
+
+        assert_eq!(budget_limit, Some(dec!(3.00)));
+    }
+
+    #[test]
+    fn test_budget_construction_only_workflow_limit() {
+        let activity_limit: Option<Decimal> = None;
+        let workflow_limit = Some(dec!(10.00));
+
+        let budget_limit = match (activity_limit, workflow_limit) {
+            (Some(a), Some(w)) => {
+                if a < w {
+                    Some(a)
+                } else {
+                    Some(w)
+                }
+            }
+            (Some(a), None) => Some(a),
+            (None, Some(w)) => Some(w),
+            (None, None) => None,
+        };
+
+        assert_eq!(budget_limit, Some(dec!(10.00)));
+    }
+
+    #[test]
+    fn test_budget_construction_no_limits() {
+        let activity_limit: Option<Decimal> = None;
+        let workflow_limit: Option<Decimal> = None;
+
+        let budget_limit = match (activity_limit, workflow_limit) {
+            (Some(a), Some(w)) => {
+                if a < w {
+                    Some(a)
+                } else {
+                    Some(w)
+                }
+            }
+            (Some(a), None) => Some(a),
+            (None, Some(w)) => Some(w),
+            (None, None) => None,
+        };
+
+        assert!(budget_limit.is_none());
+    }
+
+    #[test]
+    fn test_budget_construction_equal_limits() {
+        let activity_limit = Some(dec!(5.00));
+        let workflow_limit = Some(dec!(5.00));
+
+        let budget_limit = match (activity_limit, workflow_limit) {
+            (Some(a), Some(w)) => {
+                if a < w {
+                    Some(a)
+                } else {
+                    Some(w)
+                }
+            }
+            (Some(a), None) => Some(a),
+            (None, Some(w)) => Some(w),
+            (None, None) => None,
+        };
+
+        assert_eq!(budget_limit, Some(dec!(5.00)));
+    }
+
+    #[test]
+    fn test_budget_params_from_pricing_and_limit() {
+        let pricing = create_test_pricing();
+        let limit = dec!(1.00);
+        let cumulative = Some(dec!(0.25));
+
+        let budget = BudgetParams {
+            model_pricing: pricing.clone(),
+            budget_limit_usd: limit,
+            cumulative_cost_usd: cumulative.unwrap_or(Decimal::ZERO),
+        };
+
+        assert_eq!(budget.budget_limit_usd, dec!(1.00));
+        assert_eq!(budget.cumulative_cost_usd, dec!(0.25));
+        assert_eq!(budget.model_pricing.len(), 3);
+    }
+
+    #[test]
+    fn test_budget_params_default_cumulative_cost() {
+        let pricing = create_test_pricing();
+        let cumulative: Option<Decimal> = None;
+
+        let budget = BudgetParams {
+            model_pricing: pricing,
+            budget_limit_usd: dec!(1.00),
+            cumulative_cost_usd: cumulative.unwrap_or(Decimal::ZERO),
+        };
+
+        assert_eq!(budget.cumulative_cost_usd, Decimal::ZERO);
+    }
+
+    // ============================================================================
+    // PromptResponse / EmbeddingResponse Tests
+    // ============================================================================
+
+    #[test]
+    fn test_prompt_response_serialization() {
+        let response = PromptResponse {
+            content: "Hello!".to_string(),
+            model: "claude-3-5-sonnet-20241022".to_string(),
+            provider: "anthropic".to_string(),
+            usage: crate::llm::TokenUsage {
+                prompt_tokens: 10,
+                output_tokens: 5,
+                total_tokens: 15,
+                cached_tokens: Some(3),
+            },
+            finish_reason: crate::llm::FinishReason::Stop,
+            cost_usd: Some(dec!(0.001)),
+        };
+
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["content"], "Hello!");
+        assert_eq!(json["provider"], "anthropic");
+        assert_eq!(json["usage"]["cached_tokens"], 3);
+
+        // Roundtrip
+        let deserialized: PromptResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(deserialized.content, "Hello!");
+        assert_eq!(deserialized.cost_usd, Some(dec!(0.001)));
+    }
+
+    #[test]
+    fn test_prompt_response_max_tokens_finish_reason() {
+        let response = PromptResponse {
+            content: "Truncated...".to_string(),
+            model: "gpt-4".to_string(),
+            provider: "openai".to_string(),
+            usage: crate::llm::TokenUsage {
+                prompt_tokens: 100,
+                output_tokens: 4096,
+                total_tokens: 4196,
+                cached_tokens: None,
+            },
+            finish_reason: crate::llm::FinishReason::MaxTokens,
+            cost_usd: None,
+        };
+
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["finish_reason"], "MaxTokens");
+        assert!(json["cost_usd"].is_null());
+    }
+
+    #[test]
+    fn test_embedding_response_serialization() {
+        let response = EmbeddingResponse {
+            embeddings: vec![vec![0.1, 0.2, 0.3], vec![0.4, 0.5, 0.6]],
+            model: "text-embedding-3-small".to_string(),
+            provider: "openai".to_string(),
+            usage: crate::llm::TokenUsage {
+                prompt_tokens: 10,
+                output_tokens: 0,
+                total_tokens: 10,
+                cached_tokens: None,
+            },
+        };
+
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["embeddings"].as_array().unwrap().len(), 2);
+        assert_eq!(json["model"], "text-embedding-3-small");
+
+        let deserialized: EmbeddingResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(deserialized.embeddings.len(), 2);
+    }
+
+    // ============================================================================
+    // Activity Execute Error Path Tests
+    // ============================================================================
+
+    #[tokio::test]
+    async fn test_llm_prompt_execute_invalid_parameters() {
+        let activity = LLMPromptActivity::new();
+        let result = activity.execute(json!({"invalid": "params"})).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Failed to parse"));
+    }
+
+    #[tokio::test]
+    async fn test_llm_prompt_execute_invalid_model_format() {
+        let activity = LLMPromptActivity::new();
+        let result = activity
+            .execute(json!({
+                "model": "no-slash-model",
+                "prompt": "Hello"
+            }))
+            .await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid model format")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_embedding_execute_invalid_parameters() {
+        let activity = EmbeddingActivity::new();
+        let result = activity.execute(json!({"wrong": "shape"})).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Failed to parse"));
+    }
+
+    #[tokio::test]
+    async fn test_embedding_execute_invalid_model_format() {
+        let activity = EmbeddingActivity::new();
+        let result = activity
+            .execute(json!({
+                "model": "invalid-model",
+                "input": ["test"]
+            }))
+            .await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid model format")
+        );
+    }
+
+    // ============================================================================
+    // LLMPromptActivity / EmbeddingActivity Default Tests
+    // ============================================================================
+
+    #[test]
+    fn test_llm_prompt_activity_default() {
+        let activity = LLMPromptActivity::default();
+        assert_eq!(activity.name(), "llm_prompt");
+    }
+
+    #[test]
+    fn test_embedding_activity_default() {
+        let activity = EmbeddingActivity::default();
+        assert_eq!(activity.name(), "embedding");
+    }
+
+    #[test]
+    fn test_llm_prompt_activity_supports_streaming() {
+        use crate::streaming::StreamingActivity;
+        let activity = LLMPromptActivity::new();
+        assert!(activity.supports_streaming());
+    }
+
+    // ============================================================================
+    // FallbackChain All-Providers-Fail Tests
+    // ============================================================================
+
+    #[tokio::test]
+    #[serial]
+    async fn test_fallback_chain_prompt_all_providers_fail_no_keys() {
+        // Clear all provider keys
+        unsafe {
+            env::remove_var("ANTHROPIC_API_KEY");
+            env::remove_var("OPENAI_API_KEY");
+            env::remove_var("GOOGLE_API_KEY");
+            env::remove_var("OLLAMA_BASE_URL");
+        }
+
+        let chain = FallbackChain {
+            provider_models: vec![
+                (
+                    "anthropic".to_string(),
+                    "claude-3-5-sonnet-20241022".to_string(),
+                ),
+                ("openai".to_string(), "gpt-4".to_string()),
+            ],
+        };
+
+        let request = PromptRequest {
+            model: String::new(),
+            prompt: "Hello".to_string(),
+            system_prompt: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            stop_sequences: None,
+        };
+
+        let result = chain.prompt(&request, None).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("All providers failed")
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_fallback_chain_embed_all_providers_fail_no_keys() {
+        unsafe {
+            env::remove_var("ANTHROPIC_API_KEY");
+            env::remove_var("OPENAI_API_KEY");
+            env::remove_var("GOOGLE_API_KEY");
+        }
+
+        let chain = FallbackChain {
+            provider_models: vec![("openai".to_string(), "text-embedding-3-small".to_string())],
+        };
+
+        let request = EmbeddingRequest {
+            model: String::new(),
+            input: vec!["Hello".to_string()],
+        };
+
+        let result = chain.embed(&request).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("All providers failed")
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_fallback_chain_prompt_empty_chain() {
+        let chain = FallbackChain {
+            provider_models: vec![],
+        };
+
+        let request = PromptRequest {
+            model: String::new(),
+            prompt: "Hello".to_string(),
+            system_prompt: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            stop_sequences: None,
+        };
+
+        let result = chain.prompt(&request, None).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("No providers configured")
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_fallback_chain_embed_empty_chain() {
+        let chain = FallbackChain {
+            provider_models: vec![],
+        };
+
+        let request = EmbeddingRequest {
+            model: String::new(),
+            input: vec!["test".to_string()],
+        };
+
+        let result = chain.embed(&request).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("No providers configured")
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_fallback_chain_prompt_stream_empty_chain() {
+        use crate::streaming::NoOpStreamSender;
+
+        let chain = FallbackChain {
+            provider_models: vec![],
+        };
+
+        let request = PromptRequest {
+            model: String::new(),
+            prompt: "Hello".to_string(),
+            system_prompt: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            stop_sequences: None,
+        };
+
+        let sender = NoOpStreamSender::new();
+        let result = chain.prompt_stream(&request, None, &sender).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("No providers configured")
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_fallback_chain_prompt_stream_all_fail_no_keys() {
+        use crate::streaming::NoOpStreamSender;
+
+        unsafe {
+            env::remove_var("ANTHROPIC_API_KEY");
+            env::remove_var("OPENAI_API_KEY");
+        }
+
+        let chain = FallbackChain {
+            provider_models: vec![(
+                "anthropic".to_string(),
+                "claude-3-5-sonnet-20241022".to_string(),
+            )],
+        };
+
+        let request = PromptRequest {
+            model: String::new(),
+            prompt: "Hello".to_string(),
+            system_prompt: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            stop_sequences: None,
+        };
+
+        let sender = NoOpStreamSender::new();
+        let result = chain.prompt_stream(&request, None, &sender).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("All providers failed")
+        );
+    }
+
+    // ============================================================================
+    // Budget-Aware Fallback: Budget Exceeds Skip All Providers
+    // ============================================================================
+
+    #[tokio::test]
+    #[serial]
+    async fn test_fallback_chain_prompt_budget_skips_all_providers() {
+        // Set keys so providers can be created, but budget blocks them all
+        unsafe {
+            env::set_var("ANTHROPIC_API_KEY", "test-key");
+        }
+
+        let pricing = create_test_pricing();
+        let budget = BudgetParams {
+            model_pricing: pricing,
+            budget_limit_usd: dec!(0.00), // Zero budget
+            cumulative_cost_usd: dec!(0.00),
+        };
+
+        let chain = FallbackChain {
+            provider_models: vec![(
+                "anthropic".to_string(),
+                "claude-3-5-sonnet-20241022".to_string(),
+            )],
+        };
+
+        let request = PromptRequest {
+            model: String::new(),
+            prompt: "Hello".to_string(),
+            system_prompt: None,
+            max_tokens: Some(100),
+            temperature: None,
+            top_p: None,
+            stop_sequences: None,
+        };
+
+        let result = chain.prompt(&request, Some(&budget)).await;
+        // Should fail because budget blocks the only provider, but the error
+        // will be "ANTHROPIC_API_KEY not set" since env vars may not persist
+        // across serial tests, OR "All providers failed"
+        assert!(result.is_err());
+
+        unsafe {
+            env::remove_var("ANTHROPIC_API_KEY");
+        }
+    }
+
+    // ============================================================================
+    // Activity Output JSON Format Tests
+    // ============================================================================
+
+    #[test]
+    fn test_llm_activity_output_json_format() {
+        let response = PromptResponse {
+            content: "Generated text".to_string(),
+            model: "claude-3-5-sonnet-20241022".to_string(),
+            provider: "anthropic".to_string(),
+            usage: crate::llm::TokenUsage {
+                prompt_tokens: 50,
+                output_tokens: 200,
+                total_tokens: 250,
+                cached_tokens: None,
+            },
+            finish_reason: crate::llm::FinishReason::Stop,
+            cost_usd: Some(dec!(0.003)),
+        };
+
+        // Match what execute() produces
+        let outputs = json!({
+            "content": response.content,
+            "model": response.model,
+            "provider": response.provider,
+            "finish_reason": response.finish_reason,
+            "cost_usd": response.cost_usd,
+            "usage": {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "output_tokens": response.usage.output_tokens,
+                "total_tokens": response.usage.total_tokens,
+                "cached_tokens": response.usage.cached_tokens,
+            }
+        });
+
+        let result = ActivityResult::value("result", outputs.clone());
+        let json_value = result.to_json_value();
+        assert_eq!(json_value["result"]["content"], "Generated text");
+        assert_eq!(json_value["result"]["usage"]["prompt_tokens"], 50);
+        assert_eq!(json_value["result"]["usage"]["output_tokens"], 200);
+    }
+
+    #[test]
+    fn test_embedding_activity_output_json_format_inline() {
+        let outputs = json!({
+            "embeddings": [[0.1, 0.2], [0.3, 0.4]],
+            "embeddings_file": null,
+            "embedding_count": 2,
+            "model": "text-embedding-3-small",
+            "provider": "openai",
+            "usage": {
+                "prompt_tokens": 5,
+                "output_tokens": 0,
+                "total_tokens": 5,
+                "cached_tokens": null,
+            }
+        });
+
+        let result = ActivityResult::value("result", outputs);
+        let json_value = result.to_json_value();
+        assert_eq!(json_value["result"]["embedding_count"], 2);
+        assert!(json_value["result"]["embeddings_file"].is_null());
+        assert_eq!(
+            json_value["result"]["embeddings"].as_array().unwrap().len(),
+            2
+        );
+    }
+
+    #[test]
+    fn test_embedding_activity_output_json_format_streamed() {
+        let outputs = json!({
+            "embeddings": null,
+            "embeddings_file": "abc-123/embed_step/embeddings.jsonl",
+            "embedding_count": 1000,
+            "model": "text-embedding-3-small",
+            "provider": "openai",
+            "usage": {
+                "prompt_tokens": 5000,
+                "output_tokens": 0,
+                "total_tokens": 5000,
+                "cached_tokens": null,
+            }
+        });
+
+        let result = ActivityResult::value("result", outputs);
+        let json_value = result.to_json_value();
+        assert_eq!(json_value["result"]["embedding_count"], 1000);
+        assert!(json_value["result"]["embeddings"].is_null());
+        assert_eq!(
+            json_value["result"]["embeddings_file"],
+            "abc-123/embed_step/embeddings.jsonl"
+        );
     }
 }

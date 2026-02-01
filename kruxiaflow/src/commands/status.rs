@@ -236,4 +236,358 @@ mod tests {
         assert!(json.contains("running"));
         assert!(json.contains("0.3.0"));
     }
+
+    // =========================================================================
+    // ServiceStatus serde tests
+    // =========================================================================
+
+    #[test]
+    fn test_service_status_deserialization() {
+        let json = r#"{
+            "service": "api",
+            "version": "0.3.0",
+            "status": "running",
+            "uptime": "1h 30m"
+        }"#;
+
+        let status: ServiceStatus = serde_json::from_str(json).unwrap();
+        assert_eq!(status.service, "api");
+        assert_eq!(status.version, Some("0.3.0".to_string()));
+        assert_eq!(status.status, "running");
+        assert_eq!(status.uptime, Some("1h 30m".to_string()));
+    }
+
+    #[test]
+    fn test_service_status_deserialization_with_nulls() {
+        let json = r#"{
+            "service": "api",
+            "version": null,
+            "status": "unreachable",
+            "uptime": null
+        }"#;
+
+        let status: ServiceStatus = serde_json::from_str(json).unwrap();
+        assert_eq!(status.service, "api");
+        assert!(status.version.is_none());
+        assert_eq!(status.status, "unreachable");
+        assert!(status.uptime.is_none());
+    }
+
+    #[test]
+    fn test_service_status_serialization_skips_none_details() {
+        let status = ServiceStatus {
+            service: "api".to_string(),
+            version: None,
+            status: "running".to_string(),
+            uptime: None,
+            details: None,
+        };
+
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(!json.contains("details"));
+    }
+
+    #[test]
+    fn test_service_status_serialization_includes_details() {
+        let status = ServiceStatus {
+            service: "api".to_string(),
+            version: Some("0.3.0".to_string()),
+            status: "running".to_string(),
+            uptime: None,
+            details: Some(serde_json::json!({"features": ["llm", "email"]})),
+        };
+
+        let json = serde_json::to_string(&status).unwrap();
+        assert!(json.contains("details"));
+        assert!(json.contains("features"));
+    }
+
+    #[test]
+    fn test_service_status_debug() {
+        let status = ServiceStatus {
+            service: "api".to_string(),
+            version: Some("0.3.0".to_string()),
+            status: "running".to_string(),
+            uptime: None,
+            details: None,
+        };
+
+        let debug_str = format!("{:?}", status);
+        assert!(debug_str.contains("ServiceStatus"));
+        assert!(debug_str.contains("api"));
+    }
+
+    // =========================================================================
+    // StatusReport tests
+    // =========================================================================
+
+    #[test]
+    fn test_status_report_serialization() {
+        let report = StatusReport {
+            services: vec![ServiceStatus {
+                service: "api".to_string(),
+                version: Some("0.3.0".to_string()),
+                status: "running".to_string(),
+                uptime: Some("2h".to_string()),
+                details: None,
+            }],
+            checks: Some(serde_json::json!({
+                "database": {"status": "healthy"},
+                "orchestrator": {"status": "healthy"}
+            })),
+            timestamp: "2026-02-01T00:00:00Z".to_string(),
+        };
+
+        let json = serde_json::to_string_pretty(&report).unwrap();
+        assert!(json.contains("api"));
+        assert!(json.contains("database"));
+        assert!(json.contains("orchestrator"));
+        assert!(json.contains("2026-02-01"));
+    }
+
+    #[test]
+    fn test_status_report_serialization_no_checks() {
+        let report = StatusReport {
+            services: vec![ServiceStatus {
+                service: "api".to_string(),
+                version: None,
+                status: "unreachable: connection refused".to_string(),
+                uptime: None,
+                details: None,
+            }],
+            checks: None,
+            timestamp: "2026-02-01T00:00:00Z".to_string(),
+        };
+
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains("unreachable"));
+    }
+
+    #[test]
+    fn test_status_report_debug() {
+        let report = StatusReport {
+            services: vec![],
+            checks: None,
+            timestamp: "2026-02-01T00:00:00Z".to_string(),
+        };
+
+        let debug_str = format!("{:?}", report);
+        assert!(debug_str.contains("StatusReport"));
+    }
+
+    // =========================================================================
+    // Output formatting tests
+    // =========================================================================
+
+    #[test]
+    fn test_print_text_status_no_panic() {
+        let report = StatusReport {
+            services: vec![ServiceStatus {
+                service: "api".to_string(),
+                version: Some("0.3.0".to_string()),
+                status: "running".to_string(),
+                uptime: Some("2h 15m".to_string()),
+                details: None,
+            }],
+            checks: Some(serde_json::json!({
+                "database": {"status": "healthy"},
+                "orchestrator": {"status": "unhealthy"}
+            })),
+            timestamp: "2026-02-01T00:00:00Z".to_string(),
+        };
+
+        // Should not panic
+        print_text_status(&report);
+    }
+
+    #[test]
+    fn test_print_text_status_no_checks() {
+        let report = StatusReport {
+            services: vec![ServiceStatus {
+                service: "api".to_string(),
+                version: None,
+                status: "unreachable: timeout".to_string(),
+                uptime: None,
+                details: None,
+            }],
+            checks: None,
+            timestamp: "2026-02-01T00:00:00Z".to_string(),
+        };
+
+        // Should not panic when checks is None
+        print_text_status(&report);
+    }
+
+    #[test]
+    fn test_print_text_status_truncates_long_status() {
+        let report = StatusReport {
+            services: vec![ServiceStatus {
+                service: "api".to_string(),
+                version: None,
+                status: "unreachable: connection refused by remote host".to_string(),
+                uptime: None,
+                details: None,
+            }],
+            checks: None,
+            timestamp: "2026-02-01T00:00:00Z".to_string(),
+        };
+
+        // Status longer than 13 chars should be truncated; should not panic
+        print_text_status(&report);
+    }
+
+    #[test]
+    fn test_print_text_status_short_status() {
+        let report = StatusReport {
+            services: vec![ServiceStatus {
+                service: "api".to_string(),
+                version: None,
+                status: "running".to_string(), // Exactly 7 chars, under 13
+                uptime: None,
+                details: None,
+            }],
+            checks: None,
+            timestamp: "2026-02-01T00:00:00Z".to_string(),
+        };
+
+        // Short status should not be truncated
+        print_text_status(&report);
+    }
+
+    #[test]
+    fn test_print_text_status_with_degraded_check() {
+        let report = StatusReport {
+            services: vec![ServiceStatus {
+                service: "api".to_string(),
+                version: Some("0.3.0".to_string()),
+                status: "running".to_string(),
+                uptime: None,
+                details: None,
+            }],
+            checks: Some(serde_json::json!({
+                "database": {"status": "degraded"},
+                "cache": {"status": "unknown_status"}
+            })),
+            timestamp: "2026-02-01T00:00:00Z".to_string(),
+        };
+
+        // Should handle degraded and unknown statuses without panic
+        print_text_status(&report);
+    }
+
+    #[test]
+    fn test_print_json_status_no_panic() {
+        let report = StatusReport {
+            services: vec![ServiceStatus {
+                service: "api".to_string(),
+                version: Some("0.3.0".to_string()),
+                status: "running".to_string(),
+                uptime: Some("30m".to_string()),
+                details: Some(serde_json::json!({"build": "abc123"})),
+            }],
+            checks: Some(serde_json::json!({"database": {"status": "healthy"}})),
+            timestamp: "2026-02-01T00:00:00Z".to_string(),
+        };
+
+        // Should not panic
+        print_json_status(&report);
+    }
+
+    #[test]
+    fn test_print_text_status_empty_services() {
+        let report = StatusReport {
+            services: vec![],
+            checks: None,
+            timestamp: "2026-02-01T00:00:00Z".to_string(),
+        };
+
+        // Should not panic with empty services
+        print_text_status(&report);
+    }
+
+    #[test]
+    fn test_print_text_status_checks_non_object() {
+        let report = StatusReport {
+            services: vec![],
+            checks: Some(serde_json::json!("not_an_object")),
+            timestamp: "2026-02-01T00:00:00Z".to_string(),
+        };
+
+        // Non-object checks value should not panic
+        print_text_status(&report);
+    }
+
+    // =========================================================================
+    // StatusCommand construction tests
+    // =========================================================================
+
+    #[test]
+    fn test_status_command_json_format() {
+        let cmd = StatusCommand {
+            api_url: "http://127.0.0.1:9090".to_string(),
+            timeout: 30,
+            format: "json".to_string(),
+        };
+
+        assert_eq!(cmd.format, "json");
+        assert_eq!(cmd.timeout, 30);
+    }
+
+    #[test]
+    fn test_status_command_custom_api_url() {
+        let cmd = StatusCommand {
+            api_url: "https://kruxiaflow.example.com".to_string(),
+            timeout: 10,
+            format: "text".to_string(),
+        };
+
+        assert_eq!(cmd.api_url, "https://kruxiaflow.example.com");
+    }
+
+    // =========================================================================
+    // Multiple services tests
+    // =========================================================================
+
+    #[test]
+    fn test_print_text_status_multiple_services() {
+        let report = StatusReport {
+            services: vec![
+                ServiceStatus {
+                    service: "api".to_string(),
+                    version: Some("0.3.0".to_string()),
+                    status: "running".to_string(),
+                    uptime: Some("2h".to_string()),
+                    details: None,
+                },
+                ServiceStatus {
+                    service: "worker".to_string(),
+                    version: Some("0.3.0".to_string()),
+                    status: "running".to_string(),
+                    uptime: Some("1h 55m".to_string()),
+                    details: None,
+                },
+            ],
+            checks: None,
+            timestamp: "2026-02-01T00:00:00Z".to_string(),
+        };
+
+        print_text_status(&report);
+    }
+
+    #[test]
+    fn test_service_status_with_no_version_no_uptime() {
+        let status = ServiceStatus {
+            service: "api".to_string(),
+            version: None,
+            status: "running".to_string(),
+            uptime: None,
+            details: None,
+        };
+
+        let json = serde_json::to_string(&status).unwrap();
+        let deser: ServiceStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.service, "api");
+        assert!(deser.version.is_none());
+        assert!(deser.uptime.is_none());
+    }
 }

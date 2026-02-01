@@ -609,4 +609,114 @@ mod tests {
         let err = StreamError::ExecutionFailed("timeout".to_string());
         assert_eq!(err.to_string(), "Activity execution failed: timeout");
     }
+
+    #[test]
+    fn test_stream_error_serialization_error_display() {
+        let err = StreamError::SerializationError("invalid JSON".to_string());
+        assert_eq!(err.to_string(), "Serialization error: invalid JSON");
+    }
+
+    #[test]
+    fn test_stream_error_debug() {
+        let err = StreamError::SendFailed("test".to_string());
+        let debug_str = format!("{:?}", err);
+        assert!(debug_str.contains("SendFailed"));
+    }
+
+    #[test]
+    fn test_http_stream_sender_new() {
+        let activity_id = Uuid::now_v7();
+        let sender = HttpStreamSender::new(
+            "http://localhost:8080".to_string(),
+            activity_id,
+            Some("test-token".to_string()),
+        );
+
+        assert_eq!(sender.api_url, "http://localhost:8080");
+        assert_eq!(sender.activity_id, activity_id);
+        assert_eq!(sender.auth_token, Some("test-token".to_string()));
+    }
+
+    #[test]
+    fn test_http_stream_sender_new_without_token() {
+        let activity_id = Uuid::now_v7();
+        let sender = HttpStreamSender::new("http://localhost:8080".to_string(), activity_id, None);
+
+        assert!(sender.auth_token.is_none());
+    }
+
+    #[test]
+    fn test_http_stream_sender_debug() {
+        let activity_id = Uuid::now_v7();
+        let sender = HttpStreamSender::new("http://localhost:8080".to_string(), activity_id, None);
+
+        let debug_str = format!("{:?}", sender);
+        assert!(debug_str.contains("HttpStreamSender"));
+        assert!(debug_str.contains("localhost:8080"));
+    }
+
+    #[test]
+    fn test_stream_token_clone() {
+        let token = StreamToken::new("hello", 5);
+        let cloned = token.clone();
+        assert_eq!(token, cloned);
+    }
+
+    #[test]
+    fn test_stream_token_equality() {
+        let a = StreamToken::new("hello", 0);
+        let b = StreamToken::new("hello", 0);
+        let c = StreamToken::new("world", 0);
+        let d = StreamToken::new("hello", 1);
+
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a, d);
+    }
+
+    #[tokio::test]
+    async fn test_noop_stream_sender_error() {
+        let sender = NoOpStreamSender::new();
+        let activity_id = Uuid::now_v7();
+
+        let count = sender.send_error(activity_id, "test error").await.unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_noop_stream_sender_default() {
+        let sender = NoOpStreamSender::default();
+        let debug_str = format!("{:?}", sender);
+        assert!(debug_str.contains("NoOpStreamSender"));
+    }
+
+    #[test]
+    fn test_noop_stream_sender_clone() {
+        let sender = NoOpStreamSender::new();
+        let _cloned = sender.clone();
+    }
+
+    #[tokio::test]
+    async fn test_collecting_stream_sender_not_finished_initially() {
+        let sender = CollectingStreamSender::new();
+        assert!(!sender.is_finished());
+        assert!(sender.completion().is_none());
+        assert!(sender.error().is_none());
+        assert!(sender.tokens().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_collecting_stream_sender_close() {
+        let sender = CollectingStreamSender::new();
+        sender.close().await.unwrap();
+        // close is a no-op for collecting sender
+    }
+
+    #[tokio::test]
+    async fn test_http_stream_sender_close_is_noop() {
+        let sender =
+            HttpStreamSender::new("http://localhost:9999".to_string(), Uuid::now_v7(), None);
+        // close() just returns Ok for HTTP sender
+        sender.close().await.unwrap();
+    }
 }
