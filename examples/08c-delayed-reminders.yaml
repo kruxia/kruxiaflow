@@ -5,51 +5,90 @@ activities:
     activity_name: http_request
     parameters:
       method: POST
-      url: "{{INPUT.user_webhook}}"
+      url: "http://mailpit:8025/api/v1/send"
+      headers:
+        Content-Type: "application/json"
       body:
-        message: "Task assigned: {{INPUT.task_name}}"
-        priority: "normal"
+        From:
+          Name: "Kruxia Flow Reminders"
+          Email: "reminders@kruxiaflow.local"
+        To:
+          - Name: "Assigned User"
+            Email: "{{INPUT.assigned_user}}"
+        Subject: "Task Assigned: {{INPUT.task_name}}"
+        Text: |
+          Task assigned: {{INPUT.task_name}}
+          Priority: normal
 
-  # Wait 1 hour, then send first reminder
+  # Wait 1 minute, then send first reminder
   - key: send_first_reminder
     activity_name: http_request
     parameters:
       method: POST
-      url: "{{INPUT.user_webhook}}"
+      url: "http://mailpit:8025/api/v1/send"
+      headers:
+        Content-Type: "application/json"
       body:
-        message: "Reminder: {{INPUT.task_name}} is still pending"
-        priority: "normal"
+        From:
+          Name: "Kruxia Flow Reminders"
+          Email: "reminders@kruxiaflow.local"
+        To:
+          - Name: "Assigned User"
+            Email: "{{INPUT.assigned_user}}"
+        Subject: "Reminder: {{INPUT.task_name}} is still pending"
+        Text: |
+          Reminder: {{INPUT.task_name}} is still pending
+          Priority: normal
     settings:
-      delay: "1h"  # 1 hour
+      delay: "1m"  # 1 minute
     depends_on:
       - send_initial_notification
 
-  # Wait 3 more hours (4 hours total), send escalated reminder
+  # Wait 2 more minutes (3 minutes total), send escalated reminder
   - key: send_escalated_reminder
     activity_name: http_request
     parameters:
       method: POST
-      url: "{{INPUT.manager_webhook}}"
+      url: "http://mailpit:8025/api/v1/send"
+      headers:
+        Content-Type: "application/json"
       body:
-        message: "ESCALATED: {{INPUT.task_name}} pending for 4 hours"
-        priority: "high"
-        assigned_to: "{{INPUT.assigned_user}}"
+        From:
+          Name: "Kruxia Flow Reminders"
+          Email: "reminders@kruxiaflow.local"
+        To:
+          - Name: "Manager"
+            Email: "{{INPUT.manager_email}}"
+        Subject: "ESCALATED: {{INPUT.task_name}} pending for 3 minutes"
+        Text: |
+          ESCALATED: {{INPUT.task_name}} pending for 3 minutes
+          Assigned to: {{INPUT.assigned_user}}
+          Priority: high
     settings:
-      delay: "3h"  # 3 hours (from first_reminder)
+      delay: "2m"  # 2 minutes (from first_reminder)
     depends_on:
       - send_first_reminder
 
-  # Final escalation after 24 hours total
+  # Final escalation after 8 minutes total
   - key: send_final_escalation
     activity_name: http_request
     parameters:
       method: POST
-      url: "{{INPUT.oncall_webhook}}"
+      url: "http://mailpit:8025/api/v1/send"
+      headers:
+        Content-Type: "application/json"
       body:
-        message: "CRITICAL: {{INPUT.task_name}} pending for 24 hours"
-        priority: "critical"
-        requires_immediate_action: true
+        From:
+          Name: "Kruxia Flow Reminders"
+          Email: "reminders@kruxiaflow.local"
+        To:
+          - Name: "On-Call"
+            Email: "{{INPUT.oncall_email}}"
+        Subject: "CRITICAL: {{INPUT.task_name}} pending for 8 minutes"
+        Text: |
+          CRITICAL: {{INPUT.task_name}} pending for 8 minutes
+          Requires immediate action.
     settings:
-      delay: "20h"  # 20 more hours (24 total)
+      delay: "5m"  # 5 more minutes (8 total)
     depends_on:
       - send_escalated_reminder

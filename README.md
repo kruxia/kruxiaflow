@@ -7,24 +7,23 @@
 
 **AI-native durable workflows that run everywhere**
 
-A lightweight, high-performance workflow engine designed for AI applications. Track every token, cache intelligently, and never exceed your LLM budget.
+A lightweight, high-performance workflow engine designed for AI applications. Track every token, cache intelligently, and never exceed your LLM budget. Run on anything from the edge to the cloud.
 
 ```
 Single Binary Deployment | 40% Lower Memory | AI Cost Tracking Built-in | Runs Anywhere
 ```
 
-## Quick Start
+## Getting Started
 
 ### 1. Start Kruxia Flow
 
 ```bash
 git clone https://github.com/kruxia/kruxia-flow.git
 cd kruxia-flow
-./docker up -d
-./docker logs -f
+./docker up --examples
 
-# Wait for "listening on 0.0.0.0:8080" then verify:
-./docker exec kruxiaflow-server /kruxiaflow health
+# Wait for "listening on 0.0.0.0:8080" then verify in another terminal:
+./docker exec kruxiaflow /kruxiaflow health
 ```
 
 That's it. Kruxia Flow is running with PostgreSQL and Redis, ready to execute workflows.
@@ -57,22 +56,24 @@ curl -s -X POST http://localhost:8080/api/v1/workflow_definitions \
   --data-binary @examples/01-weather-report.yaml | jq .
 
 # Submit a workflow instance
-curl -s -X POST http://localhost:8080/api/v1/workflows \
+WORKFLOW_ID=$(curl -s -X POST http://localhost:8080/api/v1/workflows \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "definition_name": "weather_report",
     "input": {"webhook_url": "https://httpbin.org/post"}
-  }' | jq .
+  }' | jq .workflow_id | tr -d '"'); echo $WORKFLOW_ID
 ```
 
 This fetches a weather forecast from the National Weather Service API and POSTs
 the result to a webhook. Copy the `workflow_id` from the response to check status:
 
 ```bash
-curl -s http://localhost:8080/api/v1/workflows/WORKFLOW_ID \
+curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID \
   -H "Authorization: Bearer $TOKEN" | jq .
 ```
+
+If it succeeded, you've got mail! Check the weather report at http://localhost:8025/ 
 
 ### 4. Run an LLM Workflow
 
@@ -96,7 +97,7 @@ curl -s -X POST http://localhost:8080/api/v1/workflow_definitions \
   --data-binary @examples/04-moderate-content.yaml | jq .
 
 # Submit a moderation request
-curl -s -X POST http://localhost:8080/api/v1/workflows \
+WORKFLOW_ID=$(curl -s -X POST http://localhost:8080/api/v1/workflows \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -105,17 +106,21 @@ curl -s -X POST http://localhost:8080/api/v1/workflows \
       "user_content": "Check out this amazing product!",
       "content_id": "test-001"
     }
-  }' | jq .
+  }' | jq .workflow_id | tr -d '"'); echo $WORKFLOW_ID
 ```
 
 Check workflow result and cost tracking with the `workflow_id` from the response:
 
 ```bash
-curl -s http://localhost:8080/api/v1/workflows/WORKFLOW_ID \
+curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID \
   -H "Authorization: Bearer $TOKEN" | jq .
 
-# View cost breakdown
-curl -s http://localhost:8080/api/v1/workflows/WORKFLOW_ID/cost \
+# View cost summary for the workflow
+curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/cost \
+  -H "Authorization: Bearer $TOKEN" | jq .
+
+# View cost breakdown for the workflow activities
+curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/cost/history \
   -H "Authorization: Bearer $TOKEN" | jq .
 ```
 
@@ -128,16 +133,14 @@ Kruxia Flow is a **durable execution engine**: workflows survive crashes, retrie
 
 ### vs. Temporal
 
-Temporal is the industry standard for durable execution, and we respect what they've built. Choose Kruxia Flow when you want:
+Temporal is the industry standard for durable execution, and we respect what they've built. Choose Kruxia Flow when you want durable execution without the operational overhead, need AI-native features, or are a small team shipping fast. Comparison:
 
 | | Temporal | Kruxia Flow |
 |---|----------|-------------|
 | **Deployment** | 4+ services (Frontend, History, Matching, Worker) | Single binary |
-| **Memory footprint** | 300-400 MB baseline | ~200 MB baseline |
+| **Memory footprint** | 250-425 MB | ~200-330 MB |
 | **Operational complexity** | Requires expertise | Minimal configuration |
 | **AI workflow features** | — | Built-in cost tracking, budgets, model fallback, streaming |
-
-**When to choose Kruxia Flow:** You want durable execution without the operational overhead, need AI-native features, or are a small team shipping fast.
 
 ### vs. Inngest
 
@@ -158,7 +161,7 @@ Airflow is a batch scheduler. It’s great for data pipelines on a schedule, but
 | **State** | External (database) | Built-in persistence |
 | **Real-time** | Not designed for it | Sub-second capable |
 
-**Migrating from Airflow?** If you need durability guarantees, exactly-once semantics, or real-time workflows, Kruxia Flow is a natural next step. [**TODO**: See migration guide →]
+**Migrating from Airflow?** If you need durability guarantees, exactly-once semantics, or real-time workflows, Kruxia Flow is a natural next step.
 
 ### The Problem
 
@@ -182,14 +185,14 @@ Kruxia Flow combines durable execution with AI-native features:
 | Token streaming          | **Yes**    | No       | No      | Yes       |
 | Single binary            | **7.5MB**  | ~200MB   | ~500MB+ | N/A       |
 | Docker image             | **63MB**   | ~500MB   | ~1GB+   | N/A       |
-| Peak memory              | **380MB**  | ~380MB   | ~7.6GB  | N/A       |
-| Throughput (wf/sec)      | **32**     | 27       | 1.3     | N/A       |
+| Peak memory              | **328MB**  | ~425MB   | ~7.2GB  | N/A       |
+| Throughput (wf/sec)      | **93**     | 66       | 8       | N/A       |
 
 ## Key Features
 
 ### Built-in LLM Cost Tracking
 
-Every token is tracked. Every dollar is accounted for.
+The std (built-in) `llm_prompt` and `embedding` activities help you control costs: They estimate costs in advance using the published cost data for LLM models (stored in [config/llm_models.yaml](config/llm_models.yaml)) and will only run activities that won't exceed the budget, if provided. Then when the LLM activity is run, the costs and token counts are recorded so that cost metrics can be analyzed and workflows optimized.
 
 ```yaml
 activities:
@@ -205,7 +208,7 @@ activities:
         action: abort
 ```
 
-Real-time cost visibility per workflow, per activity, per model.
+Real-time costs are visible per workflow and per activity.
 
 ### Budget-Aware Model Fallback
 
@@ -219,7 +222,7 @@ activities:
       model:
         - anthropic/claude-sonnet-4-5-20250929  # Try first
         - openai/gpt-4o-mini                    # If budget constrained
-        - anthropic/claude-haiku-4-20250415      # Last resort
+        - anthropic/claude-haiku-4-20250415     # Last resort
       prompt: "Generate a summary..."
       max_tokens: 500
     settings:
@@ -254,7 +257,7 @@ Identical queries hit cache instead of the LLM. (NOTE: Semantic caching is plann
 
 ### Durable Execution
 
-Workflows survive crashes and restart from where they left off. No lost work, no duplicate charges.
+Workflows survive crashes and restart from where they left off.
 
 ### Multi-Provider LLM Support
 
@@ -267,7 +270,7 @@ Native support for all major providers:
 
 ## Examples
 
-Kruxia Flow includes 10 production-ready example workflows:
+Kruxia Flow includes 10+ production-ready example workflows:
 
 | #  | Example                     | Concepts Demonstrated                              |
 |----|-----------------------------|----------------------------------------------------|
@@ -299,7 +302,7 @@ Kruxia Flow is a single Rust binary with PostgreSQL as the only required depende
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     Kruxia Flow (7.5MB binary)                   │
+│                     Kruxia Flow (7.5MB binary)                  │
 ├─────────────────────────────────────────────────────────────────┤
 │  API Server  │  Orchestrator  │  Worker Pool  │  Cost Tracker   │
 └──────────────┴────────────────┴───────────────┴─────────────────┘
@@ -314,21 +317,20 @@ Kruxia Flow is a single Rust binary with PostgreSQL as the only required depende
 
 - **Event-driven**: Publish-subscribe architecture with exactly-once guarantees
 - **PostgreSQL-only**: No Kafka, Cassandra, or Elasticsearch required
-- **Pluggable**: Swap in Kafka, Redis, S3 when you need scale [POST-MVP]
+- **Pluggable**: Include Redis for activity results caching 
+- **Planned**: Swap in Kafka for events, S3 for storage when you need scale [POST-MVP]
 
 ## Performance
 
-Benchmarked against industry-standard workflow engines (November 2025):
+Kruxia Flow is benchmarked favorably against industry-standard workflow engines (January 2026):
 
-| Metric              | Kruxia Flow | Temporal | Airflow   |
-|---------------------|------------|----------|-----------|
-| Throughput (wf/sec) | **32**     | 27       | 1.3       |
-| P99 Latency         | **0.7-2s** | 0.7-3s   | 9-106s    |
-| Peak Memory         | **380MB**  | 380MB    | 7.6GB     |
-| Binary Size         | **7.5MB**  | ~200MB   | ~500MB+   |
-| Docker Image        | **63MB**   | ~500MB   | ~1GB+     |
-
-*Kruxia Flow: 24x faster than Airflow, 20x less memory*
+| Metric              | Kruxia Flow  | Temporal | Airflow |
+|---------------------|--------------|----------|---------|
+| Throughput (wf/sec) | **93**       | 66       | 8       |
+| P99 Latency         | **0.9–1.5s** | 0.5–2.7s | 6–22s   |
+| Peak Memory         | **328MB**    | 425MB    | 7.2GB   |
+| Binary Size         | **7.5MB**    | ~200MB   | ~500MB+ |
+| Docker Image        | **63MB**     | ~500MB   | ~1GB+   |
 
 Benchmark methodology: Identical echo workflows (sequential, parallel, high-concurrency), Docker Compose environment, same hardware. See [`benchmarks/`](benchmarks/) for reproducible tests.
 
@@ -336,8 +338,8 @@ Benchmark methodology: Identical echo workflows (sequential, parallel, high-conc
 
 - **[Architecture](docs/architecture.md)** - System design and component overview
 - **[MVP Requirements](docs/mvp-requirements.md)** - Product requirements and roadmap
-- **[Implementation Plans](docs/implementation/)** - Detailed technical specifications
-- **[Post-MVP Roadmap](docs/post-mvp.md)** - Future features and integrations
+- **[Implementation Plans](docs/implementation/)** - Detailed technical implementation specifications
+- **[Post-MVP Roadmap](docs/post-mvp.md), [Features](docs/features/)** - Future features and integrations
 
 ## Development
 
@@ -363,7 +365,6 @@ Benchmark methodology: Identical echo workflows (sequential, parallel, high-conc
 
 ```bash
 # Set up test database and run tests
-./scripts/setup-dev-db.sh
 ./scripts/test.sh
 
 # With coverage
@@ -391,16 +392,17 @@ cargo build --release
 
 ## Roadmap
 
-### Now (MVP Complete)
+### Now (Complete)
 - Durable workflow execution
-- 10 example workflows
+- 10+ example workflows
 - LLM cost tracking and budgets
-- Semantic caching
 - Multi-provider LLM support
 - Token streaming
+- Human-in-the-loop workflows
+- Python SDK (`pip install kruxia-flow`)
 
 ### Next
-- Python SDK (`pip install kruxia-flow`)
+- Semantic caching
 - Web dashboard for cost visualization
 - Airflow migration guide
 - Kubernetes Helm chart
@@ -408,7 +410,8 @@ cargo build --release
 ### Later
 - TypeScript SDK
 - RBAC and multi-tenancy
-- Kafka/Redis backends
+- Kafka protocol event backend
+- S3-compatible workflow storage backend
 
 See [Post-MVP Roadmap](docs/post-mvp.md) for details.
 
@@ -431,7 +434,7 @@ git clone https://github.com/YOUR_USERNAME/kruxia-flow.git
 git checkout -b feature/your-feature
 
 # Make changes and test
-./scripts/test.sh
+./scripts/test.sh --coverage
 
 # Submit a PR
 ```
@@ -444,4 +447,4 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 ---
 
-**Kruxia Flow** - AI-native durable workflow orchestration with built-in cost control.
+**Kruxia Flow** - AI-native durable workflows that run everywhere, with built-in LLM cost controls and streaming.

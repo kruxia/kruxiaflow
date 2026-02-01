@@ -2055,6 +2055,42 @@ conditions:
 
 ---
 
+### Story 4.4b: Date/Time Template Filters via minijinja-contrib
+
+**Priority**: P3 (Low - Quality of life for template expressions)
+
+**As** a workflow developer
+**I want** date/time filters available in template expressions
+**So that** I can parse, format, and manipulate dates and timestamps in workflow parameters and conditions
+
+**Scope**:
+- Evaluate adding `minijinja-contrib` as a dependency
+- Register `dateformat`, `datetimeformat`, and `timeformat` filters
+- Evaluate adding a `now()` function for current timestamp access
+- Document available date/time filters in template expression reference
+
+**Example Expressions**:
+```yaml
+parameters:
+  # Format an ISO 8601 timestamp as a date string
+  report_date: "{{INPUT.report_time | dateformat('%Y-%m-%d')}}"
+
+  # Format with custom display
+  display_date: "{{INPUT.scheduled_at | datetimeformat('%B %d, %Y at %I:%M %p')}}"
+
+conditions:
+  # Compare against current time (requires now() function)
+  - "{{INPUT.deadline | dateformat}} > now() | dateformat"
+```
+
+**Current Workaround**: String slicing (`{{INPUT.report_time[:10]}}`) extracts the date portion from ISO 8601 timestamps, but this is fragile and limited to extraction — no formatting, parsing, or arithmetic.
+
+**References**:
+- [minijinja-contrib filters](https://docs.rs/minijinja-contrib/latest/minijinja_contrib/filters/)
+- [minijinja-cli datetime feature](https://crates.io/crates/minijinja-cli)
+
+---
+
 ### Story 4.5: Web-Based Workflow Designer
 
 **Priority**: P2 (Medium - Non-technical users)
@@ -3836,6 +3872,48 @@ activities:
 - Better developer experience (clear error messages)
 - Safe conditional loops (retry logic, polling)
 - Confidence in workflow correctness
+
+---
+
+### Story 6.9: Per-Workflow Timeout
+
+**Priority**: P2 (Medium - Required for long-running workflows)
+
+**As** a workflow developer
+**I want** to specify a timeout for individual workflow definitions
+**So that** long-running workflows (e.g., cascading reminders over hours/days) can override the server-level default without requiring orchestrator reconfiguration
+
+**Current Behavior**:
+- Workflow timeout is server-level only: `KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS` (default: 300s)
+- All workflows share the same timeout ceiling
+- Long-running workflows require increasing the server timeout globally, which weakens the safety net for all other workflows
+
+**Proposed Behavior**:
+- Add optional `timeout` field to workflow definition YAML
+- Orchestrator config becomes the **default**, not a hard ceiling
+- Per-workflow timeout can be shorter or longer than the default
+- Optional server-level `max_workflow_timeout` to enforce an upper bound
+
+**Example YAML**:
+```yaml
+name: delayed_reminder_system
+timeout: "30m"  # This workflow needs up to 30 minutes
+activities:
+  - key: send_initial_notification
+    # ...
+```
+
+**Scope**:
+- Add `timeout` field to workflow definition schema (duration string format)
+- Parse and store per-workflow timeout in database
+- Orchestrator `check_and_timeout_stuck_workflows()` uses per-workflow timeout when present, falls back to server default
+- Optional `KRUXIAFLOW_ORCHESTRATOR_MAX_WORKFLOW_TIMEOUT_SECS` env var as an upper bound
+- Validation: reject workflow definitions where `timeout` exceeds `max_workflow_timeout` (if configured)
+
+**Benefits**:
+- Long-running workflows (reminders, scheduled reports, multi-day processes) work without global config changes
+- Short-running workflows retain a tight timeout safety net
+- Self-documenting: the workflow definition declares its own expected duration
 
 ---
 
