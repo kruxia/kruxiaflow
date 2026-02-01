@@ -285,16 +285,16 @@ Kruxia Flow includes 10+ production-ready example workflows:
 | 9  | [Token Streaming][ex9]      | Real-time LLM streaming via WebSocket              |
 | 10 | [Order Processing][ex10]    | HTTP, database transactions, email notifications   |
 
-[ex1]: examples/01-weather-report.yaml
-[ex2]: examples/02-user-validation.yaml
-[ex3]: examples/03-document-processing.yaml
-[ex4]: examples/04-moderate-content.yaml
-[ex5]: examples/05-research-assistant.yaml
-[ex6]: examples/06a-faq-bot-caching.yaml
-[ex7]: examples/07a-agentic-research-simple.yaml
-[ex8]: examples/08a-rate-limited-api-calls.yaml
-[ex9]: examples/09a-streaming-llm.yaml
-[ex10]: examples/10-order-processing.yaml
+[ex1]: examples/README.md#example-1-weather-report-pipeline
+[ex2]: examples/README.md#example-2-user-validation-with-conditional-branching
+[ex3]: examples/README.md#example-3-multi-document-processing-pipeline
+[ex4]: examples/README.md#example-4-llm-content-moderation-with-cost-tracking-and-retry
+[ex5]: examples/README.md#example-5-multi-model-llm-with-budget-aware-fallback
+[ex6]: examples/README.md#example-6a-faq-bot-with-semantic-caching
+[ex7]: examples/README.md#example-7a-simple-agentic-research-iterative-workflows
+[ex8]: examples/README.md#example-8-activity-scheduling-and-delays
+[ex9]: examples/README.md#example-9a-llm-token-streaming
+[ex10]: examples/README.md#example-10-order-processing
 
 ## Architecture
 
