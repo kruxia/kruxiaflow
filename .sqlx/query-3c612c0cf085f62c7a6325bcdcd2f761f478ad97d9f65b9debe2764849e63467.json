@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)\n        SELECT id FROM activity_queue\n        WHERE worker = 'std'\n          AND name = 'echo'\n          AND (\n              (status = 'pending'::activity_status AND scheduled_for <= NOW())\n              OR\n              (status = 'running'::activity_status\n               AND NOW() > claimed_at + timeout_duration\n               AND retry_count < max_retries)\n          )\n        ORDER BY scheduled_for ASC\n        LIMIT 1\n        FOR UPDATE SKIP LOCKED\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "QUERY PLAN",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "3c612c0cf085f62c7a6325bcdcd2f761f478ad97d9f65b9debe2764849e63467"
+}

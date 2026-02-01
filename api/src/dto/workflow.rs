@@ -46,7 +46,7 @@ pub struct ActivityDefinition {
     /// Unique key for this activity within the workflow
     pub key: String,
 
-    /// Activity worker type (e.g., "builtin", "custom-python")
+    /// Activity worker type (e.g., "std", "custom-python")
     pub worker: String,
 
     /// Activity name within worker (e.g., "http_request", "postgres_query")

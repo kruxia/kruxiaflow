@@ -10,7 +10,7 @@ pub struct WorkerConfig {
     /// Worker unique identifier
     pub worker_id: String,
 
-    /// Worker type this worker handles (e.g., "builtin", "custom")
+    /// Worker type this worker handles (e.g., "std", "custom")
     pub worker: String,
 
     /// Maximum number of activities to poll per request
@@ -43,7 +43,7 @@ impl Default for WorkerConfig {
         Self {
             api_url: "http://localhost:8080".to_string(),
             worker_id: format!("worker_{}", uuid::Uuid::now_v7()),
-            worker: "builtin".to_string(),
+            worker: "std".to_string(),
             poll_max_activities: 10,
             poll_interval: Duration::from_millis(100),
             max_concurrent_activities: 16,
@@ -221,7 +221,7 @@ mod tests {
 
         assert_eq!(config.api_url, "http://localhost:8080");
         assert!(config.worker_id.starts_with("worker_"));
-        assert_eq!(config.worker, "builtin");
+        assert_eq!(config.worker, "std");
         assert_eq!(config.poll_max_activities, 10);
         assert_eq!(config.poll_interval, Duration::from_millis(100));
         assert_eq!(config.max_concurrent_activities, 16);
@@ -239,7 +239,7 @@ mod tests {
 
             assert_eq!(config.api_url, "http://localhost:8080");
             assert!(config.worker_id.starts_with("worker_"));
-            assert_eq!(config.worker, "builtin");
+            assert_eq!(config.worker, "std");
             assert_eq!(config.max_concurrent_activities, 16);
             assert_eq!(config.concurrency, 4);
             assert_eq!(config.client_id, "worker_client");

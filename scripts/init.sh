@@ -72,7 +72,7 @@ init_env() {
 POSTGRES_PASSWORD=${postgres_password}
 
 # OAuth client credentials
-KRUXIAFLOW_CLIENT_ID=kruxiaflow-docker
+KRUXIAFLOW_CLIENT_ID=kruxiaflow-docker-client
 KRUXIAFLOW_CLIENT_SECRET=${client_secret}
 
 # Logging (info default, use debug for profiling)

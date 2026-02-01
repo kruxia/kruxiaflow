@@ -26,7 +26,7 @@ def generate_html_report(results: list, output_path: Path, timestamp: str = "") 
         platforms.add(result.platform)
 
     # Sort platforms with Kruxia Flow first
-    platform_order = ["Kruxia Flow", "Temporal", "Airflow"]
+    platform_order = ["Kruxia Flow", "Kruxia Flow (py-std)", "Temporal", "Airflow"]
     platforms = [p for p in platform_order if p in platforms]
 
     html = f"""<!DOCTYPE html>

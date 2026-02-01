@@ -17,7 +17,7 @@
 # - 06b-rag-index-builder.yaml: Build the index queried here
 #
 # Prerequisites:
-# - OPENAI_API_KEY for embedding generation
+# - GOOGLE_API_KEY for embedding generation
 # - ANTHROPIC_API_KEY for LLM (Claude Sonnet)
 # - PostgreSQL with pgvector extension and populated document_chunks table
 # - Run 06b-rag-index-builder.yaml first to populate the index
@@ -29,7 +29,7 @@
 # CREATE TABLE document_chunks (
 #     id SERIAL PRIMARY KEY,
 #     content TEXT NOT NULL,
-#     embedding vector(1536) NOT NULL,
+#     embedding vector(3072) NOT NULL,
 #     metadata JSONB,
 #     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 # );
@@ -50,7 +50,7 @@
 # );
 #
 # How RAG Works (4-Step Pattern):
-# 1. Embed: Convert user question to vector (1536-dimensional)
+# 1. Embed: Convert user question to vector (3072-dimensional)
 # 2. Search: Find top-k most similar chunks using cosine distance
 # 3. Augment: Pass retrieved chunks as context to LLM
 # 4. Generate: LLM produces answer grounded in retrieved context
@@ -63,7 +63,7 @@
 # Given question: "What is Rust's ownership model?"
 #
 # 1. embed_question:
-#    - Converts question to 1536-dimensional vector
+#    - Converts question to 3072-dimensional vector
 #    - Cost: ~$0.000002 (extremely cheap)
 #    - Output: Single embedding vector
 #
@@ -129,10 +129,10 @@ description: Answer questions using RAG (Retrieval-Augmented Generation) with em
 activities:
   # Step 1: Generate embedding for user question
   - key: embed_question
+    worker: std
     activity_name: embedding
     parameters:
-      provider: openai
-      model: text-embedding-3-small  # Same model as indexing (06b)
+      model: google/gemini-embedding-001  # Same model as indexing (06b)
       input:
         - "{{INPUT.question}}"  # Single question as array element
     outputs:
@@ -140,8 +140,10 @@ activities:
 
   # Step 2: Search for similar chunks using vector similarity (pgvector)
   - key: search_similar_chunks
+    worker: std
     activity_name: postgres_query
     parameters:
+      db_url: "{{SECRET.db_url}}"
       query: |
         SELECT
           content,
@@ -159,6 +161,7 @@ activities:
 
   # Step 3: Generate answer using LLM with retrieved context
   - key: generate_answer
+    worker: std
     activity_name: llm_prompt
     parameters:
       model: anthropic/claude-sonnet-4-5-20250929
@@ -182,15 +185,17 @@ activities:
       - result  # Contains answer in result.content
     settings:
       budget:
-        limit_usd: 0.50
+        limit: 0.50
         action: abort
     depends_on:
       - search_similar_chunks
 
   # Step 4: Store Q&A result for analytics
   - key: store_qa_result
+    worker: std
     activity_name: postgres_query
     parameters:
+      db_url: "{{SECRET.db_url}}"
       query: |
         INSERT INTO qa_log
         (question, answer, chunks_used, embedding_cost, llm_cost, total_cost, created_at)
@@ -209,19 +214,31 @@ activities:
     depends_on:
       - generate_answer
 
-  # Step 5: Return answer to user via webhook
+  # Step 5: Return answer to user via mailpit
   - key: send_response
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
-      url: "{{INPUT.response_webhook_url}}"
+      url: "http://mailpit:8025/api/v1/send"
       headers:
         Content-Type: "application/json"
       body:
-        question: "{{INPUT.question}}"
-        answer: "{{generate_answer.result.content}}"
-        sources_count: 3
-        total_cost_usd: "{{embed_question.embeddings.cost_usd + generate_answer.result.cost_usd}}"
-        workflow_id: "{{WORKFLOW.id}}"
+        From:
+          Name: "Kruxia Flow RAG"
+          Email: "workflow@kruxiaflow.local"
+        To:
+          - Name: "Requester"
+            Email: "requester@example.com"
+        Subject: "RAG Answer - {{INPUT.question}}"
+        Text: |
+          Question: {{INPUT.question}}
+
+          Answer: 
+          {{generate_answer.result.content}}
+
+          Sources Used: 3
+          Total Cost (USD): {{embed_question.embeddings.cost_usd + generate_answer.result.cost_usd}}
+          Workflow ID: {{WORKFLOW.id}}
     depends_on:
       - store_qa_result

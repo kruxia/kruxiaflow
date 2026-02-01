@@ -22,6 +22,6 @@ impl ActivityImpl for EchoActivity {
     }
 
     fn worker(&self) -> &str {
-        "builtin"
+        "std"
     }
 }

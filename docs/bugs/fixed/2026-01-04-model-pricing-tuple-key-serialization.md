@@ -58,7 +58,7 @@ activities:
     # ... custom worker completes successfully
 
   - key: generate_embeddings
-    worker: builtin
+    worker: std
     activity_name: embedding  # <-- Triggers the bug when scheduling this
     parameters:
       model: google/gemini-embedding-001

@@ -115,12 +115,12 @@ pub async fn run_orchestrator(
             // No events - increase backoff
             backoff.increase();
             let interval = backoff.current();
-            tracing::debug!("No events found, backoff interval: {:?}", interval);
+            tracing::trace!("No events found, backoff interval: {:?}", interval);
             tokio::time::sleep(interval).await;
             continue;
         }
 
-        tracing::debug!("Polled {} events, resetting backoff", events.len());
+        tracing::trace!("Polled {} events, resetting backoff", events.len());
 
         // Process each event
         for event in &events {
@@ -1248,16 +1248,14 @@ pub async fn process_workflow_event(
                             );
                             // Log the actual output values for debugging
                             for output in outputs {
-                                if output.name == "result" {
-                                    if let Some(obj) = output.value.as_object() {
-                                        tracing::info!(
-                                            activity = %a.key,
-                                            dependency = %dep.activity_key,
-                                            result_keys = ?obj.keys().collect::<Vec<_>>(),
-                                            "Template context: result object keys"
-                                        );
-                                    }
-                                }
+                                tracing::debug!(
+                                    activity = %a.key,
+                                    dependency = %dep.activity_key,
+                                    output_name = %output.name,
+                                    output_value_type = ?output.value.as_object().map(|o| o.keys().collect::<Vec<_>>()).unwrap_or_default(),
+                                    output_value_preview = %format!("{:.200}", output.value),
+                                    "Template context: output detail"
+                                );
                             }
                         }
                     }

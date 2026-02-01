@@ -109,7 +109,7 @@ async fn test_claim_multiple_activity_types_for_same_worker() {
     let activities = vec![
         Activity {
             key: "http_1".to_string(),
-            worker: "builtin".to_string(),
+            worker: "std".to_string(),
             activity_name: "http_request".to_string(),
             parameters: json!({"url": "http://example.com/1"}),
             settings: None,
@@ -120,7 +120,7 @@ async fn test_claim_multiple_activity_types_for_same_worker() {
         },
         Activity {
             key: "http_2".to_string(),
-            worker: "builtin".to_string(),
+            worker: "std".to_string(),
             activity_name: "http_request".to_string(),
             parameters: json!({"url": "http://example.com/2"}),
             settings: None,
@@ -131,7 +131,7 @@ async fn test_claim_multiple_activity_types_for_same_worker() {
         },
         Activity {
             key: "db_1".to_string(),
-            worker: "builtin".to_string(),
+            worker: "std".to_string(),
             activity_name: "postgres_query".to_string(),
             parameters: json!({"query": "SELECT 1"}),
             settings: None,
@@ -142,7 +142,7 @@ async fn test_claim_multiple_activity_types_for_same_worker() {
         },
         Activity {
             key: "echo_1".to_string(),
-            worker: "builtin".to_string(),
+            worker: "std".to_string(),
             activity_name: "echo".to_string(),
             parameters: json!({"message": "test"}),
             settings: None,
@@ -160,7 +160,7 @@ async fn test_claim_multiple_activity_types_for_same_worker() {
 
     // Claim up to 4 activities - should get all different types
     let claimed = queue
-        .claim_next("worker_test_01", "builtin", 4)
+        .claim_next("worker_test_01", "std", 4)
         .await
         .expect("Failed to claim activities");
 
@@ -247,8 +247,8 @@ async fn test_claim_only_returns_matching_worker() {
     // Schedule activities of different worker types
     let activities = vec![
         Activity {
-            key: "builtin_1".to_string(),
-            worker: "builtin".to_string(),
+            key: "std_1".to_string(),
+            worker: "std".to_string(),
             activity_name: "echo".to_string(),
             parameters: json!({}),
             settings: None,
@@ -258,8 +258,8 @@ async fn test_claim_only_returns_matching_worker() {
             signal_data: None,
         },
         Activity {
-            key: "builtin_2".to_string(),
-            worker: "builtin".to_string(),
+            key: "std_2".to_string(),
+            worker: "std".to_string(),
             activity_name: "echo".to_string(),
             parameters: json!({}),
             settings: None,
@@ -286,18 +286,18 @@ async fn test_claim_only_returns_matching_worker() {
         .await
         .expect("Failed to schedule activities");
 
-    // Claim only builtin activities
+    // Claim only std activities
     let claimed = queue
-        .claim_next("worker_test_01", "builtin", 10)
+        .claim_next("worker_test_01", "std", 10)
         .await
         .expect("Failed to claim activities");
 
-    assert_eq!(claimed.len(), 2, "Should only claim builtin activities");
+    assert_eq!(claimed.len(), 2, "Should only claim std activities");
 
     for activity in &claimed {
         assert_eq!(
-            activity.worker, "builtin",
-            "All claimed activities should be builtin"
+            activity.worker, "std",
+            "All claimed activities should be std"
         );
     }
 

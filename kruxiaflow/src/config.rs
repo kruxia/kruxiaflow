@@ -34,9 +34,9 @@ impl CacheConfig {
     }
 
     /// Create cache service based on configuration
-    pub fn create_cache_service(&self) -> Arc<dyn CacheService> {
+    pub async fn create_cache_service(&self) -> Arc<dyn CacheService> {
         match self.provider.as_str() {
-            "redis" => self.create_redis_cache(),
+            "redis" => self.create_redis_cache().await,
             _ => {
                 tracing::info!("Cache disabled (using NoOpCache)");
                 Arc::new(kruxiaflow_core::NoOpCache::new())
@@ -45,7 +45,7 @@ impl CacheConfig {
     }
 
     #[cfg(feature = "redis-cache")]
-    fn create_redis_cache(&self) -> Arc<dyn CacheService> {
+    async fn create_redis_cache(&self) -> Arc<dyn CacheService> {
         let redis_url = self
             .redis_url
             .as_deref()
@@ -54,10 +54,7 @@ impl CacheConfig {
         match kruxiaflow_core::RedisCache::new(redis_url, self.redis_key_prefix.clone()) {
             Ok(cache) => {
                 // Test connectivity
-                match tokio::runtime::Runtime::new()
-                    .unwrap()
-                    .block_on(cache.ping())
-                {
+                match cache.ping().await {
                     Ok(_) => {
                         tracing::info!(
                             redis_url = %self.redact_redis_url(redis_url),
@@ -85,7 +82,7 @@ impl CacheConfig {
     }
 
     #[cfg(not(feature = "redis-cache"))]
-    fn create_redis_cache(&self) -> Arc<dyn CacheService> {
+    async fn create_redis_cache(&self) -> Arc<dyn CacheService> {
         tracing::warn!(
             "Redis caching requested but redis-cache feature not enabled, falling back to NoOpCache"
         );

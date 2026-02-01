@@ -4,7 +4,7 @@ use crate::queue::{
 };
 use async_trait::async_trait;
 use sqlx::PgPool;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, trace, warn};
 use uuid::Uuid;
 
 pub struct PostgresQueue {
@@ -35,7 +35,7 @@ impl PostgresQueue {
 
 #[async_trait]
 impl ActivityQueue for PostgresQueue {
-    #[tracing::instrument(skip(self, activities), level = "debug", fields(num_activities = activities.len()))]
+    #[tracing::instrument(skip(self, activities), level = "trace", fields(num_activities = activities.len()))]
     async fn schedule(&self, workflow_id: Uuid, activities: Vec<Activity>) -> Result<()> {
         for activity in activities {
             // Validate parameters are valid JSON
@@ -99,13 +99,13 @@ impl ActivityQueue for PostgresQueue {
             .await?;
 
             if result.rows_affected() > 0 {
-                debug!(
+                trace!(
                     workflow_id = %workflow_id,
                     activity_key = %activity.key,
                     "Activity scheduled"
                 );
             } else {
-                debug!(
+                trace!(
                     workflow_id = %workflow_id,
                     activity_key = %activity.key,
                     "Activity already scheduled (idempotent)"
@@ -116,7 +116,7 @@ impl ActivityQueue for PostgresQueue {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self), level = "debug", fields(worker = %worker, max_activities = max_activities))]
+    #[tracing::instrument(skip(self), level = "trace", fields(worker = %worker, max_activities = max_activities))]
     async fn claim_next(
         &self,
         worker_id: &str,
@@ -221,9 +221,9 @@ impl ActivityQueue for PostgresQueue {
         }
 
         if results.is_empty() {
-            debug!(worker = %worker, "No claimable activities for worker");
+            trace!(worker = %worker, "No claimable activities for worker");
         } else {
-            debug!(worker = %worker, claimed_count = results.len(), "Activities claimed");
+            trace!(worker = %worker, claimed_count = results.len(), "Activities claimed");
         }
 
         Ok(results)

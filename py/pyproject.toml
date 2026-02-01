@@ -1,0 +1,183 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kruxiaflow"
+version = "0.1.0"
+description = "Python SDK for Kruxia Flow workflow orchestration"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Kruxia", email = "dev@kruxia.com" }
+]
+keywords = ["workflow", "orchestration", "dag", "pipeline", "kruxiaflow"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "httpx>=0.24",
+    "pyyaml>=6.0",
+    "typing_extensions>=4.0; python_version < '3.11'",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pytest-cov>=4.0",
+    "pytest-httpx>=0.30",
+    "ruff>=0.9",
+    "ty",
+]
+
+# Standard worker extras (composable - each includes std)
+std = [
+    "orjson>=3.9",
+    "python-dateutil>=2.8",
+]
+
+data = [
+    "kruxiaflow[std]",
+    "pandas>=2.2",
+    "polars>=0.20",
+    "pyarrow>=15.0",
+    "duckdb>=0.10",
+    "sqlalchemy>=2.0",
+]
+
+ml = [
+    "kruxiaflow[std]",
+    "numpy>=1.26",
+    "pandas>=2.2",
+    "scikit-learn>=1.4",
+    "scipy>=1.12",
+    "torch>=2.2",
+]
+
+nlp = [
+    "kruxiaflow[std]",
+    "numpy>=1.26",
+    "transformers>=4.38",
+    "sentence-transformers>=2.3",
+    "tiktoken>=0.6",
+    "spacy>=3.7",
+]
+
+[project.scripts]
+kruxiaflow-worker = "kruxiaflow.workers.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/kruxia/kruxiaflow"
+Documentation = "https://kruxiaflow.dev/docs/python-sdk"
+Repository = "https://github.com/kruxia/kruxiaflow"
+
+[tool.hatch.build.targets.wheel]
+packages = ["kruxiaflow"]
+
+[tool.hatch.build.targets.sdist]
+include = ["kruxiaflow", "tests"]
+
+# Ruff configuration - replaces flake8, isort, and black
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+src = ["kruxiaflow", "tests"]
+
+[tool.ruff.lint]
+select = [
+    # pycodestyle (flake8)
+    "E",      # Error
+    "W",      # Warning
+    # pyflakes (flake8)
+    "F",      # Pyflakes
+    # isort
+    "I",      # Import sorting
+    # flake8-bugbear
+    "B",      # Bugbear
+    # flake8-simplify
+    "SIM",    # Simplify
+    # flake8-comprehensions
+    "C4",     # Comprehensions
+    # flake8-pie
+    "PIE",    # Pie
+    # flake8-return
+    "RET",    # Return
+    # flake8-quotes
+    "Q",      # Quotes
+    # Ruff-specific
+    "RUF",    # Ruff
+    # pyupgrade
+    "UP",     # Pyupgrade
+]
+ignore = [
+    "E501",   # Line too long (handled by formatter)
+    "RET504", # Unnecessary variable assignment before return
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F401"]  # Allow unused imports in tests
+"kruxiaflow/workers/script_activity.py" = ["S102"]  # exec is intentional for script activity
+
+[tool.ruff.lint.isort]
+known-first-party = ["kruxiaflow"]
+force-single-line = false
+combine-as-imports = true
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = "double"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = true
+
+[tool.ty.src]
+exclude = ["tests/", "examples/"]
+
+[tool.ty.environment]
+python-version = "3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = [
+    "--cov=kruxiaflow",
+    "--cov-branch",
+    "--cov-report=term-missing:skip-covered",
+    "--cov-fail-under=95",
+]
+
+[tool.coverage.run]
+source = ["kruxiaflow"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__init__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "@abstractmethod",
+]
+show_missing = true
+fail_under = 95

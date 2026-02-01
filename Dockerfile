@@ -26,7 +26,7 @@ EXPOSE 8080
 FROM develop AS build
 ARG SQLX_OFFLINE=true
 COPY ./ ./
-RUN cargo build --release
+RUN cargo build --release --features redis-cache
 
 # == DEPLOY ==
 # Minimal production image - distroless with single binary
@@ -42,8 +42,9 @@ EXPOSE 8080
 # Direct binary execution - no shell needed
 # --migrate: wait for postgres, run migrations
 # --seed-client: seed OAuth client (idempotent - skip if exists)
+# --seed-llm: seed LLM model catalog from YAML file
 ENTRYPOINT ["/kruxiaflow"]
-CMD ["serve", "--migrate", "--seed-client"]
+CMD ["serve", "--migrate", "--seed-client", "--seed-llm", "/config/llm_models.yaml"]
 
 # == PROFILING ==
 # Profiling environment for Kruxia Flow

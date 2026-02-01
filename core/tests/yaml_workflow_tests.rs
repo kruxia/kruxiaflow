@@ -6,7 +6,7 @@ fn test_parse_yaml_workflow() {
 name: weather_report
 activities:
   - key: fetch_weather
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: GET
@@ -17,7 +17,7 @@ activities:
       - activity_key: send_notification
 
   - key: send_notification
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -38,7 +38,7 @@ activities:
     // Check first activity
     let fetch_weather = &workflow.activities[0];
     assert_eq!(fetch_weather.key, "fetch_weather");
-    assert_eq!(fetch_weather.worker, "builtin");
+    assert_eq!(fetch_weather.worker, "std");
     assert_eq!(fetch_weather.activity_name.as_deref(), Some("http_request"));
 
     let params = fetch_weather.parameters.as_ref().unwrap();
@@ -55,7 +55,7 @@ activities:
     // Check second activity has the normalized dependency
     let send_notification = &workflow.activities[1];
     assert_eq!(send_notification.key, "send_notification");
-    assert_eq!(send_notification.worker, "builtin");
+    assert_eq!(send_notification.worker, "std");
 
     let params = send_notification.parameters.as_ref().unwrap();
     assert_eq!(params["method"], "POST");
@@ -125,4 +125,34 @@ activities:
     let err = result.unwrap_err();
     let err_str = format!("{:?}", err);
     assert!(err_str.contains("cycle") || err_str.contains("Cycle"));
+}
+
+#[test]
+fn test_worker_defaults_to_std() {
+    let yaml = r#"
+name: default_worker_test
+activities:
+  - key: step1
+    activity_name: http_request
+    parameters:
+      method: GET
+      url: "https://example.com"
+"#;
+
+    let workflow = WorkflowDefinition::from_yaml(yaml).unwrap();
+    assert_eq!(workflow.activities[0].worker, "std");
+}
+
+#[test]
+fn test_explicit_worker_overrides_default() {
+    let yaml = r#"
+name: explicit_worker_test
+activities:
+  - key: step1
+    worker: custom-python
+    activity_name: run_script
+"#;
+
+    let workflow = WorkflowDefinition::from_yaml(yaml).unwrap();
+    assert_eq!(workflow.activities[0].worker, "custom-python");
 }

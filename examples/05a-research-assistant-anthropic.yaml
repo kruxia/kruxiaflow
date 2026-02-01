@@ -28,25 +28,25 @@ description: Ask LLM question with Anthropic-only fallback chain (budget-aware)
 # Budget-Aware Fallback Behavior (with $0.01 budget):
 # For typical prompt (100 input tokens + 1000 output tokens):
 #
-# 1. anthropic/claude-opus-4-1-20250514 ($15/$75 per M tokens):
-#    Estimated cost: ~$0.076 → SKIPPED (exceeds budget)
+# 1. anthropic/claude-opus-4-5-20251101 ($5/$25 per M tokens):
+#    Estimated cost: ~$0.0255 → SKIPPED (exceeds budget)
 #
 # 2. anthropic/claude-sonnet-4-5-20250929 ($3/$15 per M tokens):
 #    Estimated cost: ~$0.0153 → SKIPPED (exceeds $0.01 budget)
 #
-# 3. anthropic/claude-3-5-haiku-20241022 ($0.80/$4 per M tokens):
-#    Estimated cost: ~$0.0041 → USED (fits within budget)
+# 3. anthropic/claude-haiku-4-5-20251001 ($1/$5 per M tokens):
+#    Estimated cost: ~$0.0051 → USED (fits within budget)
 
 activities:
   - key: ask_question
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     parameters:
       # Anthropic-only fallback chain (expensive → moderate → cheap)
       model:
-        - anthropic/claude-opus-4-1-20250514      # Expensive: $15/$75 per M tokens (will be skipped)
+        - anthropic/claude-opus-4-5-20251101      # Expensive: $5/$25 per M tokens (will be skipped)
         - anthropic/claude-sonnet-4-5-20250929    # Moderate: $3/$15 per M tokens (will be skipped)
-        - anthropic/claude-3-5-haiku-20241022     # Cheap: $0.80/$4 per M tokens (will be used)
+        - anthropic/claude-haiku-4-5-20251001     # Cheap: $1/$5 per M tokens (will be used)
       prompt: "{{INPUT.question}}"
       max_tokens: 1000
     outputs:
@@ -59,13 +59,14 @@ activities:
         factor: 2
         max_seconds: 60
       budget:
-        limit_usd: 0.01  # Tight budget to demonstrate budget-aware fallback
+        limit: 0.01  # Tight budget to demonstrate budget-aware fallback
         action: abort
 
   - key: store_response
-    worker: builtin
+    worker: std
     activity_name: postgres_query
     parameters:
+      db_url: "{{SECRET.db_url}}"
       query: |
         INSERT INTO research_log
         (question, answer, provider, model, cost, prompt_tokens, output_tokens, total_tokens, created_at)

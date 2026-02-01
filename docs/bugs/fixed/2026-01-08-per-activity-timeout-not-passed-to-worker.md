@@ -34,7 +34,7 @@ The workflow definition stores the timeout as `timeout_seconds` (which is correc
 1. Create a workflow with a long-running activity:
    ```yaml
    - key: generate_embeddings
-     worker: builtin
+     worker: std
      activity_name: embedding
      settings:
        timeout_seconds: 900  # 15 minutes

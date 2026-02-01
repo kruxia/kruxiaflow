@@ -48,7 +48,7 @@ This fix allows workflows to specify per-activity timeouts:
 
 ```yaml
 - key: generate_embeddings
-  worker: builtin
+  worker: std
   activity_name: embedding
   settings:
     timeout_seconds: 900  # 15 minutes - now correctly applied
@@ -118,7 +118,7 @@ No workflow changes required for basic usage. Optional configuration:
 
 ```yaml
 - key: generate_embeddings
-  worker: builtin
+  worker: std
   activity_name: embedding
   parameters:
     model: google/gemini-embedding-001

@@ -27,7 +27,7 @@ pub struct InvalidateResponse {
 /// Request body for pattern-based cache invalidation
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct InvalidatePatternRequest {
-    /// Redis pattern to match cache keys (e.g., "builtin.llm_prompt:*")
+    /// Redis pattern to match cache keys (e.g., "std.llm_prompt:*")
     ///
     /// Supports Redis glob-style patterns:
     /// - `*` matches any characters
@@ -35,10 +35,10 @@ pub struct InvalidatePatternRequest {
     /// - `[abc]` matches one character from set
     ///
     /// Examples:
-    /// - `builtin.llm_prompt:*` - All LLM prompt activity caches
-    /// - `builtin.http_request:*` - All HTTP request activity caches
+    /// - `std.llm_prompt:*` - All LLM prompt activity caches
+    /// - `std.http_request:*` - All HTTP request activity caches
     /// - `*` - All cache entries (use with caution)
-    #[schema(example = "builtin.llm_prompt:*")]
+    #[schema(example = "std.llm_prompt:*")]
     pub pattern: String,
 }
 
@@ -111,9 +111,9 @@ pub async fn invalidate_cache_key(
 /// Requires valid JWT Bearer token.
 ///
 /// # Pattern Examples
-/// - `builtin.llm_prompt:*` - Invalidate all LLM prompt activity caches
-/// - `builtin.http_request:*` - Invalidate all HTTP request activity caches
-/// - `builtin.*:*` - Invalidate all built-in activity caches
+/// - `std.llm_prompt:*` - Invalidate all LLM prompt activity caches
+/// - `std.http_request:*` - Invalidate all HTTP request activity caches
+/// - `std.*:*` - Invalidate all built-in activity caches
 /// - `*` - Invalidate all cache entries (use with caution)
 ///
 /// # Example
@@ -122,13 +122,13 @@ pub async fn invalidate_cache_key(
 /// curl -X POST http://localhost:8080/api/v1/cache/invalidate \
 ///   -H "Authorization: Bearer $TOKEN" \
 ///   -H "Content-Type: application/json" \
-///   -d '{"pattern": "builtin.llm_prompt:*"}'
+///   -d '{"pattern": "std.llm_prompt:*"}'
 ///
 /// # Invalidate all HTTP request caches
 /// curl -X POST http://localhost:8080/api/v1/cache/invalidate \
 ///   -H "Authorization: Bearer $TOKEN" \
 ///   -H "Content-Type: application/json" \
-///   -d '{"pattern": "builtin.http_request:*"}'
+///   -d '{"pattern": "std.http_request:*"}'
 /// ```
 #[utoipa::path(
     post,
@@ -347,7 +347,7 @@ mod tests {
                 axum::http::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
             )
             .json(&serde_json::json!({
-                "pattern": "builtin.llm_prompt:*"
+                "pattern": "std.llm_prompt:*"
             }))
             .await;
 

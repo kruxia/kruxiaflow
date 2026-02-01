@@ -56,7 +56,7 @@ OLLAMA_BASE_URL=http://localhost:11434 cargo run -p kruxiaflow-worker
 ```yaml
 activities:
   - key: analyze_code
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     parameters:
       model: ollama/llama3.2
