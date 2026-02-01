@@ -909,4 +909,259 @@ mod tests {
         let debug_str = format!("{:?}", HealthStatus::Unhealthy);
         assert_eq!(debug_str, "Unhealthy");
     }
+
+    // =========================================================================
+    // check_api_and_readiness integration tests with wiremock
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_check_api_and_readiness_healthy() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"status": "healthy"})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/health/ready"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ready",
+                "checks": {
+                    "database": {"status": "healthy", "message": "Connected"},
+                    "orchestrator": {"status": "healthy"}
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = Client::new();
+        let (api_result, readiness) = check_api_and_readiness(&client, &mock_server.uri()).await;
+
+        assert_eq!(api_result.status, HealthStatus::Healthy);
+        assert!(api_result.latency_ms.is_some());
+        assert!(readiness.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_check_api_and_readiness_unhealthy_api() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&mock_server)
+            .await;
+
+        let client = Client::new();
+        let (api_result, readiness) = check_api_and_readiness(&client, &mock_server.uri()).await;
+
+        assert_eq!(api_result.status, HealthStatus::Unhealthy);
+        assert!(readiness.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_check_api_and_readiness_connection_refused() {
+        let client = Client::builder()
+            .timeout(Duration::from_millis(100))
+            .build()
+            .unwrap();
+        let (api_result, readiness) = check_api_and_readiness(&client, "http://127.0.0.1:1").await;
+
+        assert_eq!(api_result.status, HealthStatus::Unhealthy);
+        assert!(api_result.message.unwrap().contains("Request failed"));
+        assert!(readiness.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_check_api_and_readiness_healthy_but_readiness_fails() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"status": "healthy"})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        // readiness endpoint returns 500
+        Mock::given(method("GET"))
+            .and(path("/health/ready"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock_server)
+            .await;
+
+        let client = Client::new();
+        let (api_result, _readiness) = check_api_and_readiness(&client, &mock_server.uri()).await;
+
+        assert_eq!(api_result.status, HealthStatus::Healthy);
+        // readiness might be None since the response is not valid JSON
+        // (or Some if wiremock returns empty JSON body for 500)
+    }
+
+    #[tokio::test]
+    async fn test_execute_healthy_api() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"status": "healthy"})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/health/ready"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ready",
+                "checks": {
+                    "database": {"status": "healthy"},
+                    "orchestrator": {"status": "healthy"}
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let cmd = HealthCommand {
+            api_url: mock_server.uri(),
+            service: None,
+            format: "text".to_string(),
+            timeout: 5,
+            verbose: false,
+        };
+
+        let result = execute(cmd).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_json_format() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"status": "healthy"})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/health/ready"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ready",
+                "checks": {
+                    "database": {"status": "healthy"},
+                    "orchestrator": {"status": "healthy"}
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let cmd = HealthCommand {
+            api_url: mock_server.uri(),
+            service: None,
+            format: "json".to_string(),
+            timeout: 5,
+            verbose: false,
+        };
+
+        let result = execute(cmd).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_specific_service() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"status": "healthy"})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/health/ready"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ready",
+                "checks": {
+                    "database": {"status": "healthy"},
+                    "orchestrator": {"status": "healthy"}
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let cmd = HealthCommand {
+            api_url: mock_server.uri(),
+            service: Some("database".to_string()),
+            format: "text".to_string(),
+            timeout: 5,
+            verbose: true,
+        };
+
+        let result = execute(cmd).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_api_only() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"status": "healthy"})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/health/ready"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ready",
+                "checks": {}
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let cmd = HealthCommand {
+            api_url: mock_server.uri(),
+            service: Some("api".to_string()),
+            format: "text".to_string(),
+            timeout: 5,
+            verbose: false,
+        };
+
+        let result = execute(cmd).await;
+        assert!(result.is_ok());
+    }
 }

@@ -92,3 +92,121 @@ impl ValidatedClaims {
         &self.0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_bearer_token_valid() {
+        let request = Request::builder()
+            .header("Authorization", "Bearer my_token_123")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let token = extract_bearer_token(&request);
+        assert_eq!(token, Some("my_token_123".to_string()));
+    }
+
+    #[test]
+    fn test_extract_bearer_token_case_insensitive() {
+        let request = Request::builder()
+            .header("Authorization", "BEARER my_token")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let token = extract_bearer_token(&request);
+        assert_eq!(token, Some("my_token".to_string()));
+    }
+
+    #[test]
+    fn test_extract_bearer_token_lowercase() {
+        let request = Request::builder()
+            .header("Authorization", "bearer my_token")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let token = extract_bearer_token(&request);
+        assert_eq!(token, Some("my_token".to_string()));
+    }
+
+    #[test]
+    fn test_extract_bearer_token_missing_header() {
+        let request = Request::builder().body(axum::body::Body::empty()).unwrap();
+        let token = extract_bearer_token(&request);
+        assert!(token.is_none());
+    }
+
+    #[test]
+    fn test_extract_bearer_token_wrong_scheme() {
+        let request = Request::builder()
+            .header("Authorization", "Basic dXNlcjpwYXNz")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let token = extract_bearer_token(&request);
+        assert!(token.is_none());
+    }
+
+    #[test]
+    fn test_extract_bearer_token_empty_value() {
+        let request = Request::builder()
+            .header("Authorization", "Bearer ")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let token = extract_bearer_token(&request);
+        // "Bearer " has length 7, check is > 7 so this returns None
+        assert!(token.is_none());
+    }
+
+    #[test]
+    fn test_extract_bearer_token_just_bearer() {
+        let request = Request::builder()
+            .header("Authorization", "Bearer")
+            .body(axum::body::Body::empty())
+            .unwrap();
+        let token = extract_bearer_token(&request);
+        // "Bearer" has length 6, which is not > 7
+        assert!(token.is_none());
+    }
+
+    #[test]
+    fn test_validated_claims_subject() {
+        let claims = ValidatedClaims(Claims {
+            sub: "user_123".to_string(),
+            jti: "jti".to_string(),
+            iss: "test".to_string(),
+            aud: "test".to_string(),
+            exp: 9999999999,
+            iat: 1000000000,
+        });
+        assert_eq!(claims.subject(), "user_123");
+    }
+
+    #[test]
+    fn test_validated_claims_claims() {
+        let claims = ValidatedClaims(Claims {
+            sub: "user_123".to_string(),
+            jti: "jti_abc".to_string(),
+            iss: "issuer".to_string(),
+            aud: "audience".to_string(),
+            exp: 9999999999,
+            iat: 1000000000,
+        });
+        let inner = claims.claims();
+        assert_eq!(inner.sub, "user_123");
+        assert_eq!(inner.jti, "jti_abc");
+        assert_eq!(inner.iss, "issuer");
+        assert_eq!(inner.aud, "audience");
+    }
+
+    #[test]
+    fn test_validated_claims_clone() {
+        let claims = ValidatedClaims(Claims {
+            sub: "user".to_string(),
+            jti: "jti".to_string(),
+            iss: "iss".to_string(),
+            aud: "aud".to_string(),
+            exp: 9999999999,
+            iat: 1000000000,
+        });
+        let cloned = claims.clone();
+        assert_eq!(claims.subject(), cloned.subject());
+    }
+}

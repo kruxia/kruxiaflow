@@ -610,6 +610,632 @@ mod tests {
     }
 
     #[test]
+    fn test_default_attempt_value() {
+        // Test that serde default gives us 1
+        assert_eq!(default_attempt(), 1);
+    }
+
+    #[test]
+    fn test_apply_event_activity_waiting() {
+        let mut state = WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: WorkflowStatus::Running,
+            activities: HashMap::from([(
+                "step1".to_string(),
+                ActivityState {
+                    key: "step1".to_string(),
+                    status: WorkflowActivityStatus::NotScheduled,
+                    outputs: None,
+                    error: None,
+                    started_at: None,
+                    completed_at: None,
+                    attempt: 1,
+                    last_error: None,
+                    accumulated_cost_usd: Decimal::ZERO,
+                    iteration: 0,
+                    iteration_outputs: None,
+                    signal_data: None,
+                },
+            )]),
+            state_data: json!({}),
+            input: json!({}),
+        };
+
+        let event = WorkflowEvent {
+            id: Uuid::now_v7(),
+            workflow_id: state.workflow_id,
+            event_type: WorkflowEventType::ActivityWaiting,
+            activity_key: Some("step1".to_string()),
+            payload: json!({}),
+            timestamp: Utc::now(),
+            iteration: None,
+        };
+
+        apply_event_to_state(&mut state, &event).unwrap();
+        let activity = state.activities.get("step1").unwrap();
+        assert_eq!(activity.status, WorkflowActivityStatus::Waiting);
+        assert!(activity.started_at.is_some());
+    }
+
+    #[test]
+    fn test_apply_event_activity_signaled_with_data() {
+        let mut state = WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: WorkflowStatus::Running,
+            activities: HashMap::from([(
+                "step1".to_string(),
+                ActivityState {
+                    key: "step1".to_string(),
+                    status: WorkflowActivityStatus::Waiting,
+                    outputs: None,
+                    error: None,
+                    started_at: Some(chrono::Utc::now()),
+                    completed_at: None,
+                    attempt: 1,
+                    last_error: None,
+                    accumulated_cost_usd: Decimal::ZERO,
+                    iteration: 0,
+                    iteration_outputs: None,
+                    signal_data: None,
+                },
+            )]),
+            state_data: json!({}),
+            input: json!({}),
+        };
+
+        let event = WorkflowEvent {
+            id: Uuid::now_v7(),
+            workflow_id: state.workflow_id,
+            event_type: WorkflowEventType::ActivitySignaled,
+            activity_key: Some("step1".to_string()),
+            payload: json!({"signal_data": {"approved": true}}),
+            timestamp: Utc::now(),
+            iteration: None,
+        };
+
+        apply_event_to_state(&mut state, &event).unwrap();
+        let activity = state.activities.get("step1").unwrap();
+        assert_eq!(activity.status, WorkflowActivityStatus::NotScheduled);
+        assert_eq!(activity.signal_data, Some(json!({"approved": true})));
+    }
+
+    #[test]
+    fn test_apply_event_activity_signaled_skip() {
+        let mut state = WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: WorkflowStatus::Running,
+            activities: HashMap::from([(
+                "step1".to_string(),
+                ActivityState {
+                    key: "step1".to_string(),
+                    status: WorkflowActivityStatus::Waiting,
+                    outputs: None,
+                    error: None,
+                    started_at: Some(chrono::Utc::now()),
+                    completed_at: None,
+                    attempt: 1,
+                    last_error: None,
+                    accumulated_cost_usd: Decimal::ZERO,
+                    iteration: 0,
+                    iteration_outputs: None,
+                    signal_data: None,
+                },
+            )]),
+            state_data: json!({}),
+            input: json!({}),
+        };
+
+        let event = WorkflowEvent {
+            id: Uuid::now_v7(),
+            workflow_id: state.workflow_id,
+            event_type: WorkflowEventType::ActivitySignaled,
+            activity_key: Some("step1".to_string()),
+            payload: json!({"on_timeout": "skip"}),
+            timestamp: Utc::now(),
+            iteration: None,
+        };
+
+        apply_event_to_state(&mut state, &event).unwrap();
+        let activity = state.activities.get("step1").unwrap();
+        assert_eq!(activity.status, WorkflowActivityStatus::Skipped);
+    }
+
+    #[test]
+    fn test_apply_event_activity_signaled_duplicate_ignored() {
+        let mut state = WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: WorkflowStatus::Running,
+            activities: HashMap::from([(
+                "step1".to_string(),
+                ActivityState {
+                    key: "step1".to_string(),
+                    status: WorkflowActivityStatus::Completed,
+                    outputs: None,
+                    error: None,
+                    started_at: Some(chrono::Utc::now()),
+                    completed_at: Some(chrono::Utc::now()),
+                    attempt: 1,
+                    last_error: None,
+                    accumulated_cost_usd: Decimal::ZERO,
+                    iteration: 0,
+                    iteration_outputs: None,
+                    signal_data: None,
+                },
+            )]),
+            state_data: json!({}),
+            input: json!({}),
+        };
+
+        let event = WorkflowEvent {
+            id: Uuid::now_v7(),
+            workflow_id: state.workflow_id,
+            event_type: WorkflowEventType::ActivitySignaled,
+            activity_key: Some("step1".to_string()),
+            payload: json!({"signal_data": {"late": true}}),
+            timestamp: Utc::now(),
+            iteration: None,
+        };
+
+        apply_event_to_state(&mut state, &event).unwrap();
+        // Should remain Completed, not affected by duplicate signal
+        let activity = state.activities.get("step1").unwrap();
+        assert_eq!(activity.status, WorkflowActivityStatus::Completed);
+        assert!(activity.signal_data.is_none());
+    }
+
+    #[test]
+    fn test_apply_event_activity_failed_duplicate_ignored() {
+        let mut state = WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: WorkflowStatus::Running,
+            activities: HashMap::from([(
+                "step1".to_string(),
+                ActivityState {
+                    key: "step1".to_string(),
+                    status: WorkflowActivityStatus::Completed,
+                    outputs: None,
+                    error: None,
+                    started_at: Some(chrono::Utc::now()),
+                    completed_at: Some(chrono::Utc::now()),
+                    attempt: 1,
+                    last_error: None,
+                    accumulated_cost_usd: Decimal::ZERO,
+                    iteration: 0,
+                    iteration_outputs: None,
+                    signal_data: None,
+                },
+            )]),
+            state_data: json!({}),
+            input: json!({}),
+        };
+
+        let event = WorkflowEvent {
+            id: Uuid::now_v7(),
+            workflow_id: state.workflow_id,
+            event_type: WorkflowEventType::ActivityFailed,
+            activity_key: Some("step1".to_string()),
+            payload: json!({"error": "duplicate failure"}),
+            timestamp: Utc::now(),
+            iteration: None,
+        };
+
+        apply_event_to_state(&mut state, &event).unwrap();
+        // Should remain Completed - duplicate failure ignored
+        let activity = state.activities.get("step1").unwrap();
+        assert_eq!(activity.status, WorkflowActivityStatus::Completed);
+    }
+
+    #[test]
+    fn test_apply_event_activity_completed_with_f64_cost() {
+        let mut state = WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: WorkflowStatus::Running,
+            activities: HashMap::from([(
+                "step1".to_string(),
+                ActivityState {
+                    key: "step1".to_string(),
+                    status: WorkflowActivityStatus::Running,
+                    outputs: None,
+                    error: None,
+                    started_at: Some(chrono::Utc::now()),
+                    completed_at: None,
+                    attempt: 1,
+                    last_error: None,
+                    accumulated_cost_usd: Decimal::ZERO,
+                    iteration: 0,
+                    iteration_outputs: None,
+                    signal_data: None,
+                },
+            )]),
+            state_data: json!({}),
+            input: json!({}),
+        };
+
+        let event = WorkflowEvent {
+            id: Uuid::now_v7(),
+            workflow_id: state.workflow_id,
+            event_type: WorkflowEventType::ActivityCompleted,
+            activity_key: Some("step1".to_string()),
+            payload: json!({
+                "outputs": {"response": "hello"},
+                "cost_usd": 0.015  // f64, not string
+            }),
+            timestamp: Utc::now(),
+            iteration: None,
+        };
+
+        apply_event_to_state(&mut state, &event).unwrap();
+        let activity = state.activities.get("step1").unwrap();
+        assert_eq!(activity.status, WorkflowActivityStatus::Completed);
+        assert!(activity.accumulated_cost_usd > Decimal::ZERO);
+        assert!(activity.completed_at.is_some());
+    }
+
+    #[test]
+    fn test_apply_event_activity_completed_with_string_cost() {
+        let mut state = WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: WorkflowStatus::Running,
+            activities: HashMap::from([(
+                "step1".to_string(),
+                ActivityState {
+                    key: "step1".to_string(),
+                    status: WorkflowActivityStatus::Running,
+                    outputs: None,
+                    error: None,
+                    started_at: Some(chrono::Utc::now()),
+                    completed_at: None,
+                    attempt: 1,
+                    last_error: None,
+                    accumulated_cost_usd: Decimal::ZERO,
+                    iteration: 0,
+                    iteration_outputs: None,
+                    signal_data: None,
+                },
+            )]),
+            state_data: json!({}),
+            input: json!({}),
+        };
+
+        let event = WorkflowEvent {
+            id: Uuid::now_v7(),
+            workflow_id: state.workflow_id,
+            event_type: WorkflowEventType::ActivityCompleted,
+            activity_key: Some("step1".to_string()),
+            payload: json!({
+                "outputs": {"data": [1, 2, 3]},
+                "cost_usd": "0.025"
+            }),
+            timestamp: Utc::now(),
+            iteration: None,
+        };
+
+        apply_event_to_state(&mut state, &event).unwrap();
+        let activity = state.activities.get("step1").unwrap();
+        assert_eq!(activity.accumulated_cost_usd, Decimal::new(25, 3));
+    }
+
+    #[test]
+    fn test_apply_event_activity_completed_with_outputs() {
+        let mut state = WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: WorkflowStatus::Running,
+            activities: HashMap::from([(
+                "step1".to_string(),
+                ActivityState {
+                    key: "step1".to_string(),
+                    status: WorkflowActivityStatus::Running,
+                    outputs: None,
+                    error: None,
+                    started_at: Some(chrono::Utc::now()),
+                    completed_at: None,
+                    attempt: 1,
+                    last_error: None,
+                    accumulated_cost_usd: Decimal::ZERO,
+                    iteration: 0,
+                    iteration_outputs: None,
+                    signal_data: None,
+                },
+            )]),
+            state_data: json!({}),
+            input: json!({}),
+        };
+
+        let event = WorkflowEvent {
+            id: Uuid::now_v7(),
+            workflow_id: state.workflow_id,
+            event_type: WorkflowEventType::ActivityCompleted,
+            activity_key: Some("step1".to_string()),
+            payload: json!({
+                "outputs": {"response": "hello", "count": 42}
+            }),
+            timestamp: Utc::now(),
+            iteration: None,
+        };
+
+        apply_event_to_state(&mut state, &event).unwrap();
+        let activity = state.activities.get("step1").unwrap();
+        assert_eq!(activity.status, WorkflowActivityStatus::Completed);
+        assert!(activity.outputs.is_some());
+        let outputs = activity.outputs.as_ref().unwrap();
+        assert_eq!(outputs.len(), 2);
+    }
+
+    #[test]
+    fn test_apply_event_workflow_completed() {
+        let mut state = WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: WorkflowStatus::Running,
+            activities: HashMap::new(),
+            state_data: json!({}),
+            input: json!({}),
+        };
+
+        let event = WorkflowEvent {
+            id: Uuid::now_v7(),
+            workflow_id: state.workflow_id,
+            event_type: WorkflowEventType::WorkflowCompleted,
+            activity_key: None,
+            payload: json!({}),
+            timestamp: Utc::now(),
+            iteration: None,
+        };
+
+        apply_event_to_state(&mut state, &event).unwrap();
+        assert_eq!(state.status, WorkflowStatus::Completed);
+    }
+
+    #[test]
+    fn test_apply_event_workflow_failed() {
+        let mut state = WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: WorkflowStatus::Running,
+            activities: HashMap::new(),
+            state_data: json!({}),
+            input: json!({}),
+        };
+
+        let event = WorkflowEvent {
+            id: Uuid::now_v7(),
+            workflow_id: state.workflow_id,
+            event_type: WorkflowEventType::WorkflowFailed,
+            activity_key: None,
+            payload: json!({}),
+            timestamp: Utc::now(),
+            iteration: None,
+        };
+
+        apply_event_to_state(&mut state, &event).unwrap();
+        assert_eq!(state.status, WorkflowStatus::Failed);
+    }
+
+    #[test]
+    fn test_apply_event_workflow_updated() {
+        let mut state = WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: WorkflowStatus::Running,
+            activities: HashMap::new(),
+            state_data: json!({}),
+            input: json!({}),
+        };
+
+        let event = WorkflowEvent {
+            id: Uuid::now_v7(),
+            workflow_id: state.workflow_id,
+            event_type: WorkflowEventType::WorkflowUpdated,
+            activity_key: None,
+            payload: json!({}),
+            timestamp: Utc::now(),
+            iteration: None,
+        };
+
+        apply_event_to_state(&mut state, &event).unwrap();
+        // WorkflowUpdated doesn't change state directly
+        assert_eq!(state.status, WorkflowStatus::Running);
+    }
+
+    #[test]
+    fn test_apply_event_workflow_created_with_state_data() {
+        let mut state = WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: WorkflowStatus::Running,
+            activities: HashMap::new(),
+            state_data: json!({}),
+            input: json!({}),
+        };
+
+        let event = WorkflowEvent {
+            id: Uuid::now_v7(),
+            workflow_id: state.workflow_id,
+            event_type: WorkflowEventType::WorkflowCreated,
+            activity_key: None,
+            payload: json!({"state_data": {"key": "value"}}),
+            timestamp: Utc::now(),
+            iteration: None,
+        };
+
+        apply_event_to_state(&mut state, &event).unwrap();
+        assert_eq!(state.state_data, json!({"key": "value"}));
+    }
+
+    #[test]
+    fn test_apply_event_activity_scheduled() {
+        let mut state = WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: WorkflowStatus::Running,
+            activities: HashMap::from([(
+                "step1".to_string(),
+                ActivityState {
+                    key: "step1".to_string(),
+                    status: WorkflowActivityStatus::NotScheduled,
+                    outputs: None,
+                    error: None,
+                    started_at: None,
+                    completed_at: None,
+                    attempt: 1,
+                    last_error: None,
+                    accumulated_cost_usd: Decimal::ZERO,
+                    iteration: 0,
+                    iteration_outputs: None,
+                    signal_data: None,
+                },
+            )]),
+            state_data: json!({}),
+            input: json!({}),
+        };
+
+        let event = WorkflowEvent {
+            id: Uuid::now_v7(),
+            workflow_id: state.workflow_id,
+            event_type: WorkflowEventType::ActivityScheduled,
+            activity_key: Some("step1".to_string()),
+            payload: json!({}),
+            timestamp: Utc::now(),
+            iteration: None,
+        };
+
+        apply_event_to_state(&mut state, &event).unwrap();
+        let activity = state.activities.get("step1").unwrap();
+        assert_eq!(activity.status, WorkflowActivityStatus::Pending);
+        assert!(activity.started_at.is_some());
+    }
+
+    #[test]
+    fn test_apply_event_missing_activity_key() {
+        let mut state = WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: WorkflowStatus::Running,
+            activities: HashMap::new(),
+            state_data: json!({}),
+            input: json!({}),
+        };
+
+        let event = WorkflowEvent {
+            id: Uuid::now_v7(),
+            workflow_id: state.workflow_id,
+            event_type: WorkflowEventType::ActivityScheduled,
+            activity_key: None, // Missing!
+            payload: json!({}),
+            timestamp: Utc::now(),
+            iteration: None,
+        };
+
+        let result = apply_event_to_state(&mut state, &event);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_activity_state_set_error() {
+        let mut state = ActivityState {
+            key: "test".to_string(),
+            status: WorkflowActivityStatus::Running,
+            outputs: None,
+            error: None,
+            started_at: None,
+            completed_at: None,
+            attempt: 1,
+            last_error: None,
+            accumulated_cost_usd: Decimal::ZERO,
+            iteration: 0,
+            iteration_outputs: None,
+            signal_data: None,
+        };
+
+        state.set_error("something went wrong".to_string());
+        assert_eq!(state.error, Some("something went wrong".to_string()));
+        assert_eq!(state.last_error, Some("something went wrong".to_string()));
+    }
+
+    #[test]
+    fn test_activity_state_add_cost() {
+        let mut state = ActivityState {
+            key: "test".to_string(),
+            status: WorkflowActivityStatus::Running,
+            outputs: None,
+            error: None,
+            started_at: None,
+            completed_at: None,
+            attempt: 1,
+            last_error: None,
+            accumulated_cost_usd: Decimal::ZERO,
+            iteration: 0,
+            iteration_outputs: None,
+            signal_data: None,
+        };
+
+        state.add_cost(Decimal::new(15, 3)); // 0.015
+        assert_eq!(state.accumulated_cost_usd, Decimal::new(15, 3));
+
+        state.add_cost(Decimal::new(10, 3)); // 0.010
+        assert_eq!(state.accumulated_cost_usd, Decimal::new(25, 3));
+    }
+
+    #[test]
+    fn test_activity_state_increment_attempt() {
+        let mut state = ActivityState {
+            key: "test".to_string(),
+            status: WorkflowActivityStatus::Running,
+            outputs: None,
+            error: None,
+            started_at: None,
+            completed_at: None,
+            attempt: 1,
+            last_error: None,
+            accumulated_cost_usd: Decimal::ZERO,
+            iteration: 0,
+            iteration_outputs: None,
+            signal_data: None,
+        };
+
+        state.increment_attempt();
+        assert_eq!(state.attempt, 2);
+        state.increment_attempt();
+        assert_eq!(state.attempt, 3);
+    }
+
+    #[test]
+    fn test_workflow_activity_status_serde() {
+        let status = WorkflowActivityStatus::Waiting;
+        let json = serde_json::to_string(&status).unwrap();
+        assert_eq!(json, "\"waiting\"");
+
+        let deserialized: WorkflowActivityStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, WorkflowActivityStatus::Waiting);
+    }
+
+    #[test]
+    fn test_activity_state_serde_default_attempt() {
+        // Test that deserializing an ActivityState without an attempt field gives default of 1
+        let json = json!({
+            "key": "test",
+            "status": "running",
+            "outputs": null,
+            "error": null,
+            "started_at": null,
+            "completed_at": null,
+            "accumulated_cost_usd": "0",
+            "iteration": 0
+        });
+
+        let state: ActivityState = serde_json::from_value(json).unwrap();
+        assert_eq!(state.attempt, 1); // default_attempt()
+    }
+
+    #[test]
     fn test_iteration_counter_without_scoping() {
         let mut state = ActivityState {
             key: "test".to_string(),

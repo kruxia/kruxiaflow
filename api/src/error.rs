@@ -346,4 +346,145 @@ mod tests {
         assert_eq!(errors.field_errors["email"].len(), 2);
         assert_eq!(errors.field_errors["name"].len(), 1);
     }
+
+    #[test]
+    fn test_error_codes_all_variants() {
+        assert_eq!(
+            AppError::BadRequest("t".into()).error_code(),
+            ErrorCode::BadRequest
+        );
+        assert_eq!(
+            AppError::Unauthorized("t".into()).error_code(),
+            ErrorCode::Unauthorized
+        );
+        assert_eq!(
+            AppError::Forbidden("t".into()).error_code(),
+            ErrorCode::Forbidden
+        );
+        assert_eq!(
+            AppError::NotFound("t".into()).error_code(),
+            ErrorCode::NotFound
+        );
+        assert_eq!(
+            AppError::Conflict("t".into()).error_code(),
+            ErrorCode::Conflict
+        );
+        assert_eq!(
+            AppError::ValidationError(ValidationErrors::new()).error_code(),
+            ErrorCode::ValidationError
+        );
+        assert_eq!(
+            AppError::RateLimitExceeded("t".into()).error_code(),
+            ErrorCode::RateLimitExceeded
+        );
+        assert_eq!(
+            AppError::InternalError(anyhow::anyhow!("test")).error_code(),
+            ErrorCode::InternalError
+        );
+        assert_eq!(
+            AppError::ServiceUnavailable("t".into()).error_code(),
+            ErrorCode::ServiceUnavailable
+        );
+    }
+
+    #[test]
+    fn test_status_codes_all_variants() {
+        assert_eq!(
+            AppError::Forbidden("t".into()).status_code(),
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            AppError::RateLimitExceeded("t".into()).status_code(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
+        assert_eq!(
+            AppError::InternalError(anyhow::anyhow!("test")).status_code(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            AppError::ServiceUnavailable("t".into()).status_code(),
+            StatusCode::SERVICE_UNAVAILABLE
+        );
+    }
+
+    #[test]
+    fn test_into_response_not_found() {
+        let error = AppError::NotFound("test".to_string());
+        let response = error.into_response();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn test_into_response_internal_error() {
+        let error = AppError::InternalError(anyhow::anyhow!("oops"));
+        let response = error.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn test_into_response_validation_error() {
+        let mut errors = ValidationErrors::new();
+        errors.add("field", "bad value");
+        let error = AppError::ValidationError(errors);
+        let response = error.into_response();
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[test]
+    fn test_api_error_response_new() {
+        let resp = ApiErrorResponse::new(ErrorCode::NotFound, "Not found");
+        assert_eq!(resp.error.code, ErrorCode::NotFound);
+        assert_eq!(resp.error.message, "Not found");
+        assert!(resp.error.details.is_none());
+    }
+
+    #[test]
+    fn test_api_error_response_with_details() {
+        let resp = ApiErrorResponse::new(ErrorCode::BadRequest, "Bad")
+            .with_details(serde_json::json!({"key": "value"}));
+        assert!(resp.error.details.is_some());
+        assert_eq!(resp.error.details.unwrap()["key"], "value");
+    }
+
+    #[test]
+    fn test_to_response_all_error_types() {
+        // Non-validation error should have no details
+        let error = AppError::Conflict("duplicate".to_string());
+        let response = error.to_response();
+        assert_eq!(response.error.code, ErrorCode::Conflict);
+        assert!(response.error.details.is_none());
+
+        // Validation error should have field_errors in details
+        let mut errors = ValidationErrors::new();
+        errors.add("name", "required");
+        let error = AppError::ValidationError(errors);
+        let response = error.to_response();
+        assert!(response.error.details.is_some());
+    }
+
+    #[test]
+    fn test_validation_errors_has_error() {
+        let mut errors = ValidationErrors::new();
+        errors.add("email", "bad");
+        assert!(errors.has_error("email"));
+        assert!(!errors.has_error("name"));
+    }
+
+    #[test]
+    fn test_error_code_serde_roundtrip() {
+        let code = ErrorCode::ValidationError;
+        let json = serde_json::to_string(&code).unwrap();
+        assert_eq!(json, "\"VALIDATION_ERROR\"");
+        let deserialized: ErrorCode = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, ErrorCode::ValidationError);
+    }
+
+    #[test]
+    fn test_from_workflow_validation_single_error() {
+        let wf_error =
+            kruxiaflow_core::workflow::ValidationError::SingleError("bad workflow".to_string());
+        let errors = ValidationErrors::from_workflow_validation(wf_error);
+        assert!(errors.has_error("definition"));
+        assert_eq!(errors.field_errors["definition"][0], "bad workflow");
+    }
 }

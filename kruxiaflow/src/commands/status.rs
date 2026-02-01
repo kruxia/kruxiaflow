@@ -590,4 +590,209 @@ mod tests {
         assert!(deser.version.is_none());
         assert!(deser.uptime.is_none());
     }
+
+    // =========================================================================
+    // get_api_status and execute wiremock tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_get_api_status_running_with_info() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/info"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "version": "0.3.0",
+                "uptime": "2h 15m",
+                "build": "abc123"
+            })))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/health/ready"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ready",
+                "checks": {
+                    "database": {"status": "healthy"},
+                    "orchestrator": {"status": "healthy"}
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = Client::new();
+        let (api_status, readiness) = get_api_status(&client, &mock_server.uri()).await;
+
+        assert_eq!(api_status.service, "api");
+        assert_eq!(api_status.status, "running");
+        assert_eq!(api_status.version, Some("0.3.0".to_string()));
+        assert_eq!(api_status.uptime, Some("2h 15m".to_string()));
+        assert!(api_status.details.is_some());
+        assert!(readiness.is_some());
+        let checks = readiness.unwrap();
+        assert!(checks.get("database").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_get_api_status_running_no_json_body() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        // Info endpoint returns 200 but not valid JSON
+        Mock::given(method("GET"))
+            .and(path("/api/v1/info"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("OK"))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/health/ready"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ready",
+                "checks": {"database": {"status": "healthy"}}
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = Client::new();
+        let (api_status, readiness) = get_api_status(&client, &mock_server.uri()).await;
+
+        assert_eq!(api_status.status, "running");
+        assert!(api_status.version.is_none());
+        assert!(api_status.details.is_none());
+        // readiness should still be fetched since status is "running"
+        assert!(readiness.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_get_api_status_unreachable() {
+        let client = Client::builder()
+            .timeout(Duration::from_millis(100))
+            .build()
+            .unwrap();
+
+        let (api_status, readiness) = get_api_status(&client, "http://127.0.0.1:1").await;
+
+        assert!(api_status.status.starts_with("unreachable"));
+        assert!(api_status.version.is_none());
+        assert!(readiness.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_api_status_readiness_fails() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/info"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "version": "0.3.0"
+            })))
+            .mount(&mock_server)
+            .await;
+
+        // Readiness returns 500
+        Mock::given(method("GET"))
+            .and(path("/health/ready"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock_server)
+            .await;
+
+        let client = Client::new();
+        let (api_status, readiness) = get_api_status(&client, &mock_server.uri()).await;
+
+        assert_eq!(api_status.status, "running");
+        // readiness should be None since response is not valid JSON
+        assert!(readiness.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_execute_text_format() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/info"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "version": "0.3.0",
+                "uptime": "1h"
+            })))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/health/ready"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ready",
+                "checks": {"database": {"status": "healthy"}}
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let cmd = StatusCommand {
+            api_url: mock_server.uri(),
+            timeout: 5,
+            format: "text".to_string(),
+        };
+
+        let result = execute(cmd).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_json_format() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/v1/info"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "version": "0.3.0"
+            })))
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/health/ready"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ready",
+                "checks": {}
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let cmd = StatusCommand {
+            api_url: mock_server.uri(),
+            timeout: 5,
+            format: "json".to_string(),
+        };
+
+        let result = execute(cmd).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_unreachable_api() {
+        let cmd = StatusCommand {
+            api_url: "http://127.0.0.1:1".to_string(),
+            timeout: 1,
+            format: "text".to_string(),
+        };
+
+        // Should not error - it prints status as unreachable
+        let result = execute(cmd).await;
+        assert!(result.is_ok());
+    }
 }

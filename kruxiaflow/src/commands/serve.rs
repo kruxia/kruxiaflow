@@ -1208,4 +1208,17 @@ mod tests {
         assert!(cmd.validate().is_ok());
         assert_eq!(cmd.client_id, "custom_client");
     }
+
+    // =========================================================================
+    // wait_for_postgres tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_wait_for_postgres_timeout_with_invalid_url() {
+        // Should timeout quickly with an invalid URL
+        let result = wait_for_postgres("postgres://invalid:1/nonexistent", 1).await;
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Timed out"));
+    }
 }

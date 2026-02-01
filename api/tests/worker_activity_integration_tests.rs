@@ -123,6 +123,13 @@ async fn schedule_test_activities(pool: &PgPool, workflow_id: Uuid, count: usize
 }
 
 /// Helper to cleanup test data
+async fn drain_worker_queue(pool: &PgPool, worker: &str) {
+    sqlx::query!("DELETE FROM activity_queue WHERE worker = $1", worker)
+        .execute(pool)
+        .await
+        .ok();
+}
+
 async fn cleanup_test_data(pool: &PgPool, workflow_id: Uuid) {
     sqlx::query!(
         "DELETE FROM activity_queue WHERE workflow_id = $1",
@@ -740,6 +747,7 @@ async fn schedule_activity_with_timeout(
 async fn test_poll_returns_timeout_seconds_from_settings() {
     let (server, pool) = create_test_server().await;
     let token = get_test_token(&server).await;
+    drain_worker_queue(&pool, "std").await;
     let workflow_id = Uuid::now_v7();
 
     // Schedule activity with 5-second timeout (short for testing)
@@ -797,6 +805,7 @@ async fn test_poll_returns_timeout_seconds_from_settings() {
 async fn test_poll_returns_various_timeout_values() {
     let (server, pool) = create_test_server().await;
     let token = get_test_token(&server).await;
+    drain_worker_queue(&pool, "std").await;
 
     // Test different timeout values (using short values for fast tests)
     let test_cases = vec![
@@ -807,6 +816,9 @@ async fn test_poll_returns_various_timeout_values() {
     ];
 
     for (timeout, description) in test_cases {
+        // Drain before each iteration to ensure no stale activities
+        drain_worker_queue(&pool, "std").await;
+
         let workflow_id = Uuid::now_v7();
         schedule_activity_with_timeout(&pool, workflow_id, timeout).await;
 
@@ -826,6 +838,11 @@ async fn test_poll_returns_various_timeout_values() {
         assert_eq!(response.status_code(), StatusCode::OK);
 
         let body: serde_json::Value = response.json();
+        assert_eq!(
+            body["count"], 1,
+            "Failed for {}: expected 1 activity polled",
+            description
+        );
         let activity = &body["activities"][0];
 
         assert_eq!(
@@ -889,6 +906,7 @@ async fn test_poll_returns_null_timeout_when_not_configured() {
 async fn test_poll_returns_null_timeout_when_settings_has_no_timeout() {
     let (server, pool) = create_test_server().await;
     let token = get_test_token(&server).await;
+    drain_worker_queue(&pool, "std").await;
     let workflow_id = Uuid::now_v7();
 
     // Schedule activity with settings but no timeout_seconds

@@ -719,4 +719,246 @@ mod tests {
         // close() just returns Ok for HTTP sender
         sender.close().await.unwrap();
     }
+
+    // =========================================================================
+    // HttpStreamSender wiremock tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_http_stream_sender_has_subscribers_true() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let activity_id = Uuid::now_v7();
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/api/v1/activities/.*/ws/subscribers"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"count": 3})))
+            .mount(&mock_server)
+            .await;
+
+        let sender = HttpStreamSender::new(mock_server.uri(), activity_id, None);
+        let result = sender.has_subscribers().await.unwrap();
+        assert!(result);
+    }
+
+    #[tokio::test]
+    async fn test_http_stream_sender_has_subscribers_false() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let activity_id = Uuid::now_v7();
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/api/v1/activities/.*/ws/subscribers"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"count": 0})))
+            .mount(&mock_server)
+            .await;
+
+        let sender = HttpStreamSender::new(mock_server.uri(), activity_id, None);
+        let result = sender.has_subscribers().await.unwrap();
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn test_http_stream_sender_has_subscribers_with_auth() {
+        use wiremock::matchers::{header, method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let activity_id = Uuid::now_v7();
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/api/v1/activities/.*/ws/subscribers"))
+            .and(header("Authorization", "Bearer test-token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"count": 1})))
+            .mount(&mock_server)
+            .await;
+
+        let sender = HttpStreamSender::new(
+            mock_server.uri(),
+            activity_id,
+            Some("test-token".to_string()),
+        );
+        let result = sender.has_subscribers().await.unwrap();
+        assert!(result);
+    }
+
+    #[tokio::test]
+    async fn test_http_stream_sender_has_subscribers_server_error() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let activity_id = Uuid::now_v7();
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/api/v1/activities/.*/ws/subscribers"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("Internal error"))
+            .mount(&mock_server)
+            .await;
+
+        let sender = HttpStreamSender::new(mock_server.uri(), activity_id, None);
+        let result = sender.has_subscribers().await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_http_stream_sender_send_token_success() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let activity_id = Uuid::now_v7();
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/api/v1/activities/.*/ws/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"subscribers": 2})))
+            .mount(&mock_server)
+            .await;
+
+        let sender = HttpStreamSender::new(mock_server.uri(), activity_id, None);
+        let count = sender.send_token("hello world", 0).await.unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[tokio::test]
+    async fn test_http_stream_sender_send_token_with_auth() {
+        use wiremock::matchers::{header, method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let activity_id = Uuid::now_v7();
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/api/v1/activities/.*/ws/token"))
+            .and(header("Authorization", "Bearer my-jwt"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"subscribers": 1})))
+            .mount(&mock_server)
+            .await;
+
+        let sender =
+            HttpStreamSender::new(mock_server.uri(), activity_id, Some("my-jwt".to_string()));
+        let count = sender.send_token("token text", 5).await.unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_http_stream_sender_send_token_server_error() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let activity_id = Uuid::now_v7();
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/api/v1/activities/.*/ws/token"))
+            .respond_with(ResponseTemplate::new(503).set_body_string("Service unavailable"))
+            .mount(&mock_server)
+            .await;
+
+        let sender = HttpStreamSender::new(mock_server.uri(), activity_id, None);
+        let result = sender.send_token("test", 0).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_http_stream_sender_send_complete_success() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let activity_id = Uuid::now_v7();
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/api/v1/activities/.*/ws/complete"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+            .mount(&mock_server)
+            .await;
+
+        let sender = HttpStreamSender::new(mock_server.uri(), activity_id, None);
+        let count = sender
+            .send_complete(activity_id, json!({"output": "done"}))
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_http_stream_sender_send_complete_server_error() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let activity_id = Uuid::now_v7();
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/api/v1/activities/.*/ws/complete"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock_server)
+            .await;
+
+        let sender = HttpStreamSender::new(mock_server.uri(), activity_id, None);
+        let result = sender.send_complete(activity_id, json!({})).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_http_stream_sender_send_error_success() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let activity_id = Uuid::now_v7();
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/api/v1/activities/.*/ws/error"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true})))
+            .mount(&mock_server)
+            .await;
+
+        let sender = HttpStreamSender::new(mock_server.uri(), activity_id, None);
+        let count = sender
+            .send_error(activity_id, "something went wrong")
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_http_stream_sender_send_error_server_error() {
+        use wiremock::matchers::{method, path_regex};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+        let activity_id = Uuid::now_v7();
+
+        Mock::given(method("POST"))
+            .and(path_regex(r"/api/v1/activities/.*/ws/error"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock_server)
+            .await;
+
+        let sender = HttpStreamSender::new(mock_server.uri(), activity_id, None);
+        let result = sender.send_error(activity_id, "test error").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_http_stream_sender_connection_refused() {
+        let activity_id = Uuid::now_v7();
+        let sender = HttpStreamSender::new(
+            "http://127.0.0.1:1".to_string(), // Port 1 should refuse connections
+            activity_id,
+            None,
+        );
+
+        let result = sender.has_subscribers().await;
+        assert!(result.is_err());
+
+        let result = sender.send_token("test", 0).await;
+        assert!(result.is_err());
+    }
 }

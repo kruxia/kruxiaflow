@@ -243,6 +243,234 @@ mod tests {
 
         assert!(result.is_err());
     }
+
+    // Mock subscription service that returns a found subscription
+    struct MockFoundSubscriptionService;
+
+    #[async_trait::async_trait]
+    impl kruxiaflow_core::subscription::SubscriptionService for MockFoundSubscriptionService {
+        async fn create_subscription(
+            &self,
+            _subscription: kruxiaflow_core::subscription::NewSubscription,
+        ) -> kruxiaflow_core::subscription::Result<Uuid> {
+            Ok(Uuid::now_v7())
+        }
+
+        async fn signal_activity(
+            &self,
+            request: kruxiaflow_core::subscription::SignalRequest,
+        ) -> kruxiaflow_core::subscription::Result<
+            Option<kruxiaflow_core::subscription::ActivitySubscription>,
+        > {
+            Ok(Some(kruxiaflow_core::subscription::ActivitySubscription {
+                id: Uuid::now_v7(),
+                workflow_id: request.workflow_id,
+                activity_key: request.activity_key,
+                event_name: request.event_name,
+                on_timeout: kruxiaflow_core::workflow::OnTimeout::Fail,
+                timeout_at: chrono::Utc::now() + chrono::Duration::hours(1),
+                signal_data: request.data,
+                created_at: chrono::Utc::now(),
+            }))
+        }
+
+        async fn get_signal_data(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+        ) -> kruxiaflow_core::subscription::Result<Option<serde_json::Value>> {
+            Ok(None)
+        }
+
+        async fn expire_subscriptions(
+            &self,
+            _limit: i64,
+        ) -> kruxiaflow_core::subscription::Result<
+            Vec<kruxiaflow_core::subscription::ExpiredSubscription>,
+        > {
+            Ok(vec![])
+        }
+
+        async fn recover_expired(
+            &self,
+            _limit: i64,
+        ) -> kruxiaflow_core::subscription::Result<
+            Vec<kruxiaflow_core::subscription::ExpiredSubscription>,
+        > {
+            Ok(vec![])
+        }
+
+        async fn delete_subscription(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+        ) -> kruxiaflow_core::subscription::Result<()> {
+            Ok(())
+        }
+    }
+
+    async fn setup_test_state_with_found_subscription() -> AppState {
+        use kruxiaflow_core::cache::NoOpCache;
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
+        });
+        let pool = PgPool::connect(&database_url)
+            .await
+            .expect("Failed to connect to test database");
+
+        AppState::new(
+            pool,
+            Arc::new(MockAuthService),
+            Arc::new(MockActivityQueue),
+            Arc::new(MockEventSource),
+            Arc::new(MockWorkflowStorage),
+            Arc::new(NoOpCache::new()),
+            Arc::new(MockFoundSubscriptionService),
+            CancellationToken::new(),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_signal_activity_subscription_found() {
+        let state = setup_test_state_with_found_subscription().await;
+        let workflow_id = Uuid::now_v7();
+        let request = SignalActivityRequest {
+            activity_key: "wait_for_approval".to_string(),
+            event_name: "approval_received".to_string(),
+            data: Some(json!({"approved": true})),
+        };
+
+        let result = signal_activity(
+            State(state),
+            Extension(test_claims()),
+            Path(workflow_id),
+            Json(request),
+        )
+        .await;
+
+        assert!(result.is_ok());
+        let response = result.unwrap().0;
+        assert!(response.signaled);
+        assert!(response.message.contains("signaled successfully"));
+    }
+
+    #[tokio::test]
+    async fn test_signal_activity_subscription_found_no_data() {
+        let state = setup_test_state_with_found_subscription().await;
+        let workflow_id = Uuid::now_v7();
+        let request = SignalActivityRequest {
+            activity_key: "wait_step".to_string(),
+            event_name: "continue".to_string(),
+            data: None,
+        };
+
+        let result = signal_activity(
+            State(state),
+            Extension(test_claims()),
+            Path(workflow_id),
+            Json(request),
+        )
+        .await;
+
+        assert!(result.is_ok());
+        let response = result.unwrap().0;
+        assert!(response.signaled);
+    }
+
+    // Mock subscription service that returns an error
+    struct MockErrorSubscriptionService;
+
+    #[async_trait::async_trait]
+    impl kruxiaflow_core::subscription::SubscriptionService for MockErrorSubscriptionService {
+        async fn create_subscription(
+            &self,
+            _subscription: kruxiaflow_core::subscription::NewSubscription,
+        ) -> kruxiaflow_core::subscription::Result<Uuid> {
+            Ok(Uuid::now_v7())
+        }
+
+        async fn signal_activity(
+            &self,
+            _request: kruxiaflow_core::subscription::SignalRequest,
+        ) -> kruxiaflow_core::subscription::Result<
+            Option<kruxiaflow_core::subscription::ActivitySubscription>,
+        > {
+            Err(kruxiaflow_core::subscription::SubscriptionError::NotFound)
+        }
+
+        async fn get_signal_data(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+        ) -> kruxiaflow_core::subscription::Result<Option<serde_json::Value>> {
+            Ok(None)
+        }
+
+        async fn expire_subscriptions(
+            &self,
+            _limit: i64,
+        ) -> kruxiaflow_core::subscription::Result<
+            Vec<kruxiaflow_core::subscription::ExpiredSubscription>,
+        > {
+            Ok(vec![])
+        }
+
+        async fn recover_expired(
+            &self,
+            _limit: i64,
+        ) -> kruxiaflow_core::subscription::Result<
+            Vec<kruxiaflow_core::subscription::ExpiredSubscription>,
+        > {
+            Ok(vec![])
+        }
+
+        async fn delete_subscription(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+        ) -> kruxiaflow_core::subscription::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn test_signal_activity_subscription_error() {
+        use kruxiaflow_core::cache::NoOpCache;
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
+        });
+        let pool = PgPool::connect(&database_url)
+            .await
+            .expect("Failed to connect to test database");
+
+        let state = AppState::new(
+            pool,
+            Arc::new(MockAuthService),
+            Arc::new(MockActivityQueue),
+            Arc::new(MockEventSource),
+            Arc::new(MockWorkflowStorage),
+            Arc::new(NoOpCache::new()),
+            Arc::new(MockErrorSubscriptionService),
+            CancellationToken::new(),
+        );
+
+        let workflow_id = Uuid::now_v7();
+        let request = SignalActivityRequest {
+            activity_key: "wait_step".to_string(),
+            event_name: "go".to_string(),
+            data: None,
+        };
+
+        let result = signal_activity(
+            State(state),
+            Extension(test_claims()),
+            Path(workflow_id),
+            Json(request),
+        )
+        .await;
+
+        assert!(result.is_err());
+    }
 }
 
 /// Signal an activity waiting for an external event

@@ -2361,3 +2361,93 @@ async fn test_completed_workflow_early_exit() {
 
     assert_eq!(workflow.status, WorkflowStatus::Completed);
 }
+
+/// Test that check_and_timeout_stuck_workflows detects old running workflows
+/// and publishes WorkflowFailed events for them.
+#[tokio::test]
+#[serial]
+async fn test_check_and_timeout_stuck_workflows() {
+    let pool = setup_test_db().await;
+    clean_test_data(&pool).await;
+
+    // Create a simple workflow definition
+    let definition = WorkflowDefinition {
+        id: Uuid::now_v7(),
+        name: "timeout_test_workflow".to_string(),
+        version: "1.0".to_string(),
+        activities: vec![ActivityDefinition {
+            key: "long_task".to_string(),
+            worker: "test".to_string(),
+            activity_name: "slow_step".to_string(),
+            parameters: json!({}),
+            settings: None,
+            depends_on: None,
+            dependency_of: None,
+            output_definitions: None,
+        }],
+    };
+
+    let definition_id = insert_workflow_definition(&pool, &definition).await;
+    let workflow_id = Uuid::now_v7();
+    insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
+
+    // Backdate the workflow's created_at to make it look stuck
+    sqlx::query("UPDATE workflows SET created_at = NOW() - INTERVAL '2 hours' WHERE id = $1")
+        .bind(workflow_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+
+    // Create config with a 1-second timeout so the 2-hour-old workflow is stuck
+    let mut config = OrchestratorConfig::new(pool.clone());
+    config.workflow_timeout = Duration::from_secs(1);
+
+    // Call check_and_timeout_stuck_workflows
+    kruxiaflow_core::orchestrator::orchestrator::check_and_timeout_stuck_workflows(
+        &config,
+        &event_source,
+    )
+    .await
+    .unwrap();
+
+    // Verify a WorkflowFailed event was published
+    let events = event_source.poll("timeout_checker").await.unwrap();
+    let timeout_events: Vec<_> = events
+        .iter()
+        .filter(|e| {
+            e.workflow_id == workflow_id && e.event_type == WorkflowEventType::WorkflowFailed
+        })
+        .collect();
+
+    assert!(
+        !timeout_events.is_empty(),
+        "Should have published a WorkflowFailed event for stuck workflow"
+    );
+
+    // Check the payload contains timeout reason
+    let payload = &timeout_events[0].payload;
+    assert_eq!(payload["reason"], "Workflow timeout");
+}
+
+/// Test that check_and_timeout_stuck_workflows does nothing when no workflows are stuck
+#[tokio::test]
+#[serial]
+async fn test_check_and_timeout_no_stuck_workflows() {
+    let pool = setup_test_db().await;
+    clean_test_data(&pool).await;
+
+    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+
+    let config = OrchestratorConfig::new(pool.clone());
+
+    // Should return Ok with no stuck workflows
+    let result = kruxiaflow_core::orchestrator::orchestrator::check_and_timeout_stuck_workflows(
+        &config,
+        &event_source,
+    )
+    .await;
+
+    assert!(result.is_ok());
+}

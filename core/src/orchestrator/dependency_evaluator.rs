@@ -1019,6 +1019,7 @@ mod tests {
             status_to_string(WorkflowActivityStatus::NotScheduled),
             "not_scheduled"
         );
+        assert_eq!(status_to_string(WorkflowActivityStatus::Waiting), "waiting");
         assert_eq!(status_to_string(WorkflowActivityStatus::Pending), "pending");
         assert_eq!(status_to_string(WorkflowActivityStatus::Running), "running");
         assert_eq!(
@@ -1027,5 +1028,239 @@ mod tests {
         );
         assert_eq!(status_to_string(WorkflowActivityStatus::Failed), "failed");
         assert_eq!(status_to_string(WorkflowActivityStatus::Skipped), "skipped");
+    }
+
+    #[test]
+    fn test_is_workflow_complete_all_terminal() {
+        let activities = vec![
+            make_activity_state("a", WorkflowActivityStatus::Completed),
+            make_activity_state("b", WorkflowActivityStatus::Failed),
+            make_activity_state("c", WorkflowActivityStatus::Skipped),
+        ];
+        let state = make_workflow_state(activities);
+        assert!(is_workflow_complete(&state));
+    }
+
+    #[test]
+    fn test_is_workflow_complete_with_running() {
+        let activities = vec![
+            make_activity_state("a", WorkflowActivityStatus::Completed),
+            make_activity_state("b", WorkflowActivityStatus::Running),
+        ];
+        let state = make_workflow_state(activities);
+        assert!(!is_workflow_complete(&state));
+    }
+
+    #[test]
+    fn test_is_workflow_complete_with_not_scheduled() {
+        let activities = vec![
+            make_activity_state("a", WorkflowActivityStatus::Completed),
+            make_activity_state("b", WorkflowActivityStatus::NotScheduled),
+        ];
+        let state = make_workflow_state(activities);
+        assert!(!is_workflow_complete(&state));
+    }
+
+    #[test]
+    fn test_is_workflow_complete_with_pending() {
+        let activities = vec![
+            make_activity_state("a", WorkflowActivityStatus::Completed),
+            make_activity_state("b", WorkflowActivityStatus::Pending),
+        ];
+        let state = make_workflow_state(activities);
+        assert!(!is_workflow_complete(&state));
+    }
+
+    #[test]
+    fn test_is_workflow_complete_with_waiting() {
+        let activities = vec![
+            make_activity_state("a", WorkflowActivityStatus::Completed),
+            make_activity_state("b", WorkflowActivityStatus::Waiting),
+        ];
+        let state = make_workflow_state(activities);
+        assert!(!is_workflow_complete(&state));
+    }
+
+    #[test]
+    fn test_is_workflow_complete_empty() {
+        let state = make_workflow_state(vec![]);
+        assert!(is_workflow_complete(&state));
+    }
+
+    #[test]
+    fn test_is_workflow_failed_with_failure() {
+        let activities = vec![
+            make_activity_state("a", WorkflowActivityStatus::Completed),
+            make_activity_state("b", WorkflowActivityStatus::Failed),
+        ];
+        let state = make_workflow_state(activities);
+        assert!(is_workflow_failed(&state));
+    }
+
+    #[test]
+    fn test_is_workflow_failed_no_failure() {
+        let activities = vec![
+            make_activity_state("a", WorkflowActivityStatus::Completed),
+            make_activity_state("b", WorkflowActivityStatus::Completed),
+        ];
+        let state = make_workflow_state(activities);
+        assert!(!is_workflow_failed(&state));
+    }
+
+    #[test]
+    fn test_is_workflow_failed_empty() {
+        let state = make_workflow_state(vec![]);
+        assert!(!is_workflow_failed(&state));
+    }
+
+    #[test]
+    fn test_find_ready_root_activity() {
+        let definition = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![make_activity_def("root", None)],
+        };
+        let activities = vec![make_activity_state(
+            "root",
+            WorkflowActivityStatus::NotScheduled,
+        )];
+        let state = make_workflow_state(activities);
+
+        let ready = find_ready_activities(&definition, &state).unwrap();
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].key, "root");
+    }
+
+    #[test]
+    fn test_find_ready_running_not_ready() {
+        let definition = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![make_activity_def("a", None)],
+        };
+        let activities = vec![make_activity_state("a", WorkflowActivityStatus::Running)];
+        let state = make_workflow_state(activities);
+
+        let ready = find_ready_activities(&definition, &state).unwrap();
+        assert!(ready.is_empty());
+    }
+
+    #[test]
+    fn test_find_ready_waiting_not_ready() {
+        let definition = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![make_activity_def("a", None)],
+        };
+        let activities = vec![make_activity_state("a", WorkflowActivityStatus::Waiting)];
+        let state = make_workflow_state(activities);
+
+        let ready = find_ready_activities(&definition, &state).unwrap();
+        assert!(ready.is_empty());
+    }
+
+    #[test]
+    fn test_evaluate_condition_number_truthy() {
+        let state = make_workflow_state(vec![]);
+        let context = build_condition_context(&state);
+        // Non-zero number is truthy
+        assert!(evaluate_condition("{{1}}", &context).unwrap());
+        // Zero is falsy
+        assert!(!evaluate_condition("{{0}}", &context).unwrap());
+    }
+
+    #[test]
+    fn test_evaluate_condition_null_falsy() {
+        let activities = vec![make_activity_state("a", WorkflowActivityStatus::Completed)];
+        let state = make_workflow_state(activities);
+        let context = build_condition_context(&state);
+        // Access to non-existent property returns undefined/null
+        assert!(!evaluate_condition("{{a.nonexistent}}", &context).unwrap());
+    }
+
+    #[test]
+    fn test_build_condition_context_with_state_data() {
+        let mut state = make_workflow_state(vec![make_activity_state(
+            "step1",
+            WorkflowActivityStatus::Completed,
+        )]);
+        state.state_data = serde_json::json!({"user_input": "hello"});
+
+        let context = build_condition_context(&state);
+        // state_data is available via inputs in the context
+        // Verify context is built without error
+        let result = evaluate_condition("{{step1.status == 'completed'}}", &context).unwrap();
+        assert!(result);
+    }
+
+    #[test]
+    fn test_get_dependencies_with_none() {
+        let activity = make_activity_def("a", None);
+        let deps = get_dependencies(&activity);
+        assert!(deps.is_empty());
+    }
+
+    #[test]
+    fn test_get_dependencies_with_some() {
+        let activity = make_activity_def(
+            "a",
+            Some(vec![
+                ActivityRelationship {
+                    activity_key: "b".to_string(),
+                    conditions: None,
+                    is_back_edge: false,
+                },
+                ActivityRelationship {
+                    activity_key: "c".to_string(),
+                    conditions: None,
+                    is_back_edge: false,
+                },
+            ]),
+        );
+        let deps = get_dependencies(&activity);
+        assert_eq!(deps.len(), 2);
+        assert_eq!(deps[0].activity_key, "b");
+        assert_eq!(deps[1].activity_key, "c");
+    }
+
+    #[test]
+    fn test_find_skipped_root_activity_not_skipped() {
+        // Root activities (no dependencies) should never be skipped
+        let definition = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![make_activity_def("root", None)],
+        };
+        let activities = vec![make_activity_state(
+            "root",
+            WorkflowActivityStatus::NotScheduled,
+        )];
+        let state = make_workflow_state(activities);
+
+        let skipped = find_skipped_activities(&definition, &state).unwrap();
+        assert!(skipped.is_empty());
+    }
+
+    #[test]
+    fn test_find_skipped_already_completed_not_skipped() {
+        // Completed activities should not appear in skipped list
+        let definition = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![
+                make_activity_def("a", None),
+                make_activity_def(
+                    "b",
+                    Some(vec![ActivityRelationship {
+                        activity_key: "a".to_string(),
+                        conditions: None,
+                        is_back_edge: false,
+                    }]),
+                ),
+            ],
+        };
+        let activities = vec![
+            make_activity_state("a", WorkflowActivityStatus::Failed),
+            make_activity_state("b", WorkflowActivityStatus::Completed),
+        ];
+        let state = make_workflow_state(activities);
+
+        let skipped = find_skipped_activities(&definition, &state).unwrap();
+        assert!(skipped.is_empty());
     }
 }

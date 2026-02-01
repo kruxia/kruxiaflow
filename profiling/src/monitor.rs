@@ -351,4 +351,158 @@ mod tests {
         assert!(analysis.memory_growth_rate > 0.4);
         assert!(analysis.memory_leak_detected);
     }
+
+    #[test]
+    fn test_no_memory_leak_stable_memory() {
+        let start = Utc::now();
+        let samples: Vec<ResourceSample> = (0..60)
+            .map(|i| ResourceSample {
+                timestamp: start + chrono::Duration::seconds(i),
+                cpu_percent: 50.0,
+                memory_rss_mb: 100.0 + (i as f64 * 0.001), // Very slow growth
+                memory_vsz_mb: 200.0,
+                thread_count: 10,
+            })
+            .collect();
+
+        let analysis = ResourceAnalysis::from_samples(&samples);
+        assert!(!analysis.memory_leak_detected);
+    }
+
+    #[test]
+    fn test_resource_analysis_cpu_statistics() {
+        let start = Utc::now();
+        let samples = vec![
+            ResourceSample {
+                timestamp: start,
+                cpu_percent: 20.0,
+                memory_rss_mb: 100.0,
+                memory_vsz_mb: 200.0,
+                thread_count: 10,
+            },
+            ResourceSample {
+                timestamp: start + chrono::Duration::seconds(1),
+                cpu_percent: 60.0,
+                memory_rss_mb: 100.0,
+                memory_vsz_mb: 200.0,
+                thread_count: 10,
+            },
+            ResourceSample {
+                timestamp: start + chrono::Duration::seconds(2),
+                cpu_percent: 40.0,
+                memory_rss_mb: 100.0,
+                memory_vsz_mb: 200.0,
+                thread_count: 10,
+            },
+        ];
+
+        let analysis = ResourceAnalysis::from_samples(&samples);
+        assert_eq!(analysis.sample_count, 3);
+        assert_eq!(analysis.cpu_min, 20.0);
+        assert_eq!(analysis.cpu_max, 60.0);
+        assert!((analysis.cpu_avg - 40.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_resource_analysis_summary() {
+        let analysis = ResourceAnalysis {
+            sample_count: 10,
+            duration_secs: 60.0,
+            cpu_min: 10.0,
+            cpu_max: 90.0,
+            cpu_avg: 50.0,
+            memory_min_mb: 100.0,
+            memory_max_mb: 200.0,
+            memory_avg_mb: 150.0,
+            memory_growth_rate: 0.05,
+            memory_leak_detected: false,
+        };
+
+        let summary = analysis.summary();
+        assert!(summary.contains("Resource Analysis"));
+        assert!(summary.contains("10"));
+        assert!(summary.contains("60.0s"));
+        assert!(summary.contains("10.0%"));
+        assert!(summary.contains("90.0%"));
+        assert!(summary.contains("0.050 MB/sec"));
+        assert!(!summary.contains("WARNING"));
+    }
+
+    #[test]
+    fn test_resource_analysis_summary_with_leak() {
+        let analysis = ResourceAnalysis {
+            sample_count: 60,
+            duration_secs: 60.0,
+            cpu_min: 10.0,
+            cpu_max: 90.0,
+            cpu_avg: 50.0,
+            memory_min_mb: 100.0,
+            memory_max_mb: 200.0,
+            memory_avg_mb: 150.0,
+            memory_growth_rate: 0.5,
+            memory_leak_detected: true,
+        };
+
+        let summary = analysis.summary();
+        assert!(summary.contains("WARNING: Potential memory leak detected!"));
+    }
+
+    #[test]
+    fn test_database_metrics_pool_exhausted() {
+        let metrics = DatabaseMetrics {
+            active_connections: 95,
+            max_connections: 100,
+            waiting_connections: 10,
+            transactions_per_sec: 500.0,
+            cache_hit_ratio: 0.99,
+            dead_tuples: 1000,
+        };
+        assert!(metrics.is_pool_exhausted());
+
+        let healthy = DatabaseMetrics {
+            active_connections: 50,
+            max_connections: 100,
+            waiting_connections: 0,
+            transactions_per_sec: 500.0,
+            cache_hit_ratio: 0.99,
+            dead_tuples: 1000,
+        };
+        assert!(!healthy.is_pool_exhausted());
+    }
+
+    #[test]
+    fn test_database_metrics_pool_exhausted_zero_max() {
+        let metrics = DatabaseMetrics {
+            active_connections: 0,
+            max_connections: 0,
+            waiting_connections: 0,
+            transactions_per_sec: 0.0,
+            cache_hit_ratio: 0.0,
+            dead_tuples: 0,
+        };
+        assert!(!metrics.is_pool_exhausted());
+    }
+
+    #[test]
+    fn test_database_metrics_connection_contention() {
+        let metrics = DatabaseMetrics {
+            active_connections: 50,
+            max_connections: 100,
+            waiting_connections: 10,
+            transactions_per_sec: 500.0,
+            cache_hit_ratio: 0.99,
+            dead_tuples: 1000,
+        };
+        assert!(metrics.has_connection_contention());
+
+        let no_contention = DatabaseMetrics {
+            active_connections: 50,
+            max_connections: 100,
+            waiting_connections: 3,
+            transactions_per_sec: 500.0,
+            cache_hit_ratio: 0.99,
+            dead_tuples: 1000,
+        };
+        assert!(!no_contention.has_connection_contention());
+    }
 }

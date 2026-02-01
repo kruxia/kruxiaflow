@@ -392,3 +392,276 @@ pub async fn upload_activity_file(
         .unwrap()
         .into_response())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::middleware::auth::ValidatedClaims;
+    use crate::state::AppState;
+    use crate::state::tests::*;
+    use axum::extract::State;
+    use kruxiaflow_core::cache::NoOpCache;
+    use kruxiaflow_oauth::Claims;
+    use sqlx::PgPool;
+    use std::sync::Arc;
+    use tokio_util::sync::CancellationToken;
+
+    fn test_claims() -> ValidatedClaims {
+        ValidatedClaims(Claims {
+            sub: "test_user".to_string(),
+            jti: "test_jti".to_string(),
+            iss: "test".to_string(),
+            aud: "test".to_string(),
+            exp: 9999999999,
+            iat: 1000000000,
+        })
+    }
+
+    async fn setup_test_state() -> AppState {
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
+        });
+        let pool = PgPool::connect(&database_url)
+            .await
+            .expect("Failed to connect to test database");
+
+        AppState::new(
+            pool,
+            Arc::new(MockAuthService),
+            Arc::new(MockActivityQueue),
+            Arc::new(MockEventSource),
+            Arc::new(MockWorkflowStorage),
+            Arc::new(NoOpCache::new()),
+            Arc::new(MockSubscriptionService),
+            CancellationToken::new(),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_get_activity_output_workflow_not_found() {
+        let state = setup_test_state().await;
+        let workflow_id = Uuid::now_v7();
+
+        let result = get_activity_output(
+            State(state),
+            Extension(test_claims()),
+            Path((workflow_id, "step1".to_string())),
+        )
+        .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_workflow_output_workflow_not_found() {
+        let state = setup_test_state().await;
+        let workflow_id = Uuid::now_v7();
+
+        let result =
+            get_workflow_output(State(state), Extension(test_claims()), Path(workflow_id)).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_download_activity_file_not_found() {
+        // MockWorkflowStorage.get_file_metadata returns Ok with dummy data,
+        // so this will succeed at metadata but the download stream is empty.
+        let state = setup_test_state().await;
+        let workflow_id = Uuid::now_v7();
+
+        let result = download_activity_file(
+            State(state),
+            Extension(test_claims()),
+            Path((workflow_id, "step1".to_string(), "test.txt".to_string())),
+        )
+        .await;
+
+        // MockWorkflowStorage returns Ok for get_file_metadata and download_file
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_upload_activity_file() {
+        let state = setup_test_state().await;
+        let workflow_id = Uuid::now_v7();
+
+        let mut headers = HeaderMap::new();
+        headers.insert(header::CONTENT_TYPE, "text/plain".parse().unwrap());
+
+        let body = Body::from("test file content");
+
+        let result = upload_activity_file(
+            State(state),
+            Extension(test_claims()),
+            Path((workflow_id, "step1".to_string(), "test.txt".to_string())),
+            headers,
+            body,
+        )
+        .await;
+
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+    }
+
+    #[tokio::test]
+    async fn test_upload_activity_file_no_content_type() {
+        let state = setup_test_state().await;
+        let workflow_id = Uuid::now_v7();
+
+        let headers = HeaderMap::new();
+        let body = Body::from("test content");
+
+        let result = upload_activity_file(
+            State(state),
+            Extension(test_claims()),
+            Path((workflow_id, "step1".to_string(), "file.bin".to_string())),
+            headers,
+            body,
+        )
+        .await;
+
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+    }
+
+    // Test with a storage that returns errors
+    struct ErrorWorkflowStorage;
+
+    #[async_trait::async_trait]
+    impl kruxiaflow_core::storage::WorkflowStorage for ErrorWorkflowStorage {
+        async fn upload_file(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+            _filename: &str,
+            _content_type: Option<&str>,
+            _data: Pin<
+                Box<
+                    dyn futures::Stream<
+                            Item = std::result::Result<axum::body::Bytes, std::io::Error>,
+                        > + Send
+                        + Unpin,
+                >,
+            >,
+        ) -> Result<kruxiaflow_core::storage::FileMetadata, StorageError> {
+            Err(StorageError::FileNotFound("test.txt".to_string()))
+        }
+
+        async fn download_file(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+            _filename: &str,
+        ) -> Result<
+            Pin<
+                Box<
+                    dyn futures::Stream<
+                            Item = std::result::Result<axum::body::Bytes, std::io::Error>,
+                        > + Send,
+                >,
+            >,
+            StorageError,
+        > {
+            Err(StorageError::FileNotFound("test.txt".to_string()))
+        }
+
+        async fn get_file_metadata(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+            _filename: &str,
+        ) -> Result<kruxiaflow_core::storage::FileMetadata, StorageError> {
+            Err(StorageError::FileNotFound("test.txt".to_string()))
+        }
+
+        async fn list_files(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+        ) -> Result<Vec<kruxiaflow_core::storage::FileMetadata>, StorageError> {
+            Ok(vec![])
+        }
+
+        async fn delete_file(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+            _filename: &str,
+        ) -> Result<(), StorageError> {
+            Ok(())
+        }
+
+        async fn delete_workflow_files(&self, _workflow_id: Uuid) -> Result<(), StorageError> {
+            Ok(())
+        }
+
+        async fn get_file_reference(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+            _filename: &str,
+        ) -> Result<String, StorageError> {
+            Err(StorageError::FileNotFound("test.txt".to_string()))
+        }
+    }
+
+    async fn setup_error_storage_state() -> AppState {
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
+        });
+        let pool = PgPool::connect(&database_url)
+            .await
+            .expect("Failed to connect to test database");
+
+        AppState::new(
+            pool,
+            Arc::new(MockAuthService),
+            Arc::new(MockActivityQueue),
+            Arc::new(MockEventSource),
+            Arc::new(ErrorWorkflowStorage),
+            Arc::new(NoOpCache::new()),
+            Arc::new(MockSubscriptionService),
+            CancellationToken::new(),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_download_file_storage_error() {
+        let state = setup_error_storage_state().await;
+        let workflow_id = Uuid::now_v7();
+
+        let result = download_activity_file(
+            State(state),
+            Extension(test_claims()),
+            Path((workflow_id, "step1".to_string(), "missing.txt".to_string())),
+        )
+        .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_upload_file_storage_error() {
+        let state = setup_error_storage_state().await;
+        let workflow_id = Uuid::now_v7();
+
+        let headers = HeaderMap::new();
+        let body = Body::from("data");
+
+        let result = upload_activity_file(
+            State(state),
+            Extension(test_claims()),
+            Path((workflow_id, "step1".to_string(), "test.txt".to_string())),
+            headers,
+            body,
+        )
+        .await;
+
+        assert!(result.is_err());
+    }
+}
