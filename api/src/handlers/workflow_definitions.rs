@@ -181,6 +181,219 @@ mod tests {
         assert_eq!(json["name"], "wf");
         assert_eq!(json["activity_count"], 3);
     }
+
+    // =========================================================================
+    // Handler integration tests
+    // =========================================================================
+
+    #[allow(unused_imports)]
+    use crate::state::tests::*;
+    use axum::extract::Query;
+    use kruxiaflow_core::workflow::WorkflowDefinitionRepository;
+    use kruxiaflow_oauth::Claims;
+    use sqlx::PgPool;
+
+    fn test_claims() -> ValidatedClaims {
+        ValidatedClaims(Claims {
+            sub: "test_user".to_string(),
+            jti: "test_jti".to_string(),
+            iss: "test".to_string(),
+            aud: "test".to_string(),
+            exp: 9999999999,
+            iat: 1000000000,
+        })
+    }
+
+    async fn test_pool() -> PgPool {
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
+        });
+        PgPool::connect(&database_url)
+            .await
+            .expect("Failed to connect to test database")
+    }
+
+    #[tokio::test]
+    async fn test_deploy_workflow_definition_valid_yaml() {
+        let pool = test_pool().await;
+        let repo = WorkflowDefinitionRepository::new(pool);
+
+        let yaml = r#"
+name: test-deploy-handler
+activities:
+  - key: step1
+    activity_type: std.echo
+    params:
+      message: hello
+"#;
+
+        let result =
+            deploy_workflow_definition(repo, Extension(test_claims()), yaml.to_string()).await;
+
+        assert!(result.is_ok());
+        let (status, Json(response)) = result.unwrap();
+        assert!(status == StatusCode::CREATED || status == StatusCode::OK);
+        assert_eq!(response.name, "test-deploy-handler");
+    }
+
+    #[tokio::test]
+    async fn test_deploy_workflow_definition_invalid_yaml() {
+        let pool = test_pool().await;
+        let repo = WorkflowDefinitionRepository::new(pool);
+
+        let yaml = "this is not valid yaml: [[[";
+
+        let result =
+            deploy_workflow_definition(repo, Extension(test_claims()), yaml.to_string()).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_deploy_workflow_definition_missing_name() {
+        let pool = test_pool().await;
+        let repo = WorkflowDefinitionRepository::new(pool);
+
+        let yaml = r#"
+activities:
+  - key: step1
+    activity_type: std.echo
+    params:
+      message: hello
+"#;
+
+        let result =
+            deploy_workflow_definition(repo, Extension(test_claims()), yaml.to_string()).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_deploy_workflow_definition_idempotent() {
+        let pool = test_pool().await;
+        let repo = WorkflowDefinitionRepository::new(pool.clone());
+
+        let yaml = r#"
+name: test-deploy-idempotent
+activities:
+  - key: step1
+    activity_type: std.echo
+    params:
+      message: hello
+"#;
+
+        // First deploy
+        let result1 =
+            deploy_workflow_definition(repo, Extension(test_claims()), yaml.to_string()).await;
+        assert!(result1.is_ok());
+
+        // Second deploy with same content
+        let repo2 = WorkflowDefinitionRepository::new(pool);
+        let result2 =
+            deploy_workflow_definition(repo2, Extension(test_claims()), yaml.to_string()).await;
+        assert!(result2.is_ok());
+        let (status, Json(response)) = result2.unwrap();
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(response.unchanged, Some(true));
+    }
+
+    #[tokio::test]
+    async fn test_list_workflow_definitions_handler() {
+        let pool = test_pool().await;
+        let repo = WorkflowDefinitionRepository::new(pool);
+
+        let result = list_workflow_definitions(repo, Extension(test_claims())).await;
+
+        assert!(result.is_ok());
+        let Json(response) = result.unwrap();
+        assert_eq!(response.total, response.definitions.len());
+    }
+
+    #[tokio::test]
+    async fn test_get_workflow_definition_latest() {
+        let pool = test_pool().await;
+
+        // First deploy a definition
+        let repo = WorkflowDefinitionRepository::new(pool.clone());
+        let yaml = r#"
+name: test-get-latest-handler
+activities:
+  - key: step1
+    activity_type: std.echo
+    params:
+      message: hello
+"#;
+        let _ = deploy_workflow_definition(repo, Extension(test_claims()), yaml.to_string())
+            .await
+            .unwrap();
+
+        // Now get it
+        let repo2 = WorkflowDefinitionRepository::new(pool);
+        let result = get_workflow_definition(
+            repo2,
+            Extension(test_claims()),
+            Path("test-get-latest-handler".to_string()),
+            Query(GetWorkflowDefinitionQuery { version: None }),
+        )
+        .await;
+
+        assert!(result.is_ok());
+        let Json(response) = result.unwrap();
+        assert_eq!(response.name, "test-get-latest-handler");
+        assert_eq!(response.activities.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_get_workflow_definition_not_found() {
+        let pool = test_pool().await;
+        let repo = WorkflowDefinitionRepository::new(pool);
+
+        let result = get_workflow_definition(
+            repo,
+            Extension(test_claims()),
+            Path("nonexistent-workflow-def".to_string()),
+            Query(GetWorkflowDefinitionQuery { version: None }),
+        )
+        .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_workflow_definition_specific_version_not_found() {
+        let pool = test_pool().await;
+        let repo = WorkflowDefinitionRepository::new(pool);
+
+        let result = get_workflow_definition(
+            repo,
+            Extension(test_claims()),
+            Path("nonexistent-wf".to_string()),
+            Query(GetWorkflowDefinitionQuery {
+                version: Some("20260101.000000.000000".to_string()),
+            }),
+        )
+        .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_get_workflow_definition_invalid_version_format() {
+        let pool = test_pool().await;
+        let repo = WorkflowDefinitionRepository::new(pool);
+
+        let result = get_workflow_definition(
+            repo,
+            Extension(test_claims()),
+            Path("some-wf".to_string()),
+            Query(GetWorkflowDefinitionQuery {
+                version: Some("not-a-valid-version".to_string()),
+            }),
+        )
+        .await;
+
+        assert!(result.is_err());
+    }
 }
 
 /// Deploy workflow definition (idempotent)

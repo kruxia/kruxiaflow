@@ -2078,7 +2078,7 @@ async fn timeout_checker_task(
 }
 
 /// Check for workflows that have been running longer than the timeout and mark them as failed
-async fn check_and_timeout_stuck_workflows(
+pub async fn check_and_timeout_stuck_workflows(
     config: &OrchestratorConfig,
     event_source: &Arc<dyn EventSource>,
 ) -> Result<()> {
@@ -2363,6 +2363,7 @@ mod tests {
     use rust_decimal::Decimal;
     use serde_json::json;
     use std::collections::HashMap;
+    use std::time::Duration;
     use uuid::Uuid;
 
     fn create_activity_def(key: &str, settings: Option<ActivitySettings>) -> ActivityDefinition {
@@ -3487,5 +3488,249 @@ mod tests {
 
         // Failed activities should still be present in context
         assert!(context.activity_states.contains_key("failed_step"));
+    }
+
+    // =========================================================================
+    // timeout_checker_task tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_timeout_checker_task_shutdown() {
+        // Test that the timeout checker task stops when shutdown is requested
+        let config = OrchestratorConfig {
+            poll_interval_min: Duration::from_millis(10),
+            poll_interval_max: Duration::from_millis(50),
+            backoff_multiplier: 1.5,
+            workflow_timeout: Duration::from_secs(3600),
+            timeout_check_interval: Duration::from_millis(50),
+            pool: {
+                // We need a PgPool but it won't actually be used since we cancel immediately
+                // Use a placeholder that will fail on connect - the task should stop before using it
+                sqlx::PgPool::connect_lazy("postgres://invalid:5432/test").unwrap()
+            },
+            secrets: HashMap::new(),
+        };
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(0);
+        let mut mock_q = MockActivityQ::new();
+        mock_q.expect_reclaim_stale_activities().times(0);
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub.expect_recover_expired().times(0);
+        mock_sub.expect_expire_subscriptions().times(0);
+
+        let shutdown_token = CancellationToken::new();
+        // Cancel immediately so the task exits on first loop iteration
+        shutdown_token.cancel();
+
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+
+        // This should return quickly due to shutdown
+        let handle = tokio::spawn(timeout_checker_task(
+            config,
+            arc_es,
+            arc_q,
+            arc_sub,
+            Some(shutdown_token),
+        ));
+
+        let result = tokio::time::timeout(Duration::from_secs(2), handle).await;
+        assert!(
+            result.is_ok(),
+            "timeout_checker_task should exit on shutdown"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_timeout_checker_task_no_shutdown_token() {
+        // Test with no shutdown token - task runs until we drop it
+        let config = OrchestratorConfig {
+            poll_interval_min: Duration::from_millis(10),
+            poll_interval_max: Duration::from_millis(50),
+            backoff_multiplier: 1.5,
+            workflow_timeout: Duration::from_secs(3600),
+            timeout_check_interval: Duration::from_millis(10),
+            pool: sqlx::PgPool::connect_lazy("postgres://invalid:5432/test").unwrap(),
+            secrets: HashMap::new(),
+        };
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().returning(|_| Ok(()));
+        let mut mock_q = MockActivityQ::new();
+        mock_q
+            .expect_reclaim_stale_activities()
+            .returning(|_| Ok(vec![]));
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub.expect_recover_expired().returning(|_| Ok(vec![]));
+        mock_sub
+            .expect_expire_subscriptions()
+            .returning(|_| Ok(vec![]));
+
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+
+        let handle = tokio::spawn(timeout_checker_task(
+            config, arc_es, arc_q, arc_sub, None, // No shutdown token
+        ));
+
+        // Let it run for a bit then abort
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        handle.abort();
+
+        // Task should have been running (will error with JoinError::Cancelled)
+        let result = handle.await;
+        assert!(result.is_err()); // Cancelled
+    }
+
+    // =========================================================================
+    // run_orchestrator tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_run_orchestrator_immediate_shutdown() {
+        let config = OrchestratorConfig {
+            poll_interval_min: Duration::from_millis(10),
+            poll_interval_max: Duration::from_millis(50),
+            backoff_multiplier: 1.5,
+            workflow_timeout: Duration::from_secs(3600),
+            timeout_check_interval: Duration::from_secs(60),
+            pool: sqlx::PgPool::connect_lazy("postgres://invalid:5432/test").unwrap(),
+            secrets: HashMap::new(),
+        };
+
+        let mut mock_es = MockEventSrc::new();
+        // poll should not be called since shutdown is immediate
+        mock_es.expect_poll().times(0);
+        mock_es.expect_publish().returning(|_| Ok(()));
+
+        let mut mock_q = MockActivityQ::new();
+        mock_q
+            .expect_reclaim_stale_activities()
+            .returning(|_| Ok(vec![]));
+
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub.expect_recover_expired().returning(|_| Ok(vec![]));
+        mock_sub
+            .expect_expire_subscriptions()
+            .returning(|_| Ok(vec![]));
+
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+
+        let shutdown_token = CancellationToken::new();
+        shutdown_token.cancel(); // Cancel before running
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            run_orchestrator(arc_es, arc_q, arc_sub, config, Some(shutdown_token)),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "Should complete quickly on immediate shutdown"
+        );
+        assert!(result.unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_run_orchestrator_empty_poll_with_shutdown() {
+        let config = OrchestratorConfig {
+            poll_interval_min: Duration::from_millis(1),
+            poll_interval_max: Duration::from_millis(10),
+            backoff_multiplier: 1.5,
+            workflow_timeout: Duration::from_secs(3600),
+            timeout_check_interval: Duration::from_secs(60),
+            pool: sqlx::PgPool::connect_lazy("postgres://invalid:5432/test").unwrap(),
+            secrets: HashMap::new(),
+        };
+
+        let mut mock_es = MockEventSrc::new();
+        // Return empty events, then shutdown will be detected
+        mock_es.expect_poll().returning(|_| Ok(vec![]));
+        mock_es.expect_publish().returning(|_| Ok(()));
+
+        let mut mock_q = MockActivityQ::new();
+        mock_q
+            .expect_reclaim_stale_activities()
+            .returning(|_| Ok(vec![]));
+
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub.expect_recover_expired().returning(|_| Ok(vec![]));
+        mock_sub
+            .expect_expire_subscriptions()
+            .returning(|_| Ok(vec![]));
+
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+
+        let shutdown_token = CancellationToken::new();
+        let token_clone = shutdown_token.clone();
+
+        // Cancel after a short delay
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            token_clone.cancel();
+        });
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            run_orchestrator(arc_es, arc_q, arc_sub, config, Some(shutdown_token)),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Should stop after shutdown token cancelled");
+        assert!(result.unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_run_orchestrator_poll_error() {
+        let config = OrchestratorConfig {
+            poll_interval_min: Duration::from_millis(1),
+            poll_interval_max: Duration::from_millis(10),
+            backoff_multiplier: 1.5,
+            workflow_timeout: Duration::from_secs(3600),
+            timeout_check_interval: Duration::from_secs(60),
+            pool: sqlx::PgPool::connect_lazy("postgres://invalid:5432/test").unwrap(),
+            secrets: HashMap::new(),
+        };
+
+        let mut mock_es = MockEventSrc::new();
+        // poll returns an error
+        mock_es.expect_poll().returning(|_| {
+            Err(crate::events::EventError::Invalid(
+                "connection refused".to_string(),
+            ))
+        });
+        mock_es.expect_publish().returning(|_| Ok(()));
+
+        let mut mock_q = MockActivityQ::new();
+        mock_q
+            .expect_reclaim_stale_activities()
+            .returning(|_| Ok(vec![]));
+
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub.expect_recover_expired().returning(|_| Ok(vec![]));
+        mock_sub
+            .expect_expire_subscriptions()
+            .returning(|_| Ok(vec![]));
+
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            run_orchestrator(arc_es, arc_q, arc_sub, config, None),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Should return on poll error");
+        assert!(result.unwrap().is_err(), "Poll error should propagate");
     }
 }

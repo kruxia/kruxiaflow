@@ -315,6 +315,11 @@ mod tests {
     // =========================================================================
 
     #[test]
+    fn test_activity_status_display_waiting() {
+        assert_eq!(ActivityStatus::Waiting.to_string(), "waiting");
+    }
+
+    #[test]
     fn test_activity_status_display_pending() {
         assert_eq!(ActivityStatus::Pending.to_string(), "pending");
     }
@@ -337,6 +342,10 @@ mod tests {
     #[test]
     fn test_activity_status_serialization() {
         assert_eq!(
+            serde_json::to_string(&ActivityStatus::Waiting).unwrap(),
+            "\"waiting\""
+        );
+        assert_eq!(
             serde_json::to_string(&ActivityStatus::Pending).unwrap(),
             "\"pending\""
         );
@@ -356,6 +365,10 @@ mod tests {
 
     #[test]
     fn test_activity_status_deserialization() {
+        assert_eq!(
+            serde_json::from_str::<ActivityStatus>("\"waiting\"").unwrap(),
+            ActivityStatus::Waiting
+        );
         assert_eq!(
             serde_json::from_str::<ActivityStatus>("\"pending\"").unwrap(),
             ActivityStatus::Pending

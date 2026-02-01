@@ -3261,4 +3261,213 @@ activities:
         assert_eq!(outputs.len(), 1);
         assert_eq!(outputs[0].name, "result");
     }
+
+    // ========================================================================
+    // content_hash Tests
+    // ========================================================================
+
+    #[test]
+    fn test_content_hash_deterministic() {
+        let def = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![ActivityDefinition {
+                key: "step1".to_string(),
+                worker: "std".to_string(),
+                activity_name: None,
+                parameters: None,
+                depends_on: None,
+                dependency_of: None,
+                settings: None,
+                output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
+                streaming: Default::default(),
+            }],
+        };
+
+        let hash1 = def.content_hash();
+        let hash2 = def.content_hash();
+        assert_eq!(hash1, hash2);
+        assert_eq!(hash1.len(), 32); // SHA-256 = 32 bytes
+    }
+
+    #[test]
+    fn test_content_hash_differs_for_different_definitions() {
+        let def1 = WorkflowDefinition {
+            name: "workflow_a".to_string(),
+            activities: vec![ActivityDefinition {
+                key: "step1".to_string(),
+                worker: "std".to_string(),
+                activity_name: None,
+                parameters: None,
+                depends_on: None,
+                dependency_of: None,
+                settings: None,
+                output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
+                streaming: Default::default(),
+            }],
+        };
+
+        let def2 = WorkflowDefinition {
+            name: "workflow_b".to_string(),
+            activities: vec![ActivityDefinition {
+                key: "step1".to_string(),
+                worker: "std".to_string(),
+                activity_name: None,
+                parameters: None,
+                depends_on: None,
+                dependency_of: None,
+                settings: None,
+                output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
+                streaming: Default::default(),
+            }],
+        };
+
+        assert_ne!(def1.content_hash(), def2.content_hash());
+    }
+
+    #[test]
+    fn test_content_hash_differs_for_different_activities() {
+        let def1 = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![ActivityDefinition {
+                key: "step1".to_string(),
+                worker: "std".to_string(),
+                activity_name: None,
+                parameters: None,
+                depends_on: None,
+                dependency_of: None,
+                settings: None,
+                output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
+                streaming: Default::default(),
+            }],
+        };
+
+        let def2 = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![ActivityDefinition {
+                key: "step2".to_string(),
+                worker: "std".to_string(),
+                activity_name: None,
+                parameters: None,
+                depends_on: None,
+                dependency_of: None,
+                settings: None,
+                output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
+                streaming: Default::default(),
+            }],
+        };
+
+        assert_ne!(def1.content_hash(), def2.content_hash());
+    }
+
+    // ========================================================================
+    // validate_activity_settings Tests
+    // ========================================================================
+
+    #[test]
+    fn test_validate_activity_settings_delay_and_scheduled_for_mutually_exclusive() {
+        let mut def = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![ActivityDefinition {
+                key: "step1".to_string(),
+                worker: "std".to_string(),
+                activity_name: None,
+                parameters: None,
+                depends_on: None,
+                dependency_of: None,
+                settings: Some(ActivitySettings {
+                    delay: Some("5s".to_string()),
+                    scheduled_for: Some("2025-12-01T09:00:00Z".to_string()),
+                    timeout_seconds: None,
+                    retry: None,
+                    budget: None,
+                    cache: false,
+                    cache_ttl: None,
+                    iteration_limit: None,
+                    wait_for_signal: None,
+                }),
+                output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
+                streaming: Default::default(),
+            }],
+        };
+
+        let result = def.validate();
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ValidationError::MultipleErrors(errors) => {
+                let json_str = errors.to_json().to_string();
+                assert!(json_str.contains("mutually exclusive"));
+            }
+            _ => panic!("Expected MultipleErrors"),
+        }
+    }
+
+    #[test]
+    fn test_validate_activity_settings_delay_only_is_valid() {
+        let yaml = r#"
+name: test_delay
+activities:
+  - key: step1
+    worker: std
+    settings:
+      delay: "5s"
+"#;
+        let def = WorkflowDefinition::from_yaml(yaml).unwrap();
+        assert_eq!(
+            def.activities[0].settings.as_ref().unwrap().delay,
+            Some("5s".to_string())
+        );
+    }
+
+    #[test]
+    fn test_validate_activity_settings_scheduled_for_only_is_valid() {
+        let yaml = r#"
+name: test_scheduled
+activities:
+  - key: step1
+    worker: std
+    settings:
+      scheduled_for: "2025-12-01T09:00:00Z"
+"#;
+        let def = WorkflowDefinition::from_yaml(yaml).unwrap();
+        assert_eq!(
+            def.activities[0].settings.as_ref().unwrap().scheduled_for,
+            Some("2025-12-01T09:00:00Z".to_string())
+        );
+    }
+
+    // ========================================================================
+    // parse_scheduled_for Edge Cases
+    // ========================================================================
+
+    #[test]
+    fn test_parse_scheduled_for_invalid_format() {
+        let result = parse_scheduled_for("not-a-timestamp");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid ISO 8601"));
+    }
+
+    #[test]
+    fn test_parse_scheduled_for_epoch() {
+        let result = parse_scheduled_for("1970-01-01T00:00:00Z");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().timestamp(), 0);
+    }
 }

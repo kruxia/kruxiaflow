@@ -527,6 +527,39 @@ mod tests {
     }
 
     #[test]
+    fn test_cache_config_log_config_with_redis() {
+        let config = CacheConfig {
+            provider: "redis".to_string(),
+            redis_url: Some("redis://:secret@localhost:6379".to_string()),
+            redis_key_prefix: Some("test:".to_string()),
+        };
+        // Should not panic
+        config.log_config();
+    }
+
+    #[test]
+    fn test_cache_config_log_config_without_redis() {
+        let config = CacheConfig {
+            provider: "noop".to_string(),
+            redis_url: None,
+            redis_key_prefix: None,
+        };
+        // Should not panic
+        config.log_config();
+    }
+
+    #[test]
+    fn test_api_config_log_config() {
+        let config = ApiConfig {
+            database_url: "postgres://user:pass@localhost:5432/db".to_string(),
+            port: 8080,
+            bind: "0.0.0.0".to_string(),
+        };
+        // Should not panic
+        config.log_config();
+    }
+
+    #[test]
     fn test_api_config_debug() {
         let config = ApiConfig {
             database_url: "postgres://localhost/db".to_string(),

@@ -609,6 +609,202 @@ mod tests {
         assert_eq!(json["code"], "PAYMENT_DECLINED");
         assert_eq!(json["retryable"], false);
     }
+
+    // =========================================================================
+    // Handler integration tests
+    // =========================================================================
+
+    use crate::middleware::auth::ValidatedClaims;
+    use crate::state::tests::*;
+    use kruxiaflow_core::activity::ActivityWorkerService;
+    use kruxiaflow_oauth::Claims;
+    use std::sync::Arc;
+
+    fn test_claims() -> ValidatedClaims {
+        ValidatedClaims(Claims {
+            sub: "test_user".to_string(),
+            jti: "test_jti".to_string(),
+            iss: "test".to_string(),
+            aud: "test".to_string(),
+            exp: 9999999999,
+            iat: 1000000000,
+        })
+    }
+
+    fn test_service() -> ActivityWorkerService {
+        ActivityWorkerService::new(Arc::new(MockActivityQueue), Arc::new(MockEventSource))
+    }
+
+    #[tokio::test]
+    async fn test_poll_activities_handler_empty() {
+        let service = test_service();
+
+        let request = PollActivitiesRequest {
+            worker: "std".to_string(),
+            worker_id: "worker_01".to_string(),
+            max_activities: 5,
+        };
+
+        let result = poll_activities(service, Extension(test_claims()), Json(request)).await;
+
+        assert!(result.is_ok());
+        let Json(response) = result.unwrap();
+        assert_eq!(response.count, 0);
+        assert!(response.activities.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_poll_activities_handler_validation_error() {
+        let service = test_service();
+
+        let request = PollActivitiesRequest {
+            worker: "".to_string(),
+            worker_id: "".to_string(),
+            max_activities: 0,
+        };
+
+        let result = poll_activities(service, Extension(test_claims()), Json(request)).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_activity_handler_not_found() {
+        let service = test_service();
+        let activity_id = Uuid::now_v7();
+
+        let request = ActivityHeartbeatRequest {
+            worker_id: "worker_01".to_string(),
+        };
+
+        let result = heartbeat_activity(
+            service,
+            Extension(test_claims()),
+            Path(activity_id),
+            Json(request),
+        )
+        .await;
+
+        // MockActivityQueue.heartbeat returns Ok(()) so this should succeed
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_heartbeat_activity_handler_validation_error() {
+        let service = test_service();
+
+        let request = ActivityHeartbeatRequest {
+            worker_id: "".to_string(),
+        };
+
+        let result = heartbeat_activity(
+            service,
+            Extension(test_claims()),
+            Path(Uuid::now_v7()),
+            Json(request),
+        )
+        .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_complete_activity_handler() {
+        let service = test_service();
+        let activity_id = Uuid::now_v7();
+
+        let request = CompleteActivityRequest {
+            worker_id: "worker_01".to_string(),
+            output: serde_json::json!({"result": "success"}),
+            cost_usd: None,
+        };
+
+        let result = complete_activity(
+            service,
+            Extension(test_claims()),
+            Path(activity_id),
+            Json(request),
+        )
+        .await;
+
+        // MockActivityQueue.complete returns Ok(()) so this should succeed
+        assert!(result.is_ok());
+        let Json(response) = result.unwrap();
+        assert!(response.acknowledged);
+    }
+
+    #[tokio::test]
+    async fn test_complete_activity_handler_validation_error() {
+        let service = test_service();
+
+        let request = CompleteActivityRequest {
+            worker_id: "".to_string(),
+            output: serde_json::json!("not an object"),
+            cost_usd: None,
+        };
+
+        let result = complete_activity(
+            service,
+            Extension(test_claims()),
+            Path(Uuid::now_v7()),
+            Json(request),
+        )
+        .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_fail_activity_handler() {
+        let service = test_service();
+        let activity_id = Uuid::now_v7();
+
+        let request = FailActivityRequest {
+            worker_id: "worker_01".to_string(),
+            error: ActivityError {
+                code: "TIMEOUT".to_string(),
+                message: "Activity timed out".to_string(),
+                retryable: true,
+            },
+        };
+
+        let result = fail_activity(
+            service,
+            Extension(test_claims()),
+            Path(activity_id),
+            Json(request),
+        )
+        .await;
+
+        // MockActivityQueue.fail returns Ok(false) so will_retry = false
+        assert!(result.is_ok());
+        let Json(response) = result.unwrap();
+        assert!(response.acknowledged);
+    }
+
+    #[tokio::test]
+    async fn test_fail_activity_handler_validation_error() {
+        let service = test_service();
+
+        let request = FailActivityRequest {
+            worker_id: "".to_string(),
+            error: ActivityError {
+                code: "".to_string(),
+                message: "".to_string(),
+                retryable: false,
+            },
+        };
+
+        let result = fail_activity(
+            service,
+            Extension(test_claims()),
+            Path(Uuid::now_v7()),
+            Json(request),
+        )
+        .await;
+
+        assert!(result.is_err());
+    }
 }
 
 /// Poll for activities

@@ -547,4 +547,435 @@ mod tests {
             BottleneckCategory::Cpu
         );
     }
+
+    #[test]
+    fn test_priority_display() {
+        assert_eq!(format!("{}", Priority::Critical), "CRITICAL");
+        assert_eq!(format!("{}", Priority::High), "HIGH");
+        assert_eq!(format!("{}", Priority::Medium), "MEDIUM");
+        assert_eq!(format!("{}", Priority::Low), "LOW");
+    }
+
+    #[test]
+    fn test_bottleneck_category_display() {
+        assert_eq!(format!("{}", BottleneckCategory::Database), "Database");
+        assert_eq!(format!("{}", BottleneckCategory::Cpu), "CPU");
+        assert_eq!(format!("{}", BottleneckCategory::Memory), "Memory");
+        assert_eq!(format!("{}", BottleneckCategory::Network), "Network");
+        assert_eq!(
+            format!("{}", BottleneckCategory::Configuration),
+            "Configuration"
+        );
+    }
+
+    #[test]
+    fn test_to_markdown_with_primary_bottleneck() {
+        let report = BottleneckReport {
+            primary_bottleneck: Some(Bottleneck {
+                category: BottleneckCategory::Cpu,
+                description: "CPU saturation".to_string(),
+                current_value: 95.0,
+                threshold: 85.0,
+                severity: 0.95,
+                impact: "Slow processing".to_string(),
+            }),
+            secondary_bottlenecks: vec![],
+            recommendations: vec![],
+            capacity_estimate: CapacityEstimate {
+                safe_concurrent: 500,
+                max_concurrent: 1000,
+                sustained_throughput_wf_per_sec: 50.0,
+                sustained_throughput_wf_per_min: 3000.0,
+                limiting_factor: "CPU".to_string(),
+                confidence: 0.9,
+            },
+        };
+
+        let md = report.to_markdown();
+        assert!(md.contains("# Bottleneck Analysis Report"));
+        assert!(md.contains("**Category**: CPU"));
+        assert!(md.contains("**Description**: CPU saturation"));
+        assert!(md.contains("95.00"));
+        assert!(md.contains("85.00"));
+        assert!(md.contains("Slow processing"));
+        assert!(md.contains("Safe Concurrent Workflows | 500"));
+        assert!(md.contains("Max Concurrent Workflows | 1000"));
+        assert!(md.contains("90%"));
+    }
+
+    #[test]
+    fn test_to_markdown_no_primary_bottleneck() {
+        let report = BottleneckReport {
+            primary_bottleneck: None,
+            secondary_bottlenecks: vec![],
+            recommendations: vec![],
+            capacity_estimate: CapacityEstimate {
+                safe_concurrent: 500,
+                max_concurrent: 1000,
+                sustained_throughput_wf_per_sec: 50.0,
+                sustained_throughput_wf_per_min: 3000.0,
+                limiting_factor: "None".to_string(),
+                confidence: 0.7,
+            },
+        };
+
+        let md = report.to_markdown();
+        assert!(md.contains("No primary bottleneck detected."));
+    }
+
+    #[test]
+    fn test_to_markdown_with_secondary_bottlenecks() {
+        let report = BottleneckReport {
+            primary_bottleneck: Some(Bottleneck {
+                category: BottleneckCategory::Cpu,
+                description: "CPU saturation".to_string(),
+                current_value: 95.0,
+                threshold: 85.0,
+                severity: 0.95,
+                impact: "Slow".to_string(),
+            }),
+            secondary_bottlenecks: vec![Bottleneck {
+                category: BottleneckCategory::Memory,
+                description: "Memory leak".to_string(),
+                current_value: 0.5,
+                threshold: 0.1,
+                severity: 0.9,
+                impact: "OOM risk".to_string(),
+            }],
+            recommendations: vec![Recommendation {
+                priority: Priority::Critical,
+                category: BottleneckCategory::Memory,
+                issue: "Memory growing".to_string(),
+                action: "Profile memory".to_string(),
+                expected_impact: "Stable memory".to_string(),
+            }],
+            capacity_estimate: CapacityEstimate {
+                safe_concurrent: 100,
+                max_concurrent: 200,
+                sustained_throughput_wf_per_sec: 10.0,
+                sustained_throughput_wf_per_min: 600.0,
+                limiting_factor: "Memory".to_string(),
+                confidence: 0.5,
+            },
+        };
+
+        let md = report.to_markdown();
+        assert!(md.contains("## Secondary Bottlenecks"));
+        assert!(md.contains("### Memory"));
+        assert!(md.contains("Memory leak"));
+        assert!(md.contains("## Recommendations"));
+        assert!(md.contains("[CRITICAL] Memory"));
+        assert!(md.contains("Profile memory"));
+    }
+
+    #[test]
+    fn test_memory_leak_detection() {
+        let analyzer = BottleneckAnalyzer::default();
+
+        let resource_analysis = ResourceAnalysis {
+            sample_count: 60,
+            duration_secs: 60.0,
+            cpu_min: 20.0,
+            cpu_max: 50.0,
+            cpu_avg: 35.0,
+            memory_min_mb: 400.0,
+            memory_max_mb: 800.0,
+            memory_avg_mb: 600.0,
+            memory_growth_rate: 0.5,
+            memory_leak_detected: true,
+        };
+
+        let results = StressTestResults {
+            config: StressTestConfig::default(),
+            steps: vec![make_step(0, 100, 50.0, 0.99, 100)],
+            breaking_point: None,
+            peak_throughput_wf_per_sec: 50.0,
+            max_concurrent_achieved: 100,
+            total_duration: Duration::from_secs(60),
+            started_at: Utc::now(),
+            completed_at: Utc::now(),
+        };
+
+        let report = analyzer.analyze(&results, Some(&resource_analysis), None);
+
+        assert!(report.primary_bottleneck.is_some());
+        assert_eq!(
+            report.primary_bottleneck.as_ref().unwrap().category,
+            BottleneckCategory::Memory
+        );
+        assert!(
+            report
+                .recommendations
+                .iter()
+                .any(|r| r.priority == Priority::Critical)
+        );
+    }
+
+    #[test]
+    fn test_error_rate_bottleneck_with_timeout_errors() {
+        let analyzer = BottleneckAnalyzer::default();
+
+        let mut step = make_step(0, 500, 30.0, 0.85, 5000);
+        step.errors = vec!["timeout after 60s".to_string()];
+
+        let results = StressTestResults {
+            config: StressTestConfig::default(),
+            steps: vec![step],
+            breaking_point: None,
+            peak_throughput_wf_per_sec: 30.0,
+            max_concurrent_achieved: 500,
+            total_duration: Duration::from_secs(60),
+            started_at: Utc::now(),
+            completed_at: Utc::now(),
+        };
+
+        let report = analyzer.analyze(&results, None, None);
+
+        assert!(report.primary_bottleneck.is_some());
+        assert_eq!(
+            report.primary_bottleneck.as_ref().unwrap().category,
+            BottleneckCategory::Configuration
+        );
+        // Should have timeout-specific recommendation
+        assert!(
+            report
+                .recommendations
+                .iter()
+                .any(|r| r.issue.contains("timeout"))
+        );
+    }
+
+    #[test]
+    fn test_error_rate_bottleneck_with_connection_errors() {
+        let analyzer = BottleneckAnalyzer::default();
+
+        let mut step = make_step(0, 500, 30.0, 0.85, 5000);
+        step.errors = vec!["connection refused".to_string()];
+
+        let results = StressTestResults {
+            config: StressTestConfig::default(),
+            steps: vec![step],
+            breaking_point: None,
+            peak_throughput_wf_per_sec: 30.0,
+            max_concurrent_achieved: 500,
+            total_duration: Duration::from_secs(60),
+            started_at: Utc::now(),
+            completed_at: Utc::now(),
+        };
+
+        let report = analyzer.analyze(&results, None, None);
+
+        assert!(
+            report
+                .recommendations
+                .iter()
+                .any(|r| r.issue.contains("Connection"))
+        );
+    }
+
+    #[test]
+    fn test_db_pool_exhaustion_bottleneck() {
+        let analyzer = BottleneckAnalyzer::default();
+
+        let db_metrics = DatabaseMetrics {
+            active_connections: 95,
+            max_connections: 100,
+            waiting_connections: 10,
+            transactions_per_sec: 500.0,
+            cache_hit_ratio: 0.99,
+            dead_tuples: 1000,
+        };
+
+        let results = StressTestResults {
+            config: StressTestConfig::default(),
+            steps: vec![make_step(0, 100, 50.0, 0.99, 100)],
+            breaking_point: None,
+            peak_throughput_wf_per_sec: 50.0,
+            max_concurrent_achieved: 100,
+            total_duration: Duration::from_secs(60),
+            started_at: Utc::now(),
+            completed_at: Utc::now(),
+        };
+
+        let report = analyzer.analyze(&results, None, Some(&db_metrics));
+
+        assert!(report.primary_bottleneck.is_some());
+        assert_eq!(
+            report.primary_bottleneck.as_ref().unwrap().category,
+            BottleneckCategory::Database
+        );
+    }
+
+    #[test]
+    fn test_capacity_no_breaking_point_no_healthy_steps() {
+        let analyzer = BottleneckAnalyzer::default();
+
+        // All steps fail - no healthy steps
+        let results = StressTestResults {
+            config: StressTestConfig::default(),
+            steps: vec![make_step(0, 100, 10.0, 0.80, 5000)], // Below 95% threshold
+            breaking_point: None,
+            peak_throughput_wf_per_sec: 10.0,
+            max_concurrent_achieved: 100,
+            total_duration: Duration::from_secs(60),
+            started_at: Utc::now(),
+            completed_at: Utc::now(),
+        };
+
+        let report = analyzer.analyze(&results, None, None);
+
+        assert_eq!(report.capacity_estimate.safe_concurrent, 0);
+        assert_eq!(report.capacity_estimate.max_concurrent, 0);
+        assert_eq!(report.capacity_estimate.limiting_factor, "All steps failed");
+    }
+
+    #[test]
+    fn test_capacity_no_breaking_point_with_healthy_steps() {
+        let analyzer = BottleneckAnalyzer::default();
+
+        let results = StressTestResults {
+            config: StressTestConfig::default(),
+            steps: vec![
+                make_step(0, 100, 50.0, 0.99, 100),
+                make_step(1, 600, 80.0, 0.98, 200),
+                make_step(2, 1100, 90.0, 0.97, 300),
+            ],
+            breaking_point: None,
+            peak_throughput_wf_per_sec: 90.0,
+            max_concurrent_achieved: 1100,
+            total_duration: Duration::from_secs(120),
+            started_at: Utc::now(),
+            completed_at: Utc::now(),
+        };
+
+        let report = analyzer.analyze(&results, None, None);
+
+        // safe = 80% of best step's actual_concurrent
+        assert!(report.capacity_estimate.safe_concurrent > 0);
+        assert_eq!(report.capacity_estimate.max_concurrent, 1100);
+        assert_eq!(report.capacity_estimate.limiting_factor, "None detected");
+        assert_eq!(report.capacity_estimate.confidence, 0.7); // 3 steps
+    }
+
+    #[test]
+    fn test_capacity_confidence_levels() {
+        let analyzer = BottleneckAnalyzer::default();
+
+        // 5 steps -> 0.9 confidence
+        let results = StressTestResults {
+            config: StressTestConfig::default(),
+            steps: vec![
+                make_step(0, 100, 50.0, 0.99, 100),
+                make_step(1, 200, 60.0, 0.99, 100),
+                make_step(2, 300, 70.0, 0.99, 100),
+                make_step(3, 400, 80.0, 0.98, 200),
+                make_step(4, 500, 85.0, 0.97, 300),
+            ],
+            breaking_point: None,
+            peak_throughput_wf_per_sec: 85.0,
+            max_concurrent_achieved: 500,
+            total_duration: Duration::from_secs(180),
+            started_at: Utc::now(),
+            completed_at: Utc::now(),
+        };
+
+        let report = analyzer.analyze(&results, None, None);
+        assert_eq!(report.capacity_estimate.confidence, 0.9);
+
+        // 1 step -> 0.5 confidence
+        let results2 = StressTestResults {
+            config: StressTestConfig::default(),
+            steps: vec![make_step(0, 100, 50.0, 0.99, 100)],
+            breaking_point: None,
+            peak_throughput_wf_per_sec: 50.0,
+            max_concurrent_achieved: 100,
+            total_duration: Duration::from_secs(30),
+            started_at: Utc::now(),
+            completed_at: Utc::now(),
+        };
+
+        let report2 = analyzer.analyze(&results2, None, None);
+        assert_eq!(report2.capacity_estimate.confidence, 0.5);
+    }
+
+    #[test]
+    fn test_multiple_bottlenecks_sorted_by_severity() {
+        let analyzer = BottleneckAnalyzer::default();
+
+        let resource_analysis = ResourceAnalysis {
+            sample_count: 60,
+            duration_secs: 60.0,
+            cpu_min: 50.0,
+            cpu_max: 95.0,
+            cpu_avg: 80.0,
+            memory_min_mb: 400.0,
+            memory_max_mb: 800.0,
+            memory_avg_mb: 600.0,
+            memory_growth_rate: 0.5,
+            memory_leak_detected: true,
+        };
+
+        let db_metrics = DatabaseMetrics {
+            active_connections: 95,
+            max_connections: 100,
+            waiting_connections: 10,
+            transactions_per_sec: 500.0,
+            cache_hit_ratio: 0.99,
+            dead_tuples: 1000,
+        };
+
+        let results = StressTestResults {
+            config: StressTestConfig::default(),
+            steps: vec![make_step(0, 100, 50.0, 0.99, 100)],
+            breaking_point: None,
+            peak_throughput_wf_per_sec: 50.0,
+            max_concurrent_achieved: 100,
+            total_duration: Duration::from_secs(60),
+            started_at: Utc::now(),
+            completed_at: Utc::now(),
+        };
+
+        let report = analyzer.analyze(&results, Some(&resource_analysis), Some(&db_metrics));
+
+        // Should have primary + secondary bottlenecks
+        assert!(report.primary_bottleneck.is_some());
+        assert!(!report.secondary_bottlenecks.is_empty());
+
+        // Primary should have highest severity
+        let primary_severity = report.primary_bottleneck.as_ref().unwrap().severity;
+        for secondary in &report.secondary_bottlenecks {
+            assert!(primary_severity >= secondary.severity);
+        }
+    }
+
+    #[test]
+    fn test_breaking_point_small_step_size() {
+        // When breaking_point concurrent < step_size, safe = concurrent / 2
+        let analyzer = BottleneckAnalyzer::default();
+
+        let results = StressTestResults {
+            config: StressTestConfig {
+                step_size: 500,
+                ..StressTestConfig::default()
+            },
+            steps: vec![make_step(0, 100, 50.0, 0.80, 5000)],
+            breaking_point: Some(crate::stress::BreakingPoint {
+                concurrent_workflows: 100, // Less than step_size
+                failure_mode: FailureMode::ErrorRateExceeded {
+                    actual_rate: 0.20,
+                    threshold: 0.05,
+                },
+                metrics: make_step(0, 100, 50.0, 0.80, 5000),
+            }),
+            peak_throughput_wf_per_sec: 50.0,
+            max_concurrent_achieved: 100,
+            total_duration: Duration::from_secs(30),
+            started_at: Utc::now(),
+            completed_at: Utc::now(),
+        };
+
+        let report = analyzer.analyze(&results, None, None);
+        assert_eq!(report.capacity_estimate.safe_concurrent, 50); // 100 / 2
+        assert_eq!(report.capacity_estimate.max_concurrent, 100);
+    }
 }
