@@ -1,0 +1,57 @@
+# Environment overrides for quickstart with example workflows
+#
+# Adds services and configuration needed to run the example workflows locally.
+# Includes Mailpit for capturing notification emails and an examples database
+# with pre-created tables for workflows that use postgres_query.
+#
+# Usage:
+#   ./docker up --examples
+# or with explicit compose files:
+#   docker compose -f docker-compose.yml -f docker-compose.examples.yml up
+
+services:
+  # Mount init scripts to create the kruxiaflow_examples database on first startup.
+  # NOTE: Init scripts only run when the postgres data volume is first created.
+  # If you already have a running cluster, run: ./docker clean && ./docker up
+  postgres:
+    volumes:
+      - ./examples/initdb:/docker-entrypoint-initdb.d:ro
+    networks:
+      - backend
+      - frontend
+
+  # Inject secrets so example workflows can resolve {{SECRET.*}} templates.
+  kruxiaflow:
+    environment:
+      KRUXIAFLOW_SECRET_DB_URL: postgres://${POSTGRES_USER:-kruxiaflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/kruxiaflow_examples
+      KRUXIAFLOW_SECRET_SMTP_URL: smtp://mailpit:1025
+      # 10 minutes for example workflows (workflow 10 is long-running)
+      KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS: "600"
+
+  # Mailpit for capturing notification emails and webhook-style messages.
+  # - SMTP server on port 1025 for email_send activities
+  # - REST API POST /api/v1/send for notification activities
+  # - Web UI at http://localhost:8025 to view all captured messages
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: kruxiaflow-mailpit
+    ports:
+      - "127.0.0.1:1025:1025"   # SMTP server
+      - "127.0.0.1:8025:8025"   # Web UI + REST API
+    networks:
+      - backend
+      - frontend
+    restart: unless-stopped
+    logging:
+      driver: "none"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    labels:
+      com.kruxiaflow.service: "email"
+      com.kruxiaflow.component: "mailpit"

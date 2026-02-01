@@ -34,19 +34,19 @@ activities:
         limit: 0.50
         action: abort
 
-  # # TODO: Store moderation result in database
-  # - key: store_moderation_result
-  #   worker: std
-  #   activity_name: postgres_query
-  #   parameters:
-  #     query: |
-  #       INSERT INTO moderation_log
-  #       (content_id, decision, cost, tokens, moderated_at)
-  #       VALUES ($1, $2, $3, $4, NOW())
-  #     params:
-  #       - "{{INPUT.content_id}}"
-  #       - "{{analyze_content.result.content}}"
-  #       - "{{analyze_content.result.usage.total_tokens}}"
-  #       - "{{analyze_content.result.usage.total_tokens}}"
-  #   depends_on:
-  #     - analyze_content
+  - key: store_moderation_result
+    worker: std
+    activity_name: postgres_query
+    parameters:
+      db_url: "{{SECRET.db_url}}"
+      query: |
+        INSERT INTO moderation_log
+        (content_id, decision, cost, tokens, moderated_at)
+        VALUES ($1, $2, $3, $4, NOW())
+      params:
+        - "{{INPUT.content_id}}"
+        - "{{analyze_content.result.content}}"
+        - "{{analyze_content.result.cost_usd}}"
+        - "{{analyze_content.result.usage.total_tokens}}"
+    depends_on:
+      - analyze_content

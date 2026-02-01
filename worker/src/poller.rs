@@ -103,7 +103,7 @@ impl WorkerPoller {
             return Ok(0);
         }
 
-        tracing::debug!(
+        tracing::trace!(
             worker_id = %self.config.worker_id,
             count = response.count,
             available_slots = available_slots,

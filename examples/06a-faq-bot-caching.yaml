@@ -74,6 +74,7 @@ description: Answer FAQs using LLM with aggressive caching for cost savings
 activities:
   # Step 1: Answer question with LLM (with caching)
   - key: answer_question
+    worker: std
     activity_name: llm_prompt
     parameters:
       model: anthropic/claude-haiku-4-5-20251001
@@ -87,7 +88,7 @@ activities:
     settings:
       cache:
         enabled: true
-        ttl_seconds: 3600  # Cache for 1 hour
+        ttl_seconds: 86400  # Cache for 1 day
         # Cache key components (deterministic hash)
         key:
           - llm_prompt
@@ -99,8 +100,10 @@ activities:
 
   # Step 2: Store answer with cache metrics for analytics
   - key: store_answer
+    worker: std
     activity_name: postgres_query
     parameters:
+      db_url: "{{SECRET.db_url}}"
       query: |
         INSERT INTO faq_log
         (question, answer, cost, cache_hit, created_at)

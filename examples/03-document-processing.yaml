@@ -1,10 +1,11 @@
 name: process_documents
 description: Fetch multiple documents in parallel, process each, and aggregate results
 
-# Workflow demonstrates:
-# - Parallel execution (fan-out/fan-in)
-# - HTTP requests (GET/POST)
-# - Multiple depends_on relationships
+# Workflow DAG:
+#
+#   fetch_doc1 ──→ process_doc1 ──┐
+#   fetch_doc2 ──→ process_doc2 ──┼──→ aggregate_results ──→ store_summary
+#   fetch_doc3 ──→ process_doc3 ──┘
 
 activities:
   # === PARALLEL FETCH (Fan-Out) ===
@@ -15,7 +16,7 @@ activities:
     activity_name: http_request
     parameters:
       method: GET
-      url: "{{INPUT.doc1_url}}"
+      url: "https://httpbin.org/get?doc=1&title=Introduction"
     outputs:
       - response
 
@@ -24,7 +25,7 @@ activities:
     activity_name: http_request
     parameters:
       method: GET
-      url: "{{INPUT.doc2_url}}"
+      url: "https://httpbin.org/get?doc=2&title=Architecture"
     outputs:
       - response
 
@@ -33,56 +34,41 @@ activities:
     activity_name: http_request
     parameters:
       method: GET
-      url: "{{INPUT.doc3_url}}"
+      url: "https://httpbin.org/get?doc=3&title=Conclusion"
     outputs:
       - response
 
   # === PARALLEL PROCESS (Fan-Out) ===
-  # Each process activity depends on its corresponding fetch activity
-  # These also execute in parallel (independent dependencies)
+  # Each process activity depends on its corresponding fetch activity.
+  # Echo passes through the fetched data, simulating a processing step.
 
   - key: process_doc1
     worker: std
-    activity_name: http_request
+    activity_name: echo
     parameters:
-      method: POST
-      url: "{{INPUT.processing_service_url}}"
-      body:
-        document_data: "{{fetch_doc1.response.body}}"
-        operation: extract_text
-        language: en
-    outputs:
-      - response
+      doc: 1
+      title: "{{fetch_doc1.response.body.args.title}}"
+      url: "{{fetch_doc1.response.body.url}}"
     depends_on:
       - fetch_doc1
 
   - key: process_doc2
     worker: std
-    activity_name: http_request
+    activity_name: echo
     parameters:
-      method: POST
-      url: "{{INPUT.processing_service_url}}"
-      body:
-        document_data: "{{fetch_doc2.response.body}}"
-        operation: extract_text
-        language: en
-    outputs:
-      - response
+      doc: 2
+      title: "{{fetch_doc2.response.body.args.title}}"
+      url: "{{fetch_doc2.response.body.url}}"
     depends_on:
       - fetch_doc2
 
   - key: process_doc3
     worker: std
-    activity_name: http_request
+    activity_name: echo
     parameters:
-      method: POST
-      url: "{{INPUT.processing_service_url}}"
-      body:
-        document_data: "{{fetch_doc3.response.body}}"
-        operation: extract_text
-        language: en
-    outputs:
-      - response
+      doc: 3
+      title: "{{fetch_doc3.response.body.args.title}}"
+      url: "{{fetch_doc3.response.body.url}}"
     depends_on:
       - fetch_doc3
 
@@ -91,37 +77,41 @@ activities:
 
   - key: aggregate_results
     worker: std
-    activity_name: http_request
+    activity_name: echo
     parameters:
-      method: POST
-      url: "{{INPUT.aggregator_url}}"
-      body:
-        workflow_id: "{{WORKFLOW.id}}"
-        doc1_result: "{{process_doc1.response.body}}"
-        doc2_result: "{{process_doc2.response.body}}"
-        doc3_result: "{{process_doc3.response.body}}"
-        operation: summarize
-    outputs:
-      - response
+      workflow_id: "{{WORKFLOW.id}}"
+      doc1: "{{process_doc1.echo.title}}"
+      doc2: "{{process_doc2.echo.title}}"
+      doc3: "{{process_doc3.echo.title}}"
+      documents_processed: 3
     depends_on:
       - process_doc1
       - process_doc2
-      - process_doc3  # Fan-in: waits for all three
+      - process_doc3
 
-  # === FINAL STORAGE ===
-  # Store the final summary
+  # === FINAL NOTIFICATION ===
+  # Send the summary via Mailpit
 
   - key: store_summary
     worker: std
     activity_name: http_request
     parameters:
       method: POST
-      url: "{{INPUT.storage_webhook_url}}"
+      url: "http://mailpit:8025/api/v1/send"
+      headers:
+        Content-Type: "application/json"
       body:
-        workflow_id: "{{WORKFLOW.id}}"
-        summary: "{{aggregate_results.response.body}}"
-        document_count: 3
-    outputs:
-      - response
+        From:
+          Name: "Kruxia Flow"
+          Email: "workflow@kruxiaflow.local"
+        To:
+          - Name: "Document Consumer"
+            Email: "docs@example.com"
+        Subject: "Document Processing Summary - {{WORKFLOW.id}}"
+        Text: |
+          Documents Processed: {{aggregate_results.echo.documents_processed}}
+          Doc 1: {{aggregate_results.echo.doc1}}
+          Doc 2: {{aggregate_results.echo.doc2}}
+          Doc 3: {{aggregate_results.echo.doc3}}
     depends_on:
       - aggregate_results

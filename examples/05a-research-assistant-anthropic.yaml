@@ -66,6 +66,7 @@ activities:
     worker: std
     activity_name: postgres_query
     parameters:
+      db_url: "{{SECRET.db_url}}"
       query: |
         INSERT INTO research_log
         (question, answer, provider, model, cost, prompt_tokens, output_tokens, total_tokens, created_at)

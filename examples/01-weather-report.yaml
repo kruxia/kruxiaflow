@@ -12,12 +12,19 @@ activities:
     activity_name: http_request
     parameters:
       method: POST
-      url: "{{INPUT.webhook_url}}"
+      url: "http://mailpit:8025/api/v1/send"
       headers:
         Content-Type: "application/json"
       body:
-        temperature: "{{fetch_weather.response.body.properties.periods[0].temperature}}"
-        forecast: "{{fetch_weather.response.body.properties.periods[0].detailedForecast}}"
-        workflow_id: "{{WORKFLOW.id}}"
+        From:
+          Name: "Kruxia Flow"
+          Email: "workflow@kruxiaflow.local"
+        To:
+          - Name: "Weather Subscriber"
+            Email: "weather@example.com"
+        Subject: "Weather Report - {{WORKFLOW.id}}"
+        Text: |
+          Temperature: {{fetch_weather.response.body.properties.periods[0].temperature}}
+          Forecast: {{fetch_weather.response.body.properties.periods[0].detailedForecast}}
     depends_on:
       - fetch_weather

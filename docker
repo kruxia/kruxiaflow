@@ -63,10 +63,12 @@ Modes:
   (default)    Production with prebuilt image (target = deploy)
   --develop    Development with hot reload (target = develop)
   --profiling  Memory profiling with jemalloc (target = profiling)
+  --examples   Production + examples environment (Mailpit, examples database)
 
 Examples:
   ./docker up                        # Start production environment
   ./docker up --develop              # Start development environment
+  ./docker up --examples             # Start with examples environment
   ./docker up --profiling            # Start profiling environment
   ./docker up -d                     # Start detached
   ./docker logs -f                   # Follow logs
@@ -101,6 +103,10 @@ main() {
                         mode="develop"
                         shift
                         ;;
+                    --examples)
+                        mode="examples"
+                        shift
+                        ;;
                     --profiling)
                         mode="profiling"
                         shift
@@ -115,6 +121,10 @@ main() {
                 develop)
                     log_info "Starting development environment"
                     exec docker compose -f docker-compose.yml -f docker-compose.develop.yml up $other_args
+                    ;;
+                examples)
+                    log_info "Starting examples environment (Mailpit + examples database)"
+                    exec docker compose -f docker-compose.yml -f docker-compose.examples.yml up $other_args
                     ;;
                 profiling)
                     log_info "Starting profiling environment"

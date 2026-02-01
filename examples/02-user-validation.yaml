@@ -2,15 +2,15 @@ name: validate_user
 description: Validate user email and store result in database with conditional branching
 
 activities:
-  # Step 1: Check if email is valid using a validation service
+  # Step 1: Echo the input so conditional branches can check the "valid" field
   - key: check_email
     worker: std
-    activity_name: http_request
+    activity_name: echo
     parameters:
-      method: GET
-      url: "https://httpbin.org/json"  # Using httpbin as a mock validation endpoint
+      email: "{{INPUT.email}}"
+      valid: "{{INPUT.valid}}"
     outputs:
-      - response
+      - echo
 
   # Step 2a: Store valid user (only runs if valid)
   - key: store_valid_user
@@ -18,13 +18,13 @@ activities:
     activity_name: postgres_query
     parameters:
       db_url: "{{SECRET.db_url}}"
-      query: "INSERT INTO valid_users (email, validated_at) VALUES ($1, NOW()) 
+      query: "INSERT INTO valid_users (email, validated_at) VALUES ($1, NOW())
         ON CONFLICT (email) DO NOTHING"
       params:
         - "{{INPUT.email}}"
     depends_on:
       - activity_key: check_email
-        condition: "{{check_email.response.success == true}}"
+        condition: "{{check_email.echo.valid == true}}"
 
   # Step 2b: Store invalid user (only runs if invalid)
   - key: store_invalid_user
@@ -32,14 +32,14 @@ activities:
     activity_name: postgres_query
     parameters:
       db_url: "{{SECRET.db_url}}"
-      query: "INSERT INTO invalid_users (email, reason, checked_at) 
+      query: "INSERT INTO invalid_users (email, reason, checked_at)
         VALUES ($1, $2, NOW()) ON CONFLICT (email) DO NOTHING"
       params:
         - "{{INPUT.email}}"
         - "Email validation failed"
     depends_on:
       - activity_key: check_email
-        condition: "{{check_email.response.success != true}}"
+        condition: "{{check_email.echo.valid != true}}"
 
   # Step 3: Send notification (runs after either store activity completes)
   - key: send_notification
@@ -47,15 +47,23 @@ activities:
     activity_name: http_request
     parameters:
       method: POST
-      url: "{{INPUT.notification_webhook_url}}"
+      url: "http://mailpit:8025/api/v1/send"
       headers:
         Content-Type: "application/json"
       body:
-        email: "{{INPUT.email}}"
-        status: "{{check_email.response.success}}"
-        workflow_id: "{{WORKFLOW.id}}"
+        From:
+          Name: "Kruxia Flow"
+          Email: "workflow@kruxiaflow.local"
+        To:
+          - Name: "Admin"
+            Email: "admin@example.com"
+        Subject: "User Validation Result - {{INPUT.email}}"
+        Text: |
+          Email: {{INPUT.email}}
+          Valid: {{check_email.echo.valid}}
+          Workflow ID: {{WORKFLOW.id}}
     depends_on:
       - activity_key: store_valid_user
-        condition: "{{check_email.response.success == true}}"
+        condition: "{{check_email.echo.valid == true}}"
       - activity_key: store_invalid_user
-        condition: "{{check_email.response.success != true}}"
+        condition: "{{check_email.echo.valid != true}}"
