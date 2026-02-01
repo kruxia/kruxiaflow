@@ -426,14 +426,14 @@ async fn test_worker_respects_scheduled_for() {
         .expect("Failed to process event");
     }
 
-    // Try to claim the activity immediately - should return None
+    // Try to claim the activity immediately - should return empty Vec
     let claimed = activity_queue
-        .claim_next("test_worker_id", "test", "future_work")
+        .claim_next("test_worker_id", "test", 1)
         .await
         .expect("Failed to claim");
 
     assert!(
-        claimed.is_none(),
+        claimed.is_empty(),
         "Worker should not be able to claim future-scheduled activity"
     );
 

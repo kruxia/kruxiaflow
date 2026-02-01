@@ -167,7 +167,7 @@ async fn test_yaml_workflow_end_to_end_with_healthcheck() {
     let worker_config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("test_worker_{}", Uuid::now_v7()),
-        activity_types: registry.activity_types(),
+        worker: "builtin".to_string(),
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities: 16,
@@ -495,7 +495,7 @@ async fn test_conditional_branching_workflow() {
     let worker_config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("test_worker_{}", Uuid::now_v7()),
-        activity_types: registry.activity_types(),
+        worker: "builtin".to_string(),
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities: 16,

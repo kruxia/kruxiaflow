@@ -87,14 +87,14 @@ impl WorkerApiClient {
     pub async fn poll_activities(
         &self,
         worker_id: &str,
-        activity_types: Vec<String>,
+        worker: &str,
         max_activities: usize,
     ) -> Result<PollActivitiesResponse> {
         let token = self.get_token().await?;
 
         #[derive(Serialize)]
         struct PollRequest {
-            activity_types: Vec<String>,
+            worker: String,
             worker_id: String,
             max_activities: usize,
         }
@@ -104,7 +104,7 @@ impl WorkerApiClient {
             .post(format!("{}/api/v1/workers/poll", self.api_url))
             .bearer_auth(&token)
             .json(&PollRequest {
-                activity_types: activity_types.clone(),
+                worker: worker.to_string(),
                 worker_id: worker_id.to_string(),
                 max_activities,
             })
@@ -119,7 +119,7 @@ impl WorkerApiClient {
             *token_lock = None;
             drop(token_lock);
             // Retry once with new token
-            return Box::pin(self.poll_activities(worker_id, activity_types, max_activities)).await;
+            return Box::pin(self.poll_activities(worker_id, worker, max_activities)).await;
         }
 
         if !response.status().is_success() {

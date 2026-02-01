@@ -27,13 +27,17 @@ pub trait ActivityQueue: Send + Sync {
     /// Schedule activities to the queue (idempotent via UNIQUE constraint)
     async fn schedule(&self, workflow_id: Uuid, activities: Vec<Activity>) -> Result<()>;
 
-    /// Claim next pending activity for the given worker/name (includes stale activity detection)
+    /// Claim next pending activities for the given worker (includes stale activity detection)
+    ///
+    /// Claims up to `max_activities` activities for the specified worker, regardless of
+    /// activity type. Activities are claimed in `scheduled_for` order for fair scheduling
+    /// across all activity types.
     async fn claim_next(
         &self,
         worker_id: &str,
         worker: &str,
-        name: &str,
-    ) -> Result<Option<QueuedActivity>>;
+        max_activities: usize,
+    ) -> Result<Vec<QueuedActivity>>;
 
     /// Get activity details (workflow_id, activity_key) for event publishing
     async fn get_activity_summary(&self, activity_id: Uuid) -> Result<ActivitySummary>;

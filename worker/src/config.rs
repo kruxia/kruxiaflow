@@ -10,8 +10,8 @@ pub struct WorkerConfig {
     /// Worker unique identifier
     pub worker_id: String,
 
-    /// Activity types this worker can execute (worker.name format)
-    pub activity_types: Vec<String>,
+    /// Worker type this worker handles (e.g., "builtin", "custom")
+    pub worker: String,
 
     /// Maximum number of activities to poll per request
     pub poll_max_activities: usize,
@@ -43,7 +43,7 @@ impl Default for WorkerConfig {
         Self {
             api_url: "http://localhost:8080".to_string(),
             worker_id: format!("worker_{}", uuid::Uuid::now_v7()),
-            activity_types: vec!["default.echo".to_string()],
+            worker: "builtin".to_string(),
             poll_max_activities: 10,
             poll_interval: Duration::from_millis(100),
             max_concurrent_activities: 16,
@@ -70,8 +70,8 @@ impl WorkerConfig {
             config.worker_id = id;
         }
 
-        if let Ok(types) = std::env::var("KRUXIAFLOW_ACTIVITY_TYPES") {
-            config.activity_types = types.split(',').map(|s| s.trim().to_string()).collect();
+        if let Ok(worker) = std::env::var("KRUXIAFLOW_WORKER") {
+            config.worker = worker;
         }
 
         // New config: max_concurrent_activities
@@ -117,14 +117,8 @@ impl WorkerConfig {
     /// Validate configuration
     #[allow(deprecated)]
     fn validate(&self) -> Result<(), ConfigError> {
-        if self.activity_types.is_empty() {
-            return Err(ConfigError::NoActivityTypes);
-        }
-
-        for activity_type in &self.activity_types {
-            if !activity_type.contains('.') {
-                return Err(ConfigError::InvalidActivityType(activity_type.clone()));
-            }
+        if self.worker.is_empty() {
+            return Err(ConfigError::NoWorker);
         }
 
         if self.max_concurrent_activities == 0 {
@@ -150,11 +144,8 @@ impl WorkerConfig {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    #[error("No activity types configured")]
-    NoActivityTypes,
-
-    #[error("Invalid activity type format: {0} (must be worker.name)")]
-    InvalidActivityType(String),
+    #[error("No worker configured (set KRUXIAFLOW_WORKER)")]
+    NoWorker,
 
     #[error("Invalid max_concurrent_activities value (must be > 0)")]
     InvalidMaxConcurrentActivities,
@@ -192,7 +183,7 @@ mod tests {
         let env_vars = [
             "KRUXIAFLOW_API_URL",
             "KRUXIAFLOW_WORKER_ID",
-            "KRUXIAFLOW_ACTIVITY_TYPES",
+            "KRUXIAFLOW_WORKER",
             "KRUXIAFLOW_WORKER_CONCURRENCY",
             "KRUXIAFLOW_WORKER_MAX_ACTIVITIES",
             "KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES",
@@ -230,7 +221,7 @@ mod tests {
 
         assert_eq!(config.api_url, "http://localhost:8080");
         assert!(config.worker_id.starts_with("worker_"));
-        assert_eq!(config.activity_types, vec!["default.echo"]);
+        assert_eq!(config.worker, "builtin");
         assert_eq!(config.poll_max_activities, 10);
         assert_eq!(config.poll_interval, Duration::from_millis(100));
         assert_eq!(config.max_concurrent_activities, 16);
@@ -248,7 +239,7 @@ mod tests {
 
             assert_eq!(config.api_url, "http://localhost:8080");
             assert!(config.worker_id.starts_with("worker_"));
-            assert_eq!(config.activity_types, vec!["default.echo"]);
+            assert_eq!(config.worker, "builtin");
             assert_eq!(config.max_concurrent_activities, 16);
             assert_eq!(config.concurrency, 4);
             assert_eq!(config.client_id, "worker_client");
@@ -262,7 +253,7 @@ mod tests {
             vec![
                 ("KRUXIAFLOW_API_URL", "http://api.example.com:9090"),
                 ("KRUXIAFLOW_WORKER_ID", "custom_worker_123"),
-                ("KRUXIAFLOW_ACTIVITY_TYPES", "ns1.activity1, ns2.activity2"),
+                ("KRUXIAFLOW_WORKER", "custom"),
                 ("KRUXIAFLOW_WORKER_MAX_ACTIVITIES", "32"),
                 ("KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES", "8"),
                 ("KRUXIAFLOW_CLIENT_ID", "custom_client"),
@@ -273,10 +264,7 @@ mod tests {
 
                 assert_eq!(config.api_url, "http://api.example.com:9090");
                 assert_eq!(config.worker_id, "custom_worker_123");
-                assert_eq!(
-                    config.activity_types,
-                    vec!["ns1.activity1", "ns2.activity2"]
-                );
+                assert_eq!(config.worker, "custom");
                 assert_eq!(config.max_concurrent_activities, 32);
                 assert_eq!(config.poll_max_activities, 8);
                 assert_eq!(config.client_id, "custom_client");
@@ -361,7 +349,7 @@ mod tests {
             vec![
                 ("KRUXIAFLOW_API_URL", "http://api.example.com:9090"),
                 ("KRUXIAFLOW_WORKER_ID", "custom_worker_123"),
-                ("KRUXIAFLOW_ACTIVITY_TYPES", "ns1.activity1, ns2.activity2"),
+                ("KRUXIAFLOW_WORKER", "custom"),
                 ("KRUXIAFLOW_WORKER_CONCURRENCY", "8"),
                 ("KRUXIAFLOW_CLIENT_ID", "custom_client"),
                 ("KRUXIAFLOW_CLIENT_SECRET", "super_secret"),
@@ -371,10 +359,7 @@ mod tests {
 
                 assert_eq!(config.api_url, "http://api.example.com:9090");
                 assert_eq!(config.worker_id, "custom_worker_123");
-                assert_eq!(
-                    config.activity_types,
-                    vec!["ns1.activity1", "ns2.activity2"]
-                );
+                assert_eq!(config.worker, "custom");
                 assert_eq!(config.concurrency, 8);
                 assert_eq!(config.client_id, "custom_client");
                 assert_eq!(config.client_secret, "super_secret");
@@ -407,50 +392,14 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_no_activity_types() {
+    fn test_validate_no_worker() {
         let mut config = WorkerConfig::default();
-        config.activity_types = vec![];
+        config.worker = "".to_string();
         config.client_secret = "secret".to_string();
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(matches!(result, Err(ConfigError::NoActivityTypes)));
-    }
-
-    #[test]
-    fn test_validate_invalid_activity_type_format() {
-        let mut config = WorkerConfig::default();
-        config.activity_types = vec!["invalid_format".to_string()];
-        config.client_secret = "secret".to_string();
-
-        let result = config.validate();
-        assert!(result.is_err());
-        match result {
-            Err(ConfigError::InvalidActivityType(msg)) => {
-                assert_eq!(msg, "invalid_format");
-            }
-            _ => panic!("Expected InvalidActivityType error"),
-        }
-    }
-
-    #[test]
-    fn test_validate_multiple_activity_types_one_invalid() {
-        let mut config = WorkerConfig::default();
-        config.activity_types = vec![
-            "valid.activity".to_string(),
-            "invalid".to_string(),
-            "also.valid".to_string(),
-        ];
-        config.client_secret = "secret".to_string();
-
-        let result = config.validate();
-        assert!(result.is_err());
-        match result {
-            Err(ConfigError::InvalidActivityType(msg)) => {
-                assert_eq!(msg, "invalid");
-            }
-            _ => panic!("Expected InvalidActivityType error"),
-        }
+        assert!(matches!(result, Err(ConfigError::NoWorker)));
     }
 
     #[test]
@@ -510,13 +459,10 @@ mod tests {
 
     #[test]
     fn test_error_display_messages() {
-        let err = ConfigError::NoActivityTypes;
-        assert_eq!(err.to_string(), "No activity types configured");
-
-        let err = ConfigError::InvalidActivityType("test.bad".to_string());
+        let err = ConfigError::NoWorker;
         assert_eq!(
             err.to_string(),
-            "Invalid activity type format: test.bad (must be worker.name)"
+            "No worker configured (set KRUXIAFLOW_WORKER)"
         );
 
         let err = ConfigError::InvalidMaxConcurrentActivities;
@@ -542,35 +488,15 @@ mod tests {
     }
 
     #[test]
-    fn test_from_env_with_single_activity_type() {
+    fn test_from_env_with_custom_worker() {
         with_env_vars(
             vec![
-                ("KRUXIAFLOW_ACTIVITY_TYPES", "worker.single"),
+                ("KRUXIAFLOW_WORKER", "custom_worker"),
                 ("KRUXIAFLOW_CLIENT_SECRET", "secret"),
             ],
             || {
                 let config = WorkerConfig::from_env().unwrap();
-                assert_eq!(config.activity_types, vec!["worker.single"]);
-            },
-        );
-    }
-
-    #[test]
-    fn test_from_env_activity_types_with_spaces() {
-        with_env_vars(
-            vec![
-                (
-                    "KRUXIAFLOW_ACTIVITY_TYPES",
-                    "ns1.act1 , ns2.act2  ,  ns3.act3",
-                ),
-                ("KRUXIAFLOW_CLIENT_SECRET", "secret"),
-            ],
-            || {
-                let config = WorkerConfig::from_env().unwrap();
-                assert_eq!(
-                    config.activity_types,
-                    vec!["ns1.act1", "ns2.act2", "ns3.act3"]
-                );
+                assert_eq!(config.worker, "custom_worker");
             },
         );
     }

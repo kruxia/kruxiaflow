@@ -84,40 +84,23 @@ impl ActivityWorkerService {
 
     /// Poll for pending activities
     ///
-    /// Claims activities matching the specified types by calling ActivityQueue::claim_next.
-    /// Returns up to max_activities that are ready to execute.
+    /// Claims activities for the specified worker by calling ActivityQueue::claim_next.
+    /// Returns up to max_activities that are ready to execute, ordered by scheduled_for
+    /// for fair scheduling across all activity types.
     pub async fn poll_activities(
         &self,
-        activity_types: Vec<(String, String)>, // Vec of (worker, name)
-        worker_id: String,
+        worker: &str,
+        worker_id: &str,
         max_activities: usize,
     ) -> ActivityWorkerResult<Vec<PendingActivityRecord>> {
-        let mut claimed = Vec::new();
-
-        // Poll for each activity type until we reach max_activities
-        for (worker, name) in activity_types {
-            while claimed.len() < max_activities {
-                // Delegate to ActivityQueue
-                match self.queue.claim_next(&worker_id, &worker, &name).await? {
-                    Some(activity) => {
-                        claimed.push(PendingActivityRecord::from(activity));
-                    }
-                    None => break, // No more activities of this type
-                }
-            }
-
-            if claimed.len() >= max_activities {
-                break;
-            }
-        }
-
-        if claimed.len() > 0 {
-            tracing::debug!(
-                worker_id = %worker_id,
-                claimed_count = claimed.len(),
-                "Activities claimed by worker"
-            );
-        }
+        // Single call to claim_next filtering by worker only
+        let claimed = self
+            .queue
+            .claim_next(worker_id, worker, max_activities)
+            .await?
+            .into_iter()
+            .map(PendingActivityRecord::from)
+            .collect();
 
         Ok(claimed)
     }

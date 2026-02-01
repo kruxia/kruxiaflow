@@ -325,7 +325,7 @@ async fn test_example_10_order_processing_with_email() {
     let worker_config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("test_worker_ex10_{}", Uuid::now_v7()),
-        activity_types: registry.activity_types(),
+        worker: "builtin".to_string(),
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities: 20,

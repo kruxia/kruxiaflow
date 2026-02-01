@@ -239,7 +239,7 @@ Benchmark methodology: Identical echo workflows (sequential, parallel, high-conc
 cargo install sqlx-cli --no-default-features --features postgres
 
 # Start PostgreSQL manually
-docker run -d --name pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:18
+docker run -d --name pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:17
 
 # Run migrations
 export DATABASE_URL='postgres://postgres:dev@localhost:5432/kruxiaflow'

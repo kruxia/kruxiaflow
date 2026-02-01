@@ -129,9 +129,9 @@ async fn test_concurrent_claiming() {
     let queue3 = PostgresQueue::new(pool.clone(), config);
 
     let (claimed1, claimed2, claimed3) = tokio::join!(
-        queue1.claim_next(worker1_id, "test", "test_task"),
-        queue2.claim_next(worker2_id, "test", "test_task"),
-        queue3.claim_next(worker3_id, "test", "test_task"),
+        queue1.claim_next(worker1_id, "test", 1),
+        queue2.claim_next(worker2_id, "test", 1),
+        queue3.claim_next(worker3_id, "test", 1),
     );
 
     let claimed1 = claimed1.expect("Worker 1 claim failed");
@@ -139,14 +139,14 @@ async fn test_concurrent_claiming() {
     let claimed3 = claimed3.expect("Worker 3 claim failed");
 
     // All should succeed
-    assert!(claimed1.is_some(), "Worker 1 should claim an activity");
-    assert!(claimed2.is_some(), "Worker 2 should claim an activity");
-    assert!(claimed3.is_some(), "Worker 3 should claim an activity");
+    assert!(!claimed1.is_empty(), "Worker 1 should claim an activity");
+    assert!(!claimed2.is_empty(), "Worker 2 should claim an activity");
+    assert!(!claimed3.is_empty(), "Worker 3 should claim an activity");
 
     // All should be different activities
-    let id1 = claimed1.unwrap().id;
-    let id2 = claimed2.unwrap().id;
-    let id3 = claimed3.unwrap().id;
+    let id1 = claimed1[0].id;
+    let id2 = claimed2[0].id;
+    let id3 = claimed3[0].id;
 
     assert_ne!(id1, id2, "Workers should claim different activities");
     assert_ne!(id1, id3, "Workers should claim different activities");
@@ -208,10 +208,12 @@ async fn test_stale_activity_recovery() {
 
     // Worker 1 claims activity
     let claimed1 = queue
-        .claim_next(worker1_id, "test", "test_task")
+        .claim_next(worker1_id, "test", 1)
         .await
-        .expect("Failed to claim activity")
-        .expect("Should have claimed activity");
+        .expect("Failed to claim activity");
+
+    assert!(!claimed1.is_empty(), "Should have claimed activity");
+    let claimed1 = &claimed1[0];
 
     assert_eq!(
         claimed1.retry_count, 0,
@@ -223,10 +225,12 @@ async fn test_stale_activity_recovery() {
 
     // Worker 2 claims activity (should reclaim stale activity)
     let claimed2 = queue
-        .claim_next(worker2_id, "test", "test_task")
+        .claim_next(worker2_id, "test", 1)
         .await
-        .expect("Failed to reclaim activity")
-        .expect("Should have reclaimed stale activity");
+        .expect("Failed to reclaim activity");
+
+    assert!(!claimed2.is_empty(), "Should have reclaimed stale activity");
+    let claimed2 = &claimed2[0];
 
     assert_eq!(claimed1.id, claimed2.id, "Should reclaim same activity");
     assert_eq!(
@@ -283,20 +287,24 @@ async fn test_heartbeat_conflict_detection() {
 
     // Worker 1 claims activity
     let claimed = queue
-        .claim_next(worker1_id, "test", "test_task")
+        .claim_next(worker1_id, "test", 1)
         .await
-        .expect("Failed to claim activity")
-        .expect("Should have claimed activity");
+        .expect("Failed to claim activity");
+
+    assert!(!claimed.is_empty(), "Should have claimed activity");
+    let claimed = &claimed[0];
 
     // Wait for timeout
     sleep(Duration::from_millis(1200)).await;
 
     // Worker 2 reclaims stale activity
     let reclaimed = queue
-        .claim_next(worker2_id, "test", "test_task")
+        .claim_next(worker2_id, "test", 1)
         .await
-        .expect("Failed to reclaim activity")
-        .expect("Should have reclaimed activity");
+        .expect("Failed to reclaim activity");
+
+    assert!(!reclaimed.is_empty(), "Should have reclaimed activity");
+    let reclaimed = &reclaimed[0];
 
     assert_eq!(claimed.id, reclaimed.id);
 
@@ -367,10 +375,12 @@ async fn test_max_retries_exhaustion() {
     for i in 0..3 {
         let worker_id = format!("worker_test_{:02}", i);
         let claimed = queue
-            .claim_next(&worker_id, "test", "test_task")
+            .claim_next(&worker_id, "test", 1)
             .await
-            .expect("Failed to claim activity")
-            .expect("Should have claimed activity");
+            .expect("Failed to claim activity");
+
+        assert!(!claimed.is_empty(), "Should have claimed activity");
+        let claimed = &claimed[0];
 
         // First claim has retry_count=0, subsequent reclaims increment it
         let expected_retry_count = if i == 0 { 0 } else { i };
@@ -387,12 +397,12 @@ async fn test_max_retries_exhaustion() {
     // Try to claim again - should not return activity (retry_count >= max_retries)
     let worker_id = "worker_test_final";
     let no_claim = queue
-        .claim_next(worker_id, "test", "test_task")
+        .claim_next(worker_id, "test", 1)
         .await
         .expect("Claim call should succeed");
 
     assert!(
-        no_claim.is_none(),
+        no_claim.is_empty(),
         "Should not claim activity after max retries exhausted"
     );
 
@@ -465,10 +475,12 @@ async fn test_completion_idempotency() {
 
     // Claim activity
     let claimed = queue
-        .claim_next(worker_id, "test", "test_task")
+        .claim_next(worker_id, "test", 1)
         .await
-        .expect("Failed to claim activity")
-        .expect("Should have claimed activity");
+        .expect("Failed to claim activity");
+
+    assert!(!claimed.is_empty(), "Should have claimed activity");
+    let claimed = &claimed[0];
 
     let result = ActivityResult {
         success: true,
@@ -542,10 +554,12 @@ async fn test_sequential_ordering() {
 
     // Claim and complete step 1
     let claimed1 = queue
-        .claim_next(worker_id, "test", "test_task")
+        .claim_next(worker_id, "test", 1)
         .await
-        .expect("Failed to claim")
-        .expect("Should claim step1");
+        .expect("Failed to claim");
+
+    assert!(!claimed1.is_empty(), "Should claim step1");
+    let claimed1 = &claimed1[0];
 
     assert_eq!(claimed1.activity_key, "step1");
 
@@ -583,10 +597,12 @@ async fn test_sequential_ordering() {
 
     // Claim step 2
     let claimed2 = queue
-        .claim_next(worker_id, "test", "test_task")
+        .claim_next(worker_id, "test", 1)
         .await
-        .expect("Failed to claim")
-        .expect("Should claim step2");
+        .expect("Failed to claim");
+
+    assert!(!claimed2.is_empty(), "Should claim step2");
+    let claimed2 = &claimed2[0];
 
     assert_eq!(claimed2.activity_key, "step2");
 
@@ -641,21 +657,21 @@ async fn test_parallel_execution() {
     let queue3 = PostgresQueue::new(pool.clone(), QueueConfig::default());
 
     let (claimed1, claimed2, claimed3) = tokio::join!(
-        queue1.claim_next(worker1_id, "test", "test_task"),
-        queue2.claim_next(worker2_id, "test", "test_task"),
-        queue3.claim_next(worker3_id, "test", "test_task"),
+        queue1.claim_next(worker1_id, "test", 1),
+        queue2.claim_next(worker2_id, "test", 1),
+        queue3.claim_next(worker3_id, "test", 1),
     );
 
     assert!(
-        claimed1.unwrap().is_some(),
+        !claimed1.unwrap().is_empty(),
         "Worker 1 should claim activity"
     );
     assert!(
-        claimed2.unwrap().is_some(),
+        !claimed2.unwrap().is_empty(),
         "Worker 2 should claim activity"
     );
     assert!(
-        claimed3.unwrap().is_some(),
+        !claimed3.unwrap().is_empty(),
         "Worker 3 should claim activity"
     );
 
@@ -713,10 +729,12 @@ async fn test_reclaim_stale_activities_resets_to_pending() {
 
     // Worker claims activity
     let claimed = queue
-        .claim_next(worker_id, "test", "test_task")
+        .claim_next(worker_id, "test", 1)
         .await
-        .expect("Failed to claim")
-        .expect("Should have claimed");
+        .expect("Failed to claim");
+
+    assert!(!claimed.is_empty(), "Should have claimed");
+    let claimed = &claimed[0];
 
     assert_eq!(claimed.retry_count, 0);
 
@@ -751,10 +769,15 @@ async fn test_reclaim_stale_activities_resets_to_pending() {
 
     // Verify activity can be claimed again
     let reclaimed_claimed = queue
-        .claim_next(worker_id, "test", "test_task")
+        .claim_next(worker_id, "test", 1)
         .await
-        .expect("Failed to claim")
-        .expect("Should claim reclaimed activity");
+        .expect("Failed to claim");
+
+    assert!(
+        !reclaimed_claimed.is_empty(),
+        "Should claim reclaimed activity"
+    );
+    let reclaimed_claimed = &reclaimed_claimed[0];
 
     assert_eq!(reclaimed_claimed.id, claimed.id);
     assert_eq!(reclaimed_claimed.retry_count, 1);
@@ -809,10 +832,12 @@ async fn test_reclaim_stale_activities_marks_failed_when_retries_exhausted() {
 
     // Worker claims activity
     let claimed = queue
-        .claim_next("worker_test_01", "test", "test_task")
+        .claim_next("worker_test_01", "test", 1)
         .await
-        .expect("Failed to claim")
-        .expect("Should have claimed");
+        .expect("Failed to claim");
+
+    assert!(!claimed.is_empty(), "Should have claimed");
+    let claimed = &claimed[0];
 
     assert_eq!(claimed.retry_count, 0);
 
@@ -848,11 +873,11 @@ async fn test_reclaim_stale_activities_marks_failed_when_retries_exhausted() {
 
     // Verify activity cannot be claimed again
     let no_claim = queue
-        .claim_next("worker_test_02", "test", "test_task")
+        .claim_next("worker_test_02", "test", 1)
         .await
         .expect("Claim call should succeed");
 
-    assert!(no_claim.is_none(), "Should not claim failed activity");
+    assert!(no_claim.is_empty(), "Should not claim failed activity");
 
     cleanup_queue(&pool, workflow_id).await;
 }
@@ -902,10 +927,12 @@ async fn test_reclaim_stale_activities_does_not_affect_non_stale() {
 
     // Worker claims activity
     let claimed = queue
-        .claim_next(worker_id, "test", "test_task")
+        .claim_next(worker_id, "test", 1)
         .await
-        .expect("Failed to claim")
-        .expect("Should have claimed");
+        .expect("Failed to claim");
+
+    assert!(!claimed.is_empty(), "Should have claimed");
+    let claimed = &claimed[0];
 
     // Do NOT wait for timeout - activity is still valid
 
@@ -1044,11 +1071,11 @@ async fn test_reclaim_stale_activities_multiple_activities() {
     // Claim all 3 activities
     for i in 0..3 {
         let worker_id = format!("worker_test_{:02}", i);
-        queue
-            .claim_next(&worker_id, "test", "test_task")
+        let claimed = queue
+            .claim_next(&worker_id, "test", 1)
             .await
-            .expect("Failed to claim")
-            .expect("Should have claimed");
+            .expect("Failed to claim");
+        assert!(!claimed.is_empty(), "Should have claimed");
     }
 
     // Wait for short timeouts to expire

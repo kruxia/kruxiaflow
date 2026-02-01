@@ -339,7 +339,7 @@ async fn spawn_workers(
     let config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("internal_worker_{}", Uuid::now_v7()),
-        activity_types: registry.activity_types(),
+        worker: "builtin".to_string(),
         poll_max_activities,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities,

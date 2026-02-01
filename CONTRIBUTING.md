@@ -24,7 +24,7 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 - **Docker and Docker Compose** - Required for running the development environment
 - **Rust 1.90+** - Required for local development without Docker
-- **PostgreSQL 18** - The only required runtime dependency
+- **PostgreSQL 17+** - The only required runtime dependency
 
 ### Quick Setup
 
@@ -75,7 +75,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 cargo install sqlx-cli --no-default-features --features postgres
 
 # Start PostgreSQL (required)
-docker run -d --name pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:18
+docker run -d --name pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:17
 
 # Set up the database
 export DATABASE_URL='postgres://postgres:dev@localhost:5432/kruxiaflow'

@@ -12,9 +12,9 @@
 Python support is a **foundational requirement** for Kruxia Flow adoption, particularly among AI/ML engineers (primary persona P1). This plan unifies four interdependent components into a cohesive development roadmap:
 
 1. **Python Workflow Definitions** - Programmatic workflow building with type safety
-2. **Python Worker SDK** - Library for implementing custom Python activities
+2. **Python Worker SDK** - Library for implementing custom Python activities and workers
 3. **Python Activity Standard Library** - Common activities for data engineering, ML, NLP
-4. **Built-in Python Worker** - Zero-setup Python execution for foundational activities
+4. **Standard Python Worker** - Pre-built worker for common Python activities (PyPI + Docker)
 
 **Key Insight**: These components must be developed together. You cannot effectively define workflows in Python without being able to test Python activities locally, which requires the worker SDK.
 
@@ -41,9 +41,9 @@ Python support is a **foundational requirement** for Kruxia Flow adoption, parti
    - No Python runtime dependency during workflow execution
    - Activities can be Python (via worker) but workflow definition is static
 
-2. **Zero-Setup Experience**: Built-in Python worker for common cases
-   - Ship with common activities (script execution, data manipulation)
-   - Users can run Python workflows without deploying custom workers
+2. **Low-Setup Experience**: Standard Python worker for common cases
+   - Pre-built worker with common activities (script execution, data manipulation)
+   - Available as PyPI package (`kruxiaflow-worker-python`) and Docker image
    - Custom workers for advanced cases (specialized libraries, dependencies)
 
 3. **Type Safety**: Leverage Python's type hints
@@ -74,7 +74,7 @@ flowchart TB
     end
 
     subgraph "3: Runtime"
-        BuiltinWorker[Built-in Python Worker]
+        StdWorker[Standard Python Worker]
         CustomWorker[Custom Python Worker]
         API[Kruxia Flow API]
     end
@@ -88,10 +88,10 @@ flowchart TB
     StdLib -->|provides| CustomAct
 
     CustomAct -->|runs in| CustomWorker
-    StdLib -->|bundled in| BuiltinWorker
+    StdLib -->|bundled in| StdWorker
 
     CustomWorker -->|polls| API
-    BuiltinWorker -->|polls| API
+    StdWorker -->|polls| API
 ```
 
 ---
@@ -107,140 +107,173 @@ Fluent Python API for building workflows programmatically, with compilation to Y
 **Core Features**:
 - Workflow builder pattern with method chaining
 - Activity definitions with parameters and dependencies
+- **Fluent API**: All builder methods return `self` for chaining
+- **Explicit registration**: `Workflow.append(activity)` returns workflow for chaining
+- **Subscript access** for activity outputs (`activity["key"]`)
 - Type hints for IDE support (autocomplete, validation)
 - Template expression support for dynamic values
 - Compilation to validated YAML
 - Direct deployment to Kruxia Flow server
 
-**Example API**:
+**Example API** (Fluent Style):
 ```python
-from kruxiaflow import Workflow, Activity, Input
+from kruxiaflow import KruxiaFlow, Workflow, WorkflowActivity, Input
 
-# Create workflow
-workflow = Workflow(
-    name="sentiment_analysis",
-    version="1.0.0",
-    namespace="ai_pipeline"
-)
-
-# Define inputs
 user_text = Input("text", type=str, required=True)
 
-# Build activities
-analyze = Activity(
-    key="analyze_sentiment",
-    worker="builtin",
-    activity_name="llm_prompt",
-    parameters={
-        "provider": "anthropic",
-        "model": "claude-3-haiku-20240307",
-        "prompt": f"Analyze sentiment: {user_text}",
-        "temperature": 0.0
-    },
-    settings={
-        "cache": True,
-        "cache_ttl": 3600,
-        "budget": {"limit": 0.10}
-    }
-)
+# Fluent activity definition - all methods return self for chaining
+analyze = WorkflowActivity("analyze_sentiment") \
+    .worker("standard", "llm_prompt") \
+    .params(
+        provider="anthropic",
+        model="claude-3-haiku-20240307",
+        prompt=f"Analyze sentiment: {user_text}",
+        temperature=0.0
+    ) \
+    .cache(ttl=3600) \
+    .budget(limit=0.10)
 
-save = Activity(
-    key="save_results",
-    worker="builtin",
-    activity_name="postgres_query",
-    parameters={
-        "database_url": "${DATABASE_URL}",
-        "query": """
+save = WorkflowActivity("save_results") \
+    .worker("standard", "postgres_query") \
+    .params(
+        database_url="${DATABASE_URL}",
+        query="""
             INSERT INTO sentiment_results (text, sentiment, confidence)
             VALUES ($1, $2, $3)
         """,
-        "params": [
-            user_text,
-            analyze.outputs["sentiment"],
-            analyze.outputs["confidence"]
-        ]
-    }
-).after(analyze)
+        params=[user_text, analyze["sentiment"], analyze["confidence"]]
+    ) \
+    .depends_on(analyze)
 
-# Add to workflow
-workflow.add_activities(analyze, save)
+# Build workflow - .append() accepts multiple activities
+wf = Workflow("sentiment_analysis", version="1.0.0", namespace="ai_pipeline") \
+    .append(analyze, save)
 
-# Deploy
-workflow.deploy(
-    api_url="http://localhost:8080",
-    api_token="${KRUXIAFLOW_TOKEN}"
-)
+# Deploy via API client
+client = KruxiaFlow(api_url="http://localhost:8080", api_token="${KRUXIAFLOW_TOKEN}")
+client.deploy(wf)
+```
+
+**Fluent Chaining Pattern**:
+```python
+# Define activities with full configuration
+extract = WorkflowActivity("extract").worker("standard", "http_request").params(url="${API_URL}")
+
+transform = WorkflowActivity("transform") \
+    .worker("python", "script") \
+    .params(script="...") \
+    .timeout(300) \
+    .retries(3) \
+    .depends_on(extract)
+
+validate = WorkflowActivity("validate") \
+    .worker("python", "script") \
+    .params(script="...") \
+    .depends_on(transform)
+
+load = WorkflowActivity("load") \
+    .worker("standard", "postgres_query") \
+    .params(query="...") \
+    .depends_on(transform)  # Parallel with validate - both depend on transform
+
+# Fan-in: notify depends on multiple activities
+notify = WorkflowActivity("notify") \
+    .worker("standard", "http_request") \
+    .params(url="${SLACK_URL}") \
+    .depends_on(validate, load)  # Waits for both to complete
+
+# Build workflow - append all activities at once
+wf = Workflow("data_pipeline").append(extract, transform, validate, load, notify)
+```
+
+**Subscript Access for Outputs**:
+```python
+# Instead of: analyze.outputs["sentiment"]
+# Use subscript: analyze["sentiment"]
+
+save = WorkflowActivity("save") \
+    .worker("standard", "postgres_query") \
+    .params(
+        sentiment=analyze["sentiment"],       # Activity output reference
+        confidence=analyze["confidence"],
+        raw_response=analyze["response.text"] # Nested path access
+    ) \
+    .depends_on(analyze)
+
+# Conditions with output references
+notify = WorkflowActivity("notify") \
+    .worker("standard", "http_request") \
+    .when(analyze["confidence"] > 0.8) \
+    .depends_on(analyze)
+
+retry = WorkflowActivity("retry") \
+    .worker("standard", "llm_prompt") \
+    .when(analyze["status"] == "failed") \
+    .depends_on(analyze)
 ```
 
 **Dynamic Workflow Generation**:
 ```python
-# Generate N parallel search activities
 search_queries = ["AI workflows", "ML pipelines", "LLM orchestration"]
 
-search_activities = [
-    Activity(
-        key=f"search_{i}",
-        worker="builtin",
-        activity_name="http_request",
-        parameters={
-            "method": "GET",
-            "url": f"https://api.search.com/q={query}"
-        }
-    )
+# Generate N parallel search activities with list comprehension
+searches = [
+    WorkflowActivity(f"search_{i}")
+        .worker("standard", "http_request")
+        .params(method="GET", url=f"https://api.search.com/q={query}")
     for i, query in enumerate(search_queries)
 ]
 
-# Aggregate results
-aggregate = Activity(
-    key="aggregate",
-    worker="python",
-    activity_name="combine_results",
-    parameters={
-        "results": [s.outputs for s in search_activities]
-    }
-).after(*search_activities)
+# Fan-in: aggregate depends on all searches
+aggregate = WorkflowActivity("aggregate") \
+    .worker("python", "script") \
+    .params(results=[s["response"] for s in searches]) \
+    .depends_on(*searches)  # Unpack list as dependencies
 
-workflow.add_activities(*search_activities, aggregate)
+# Build workflow - unpack list with *
+wf = Workflow("parallel_search").append(*searches, aggregate)
 ```
 
 **Reusable Components**:
 ```python
-def create_llm_fallback_chain(name: str, prompt: str, budget: float):
-    """Create activity group with Claude → GPT-4 fallback"""
-    primary = Activity(
-        key=f"{name}_claude",
-        worker="builtin",
-        activity_name="llm_prompt",
-        parameters={
-            "provider": "anthropic",
-            "model": "claude-3-haiku-20240307",
-            "prompt": prompt
-        },
-        settings={"budget": {"limit": budget * 0.7}}
-    )
+def create_llm_fallback_chain(name: str, prompt: str, budget: float) -> list[WorkflowActivity]:
+    """Create activity group with Claude → GPT-4 fallback."""
+    primary = WorkflowActivity(f"{name}_claude") \
+        .worker("standard", "llm_prompt") \
+        .params(
+            provider="anthropic",
+            model="claude-3-haiku-20240307",
+            prompt=prompt
+        ) \
+        .budget(limit=budget * 0.7)
 
-    fallback = Activity(
-        key=f"{name}_gpt4",
-        worker="builtin",
-        activity_name="llm_prompt",
-        parameters={
-            "provider": "openai",
-            "model": "gpt-4o-mini",
-            "prompt": prompt
-        },
-        settings={"budget": {"limit": budget * 0.3}}
-    ).when(primary.failed())
+    fallback = WorkflowActivity(f"{name}_gpt4") \
+        .worker("standard", "llm_prompt") \
+        .params(
+            provider="openai",
+            model="gpt-4o-mini",
+            prompt=prompt
+        ) \
+        .budget(limit=budget * 0.3) \
+        .when(primary.failed) \
+        .depends_on(primary)
 
     return [primary, fallback]
 
-# Use in workflow
-workflow.add_activities(
-    *create_llm_fallback_chain(
-        name="summarize",
-        prompt="Summarize: ${INPUT.document}",
-        budget=1.00
-    )
+# Use reusable component
+activities = create_llm_fallback_chain(
+    name="summarize",
+    prompt="Summarize: ${INPUT.document}",
+    budget=1.00
 )
+
+notify = WorkflowActivity("notify") \
+    .worker("standard", "http_request") \
+    .params(url="${SLACK_URL}") \
+    .depends_on(*activities)  # Depends on both primary and fallback
+
+# Build workflow - unpack list with *
+wf = Workflow("summarization").append(*activities, notify)
 ```
 
 ### Implementation Details
@@ -252,80 +285,318 @@ kruxiaflow-python/
 ├── README.md
 ├── src/kruxiaflow/
 │   ├── __init__.py
-│   ├── workflow.py      # Workflow builder
-│   ├── activity.py      # Activity builder
-│   ├── expressions.py   # Template expressions
-│   ├── client.py        # API client for deployment
-│   ├── validation.py    # Pre-deployment validation
+│   ├── models.py        # Pydantic models (validated, immutable)
+│   ├── builders.py      # Fluent builders (WorkflowActivity, Workflow)
+│   ├── expressions.py   # Template expressions (OutputRef, OutputComparison)
+│   ├── client.py        # API client (KruxiaFlow)
 │   └── types.py         # Type definitions
 └── tests/
-    ├── test_workflow.py
-    ├── test_activity.py
-    └── test_compilation.py
+    ├── test_models.py
+    ├── test_builders.py
+    └── test_client.py
 ```
 
-**Key Classes**:
+**Dependencies**:
+```toml
+[project]
+dependencies = [
+    "pydantic>=2.0",
+    "httpx>=0.24",
+    "pyyaml>=6.0",
+]
+```
+
+**Pydantic Models** (`models.py`):
 ```python
-class Workflow:
-    def __init__(self, name: str, version: str = "1.0.0", namespace: str = "default"):
-        ...
+from pydantic import BaseModel, Field
+from typing import Any
 
-    def add_activities(self, *activities: Activity) -> None:
-        ...
+class RetrySettings(BaseModel):
+    """Retry policy configuration."""
+    max: int = 3
+    backoff: str = "exponential"
 
-    def compile(self) -> str:
-        """Compile to YAML"""
-        ...
+class CacheSettings(BaseModel):
+    """Cache configuration."""
+    enabled: bool = True
+    ttl: int
+    key: str | None = None
 
-    def deploy(self, api_url: str, api_token: str) -> dict:
-        """Compile and deploy to Kruxia Flow"""
-        ...
+class BudgetSettings(BaseModel):
+    """Cost budget configuration."""
+    limit: float
 
-    def validate(self) -> list[str]:
-        """Validate workflow before deployment"""
-        ...
+class ActivitySettings(BaseModel):
+    """Activity execution settings."""
+    timeout: int | None = None
+    retries: RetrySettings | None = None
+    cache: CacheSettings | None = None
+    budget: BudgetSettings | None = None
 
-class Activity:
-    def __init__(
-        self,
-        key: str,
-        worker: str,
-        activity_name: str,
-        parameters: dict = None,
-        settings: dict = None
-    ):
-        ...
+class ActivityModel(BaseModel):
+    """Validated, immutable activity definition."""
+    key: str
+    worker: str
+    activity_name: str
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    settings: ActivitySettings = Field(default_factory=ActivitySettings)
+    depends_on: list[str] = Field(default_factory=list)
+    condition: str | None = None
 
-    def after(self, *dependencies: Activity) -> 'Activity':
-        """Set dependencies"""
-        ...
+class WorkflowModel(BaseModel):
+    """Validated, immutable workflow definition."""
+    name: str
+    version: str = "1.0.0"
+    namespace: str = "default"
+    activities: list[ActivityModel] = Field(default_factory=list)
 
-    def when(self, condition: str | bool) -> 'Activity':
-        """Set condition"""
-        ...
+    def to_yaml(self) -> str:
+        """Serialize to YAML format."""
+        import yaml
+        return yaml.dump(self.model_dump(exclude_none=True), sort_keys=False)
+```
+
+**Fluent Builders** (`builders.py`):
+```python
+from typing import Self
+
+class WorkflowActivity:
+    """
+    Fluent activity builder. All methods return self for chaining.
+    Call .build() to produce a validated ActivityModel.
+
+    Example:
+        activity = WorkflowActivity("process") \\
+            .worker("python", "script") \\
+            .params(script="...") \\
+            .timeout(300) \\
+            .retries(3) \\
+            .depends_on(extract) \\
+            .build()
+    """
+
+    def __init__(self, key: str):
+        self._key = key
+        self._worker: str | None = None
+        self._activity_name: str | None = None
+        self._parameters: dict = {}
+        self._timeout: int | None = None
+        self._retries: tuple[int, str] | None = None
+        self._cache: tuple[int, str | None] | None = None
+        self._budget: float | None = None
+        self._depends_on: list[WorkflowActivity] = []
+        self._condition: str | None = None
 
     @property
-    def outputs(self) -> OutputProxy:
-        """Access activity outputs in expressions"""
-        ...
+    def key(self) -> str:
+        """Activity key for dependency references."""
+        return self._key
 
+    def worker(self, worker: str, activity_name: str) -> Self:
+        """Set worker and activity name. Returns self."""
+        self._worker = worker
+        self._activity_name = activity_name
+        return self
+
+    def params(self, **parameters) -> Self:
+        """Set activity parameters. Returns self."""
+        self._parameters.update(parameters)
+        return self
+
+    def timeout(self, seconds: int) -> Self:
+        """Set timeout in seconds. Returns self."""
+        self._timeout = seconds
+        return self
+
+    def retries(self, count: int, backoff: str = "exponential") -> Self:
+        """Set retry policy. Returns self."""
+        self._retries = (count, backoff)
+        return self
+
+    def cache(self, ttl: int, key: str | None = None) -> Self:
+        """Enable caching with TTL. Returns self."""
+        self._cache = (ttl, key)
+        return self
+
+    def budget(self, limit: float) -> Self:
+        """Set cost budget limit. Returns self."""
+        self._budget = limit
+        return self
+
+    def depends_on(self, *dependencies: 'WorkflowActivity') -> Self:
+        """Set dependencies (activities that must complete first). Returns self."""
+        self._depends_on.extend(dependencies)
+        return self
+
+    def when(self, condition: str | 'OutputComparison') -> Self:
+        """Set conditional execution. Returns self."""
+        self._condition = str(condition)
+        return self
+
+    def build(self) -> 'ActivityModel':
+        """Build validated ActivityModel. Raises ValidationError if invalid."""
+        from .models import ActivityModel, ActivitySettings, RetrySettings, CacheSettings, BudgetSettings
+
+        settings = ActivitySettings(
+            timeout=self._timeout,
+            retries=RetrySettings(max=self._retries[0], backoff=self._retries[1]) if self._retries else None,
+            cache=CacheSettings(ttl=self._cache[0], key=self._cache[1]) if self._cache else None,
+            budget=BudgetSettings(limit=self._budget) if self._budget else None,
+        )
+
+        return ActivityModel(
+            key=self._key,
+            worker=self._worker,
+            activity_name=self._activity_name,
+            parameters=self._parameters,
+            settings=settings,
+            depends_on=[dep.key for dep in self._depends_on],
+            condition=self._condition,
+        )
+
+    def __getitem__(self, key: str) -> 'OutputRef':
+        """Access activity output by key. Enables activity["field"] syntax."""
+        return OutputRef(self, key)
+
+    @property
     def failed(self) -> str:
-        """Generate condition for activity failure"""
-        return f"{{{{ {self.key}.status == 'failed' }}}}"
+        """Condition expression for activity failure."""
+        return f"{{{{ {self._key}.status == 'failed' }}}}"
+
+    @property
+    def succeeded(self) -> str:
+        """Condition expression for activity success."""
+        return f"{{{{ {self._key}.status == 'succeeded' }}}}"
+
+
+class Workflow:
+    """
+    Fluent workflow builder. All methods return self for chaining.
+    Call .build() to produce a validated WorkflowModel.
+    """
+
+    def __init__(self, name: str, version: str = "1.0.0", namespace: str = "default"):
+        self._name = name
+        self._version = version
+        self._namespace = namespace
+        self._activities: list[WorkflowActivity] = []
+
+    def append(self, *activities: WorkflowActivity) -> Self:
+        """Append one or more activities. Returns self for chaining."""
+        self._activities.extend(activities)
+        return self
+
+    def build(self) -> 'WorkflowModel':
+        """Build validated WorkflowModel. Raises ValidationError if invalid."""
+        from .models import WorkflowModel
+
+        return WorkflowModel(
+            name=self._name,
+            version=self._version,
+            namespace=self._namespace,
+            activities=[activity.build() for activity in self._activities],
+        )
+
+    def compile(self) -> str:
+        """Build and compile to YAML."""
+        return self.build().to_yaml()
+
+
+class OutputRef:
+    """Reference to an activity output field. Supports comparison operators."""
+
+    def __init__(self, activity: WorkflowActivity, key: str):
+        self._activity = activity
+        self._key = key
+
+    def __str__(self) -> str:
+        return f"{{{{ {self._activity.key}.{self._key} }}}}"
+
+    def __eq__(self, other) -> 'OutputComparison':
+        return OutputComparison(f"{self._activity.key}.{self._key} == {repr(other)}")
+
+    def __gt__(self, other) -> 'OutputComparison':
+        return OutputComparison(f"{self._activity.key}.{self._key} > {other}")
+
+    def __lt__(self, other) -> 'OutputComparison':
+        return OutputComparison(f"{self._activity.key}.{self._key} < {other}")
+
+    def __ge__(self, other) -> 'OutputComparison':
+        return OutputComparison(f"{self._activity.key}.{self._key} >= {other}")
+
+    def __le__(self, other) -> 'OutputComparison':
+        return OutputComparison(f"{self._activity.key}.{self._key} <= {other}")
+
+
+class OutputComparison:
+    """Comparison expression for use in .when() conditions."""
+
+    def __init__(self, expr: str):
+        self._expr = expr
+
+    def __str__(self) -> str:
+        return f"{{{{ {self._expr} }}}}"
+```
+
+**API Client** (`client.py`):
+```python
+import httpx
+from .models import WorkflowModel
+from .builders import Workflow
+
+class KruxiaFlow:
+    """API client for Kruxia Flow server."""
+
+    def __init__(self, api_url: str, api_token: str):
+        self._api_url = api_url.rstrip('/')
+        self._api_token = api_token
+        self._client = httpx.Client(
+            base_url=self._api_url,
+            headers={"Authorization": f"Bearer {api_token}"}
+        )
+
+    def deploy(self, workflow: Workflow | WorkflowModel) -> dict:
+        """
+        Deploy workflow to server.
+        Accepts either a Workflow builder or a built WorkflowModel.
+        """
+        if isinstance(workflow, Workflow):
+            model = workflow.build()
+        else:
+            model = workflow
+
+        response = self._client.post(
+            "/api/v1/workflows",
+            json=model.model_dump(exclude_none=True)
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def get_workflow(self, workflow_id: str) -> dict:
+        """Get workflow status."""
+        response = self._client.get(f"/api/v1/workflows/{workflow_id}")
+        response.raise_for_status()
+        return response.json()
+
+    def cancel_workflow(self, workflow_id: str) -> None:
+        """Cancel a running workflow."""
+        response = self._client.post(f"/api/v1/workflows/{workflow_id}/cancel")
+        response.raise_for_status()
 ```
 
 **Testing Strategy**:
-- Unit tests for workflow/activity builders
-- Integration tests for compilation
-- E2E tests for deployment
+- Unit tests for Pydantic models (validation, serialization)
+- Unit tests for fluent builders (chaining, build output)
+- Integration tests for YAML compilation
+- E2E tests for client deployment
 - All 10 MVP examples implemented in Python
 
 ### Estimated Time: 5-7 days
 
-- Core builder API (2 days)
-- YAML compilation (1 day)
-- Validation logic (1 day)
-- API client for deployment (1 day)
+- Pydantic models + validation (1 day)
+- Fluent builders (2 days)
+- YAML compilation (0.5 day)
+- API client (0.5 day)
 - Tests + documentation (1-2 days)
 
 ---
@@ -338,8 +609,14 @@ class Activity:
 
 Library for building custom Python workers that implement activities. Handles polling, result reporting, error handling, and all worker lifecycle management.
 
+**Naming Convention**:
+- `@worker.activity()` decorator registers an `ActivityHandler`
+- Activity name defaults to function name, or can be set explicitly with `name=`
+- Aligns with Rust `ActivityHandler` trait (rename from `ActivityImpl`)
+- Distinct from workflow SDK's `WorkflowActivity` builder class
+
 **Core Features**:
-- Activity registration and implementation
+- Activity handler registration via `@worker.activity` decorator
 - Automatic polling from Kruxia Flow API
 - Result serialization and reporting
 - Error handling and retries
@@ -350,7 +627,7 @@ Library for building custom Python workers that implement activities. Handles po
 
 **Example Usage**:
 ```python
-from kruxiaflow.worker import Worker, Activity, ActivityResult
+from kruxiaflow.worker import Worker, ActivityParams, ActivityResult
 
 # Create worker
 worker = Worker(
@@ -360,9 +637,9 @@ worker = Worker(
     concurrency=5  # Max parallel activities
 )
 
-# Define activity
-@worker.activity(name="analyze_text", timeout=30)
-async def analyze_text(params: dict) -> ActivityResult:
+# Define activity - name defaults to function name "analyze_text"
+@worker.activity()
+async def analyze_text(params: ActivityParams) -> ActivityResult:
     """Custom text analysis activity"""
     text = params["text"]
     model = params.get("model", "default")
@@ -386,8 +663,8 @@ if __name__ == "__main__":
 
 **Advanced Features**:
 ```python
-@worker.activity(name="process_document", timeout=300)
-async def process_document(params: dict, context: ActivityContext) -> ActivityResult:
+@worker.activity()  # Uses function name "process_document"
+async def process_document(params: ActivityParams, context: ActivityContext) -> ActivityResult:
     """Long-running activity with heartbeat and file handling"""
     doc_url = params["document_url"]
 
@@ -421,9 +698,9 @@ async def process_document(params: dict, context: ActivityContext) -> ActivityRe
     )
 
 # Error handling
-@worker.activity(name="fetch_data")
-async def fetch_data(params: dict) -> ActivityResult:
-    """Activity with error handling"""
+@worker.activity(name="fetch_data")  # Explicit name (could also omit for "fetch_data")
+async def fetch_data(params: ActivityParams) -> ActivityResult:
+    """Activity with error handling."""
     try:
         data = await external_api.fetch(params["url"])
         return ActivityResult(output=data)
@@ -470,13 +747,8 @@ class Worker:
     ):
         ...
 
-    def activity(
-        self,
-        name: str,
-        timeout: int = 60,
-        retry_on_failure: bool = False
-    ) -> Callable:
-        """Decorator to register activity implementation"""
+    def activity(self, name: str | None = None) -> Callable:
+        """Decorator to register an ActivityHandler. Uses function name if name not provided."""
         ...
 
     async def run(self) -> None:
@@ -486,6 +758,33 @@ class Worker:
     async def shutdown(self) -> None:
         """Graceful shutdown"""
         ...
+
+class ActivityParams(BaseModel):
+    """
+    Base class for activity parameters. Handlers can subclass for type safety,
+    or use directly for dict-like access.
+
+    Example:
+        # Type-safe params
+        class AnalyzeParams(ActivityParams):
+            text: str
+            model: str = "default"
+
+        @worker.activity()
+        async def analyze(params: AnalyzeParams) -> ActivityResult:
+            print(params.text)  # IDE autocomplete works
+
+        # Or use base class for dict-like access
+        @worker.activity()
+        async def simple(params: ActivityParams) -> ActivityResult:
+            print(params["text"])  # Dict-style access
+    """
+    model_config = ConfigDict(extra="allow")  # Allow arbitrary fields
+
+    def __getitem__(self, key: str) -> Any:
+        """Dict-style access: params["key"]"""
+        return getattr(self, key)
+
 
 class ActivityResult:
     def __init__(
@@ -498,18 +797,25 @@ class ActivityResult:
 
     @classmethod
     def error(cls, error: str, error_type: str = "Error") -> 'ActivityResult':
-        """Create error result"""
+        """Create error result."""
         ...
 
 class ActivityContext:
-    """Context passed to activity implementations"""
+    """Context passed to activity handlers."""
 
     @property
     def workflow_id(self) -> str:
+        """Unique identifier for the workflow instance."""
+        ...
+
+    @property
+    def activity_id(self) -> str:
+        """Unique identifier for this activity execution."""
         ...
 
     @property
     def activity_key(self) -> str:
+        """Activity key from workflow definition."""
         ...
 
     @property
@@ -584,7 +890,7 @@ class ActivityPoller:
 
 ### Scope
 
-Bundle common Python packages with the built-in Python worker. Instead of creating 30+ discrete activities, provide a single `script` activity with rich package ecosystem pre-installed.
+Bundle common Python packages with the standard Python worker. Instead of creating 30+ discrete activities, provide a single `script` activity with rich package ecosystem pre-installed.
 
 **Design Rationale**:
 - Discrete activities like `read_csv` don't make sense (need to pass DataFrames between activities)
@@ -612,12 +918,13 @@ scipy>=1.10.0           # Scientific computing
 ```
 transformers>=4.30.0    # Hugging Face models (minimal install)
 sentence-transformers   # Embeddings
-nltk>=3.8.0            # Basic NLP tools
+nltk>=3.8.0             # Basic NLP tools
 ```
 
 ### 3.4 Utilities
 ```
 httpx>=0.24.0          # HTTP requests
+lxml                   # XML parsing
 beautifulsoup4>=4.12.0 # HTML parsing
 pillow>=10.0.0         # Image processing
 orjson>=3.9.0          # Fast JSON
@@ -752,7 +1059,7 @@ docs/python-examples/
 
 ---
 
-## Component 4: Built-in Python Worker
+## Component 4: Standard Python Worker
 
 **Status in Roadmap**: Not yet documented (NEW)
 
@@ -800,8 +1107,8 @@ activities:
 
 **Activity Implementation**:
 ```python
-@worker.activity(name="script", timeout=300)
-async def execute_script(params: dict, context: ActivityContext) -> ActivityResult:
+@worker.activity(name="script")  # Explicit name for standard worker activity
+async def execute_script(params: ActivityParams, context: ActivityContext) -> ActivityResult:
     """Execute arbitrary Python script in sandboxed environment"""
 
     script = params["script"]
@@ -931,7 +1238,7 @@ activities:
     depends_on: [extract]
 
   - key: load
-    worker: builtin
+    worker: standard
     activity_name: postgres_query
     parameters:
       database_url: "${DATABASE_URL}"
@@ -1021,12 +1328,12 @@ activities:
 
 **Example Custom Activity**:
 ```python
-from kruxiaflow.worker import Worker, ActivityResult
+from kruxiaflow.worker import Worker, ActivityParams, ActivityResult
 
 worker = Worker(worker_id="ml-worker", ...)
 
-@worker.activity(name="bert_inference", timeout=60)
-async def bert_inference(params: dict) -> ActivityResult:
+@worker.activity()  # Uses function name "bert_inference"
+async def bert_inference(params: ActivityParams) -> ActivityResult:
     """Specialized BERT inference with model caching"""
 
     # Model loaded once at worker startup (not per activity)
@@ -1099,7 +1406,7 @@ worker.run()
 - Enables real-world use cases (data engineering, ML)
 - "30+ packages pre-installed" is strong marketing
 - Competitive with Airflow's operator library (but more flexible)
-- Needed before built-in worker can ship
+- Needed before standard worker can ship
 
 **Roadmap Location**:
 - Launch Development Plan: Week 3-4 (Soft Launch)
@@ -1109,15 +1416,15 @@ worker.run()
 
 ---
 
-### Phase 3: Built-in Python Worker (Week 3-4) - **Soft Launch / Public Launch**
+### Phase 3: Standard Python Worker (Week 3-4) - **Soft Launch / Public Launch**
 
 **Goal**: Zero-setup Python script execution
 
 **Components**:
-4. Built-in Python Worker (Component 4)
+4. Standard Python Worker (Component 4)
 
 **Deliverables**:
-- Built-in worker: `python` with activity `script`
+- Standard worker: `python` with activity `script`
 - Helper functions (upload_file, download_file)
 - Docker image with all packages
 - Updated quick start (Python script in 60 seconds)
@@ -1131,7 +1438,7 @@ worker.run()
 
 **Roadmap Location**:
 - Launch Development Plan: Week 3-4 (Soft Launch)
-- Post-MVP: Story 4.1d "Built-in Python Worker" (P1)
+- Post-MVP: Story 4.1d "Standard Python Worker" (P1)
 
 **Estimated Time**: 3-4 days
 
@@ -1144,7 +1451,7 @@ worker.run()
 | 1     | Workflow Definitions SDK         | 1-2   | 5-7   | Pre-Launch     |
 | 1     | Worker SDK (core)                | 1-2   | 7-10  | Pre-Launch     |
 | 2     | Pre-installed Python Packages    | 3     | 2-3   | Soft Launch    |
-| 3     | Built-in Python Worker           | 3-4   | 3-4   | Soft Launch    |
+| 3     | Standard Python Worker           | 3-4   | 3-4   | Soft Launch    |
 |       | **Total**                        | 4     | 17-24 |                |
 
 **Recommended Schedule**: 3-4 weeks, starting immediately (aligns with launch plan)
@@ -1167,8 +1474,8 @@ worker.run()
 - ✅ Package selection validated with beta testers
 - ✅ Dockerfile/packaging complete
 
-### Phase 3 (Built-in Worker)
-- ✅ Built-in Python worker ships with Kruxia Flow
+### Phase 3 (Standard Worker)
+- ✅ Standard Python worker available on PyPI and Docker Hub
 - ✅ `script` activity works with all pre-installed packages
 - ✅ Helper functions (upload_file, download_file) functional
 - ✅ Zero-config Python execution works
@@ -1188,10 +1495,10 @@ worker.run()
 ### Internal Dependencies
 - Kruxia Flow API must be stable (MVP complete)
 - File artifact storage operational (US-5.4)
-- Built-in worker polling infrastructure works
+- Standard worker polling infrastructure works
 
 ### External Dependencies
-- Python 3.9+ (target compatibility)
+- Python 3.10+ (target compatibility)
 - PyPI package distribution
 - Documentation hosting (ReadTheDocs or similar)
 
@@ -1203,7 +1510,7 @@ worker.run()
 **Impact**: High
 **Probability**: Medium
 **Mitigation**:
-- Use minimal dependencies in built-in worker
+- Use minimal dependencies in standard worker
 - Document virtual environment best practices
 - Provide Docker images with dependencies pre-installed
 
@@ -1211,7 +1518,7 @@ worker.run()
 **Impact**: Medium
 **Probability**: Medium
 **Mitigation**:
-- Limit built-in worker to essential activities only
+- Limit standard worker to essential activities only
 - Use PyOxidizer for efficient bundling
 - Offer separate "full" vs "minimal" binaries
 
@@ -1238,17 +1545,22 @@ worker.run()
 1. **Package naming**: `kruxiaflow` or `kruxia-flow` or `kruxia_flow`?
    - Recommendation: `kruxiaflow` (matches domain, easier to type)
 
-2. **Built-in worker activation**: Auto-start or explicit?
-   - Recommendation: Auto-start with `kruxiaflow serve`, disable via flag
-
-3. **Async vs sync worker API**: Force async or support both?
+2. **Async vs sync worker API**: Force async or support both?
    - Recommendation: Async-first (modern Python), provide sync wrapper
 
-4. **Standard library versioning**: Separate from main package?
-   - Recommendation: Separate package (`kruxiaflow-stdlib`) with independent versioning
+3. **Python version support**: Support bugfix and security versions per https://devguide.python.org/versions/
+   - Currently: 3.10+ (3.9 reached EOL 2025-10)
+   - Policy: Drop support when versions move to "end of life"
 
-5. **Python version support**: 3.9+, 3.10+, or 3.11+?
-   - Recommendation: 3.9+ (wider compatibility, still modern)
+4. **Specialized workers (post-MVP)**: One standard worker or multiple specialized?
+   - **Option A**: Single `kruxiaflow-worker-python` with all packages (~500MB image)
+   - **Option B**: Multiple official workers by domain:
+     - `kruxiaflow-worker-python` - minimal base (httpx, orjson)
+     - `kruxiaflow-worker-python-data` - pandas, pyarrow, sqlalchemy
+     - `kruxiaflow-worker-python-ml` - sklearn, numpy, scipy
+     - `kruxiaflow-worker-python-nlp` - transformers, sentence-transformers
+   - **Option C**: Community/contrib ecosystem (`kruxiaflow-contrib-worker-*`)
+   - Recommendation: Start with Option A for MVP, evaluate B/C based on user feedback
 
 ---
 

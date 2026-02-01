@@ -25,7 +25,7 @@ Kruxia Flow is a lightweight, high-performance workflow orchestration platform d
 ### Core Value Proposition
 
 - **Single Binary**: Complete orchestration stack in one 10-15MB executable
-- **PostgreSQL-First**: All persistence (queues, events, state) using PostgreSQL 18+
+- **PostgreSQL-First**: All persistence (queues, events, state) using PostgreSQL 17+
 - **High Performance**: Target >1,000 workflows/sec on commodity hardware
 - **Edge-Ready**: Runs with 50MB RAM footprint
 - **AI-Native**: Built-in cost tracking, streaming, and non-deterministic activity handling
@@ -625,7 +625,26 @@ HTML/text email via SMTP.
 
 ### PostgreSQL Schema
 
-Kruxia Flow uses PostgreSQL 18+ as the single source of truth for all state.
+Kruxia Flow uses PostgreSQL 17+ as the single source of truth for all state.
+
+#### UUIDv7 for Primary Keys
+
+All tables use UUIDv7 for primary keys, providing:
+- **Time-ordered**: Monotonically increasing based on timestamp (good for B-tree indexes)
+- **Non-guessable**: 74 bits of randomness prevents enumeration attacks
+- **Distributed-safe**: No coordination required between nodes
+
+PostgreSQL 18+ provides native `uuidv7()`. For PostgreSQL 17, a custom implementation is provided via migration that uses connection-local session state to guarantee strict monotonicity.
+
+**Performance comparison**:
+
+| Platform                    | PostgreSQL | Time per UUID | Max Throughput |
+|-----------------------------|------------|---------------|----------------|
+| Apple M4 Pro                | 18 native  | ~2 μs         | ~500k/sec      |
+| Apple M4 Pro                | 17 custom  | ~7 μs         | ~143k/sec      |
+| Raspberry Pi Zero W (ARMv6) | 17 custom  | ~1.4 ms       | ~720/sec       |
+
+The custom implementation is ~3.5x slower than native on the same hardware due to PL/pgSQL interpretation. On resource-constrained devices like Pi Zero W, expect ~200x slower than M3, but ~720 UUIDs/second still provides sufficient headroom for edge deployments.
 
 #### Core Tables
 
@@ -3056,7 +3075,7 @@ spec:
 - Migration management
 - Prepared statement support
 
-**Database**: PostgreSQL 18+
+**Database**: PostgreSQL 17+
 - Activity queue
 - Event sourcing
 - Workflow state
