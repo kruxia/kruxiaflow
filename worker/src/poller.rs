@@ -940,4 +940,86 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn test_pending_activity_output_definitions_parsing() {
+        use kruxiaflow_core::workflow::ActivityOutputDefinition;
+
+        let activity = PendingActivity {
+            activity_id: Uuid::now_v7(),
+            workflow_id: Uuid::now_v7(),
+            activity_key: "test".to_string(),
+            worker: "test".to_string(),
+            activity_name: "process".to_string(),
+            parameters: json!({}),
+            settings: Some(json!({"retry_limit": 3})),
+            timeout_seconds: Some(120),
+            output_definitions: Some(json!([
+                {"name": "result", "type": "value"},
+                {"name": "report.pdf", "type": "file"}
+            ])),
+            signal_data: None,
+        };
+
+        // Test output_definitions parsing (matches execute_activity logic)
+        let defs: Option<Vec<ActivityOutputDefinition>> = activity
+            .output_definitions
+            .as_ref()
+            .and_then(|d| serde_json::from_value(d.clone()).ok());
+        assert!(defs.is_some());
+        let defs = defs.unwrap();
+        assert_eq!(defs.len(), 2);
+        assert_eq!(defs[0].name, "result");
+        assert_eq!(defs[1].name, "report.pdf");
+    }
+
+    #[test]
+    fn test_pending_activity_settings_parsing() {
+        use serde_json::Value;
+
+        let activity = PendingActivity {
+            activity_id: Uuid::now_v7(),
+            workflow_id: Uuid::now_v7(),
+            activity_key: "test".to_string(),
+            worker: "test".to_string(),
+            activity_name: "echo".to_string(),
+            parameters: json!({}),
+            settings: Some(json!({"cache_ttl_seconds": 60, "idempotent": true})),
+            timeout_seconds: None,
+            output_definitions: None,
+            signal_data: None,
+        };
+
+        // Test settings parsing (matches execute_activity logic)
+        let settings: Option<Value> = activity
+            .settings
+            .as_ref()
+            .and_then(|s| serde_json::from_value(s.clone()).ok());
+        assert!(settings.is_some());
+    }
+
+    #[test]
+    fn test_pending_activity_invalid_output_definitions() {
+        use kruxiaflow_core::workflow::ActivityOutputDefinition;
+
+        let activity = PendingActivity {
+            activity_id: Uuid::now_v7(),
+            workflow_id: Uuid::now_v7(),
+            activity_key: "test".to_string(),
+            worker: "test".to_string(),
+            activity_name: "echo".to_string(),
+            parameters: json!({}),
+            settings: None,
+            timeout_seconds: None,
+            output_definitions: Some(json!("not an array")),
+            signal_data: None,
+        };
+
+        // Invalid output_definitions should return None
+        let defs: Option<Vec<ActivityOutputDefinition>> = activity
+            .output_definitions
+            .as_ref()
+            .and_then(|d| serde_json::from_value(d.clone()).ok());
+        assert!(defs.is_none());
+    }
 }

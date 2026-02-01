@@ -59,6 +59,192 @@ pub struct SignalActivityResponse {
     pub message: String,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::AppState;
+    use crate::state::tests::*;
+    use axum::extract::State;
+    use kruxiaflow_oauth::Claims;
+    use sqlx::PgPool;
+    use std::sync::Arc;
+    use tokio_util::sync::CancellationToken;
+    use uuid::Uuid;
+
+    // --- SignalActivityRequest validation tests ---
+
+    #[test]
+    fn test_signal_request_validate_valid() {
+        let request = SignalActivityRequest {
+            activity_key: "wait_for_approval".to_string(),
+            event_name: "approval_received".to_string(),
+            data: Some(json!({"approved": true})),
+        };
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn test_signal_request_validate_empty_activity_key() {
+        let request = SignalActivityRequest {
+            activity_key: "".to_string(),
+            event_name: "approval_received".to_string(),
+            data: None,
+        };
+        let err = request.validate().unwrap_err();
+        assert!(err.field_errors.contains_key("activity_key"));
+    }
+
+    #[test]
+    fn test_signal_request_validate_empty_event_name() {
+        let request = SignalActivityRequest {
+            activity_key: "wait_for_approval".to_string(),
+            event_name: "".to_string(),
+            data: None,
+        };
+        let err = request.validate().unwrap_err();
+        assert!(err.field_errors.contains_key("event_name"));
+    }
+
+    #[test]
+    fn test_signal_request_validate_both_empty() {
+        let request = SignalActivityRequest {
+            activity_key: "".to_string(),
+            event_name: "".to_string(),
+            data: None,
+        };
+        let err = request.validate().unwrap_err();
+        assert!(err.field_errors.contains_key("activity_key"));
+        assert!(err.field_errors.contains_key("event_name"));
+    }
+
+    #[test]
+    fn test_signal_request_validate_no_data() {
+        let request = SignalActivityRequest {
+            activity_key: "wait".to_string(),
+            event_name: "signal".to_string(),
+            data: None,
+        };
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn test_signal_request_deserialize() {
+        let json = r#"{"activity_key": "wait", "event_name": "go", "data": {"value": 42}}"#;
+        let request: SignalActivityRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(request.activity_key, "wait");
+        assert_eq!(request.event_name, "go");
+        assert_eq!(request.data.unwrap()["value"], 42);
+    }
+
+    #[test]
+    fn test_signal_request_deserialize_without_data() {
+        let json = r#"{"activity_key": "wait", "event_name": "go"}"#;
+        let request: SignalActivityRequest = serde_json::from_str(json).unwrap();
+        assert!(request.data.is_none());
+    }
+
+    #[test]
+    fn test_signal_response_serialize() {
+        let response = SignalActivityResponse {
+            signaled: true,
+            message: "Activity signaled successfully".to_string(),
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["signaled"], true);
+        assert_eq!(json["message"], "Activity signaled successfully");
+    }
+
+    #[test]
+    fn test_signal_response_serialize_not_found() {
+        let response = SignalActivityResponse {
+            signaled: false,
+            message: "No waiting activity found".to_string(),
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["signaled"], false);
+    }
+
+    // --- Handler tests using mock state ---
+
+    async fn setup_test_state() -> AppState {
+        use kruxiaflow_core::cache::NoOpCache;
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
+        });
+        let pool = PgPool::connect(&database_url)
+            .await
+            .expect("Failed to connect to test database");
+
+        AppState::new(
+            pool,
+            Arc::new(MockAuthService),
+            Arc::new(MockActivityQueue),
+            Arc::new(MockEventSource),
+            Arc::new(MockWorkflowStorage),
+            Arc::new(NoOpCache::new()),
+            Arc::new(MockSubscriptionService),
+            CancellationToken::new(),
+        )
+    }
+
+    fn test_claims() -> ValidatedClaims {
+        ValidatedClaims(Claims {
+            sub: "test_user".to_string(),
+            jti: "test_jti".to_string(),
+            iss: "test".to_string(),
+            aud: "test".to_string(),
+            exp: 9999999999,
+            iat: 1000000000,
+        })
+    }
+
+    #[tokio::test]
+    async fn test_signal_activity_no_subscription_found() {
+        // MockSubscriptionService.signal_activity returns None
+        let state = setup_test_state().await;
+        let workflow_id = Uuid::now_v7();
+        let request = SignalActivityRequest {
+            activity_key: "wait_for_approval".to_string(),
+            event_name: "approval_received".to_string(),
+            data: Some(json!({"approved": true})),
+        };
+
+        let result = signal_activity(
+            State(state),
+            Extension(test_claims()),
+            Path(workflow_id),
+            Json(request),
+        )
+        .await;
+
+        assert!(result.is_ok());
+        let response = result.unwrap().0;
+        assert!(!response.signaled);
+        assert!(response.message.contains("No waiting activity found"));
+    }
+
+    #[tokio::test]
+    async fn test_signal_activity_validation_error() {
+        let state = setup_test_state().await;
+        let workflow_id = Uuid::now_v7();
+        let request = SignalActivityRequest {
+            activity_key: "".to_string(),
+            event_name: "".to_string(),
+            data: None,
+        };
+
+        let result = signal_activity(
+            State(state),
+            Extension(test_claims()),
+            Path(workflow_id),
+            Json(request),
+        )
+        .await;
+
+        assert!(result.is_err());
+    }
+}
+
 /// Signal an activity waiting for an external event
 ///
 /// Endpoint: POST /api/v1/workflows/{workflow_id}/signal

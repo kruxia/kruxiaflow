@@ -210,3 +210,145 @@ impl From<kruxiaflow_core::workflow::WorkflowOutputResult> for GetWorkflowOutput
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use kruxiaflow_core::storage::FileMetadata;
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+    use uuid::Uuid;
+
+    #[test]
+    fn test_upload_activity_file_response_from_metadata() {
+        let now = Utc::now();
+        let wf_id = Uuid::now_v7();
+        let metadata = FileMetadata {
+            workflow_id: wf_id,
+            activity_key: "extract".to_string(),
+            filename: "output.json".to_string(),
+            size: 1024,
+            content_type: Some("application/json".to_string()),
+            created_at: now,
+        };
+        let response = UploadActivityFileResponse::from(metadata);
+        assert_eq!(response.workflow_id, wf_id);
+        assert_eq!(response.activity_key, "extract");
+        assert_eq!(response.filename, "output.json");
+        assert_eq!(response.size, 1024);
+        assert_eq!(response.content_type, Some("application/json".to_string()));
+    }
+
+    #[test]
+    fn test_upload_activity_file_response_no_content_type() {
+        let metadata = FileMetadata {
+            workflow_id: Uuid::now_v7(),
+            activity_key: "step".to_string(),
+            filename: "data.bin".to_string(),
+            size: 0,
+            content_type: None,
+            created_at: Utc::now(),
+        };
+        let response = UploadActivityFileResponse::from(metadata);
+        assert!(response.content_type.is_none());
+    }
+
+    #[test]
+    fn test_file_info_from_core() {
+        let core = kruxiaflow_core::workflow::FileInfo {
+            filename: "report.pdf".to_string(),
+            size: 5000,
+            content_type: Some("application/pdf".to_string()),
+            download_url: "/api/v1/workflows/abc/activities/gen/files/report.pdf".to_string(),
+        };
+        let api = FileInfo::from(core);
+        assert_eq!(api.filename, "report.pdf");
+        assert_eq!(api.size, 5000);
+        assert!(api.download_url.contains("report.pdf"));
+    }
+
+    #[test]
+    fn test_activity_output_summary_from_core() {
+        let now = Utc::now();
+        let core = kruxiaflow_core::workflow::ActivityOutputSummary {
+            status: WorkflowActivityStatus::Completed,
+            output: Some(serde_json::json!({"result": "ok"})),
+            cost_usd: Decimal::from_str("0.05").unwrap(),
+            completed_at: Some(now),
+            is_terminal: true,
+        };
+        let api = ActivityOutputSummary::from(core);
+        assert!(api.is_terminal);
+        assert_eq!(api.cost_usd, Decimal::from_str("0.05").unwrap());
+        assert!(api.output.is_some());
+    }
+
+    #[test]
+    fn test_get_activity_output_response_from_core() {
+        let wf_id = Uuid::now_v7();
+        let core = kruxiaflow_core::workflow::ActivityOutputResult {
+            workflow_id: wf_id,
+            activity_key: "analyze".to_string(),
+            status: WorkflowActivityStatus::Completed,
+            output: Some(serde_json::json!({"summary": "done"})),
+            cost_usd: Decimal::from_str("0.01").unwrap(),
+            completed_at: Some(Utc::now()),
+            files: vec![kruxiaflow_core::workflow::FileInfo {
+                filename: "out.txt".to_string(),
+                size: 100,
+                content_type: None,
+                download_url: "/files/out.txt".to_string(),
+            }],
+        };
+        let api = GetActivityOutputResponse::from(core);
+        assert_eq!(api.workflow_id, wf_id);
+        assert_eq!(api.activity_key, "analyze");
+        assert_eq!(api.files.len(), 1);
+        assert_eq!(api.files[0].filename, "out.txt");
+    }
+
+    #[test]
+    fn test_get_workflow_output_response_from_core() {
+        let wf_id = Uuid::now_v7();
+        let mut outputs = HashMap::new();
+        outputs.insert(
+            "step1".to_string(),
+            kruxiaflow_core::workflow::ActivityOutputSummary {
+                status: WorkflowActivityStatus::Completed,
+                output: Some(serde_json::json!({"x": 1})),
+                cost_usd: Decimal::from_str("0.02").unwrap(),
+                completed_at: Some(Utc::now()),
+                is_terminal: false,
+            },
+        );
+        let core = kruxiaflow_core::workflow::WorkflowOutputResult {
+            workflow_id: wf_id,
+            status: WorkflowStatus::Completed,
+            total_cost_usd: Decimal::from_str("0.02").unwrap(),
+            completed_at: Some(Utc::now()),
+            outputs,
+            terminal_outputs: vec!["step1".to_string()],
+        };
+        let api = GetWorkflowOutputResponse::from(core);
+        assert_eq!(api.workflow_id, wf_id);
+        assert_eq!(api.outputs.len(), 1);
+        assert!(api.outputs.contains_key("step1"));
+        assert_eq!(api.terminal_outputs, vec!["step1"]);
+    }
+
+    #[test]
+    fn test_upload_response_serialization() {
+        let response = UploadActivityFileResponse {
+            workflow_id: Uuid::nil(),
+            activity_key: "test".to_string(),
+            filename: "file.txt".to_string(),
+            size: 42,
+            content_type: Some("text/plain".to_string()),
+            created_at: Utc::now(),
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["size"], 42);
+        assert_eq!(json["content_type"], "text/plain");
+    }
+}

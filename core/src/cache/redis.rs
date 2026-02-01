@@ -343,4 +343,165 @@ mod tests {
         assert!(result1.is_none());
         assert!(result2.is_none());
     }
+
+    // --- Unit tests that don't require a running Redis instance ---
+
+    #[test]
+    fn test_redis_cache_new_with_default_prefix() {
+        let cache =
+            RedisCache::new("redis://localhost:6379", None).expect("Failed to create Redis cache");
+        assert_eq!(cache.key_prefix, "kruxiaflow:cache:");
+    }
+
+    #[test]
+    fn test_redis_cache_new_with_custom_prefix() {
+        let cache = RedisCache::new("redis://localhost:6379", Some("custom:prefix:".to_string()))
+            .expect("Failed to create Redis cache");
+        assert_eq!(cache.key_prefix, "custom:prefix:");
+    }
+
+    #[test]
+    fn test_redis_cache_new_with_empty_prefix() {
+        let cache = RedisCache::new("redis://localhost:6379", Some(String::new()))
+            .expect("Failed to create Redis cache");
+        assert_eq!(cache.key_prefix, "");
+    }
+
+    #[test]
+    fn test_redis_cache_new_invalid_url() {
+        let result = RedisCache::new("not-a-valid-url", None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_redis_cache_new_empty_url() {
+        let result = RedisCache::new("", None);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_redis_cache_build_key_with_default_prefix() {
+        let cache = RedisCache::new("redis://localhost:6379", None).unwrap();
+        assert_eq!(cache.build_key("my_key"), "kruxiaflow:cache:my_key");
+    }
+
+    #[test]
+    fn test_redis_cache_build_key_with_custom_prefix() {
+        let cache = RedisCache::new("redis://localhost:6379", Some("test:".to_string())).unwrap();
+        assert_eq!(cache.build_key("my_key"), "test:my_key");
+    }
+
+    #[test]
+    fn test_redis_cache_build_key_with_empty_prefix() {
+        let cache = RedisCache::new("redis://localhost:6379", Some(String::new())).unwrap();
+        assert_eq!(cache.build_key("my_key"), "my_key");
+    }
+
+    #[test]
+    fn test_redis_cache_build_key_with_empty_key() {
+        let cache = RedisCache::new("redis://localhost:6379", None).unwrap();
+        assert_eq!(cache.build_key(""), "kruxiaflow:cache:");
+    }
+
+    #[test]
+    fn test_redis_cache_build_key_special_characters() {
+        let cache = RedisCache::new("redis://localhost:6379", None).unwrap();
+        assert_eq!(
+            cache.build_key("workflow:123:activity:*"),
+            "kruxiaflow:cache:workflow:123:activity:*"
+        );
+    }
+
+    #[test]
+    fn test_redis_cache_is_available() {
+        let cache = RedisCache::new("redis://localhost:6379", None).unwrap();
+        // is_available always returns true (connectivity checked lazily)
+        assert!(cache.is_available());
+    }
+
+    #[tokio::test]
+    async fn test_redis_cache_get_connection_fails_with_bad_url() {
+        // Use a URL that resolves but isn't Redis
+        let cache = RedisCache::new("redis://127.0.0.1:1", None).unwrap();
+        let result = cache.get_connection().await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_redis_cache_connection_arc_clone() {
+        let cache = RedisCache::new("redis://localhost:6379", None).unwrap();
+        // Verify the connection Arc can be cloned (for concurrent access)
+        let _clone = Arc::clone(&cache.connection);
+    }
+
+    #[test]
+    fn test_redis_cache_new_with_auth_url() {
+        let cache = RedisCache::new("redis://user:password@localhost:6379/0", None);
+        assert!(cache.is_ok());
+    }
+
+    #[test]
+    fn test_redis_cache_new_with_db_number() {
+        let cache = RedisCache::new("redis://localhost:6379/2", None);
+        assert!(cache.is_ok());
+    }
+
+    #[test]
+    fn test_cached_result_serialization_roundtrip() {
+        let result = CachedResult {
+            output: json!({"key": "value", "nested": {"a": 1}}),
+            cached_at: Utc::now(),
+            original_cost_usd: Some(Decimal::new(5050, 4)), // 0.5050
+        };
+
+        let json_str = serde_json::to_string(&result).unwrap();
+        let deserialized: CachedResult = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(deserialized.output, result.output);
+        assert_eq!(deserialized.original_cost_usd, result.original_cost_usd);
+    }
+
+    #[test]
+    fn test_cached_result_serialization_no_cost() {
+        let result = CachedResult {
+            output: json!("simple string"),
+            cached_at: Utc::now(),
+            original_cost_usd: None,
+        };
+
+        let json_str = serde_json::to_string(&result).unwrap();
+        let deserialized: CachedResult = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(deserialized.output, json!("simple string"));
+        assert!(deserialized.original_cost_usd.is_none());
+    }
+
+    #[test]
+    fn test_cached_result_with_null_output() {
+        let result = CachedResult {
+            output: json!(null),
+            cached_at: Utc::now(),
+            original_cost_usd: None,
+        };
+
+        let json_str = serde_json::to_string(&result).unwrap();
+        let deserialized: CachedResult = serde_json::from_str(&json_str).unwrap();
+
+        assert!(deserialized.output.is_null());
+    }
+
+    #[test]
+    fn test_cached_result_with_array_output() {
+        let result = CachedResult {
+            output: json!([1, 2, 3, "test"]),
+            cached_at: Utc::now(),
+            original_cost_usd: Some(Decimal::ZERO),
+        };
+
+        let json_str = serde_json::to_string(&result).unwrap();
+        let deserialized: CachedResult = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(deserialized.output, json!([1, 2, 3, "test"]));
+        assert_eq!(deserialized.original_cost_usd, Some(Decimal::ZERO));
+    }
 }

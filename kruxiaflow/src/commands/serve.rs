@@ -726,6 +726,7 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     /// Helper to create a valid ServeCommand for testing
     fn valid_serve_command() -> ServeCommand {
@@ -979,5 +980,232 @@ mod tests {
                 .to_string()
                 .contains("Max concurrent activities")
         );
+    }
+
+    // =========================================================================
+    // load_secret tests
+    // =========================================================================
+
+    #[test]
+    #[serial]
+    fn test_load_secret_from_env_var() {
+        unsafe {
+            std::env::set_var("TEST_LOAD_SECRET_A", "direct_value");
+            std::env::remove_var("TEST_LOAD_SECRET_A_FILE");
+        }
+
+        let result = load_secret("TEST_LOAD_SECRET_A");
+        assert_eq!(result, Some("direct_value".to_string()));
+
+        unsafe {
+            std::env::remove_var("TEST_LOAD_SECRET_A");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_secret_from_file() {
+        let file_path = std::env::temp_dir().join("kruxiaflow_test_secret_b.txt");
+        std::fs::write(&file_path, "file_secret_value\n").unwrap();
+
+        unsafe {
+            std::env::set_var("TEST_LOAD_SECRET_B_FILE", file_path.to_str().unwrap());
+            std::env::set_var("TEST_LOAD_SECRET_B", "should_be_ignored");
+        }
+
+        let result = load_secret("TEST_LOAD_SECRET_B");
+        // File takes precedence over direct env var
+        assert_eq!(result, Some("file_secret_value".to_string()));
+
+        unsafe {
+            std::env::remove_var("TEST_LOAD_SECRET_B_FILE");
+            std::env::remove_var("TEST_LOAD_SECRET_B");
+        }
+        let _ = std::fs::remove_file(&file_path);
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_secret_file_trims_whitespace() {
+        let file_path = std::env::temp_dir().join("kruxiaflow_test_secret_c.txt");
+        std::fs::write(&file_path, "  trimmed_value  \n").unwrap();
+
+        unsafe {
+            std::env::set_var("TEST_LOAD_SECRET_C_FILE", file_path.to_str().unwrap());
+        }
+
+        let result = load_secret("TEST_LOAD_SECRET_C");
+        assert_eq!(result, Some("trimmed_value".to_string()));
+
+        unsafe {
+            std::env::remove_var("TEST_LOAD_SECRET_C_FILE");
+        }
+        let _ = std::fs::remove_file(&file_path);
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_secret_file_not_found_falls_back_to_env() {
+        unsafe {
+            std::env::set_var("TEST_LOAD_SECRET_D_FILE", "/nonexistent/path/secret.txt");
+            std::env::set_var("TEST_LOAD_SECRET_D", "fallback_value");
+        }
+
+        let result = load_secret("TEST_LOAD_SECRET_D");
+        // File doesn't exist, falls back to direct env var
+        assert_eq!(result, Some("fallback_value".to_string()));
+
+        unsafe {
+            std::env::remove_var("TEST_LOAD_SECRET_D_FILE");
+            std::env::remove_var("TEST_LOAD_SECRET_D");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_secret_not_set() {
+        unsafe {
+            std::env::remove_var("TEST_LOAD_SECRET_E");
+            std::env::remove_var("TEST_LOAD_SECRET_E_FILE");
+        }
+
+        let result = load_secret("TEST_LOAD_SECRET_E");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_secret_file_not_found_no_fallback() {
+        unsafe {
+            std::env::set_var("TEST_LOAD_SECRET_F_FILE", "/nonexistent/path.txt");
+            std::env::remove_var("TEST_LOAD_SECRET_F");
+        }
+
+        let result = load_secret("TEST_LOAD_SECRET_F");
+        assert_eq!(result, None);
+
+        unsafe {
+            std::env::remove_var("TEST_LOAD_SECRET_F_FILE");
+        }
+    }
+
+    // =========================================================================
+    // Additional serve command configuration tests
+    // =========================================================================
+
+    #[test]
+    fn test_serve_command_no_worker_flag() {
+        let mut cmd = valid_serve_command();
+        cmd.no_worker = true;
+        assert!(cmd.validate().is_ok());
+        assert!(cmd.no_worker);
+    }
+
+    #[test]
+    fn test_serve_command_migrate_flag() {
+        let mut cmd = valid_serve_command();
+        cmd.migrate = true;
+        assert!(cmd.validate().is_ok());
+        assert!(cmd.migrate);
+    }
+
+    #[test]
+    fn test_serve_command_seed_llm_with_path() {
+        let mut cmd = valid_serve_command();
+        cmd.seed_llm = Some("/config/llm_models.yaml".to_string());
+        assert!(cmd.validate().is_ok());
+        assert_eq!(cmd.seed_llm.as_deref(), Some("/config/llm_models.yaml"));
+    }
+
+    #[test]
+    fn test_serve_command_seed_llm_none() {
+        let cmd = valid_serve_command();
+        assert!(cmd.seed_llm.is_none());
+    }
+
+    #[test]
+    fn test_serve_command_activity_timeout() {
+        let mut cmd = valid_serve_command();
+        cmd.activity_timeout = 600;
+        assert!(cmd.validate().is_ok());
+        assert_eq!(cmd.activity_timeout, 600);
+    }
+
+    #[test]
+    fn test_serve_command_db_connect_timeout() {
+        let mut cmd = valid_serve_command();
+        cmd.db_connect_timeout = 120;
+        assert!(cmd.validate().is_ok());
+        assert_eq!(cmd.db_connect_timeout, 120);
+    }
+
+    #[test]
+    fn test_serve_command_validation_order_poll_activities_after_max_activities() {
+        // When max_activities is valid but poll_max_activities is invalid
+        let mut cmd = valid_serve_command();
+        cmd.poll_max_activities = 0;
+        cmd.client_secret = None;
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Max activities per poll")
+        );
+    }
+
+    #[test]
+    fn test_serve_command_validation_order_secret_after_poll() {
+        // When activities are valid but secret is missing
+        let mut cmd = valid_serve_command();
+        cmd.client_secret = None;
+        cmd.oauth_private_key = None;
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Client secret"));
+    }
+
+    #[test]
+    fn test_serve_command_validation_order_oauth_after_secret() {
+        // When secret is valid but oauth key is missing
+        let mut cmd = valid_serve_command();
+        cmd.oauth_private_key = None;
+        cmd.shutdown_timeout = 1; // Also invalid, but should fail on oauth first
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("OAuth private key")
+        );
+    }
+
+    #[test]
+    fn test_serve_command_redis_url() {
+        let mut cmd = valid_serve_command();
+        cmd.redis_url = "redis://redis.example.com:6379/0".to_string();
+        assert!(cmd.validate().is_ok());
+        assert_eq!(cmd.redis_url, "redis://redis.example.com:6379/0");
+    }
+
+    #[test]
+    fn test_serve_command_orchestrator_id() {
+        let mut cmd = valid_serve_command();
+        cmd.orchestrator_id = "custom_orch_id".to_string();
+        assert!(cmd.validate().is_ok());
+        assert_eq!(cmd.orchestrator_id, "custom_orch_id");
+    }
+
+    #[test]
+    fn test_serve_command_client_id() {
+        let mut cmd = valid_serve_command();
+        cmd.client_id = "custom_client".to_string();
+        assert!(cmd.validate().is_ok());
+        assert_eq!(cmd.client_id, "custom_client");
     }
 }

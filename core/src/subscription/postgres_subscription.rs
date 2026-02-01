@@ -215,3 +215,180 @@ fn parse_on_timeout(s: &str) -> OnTimeout {
         _ => OnTimeout::Fail, // Default to fail for unknown values
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_parse_on_timeout_continue() {
+        assert!(matches!(parse_on_timeout("continue"), OnTimeout::Continue));
+    }
+
+    #[test]
+    fn test_parse_on_timeout_skip() {
+        assert!(matches!(parse_on_timeout("skip"), OnTimeout::Skip));
+    }
+
+    #[test]
+    fn test_parse_on_timeout_fail() {
+        assert!(matches!(parse_on_timeout("fail"), OnTimeout::Fail));
+    }
+
+    #[test]
+    fn test_parse_on_timeout_unknown_defaults_to_fail() {
+        assert!(matches!(parse_on_timeout("unknown"), OnTimeout::Fail));
+    }
+
+    #[test]
+    fn test_parse_on_timeout_empty_string_defaults_to_fail() {
+        assert!(matches!(parse_on_timeout(""), OnTimeout::Fail));
+    }
+
+    #[test]
+    fn test_parse_on_timeout_case_sensitive() {
+        // Uppercase should not match — defaults to Fail
+        assert!(matches!(parse_on_timeout("Continue"), OnTimeout::Fail));
+        assert!(matches!(parse_on_timeout("SKIP"), OnTimeout::Fail));
+        assert!(matches!(parse_on_timeout("FAIL"), OnTimeout::Fail));
+    }
+
+    #[test]
+    fn test_new_subscription_fields() {
+        let sub = NewSubscription {
+            workflow_id: Uuid::nil(),
+            activity_key: "step_1".to_string(),
+            event_name: "approval".to_string(),
+            on_timeout: OnTimeout::Continue,
+            timeout_seconds: 300,
+        };
+        assert_eq!(sub.activity_key, "step_1");
+        assert_eq!(sub.event_name, "approval");
+        assert_eq!(sub.timeout_seconds, 300);
+    }
+
+    #[test]
+    fn test_signal_request_serialization() {
+        let request = SignalRequest {
+            workflow_id: Uuid::nil(),
+            activity_key: "step_1".to_string(),
+            event_name: "approval".to_string(),
+            data: Some(json!({"approved": true})),
+        };
+
+        let json_str = serde_json::to_string(&request).unwrap();
+        let deserialized: SignalRequest = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(deserialized.activity_key, "step_1");
+        assert_eq!(deserialized.event_name, "approval");
+        assert_eq!(deserialized.data, Some(json!({"approved": true})));
+    }
+
+    #[test]
+    fn test_signal_request_serialization_no_data() {
+        let request = SignalRequest {
+            workflow_id: Uuid::nil(),
+            activity_key: "step_1".to_string(),
+            event_name: "approval".to_string(),
+            data: None,
+        };
+
+        let json_str = serde_json::to_string(&request).unwrap();
+        let deserialized: SignalRequest = serde_json::from_str(&json_str).unwrap();
+
+        assert!(deserialized.data.is_none());
+    }
+
+    #[test]
+    fn test_expired_subscription_fields() {
+        let expired = ExpiredSubscription {
+            id: Uuid::nil(),
+            workflow_id: Uuid::nil(),
+            activity_key: "step_2".to_string(),
+            event_name: "timeout_event".to_string(),
+            on_timeout: OnTimeout::Skip,
+        };
+        assert_eq!(expired.activity_key, "step_2");
+        assert!(matches!(expired.on_timeout, OnTimeout::Skip));
+    }
+
+    #[test]
+    fn test_activity_subscription_serialization() {
+        let sub = ActivitySubscription {
+            id: Uuid::nil(),
+            workflow_id: Uuid::nil(),
+            activity_key: "step_1".to_string(),
+            event_name: "signal".to_string(),
+            on_timeout: OnTimeout::Fail,
+            timeout_at: Utc::now(),
+            signal_data: Some(json!({"key": "value"})),
+            created_at: Utc::now(),
+        };
+
+        let json_str = serde_json::to_string(&sub).unwrap();
+        let deserialized: ActivitySubscription = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(deserialized.activity_key, "step_1");
+        assert_eq!(deserialized.signal_data, Some(json!({"key": "value"})));
+    }
+
+    #[test]
+    fn test_activity_subscription_without_signal_data() {
+        let sub = ActivitySubscription {
+            id: Uuid::nil(),
+            workflow_id: Uuid::nil(),
+            activity_key: "step_1".to_string(),
+            event_name: "signal".to_string(),
+            on_timeout: OnTimeout::Continue,
+            timeout_at: Utc::now(),
+            signal_data: None,
+            created_at: Utc::now(),
+        };
+
+        let json_str = serde_json::to_string(&sub).unwrap();
+        let deserialized: ActivitySubscription = serde_json::from_str(&json_str).unwrap();
+
+        assert!(deserialized.signal_data.is_none());
+        assert!(matches!(deserialized.on_timeout, OnTimeout::Continue));
+    }
+
+    #[test]
+    fn test_subscription_error_display_not_found() {
+        let err = SubscriptionError::NotFound;
+        assert_eq!(format!("{}", err), "Subscription not found");
+    }
+
+    #[test]
+    fn test_subscription_error_display_already_exists() {
+        let wf_id = Uuid::nil();
+        let err = SubscriptionError::AlreadyExists(wf_id, "step_1".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("already exists"));
+        assert!(msg.contains("step_1"));
+    }
+
+    #[test]
+    fn test_subscription_error_display_event_name_mismatch() {
+        let err = SubscriptionError::EventNameMismatch {
+            expected: "approval".to_string(),
+            actual: "rejection".to_string(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("approval"));
+        assert!(msg.contains("rejection"));
+    }
+
+    #[test]
+    fn test_expired_subscription_clone() {
+        let expired = ExpiredSubscription {
+            id: Uuid::nil(),
+            workflow_id: Uuid::nil(),
+            activity_key: "step_1".to_string(),
+            event_name: "event".to_string(),
+            on_timeout: OnTimeout::Fail,
+        };
+        let cloned = expired.clone();
+        assert_eq!(cloned.activity_key, expired.activity_key);
+    }
+}

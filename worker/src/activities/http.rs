@@ -327,7 +327,8 @@ impl ActivityImpl for HttpRequestActivity {
         } else if let Some(content_type) = response.headers().get("content-type") {
             // Body requested - parse based on content type
             let content_type_str = content_type.to_str().unwrap_or("");
-            if content_type_str.contains("application/json") || content_type_str.ends_with("+json") {
+            if content_type_str.contains("application/json") || content_type_str.ends_with("+json")
+            {
                 HttpResponse::from_response_json(response).await?
             } else {
                 HttpResponse::from_response_text(response).await?
@@ -488,7 +489,10 @@ mod tests {
 
         // The body should be a parsed JSON object, not a string
         let body_value = &response["body"];
-        assert!(body_value.is_object(), "body should be a JSON object, not a string");
+        assert!(
+            body_value.is_object(),
+            "body should be a JSON object, not a string"
+        );
         assert_eq!(body_value["properties"]["periods"][0]["temperature"], 72);
         assert_eq!(
             body_value["properties"]["periods"][0]["shortForecast"],
@@ -564,7 +568,10 @@ mod tests {
 
         let response = &result.outputs[0].value;
         let body_value = &response["body"];
-        assert!(body_value.is_string(), "body should be a string for text/plain");
+        assert!(
+            body_value.is_string(),
+            "body should be a string for text/plain"
+        );
         assert_eq!(body_value.as_str().unwrap(), "Hello, world!");
     }
 }
