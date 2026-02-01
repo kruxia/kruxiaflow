@@ -41,6 +41,8 @@ pub struct PendingActivityRecord {
     pub parameters: Value,
     pub settings: Option<Value>,
     pub output_definitions: Option<Value>,
+    /// Signal data for activities that were waiting for an external signal
+    pub signal_data: Option<Value>,
 }
 
 impl From<QueuedActivity> for PendingActivityRecord {
@@ -56,6 +58,7 @@ impl From<QueuedActivity> for PendingActivityRecord {
             output_definitions: qa
                 .output_definitions
                 .map(|defs| serde_json::to_value(defs).unwrap()),
+            signal_data: qa.signal_data,
         }
     }
 }

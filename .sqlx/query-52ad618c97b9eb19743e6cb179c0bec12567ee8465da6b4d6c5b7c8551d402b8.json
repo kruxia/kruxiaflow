@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT signal_data\n            FROM activity_event_subscriptions\n            WHERE workflow_id = $1 AND activity_key = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "signal_data",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "52ad618c97b9eb19743e6cb179c0bec12567ee8465da6b4d6c5b7c8551d402b8"
+}

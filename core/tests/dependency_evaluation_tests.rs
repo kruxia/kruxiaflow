@@ -37,6 +37,7 @@ fn create_test_state_with_activities(
                     accumulated_cost_usd: Decimal::ZERO,
                     iteration: 0,
                     iteration_outputs: None,
+                    signal_data: None,
                 },
             )
         })
@@ -1291,6 +1292,7 @@ fn test_is_workflow_complete_with_running_activity() {
             accumulated_cost_usd: Decimal::ZERO,
             iteration: 0,
             iteration_outputs: None,
+            signal_data: None,
         },
     );
     activities_map.insert(
@@ -1307,6 +1309,7 @@ fn test_is_workflow_complete_with_running_activity() {
             accumulated_cost_usd: Decimal::ZERO,
             iteration: 0,
             iteration_outputs: None,
+            signal_data: None,
         },
     );
 
@@ -1367,6 +1370,7 @@ fn test_loop_activity_not_ready_when_max_iterations_exceeded() {
             accumulated_cost_usd: Decimal::ZERO,
             iteration: 3, // At limit
             iteration_outputs: None,
+            signal_data: None,
         },
     );
 
@@ -1429,6 +1433,7 @@ fn test_back_edge_first_iteration_auto_satisfied() {
             accumulated_cost_usd: Decimal::ZERO,
             iteration: 0, // First iteration
             iteration_outputs: None,
+            signal_data: None,
         },
     );
 

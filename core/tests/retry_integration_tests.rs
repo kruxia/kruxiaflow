@@ -5,6 +5,7 @@ use kruxiaflow_core::events::{
 use kruxiaflow_core::orchestrator::OrchestratorConfig;
 use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
 use kruxiaflow_core::workflow::{ActivitySettings, BackoffStrategy, RetryPolicy};
+use kruxiaflow_core::{PostgresSubscriptionService, SubscriptionService};
 use serde_json::json;
 use serial_test::serial;
 use sqlx::PgPool;
@@ -51,6 +52,7 @@ async fn poll_with_retry(
 async fn process_all_events(
     event_source: &Arc<dyn EventSource>,
     activity_queue: &Arc<dyn ActivityQueue>,
+    subscription_service: &Arc<dyn SubscriptionService>,
     config: &OrchestratorConfig,
     consumer_id: &str,
     last_event_id: Option<uuid::Uuid>,
@@ -80,6 +82,7 @@ async fn process_all_events(
                         event,
                         event_source,
                         activity_queue,
+                        subscription_service,
                         config,
                     )
                     .await
@@ -102,6 +105,7 @@ async fn process_all_events(
                 event,
                 event_source,
                 activity_queue,
+                subscription_service,
                 config,
             )
             .await
@@ -200,6 +204,7 @@ async fn test_activity_retry_with_exponential_backoff() {
                 iteration_limit: None,
                 delay: None,
                 scheduled_for: None,
+                wait_for_signal: None,
             }),
             depends_on: None,
             dependency_of: None,
@@ -214,6 +219,8 @@ async fn test_activity_retry_with_exponential_backoff() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // 1. Process WorkflowCreated - schedules initial activity
@@ -234,6 +241,7 @@ async fn test_activity_retry_with_exponential_backoff() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -259,6 +267,7 @@ async fn test_activity_retry_with_exponential_backoff() {
     let last_event_id = process_all_events(
         &event_source,
         &activity_queue,
+        &subscription_service,
         &config,
         "test_retry",
         events.last().map(|e| e.id),
@@ -284,6 +293,7 @@ async fn test_activity_retry_with_exponential_backoff() {
     let _last_event_id = process_all_events(
         &event_source,
         &activity_queue,
+        &subscription_service,
         &config,
         "test_retry",
         last_event_id,
@@ -329,6 +339,7 @@ async fn test_activity_retry_with_exponential_backoff() {
     let _last_event_id = process_all_events(
         &event_source,
         &activity_queue,
+        &subscription_service,
         &config,
         "test_retry",
         _last_event_id,
@@ -383,6 +394,7 @@ async fn test_activity_retry_max_attempts_reached() {
                 iteration_limit: None,
                 delay: None,
                 scheduled_for: None,
+                wait_for_signal: None,
             }),
             depends_on: None,
             dependency_of: None,
@@ -397,6 +409,8 @@ async fn test_activity_retry_max_attempts_reached() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // 1. Process WorkflowCreated
@@ -417,6 +431,7 @@ async fn test_activity_retry_max_attempts_reached() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -442,6 +457,7 @@ async fn test_activity_retry_max_attempts_reached() {
     let last_event_id = process_all_events(
         &event_source,
         &activity_queue,
+        &subscription_service,
         &config,
         "test_max_attempts",
         events.last().map(|e| e.id),
@@ -467,6 +483,7 @@ async fn test_activity_retry_max_attempts_reached() {
     let _last_event_id = process_all_events(
         &event_source,
         &activity_queue,
+        &subscription_service,
         &config,
         "test_max_attempts",
         last_event_id,
@@ -536,6 +553,7 @@ async fn test_activity_retry_with_fixed_backoff() {
                 iteration_limit: None,
                 delay: None,
                 scheduled_for: None,
+                wait_for_signal: None,
             }),
             depends_on: None,
             dependency_of: None,
@@ -550,6 +568,8 @@ async fn test_activity_retry_with_fixed_backoff() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // Process WorkflowCreated
@@ -570,6 +590,7 @@ async fn test_activity_retry_with_fixed_backoff() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -599,6 +620,7 @@ async fn test_activity_retry_with_fixed_backoff() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -660,6 +682,8 @@ async fn test_activity_without_retry_fails_immediately() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // Process WorkflowCreated
@@ -680,6 +704,7 @@ async fn test_activity_without_retry_fails_immediately() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -709,6 +734,7 @@ async fn test_activity_without_retry_fails_immediately() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -784,6 +810,7 @@ async fn test_retry_state_tracking_with_cost_accumulation() {
                 iteration_limit: None,
                 delay: None,
                 scheduled_for: None,
+                wait_for_signal: None,
             }),
             depends_on: None,
             dependency_of: None,
@@ -798,6 +825,8 @@ async fn test_retry_state_tracking_with_cost_accumulation() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // Process WorkflowCreated
@@ -818,6 +847,7 @@ async fn test_retry_state_tracking_with_cost_accumulation() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -847,6 +877,7 @@ async fn test_retry_state_tracking_with_cost_accumulation() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await

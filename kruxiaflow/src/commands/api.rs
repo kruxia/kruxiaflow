@@ -5,6 +5,7 @@ use clap::Args;
 use kruxiaflow_core::cache::{CacheService, RedisCache};
 use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
+use kruxiaflow_core::subscription::{PostgresSubscriptionService, SubscriptionService};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
@@ -116,6 +117,11 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
         Arc::new(RedisCache::new(&redis_url, None).context("Failed to connect to Redis")?);
     tracing::info!("Cache service initialized (Redis)");
 
+    // Initialize subscription service (PostgreSQL for MVP)
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(db_pool.clone()));
+    tracing::info!("Subscription service initialized (PostgreSQL)");
+
     // Create application state with configured infrastructure services
     let shutdown_token = tokio_util::sync::CancellationToken::new();
     let app_state = kruxiaflow_api::AppState::new(
@@ -125,6 +131,7 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
         event_source,
         workflow_storage,
         cache_service,
+        subscription_service,
         shutdown_token,
     );
 

@@ -3,6 +3,7 @@ use kruxiaflow_core::cache::CacheService;
 use kruxiaflow_core::events::EventSource;
 use kruxiaflow_core::queue::ActivityQueue;
 use kruxiaflow_core::storage::WorkflowStorage;
+use kruxiaflow_core::subscription::SubscriptionService;
 use kruxiaflow_oauth::AuthenticationService;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -51,6 +52,10 @@ pub struct AppState {
     /// Swappable: RedisCache → NoOpCache (when Redis unavailable)
     pub cache_service: Arc<dyn CacheService>,
 
+    /// Subscription service for activities waiting for external signals
+    /// Swappable: PostgresSubscriptionService → (future implementations)
+    pub subscription_service: Arc<dyn SubscriptionService>,
+
     /// WebSocket connection manager for activity streaming
     /// Manages active WebSocket connections per activity for real-time token streaming
     pub connection_manager: ConnectionManager,
@@ -78,6 +83,7 @@ impl AppState {
     /// * `event_source` - Event source implementation (e.g., PostgresEventSource, KafkaEventSource)
     /// * `workflow_storage` - Workflow storage implementation (e.g., PostgresStorage, S3Storage)
     /// * `cache_service` - Cache service implementation (e.g., RedisCache, NoOpCache)
+    /// * `subscription_service` - Subscription service for activity signal waiting
     /// * `shutdown_token` - Cancellation token for coordinated shutdown
     ///
     /// # Build Metadata
@@ -92,6 +98,7 @@ impl AppState {
         event_source: Arc<dyn EventSource>,
         workflow_storage: Arc<dyn WorkflowStorage>,
         cache_service: Arc<dyn CacheService>,
+        subscription_service: Arc<dyn SubscriptionService>,
         shutdown_token: CancellationToken,
     ) -> Self {
         Self {
@@ -101,6 +108,7 @@ impl AppState {
             event_source,
             workflow_storage,
             cache_service,
+            subscription_service,
             connection_manager: ConnectionManager::new(),
             shutdown_token,
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -130,6 +138,7 @@ impl AppState {
     /// * `event_source` - Event source implementation
     /// * `workflow_storage` - Workflow storage implementation
     /// * `cache_service` - Cache service implementation
+    /// * `subscription_service` - Subscription service for activity signal waiting
     /// * `shutdown_token` - Cancellation token for coordinated shutdown
     /// * `version` - Service version string
     /// * `build` - Build metadata (timestamp and git hash)
@@ -143,6 +152,7 @@ impl AppState {
         event_source: Arc<dyn EventSource>,
         workflow_storage: Arc<dyn WorkflowStorage>,
         cache_service: Arc<dyn CacheService>,
+        subscription_service: Arc<dyn SubscriptionService>,
         shutdown_token: CancellationToken,
         version: String,
         build: AppStateBuild,
@@ -155,6 +165,7 @@ impl AppState {
             event_source,
             workflow_storage,
             cache_service,
+            subscription_service,
             connection_manager: ConnectionManager::new(),
             shutdown_token,
             version,
@@ -195,6 +206,9 @@ pub mod tests {
 
     // Mock cache service for testing
     pub struct MockCacheService;
+
+    // Mock subscription service for testing
+    pub struct MockSubscriptionService;
 
     #[async_trait]
     impl ActivityQueue for MockActivityQueue {
@@ -394,6 +408,59 @@ pub mod tests {
     }
 
     #[async_trait]
+    impl SubscriptionService for MockSubscriptionService {
+        async fn create_subscription(
+            &self,
+            _subscription: kruxiaflow_core::subscription::NewSubscription,
+        ) -> kruxiaflow_core::subscription::Result<Uuid> {
+            Ok(Uuid::now_v7())
+        }
+
+        async fn signal_activity(
+            &self,
+            _request: kruxiaflow_core::subscription::SignalRequest,
+        ) -> kruxiaflow_core::subscription::Result<
+            Option<kruxiaflow_core::subscription::ActivitySubscription>,
+        > {
+            Ok(None)
+        }
+
+        async fn get_signal_data(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+        ) -> kruxiaflow_core::subscription::Result<Option<serde_json::Value>> {
+            Ok(None)
+        }
+
+        async fn expire_subscriptions(
+            &self,
+            _limit: i64,
+        ) -> kruxiaflow_core::subscription::Result<
+            Vec<kruxiaflow_core::subscription::ExpiredSubscription>,
+        > {
+            Ok(vec![])
+        }
+
+        async fn recover_expired(
+            &self,
+            _limit: i64,
+        ) -> kruxiaflow_core::subscription::Result<
+            Vec<kruxiaflow_core::subscription::ExpiredSubscription>,
+        > {
+            Ok(vec![])
+        }
+
+        async fn delete_subscription(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+        ) -> kruxiaflow_core::subscription::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[async_trait]
     impl AuthenticationService for MockAuthService {
         async fn authenticate_client(
             &self,
@@ -472,6 +539,7 @@ pub mod tests {
             event_source,
             workflow_storage,
             cache_service,
+            Arc::new(MockSubscriptionService),
             shutdown_token,
         );
 
@@ -507,6 +575,7 @@ pub mod tests {
             event_source,
             workflow_storage,
             cache_service,
+            Arc::new(MockSubscriptionService),
             shutdown_token,
             "1.2.3".to_string(),
             build.clone(),
@@ -529,6 +598,7 @@ pub mod tests {
         let cache_service = Arc::new(MockCacheService);
         let shutdown_token = CancellationToken::new();
 
+        let subscription_service = Arc::new(MockSubscriptionService);
         let state1 = AppState::new(
             pool,
             auth_service,
@@ -536,6 +606,7 @@ pub mod tests {
             event_source,
             workflow_storage,
             cache_service,
+            subscription_service,
             shutdown_token,
         );
         let state2 = state1.clone();
@@ -576,6 +647,7 @@ pub mod tests {
             event_source,
             workflow_storage,
             cache_service,
+            Arc::new(MockSubscriptionService),
             shutdown_token,
         );
 
@@ -606,6 +678,7 @@ pub mod tests {
             event_source,
             workflow_storage,
             cache_service,
+            Arc::new(MockSubscriptionService),
             shutdown_token,
             "1.0.0".to_string(),
             build,
@@ -632,6 +705,7 @@ pub mod tests {
             event_source,
             workflow_storage,
             cache_service,
+            Arc::new(MockSubscriptionService),
             shutdown_token,
         );
 

@@ -11,6 +11,7 @@ use kruxiaflow_api::handlers::workflow_definitions::{
     ListWorkflowDefinitionsResponse,
 };
 use kruxiaflow_api::{AppState, AppStateBuild, app_router};
+use kruxiaflow_core::PostgresSubscriptionService;
 use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_core::storage::PostgresStorage;
@@ -81,6 +82,7 @@ async fn setup_test_state() -> AppState {
     let workflow_storage = Arc::new(PostgresStorage::new(pool.clone()));
     let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
 
+    let subscription_service = Arc::new(PostgresSubscriptionService::new(pool.clone()));
     AppState::with_metadata(
         pool,
         Arc::new(auth_service),
@@ -88,6 +90,7 @@ async fn setup_test_state() -> AppState {
         event_source,
         workflow_storage,
         cache_service,
+        subscription_service,
         CancellationToken::new(),
         "0.2.0-test".to_string(),
         AppStateBuild {

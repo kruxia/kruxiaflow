@@ -1,7 +1,9 @@
 use kruxiaflow_api::{AppState, app_router};
 use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
-use kruxiaflow_core::{OrchestratorConfig, run_orchestrator};
+use kruxiaflow_core::{
+    OrchestratorConfig, PostgresSubscriptionService, SubscriptionService, run_orchestrator,
+};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use kruxiaflow_worker::{ActivityRegistry, HttpRequestActivity, WorkerConfig, WorkerManager};
 /// End-to-end test for Example 3: Parallel File Processing
@@ -113,6 +115,8 @@ async fn test_example_03_parallel_document_processing() {
 
     // Start Kruxia Flow API server
     let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let state = AppState::new(
         pool.clone(),
         Arc::new(auth_service),
@@ -120,6 +124,7 @@ async fn test_example_03_parallel_document_processing() {
         event_source.clone(),
         workflow_storage.clone(),
         cache_service,
+        subscription_service.clone(),
         shutdown_token.clone(),
     );
     let app = app_router(state);
@@ -144,11 +149,15 @@ async fn test_example_03_parallel_document_processing() {
     let orchestrator_queue = activity_queue.clone();
     let orchestrator_pool = pool.clone();
     let orchestrator_shutdown = shutdown_token.clone();
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
+    let orchestrator_subscription = subscription_service.clone();
     tokio::spawn(async move {
         let config = OrchestratorConfig::new(orchestrator_pool);
         run_orchestrator(
             orchestrator_event_source,
             orchestrator_queue,
+            orchestrator_subscription,
             config,
             Some(orchestrator_shutdown),
         )

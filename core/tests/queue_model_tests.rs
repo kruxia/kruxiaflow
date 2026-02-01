@@ -79,6 +79,7 @@ fn test_activity_serialization() {
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     let json = serde_json::to_string(&activity).unwrap();
@@ -105,6 +106,7 @@ fn test_activity_with_settings() {
         iteration_limit: None,
         delay: None,
         scheduled_for: None,
+        wait_for_signal: None,
     };
 
     let activity = Activity {
@@ -116,6 +118,7 @@ fn test_activity_with_settings() {
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     let json = serde_json::to_string(&activity).unwrap();
@@ -135,6 +138,7 @@ fn test_activity_with_scheduled_for() {
         scheduled_for: Some(scheduled),
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     let json = serde_json::to_string(&activity).unwrap();
@@ -152,6 +156,7 @@ fn test_activity_clone() {
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     let activity2 = activity1.clone();
@@ -175,6 +180,7 @@ fn test_activity_settings_default_values() {
         iteration_limit: None,
         delay: None,
         scheduled_for: None,
+        wait_for_signal: None,
     };
 
     let json = serde_json::to_string(&settings).unwrap();
@@ -203,6 +209,7 @@ fn test_activity_settings_with_all_options() {
         iteration_limit: None,
         delay: None,
         scheduled_for: None,
+        wait_for_signal: None,
     };
 
     let json = serde_json::to_string(&settings).unwrap();
@@ -223,6 +230,7 @@ fn test_activity_settings_serialization_skips_none() {
         iteration_limit: None,
         delay: None,
         scheduled_for: None,
+        wait_for_signal: None,
     };
 
     let json = serde_json::to_string(&settings).unwrap();
@@ -251,6 +259,7 @@ fn test_activity_settings_clone() {
         iteration_limit: None,
         delay: None,
         scheduled_for: None,
+        wait_for_signal: None,
     };
 
     let settings2 = settings1.clone();
@@ -376,6 +385,7 @@ fn test_queued_activity_serialization() {
         claimed_at,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     let json = serde_json::to_string(&activity).unwrap();
@@ -405,6 +415,7 @@ fn test_queued_activity_with_settings() {
         iteration_limit: None,
         delay: None,
         scheduled_for: None,
+        wait_for_signal: None,
     };
 
     let activity = QueuedActivity {
@@ -419,6 +430,7 @@ fn test_queued_activity_with_settings() {
         claimed_at: Utc::now(),
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     let json = serde_json::to_string(&activity).unwrap();
@@ -443,6 +455,7 @@ fn test_queued_activity_clone() {
         claimed_at: Utc::now(),
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     let activity2 = activity1.clone();

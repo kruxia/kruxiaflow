@@ -793,6 +793,38 @@ pub struct ActivitySettings {
     /// Example: "2025-12-01T09:00:00-08:00" or "{{INPUT.report_deadline}}"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scheduled_for: Option<String>,
+
+    /// Wait for an external signal before running the activity
+    /// When set, the activity enters 'waiting' state until signaled or timeout
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_for_signal: Option<WaitForSignalSettings>,
+}
+
+/// Settings for activities that wait for external signals
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WaitForSignalSettings {
+    /// The event name to wait for (matched against signal requests)
+    pub event_name: String,
+
+    /// Timeout in seconds before taking the on_timeout action
+    pub timeout_seconds: u64,
+
+    /// Action to take when timeout occurs (default: fail)
+    #[serde(default)]
+    pub on_timeout: OnTimeout,
+}
+
+/// Action to take when a signal wait times out
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum OnTimeout {
+    /// Continue with the activity (run with null signal data)
+    Continue,
+    /// Skip the activity
+    Skip,
+    /// Fail the activity (default)
+    #[default]
+    Fail,
 }
 
 impl ActivitySettings {
