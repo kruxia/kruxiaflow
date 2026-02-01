@@ -143,9 +143,8 @@ parameters:
 
 ## Community
 
-- [Discord](https://discord.gg/kruxiaflow) — Get help, share workflows
-- [GitHub Discussions](https://github.com/kruxiaflow/kruxiaflow/discussions) — Ideas and Q&A
-- [Twitter](https://twitter.com/kruxiaflowdev) — Updates and tips
+- [Discord](https://discord.gg/ZJAzygCq) — Get help, share workflows
+- [Bluesky](https://bsky.app/profile/kruxia.com) — Updates and tips
 
 ## License
 

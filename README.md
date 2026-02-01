@@ -1,9 +1,11 @@
 # Kruxia Flow
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![CI](https://github.com/kruxia/kruxiaflow/actions/workflows/main-ci.yml/badge.svg)](https://github.com/kruxia/kruxiaflow/actions/workflows/main-ci.yml)
+[![codecov](https://codecov.io/gh/kruxia/kruxiaflow/branch/main/graph/badge.svg)](https://codecov.io/gh/kruxia/kruxiaflow)
+[![Docker Image](https://img.shields.io/docker/image-size/kruxia/kruxiaflow/latest?label=docker%20image)](https://hub.docker.com/r/kruxia/kruxiaflow)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Rust](https://img.shields.io/badge/rust-1.90%2B-orange.svg)](https://www.rust-lang.org/)
-[![Docker](https://img.shields.io/docker/v/kruxia/kruxia-flow?label=docker&color=2496ED)](https://hub.docker.com/r/kruxia/kruxia-flow)
-[![Docker Image Size](https://img.shields.io/docker/image-size/kruxia/kruxia-flow/latest?label=image%20size)](https://hub.docker.com/r/kruxia/kruxia-flow)
+[![Discord](https://img.shields.io/discord/1457098705214640333?logo=discord&label=Discord)](https://discord.gg/ZJAzygCq)
 
 **AI-native durable workflows that run everywhere**
 
@@ -13,13 +15,42 @@ A lightweight, high-performance workflow engine designed for AI applications. Tr
 Single Binary Deployment | 40% Lower Memory | AI Cost Tracking Built-in | Runs Anywhere
 ```
 
+## Why Kruxia Flow?
+
+Kruxia Flow is a **durable execution engine**: workflows survive crashes, retries are automatic, and state is persistent. This puts us in the same category as Temporal and Inngest, not batch schedulers like Airflow.
+
+### The Problem
+
+LLM costs spiral out of control. You're running AI workflows with no visibility into token usage. Existing tools don't help:
+
+- **Airflow/Temporal**: Great for orchestration, but no LLM awareness
+- **LangChain/LangGraph**: Great for LLM chains, but no durability or cost tracking
+- **DIY**: You're building infrastructure instead of your product
+
+### The Solution
+
+Kruxia Flow combines durable execution with AI-native features:
+
+| Feature                  | Kruxia Flow | Temporal | Airflow | LangChain |
+|--------------------------|:----------:|:--------:|:-------:|:---------:|
+| Durable execution        | **Yes**    | Yes      | Yes     | No        |
+| LLM cost tracking        | **Yes**    | No       | No      | No        |
+| Budget enforcement       | **Yes**    | No       | No      | No        |
+| Semantic caching         | **Planned**| No       | No      | Partial   |
+| Multi-provider LLM       | **Yes**    | No       | No      | Yes       |
+| Token streaming          | **Yes**    | No       | No      | Yes       |
+| Single binary            | **7.5MB**  | ~200MB   | ~500MB+ | N/A       |
+| Docker image             | **63MB**   | ~500MB   | ~1GB+   | N/A       |
+| Peak memory              | **328MB**  | ~425MB   | ~7.2GB  | N/A       |
+| Throughput (wf/sec)      | **93**     | 66       | 8       | N/A       |
+
 ## Getting Started
 
 ### 1. Start Kruxia Flow
 
 ```bash
-git clone https://github.com/kruxia/kruxia-flow.git
-cd kruxia-flow
+git clone https://github.com/kruxia/kruxiaflow.git
+cd kruxiaflow
 ./docker up --examples
 
 # Wait for "listening on 0.0.0.0:8080" then verify in another terminal:
@@ -127,67 +158,6 @@ curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/cost/history \
 See `examples/` for 15+ workflows covering parallel execution, model fallback, caching,
 loops, scheduling, and RAG patterns. API docs at http://localhost:8080/api/v1/docs.
 
-## Why Kruxia Flow?
-
-Kruxia Flow is a **durable execution engine**: workflows survive crashes, retries are automatic, and state is persistent. This puts us in the same category as Temporal and Inngest, not batch schedulers like Airflow.
-
-### vs. Temporal
-
-Temporal is the industry standard for durable execution, and we respect what they've built. Choose Kruxia Flow when you want durable execution without the operational overhead, need AI-native features, or are a small team shipping fast. Comparison:
-
-| | Temporal | Kruxia Flow |
-|---|----------|-------------|
-| **Deployment** | 4+ services (Frontend, History, Matching, Worker) | Single binary |
-| **Memory footprint** | 250-425 MB | ~200-330 MB |
-| **Operational complexity** | Requires expertise | Minimal configuration |
-| **AI workflow features** | — | Built-in cost tracking, budgets, model fallback, streaming |
-
-### vs. Inngest
-
-Inngest offers a great developer experience for durable functions. Kruxia Flow differentiates with:
-
-- **Self-hosted first:** Run anywhere, including edge and air-gapped environments
-- **AI-native:** Built-in cost tracking, budget enforcement, model fallback, token streaming
-- **Resource efficiency:** Lower memory footprint for cost-sensitive deployments
-
-### vs. Airflow
-
-Airflow is a batch scheduler. It’s great for data pipelines on a schedule, but fundamentally different from durable execution:
-
-| | Airflow | Kruxia Flow |
-|---|---------|-------------|
-| **Model** | DAG scheduling | Durable execution |
-| **Failure handling** | Task retry | Workflow survives crashes |
-| **State** | External (database) | Built-in persistence |
-| **Real-time** | Not designed for it | Sub-second capable |
-
-**Migrating from Airflow?** If you need durability guarantees, exactly-once semantics, or real-time workflows, Kruxia Flow is a natural next step.
-
-### The Problem
-
-LLM costs spiral out of control. You're running AI workflows with no visibility into token usage. Existing tools don't help:
-
-- **Airflow/Temporal**: Great for orchestration, but no LLM awareness
-- **LangChain/LangGraph**: Great for LLM chains, but no durability or cost tracking
-- **DIY**: You're building infrastructure instead of your product
-
-### The Solution
-
-Kruxia Flow combines durable execution with AI-native features:
-
-| Feature                  | Kruxia Flow | Temporal | Airflow | LangChain |
-|--------------------------|:----------:|:--------:|:-------:|:---------:|
-| Durable execution        | **Yes**    | Yes      | Yes     | No        |
-| LLM cost tracking        | **Yes**    | No       | No      | No        |
-| Budget enforcement       | **Yes**    | No       | No      | No        |
-| Semantic caching         | **Planned**| No       | No      | Partial   |
-| Multi-provider LLM       | **Yes**    | No       | No      | Yes       |
-| Token streaming          | **Yes**    | No       | No      | Yes       |
-| Single binary            | **7.5MB**  | ~200MB   | ~500MB+ | N/A       |
-| Docker image             | **63MB**   | ~500MB   | ~1GB+   | N/A       |
-| Peak memory              | **328MB**  | ~425MB   | ~7.2GB  | N/A       |
-| Throughput (wf/sec)      | **93**     | 66       | 8       | N/A       |
-
 ## Key Features
 
 ### Built-in LLM Cost Tracking
@@ -267,6 +237,59 @@ Native support for all major providers:
 - **OpenAI**: GPT-5.1, GPT-4o, GPT-4o-mini, GPT-3.5 Turbo
 - **Google**: Gemini Pro, Gemini Flash
 - **Ollama**: Self-hosted open models
+
+## Comparison with Other Durable Orchestration Systems
+
+### vs. Temporal
+
+Temporal is the industry standard for durable execution, and we respect what they've built. Choose Kruxia Flow when you want durable execution without the operational overhead, need AI-native features, or are a small team shipping fast. Comparison:
+
+| | Temporal | Kruxia Flow |
+|---|----------|-------------|
+| **Deployment** | 4+ services (Frontend, History, Matching, Worker) | Single binary |
+| **Memory footprint** | 250-425 MB | ~200-330 MB |
+| **Operational complexity** | Requires expertise | Minimal configuration |
+| **AI workflow features** | — | Built-in cost tracking, budgets, model fallback, streaming |
+
+### vs. Inngest
+
+[Inngest](https://www.inngest.com/) offers a great developer experience for step-based durable functions with multi-language SDKs (TypeScript, Python, Go, Kotlin). It is open source and supports both cloud-hosted and self-hosted deployment.
+
+| | Inngest | Kruxia Flow |
+|---|---------|-------------|
+| **Architecture**    | Cloud-first SaaS; self-hosting available  | Self-hosted first; single binary            |
+| **Self-hosting**    | Requires Redis + PostgreSQL for production | PostgreSQL only                              |
+| **Workflow model**  | Step functions (linear/branching)          | DAG-based (parallel fan-out/fan-in)          |
+| **AI-native**       | Agent Kit add-on                           | Built-in cost tracking, budgets, model fallback, token streaming |
+| **Pricing**         | Free tier (50k executions/mo), then pay-per-execution | Open source, self-hosted                     |
+| **Language support** | TypeScript, Python, Go, Kotlin SDKs       | Language-agnostic HTTP worker protocol       |
+| **Concurrency**     | 5 concurrent steps (free), 100+ (Pro)      | Bounded only by worker pool size             |
+
+### vs. Restate
+
+[Restate](https://restate.dev/) is a lightweight durable execution runtime written in Rust by the creators of Apache Flink. It provides durable promises, reliable messaging, and consistent state management. It is open source and offers both self-hosted and cloud deployment, with SDKs for TypeScript, Java/Kotlin, Python, Go, and Rust.
+
+| | Restate | Kruxia Flow |
+|---|---------|-------------|
+| **Architecture**     | Single binary runtime (Rust), zero dependencies | Single binary (Rust), requires PostgreSQL    |
+| **Workflow model**   | Durable functions with step-level checkpointing | DAG-based (parallel fan-out/fan-in)          |
+| **State management** | Built-in key-value state per entity              | Event-sourced in PostgreSQL                  |
+| **AI-native**        | General-purpose durable execution                | Built-in cost tracking, budgets, model fallback, token streaming |
+| **Language support**  | TypeScript, Java/Kotlin, Python, Go, Rust SDKs   | Language-agnostic HTTP worker protocol       |
+z| **Cloud option**     | Restate Cloud available                           | Self-hosted only                             |
+
+### vs. Airflow
+
+Airflow is a batch scheduler. It’s great for data pipelines on a schedule, but fundamentally different from durable execution:
+
+| | Airflow | Kruxia Flow |
+|---|---------|-------------|
+| **Model** | DAG scheduling | Durable execution |
+| **Failure handling** | Task retry | Workflow survives crashes |
+| **State** | External (database) | Built-in persistence |
+| **Real-time** | Not designed for it | Sub-second capable |
+
+**Migrating from Airflow?** If you need durability guarantees, exactly-once semantics, or real-time workflows, Kruxia Flow is a natural next step.
 
 ## Examples
 
@@ -381,13 +404,13 @@ cargo install sqlx-cli --no-default-features --features postgres
 docker run -d --name pg -e POSTGRES_PASSWORD=dev -p 5432:5432 postgres:17
 
 # Run migrations
-export DATABASE_URL='postgres://postgres:dev@localhost:5432/kruxia-flow'
+export DATABASE_URL='postgres://postgres:dev@localhost:5432/kruxiaflow'
 sqlx database create
 sqlx migrate run
 
 # Build and run
 cargo build --release
-./target/release/kruxia-flow serve
+./target/release/kruxiaflow serve
 ```
 
 ## Roadmap
@@ -399,7 +422,7 @@ cargo build --release
 - Multi-provider LLM support
 - Token streaming
 - Human-in-the-loop workflows
-- Python SDK (`pip install kruxia-flow`)
+- Python SDK (`pip install kruxiaflow`)
 
 ### Next
 - Semantic caching
@@ -417,8 +440,9 @@ See [Post-MVP Roadmap](docs/post-mvp.md) for details.
 
 ## Community
 
-- **GitHub Issues**: [Report bugs and request features](https://github.com/kruxia/kruxia-flow/issues)
-- **Discussions**: [Ask questions and share ideas](https://github.com/kruxia/kruxia-flow/discussions)
+- **Discord**: [Join the Kruxia community](https://discord.gg/ZJAzygCq)
+- **Bluesky**: [@kruxia.com](https://bsky.app/profile/kruxia.com)
+- **GitHub Issues**: [Report bugs and request features](https://github.com/kruxia/kruxiaflow/issues)
 - **Code of Conduct**: [Community guidelines](CODE_OF_CONDUCT.md)
 - **Security**: [Report vulnerabilities](SECURITY.md)
 
@@ -428,7 +452,7 @@ Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTIN
 
 ```bash
 # Fork and clone
-git clone https://github.com/YOUR_USERNAME/kruxia-flow.git
+git clone https://github.com/YOUR_USERNAME/kruxiaflow.git
 
 # Create a branch
 git checkout -b feature/your-feature

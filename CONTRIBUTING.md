@@ -165,7 +165,7 @@ cargo test -p kruxiaflow-core
 ### Communication Guidelines
 
 - Be respectful and constructive
-- Search existing discussions before posting
+- Search existing issues and Discord before posting
 - Provide context and be specific
 - Help others when you can
 
