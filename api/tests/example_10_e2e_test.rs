@@ -334,7 +334,7 @@ async fn test_example_10_order_processing_with_email() {
     let worker_config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("test_worker_ex10_{}", Uuid::now_v7()),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities: 20,
@@ -361,7 +361,7 @@ description: Test order processing with database transaction and email confirmat
 activities:
   # Step 1: Mock inventory check (using health endpoint as mock)
   - key: validate_inventory
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: GET
@@ -372,7 +372,7 @@ activities:
 
   # Step 2: Mock inventory reservation (using health endpoint as mock)
   - key: reserve_inventory
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -389,7 +389,7 @@ activities:
 
   # Step 3: Mock payment processing (using health endpoint as mock)
   - key: process_payment
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -406,7 +406,7 @@ activities:
 
   # Step 4: Record order in database (atomic transaction)
   - key: record_order
-    worker: builtin
+    worker: std
     activity_name: postgres_transaction
     parameters:
       db_url: "{db_url}"
@@ -439,7 +439,7 @@ activities:
 
   # Step 5: Send confirmation email
   - key: send_confirmation
-    worker: builtin
+    worker: std
     activity_name: email_send
     parameters:
       smtp_url: "smtp://127.0.0.1:1025"

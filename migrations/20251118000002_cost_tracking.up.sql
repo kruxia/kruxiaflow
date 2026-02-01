@@ -81,8 +81,8 @@ AFTER INSERT ON activity_costs
 FOR EACH ROW
 EXECUTE FUNCTION update_workflow_cost();
 
--- Materialized view for cost dashboards
-CREATE MATERIALIZED VIEW workflow_cost_summary AS
+-- View for cost dashboards
+CREATE VIEW workflow_cost_summary AS
 SELECT
     w.id AS workflow_id,
     w.definition_name AS workflow_name,
@@ -95,7 +95,3 @@ SELECT
 FROM workflows w
 LEFT JOIN activity_costs ac ON w.id = ac.workflow_id
 GROUP BY w.id, w.definition_name, w.total_cost_usd, w.budget_limit_usd, w.status;
-
--- Index for fast dashboard queries
-CREATE INDEX idx_workflow_cost_summary_workflow
-    ON workflow_cost_summary(workflow_id);

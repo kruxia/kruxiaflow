@@ -1,6 +1,6 @@
-/// Built-in activity registration
+/// Standard worker activity registration
 ///
-/// This module provides default registration for all built-in activities.
+/// This module provides default registration for all standard worker activities.
 ///
 use crate::activities::{
     EchoActivity, EmailSendActivity, EmbeddingActivity, HttpRequestActivity, LLMPromptActivity,
@@ -10,16 +10,16 @@ use crate::registry::ActivityRegistry;
 use kruxiaflow_core::cache::CacheService;
 use std::sync::Arc;
 
-/// Register all built-in activities
+/// Register all standard worker activities
 ///
-/// Returns an ActivityRegistry with all built-in activities pre-registered:
-/// - `builtin.echo` - Echo activity (for testing)
-/// - `builtin.http_request` - HTTP request activity
-/// - `builtin.postgres_query` - PostgreSQL query activity
-/// - `builtin.postgres_transaction` - PostgreSQL transaction activity
-/// - `builtin.llm_prompt` - LLM prompt completion activity
-/// - `builtin.embedding` - LLM embedding generation activity
-/// - `builtin.email_send` - Email send activity via SMTP
+/// Returns an ActivityRegistry with all standard worker activities pre-registered:
+/// - `std.echo` - Echo activity (for testing)
+/// - `std.http_request` - HTTP request activity
+/// - `std.postgres_query` - PostgreSQL query activity
+/// - `std.postgres_transaction` - PostgreSQL transaction activity
+/// - `std.llm_prompt` - LLM prompt completion activity
+/// - `std.embedding` - LLM embedding generation activity
+/// - `std.email_send` - Email send activity via SMTP
 ///
 /// # Arguments
 ///
@@ -28,15 +28,15 @@ use std::sync::Arc;
 /// # Example
 ///
 /// ```rust,no_run
-/// use kruxiaflow_worker::register_builtin_activities;
+/// use kruxiaflow_worker::register_std_activities;
 /// use kruxiaflow_core::cache::NoOpCache;
 /// use std::sync::Arc;
 ///
 /// let cache_service = Arc::new(NoOpCache::new());
-/// let registry = register_builtin_activities(cache_service);
+/// let registry = register_std_activities(cache_service);
 /// // Registry is ready to use with worker manager
 /// ```
-pub fn register_builtin_activities(cache_service: Arc<dyn CacheService>) -> ActivityRegistry {
+pub fn register_std_activities(cache_service: Arc<dyn CacheService>) -> ActivityRegistry {
     let mut registry = ActivityRegistry::new(cache_service);
 
     // Register echo activity (for testing)
@@ -59,7 +59,7 @@ pub fn register_builtin_activities(cache_service: Arc<dyn CacheService>) -> Acti
     // Register email activity
     registry.register(Arc::new(EmailSendActivity::new()));
 
-    // Future built-in activities will be registered here:
+    // Future standard worker activities will be registered here:
     // registry.register(Arc::new(S3OperationActivity::new()));
 
     registry
@@ -71,19 +71,19 @@ mod tests {
     use kruxiaflow_core::cache::NoOpCache;
 
     #[test]
-    fn test_register_builtin_activities() {
+    fn test_register_std_activities() {
         let cache_service = Arc::new(NoOpCache::new());
-        let registry = register_builtin_activities(cache_service);
+        let registry = register_std_activities(cache_service);
         let activity_types = registry.activity_types();
 
-        // Verify all built-in activities are registered
-        assert!(activity_types.contains(&"builtin.echo".to_string()));
-        assert!(activity_types.contains(&"builtin.http_request".to_string()));
-        assert!(activity_types.contains(&"builtin.postgres_query".to_string()));
-        assert!(activity_types.contains(&"builtin.postgres_transaction".to_string()));
-        assert!(activity_types.contains(&"builtin.llm_prompt".to_string()));
-        assert!(activity_types.contains(&"builtin.embedding".to_string()));
-        assert!(activity_types.contains(&"builtin.email_send".to_string()));
+        // Verify all standard worker activities are registered
+        assert!(activity_types.contains(&"std.echo".to_string()));
+        assert!(activity_types.contains(&"std.http_request".to_string()));
+        assert!(activity_types.contains(&"std.postgres_query".to_string()));
+        assert!(activity_types.contains(&"std.postgres_transaction".to_string()));
+        assert!(activity_types.contains(&"std.llm_prompt".to_string()));
+        assert!(activity_types.contains(&"std.embedding".to_string()));
+        assert!(activity_types.contains(&"std.email_send".to_string()));
 
         // Should have exactly 7 activities
         assert_eq!(activity_types.len(), 7);

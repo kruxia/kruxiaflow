@@ -113,7 +113,7 @@ description: Fetch weather data and send to webhook
 activities:
   fetch_weather:
     activity: http_request
-    # worker: builtin  # Optional - builtin is the default
+    # worker: std  # Optional - std is the default
     parameters:
       method: GET
       url: "https://api.weather.gov/gridpoints/TOP/31,80/forecast"
@@ -137,7 +137,7 @@ activities:
 ```
 
 #### YAML Features Implemented
-- ✅ Activity definition with `activity` name and optional `worker` (defaults to `builtin`)
+- ✅ Activity definition with `activity` name and optional `worker` (defaults to `std`)
 - ✅ Activity naming: lowercase alphanumeric with underscores (snake_case, e.g., `http_request`, `postgres_query`)
 - ✅ Sequential execution via `depends_on`
 - ✅ Template expressions: `{{INPUT.input_name}}`
@@ -897,7 +897,7 @@ activities:
   # Store chunks with embeddings (simplified 3-chunk example)
   store_chunk_1:
     activity: postgres_query
-    worker: builtin
+    worker: std
     parameters:
       db_url: "{{SECRET.db_url}}"
       query: |
@@ -913,7 +913,7 @@ activities:
 
   store_chunk_2:
     activity: postgres_query
-    worker: builtin
+    worker: std
     parameters:
       db_url: "{{SECRET.db_url}}"
       query: |
@@ -929,7 +929,7 @@ activities:
 
   store_chunk_3:
     activity: postgres_query
-    worker: builtin
+    worker: std
     parameters:
       db_url: "{{SECRET.db_url}}"
       query: |
@@ -946,7 +946,7 @@ activities:
   # Confirm indexing complete
   confirm_indexing:
     activity: http_request
-    worker: builtin
+    worker: std
     parameters:
       method: POST
       url: "{{INPUT.notification_webhook_url}}"
@@ -996,7 +996,7 @@ activities:
   # Step 2: Search for similar chunks using vector similarity
   search_similar_chunks:
     activity: postgres_query
-    worker: builtin
+    worker: std
     parameters:
       db_url: "{{SECRET.db_url}}"
       query: |
@@ -1049,7 +1049,7 @@ activities:
   # Step 4: Store Q&A result for analytics
   store_qa_result:
     activity: postgres_query
-    worker: builtin
+    worker: std
     parameters:
       db_url: "{{SECRET.db_url}}"
       query: |
@@ -1069,7 +1069,7 @@ activities:
   # Step 5: Return answer to user
   send_response:
     activity: http_request
-    worker: builtin
+    worker: std
     parameters:
       method: POST
       url: "{{INPUT.response_webhook_url}}"
@@ -1712,7 +1712,7 @@ description: LLM prompt with token streaming over WebSocket
 
 activities:
   - key: generate_story
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     streaming: true  # Enable token streaming
     parameters:
@@ -1997,7 +1997,7 @@ activities:
    - `RateLimiter` - Per-domain rate limiting
    - `EmailExecutor` - SMTP client wrapper
    - `EmailSendActivity` - ActivityImpl implementation
-3. Register `email_send` in builtin activities
+3. Register `email_send` in std activities
 4. Unit tests for SMTP URL parsing, rate limiter
 5. Integration test with mailhog
 

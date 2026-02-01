@@ -347,7 +347,7 @@ Detailed flow:
    Authorization: Bearer eyJhbGc...
    Content-Type: application/json
 
-   {"worker": "builtin", "name": "http_request"}
+   {"worker": "std", "name": "http_request"}
    ```
 
 **Polling Strategy** (via authenticated API endpoint):
@@ -446,7 +446,7 @@ class StreamFlowWorker:
 
 ### 4. Built-in Activities
 
-Kruxia Flow includes several built-in activities that cover common workflow patterns. All built-in activities are executed by the built-in worker with `worker: builtin`.
+Kruxia Flow includes several built-in activities that cover common workflow patterns. All built-in activities are executed by the built-in worker with `worker: std`.
 
 #### http_request
 
@@ -454,7 +454,7 @@ HTTP requests with full control over method, headers, query parameters, body, an
 
 ```yaml
 - key: call_api
-  worker: builtin
+  worker: std
   activity_name: http_request
   parameters:
     method: POST
@@ -489,7 +489,7 @@ Single PostgreSQL query with parameterized values.
 
 ```yaml
 - key: fetch_user
-  worker: builtin
+  worker: std
   activity_name: postgres_query
   parameters:
     query: "SELECT * FROM users WHERE id = $1"
@@ -510,7 +510,7 @@ Atomic multi-statement transactions with automatic rollback on failure.
 
 ```yaml
 - key: record_order
-  worker: builtin
+  worker: std
   activity_name: postgres_transaction
   parameters:
     db_url: "{{SECRET.db_url}}"
@@ -543,7 +543,7 @@ LLM completions with multi-model fallback, budget awareness, and optional stream
 
 ```yaml
 - key: generate_response
-  worker: builtin
+  worker: std
   activity_name: llm_prompt
   streaming: true  # Enable WebSocket token streaming
   parameters:
@@ -595,7 +595,7 @@ HTML/text email via SMTP.
 
 ```yaml
 - key: send_notification
-  worker: builtin
+  worker: std
   activity_name: email_send
   parameters:
     smtp_url: "{{SECRET.smtp_url}}"
@@ -1009,7 +1009,7 @@ Kruxia Flow provides comprehensive file management capabilities for handling lar
 ```yaml
 activities:
   - key: fetch_document
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: GET
@@ -1022,7 +1022,7 @@ activities:
 **File Reference in Downstream Activities**:
 ```yaml
   - key: process_document
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -1049,7 +1049,7 @@ activities:
 activities:
   # Fan-out: Multiple parallel downloads
   - key: fetch_doc1
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: GET
@@ -1059,7 +1059,7 @@ activities:
         type: file
 
   - key: fetch_doc2
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: GET
@@ -1070,7 +1070,7 @@ activities:
 
   # Parallel processing
   - key: process_doc1
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -1084,7 +1084,7 @@ activities:
       - fetch_doc1
 
   - key: process_doc2
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -1099,7 +1099,7 @@ activities:
 
   # Fan-in: Wait for all processing to complete
   - key: aggregate_results
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -3226,7 +3226,7 @@ description: Process payment with validation and authorization
 activities:
   validate_payment:
     activity: validate_card
-    worker: payments  # Optional - defaults to "builtin"
+    worker: payments  # Optional - defaults to "std"
     parameters:
       card_token: "{{INPUT.card_token}}"
     outputs:

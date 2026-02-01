@@ -43,6 +43,50 @@ services:
       retries: 10
       start_period: 30s
 
+  # Kruxia Flow server for py-std benchmarks (API + orchestrator, no built-in worker)
+  kruxiaflow-py-std-server:
+    image: kruxia/kruxiaflow:latest
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: deploy
+    environment:
+      RUST_LOG: info
+      DATABASE_URL: postgres://kruxiaflow:kruxiaflow@kruxiaflow-postgres:5432/kruxiaflow
+      KRUXIAFLOW_CLIENT_ID: benchmark
+      KRUXIAFLOW_CLIENT_SECRET: benchmark_secret
+      KRUXIAFLOW_OAUTH_TOKEN_ISSUER: http://localhost:8080
+      KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE: kruxiaflow-dev-audience
+      KRUXIAFLOW_LOG_LEVEL: info
+      KRUXIAFLOW_NO_WORKER: "true"
+      KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM: "${KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM:-}"
+      KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM: "${KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM:-}"
+    depends_on:
+      kruxiaflow:
+        condition: service_healthy
+    command: [ "serve" ]
+    healthcheck:
+      test: [ "CMD", "/kruxiaflow", "version" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # Kruxia Flow Python worker (py-std)
+  kruxiaflow-py-std:
+    build:
+      context: ../py
+      dockerfile: Dockerfile
+      target: py-std
+    environment:
+      KRUXIAFLOW_API_URL: http://kruxiaflow-py-std-server:8080
+      KRUXIAFLOW_CLIENT_ID: benchmark
+      KRUXIAFLOW_CLIENT_SECRET: benchmark_secret
+      WORKER_TYPE: py-std
+    depends_on:
+      kruxiaflow-py-std-server:
+        condition: service_healthy
+
   # Temporal stack
   temporal-postgres:
     image: postgres:13
@@ -229,21 +273,24 @@ services:
     depends_on:
       kruxiaflow:
         condition: service_healthy
+      kruxiaflow-py-std:
+        condition: service_started
       temporal:
         condition: service_healthy
-      # airflow-api-server:
-      #   condition: service_healthy
-      # airflow-scheduler:
-      #   condition: service_healthy
-      # airflow-dag-processor:
-      #   condition: service_started
-      # airflow-worker:
-      #   condition: service_started
+      airflow-api-server:
+        condition: service_healthy
+      airflow-scheduler:
+        condition: service_healthy
+      airflow-dag-processor:
+        condition: service_started
+      airflow-worker:
+        condition: service_started
     volumes:
       - ./:/app/
       - /var/run/docker.sock:/var/run/docker.sock  # For resource monitoring
-    # NOTE: Airflow benchmarking is currently disabled due to performance issues in Airflow 3
-    command: [ "python", "run_benchmark.py", "run", "-p", "kruxiaflow", "-p", "temporal" ]
+    # NOTE: Airflow benchmarking can be disabled:
+    # command: [ "python", "run_benchmark.py", "run", "-p", "temporal", "-p", "kruxiaflow", "-p", "kruxiaflow-py-std" ]
+    command: [ "python", "run_benchmark.py", "run" ]
 
 volumes:
   kruxiaflow_pg_data:

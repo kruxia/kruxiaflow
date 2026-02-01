@@ -6,7 +6,7 @@ activities:
     parameters:
       model: anthropic/claude-sonnet-4-5-20250929
       prompt: |
-        Generate a daily summary report for {{INPUT.report_date}}.
+        Generate a daily summary report for {{INPUT.report_date | default(INPUT.report_time[:10])}}.
 
         Include:
         - Key metrics and trends
@@ -22,20 +22,28 @@ activities:
       # Input format: "2025-12-01T09:00:00-08:00"
       scheduled_for: "{{INPUT.report_time}}"
       budget:
-        limit_usd: 0.10
+        limit: 0.10
         action: abort
 
-  # Send report via email/webhook after generation
+  # Send report via mailpit after generation
   - key: send_report
     activity_name: http_request
     parameters:
       method: POST
-      url: "{{INPUT.notification_webhook}}"
+      url: "http://mailpit:8025/api/v1/send"
       headers:
         Content-Type: "application/json"
       body:
-        subject: "Daily Report - {{INPUT.report_date}}"
-        content: "{{generate_report.result.content}}"
-        scheduled_for: "{{INPUT.report_time}}"
+        From:
+          Name: "Kruxia Flow Reports"
+          Email: "reports@kruxiaflow.local"
+        To:
+          - Name: "Report Subscriber"
+            Email: "reports@example.com"
+        Subject: "Daily Report - {{INPUT.report_date | default(INPUT.report_time[:10])}}"
+        Text: |
+          {{generate_report.result.content}}
+
+          Scheduled for: {{INPUT.report_time}}
     depends_on:
       - generate_report

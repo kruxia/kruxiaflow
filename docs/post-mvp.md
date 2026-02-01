@@ -683,7 +683,7 @@ This story enhances file handling with production features deferred from the MVP
 ```yaml
 activities:
   - key: process_document
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -707,7 +707,7 @@ activities:
         type: folder  # Directory of PDF files
 
   - key: upload_reports
-    worker: builtin
+    worker: std
     activity_name: s3_upload_folder
     parameters:
       folder: "{{FOLDER.generate_reports.reports}}"
@@ -731,7 +731,7 @@ let versions = storage.list_file_versions(workflow_id, activity_key, filename).a
 ```yaml
 activities:
   - key: generate_upload_url
-    worker: builtin
+    worker: std
     activity_name: generate_presigned_url
     parameters:
       operation: put_object
@@ -1847,6 +1847,49 @@ orjson>=3.9.0          # Fast JSON
 
 ---
 
+### Story 4.1d: Python Worker True Parallelism
+
+**Priority**: P3 (Low - current asyncio model handles I/O-bound workloads well)
+
+**As** a Python developer running CPU-intensive activities
+**I want** the option to execute activities with true parallelism
+**So that** CPU-bound work doesn't block other activities
+
+**Current Implementation**: The Python worker uses `asyncio.create_task()` for concurrent activity execution. This is single-threaded cooperative multitasking - tasks yield at `await` points but cannot run simultaneously.
+
+**Why Current Model Works**: Activity execution is primarily I/O-bound (HTTP calls, file transfers). Multiple activities progress concurrently as they take turns waiting on I/O.
+
+**Scope (if needed)**:
+
+**Option 1: ThreadPoolExecutor**
+- Add `offload_to_thread=True` option to `@activity` decorator
+- Activity handlers run in thread pool
+- Parallelism for C extensions that release GIL (numpy, pandas)
+- Does NOT help pure Python CPU-bound code (GIL limitation)
+
+**Option 2: ProcessPoolExecutor**
+- True parallelism (each process has own GIL)
+- Requires serializable parameters and results (pickle)
+- Cannot share `WorkerApiClient`, `ActivityContext` across processes
+- Significant architecture changes required
+- Higher memory footprint (~30-50MB per process)
+
+**Option 3: Python 3.13+ Free-threaded Mode**
+- Experimental `--disable-gil` flag
+- Would make ThreadPoolExecutor achieve true parallelism
+- Monitor for stability before adoption
+
+**Decision Criteria**:
+- Only implement if users report CPU-bound bottlenecks
+- Measured latency improvements must justify added complexity
+- I/O-bound workloads (common case) already well-served by asyncio
+
+**Analysis Document**: See `py/docs/concurrency-parallelism-analysis.md`
+
+**Estimated Time**: 3-5 days (ThreadPoolExecutor), 7-10 days (ProcessPoolExecutor)
+
+---
+
 ### Story 4.1d: Built-in Python Worker
 
 **Priority**: P1 (High - Zero-setup experience)
@@ -2009,6 +2052,42 @@ conditions:
 - Reduce need for custom activities
 - More expressive conditions
 - Better developer experience
+
+---
+
+### Story 4.4b: Date/Time Template Filters via minijinja-contrib
+
+**Priority**: P3 (Low - Quality of life for template expressions)
+
+**As** a workflow developer
+**I want** date/time filters available in template expressions
+**So that** I can parse, format, and manipulate dates and timestamps in workflow parameters and conditions
+
+**Scope**:
+- Evaluate adding `minijinja-contrib` as a dependency
+- Register `dateformat`, `datetimeformat`, and `timeformat` filters
+- Evaluate adding a `now()` function for current timestamp access
+- Document available date/time filters in template expression reference
+
+**Example Expressions**:
+```yaml
+parameters:
+  # Format an ISO 8601 timestamp as a date string
+  report_date: "{{INPUT.report_time | dateformat('%Y-%m-%d')}}"
+
+  # Format with custom display
+  display_date: "{{INPUT.scheduled_at | datetimeformat('%B %d, %Y at %I:%M %p')}}"
+
+conditions:
+  # Compare against current time (requires now() function)
+  - "{{INPUT.deadline | dateformat}} > now() | dateformat"
+```
+
+**Current Workaround**: String slicing (`{{INPUT.report_time[:10]}}`) extracts the date portion from ISO 8601 timestamps, but this is fragile and limited to extraction — no formatting, parsing, or arithmetic.
+
+**References**:
+- [minijinja-contrib filters](https://docs.rs/minijinja-contrib/latest/minijinja_contrib/filters/)
+- [minijinja-cli datetime feature](https://crates.io/crates/minijinja-cli)
 
 ---
 
@@ -2198,7 +2277,7 @@ class TestPaymentWorkflow(WorkflowTest):
 ```yaml
 # Create a new SQLite database
 - key: create_db
-  worker: builtin
+  worker: std
   name: sqlite_create
   parameters:
     schema: |
@@ -2209,7 +2288,7 @@ class TestPaymentWorkflow(WorkflowTest):
 
 # Execute queries on an existing SQLite database
 - key: process_data
-  worker: builtin
+  worker: std
   name: sqlite_execute
   parameters:
     database: "{{create_db.outputs.database}}"
@@ -2222,7 +2301,7 @@ class TestPaymentWorkflow(WorkflowTest):
 
 # Query and return results
 - key: get_results
-  worker: builtin
+  worker: std
   name: sqlite_query
   parameters:
     database: "{{process_data.outputs.database}}"
@@ -3793,6 +3872,48 @@ activities:
 - Better developer experience (clear error messages)
 - Safe conditional loops (retry logic, polling)
 - Confidence in workflow correctness
+
+---
+
+### Story 6.9: Per-Workflow Timeout
+
+**Priority**: P2 (Medium - Required for long-running workflows)
+
+**As** a workflow developer
+**I want** to specify a timeout for individual workflow definitions
+**So that** long-running workflows (e.g., cascading reminders over hours/days) can override the server-level default without requiring orchestrator reconfiguration
+
+**Current Behavior**:
+- Workflow timeout is server-level only: `KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS` (default: 300s)
+- All workflows share the same timeout ceiling
+- Long-running workflows require increasing the server timeout globally, which weakens the safety net for all other workflows
+
+**Proposed Behavior**:
+- Add optional `timeout` field to workflow definition YAML
+- Orchestrator config becomes the **default**, not a hard ceiling
+- Per-workflow timeout can be shorter or longer than the default
+- Optional server-level `max_workflow_timeout` to enforce an upper bound
+
+**Example YAML**:
+```yaml
+name: delayed_reminder_system
+timeout: "30m"  # This workflow needs up to 30 minutes
+activities:
+  - key: send_initial_notification
+    # ...
+```
+
+**Scope**:
+- Add `timeout` field to workflow definition schema (duration string format)
+- Parse and store per-workflow timeout in database
+- Orchestrator `check_and_timeout_stuck_workflows()` uses per-workflow timeout when present, falls back to server default
+- Optional `KRUXIAFLOW_ORCHESTRATOR_MAX_WORKFLOW_TIMEOUT_SECS` env var as an upper bound
+- Validation: reject workflow definitions where `timeout` exceeds `max_workflow_timeout` (if configured)
+
+**Benefits**:
+- Long-running workflows (reminders, scheduled reports, multi-day processes) work without global config changes
+- Short-running workflows retain a tight timeout safety net
+- Self-documenting: the workflow definition declares its own expected duration
 
 ---
 

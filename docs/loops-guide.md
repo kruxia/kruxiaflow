@@ -548,7 +548,7 @@ Full example showing all loop features:
 name: agentic_research
 activities:
   - key: initialize
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     parameters:
       model: anthropic/claude-haiku-4-20250415

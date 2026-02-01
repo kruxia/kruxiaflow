@@ -24,15 +24,11 @@ pub struct WorkflowCostSummary {
 /// Get cost summary for a specific workflow
 ///
 /// Returns the total cost, budget limit, budget remaining, and activity count
-/// for a workflow. Uses the workflow_cost_summary materialized view for
-/// efficient queries.
+/// for a workflow. Uses the workflow_cost_summary view.
 ///
 /// # Response
 /// - 200 OK: Cost summary returned
 /// - 404 Not Found: Workflow does not exist
-///
-/// # Performance
-/// Target: <10ms P99 latency (materialized view query)
 #[utoipa::path(
     get,
     path = "/api/v1/workflows/{workflow_id}/cost",
@@ -53,7 +49,7 @@ pub async fn get_workflow_cost(
     State(state): State<AppState>,
     Path(workflow_id): Path<Uuid>,
 ) -> Result<Json<WorkflowCostSummary>, StatusCode> {
-    // Query workflow cost from materialized view
+    // Query workflow cost from view
     let summary = sqlx::query!(
         r#"
         SELECT
@@ -102,6 +98,7 @@ pub struct ActivityCostDetail {
     pub cached_tokens: Option<i32>,
     pub provider: String,
     pub model: String,
+    pub budget_limit_usd: Option<Decimal>,
     pub budget_exceeded: Option<bool>,
     pub created_at: DateTime<Utc>,
 }
@@ -151,6 +148,7 @@ pub async fn get_workflow_cost_history(
             cached_tokens,
             provider,
             model,
+            activity_budget_limit_usd as budget_limit_usd,
             budget_exceeded,
             created_at
         FROM activity_costs

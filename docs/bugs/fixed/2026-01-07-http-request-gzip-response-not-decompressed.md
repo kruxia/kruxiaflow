@@ -7,7 +7,7 @@
 
 ## Summary
 
-The `http_request` builtin activity sends `Accept-Encoding: gzip` by default (via the underlying HTTP client), but does not decompress gzip-compressed responses before storing them in the database. This causes PostgreSQL to reject the workflow event because gzip binary data contains null bytes (`\u0000`) which cannot be stored in JSON text fields.
+The `http_request` built-in activity sends `Accept-Encoding: gzip` by default (via the underlying HTTP client), but does not decompress gzip-compressed responses before storing them in the database. This causes PostgreSQL to reject the workflow event because gzip binary data contains null bytes (`\u0000`) which cannot be stored in JSON text fields.
 
 ## Symptoms
 
@@ -15,7 +15,7 @@ When making an HTTP request to a server that returns gzip-compressed content:
 
 ```yaml
 - key: lookup_doi_org
-  worker: builtin
+  worker: std
   activity_name: http_request
   parameters:
     method: GET
@@ -53,7 +53,7 @@ Add `Accept-Encoding: identity` header to HTTP requests to disable compression:
 
 ```yaml
 - key: lookup_doi_org
-  worker: builtin
+  worker: std
   activity_name: http_request
   parameters:
     method: GET

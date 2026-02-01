@@ -58,7 +58,7 @@ Example: --max-activities 32"
         long_help = "Activity types this worker handles\n\n\
 If not specified, handles all built-in activity types.\n\
 Use to create specialized workers for specific activities.\n\n\
-Example: --activity-types builtin.echo,builtin.http_request,builtin.llm_prompt"
+Example: --activity-types std.echo,std.http_request,std.llm_prompt"
     )]
     pub activity_types: Option<String>,
 
@@ -218,13 +218,13 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
     // Create cache service based on environment configuration
     let cache_config = crate::config::CacheConfig::new();
     cache_config.log_config();
-    let cache_service = cache_config.create_cache_service();
+    let cache_service = cache_config.create_cache_service().await;
 
     // Create activity registry with built-in activities
     let registry = if let Some(ref types_str) = cmd.activity_types {
         // Filter registry to only specified types
         let requested_types: Vec<&str> = types_str.split(',').map(|s| s.trim()).collect();
-        let full_registry = kruxiaflow_worker::register_builtin_activities(cache_service);
+        let full_registry = kruxiaflow_worker::register_std_activities(cache_service);
 
         // Log which types are available vs requested
         let available_types = full_registry.activity_types();
@@ -238,7 +238,7 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
         // TODO: Implement registry filtering in kruxiaflow_worker
         full_registry
     } else {
-        kruxiaflow_worker::register_builtin_activities(cache_service)
+        kruxiaflow_worker::register_std_activities(cache_service)
     };
 
     tracing::info!(
@@ -250,7 +250,7 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
     let config = WorkerConfig {
         api_url: cmd.api_url.clone(),
         worker_id: worker_id.clone(),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         poll_max_activities: cmd.poll_max_activities,
         poll_interval: Duration::from_millis(cmd.poll_interval),
         max_concurrent_activities: cmd.max_activities,

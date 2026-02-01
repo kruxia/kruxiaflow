@@ -423,7 +423,7 @@ impl ActivityImpl for PostgresQueryActivity {
     }
 
     fn worker(&self) -> &str {
-        "builtin"
+        "std"
     }
 }
 
@@ -564,7 +564,7 @@ impl ActivityImpl for PostgresTransactionActivity {
     }
 
     fn worker(&self) -> &str {
-        "builtin"
+        "std"
     }
 }
 

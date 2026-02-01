@@ -16,18 +16,19 @@ services:
       - backend
       - frontend
 
-  # Mailhog for email testing (US-5.7a email_send activity)
-  mailhog:
-    image: mailhog/mailhog:v1.0.1
-    container_name: kruxiaflow-mailhog
+  # Mailpit for email testing (US-5.7a email_send activity)
+  # - SMTP server on port 1025
+  # - Web UI + REST API on port 8025 (http://localhost:8025)
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: kruxiaflow-mailpit
     ports:
       - "127.0.0.1:1025:1025"   # SMTP server
-      - "127.0.0.1:8025:8025"   # Web UI for viewing emails
+      - "127.0.0.1:8025:8025"   # Web UI + REST API
     networks:
       - backend
       - frontend
     restart: unless-stopped
-    # Suppress logs - mailhog is a dev tool, check UI at http://localhost:8025
     logging:
       driver: "none"
     deploy:
@@ -40,7 +41,7 @@ services:
           memory: 128M
     labels:
       com.kruxiaflow.service: "email"
-      com.kruxiaflow.component: "mailhog"
+      com.kruxiaflow.component: "mailpit"
 
   # Override kruxiaflow for development: source mounting, cargo caches, no healthcheck
   kruxiaflow:

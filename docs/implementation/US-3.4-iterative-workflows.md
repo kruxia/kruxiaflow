@@ -62,7 +62,7 @@ flowchart TB
 ```yaml
 activities:
   - key: perform_search
-    worker: builtin
+    worker: std
     activity_name: http_request
     iteration_scoped: true  # Store results from each iteration as array
     parameters:
@@ -78,7 +78,7 @@ activities:
           - "{{evaluate_results.sufficient | last == false}}"  # Check latest iteration
 
   - key: evaluate_results
-    worker: builtin
+    worker: std
     activity_name: llm_call
     iteration_scoped: true
     parameters:
@@ -293,7 +293,7 @@ pub struct ActivitySettings {
 ```yaml
 activities:
   - key: perform_search
-    worker: builtin
+    worker: std
     activity_name: http_request
     iteration_scoped: true      # Enable iteration tracking
     iteration_limit: 10          # Prevent infinite loops
@@ -1346,7 +1346,7 @@ activities:
 
    activities:
      - key: initialize
-       worker: builtin
+       worker: std
        activity_name: llm_call
        parameters:
          provider: anthropic
@@ -1366,7 +1366,7 @@ activities:
          - name: cost_usd
 
      - key: perform_search
-       worker: builtin
+       worker: std
        activity_name: llm_call
        iteration_scoped: true
        iteration_limit: 5
@@ -1394,7 +1394,7 @@ activities:
              - "{{evaluate_results.results | last | get(key='content') | contains(substring='CONTINUE')}}"
 
      - key: evaluate_results
-       worker: builtin
+       worker: std
        activity_name: llm_call
        iteration_scoped: true
        parameters:
@@ -1419,7 +1419,7 @@ activities:
          - perform_search
 
      - key: compile_report
-       worker: builtin
+       worker: std
        activity_name: llm_call
        parameters:
          provider: anthropic
@@ -1906,7 +1906,7 @@ description: "Research assistant with iteration tracking, budget limits, and con
 activities:
   # Step 1: Initialize research plan
   - key: initialize
-    worker: builtin
+    worker: std
     activity_name: llm_call
     parameters:
       provider: anthropic
@@ -1933,7 +1933,7 @@ activities:
 
   # Step 2: Perform iterative research (loops until sufficient)
   - key: perform_search
-    worker: builtin
+    worker: std
     activity_name: llm_call
     iteration_scoped: true
     iteration_limit: 5
@@ -1964,7 +1964,7 @@ activities:
 
   # Step 3: Evaluate if we have enough information
   - key: evaluate_results
-    worker: builtin
+    worker: std
     activity_name: llm_call
     iteration_scoped: true
     settings:
@@ -1994,7 +1994,7 @@ activities:
 
   # Step 4: Compile final report (only when sufficient)
   - key: compile_report
-    worker: builtin
+    worker: std
     activity_name: llm_call
     settings:
       budget:

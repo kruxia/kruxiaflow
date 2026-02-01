@@ -5,7 +5,10 @@ import httpx
 import time
 import statistics
 from dataclasses import dataclass
-from .workflows import SEQUENTIAL_5, SEQUENTIAL_3, PARALLEL_10
+from .workflows import (
+    SEQUENTIAL_5, SEQUENTIAL_3, PARALLEL_10,
+    PY_STD_SEQUENTIAL_5, PY_STD_SEQUENTIAL_3, PY_STD_PARALLEL_10,
+)
 
 
 @dataclass
@@ -46,7 +49,7 @@ class StreamFlowBenchmark:
         self.access_token: str | None = None
         self.client: httpx.AsyncClient | None = None
 
-    async def setup(self) -> None:
+    async def setup(self, extra_workflows: list[dict] | None = None) -> None:
         """Initialize HTTP client and authenticate"""
         self.client = httpx.AsyncClient(timeout=30.0)
 
@@ -66,6 +69,9 @@ class StreamFlowBenchmark:
         await self._register_workflow(SEQUENTIAL_5)
         await self._register_workflow(SEQUENTIAL_3)
         await self._register_workflow(PARALLEL_10)
+
+        for wf in (extra_workflows or []):
+            await self._register_workflow(wf)
 
     async def cleanup(self) -> None:
         """Close HTTP client"""
