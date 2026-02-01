@@ -66,7 +66,7 @@ Example: --activity-types builtin.echo,builtin.http_request,builtin.llm_prompt"
     #[arg(
         long,
         env = "KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES",
-        default_value = "1",
+        default_value = "5",
         help = "Maximum activities to claim per poll",
         long_help = "Maximum number of activities each worker claims per poll\n\n\
 Lower values (1-5) improve work distribution.\n\
@@ -250,7 +250,7 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
     let config = WorkerConfig {
         api_url: cmd.api_url.clone(),
         worker_id: worker_id.clone(),
-        activity_types: registry.activity_types(),
+        worker: "builtin".to_string(),
         poll_max_activities: cmd.poll_max_activities,
         poll_interval: Duration::from_millis(cmd.poll_interval),
         max_concurrent_activities: cmd.max_activities,

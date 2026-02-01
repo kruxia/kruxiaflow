@@ -51,7 +51,7 @@ impl WorkerPoller {
     pub async fn run(&self) -> Result<()> {
         tracing::info!(
             worker_id = %self.config.worker_id,
-            activity_types = ?self.config.activity_types,
+            worker = %self.config.worker,
             max_concurrent_activities = self.config.max_concurrent_activities,
             "Starting worker poller with semaphore-based concurrency"
         );
@@ -93,11 +93,7 @@ impl WorkerPoller {
 
         let response = self
             .client
-            .poll_activities(
-                &self.config.worker_id,
-                self.config.activity_types.clone(),
-                max_to_poll,
-            )
+            .poll_activities(&self.config.worker_id, &self.config.worker, max_to_poll)
             .await
             .context("Failed to poll activities")?;
 
@@ -533,7 +529,7 @@ mod tests {
         WorkerConfig {
             api_url: "http://localhost:8080".to_string(),
             worker_id: "test_worker".to_string(),
-            activity_types: vec!["test.success".to_string()],
+            worker: "test".to_string(),
             poll_max_activities: 10,
             poll_interval: Duration::from_millis(100),
             max_concurrent_activities: 16,

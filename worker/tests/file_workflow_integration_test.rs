@@ -238,7 +238,7 @@ async fn test_end_to_end_file_workflow() -> Result<()> {
     let worker_config = WorkerConfig {
         api_url: server_url.clone(),
         worker_id: "test_worker".to_string(),
-        activity_types: registry.activity_types(),
+        worker: "builtin".to_string(),
         poll_interval: Duration::from_millis(100),
         poll_max_activities: 5,
         max_concurrent_activities: 16,

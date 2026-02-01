@@ -49,51 +49,51 @@ A visual dashboard showing multiple concurrent AI workflows executing simultaneo
 ┌─────────────────────────────────────────────────────────────────┐
 │  🎯 Kruxiaflow Live Command Center                    [Pi Logo] │
 │  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │
-│                                                                   │
-│  💰 Total Cost Today: $2.47   💾 Workflows: 23   ⏱️ Uptime: 4h  │
+│                                                                 │
+│  💰 Total Cost Today: $2.47   💾 Workflows: 23   ⏱️ Uptime: 4h   │
 │  📊 Savings vs. GPT-4-only: $14.23 (85%)                        │
 │  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ │
-│                                                                   │
+│                                                                 │
 │  ┌──────────────────────────────┬────────────────────────────┐  │
-│  │ 🔍 Research: "Rust vs Go"    │ 📧 Email Summary           │  │
-│  │ ──────────────────────────── │ ───────────────────────── │  │
+│  │ 🔍 Research: "Rust vs Go"    │ 📧 Email Summary            │  │
+│  │ ──────────────────────────── │ ────────────────────────── │  │
 │  │ Status: ⚡ Streaming          │ Status: ✅ Completed       │  │
-│  │ Cost: $0.047 / $0.50 budget  │ Cost: $0.003              │  │
-│  │ Model: Claude Sonnet 3.5     │ Model: Haiku 3.5          │  │
-│  │ ───────────────────────────  │ ───────────────────────── │  │
-│  │ [████████████████░░░] 85%    │ Saved: $0.127 (98%)       │  │
+│  │ Cost: $0.047 / $0.50 budget  │ Cost: $0.003               │  │
+│  │ Model: Claude Sonnet 3.5     │ Model: Haiku 3.5           │  │
+│  │ ───────────────────────────  │ ────────────────────────── │  │
+│  │ [████████████████░░░] 85%    │ Saved: $0.127 (98%)        │  │
 │  │                              │                            │  │
-│  │ "Rust and Go both excel in   │ Summary: 5 emails, 2      │  │
-│  │  concurrent programming, but  │ requiring action...       │  │
-│  │  Rust's ownership model..."   │ [View Details]            │  │
-│  │  [Streaming live...]          │                           │  │
+│  │ "Rust and Go both excel in   │ Summary: 5 emails, 2       │  │
+│  │  concurrent programming, but │ requiring action...        │  │
+│  │  Rust's ownership model..."  │ [View Details]             │  │
+│  │  [Streaming live...]         │                            │  │
 │  └──────────────────────────────┴────────────────────────────┘  │
-│                                                                   │
+│                                                                 │
 │  ┌──────────────────────────────┬────────────────────────────┐  │
-│  │ 🌐 News Analysis             │ 💬 Content Moderation      │  │
-│  │ ──────────────────────────── │ ───────────────────────── │  │
-│  │ Status: 🔄 Running (3/5)     │ Status: ⚠️ Budget Alert    │  │
-│  │ Cost: $0.21 / $1.00 budget   │ Cost: $0.42 / $0.50       │  │
-│  │ Model: GPT-4o-mini           │ Model: Haiku → Sonnet     │  │
-│  │ ───────────────────────────  │ ───────────────────────── │  │
-│  │ Parallel: 3 articles         │ [██████████████████░] 84% │  │
-│  │ • "Tech trends" ✅           │                           │  │
-│  │ • "Market news" ⚡           │ Fallback: Claude rate     │  │
-│  │ • "AI policy" 🕐             │ limited → GPT-4 used      │  │
+│  │ 🌐 News Analysis             │ 💬 Content Moderation       │  │
+│  │ ──────────────────────────── │ ────────────────────────── │  │
+│  │ Status: 🔄 Running (3/5)     │ Status: ⚠️ Budget Alert     │  │
+│  │ Cost: $0.21 / $1.00 budget   │ Cost: $0.42 / $0.50        │  │
+│  │ Model: GPT-4o-mini           │ Model: Haiku → Sonnet      │  │
+│  │ ───────────────────────────  │ ────────────────────────── │  │
+│  │ Parallel: 3 articles         │ [██████████████████░] 84%  │  │
+│  │ • "Tech trends" ✅           │                            │  │
+│  │ • "Market news" ⚡            │ Fallback: Claude rate      │  │
+│  │ • "AI policy" 🕐             │ limited → GPT-4 used       │  │
 │  └──────────────────────────────┴────────────────────────────┘  │
-│                                                                   │
-│  📈 Real-time Savings Chart                                      │
+│                                                                 │
+│  📈 Real-time Savings Chart                                     │
 │  ┌─────────────────────────────────────────────────────────────┐│
-│  │  $$                                                          ││
+│  │  $$                                                         ││
 │  │  15│            ━━━ Baseline (GPT-4 only)                   ││
-│  │  12│          ╱                                              ││
-│  │   9│         ╱                                               ││
-│  │   6│        ╱                                                ││
-│  │   3│  ━━━━━━━━━━━━━━━━━ Kruxiaflow (Smart Routing)         ││
-│  │   0└──────────────────────────────────────────────────────▶││
-│  │     9am    10am    11am    12pm    1pm    2pm              ││
+│  │  12│          ╱                                             ││
+│  │   9│         ╱                                              ││
+│  │   6│        ╱                                               ││
+│  │   3│  ━━━━━━━━━━━━━━━━━ Kruxiaflow (Smart Routing)          ││
+│  │   0└───────────────────────────────────────────────────────▶││
+│  │     9am    10am    11am    12pm    1pm    2pm               ││
 │  └─────────────────────────────────────────────────────────────┘│
-└───────────────────────────────────────────────────────────────────┘
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Workflows Running
@@ -126,7 +126,7 @@ A visual dashboard showing multiple concurrent AI workflows executing simultaneo
 - PostgreSQL on Pi Zero 2 W (lightweight config: `shared_buffers=64MB`, `max_connections=10`)
 - Kruxiaflow API server (single process)
 - Kruxiaflow worker with `max_concurrent_activities=3`
-- All services run via `docker-compose` or systemd
+- All services run natively via systemd (no Docker overhead)
 
 **Frontend:**
 - Static HTML/CSS/JS dashboard (no build step)
@@ -339,7 +339,7 @@ activities:
         Simple: weather, timers, basic facts, device control
         Complex: analysis, explanations, creative tasks
 
-        Respond with JSON: {"complexity": "simple" or "complex"}
+        Respond with JSON: {"complexity": "simple"} or {"complexity": "complex"}
 
   # Step 2a: Handle simple queries (cheap model)
   - key: answer_simple
@@ -724,12 +724,12 @@ activities:
 
 | Demo                       | Visual Impact | Cost Tracking | Streaming | Edge Computing | Fallback | Target Audience           | Setup Complexity |
 |----------------------------|---------------|---------------|-----------|----------------|----------|---------------------------|------------------|
-| **#1: Command Center**     | ⭐⭐⭐⭐⭐        | ⭐⭐⭐⭐⭐        | ⭐⭐⭐⭐⭐    | ⭐⭐⭐⭐          | ⭐⭐⭐⭐⭐    | AI/SaaS Developers        | Medium           |
-| **#2: Research Station**   | ⭐⭐⭐⭐         | ⭐⭐⭐⭐⭐        | ⭐⭐⭐⭐     | ⭐⭐⭐⭐          | ⭐⭐⭐⭐     | AI Researchers            | Low              |
-| **#3: Smart Home**         | ⭐⭐⭐          | ⭐⭐⭐⭐         | ⭐⭐        | ⭐⭐⭐⭐⭐         | ⭐⭐⭐⭐⭐    | Consumers/Small Business  | High (hardware)  |
-| **#4: Content Moderation** | ⭐⭐⭐⭐         | ⭐⭐⭐⭐⭐        | ⭐⭐        | ⭐⭐⭐           | ⭐⭐⭐⭐⭐    | SaaS/Social Platforms     | Low              |
-| **#5: News Aggregator**    | ⭐⭐⭐          | ⭐⭐⭐⭐         | ⭐⭐        | ⭐⭐⭐⭐          | ⭐⭐⭐      | Consumers                 | Low              |
-| **#6: IoT Sensor Hub**     | ⭐⭐           | ⭐⭐⭐          | ⭐         | ⭐⭐⭐⭐⭐         | ⭐⭐⭐⭐     | Industrial/Commercial     | High (hardware)  |
+| **#1: Command Center**     | ★★★★★         | ★★★★★         | ★★★★★     | ★★★★           | ★★★★★    | AI/SaaS Developers        | Medium           |
+| **#2: Research Station**   | ★★★★          | ★★★★★         | ★★★★      | ★★★★           | ★★★★     | AI Researchers            | Low              |
+| **#3: Smart Home**         | ★★★           | ★★★★          | ★★        | ★★★★★          | ★★★★★    | Consumers/Small Business  | High (hardware)  |
+| **#4: Content Moderation** | ★★★★          | ★★★★★         | ★★        | ★★★            | ★★★★★    | SaaS/Social Platforms     | Low              |
+| **#5: News Aggregator**    | ★★★           | ★★★★          | ★★        | ★★★★           | ★★★      | Consumers                 | Low              |
+| **#6: IoT Sensor Hub**     | ★★            | ★★★           | ★         | ★★★★★          | ★★★★     | Industrial/Commercial     | High (hardware)  |
 
 **Recommendation:** **Demo #1 (Live AI Command Center)** is the clear winner for maximum impact with investors and potential customers.
 
@@ -757,7 +757,9 @@ activities:
 # Configure WiFi and SSH before flashing
 ```
 
-**2. Install Docker & Docker Compose**
+**2. Install PostgreSQL 17**
+
+Native PostgreSQL uses significantly less memory than containerized PostgreSQL (~64MB vs ~200MB).
 
 ```bash
 ssh pi@raspberrypi.local
@@ -765,154 +767,239 @@ ssh pi@raspberrypi.local
 # Update system
 sudo apt update && sudo apt upgrade -y
 
-# Install Docker
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker pi
-newgrp docker
+# Install PostgreSQL (Raspbian Trixie includes PostgreSQL 17)
+sudo apt install -y postgresql-17 postgresql-client-17
 
-# Install Docker Compose
-sudo apt install docker-compose -y
+# Start and enable PostgreSQL
+sudo systemctl enable postgresql
+sudo systemctl start postgresql
+
+# Create database and user
+sudo -u postgres psql <<EOF
+CREATE USER kruxiaflow WITH PASSWORD 'kruxiaflow_demo';
+CREATE DATABASE kruxiaflow OWNER kruxiaflow;
+GRANT ALL PRIVILEGES ON DATABASE kruxiaflow TO kruxiaflow;
+\c kruxiaflow
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+EOF
 ```
 
-**3. Clone Kruxiaflow Repository**
+**3. Configure PostgreSQL for Low Memory**
+
+Edit `/etc/postgresql/17/main/postgresql.conf` for Pi Zero 2 W's limited RAM:
 
 ```bash
-git clone https://github.com/kruxiaflow/kruxiaflow.git
-cd kruxiaflow
+sudo tee -a /etc/postgresql/17/main/postgresql.conf > /dev/null <<EOF
+
+# Pi Zero 2 W optimized settings
+shared_buffers = 64MB
+effective_cache_size = 128MB
+work_mem = 4MB
+maintenance_work_mem = 32MB
+max_connections = 20
+
+# Aggressive vacuuming for limited storage
+autovacuum_naptime = 30s
+autovacuum_vacuum_cost_limit = 200
+
+# WAL settings
+wal_buffers = 4MB
+checkpoint_completion_target = 0.9
+
+# Disable logging in demo (saves I/O)
+logging_collector = off
+EOF
+
+sudo systemctl restart postgresql
 ```
 
-**4. Configure Environment**
+**4. Cross-Compile Kruxiaflow Binary**
+
+On your development machine (macOS or Linux), cross-compile for ARM64:
 
 ```bash
-# Create .env file
-cat > .env <<EOF
+# Install Rust target (one-time setup)
+rustup target add aarch64-unknown-linux-gnu
+
+# On macOS, install cross-compiler toolchain
+brew tap messense/macos-cross-toolchains
+brew install aarch64-unknown-linux-gnu
+
+# Build for Pi Zero 2 W (64-bit ARM)
+cargo build --release --target aarch64-unknown-linux-gnu
+
+# Binary is at: target/aarch64-unknown-linux-gnu/release/kruxiaflow
+# Size: ~7-8 MB (optimized with LTO and symbol stripping)
+```
+
+**5. Deploy Binary to Raspberry Pi**
+
+```bash
+# Copy binary to Pi
+scp target/aarch64-unknown-linux-gnu/release/kruxiaflow pi@raspberrypi.local:~/
+
+# On the Pi, install to /usr/local/bin
+ssh pi@raspberrypi.local
+sudo mv ~/kruxiaflow /usr/local/bin/
+sudo chmod +x /usr/local/bin/kruxiaflow
+
+# Verify installation
+kruxiaflow version
+```
+
+**6. Generate OAuth Keys and Configure Environment**
+
+```bash
+# Generate RSA key pair for JWT authentication
+openssl genrsa -out ~/kruxiaflow-private.pem 2048
+openssl rsa -in ~/kruxiaflow-private.pem -pubout -out ~/kruxiaflow-public.pem
+chmod 600 ~/kruxiaflow-private.pem
+
+# Create environment file
+CLIENT_SECRET=$(openssl rand -hex 32)
+cat > ~/.envrc <<EOF
 # Database
-POSTGRES_PASSWORD=kruxiaflow_demo
+DATABASE_URL=postgres://kruxiaflow:kruxiaflow_demo@localhost:5432/kruxiaflow
 
-# API Keys (add your own)
+# API Server
+KRUXIAFLOW_API_PORT=8080
+KRUXIAFLOW_API_BIND=0.0.0.0
+
+# Worker (optimized for Pi Zero 2 W quad-core)
+KRUXIAFLOW_WORKER_MAX_ACTIVITIES=4
+KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES=2
+
+# OAuth
+KRUXIAFLOW_CLIENT_ID=kruxiaflow_demo
+KRUXIAFLOW_CLIENT_SECRET=$CLIENT_SECRET
+KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM_FILE=$HOME/kruxiaflow-private.pem
+KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM_FILE=$HOME/kruxiaflow-public.pem
+
+# LLM API Keys (add your own)
 ANTHROPIC_API_KEY=sk-ant-...
 OPENAI_API_KEY=sk-...
 GOOGLE_API_KEY=...
 
-# SMTP (use Mailhog for testing)
-SMTP_URL=smtp://mailhog:1025
-
-# Resource Limits (Pi Zero 2 W optimized)
-KRUXIAFLOW_POSTGRES_POOL_MAX_CONNECTIONS=5
-KRUXIAFLOW_WORKER_MAX_CONCURRENT_ACTIVITIES=3
+# Logging
+KRUXIAFLOW_LOG_LEVEL=info
 EOF
+
+chmod 600 ~/.envrc
 ```
 
-**5. Create Docker Compose Configuration**
-
-```yaml
-# docker-compose.pi-demo.yml
-version: '3.8'
-
-services:
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      POSTGRES_DB: kruxiaflow
-      POSTGRES_USER: kruxiaflow
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    command: >
-      postgres
-      -c shared_buffers=64MB
-      -c effective_cache_size=128MB
-      -c max_connections=10
-    deploy:
-      resources:
-        limits:
-          memory: 200M
-
-  api:
-    image: kruxiaflow/api:latest
-    environment:
-      DATABASE_URL: postgres://kruxiaflow:${POSTGRES_PASSWORD}@postgres/kruxiaflow
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-    ports:
-      - "8080:8080"
-    depends_on:
-      - postgres
-    deploy:
-      resources:
-        limits:
-          memory: 150M
-
-  worker:
-    image: kruxiaflow/worker:latest
-    environment:
-      DATABASE_URL: postgres://kruxiaflow:${POSTGRES_PASSWORD}@postgres/kruxiaflow
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      KRUXIAFLOW_WORKER_MAX_CONCURRENT_ACTIVITIES: 3
-    depends_on:
-      - postgres
-    deploy:
-      resources:
-        limits:
-          memory: 150M
-
-  mailhog:
-    image: mailhog/mailhog:latest
-    ports:
-      - "1025:1025"
-      - "8025:8025"
-
-  dashboard:
-    image: nginx:alpine
-    volumes:
-      - ./demos/dashboard:/usr/share/nginx/html:ro
-    ports:
-      - "80:80"
-
-volumes:
-  postgres_data:
-```
-
-**6. Start Services**
+**7. Create systemd Service**
 
 ```bash
-docker-compose -f docker-compose.pi-demo.yml up -d
+sudo tee /etc/systemd/system/kruxiaflow.service > /dev/null <<'EOF'
+[Unit]
+Description=Kruxia Flow Workflow Orchestration
+After=network.target postgresql.service
+Requires=postgresql.service
 
-# Wait for services to start
-sleep 30
+[Service]
+Type=simple
+User=pi
+EnvironmentFile=/home/pi/.envrc
+ExecStart=/usr/local/bin/kruxiaflow serve --migrate --seed-client
+Restart=on-failure
+RestartSec=10
 
-# Check status
-docker-compose -f docker-compose.pi-demo.yml ps
+# Resource limits for Raspberry Pi Zero 2 W
+MemoryMax=200M
+CPUQuota=80%
 
-# Seed LLM pricing data
-docker-compose -f docker-compose.pi-demo.yml exec api \
-  kruxiaflow seed-llm
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/tmp
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable kruxiaflow
+sudo systemctl start kruxiaflow
+
+# Verify service is running
+sudo systemctl status kruxiaflow
+journalctl -u kruxiaflow -f
 ```
 
-**7. Deploy Dashboard**
+**8. Seed LLM Pricing Data**
 
 ```bash
-# Copy dashboard files
-mkdir -p demos/dashboard
-# ... copy dashboard HTML/CSS/JS files
+# Source environment and seed the LLM model catalog
+source ~/.envrc
+kruxiaflow seed-llm
 ```
 
-**8. Load Demo Workflows**
+**9. Deploy Dashboard (Static Files via nginx)**
 
 ```bash
+# Install nginx for serving the dashboard
+sudo apt install -y nginx
+
+# Create dashboard directory
+sudo mkdir -p /var/www/kruxiaflow-dashboard
+
+# Copy dashboard HTML/CSS/JS files (from your dev machine)
+# scp -r demos/dashboard/* pi@raspberrypi.local:/var/www/kruxiaflow-dashboard/
+
+# Configure nginx
+sudo tee /etc/nginx/sites-available/kruxiaflow-dashboard > /dev/null <<'EOF'
+server {
+    listen 80;
+    server_name raspberrypi.local;
+
+    root /var/www/kruxiaflow-dashboard;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    # Proxy API requests to kruxiaflow
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+    }
+}
+EOF
+
+sudo ln -sf /etc/nginx/sites-available/kruxiaflow-dashboard /etc/nginx/sites-enabled/
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo systemctl restart nginx
+```
+
+**10. Load Demo Workflows**
+
+```bash
+# Get auth token
+source ~/.envrc
+TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/auth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials&client_id=$KRUXIAFLOW_CLIENT_ID&client_secret=$KRUXIAFLOW_CLIENT_SECRET" \
+  | jq -r '.access_token')
+
 # Submit research workflow definition
 curl -X POST http://localhost:8080/api/v1/workflow_definitions \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/yaml" \
   --data-binary @examples/09b-streaming-research.yaml
 
 # Submit moderation workflow
 curl -X POST http://localhost:8080/api/v1/workflow_definitions \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/yaml" \
   --data-binary @examples/04-moderate-content.yaml
 ```
 
-**9. Access Dashboard**
+**11. Access Dashboard**
 
 ```bash
 # Open in browser
@@ -921,22 +1008,32 @@ http://raspberrypi.local/
 
 #### Performance Tuning
 
-**PostgreSQL Optimization:**
-```sql
--- Aggressive vacuuming for limited RAM
-ALTER SYSTEM SET autovacuum_naptime = '10s';
-ALTER SYSTEM SET autovacuum_vacuum_cost_limit = 500;
-SELECT pg_reload_conf();
-```
+**Swap Configuration** (helps with memory spikes):
 
-**Swap Configuration:**
 ```bash
-# Increase swap (helps with memory spikes)
 sudo dphys-swapfile swapoff
-sudo sed -i 's/CONF_SWAPSIZE=100/CONF_SWAPSIZE=1024/' /etc/dphys-swapfile
+sudo sed -i 's/CONF_SWAPSIZE=.*/CONF_SWAPSIZE=1024/' /etc/dphys-swapfile
 sudo dphys-swapfile setup
 sudo dphys-swapfile swapon
+
+# Verify swap is active
+free -h
 ```
+
+**Memory Usage Summary** (native deployment):
+
+| Component       | Memory Usage |
+|-----------------|--------------|
+| PostgreSQL      | ~64MB        |
+| Kruxiaflow      | ~150MB       |
+| nginx           | ~5MB         |
+| System overhead | ~100MB       |
+| **Total**       | **~320MB**   |
+| **Available**   | **~190MB**   |
+
+This leaves headroom for workflow execution and system buffers, unlike Docker which would consume nearly all 512MB before the application starts.
+
+> **See Also:** For detailed cross-compilation instructions, PostgreSQL tuning, troubleshooting, and Pi Zero W (32-bit) support, see [Raspberry Pi Deployment Guide](../raspberry-pi-deployment.md).
 
 ---
 
@@ -958,7 +1055,7 @@ Use this script when demoing to potential customers:
 
 ### The Value (30 seconds)
 
-> "Kruxiaflow gives you production-grade workflow orchestration with built-in cost control and multi-provider resilience. Define workflows in YAML using our six built-in activities—no custom code needed. Deploy anywhere: Raspberry Pi, AWS, your data center. And most importantly, you'll never get a surprise $50,000 API bill, because budget enforcement is built into the platform."
+> "Kruxiaflow gives you production-grade workflow orchestration with built-in cost control and multi-provider resilience. Define workflows in YAML using our six built-in activities — no custom code needed. Deploy anywhere: Raspberry Pi, AWS, your data center. And most importantly, you'll never get a surprise $50,000 API bill, because budget enforcement is built into the platform."
 
 ---
 
@@ -983,7 +1080,6 @@ Use this script when demoing to potential customers:
 
 **Next Steps:**
 1. Build dashboard UI (HTML/CSS/JS)
-2. Optimize docker-compose for Pi Zero 2 W
-3. Create demo script and video walkthrough
-4. Test end-to-end on actual hardware
-5. Package as downloadable Pi image for customers to try
+2. Create demo script and video walkthrough
+3. Test end-to-end on actual hardware
+4. Package as downloadable Pi image for customers to try

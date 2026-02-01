@@ -155,7 +155,7 @@ async fn test_poll_activities_success() {
             HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
         )
         .json(&json!({
-            "activity_types": ["payments.authorize"],
+            "worker": "payments",
             "worker_id": "worker_test_01",
             "max_activities": 10
         }))
@@ -184,7 +184,7 @@ async fn test_poll_activities_empty() {
             HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
         )
         .json(&json!({
-            "activity_types": ["nonexistent.type"],
+            "worker": "nonexistent",
             "worker_id": "worker_test_01",
             "max_activities": 10
         }))
@@ -203,7 +203,7 @@ async fn test_poll_activities_validation_error() {
     let (server, _pool) = create_test_server().await;
     let token = get_test_token(&server).await;
 
-    // Invalid activity type format (missing worker)
+    // Missing required field (no worker)
     let response = server
         .post("/api/v1/workers/poll")
         .add_header(
@@ -211,7 +211,6 @@ async fn test_poll_activities_validation_error() {
             HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
         )
         .json(&json!({
-            "activity_types": ["invalid_format"],
             "worker_id": "worker_test_01",
             "max_activities": 10
         }))
@@ -229,7 +228,7 @@ async fn test_poll_activities_unauthorized() {
     let response = server
         .post("/api/v1/workers/poll")
         .json(&json!({
-            "activity_types": ["payments.authorize"],
+            "worker": "payments",
             "worker_id": "worker_test_01",
             "max_activities": 10
         }))
@@ -255,7 +254,7 @@ async fn test_heartbeat_activity_success() {
             HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
         )
         .json(&json!({
-            "activity_types": ["payments.authorize"],
+            "worker": "payments",
             "worker_id": "worker_test_01",
             "max_activities": 1
         }))
@@ -324,7 +323,7 @@ async fn test_heartbeat_wrong_worker() {
             HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
         )
         .json(&json!({
-            "activity_types": ["payments.authorize"],
+            "worker": "payments",
             "worker_id": "worker_test_01",
             "max_activities": 1
         }))
@@ -367,7 +366,7 @@ async fn test_complete_activity_success() {
             HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
         )
         .json(&json!({
-            "activity_types": ["payments.authorize"],
+            "worker": "payments",
             "worker_id": "worker_test_01",
             "max_activities": 1
         }))
@@ -415,7 +414,7 @@ async fn test_complete_activity_idempotency() {
             HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
         )
         .json(&json!({
-            "activity_types": ["payments.authorize"],
+            "worker": "payments",
             "worker_id": "worker_test_01",
             "max_activities": 1
         }))
@@ -474,7 +473,7 @@ async fn test_complete_activity_validation_error() {
             HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
         )
         .json(&json!({
-            "activity_types": ["payments.authorize"],
+            "worker": "payments",
             "worker_id": "worker_test_01",
             "max_activities": 1
         }))
@@ -518,7 +517,7 @@ async fn test_fail_activity_success() {
             HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
         )
         .json(&json!({
-            "activity_types": ["payments.authorize"],
+            "worker": "payments",
             "worker_id": "worker_test_01",
             "max_activities": 1
         }))
@@ -570,7 +569,7 @@ async fn test_fail_activity_validation_error() {
             HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
         )
         .json(&json!({
-            "activity_types": ["payments.authorize"],
+            "worker": "payments",
             "worker_id": "worker_test_01",
             "max_activities": 1
         }))
@@ -619,7 +618,7 @@ async fn test_complete_workflow_end_to_end() {
             HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
         )
         .json(&json!({
-            "activity_types": ["payments.authorize"],
+            "worker": "payments",
             "worker_id": "worker_test_01",
             "max_activities": 10
         }))
@@ -748,7 +747,7 @@ async fn test_poll_returns_timeout_seconds_from_settings() {
             HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
         )
         .json(&json!({
-            "activity_types": ["builtin.http_request"],
+            "worker": "builtin",
             "worker_id": "worker_timeout_test",
             "max_activities": 1
         }))
@@ -812,7 +811,7 @@ async fn test_poll_returns_various_timeout_values() {
                 HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
             )
             .json(&json!({
-                "activity_types": ["builtin.http_request"],
+                "worker": "builtin",
                 "worker_id": &format!("worker_timeout_{}", timeout),
                 "max_activities": 1
             }))
@@ -856,7 +855,7 @@ async fn test_poll_returns_null_timeout_when_not_configured() {
             HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
         )
         .json(&json!({
-            "activity_types": ["payments.authorize"],
+            "worker": "payments",
             "worker_id": "worker_no_timeout_test",
             "max_activities": 1
         }))
@@ -920,7 +919,7 @@ async fn test_poll_returns_null_timeout_when_settings_has_no_timeout() {
             HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
         )
         .json(&json!({
-            "activity_types": ["builtin.http_request"],
+            "worker": "builtin",
             "worker_id": "worker_settings_no_timeout",
             "max_activities": 1
         }))

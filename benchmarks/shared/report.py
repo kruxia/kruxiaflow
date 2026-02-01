@@ -531,7 +531,7 @@ def _generate_resource_section(results: list, platforms: list) -> str:
     html += "            </tr>\n"
 
     # Efficiency metric: throughput per CPU% and per MB
-    html += '            <tr class="metric-header">\n                <td>Efficiency (wf/sec per CPU%)</td>\n'
+    html += '            <tr class="metric-header">\n                <td>CPU Efficiency (wf/sec per CPU%)</td>\n'
     for platform in platforms:
         platform_results = [r for r in results if r.platform == platform]
         if platform_results and platform in platform_resources:
@@ -546,7 +546,7 @@ def _generate_resource_section(results: list, platforms: list) -> str:
             html += "                <td>-</td>\n"
     html += "            </tr>\n"
 
-    html += '            <tr class="metric-header">\n                <td>Efficiency (wf/sec per 100MB)</td>\n'
+    html += '            <tr class="metric-header">\n                <td>Memory Efficiency (wf/sec per 100MB)</td>\n'
     for platform in platforms:
         platform_results = [r for r in results if r.platform == platform]
         if platform_results and platform in platform_resources:

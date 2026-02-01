@@ -9,13 +9,14 @@ use uuid::Uuid;
 
 /// Poll for activities request
 ///
-/// Workers poll for pending activities by specifying which activity types
-/// they can execute. The API returns activities matching those types.
+/// Workers poll for pending activities by specifying which worker type
+/// they handle. The API returns activities for that worker, ordered by
+/// scheduled_for for fair scheduling across all activity types.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct PollActivitiesRequest {
-    /// Activity types this worker can execute (format: "worker.name")
-    #[schema(example = json!(["builtin.http_request", "builtin.postgres_query"]))]
-    pub activity_types: Vec<String>,
+    /// Worker type this worker handles (e.g., "builtin", "custom")
+    #[schema(example = "builtin")]
+    pub worker: String,
 
     /// Worker instance ID (for tracking which worker claimed the activity)
     #[schema(example = "worker_payments_01")]
@@ -35,18 +36,8 @@ impl PollActivitiesRequest {
     fn validate(&self) -> Result<(), ValidationErrors> {
         let mut errors = ValidationErrors::new();
 
-        if self.activity_types.is_empty() {
-            errors.add("activity_types", "At least one activity type is required");
-        }
-
-        // Validate activity type format (worker.name)
-        for activity_type in &self.activity_types {
-            if !activity_type.contains('.') {
-                errors.add(
-                    "activity_types",
-                    &format!("Invalid format '{}': must be 'worker.name'", activity_type),
-                );
-            }
+        if self.worker.is_empty() {
+            errors.add("worker", "Worker type cannot be empty");
         }
 
         if self.worker_id.is_empty() {
@@ -301,33 +292,15 @@ pub async fn poll_activities(
 
     tracing::debug!(
         worker_id = %request.worker_id,
-        activity_types = ?request.activity_types,
+        worker = %request.worker,
         max_activities = request.max_activities,
         user = %claims.subject(),
         "Polling for activities"
     );
 
-    // Parse activity types (worker.name → (worker, name))
-    let activity_types: Vec<(String, String)> = request
-        .activity_types
-        .iter()
-        .filter_map(|t| {
-            let parts: Vec<&str> = t.splitn(2, '.').collect();
-            if parts.len() == 2 {
-                Some((parts[0].to_string(), parts[1].to_string()))
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    // Poll for activities
+    // Poll for activities (filters by worker only for fair scheduling)
     let activities = service
-        .poll_activities(
-            activity_types,
-            request.worker_id.clone(),
-            request.max_activities,
-        )
+        .poll_activities(&request.worker, &request.worker_id, request.max_activities)
         .await
         .map_err(|e| {
             tracing::error!("Error polling activities: {:?}", e);
