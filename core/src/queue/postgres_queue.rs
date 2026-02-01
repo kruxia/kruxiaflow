@@ -4,7 +4,7 @@ use crate::queue::{
 };
 use async_trait::async_trait;
 use sqlx::PgPool;
-use tracing::{error, trace, warn};
+use tracing::{debug, error, trace, warn};
 use uuid::Uuid;
 
 pub struct PostgresQueue {
