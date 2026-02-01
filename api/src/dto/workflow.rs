@@ -309,6 +309,78 @@ pub struct ActivitySettings {
     /// Example: "2025-12-01T09:00:00-08:00" or "{{INPUT.report_deadline}}"
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scheduled_for: Option<String>,
+
+    /// Wait for an external signal before running the activity
+    /// When set, the activity enters 'waiting' state until signaled or timeout
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_for_signal: Option<WaitForSignalSettings>,
+}
+
+/// Settings for activities that wait for external signals
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct WaitForSignalSettings {
+    /// The event name to wait for (matched against signal requests)
+    pub event_name: String,
+
+    /// Timeout in seconds before taking the on_timeout action
+    pub timeout_seconds: u64,
+
+    /// Action to take when timeout occurs (default: fail)
+    #[serde(default)]
+    pub on_timeout: OnTimeout,
+}
+
+/// Action to take when a signal wait times out
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum OnTimeout {
+    /// Continue with the activity (run with null signal data)
+    Continue,
+    /// Skip the activity
+    Skip,
+    /// Fail the activity (default)
+    #[default]
+    Fail,
+}
+
+impl From<kruxiaflow_core::workflow::WaitForSignalSettings> for WaitForSignalSettings {
+    fn from(settings: kruxiaflow_core::workflow::WaitForSignalSettings) -> Self {
+        Self {
+            event_name: settings.event_name,
+            timeout_seconds: settings.timeout_seconds,
+            on_timeout: settings.on_timeout.into(),
+        }
+    }
+}
+
+impl From<WaitForSignalSettings> for kruxiaflow_core::workflow::WaitForSignalSettings {
+    fn from(settings: WaitForSignalSettings) -> Self {
+        Self {
+            event_name: settings.event_name,
+            timeout_seconds: settings.timeout_seconds,
+            on_timeout: settings.on_timeout.into(),
+        }
+    }
+}
+
+impl From<kruxiaflow_core::workflow::OnTimeout> for OnTimeout {
+    fn from(action: kruxiaflow_core::workflow::OnTimeout) -> Self {
+        match action {
+            kruxiaflow_core::workflow::OnTimeout::Continue => Self::Continue,
+            kruxiaflow_core::workflow::OnTimeout::Skip => Self::Skip,
+            kruxiaflow_core::workflow::OnTimeout::Fail => Self::Fail,
+        }
+    }
+}
+
+impl From<OnTimeout> for kruxiaflow_core::workflow::OnTimeout {
+    fn from(action: OnTimeout) -> Self {
+        match action {
+            OnTimeout::Continue => Self::Continue,
+            OnTimeout::Skip => Self::Skip,
+            OnTimeout::Fail => Self::Fail,
+        }
+    }
 }
 
 /// Budget configuration for activities
@@ -381,6 +453,7 @@ impl From<kruxiaflow_core::workflow::ActivitySettings> for ActivitySettings {
             iteration_limit: settings.iteration_limit,
             delay: settings.delay,
             scheduled_for: settings.scheduled_for,
+            wait_for_signal: settings.wait_for_signal.map(Into::into),
         }
     }
 }
@@ -396,6 +469,7 @@ impl From<ActivitySettings> for kruxiaflow_core::workflow::ActivitySettings {
             iteration_limit: settings.iteration_limit,
             delay: settings.delay,
             scheduled_for: settings.scheduled_for,
+            wait_for_signal: settings.wait_for_signal.map(Into::into),
         }
     }
 }

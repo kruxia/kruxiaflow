@@ -4,6 +4,7 @@ use kruxiaflow_core::events::{
 };
 use kruxiaflow_core::orchestrator::OrchestratorConfig;
 use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
+use kruxiaflow_core::{PostgresSubscriptionService, SubscriptionService};
 use serde_json::json;
 use serial_test::serial;
 use sqlx::PgPool;
@@ -134,6 +135,8 @@ async fn test_sequential_workflow_integration() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
 
     // Publish WorkflowCreated event
     event_source
@@ -160,6 +163,7 @@ async fn test_sequential_workflow_integration() {
         &events[0],
         &event_source,
         &activity_queue,
+        &subscription_service,
         &config,
     )
     .await
@@ -207,6 +211,7 @@ async fn test_sequential_workflow_integration() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -320,6 +325,8 @@ async fn test_parallel_workflow_integration() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // Publish WorkflowCreated and process
@@ -344,6 +351,7 @@ async fn test_parallel_workflow_integration() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -389,6 +397,7 @@ async fn test_parallel_workflow_integration() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -440,6 +449,7 @@ async fn test_parallel_workflow_integration() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -517,6 +527,8 @@ async fn test_conditional_workflow_integration() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // Publish WorkflowCreated and process
@@ -541,6 +553,7 @@ async fn test_conditional_workflow_integration() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -574,6 +587,7 @@ async fn test_conditional_workflow_integration() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -623,6 +637,8 @@ async fn test_workflow_completion_success() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // 1. Publish and process WorkflowCreated
@@ -647,6 +663,7 @@ async fn test_workflow_completion_success() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -680,6 +697,7 @@ async fn test_workflow_completion_success() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -749,6 +767,8 @@ async fn test_workflow_failure() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // 1. Publish and process WorkflowCreated
@@ -773,6 +793,7 @@ async fn test_workflow_failure() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -806,6 +827,7 @@ async fn test_workflow_failure() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -907,6 +929,8 @@ async fn test_workflow_completion_with_multiple_activities() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // Process WorkflowCreated
@@ -927,6 +951,7 @@ async fn test_workflow_completion_with_multiple_activities() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -957,6 +982,7 @@ async fn test_workflow_completion_with_multiple_activities() {
                 event,
                 &event_source,
                 &activity_queue,
+                &subscription_service,
                 &config,
             )
             .await
@@ -1007,6 +1033,8 @@ async fn test_activity_scheduled_events_published() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // Process WorkflowCreated
@@ -1027,6 +1055,7 @@ async fn test_activity_scheduled_events_published() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -1082,6 +1111,8 @@ async fn test_run_orchestrator_loop() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // Publish WorkflowCreated event before starting orchestrator
@@ -1100,11 +1131,13 @@ async fn test_run_orchestrator_loop() {
     let event_source_clone = event_source.clone();
     let activity_queue_clone = activity_queue.clone();
     let config_clone = config.clone();
+    let subscription_clone = subscription_service.clone();
 
     let orchestrator_handle = tokio::spawn(async move {
         kruxiaflow_core::orchestrator::orchestrator::run_orchestrator(
             event_source_clone,
             activity_queue_clone,
+            subscription_clone,
             config_clone,
             None,
         )
@@ -1166,17 +1199,21 @@ async fn test_orchestrator_backoff_when_no_events() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     let event_source_clone = event_source.clone();
     let activity_queue_clone = activity_queue.clone();
     let config_clone = config.clone();
+    let subscription_clone = subscription_service.clone();
 
     // Run orchestrator with no events
     let orchestrator_handle = tokio::spawn(async move {
         kruxiaflow_core::orchestrator::orchestrator::run_orchestrator(
             event_source_clone,
             activity_queue_clone,
+            subscription_clone,
             config_clone,
             None,
         )
@@ -1256,6 +1293,8 @@ async fn test_workflow_failed_with_incomplete_template_dependencies() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // 1. Publish and process WorkflowCreated to start the workflow
@@ -1280,6 +1319,7 @@ async fn test_workflow_failed_with_incomplete_template_dependencies() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -1330,6 +1370,7 @@ async fn test_workflow_failed_with_incomplete_template_dependencies() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await;
@@ -1444,6 +1485,8 @@ async fn test_workflow_failed_with_multiple_incomplete_dependencies() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // Start workflow
@@ -1464,6 +1507,7 @@ async fn test_workflow_failed_with_multiple_incomplete_dependencies() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -1494,6 +1538,7 @@ async fn test_workflow_failed_with_multiple_incomplete_dependencies() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await;
@@ -1565,6 +1610,8 @@ async fn test_normal_workflow_with_conditions_still_completes() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // Start workflow
@@ -1585,6 +1632,7 @@ async fn test_normal_workflow_with_conditions_still_completes() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -1614,6 +1662,7 @@ async fn test_normal_workflow_with_conditions_still_completes() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -1657,6 +1706,7 @@ async fn test_normal_workflow_with_conditions_still_completes() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -1758,6 +1808,8 @@ async fn test_workflow_failed_event_persists_status_immediately() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // 1. Start the workflow
@@ -1782,6 +1834,7 @@ async fn test_workflow_failed_event_persists_status_immediately() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -1828,6 +1881,7 @@ async fn test_workflow_failed_event_persists_status_immediately() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -1898,6 +1952,8 @@ async fn test_failed_workflow_does_not_schedule_activities() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // Start workflow
@@ -1918,6 +1974,7 @@ async fn test_failed_workflow_does_not_schedule_activities() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -1958,6 +2015,7 @@ async fn test_failed_workflow_does_not_schedule_activities() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -2012,6 +2070,8 @@ async fn test_events_on_already_failed_workflow_handled_gracefully() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // Start and then fail workflow
@@ -2032,6 +2092,7 @@ async fn test_events_on_already_failed_workflow_handled_gracefully() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -2061,6 +2122,7 @@ async fn test_events_on_already_failed_workflow_handled_gracefully() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -2103,6 +2165,7 @@ async fn test_events_on_already_failed_workflow_handled_gracefully() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await;
@@ -2163,6 +2226,8 @@ async fn test_completed_workflow_early_exit() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // Start workflow and complete the only activity
@@ -2183,6 +2248,7 @@ async fn test_completed_workflow_early_exit() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -2212,6 +2278,7 @@ async fn test_completed_workflow_early_exit() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -2230,6 +2297,7 @@ async fn test_completed_workflow_early_exit() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -2271,6 +2339,7 @@ async fn test_completed_workflow_early_exit() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await;

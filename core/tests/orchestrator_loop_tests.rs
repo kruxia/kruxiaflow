@@ -10,6 +10,7 @@ use kruxiaflow_core::workflow::{
     ActivityDefinition, ActivityRelationship, ActivitySettings, BudgetAction, BudgetSettings,
     WorkflowDefinition,
 };
+use kruxiaflow_core::{PostgresSubscriptionService, SubscriptionService};
 use serde_json::json;
 use serial_test::serial;
 use sqlx::PgPool;
@@ -128,6 +129,8 @@ async fn test_simple_loop_workflow() {
     };
     let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config.clone()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
 
     // Publish WorkflowCreated event
     event_source
@@ -163,6 +166,7 @@ async fn test_simple_loop_workflow() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -208,6 +212,7 @@ async fn test_simple_loop_workflow() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -255,6 +260,7 @@ async fn test_simple_loop_workflow() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -323,6 +329,8 @@ async fn test_loop_max_iterations_enforced() {
     };
     let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
 
     // Create workflow
     event_source
@@ -356,6 +364,7 @@ async fn test_loop_max_iterations_enforced() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -386,6 +395,7 @@ async fn test_loop_max_iterations_enforced() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -427,6 +437,7 @@ async fn test_loop_max_iterations_enforced() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -495,6 +506,8 @@ async fn test_iteration_counter_without_scoping() {
     };
     let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
 
     event_source
         .publish(NewWorkflowEvent {
@@ -527,6 +540,7 @@ async fn test_iteration_counter_without_scoping() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -557,6 +571,7 @@ async fn test_iteration_counter_without_scoping() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -617,6 +632,7 @@ async fn test_iteration_budget_accumulation() {
                 iteration_limit: None,
                 delay: None,
                 scheduled_for: None,
+                wait_for_signal: None,
             }),
             depends_on: Some(vec![ActivityRelationship {
                 activity_key: "expensive_task".to_string(),
@@ -646,6 +662,8 @@ async fn test_iteration_budget_accumulation() {
     };
     let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
 
     // Create workflow
     event_source
@@ -679,6 +697,7 @@ async fn test_iteration_budget_accumulation() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -711,6 +730,7 @@ async fn test_iteration_budget_accumulation() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -755,6 +775,7 @@ async fn test_iteration_budget_accumulation() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -828,6 +849,8 @@ async fn test_loop_pattern_1_fixed_iterations() {
     };
     let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
 
     // Create and execute workflow
     event_source
@@ -861,6 +884,7 @@ async fn test_loop_pattern_1_fixed_iterations() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -892,6 +916,7 @@ async fn test_loop_pattern_1_fixed_iterations() {
                 &event,
                 &event_source,
                 &activity_queue,
+                &subscription_service,
                 &config,
             )
             .await
@@ -992,6 +1017,8 @@ async fn test_loop_pattern_2_condition_only() {
     };
     let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
 
     event_source
         .publish(NewWorkflowEvent {
@@ -1024,6 +1051,7 @@ async fn test_loop_pattern_2_condition_only() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -1056,6 +1084,7 @@ async fn test_loop_pattern_2_condition_only() {
                 &event,
                 &event_source,
                 &activity_queue,
+                &subscription_service,
                 &config,
             )
             .await
@@ -1086,6 +1115,7 @@ async fn test_loop_pattern_2_condition_only() {
                 &event,
                 &event_source,
                 &activity_queue,
+                &subscription_service,
                 &config,
             )
             .await
@@ -1117,6 +1147,7 @@ async fn test_loop_pattern_2_condition_only() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -1146,6 +1177,7 @@ async fn test_loop_pattern_2_condition_only() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await

@@ -40,6 +40,9 @@ pub enum OrchestratorError {
 
     #[error("Cost tracking failed: {0}")]
     CostTrackingFailed(String),
+
+    #[error("Internal error: {0}")]
+    InternalError(String),
 }
 
 pub type Result<T> = std::result::Result<T, OrchestratorError>;
