@@ -164,7 +164,7 @@ activities:
   - key: evaluate_sufficiency
     activity_name: llm_prompt
     parameters:
-      model: anthropic/claude-haiku-4-20250415
+      model: anthropic/claude-haiku-4-5-20251001
       prompt: |
         You are a research assistant. Determine if the gathered information
         is sufficient to answer the research question. Respond with ONLY valid JSON (no markdown):
@@ -194,7 +194,7 @@ activities:
       - gaps          # Array: list of information gaps
     settings:
       budget:
-        limit_usd: 0.50
+        limit: 0.50
         action: abort
     depends_on:
       - search_information
@@ -227,7 +227,7 @@ activities:
         type: file  # Store report as file (could be large)
     settings:
       budget:
-        limit_usd: 1.00
+        limit: 1.00
         action: abort
     depends_on:
       - activity_key: evaluate_sufficiency

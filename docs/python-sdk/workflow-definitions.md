@@ -28,7 +28,7 @@ from kruxiaflow import Activity
 
 fetch = (
     Activity(key="fetch_data")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(
         method="GET",
         url="https://api.example.com/data",
@@ -43,7 +43,7 @@ All methods return `self` for chaining:
 ```python
 activity = (
     Activity(key="process")
-    .with_worker("builtin", "transform")
+    .with_worker("std", "transform")
     .with_params(data="${INPUT.data}")
     .with_timeout(300)                    # 5 minute timeout
     .with_retry(max_attempts=3, backoff="exponential")
@@ -70,9 +70,9 @@ activity = (
 ### Simple Dependencies
 
 ```python
-step1 = Activity(key="step1").with_worker("builtin", "http_request")
-step2 = Activity(key="step2").with_worker("builtin", "transform")
-step3 = Activity(key="step3").with_worker("builtin", "http_request")
+step1 = Activity(key="step1").with_worker("std", "http_request")
+step2 = Activity(key="step2").with_worker("std", "transform")
+step3 = Activity(key="step3").with_worker("std", "http_request")
 
 # step2 waits for step1
 step2 = step2.with_dependencies(step1)
@@ -91,7 +91,7 @@ from kruxiaflow import Dependency
 # Only run if confidence > 0.8
 notify = (
     Activity(key="notify")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_dependencies(
         Dependency.on(analyze, analyze["confidence"] > 0.8)
     )
@@ -100,7 +100,7 @@ notify = (
 # Run on dependency failure
 retry = (
     Activity(key="retry")
-    .with_worker("builtin", "llm_prompt")
+    .with_worker("std", "llm_prompt")
     .with_dependencies(
         Dependency.on(analyze, analyze["status"] == "failed")
     )
@@ -109,7 +109,7 @@ retry = (
 # Combine conditions with & (AND) and | (OR)
 save = (
     Activity(key="save")
-    .with_worker("builtin", "postgres_query")
+    .with_worker("std", "postgres_query")
     .with_dependencies(
         Dependency.on(
             analyze,
@@ -134,7 +134,7 @@ options = Input("options", type=dict, required=False)
 # Use in activity parameters
 activity = (
     Activity(key="fetch")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(
         url=f"https://api.example.com/users/{user_id}",
         limit=count,
@@ -147,7 +147,7 @@ activity = (
 Access outputs from previous activities:
 
 ```python
-fetch = Activity(key="fetch").with_worker("builtin", "http_request")
+fetch = Activity(key="fetch").with_worker("std", "http_request")
 
 # Simple output access
 process = (
@@ -290,7 +290,7 @@ queries = ["AI workflows", "ML pipelines", "LLM orchestration"]
 # Generate parallel search activities
 searches = [
     Activity(key=f"search_{i}")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(url=f"https://api.search.com/q={query}")
     for i, query in enumerate(queries)
 ]
@@ -319,14 +319,14 @@ def create_llm_with_fallback(name: str, prompt: str, budget: float) -> list[Acti
     """Create activity group with Claude -> GPT-4 fallback."""
     primary = (
         Activity(key=f"{name}_claude")
-        .with_worker("builtin", "llm_prompt")
+        .with_worker("std", "llm_prompt")
         .with_params(provider="anthropic", model="claude-3-haiku", prompt=prompt)
         .with_budget(limit_usd=budget * 0.7)
     )
 
     fallback = (
         Activity(key=f"{name}_gpt4")
-        .with_worker("builtin", "llm_prompt")
+        .with_worker("std", "llm_prompt")
         .with_params(provider="openai", model="gpt-4o-mini", prompt=prompt)
         .with_budget(limit_usd=budget * 0.3)
         .with_dependencies(Dependency.on(primary, primary["status"] == "failed"))
@@ -391,7 +391,7 @@ notify_email = Input("notify_email", type=str, required=True)
 # Fetch document
 fetch = (
     Activity(key="fetch_document")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(method="GET", url=document_url)
     .with_timeout(30)
     .with_retry(max_attempts=3)
@@ -400,7 +400,7 @@ fetch = (
 # Analyze with LLM
 analyze = (
     Activity(key="analyze")
-    .with_worker("builtin", "llm_prompt")
+    .with_worker("std", "llm_prompt")
     .with_params(
         provider="anthropic",
         model="claude-3-haiku-20240307",
@@ -414,7 +414,7 @@ analyze = (
 # Save results (only if confidence > 0.7)
 save = (
     Activity(key="save_results")
-    .with_worker("builtin", "postgres_query")
+    .with_worker("std", "postgres_query")
     .with_params(
         query="INSERT INTO analyses (doc_url, summary, confidence) VALUES ($1, $2, $3)",
         params=[document_url, analyze["summary"], analyze["confidence"]],
@@ -427,7 +427,7 @@ save = (
 # Send notification
 notify = (
     Activity(key="notify")
-    .with_worker("builtin", "email_send")
+    .with_worker("std", "email_send")
     .with_params(
         to=notify_email,
         subject=f"Analysis Complete: {workflow.name}",

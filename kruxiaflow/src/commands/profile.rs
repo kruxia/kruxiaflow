@@ -445,7 +445,7 @@ async fn explain_hot_paths(pool: &PgPool) -> Result<()> {
         r#"
         EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)
         SELECT id FROM activity_queue
-        WHERE worker = 'builtin'
+        WHERE worker = 'std'
           AND name = 'echo'
           AND (
               (status = 'pending'::activity_status AND scheduled_for <= NOW())

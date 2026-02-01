@@ -16,7 +16,7 @@ webhook_url = Input("webhook_url", type=str, required=True)
 # Step 1: Fetch weather data from the weather API
 fetch_weather = (
     Activity(key="fetch_weather")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(
         method="GET",
         url="https://api.weather.gov/gridpoints/LOT/76,73/forecast",
@@ -27,7 +27,7 @@ fetch_weather = (
 # Depends on fetch_weather completing first
 send_notification = (
     Activity(key="send_notification")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(
         method="POST",
         url=webhook_url,

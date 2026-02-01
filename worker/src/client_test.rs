@@ -66,7 +66,7 @@ mod tests {
                     "activity_id": activity_id,
                     "workflow_id": workflow_id,
                     "activity_key": "test_activity",
-                    "worker": "builtin",
+                    "worker": "std",
                     "activity_name": "echo",
                     "parameters": {"test": "value"},
                     "settings": null,
@@ -83,7 +83,7 @@ mod tests {
         assert_eq!(response.activities.len(), 1);
         assert_eq!(response.activities[0].activity_id, activity_id);
         assert_eq!(response.activities[0].workflow_id, workflow_id);
-        assert_eq!(response.activities[0].worker, "builtin");
+        assert_eq!(response.activities[0].worker, "std");
         assert_eq!(response.activities[0].activity_name, "echo");
     }
 

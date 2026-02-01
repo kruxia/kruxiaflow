@@ -176,7 +176,7 @@ async fn test_example_03_parallel_document_processing() {
     let worker_config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("test_worker_{}", Uuid::now_v7()),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities: 20, // Allow parallel execution
@@ -202,7 +202,7 @@ description: Fetch multiple documents in parallel, process each, and aggregate r
 
 activities:
   - key: fetch_doc1
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: GET
@@ -211,7 +211,7 @@ activities:
       - response
 
   - key: fetch_doc2
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: GET
@@ -220,7 +220,7 @@ activities:
       - response
 
   - key: fetch_doc3
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: GET
@@ -229,7 +229,7 @@ activities:
       - response
 
   - key: process_doc1
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -243,7 +243,7 @@ activities:
       - fetch_doc1
 
   - key: process_doc2
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -257,7 +257,7 @@ activities:
       - fetch_doc2
 
   - key: process_doc3
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -271,7 +271,7 @@ activities:
       - fetch_doc3
 
   - key: aggregate_results
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -289,7 +289,7 @@ activities:
       - process_doc3
 
   - key: store_summary
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST

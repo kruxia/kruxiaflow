@@ -23,19 +23,19 @@ storage_webhook_url = Input("storage_webhook_url", type=str, required=True)
 
 fetch_doc1 = (
     Activity(key="fetch_doc1")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(method="GET", url=doc1_url)
 )
 
 fetch_doc2 = (
     Activity(key="fetch_doc2")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(method="GET", url=doc2_url)
 )
 
 fetch_doc3 = (
     Activity(key="fetch_doc3")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(method="GET", url=doc3_url)
 )
 
@@ -46,7 +46,7 @@ fetch_doc3 = (
 
 process_doc1 = (
     Activity(key="process_doc1")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(
         method="POST",
         url=processing_service_url,
@@ -61,7 +61,7 @@ process_doc1 = (
 
 process_doc2 = (
     Activity(key="process_doc2")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(
         method="POST",
         url=processing_service_url,
@@ -76,7 +76,7 @@ process_doc2 = (
 
 process_doc3 = (
     Activity(key="process_doc3")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(
         method="POST",
         url=processing_service_url,
@@ -95,7 +95,7 @@ process_doc3 = (
 
 aggregate_results = (
     Activity(key="aggregate_results")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(
         method="POST",
         url=aggregator_url,
@@ -118,7 +118,7 @@ aggregate_results = (
 
 store_summary = (
     Activity(key="store_summary")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(
         method="POST",
         url=storage_webhook_url,

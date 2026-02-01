@@ -14,7 +14,7 @@ This creates problems for large data:
 - Large parameters bloat the event log and queue tables
 - Memory spikes when serializing/deserializing large JSON
 
-Current workaround: The embedding activity (builtin worker) streams embeddings to workflow storage, and external workers download via the existing `GET /api/v1/workflows/{id}/activities/{key}/files/{filename}` endpoint.
+Current workaround: The embedding activity (std worker) streams embeddings to workflow storage, and external workers download via the existing `GET /api/v1/workflows/{id}/activities/{key}/files/{filename}` endpoint.
 
 However, external workers cannot **upload** to workflow storage, so they must return large outputs (like extracted passages) as parameters.
 

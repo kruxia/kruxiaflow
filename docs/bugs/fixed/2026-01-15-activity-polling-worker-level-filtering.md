@@ -21,10 +21,10 @@ POST /api/v1/workers/poll
 {
   "worker_id": "worker-abc-123",
   "activity_types": [
-    ["builtin", "echo"],
-    ["builtin", "http_request"],
-    ["builtin", "postgres_query"],
-    ["builtin", "llm_prompt"]
+    ["std", "echo"],
+    ["std", "http_request"],
+    ["std", "postgres_query"],
+    ["std", "llm_prompt"]
   ],
   "max_activities": 10
 }
@@ -61,15 +61,15 @@ async fn claim_next(
 ### Problem Scenario
 
 Given:
-- 10 pending `builtin.echo` activities
-- 10 pending `builtin.http_request` activities
-- 10 pending `builtin.postgres_query` activities
+- 10 pending `std.echo` activities
+- 10 pending `std.http_request` activities
+- 10 pending `std.postgres_query` activities
 - Worker polls with `max_activities=10`
 
 Result:
-- Claims 10 `builtin.echo` activities
-- Claims 0 `builtin.http_request` activities
-- Claims 0 `builtin.postgres_query` activities
+- Claims 10 `std.echo` activities
+- Claims 0 `std.http_request` activities
+- Claims 0 `std.postgres_query` activities
 
 The `http_request` and `postgres_query` activities are starved until all `echo` activities are processed.
 
@@ -81,7 +81,7 @@ The `http_request` and `postgres_query` activities are starved until all `echo` 
 POST /api/v1/workers/poll
 {
   "worker_id": "worker-abc-123",
-  "worker": "builtin",
+  "worker": "std",
   "max_activities": 10
 }
 ```
@@ -93,7 +93,7 @@ POST /api/v1/workers/poll
 async fn claim_next(
     &self,
     worker_id: &str,
-    worker: &str,           // Single worker name (e.g., "builtin")
+    worker: &str,           // Single worker name (e.g., "std")
     max_activities: usize,
 ) -> Result<Vec<QueuedActivity>> {
     // Single query filtering only on worker
@@ -316,7 +316,7 @@ pub struct WorkerConfig {
 
 // After
 pub struct WorkerConfig {
-    pub worker: String,  // e.g., "builtin", "custom"
+    pub worker: String,  // e.g., "std", "custom"
     // ...
 }
 ```
@@ -380,7 +380,7 @@ WHERE status IN ('pending', 'running');
 -- Test with EXPLAIN ANALYZE
 EXPLAIN ANALYZE
 SELECT id FROM activity_queue
-WHERE worker = 'builtin'
+WHERE worker = 'std'
   AND status = 'pending'::activity_status
   AND scheduled_for <= NOW()
 ORDER BY scheduled_for ASC
@@ -454,7 +454,7 @@ External workers using the Python SDK will need to update their polling requests
 | `api/src/state.rs` | Update mock implementation |
 | `worker/src/poller.rs` | Update poll request |
 | `worker/src/config.rs` | Simplify configuration |
-| `worker/src/builtin.rs` | Update builtin worker setup |
+| `worker/src/std_worker.rs` | Update std worker setup |
 | `core/tests/queue_tests.rs` | Update tests |
 | `core/tests/scheduling_integration_tests.rs` | Update tests |
 | `core/tests/batched_claim_tests.rs` | Update/rename tests |

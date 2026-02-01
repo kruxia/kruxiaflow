@@ -64,7 +64,7 @@ webhook_url = Input("webhook_url", type=str, required=True)
 # Step 1: Fetch data from an API
 fetch_data = (
     Activity(key="fetch_data")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(
         method="GET",
         url="https://api.example.com/data",
@@ -75,7 +75,7 @@ fetch_data = (
 # Uses fetch_data["response"] to reference the output
 send_notification = (
     Activity(key="send_notification")
-    .with_worker("builtin", "http_request")
+    .with_worker("std", "http_request")
     .with_params(
         method="POST",
         url=webhook_url,
@@ -140,7 +140,7 @@ from kruxiaflow import Activity
 
 activity = (
     Activity(key="unique_key")
-    .with_worker("builtin", "http_request")  # worker type, activity name
+    .with_worker("std", "http_request")  # worker type, activity name
     .with_params(url="https://api.example.com")
     .with_timeout(60)  # seconds
     .with_retry(max_attempts=3)
@@ -156,7 +156,7 @@ Control execution order with dependencies:
 ```python
 step2 = (
     Activity(key="step2")
-    .with_worker("builtin", "transform")
+    .with_worker("std", "transform")
     .with_dependencies(step1)  # Waits for step1 to complete
 )
 ```
@@ -171,7 +171,7 @@ Reference outputs from previous activities:
 # Access nested JSON paths
 save = (
     Activity(key="save")
-    .with_worker("builtin", "postgres_query")
+    .with_worker("std", "postgres_query")
     .with_params(
         query="INSERT INTO results (value) VALUES ($1)",
         params=[fetch["response.json.data.value"]],

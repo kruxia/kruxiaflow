@@ -16,8 +16,8 @@ activities:
       headers:
         Content-Type: "application/json"
       body:
-        temperature: "{{fetch_weather.response.json.properties.periods[0].temperature}}"
-        conditions: "{{fetch_weather.response.json.properties.periods[0].shortForecast}}"
+        temperature: "{{fetch_weather.response.body.properties.periods[0].temperature}}"
+        forecast: "{{fetch_weather.response.body.properties.periods[0].detailedForecast}}"
         workflow_id: "{{WORKFLOW.id}}"
     depends_on:
       - fetch_weather

@@ -39,7 +39,7 @@ description: Ask LLM question with OpenAI-only fallback chain (budget-aware)
 
 activities:
   - key: ask_question
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     parameters:
       # OpenAI-only fallback chain (expensive → cheap → very cheap)
@@ -59,11 +59,11 @@ activities:
         factor: 2
         max_seconds: 60
       budget:
-        limit_usd: 0.01  # Tight budget to demonstrate budget-aware fallback
+        limit: 0.01  # Tight budget to demonstrate budget-aware fallback
         action: abort
 
   - key: store_response
-    worker: builtin
+    worker: std
     activity_name: postgres_query
     parameters:
       query: |

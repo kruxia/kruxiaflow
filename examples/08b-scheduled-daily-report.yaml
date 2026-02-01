@@ -22,7 +22,7 @@ activities:
       # Input format: "2025-12-01T09:00:00-08:00"
       scheduled_for: "{{INPUT.report_time}}"
       budget:
-        limit_usd: 0.10
+        limit: 0.10
         action: abort
 
   # Send report via email/webhook after generation

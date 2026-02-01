@@ -48,7 +48,7 @@ Control spending for individual activities (useful with retries):
 ```yaml
 activities:
   - key: analyze_content
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     parameters:
       model: anthropic/claude-3-5-sonnet-20241022
@@ -120,7 +120,7 @@ settings:
 
 activities:
   - key: analyze
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     parameters:
       model: anthropic/claude-3-5-haiku-20241022
@@ -144,7 +144,7 @@ description: Retry expensive operation with budget control
 
 activities:
   - key: extract_entities
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     parameters:
       model: anthropic/claude-3-5-sonnet-20241022
@@ -182,7 +182,7 @@ settings:
 
 activities:
   - key: classify
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     parameters:
       model: anthropic/claude-3-5-haiku-20241022
@@ -190,7 +190,7 @@ activities:
       max_tokens: 50
 
   - key: extract_keywords
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     parameters:
       model: anthropic/claude-3-5-haiku-20241022
@@ -200,7 +200,7 @@ activities:
       - classify
 
   - key: generate_summary
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     parameters:
       model: anthropic/claude-3-5-sonnet-20241022
@@ -232,7 +232,7 @@ settings:
 
 activities:
   - key: analyze
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     parameters:
       model: anthropic/claude-3-5-opus-20241022
@@ -262,7 +262,7 @@ settings:
 
 activities:
   - key: analyze
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     parameters:
       # Try Ollama (free), then Haiku (cheap), then Sonnet (expensive)

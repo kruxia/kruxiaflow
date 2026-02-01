@@ -179,6 +179,18 @@ Example: kruxiaflow serve --seed-client"
     )]
     pub seed_client: bool,
 
+    /// Seed LLM model catalog before starting
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_SEED_LLM",
+        value_name = "YAML_FILE",
+        help = "Seed LLM model catalog from YAML file before starting server",
+        long_help = "Load LLM provider and model catalog from a YAML file.\n\
+Upserts providers and models (idempotent).\n\n\
+Example: kruxiaflow serve --seed-llm /config/llm_models.yaml"
+    )]
+    pub seed_llm: Option<String>,
+
     /// Database connection timeout for --migrate/--seed-client (seconds)
     #[arg(
         long,
@@ -350,16 +362,16 @@ async fn spawn_workers(
     // Create cache service based on environment configuration
     let cache_config = crate::config::CacheConfig::new();
     cache_config.log_config();
-    let cache_service = cache_config.create_cache_service();
+    let cache_service = cache_config.create_cache_service().await;
 
     // Create activity registry with all built-in activities pre-registered
-    let registry = kruxiaflow_worker::register_builtin_activities(cache_service);
+    let registry = kruxiaflow_worker::register_std_activities(cache_service);
 
     #[allow(deprecated)]
     let config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("internal_worker_{}", Uuid::now_v7()),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         poll_max_activities,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities,
@@ -459,8 +471,8 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         cmd.client_secret = load_secret("KRUXIAFLOW_CLIENT_SECRET");
     }
 
-    // Run startup tasks if requested (--migrate or --seed-client)
-    if cmd.migrate || cmd.seed_client {
+    // Run startup tasks if requested (--migrate, --seed-client, --seed-llm)
+    if cmd.migrate || cmd.seed_client || cmd.seed_llm.is_some() {
         // Wait for database with retry (for container startup scenarios)
         let init_pool = wait_for_postgres(&database_url, cmd.db_connect_timeout).await?;
 
@@ -482,6 +494,20 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
 
             // Check if client exists and seed if not (idempotent)
             seed_client::seed_oauth_client(&init_pool, client_id, client_secret, false).await?;
+        }
+
+        // Seed LLM model catalog if requested
+        if let Some(ref llm_models_file) = cmd.seed_llm {
+            let llm_path = std::path::Path::new(llm_models_file);
+            if llm_path.exists() {
+                tracing::info!("Seeding LLM model catalog from {}...", llm_models_file);
+                crate::llm_catalog::load_catalog_from_yaml(&init_pool, llm_path).await?;
+            } else {
+                tracing::warn!(
+                    "LLM models file not found: {} (skipping --seed-llm)",
+                    llm_models_file
+                );
+            }
         }
 
         // Close the init pool - main server will create its own

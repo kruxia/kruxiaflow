@@ -135,7 +135,7 @@ class TestActivity:
     def test_minimal_activity(self):
         activity = Activity(key="test", activity_name="echo")
         assert activity.key == "test"
-        assert activity.worker == "builtin"
+        assert activity.worker == "std"
         assert activity.activity_name == "echo"
         assert activity.parameters == {}
         assert activity.depends_on == []
@@ -145,7 +145,7 @@ class TestActivity:
         activity = Activity(key="test")
         assert activity.activity_name == ""
         # with_worker sets activity_name
-        activity.with_worker("builtin", "echo")
+        activity.with_worker("std", "echo")
         assert activity.activity_name == "echo"
 
     def test_to_dict_requires_activity_name(self):
@@ -157,14 +157,14 @@ class TestActivity:
     def test_full_activity(self):
         activity = Activity(
             key="fetch",
-            worker="builtin",
+            worker="std",
             activity_name="http_request",
             parameters={"url": "https://example.com"},
             settings=ActivitySettings(timeout_seconds=60),
             depends_on=["step1"],
         )
         assert activity.key == "fetch"
-        assert activity.worker == "builtin"
+        assert activity.worker == "std"
         assert activity.activity_name == "http_request"
         assert activity.parameters["url"] == "https://example.com"
         assert activity.settings.timeout_seconds == 60
@@ -176,14 +176,14 @@ class TestActivityFluentMethods:
 
     def test_with_worker(self):
         activity = Activity(key="test", activity_name="placeholder").with_worker(
-            "builtin", "http_request"
+            "std", "http_request"
         )
-        assert activity.worker == "builtin"
+        assert activity.worker == "std"
         assert activity.activity_name == "http_request"
 
     def test_with_worker_returns_self(self):
         activity = Activity(key="test", activity_name="placeholder")
-        result = activity.with_worker("builtin", "http_request")
+        result = activity.with_worker("std", "http_request")
         assert result is activity
 
     def test_with_params(self):
@@ -273,7 +273,7 @@ class TestActivityFluentMethods:
     def test_chaining_all_methods(self):
         activity = (
             Activity(key="complete", activity_name="placeholder")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(url="https://example.com")
             .with_timeout(300)
             .with_retry(max_attempts=3)
@@ -283,7 +283,7 @@ class TestActivityFluentMethods:
             .with_streaming(True)
         )
         assert activity.key == "complete"
-        assert activity.worker == "builtin"
+        assert activity.worker == "std"
         assert activity.activity_name == "http_request"
         assert activity.parameters["url"] == "https://example.com"
         assert activity.settings.timeout_seconds == 300
@@ -330,7 +330,7 @@ class TestActivitySerialization:
         activity = Activity(key="test", activity_name="echo")
         d = activity.to_dict()
         assert d["key"] == "test"
-        assert d["worker"] == "builtin"
+        assert d["worker"] == "std"
         assert d["activity_name"] == "echo"
         assert "parameters" not in d
         assert "settings" not in d

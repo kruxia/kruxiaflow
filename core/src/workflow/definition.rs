@@ -623,7 +623,8 @@ pub struct ActivityDefinition {
     /// Unique key for this activity within the workflow
     pub key: String,
 
-    /// Activity worker type (e.g., "builtin", "custom-python")
+    /// Activity worker type (e.g., "std", "custom-python")
+    #[serde(default = "default_worker")]
     pub worker: String,
 
     /// Activity name within worker (e.g., "http_request", "postgres_query")
@@ -884,6 +885,10 @@ pub struct RetryPolicy {
     /// Maximum backoff delay cap in seconds
     #[serde(default = "default_max_seconds")]
     pub max_seconds: u64,
+}
+
+fn default_worker() -> String {
+    "std".to_string()
 }
 
 fn default_max_attempts() -> u32 {

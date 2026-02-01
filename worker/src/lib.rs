@@ -1,6 +1,6 @@
 pub mod activities;
 pub mod activity_result;
-pub mod builtin;
+pub mod std_worker;
 pub mod client;
 pub mod config;
 pub mod file_executor;
@@ -15,7 +15,7 @@ pub use activities::{
     PostgresQueryActivity, new_pool_cache,
 };
 pub use activity_result::ActivityResult;
-pub use builtin::register_builtin_activities;
+pub use std_worker::register_std_activities;
 pub use client::WorkerApiClient;
 pub use config::WorkerConfig;
 pub use manager::WorkerManager;

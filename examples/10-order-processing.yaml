@@ -111,7 +111,7 @@ description: Process order with API calls, database transaction, and email confi
 activities:
   # Step 1: Validate inventory availability
   - key: validate_inventory
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: GET
@@ -131,7 +131,7 @@ activities:
 
   # Step 2: Reserve inventory (only if available)
   - key: reserve_inventory
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -155,7 +155,7 @@ activities:
 
   # Step 3: Process payment
   - key: process_payment
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -183,7 +183,7 @@ activities:
 
   # Step 4: Record order in database (atomic transaction)
   - key: record_order
-    worker: builtin
+    worker: std
     activity_name: postgres_transaction
     parameters:
       db_url: "{{SECRET.db_url}}"
@@ -216,7 +216,7 @@ activities:
 
   # Step 5: Send confirmation email
   - key: send_confirmation
-    worker: builtin
+    worker: std
     activity_name: email_send
     parameters:
       smtp_url: "{{SECRET.smtp_url}}"

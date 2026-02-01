@@ -52,11 +52,12 @@ services:
       - "-c"
       - "log_min_duration_statement=100"
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
     networks:
       - backend
+      - frontend
     healthcheck:
       <<: *healthcheck-defaults
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kruxiaflow}"]
@@ -89,6 +90,7 @@ services:
       - redis_data:/data
     networks:
       - backend
+      - frontend
     command: redis-server --appendonly yes
     healthcheck:
       <<: *healthcheck-defaults
@@ -131,8 +133,8 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-kruxiaflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-kruxiaflow}
       # OAuth configuration (required)
-      KRUXIAFLOW_CLIENT_ID: ${KRUXIAFLOW_CLIENT_ID:?KRUXIAFLOW_CLIENT_ID is required}
-      KRUXIAFLOW_CLIENT_SECRET: ${KRUXIAFLOW_CLIENT_SECRET:?KRUXIAFLOW_CLIENT_SECRET is required}
+      KRUXIAFLOW_CLIENT_ID: ${KRUXIAFLOW_CLIENT_ID:-}
+      KRUXIAFLOW_CLIENT_SECRET: ${KRUXIAFLOW_CLIENT_SECRET:-}
       KRUXIAFLOW_OAUTH_TOKEN_ISSUER: ${KRUXIAFLOW_OAUTH_TOKEN_ISSUER:-http://localhost:8080}
       KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE: ${KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE:-kruxiaflow-api}
       # OAuth RSA keys (loaded from mounted secrets via _FILE pattern)
@@ -144,6 +146,10 @@ services:
       # Cache configuration
       KRUXIAFLOW_CACHE_PROVIDER: ${KRUXIAFLOW_CACHE_PROVIDER:-redis}
       KRUXIAFLOW_REDIS_URL: redis://redis:6379
+      # LLM API keys
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
       # Logging configuration
       KRUXIAFLOW_LOG_LEVEL: ${KRUXIAFLOW_LOG_LEVEL:-info}
     healthcheck:
@@ -172,6 +178,7 @@ services:
         hard: 65536
     volumes:
       - ./docker-keys:/secrets:ro
+      - ./config:/config:ro
 
 volumes:
   postgres_data:

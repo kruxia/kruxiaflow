@@ -27,7 +27,7 @@ class TestSimpleWorkflowYAML:
     def test_single_activity_workflow_yaml(self):
         activity = (
             Activity(key="fetch")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(url="https://example.com", method="GET")
         )
         wf = Workflow(name="simple").with_activities(activity)
@@ -37,7 +37,7 @@ class TestSimpleWorkflowYAML:
         assert data["name"] == "simple"
         assert len(data["activities"]) == 1
         assert data["activities"][0]["key"] == "fetch"
-        assert data["activities"][0]["worker"] == "builtin"
+        assert data["activities"][0]["worker"] == "std"
         assert data["activities"][0]["activity_name"] == "http_request"
         assert data["activities"][0]["parameters"]["url"] == "https://example.com"
 
@@ -63,12 +63,12 @@ class TestSequentialWorkflowYAML:
     def test_two_step_sequential_workflow(self):
         step1 = (
             Activity(key="step1")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(url="https://api.example.com")
         )
         step2 = (
             Activity(key="step2")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(url="https://api.example.com/next", data=step1["response"])
             .with_dependencies(step1)
         )
@@ -91,7 +91,7 @@ class TestParallelWorkflowYAML:
         # Three parallel activities with no dependencies
         activities = [
             Activity(key=f"fetch_{i}")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(url=f"https://api{i}.example.com")
             for i in range(3)
         ]
@@ -107,13 +107,13 @@ class TestParallelWorkflowYAML:
         # Three parallel activities that fan into one
         fetches = [
             Activity(key=f"fetch_{i}")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(url=f"https://api{i}.example.com")
             for i in range(3)
         ]
         aggregate = (
             Activity(key="aggregate")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(results=[f["response"] for f in fetches])
             .with_dependencies(*fetches)
         )
@@ -132,12 +132,12 @@ class TestConditionalWorkflowYAML:
     def test_conditional_dependency(self):
         check = (
             Activity(key="check")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(url="https://api.example.com/validate")
         )
         success_path = (
             Activity(key="success")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(url="https://api.example.com/success")
             .with_dependencies(
                 Dependency.on(check, check["valid"] == True)  # noqa: E712
@@ -145,7 +145,7 @@ class TestConditionalWorkflowYAML:
         )
         failure_path = (
             Activity(key="failure")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(url="https://api.example.com/failure")
             .with_dependencies(
                 Dependency.on(check, check["valid"] == False)  # noqa: E712
@@ -177,7 +177,7 @@ class TestActivitySettingsYAML:
     def test_activity_with_timeout(self):
         activity = (
             Activity(key="slow")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(url="https://slow.api.com")
             .with_timeout(300)
         )
@@ -190,7 +190,7 @@ class TestActivitySettingsYAML:
     def test_activity_with_retry(self):
         activity = (
             Activity(key="retry")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(url="https://flaky.api.com")
             .with_retry(max_attempts=5, strategy=BackoffStrategy.EXPONENTIAL)
         )
@@ -205,7 +205,7 @@ class TestActivitySettingsYAML:
     def test_activity_with_cache(self):
         activity = (
             Activity(key="cached")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(url="https://api.example.com")
             .with_cache(ttl=3600, key="custom_key")
         )
@@ -221,7 +221,7 @@ class TestActivitySettingsYAML:
     def test_activity_with_budget(self):
         activity = (
             Activity(key="llm")
-            .with_worker("builtin", "llm_prompt")
+            .with_worker("std", "llm_prompt")
             .with_params(prompt="Hello")
             .with_budget(limit_usd=1.0, action=BudgetAction.ABORT)
         )
@@ -236,7 +236,7 @@ class TestActivitySettingsYAML:
     def test_activity_with_all_settings(self):
         activity = (
             Activity(key="complete")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(url="https://api.example.com")
             .with_timeout(300)
             .with_retry(max_attempts=3)
@@ -267,7 +267,7 @@ class TestCompleteWorkflowYAML:
 
         fetch_weather = (
             Activity(key="fetch_weather")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(
                 method="GET",
                 url="https://api.weather.gov/gridpoints/LOT/76,73/forecast",
@@ -276,7 +276,7 @@ class TestCompleteWorkflowYAML:
 
         send_notification = (
             Activity(key="send_notification")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(
                 method="POST",
                 url=webhook_url,
@@ -313,13 +313,13 @@ class TestCompleteWorkflowYAML:
 
         check_email = (
             Activity(key="check_email")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(method="GET", url="https://httpbin.org/json")
         )
 
         store_valid = (
             Activity(key="store_valid")
-            .with_worker("builtin", "postgres_query")
+            .with_worker("std", "postgres_query")
             .with_params(db_url=db_url, query="INSERT INTO valid_users...")
             .with_dependencies(
                 Dependency.on(check_email, check_email["response.success"] == True)  # noqa: E712
@@ -328,7 +328,7 @@ class TestCompleteWorkflowYAML:
 
         store_invalid = (
             Activity(key="store_invalid")
-            .with_worker("builtin", "postgres_query")
+            .with_worker("std", "postgres_query")
             .with_params(db_url=db_url, query="INSERT INTO invalid_users...")
             .with_dependencies(
                 Dependency.on(check_email, check_email["response.success"] != True)  # noqa: E712
@@ -361,7 +361,7 @@ class TestYAMLRoundTrip:
 
     def test_yaml_is_valid(self):
         """Ensure generated YAML is valid YAML syntax."""
-        activity = Activity(key="test").with_worker("builtin", "echo")
+        activity = Activity(key="test").with_worker("std", "echo")
         wf = Workflow(name="test").with_activities(activity)
         yaml_str = wf.to_yaml()
 
@@ -374,7 +374,7 @@ class TestYAMLRoundTrip:
         text_input = Input("text", type=str)
         activity = (
             Activity(key="test")
-            .with_worker("builtin", "echo")
+            .with_worker("std", "echo")
             .with_params(input=text_input)
         )
         wf = Workflow(name="test").with_inputs(text_input).with_activities(activity)
@@ -388,7 +388,7 @@ class TestYAMLRoundTrip:
         """Ensure special characters are properly escaped."""
         activity = (
             Activity(key="test")
-            .with_worker("builtin", "echo")
+            .with_worker("std", "echo")
             .with_params(
                 text="Hello 'world'",
                 query="SELECT * FROM users WHERE name = 'John's'",

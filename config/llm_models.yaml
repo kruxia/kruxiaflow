@@ -161,6 +161,16 @@ providers:
     requires_api_key: true
     models:
       # Claude 4.5 Sonnet (latest)
+      - name: claude-opus-4-5-20251101
+        display_name: Claude 4.5 Opus
+        input_price_per_million: 5.00
+        output_price_per_million: 25.00
+        cached_input_price_per_million: 0.50
+        supports_completion: true
+        context_window: 200000
+        max_output_tokens: 64000
+        notes: "Pricing increases for >200K tokens"
+
       - name: claude-sonnet-4-5-20250929
         display_name: Claude 4.5 Sonnet
         input_price_per_million: 3.00
@@ -172,7 +182,7 @@ providers:
         notes: "Pricing increases for >200K tokens: $6 input, $22.50 output, $0.60 cached"
 
       # Claude 4.5 Haiku
-      - name: claude-haiku-4-5-20250229
+      - name: claude-haiku-4-5-20251001
         display_name: Claude 4.5 Haiku
         input_price_per_million: 1.00
         output_price_per_million: 5.00

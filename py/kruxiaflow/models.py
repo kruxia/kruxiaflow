@@ -156,7 +156,7 @@ class Activity(BaseModel):
     Declarative example:
         activity = Activity(
             key="fetch_data",
-            worker="builtin",
+            worker="std",
             activity_name="http_request",
             parameters={"url": "https://api.example.com"},
             settings=ActivitySettings(timeout_seconds=300),
@@ -165,7 +165,7 @@ class Activity(BaseModel):
     Fluent example:
         activity = (
             Activity(key="fetch_data")
-            .with_worker("builtin", "http_request")
+            .with_worker("std", "http_request")
             .with_params(url="https://api.example.com")
             .with_timeout(300)
         )
@@ -190,7 +190,7 @@ class Activity(BaseModel):
         """Set the worker and activity name.
 
         Args:
-            worker: Worker identifier (e.g., "builtin", "python")
+            worker: Worker identifier (e.g., "std", "python")
             activity_name: Activity name within the worker (e.g., "http_request")
 
         Returns:

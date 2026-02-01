@@ -1,14 +1,14 @@
 """Kruxia Flow workflow definitions as Python dicts (JSON-serializable)"""
 
 
-# Echo script for py-std worker (equivalent to builtin.echo)
+# Echo script for py-std worker (equivalent to std.echo)
 PY_ECHO_SCRIPT = "OUTPUT = INPUT"
 
 
 def _echo_activity(worker: str) -> dict:
     """Create an echo activity definition for the given worker type."""
-    if worker == "builtin":
-        return {"worker": "builtin", "activity_name": "echo", "parameters": {}}
+    if worker == "std":
+        return {"worker": "std", "activity_name": "echo", "parameters": {}}
     else:
         return {
             "worker": worker,
@@ -17,9 +17,9 @@ def _echo_activity(worker: str) -> dict:
         }
 
 
-def create_sequential_workflow(num_activities: int, worker: str = "builtin") -> dict:
+def create_sequential_workflow(num_activities: int, worker: str = "std") -> dict:
     """Create sequential workflow with N echo activities"""
-    suffix = f"_{worker}" if worker != "builtin" else ""
+    suffix = f"_{worker}" if worker != "std" else ""
     activities = []
 
     for i in range(num_activities):
@@ -39,9 +39,9 @@ def create_sequential_workflow(num_activities: int, worker: str = "builtin") -> 
     }
 
 
-def create_parallel_workflow(num_parallel: int, worker: str = "builtin") -> dict:
+def create_parallel_workflow(num_parallel: int, worker: str = "std") -> dict:
     """Create parallel workflow with fan-out and fan-in"""
-    suffix = f"_{worker}" if worker != "builtin" else ""
+    suffix = f"_{worker}" if worker != "std" else ""
     activities = [
         # Start activity (fans out)
         {
@@ -79,7 +79,7 @@ def create_parallel_workflow(num_parallel: int, worker: str = "builtin") -> dict
     }
 
 
-# Pre-defined workflows: builtin worker
+# Pre-defined workflows: std worker
 SEQUENTIAL_5 = create_sequential_workflow(5)
 SEQUENTIAL_3 = create_sequential_workflow(3)
 PARALLEL_10 = create_parallel_workflow(10)

@@ -15,7 +15,7 @@ use sha2::{Digest, Sha256};
 ///
 /// # Arguments
 ///
-/// * `activity_name` - Full activity name (e.g., "builtin.llm_prompt")
+/// * `activity_name` - Full activity name (e.g., "std.llm_prompt")
 /// * `parameters` - Activity parameters as JSON value
 ///
 /// # Returns
@@ -34,7 +34,7 @@ use sha2::{Digest, Sha256};
 ///     "temperature": 0.0
 /// });
 ///
-/// let key = generate_cache_key("builtin.llm_prompt", &params)?;
+/// let key = generate_cache_key("std.llm_prompt", &params)?;
 /// assert_eq!(key.len(), 64); // SHA256 hex = 64 chars
 /// # Ok::<(), anyhow::Error>(())
 /// ```

@@ -2,41 +2,163 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.90%2B-orange.svg)](https://www.rust-lang.org/)
-[![Docker](https://img.shields.io/docker/v/kruxia/kruxia-flow?label=docker&color=2496ED)](https://hub.docker.com/r/kruxia/kruxia-flow)
-[![Docker Image Size](https://img.shields.io/docker/image-size/kruxia/kruxia-flow/latest?label=image%20size)](https://hub.docker.com/r/kruxia/kruxia-flow)
+[![Docker](https://img.shields.io/docker/v/kruxia/kruxiaflow?label=docker&color=2496ED)](https://hub.docker.com/r/kruxia/kruxiaflow)
+[![Docker Image Size](https://img.shields.io/docker/image-size/kruxia/kruxiaflow/latest?label=image%20size)](https://hub.docker.com/r/kruxia/kruxiaflow)
 
 **AI-native durable workflows that run everywhere**
 
 A lightweight, high-performance workflow engine designed for AI applications. Track every token, cache intelligently, and never exceed your LLM budget.
 
 ```
-Single 8MB binary | 24x faster than Airflow | 20x less memory
+Single Binary Deployment | 40% Lower Memory | AI Cost Tracking Built-in | Runs Anywhere
 ```
 
 ## Quick Start
 
-Get Kruxia Flow running in 60 seconds:
+### 1. Start Kruxia Flow
 
 ```bash
-# Clone and start
 git clone https://github.com/kruxia/kruxia-flow.git
 cd kruxia-flow
 ./docker up -d
 ./docker logs -f
 
-# Wait for services to be healthy (~30 seconds)
-docker compose ps
-
-# API is ready at http://localhost:8080
-curl http://localhost:8080/health
-
-# API docs:
-open http://localhost:8080/api/v1/docs
+# Wait for "listening on 0.0.0.0:8080" then verify:
+./docker exec kruxiaflow-server /kruxiaflow health
 ```
 
 That's it. Kruxia Flow is running with PostgreSQL and Redis, ready to execute workflows.
 
+### 2. Get an Access Token
+
+Kruxia Flow always runs with OAuth2 security, so you'll need client authentication to
+run workflows. The simplest approach for local running is to use the generated client
+credentials to get an access token:
+
+```bash
+# Read the generated client secret from .env
+CLIENT_SECRET=$(grep KRUXIAFLOW_CLIENT_SECRET .env | cut -d= -f2)
+
+TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/oauth/token \
+  -d "grant_type=client_credentials" \
+  -d "client_id=kruxiaflow-docker-client" \
+  -d "client_secret=$CLIENT_SECRET" | jq -r '.access_token')
+```
+
+### 3. Run a Workflow
+
+Deploy the weather report example and run it:
+
+```bash
+# Deploy the workflow definition
+curl -s -X POST http://localhost:8080/api/v1/workflow_definitions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: text/yaml" \
+  --data-binary @examples/01-weather-report.yaml | jq .
+
+# Submit a workflow instance
+curl -s -X POST http://localhost:8080/api/v1/workflows \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "definition_name": "weather_report",
+    "input": {"webhook_url": "https://httpbin.org/post"}
+  }' | jq .
+```
+
+This fetches a weather forecast from the National Weather Service API and POSTs
+the result to a webhook. Copy the `workflow_id` from the response to check status:
+
+```bash
+curl -s http://localhost:8080/api/v1/workflows/WORKFLOW_ID \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+### 4. Run an LLM Workflow
+
+For AI workflows, set your provider API key in your shell environment and restart:
+
+```bash
+# Set your Anthropic API key (add to ~/.bashrc or ~/.zshrc to persist)
+export ANTHROPIC_API_KEY=your-key-here
+
+# Restart the server to pick up the new key
+./docker down && ./docker up -d
+```
+
+Then deploy and run the content moderation example:
+
+```bash
+# Deploy the moderation workflow
+curl -s -X POST http://localhost:8080/api/v1/workflow_definitions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: text/yaml" \
+  --data-binary @examples/04-moderate-content.yaml | jq .
+
+# Submit a moderation request
+curl -s -X POST http://localhost:8080/api/v1/workflows \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "definition_name": "moderate_content",
+    "input": {
+      "user_content": "Check out this amazing product!",
+      "content_id": "test-001"
+    }
+  }' | jq .
+```
+
+Check workflow result and cost tracking with the `workflow_id` from the response:
+
+```bash
+curl -s http://localhost:8080/api/v1/workflows/WORKFLOW_ID \
+  -H "Authorization: Bearer $TOKEN" | jq .
+
+# View cost breakdown
+curl -s http://localhost:8080/api/v1/workflows/WORKFLOW_ID/cost \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+See `examples/` for 15+ workflows covering parallel execution, model fallback, caching,
+loops, scheduling, and RAG patterns. API docs at http://localhost:8080/api/v1/docs.
+
 ## Why Kruxia Flow?
+
+Kruxia Flow is a **durable execution engine**: workflows survive crashes, retries are automatic, and state is persistent. This puts us in the same category as Temporal and Inngest, not batch schedulers like Airflow.
+
+### vs. Temporal
+
+Temporal is the industry standard for durable execution, and we respect what they've built. Choose Kruxia Flow when you want:
+
+| | Temporal | Kruxia Flow |
+|---|----------|-------------|
+| **Deployment** | 4+ services (Frontend, History, Matching, Worker) | Single binary |
+| **Memory footprint** | 300-400 MB baseline | ~200 MB baseline |
+| **Operational complexity** | Requires expertise | Minimal configuration |
+| **AI workflow features** | — | Built-in cost tracking, budgets, model fallback, streaming |
+
+**When to choose Kruxia Flow:** You want durable execution without the operational overhead, need AI-native features, or are a small team shipping fast.
+
+### vs. Inngest
+
+Inngest offers a great developer experience for durable functions. Kruxia Flow differentiates with:
+
+- **Self-hosted first:** Run anywhere, including edge and air-gapped environments
+- **AI-native:** Built-in cost tracking, budget enforcement, model fallback, token streaming
+- **Resource efficiency:** Lower memory footprint for cost-sensitive deployments
+
+### vs. Airflow
+
+Airflow is a batch scheduler. It’s great for data pipelines on a schedule, but fundamentally different from durable execution:
+
+| | Airflow | Kruxia Flow |
+|---|---------|-------------|
+| **Model** | DAG scheduling | Durable execution |
+| **Failure handling** | Task retry | Workflow survives crashes |
+| **State** | External (database) | Built-in persistence |
+| **Real-time** | Not designed for it | Sub-second capable |
+
+**Migrating from Airflow?** If you need durability guarantees, exactly-once semantics, or real-time workflows, Kruxia Flow is a natural next step. [**TODO**: See migration guide →]
 
 ### The Problem
 
@@ -44,7 +166,7 @@ LLM costs spiral out of control. You're running AI workflows with no visibility 
 
 - **Airflow/Temporal**: Great for orchestration, but no LLM awareness
 - **LangChain/LangGraph**: Great for LLM chains, but no durability or cost tracking
-- **DIY**: You're building billing infrastructure instead of your product
+- **DIY**: You're building infrastructure instead of your product
 
 ### The Solution
 
@@ -55,7 +177,7 @@ Kruxia Flow combines durable execution with AI-native features:
 | Durable execution        | **Yes**    | Yes      | Yes     | No        |
 | LLM cost tracking        | **Yes**    | No       | No      | No        |
 | Budget enforcement       | **Yes**    | No       | No      | No        |
-| Semantic caching         | **Yes**    | No       | No      | Partial   |
+| Semantic caching         | **Planned**| No       | No      | Partial   |
 | Multi-provider LLM       | **Yes**    | No       | No      | Yes       |
 | Token streaming          | **Yes**    | No       | No      | Yes       |
 | Single binary            | **7.5MB**  | ~200MB   | ~500MB+ | N/A       |
@@ -71,14 +193,16 @@ Every token is tracked. Every dollar is accounted for.
 
 ```yaml
 activities:
-  analyze:
-    type: llm_prompt
-    budget:
-      max_cost_usd: 0.50
-      exceeded_action: abort
-    input:
-      model: claude-4-5-sonnet
+  - key: analyze
+    activity_name: llm_prompt
+    parameters:
+      model: anthropic/claude-sonnet-4-5-20250929
       prompt: "Analyze this document..."
+      max_tokens: 500
+    settings:
+      budget:
+        limit_usd: 0.50
+        action: abort
 ```
 
 Real-time cost visibility per workflow, per activity, per model.
@@ -89,30 +213,44 @@ Automatically fall back to cheaper models when budget is constrained:
 
 ```yaml
 activities:
-  generate:
-    type: llm_prompt
-    input:
-      model: claude-4-5-sonnet  # Try first
-      fallback_models:
-        - gpt-4o-mini           # If budget constrained
-        - claude-4-5-haiku      # Last resort
+  - key: generate
+    activity_name: llm_prompt
+    parameters:
+      model:
+        - anthropic/claude-sonnet-4-5-20250929  # Try first
+        - openai/gpt-4o-mini                    # If budget constrained
+        - anthropic/claude-haiku-4-20250415      # Last resort
+      prompt: "Generate a summary..."
+      max_tokens: 500
+    settings:
+      budget:
+        limit_usd: 0.10
+        action: abort
 ```
 
-### Semantic Caching
+### Result Caching
 
-Save 50-80% on LLM costs by caching similar queries:
+Save on LLM costs by caching repeated queries:
 
 ```yaml
 activities:
-  answer:
-    type: llm_prompt
-    cache:
-      enabled: true
-      similarity_threshold: 0.92
-      ttl: 24h
+  - key: answer
+    activity_name: llm_prompt
+    parameters:
+      model: anthropic/claude-haiku-4-20250415
+      prompt: "{{INPUT.question}}"
+      max_tokens: 200
+    settings:
+      cache:
+        enabled: true
+        ttl_seconds: 3600
+        key:
+          - llm_prompt
+          - "{{parameters.model}}"
+          - "{{parameters.prompt}}"
 ```
 
-Repeated or similar questions hit cache instead of the LLM.
+Identical queries hit cache instead of the LLM. (NOTE: Semantic caching is planned.)
 
 ### Durable Execution
 
