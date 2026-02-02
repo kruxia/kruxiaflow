@@ -60,6 +60,9 @@ reqwest = { workspace = true }
 # Time
 chrono = { workspace = true }
 
+# MCP Server (optional - opt-in feature)
+rust-mcp-sdk = { version = "0.8.2", optional = true }
+
 [dev-dependencies]
 serial_test = { workspace = true }
 wiremock = "0.6"
@@ -68,5 +71,7 @@ wiremock = "0.6"
 tikv-jemallocator = { version = "0.6", optional=true, features=["profiling"] }
 
 [features]
+default = []  # MCP excluded by default (opt-in for smaller edge binaries)
+mcp-server = ["dep:rust-mcp-sdk"]  # Opt-in MCP server support
 profiling = ["tikv-jemallocator", "kruxiaflow-core/profiling", "kruxiaflow-worker/profiling"]
 redis-cache = ["kruxiaflow-core/redis-cache"]

@@ -215,6 +215,64 @@ workers (e.g. Python SDK workers) handle activity execution.\n\n\
 Example: kruxiaflow serve --no-worker"
     )]
     pub no_worker: bool,
+
+    // ========================================================================
+    // MCP Server Configuration (requires compile-time --features mcp-server)
+    // ========================================================================
+    /// Enable MCP server (requires mcp-server feature at compile time)
+    #[cfg(feature = "mcp-server")]
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_MCP_ENABLED",
+        help = "Enable MCP server for AI agent integration",
+        long_help = "Enable MCP (Model Context Protocol) server.\n\
+Allows AI agents like Claude to interact with Kruxia Flow.\n\n\
+NOTE: Requires building with --features mcp-server\n\n\
+Example: kruxiaflow serve --mcp-enabled"
+    )]
+    pub mcp_enabled: Option<bool>,
+
+    /// MCP transport (http only - stdio not supported)
+    #[cfg(feature = "mcp-server")]
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_MCP_TRANSPORT",
+        help = "MCP transport type (only 'http' is supported)",
+        long_help = "MCP transport type: only 'http' is supported in the integrated MCP server.\n\n\
+Stdio transport is NOT supported because the 'serve' command runs multiple services\n\
+(API server, orchestrator, workers) that log to stdout/stderr, which would corrupt\n\
+the MCP stdio protocol (requires clean stdin/stdout).\n\n\
+For stdio MCP support, use a separate process:\n  \
+  - Python MCP server: kruxiaflow-mcp/\n  \
+  - Standalone Rust MCP server: Create a dedicated binary\n\n\
+Default: http\n\
+Example: --mcp-transport http"
+    )]
+    pub mcp_transport: Option<String>,
+
+    /// MCP HTTP port (required if transport=http)
+    #[cfg(feature = "mcp-server")]
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_MCP_HTTP_PORT",
+        help = "MCP HTTP port (if transport=http)",
+        long_help = "MCP HTTP server port (only used if transport=http).\n\n\
+Default: 8081\n\
+Example: --mcp-http-port 9091"
+    )]
+    pub mcp_http_port: Option<u16>,
+
+    /// MCP HTTP bind address
+    #[cfg(feature = "mcp-server")]
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_MCP_HTTP_BIND",
+        help = "MCP HTTP bind address",
+        long_help = "Address to bind MCP HTTP server to (only used if transport=http).\n\n\
+Default: 0.0.0.0\n\
+Example: --mcp-http-bind 127.0.0.1"
+    )]
+    pub mcp_http_bind: Option<String>,
 }
 
 impl ServeCommand {
@@ -628,6 +686,42 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         .await?
     };
 
+    // 6. Spawn MCP server if enabled and feature is compiled in
+    #[cfg(feature = "mcp-server")]
+    let mcp_handle = {
+        let mcp_config = crate::mcp::config::McpConfig::new(
+            cmd.mcp_enabled,
+            cmd.mcp_transport,
+            cmd.mcp_http_port,
+            cmd.mcp_http_bind,
+        )?;
+
+        if mcp_config.enabled {
+            mcp_config.log_config();
+            Some(crate::mcp::server::spawn_mcp_server(
+                Arc::new(mcp_config),
+                pool.clone(),
+            ))
+        } else {
+            None
+        }
+    };
+
+    // Log if someone tries to use MCP without the feature
+    #[cfg(not(feature = "mcp-server"))]
+    {
+        if std::env::var("KRUXIAFLOW_MCP_ENABLED")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(false)
+        {
+            tracing::warn!(
+                "MCP server requested but not compiled in. \
+                Rebuild with --features mcp-server to enable MCP support."
+            );
+        }
+    }
+
     tracing::info!("All services started successfully");
     tracing::info!(
         api_url = %api_url,
@@ -706,6 +800,14 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         Err(_) => tracing::warn!("Orchestrator shutdown timeout, forcing stop"),
     }
 
+    // Stop MCP server (if running)
+    #[cfg(feature = "mcp-server")]
+    if let Some(handle) = mcp_handle {
+        tracing::info!("Stopping MCP server...");
+        handle.abort();
+        tracing::info!("MCP server stopped");
+    }
+
     // Stop pool monitor (only in profiling mode)
     #[cfg(feature = "profiling")]
     {
@@ -750,6 +852,14 @@ mod tests {
             db_connect_timeout: 60,
             activity_timeout: 300,
             no_worker: false,
+            #[cfg(feature = "mcp-server")]
+            mcp_enabled: None,
+            #[cfg(feature = "mcp-server")]
+            mcp_transport: None,
+            #[cfg(feature = "mcp-server")]
+            mcp_http_port: None,
+            #[cfg(feature = "mcp-server")]
+            mcp_http_bind: None,
         }
     }
 
@@ -948,6 +1058,14 @@ mod tests {
             db_connect_timeout: 120,
             activity_timeout: 300,
             no_worker: false,
+            #[cfg(feature = "mcp-server")]
+            mcp_enabled: Some(true),
+            #[cfg(feature = "mcp-server")]
+            mcp_transport: Some("http".to_string()),
+            #[cfg(feature = "mcp-server")]
+            mcp_http_port: Some(8081),
+            #[cfg(feature = "mcp-server")]
+            mcp_http_bind: Some("127.0.0.1".to_string()),
         };
 
         assert!(cmd.validate().is_ok());
