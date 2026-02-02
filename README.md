@@ -239,7 +239,7 @@ Native support for all major providers:
 - **Google**: Gemini Pro, Gemini Flash
 - **Ollama**: Self-hosted open models
 
-## Comparison with Other Durable Orchestration Systems
+<!-- ## Comparison with Other Durable Orchestration Systems
 
 ### vs. Temporal
 
@@ -290,7 +290,7 @@ Airflow is a batch scheduler. It’s great for data pipelines on a schedule, but
 | **State** | External (database) | Built-in persistence |
 | **Real-time** | Not designed for it | Sub-second capable |
 
-**Migrating from Airflow?** If you need durability guarantees, exactly-once semantics, or real-time workflows, Kruxia Flow is a natural next step.
+**Migrating from Airflow?** If you need durability guarantees, exactly-once semantics, or real-time workflows, Kruxia Flow is a natural next step. -->
 
 ## Examples
 
