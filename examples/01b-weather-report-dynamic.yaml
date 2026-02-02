@@ -6,8 +6,8 @@ activities:
       method: GET
       url: "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
       query:
-        address: "{{INPUT.city}}, {{INPUT.state}}"
-        benchmark: "2020"
+        address: "{{INPUT.address}}"  # must be a complete single-line address
+        benchmark: "4"  # corresponds to the current benchmark
         format: "json"
     outputs:
       - response
@@ -16,7 +16,7 @@ activities:
     activity_name: http_request
     parameters:
       method: GET
-      url: "https://api.weather.gov/points/{{geocode.response.json.result.addressMatches[0].coordinates.y}},{{geocode.response.json.result.addressMatches[0].coordinates.x}}"
+      url: "https://api.weather.gov/points/{{geocode.response.body.result.addressMatches[0].coordinates.y}},{{geocode.response.body.result.addressMatches[0].coordinates.x}}"
     outputs:
       - response
     depends_on:
@@ -26,7 +26,7 @@ activities:
     activity_name: http_request
     parameters:
       method: GET
-      url: "{{get_grid.response.json.properties.forecast}}"
+      url: "{{get_grid.response.body.properties.forecast}}"
     outputs:
       - response
     depends_on:
@@ -36,14 +36,21 @@ activities:
     activity_name: http_request
     parameters:
       method: POST
-      url: "{{INPUT.webhook_url}}"
+      url: "http://mailpit:8025/api/v1/send"
       headers:
         Content-Type: "application/json"
       body:
-        city: "{{INPUT.city}}"
-        state: "{{INPUT.state}}"
-        temperature: "{{fetch_forecast.response.json.properties.periods[0].temperature}}"
-        conditions: "{{fetch_forecast.response.json.properties.periods[0].shortForecast}}"
-        detailed_forecast: "{{fetch_forecast.response.json.properties.periods[0].detailedForecast}}"
+        From:
+          Name: "Kruxia Flow"
+          Email: "workflow@kruxiaflow.local"
+        To:
+          - Name: "Weather Subscriber"
+            Email: "weather@example.com"
+        Subject: "Weather Report - {{INPUT.address}}"
+        Text: |
+          Address: {{INPUT.address}}
+          Temperature: {{fetch_forecast.response.body.properties.periods[0].temperature}}
+          Conditions: {{fetch_forecast.response.body.properties.periods[0].shortForecast}}
+          Detailed Forecast: {{fetch_forecast.response.body.properties.periods[0].detailedForecast}}
     depends_on:
       - fetch_forecast

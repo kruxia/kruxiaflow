@@ -256,6 +256,12 @@ pub async fn activity_connection_count(state: &AppState, activity_id: Uuid) -> u
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::AppState;
+    use crate::state::tests::*;
+    use kruxiaflow_core::cache::NoOpCache;
+    use sqlx::PgPool;
+    use std::sync::Arc;
+    use tokio_util::sync::CancellationToken;
 
     // Note: Full WebSocket integration tests require a running server
     // and are in api/tests/websocket_integration_tests.rs
@@ -270,5 +276,86 @@ mod tests {
     fn test_stream_params_deserialize_missing_token() {
         let params: StreamParams = serde_json::from_str(r#"{}"#).unwrap();
         assert_eq!(params.token, None);
+    }
+
+    #[test]
+    fn test_stream_params_deserialize_null_token() {
+        let params: StreamParams = serde_json::from_str(r#"{"token": null}"#).unwrap();
+        assert_eq!(params.token, None);
+    }
+
+    async fn setup_test_state() -> AppState {
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
+        });
+        let pool = PgPool::connect(&database_url)
+            .await
+            .expect("Failed to connect to test database");
+        AppState::new(
+            pool,
+            Arc::new(MockAuthService),
+            Arc::new(MockActivityQueue),
+            Arc::new(MockEventSource),
+            Arc::new(MockWorkflowStorage),
+            Arc::new(NoOpCache::new()),
+            Arc::new(MockSubscriptionService),
+            CancellationToken::new(),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_to_activity_no_connections() {
+        let state = setup_test_state().await;
+        let activity_id = Uuid::now_v7();
+        let message = StreamMessage::ping();
+        let count = broadcast_to_activity(&state, activity_id, message).await;
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_activity_connection_count_no_connections() {
+        let state = setup_test_state().await;
+        let activity_id = Uuid::now_v7();
+        let count = activity_connection_count(&state, activity_id).await;
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn test_close_activity_connections_no_connections() {
+        let state = setup_test_state().await;
+        let activity_id = Uuid::now_v7();
+        // Should not panic even when there are no connections
+        close_activity_connections(&state, activity_id).await;
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_after_register() {
+        let state = setup_test_state().await;
+        let activity_id = Uuid::now_v7();
+
+        // Register a connection
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let conn_id = state.connection_manager.register(activity_id, tx).await;
+
+        // Verify connection count
+        let count = activity_connection_count(&state, activity_id).await;
+        assert_eq!(count, 1);
+
+        // Broadcast a message
+        let msg = StreamMessage::ping();
+        let sent = broadcast_to_activity(&state, activity_id, msg).await;
+        assert_eq!(sent, 1);
+
+        // Verify message received
+        let received = rx.try_recv();
+        assert!(received.is_ok());
+
+        // Cleanup
+        state
+            .connection_manager
+            .unregister(activity_id, conn_id)
+            .await;
+        let count = activity_connection_count(&state, activity_id).await;
+        assert_eq!(count, 0);
     }
 }

@@ -216,13 +216,13 @@ pub fn generate_capacity_document(
             bp.concurrent_workflows
         ));
     }
-    doc.push_str("\n");
+    doc.push('\n');
 
     // Capacity Matrix
     doc.push_str("## Capacity Matrix\n\n");
     let matrix = CapacityMatrix::from_stress_results(results, config);
     doc.push_str(&matrix.to_markdown());
-    doc.push_str("\n");
+    doc.push('\n');
 
     // Bottleneck Analysis
     doc.push_str("## Bottleneck Analysis\n\n");
@@ -245,7 +245,7 @@ pub fn generate_capacity_document(
         for bn in &bottleneck_report.secondary_bottlenecks {
             doc.push_str(&format!("- **{}**: {}\n", bn.category, bn.description));
         }
-        doc.push_str("\n");
+        doc.push('\n');
     }
 
     // Scaling Recommendations
@@ -382,5 +382,295 @@ mod tests {
         let config = SystemConfiguration::default();
         assert_eq!(config.short_description(), "1 orch + 1 workers");
         assert_eq!(config.total_connections(), 40); // 2 * 20
+    }
+
+    #[test]
+    fn test_capacity_status_display() {
+        assert_eq!(format!("{}", CapacityStatus::Healthy), "Healthy");
+        assert_eq!(format!("{}", CapacityStatus::AtCapacity), "At Capacity");
+        assert_eq!(format!("{}", CapacityStatus::Degraded), "Degraded");
+        assert_eq!(format!("{}", CapacityStatus::Overloaded), "Overloaded");
+    }
+
+    #[test]
+    fn test_determine_status_boundary_conditions() {
+        // Exactly at boundaries
+        assert_eq!(determine_status(0.90, 100, 50.0), CapacityStatus::Degraded); // success_rate < 0.95
+        assert_eq!(determine_status(0.95, 100, 50.0), CapacityStatus::Healthy);
+        assert_eq!(determine_status(0.99, 3001, 50.0), CapacityStatus::Degraded); // p99 > 3000
+        assert_eq!(
+            determine_status(0.99, 3000, 50.0),
+            CapacityStatus::AtCapacity
+        ); // p99 == 3000, triggers > 1000
+        assert_eq!(
+            determine_status(0.99, 1001, 50.0),
+            CapacityStatus::AtCapacity
+        ); // p99 > 1000
+        assert_eq!(determine_status(0.99, 1000, 50.0), CapacityStatus::Healthy); // p99 == 1000
+        assert_eq!(
+            determine_status(0.99, 100, 80.1),
+            CapacityStatus::AtCapacity
+        ); // cpu > 80
+        assert_eq!(determine_status(0.99, 100, 80.0), CapacityStatus::Healthy); // cpu == 80
+    }
+
+    #[test]
+    fn test_from_stress_results() {
+        use crate::stress::{StepMetrics, StressTestConfig, StressTestResults};
+        use chrono::Utc;
+        use std::time::Duration;
+
+        let step = StepMetrics {
+            step_number: 0,
+            target_concurrent: 100,
+            actual_concurrent: 100,
+            total_workflows: 100,
+            successful_workflows: 99,
+            failed_workflows: 1,
+            throughput_wf_per_sec: 50.0,
+            success_rate: 0.99,
+            p50_latency_ms: 50,
+            p95_latency_ms: 100,
+            p99_latency_ms: 200,
+            cpu_percent: 40.0,
+            memory_mb: 512.0,
+            db_connections: 10,
+            duration: Duration::from_secs(30),
+            errors: vec![],
+            started_at: Utc::now(),
+        };
+
+        let results = StressTestResults {
+            config: StressTestConfig::default(),
+            steps: vec![step],
+            breaking_point: None,
+            peak_throughput_wf_per_sec: 50.0,
+            max_concurrent_achieved: 100,
+            total_duration: Duration::from_secs(30),
+            started_at: Utc::now(),
+            completed_at: Utc::now(),
+        };
+
+        let config = SystemConfiguration::default();
+        let matrix = CapacityMatrix::from_stress_results(&results, &config);
+
+        assert_eq!(matrix.rows.len(), 1);
+        assert_eq!(matrix.rows[0].concurrent_workflows, 100);
+        assert_eq!(matrix.rows[0].throughput_wf_per_sec, 50.0);
+        assert_eq!(matrix.rows[0].throughput_wf_per_min, 3000.0);
+        assert_eq!(matrix.rows[0].latency_p99_ms, 200);
+        assert_eq!(matrix.rows[0].cpu_utilization, 40.0);
+        assert_eq!(matrix.rows[0].status, CapacityStatus::Healthy);
+        assert_eq!(matrix.git_sha, "unknown");
+    }
+
+    #[test]
+    fn test_capacity_matrix_to_markdown() {
+        let matrix = CapacityMatrix {
+            rows: vec![CapacityRow {
+                configuration: SystemConfiguration::default(),
+                concurrent_workflows: 100,
+                throughput_wf_per_min: 3000.0,
+                throughput_wf_per_sec: 50.0,
+                latency_p99_ms: 200,
+                cpu_utilization: 40.0,
+                memory_utilization: 25.0,
+                status: CapacityStatus::Healthy,
+            }],
+            test_date: "2026-01-01".to_string(),
+            git_sha: "abc123".to_string(),
+        };
+
+        let md = matrix.to_markdown();
+        assert!(md.contains("Configuration"));
+        assert!(md.contains("Concurrent"));
+        assert!(md.contains("1 orch + 1 workers"));
+        assert!(md.contains("100"));
+        assert!(md.contains("3000"));
+        assert!(md.contains("200ms"));
+        assert!(md.contains("40%"));
+        assert!(md.contains("25%"));
+        assert!(md.contains("✅"));
+        assert!(md.contains("Healthy"));
+    }
+
+    #[test]
+    fn test_generate_capacity_document() {
+        use crate::bottleneck::{BottleneckReport, CapacityEstimate};
+        use crate::stress::{StepMetrics, StressTestConfig, StressTestResults};
+        use chrono::Utc;
+        use std::time::Duration;
+
+        let step = StepMetrics {
+            step_number: 0,
+            target_concurrent: 100,
+            actual_concurrent: 100,
+            total_workflows: 100,
+            successful_workflows: 99,
+            failed_workflows: 1,
+            throughput_wf_per_sec: 50.0,
+            success_rate: 0.99,
+            p50_latency_ms: 50,
+            p95_latency_ms: 100,
+            p99_latency_ms: 200,
+            cpu_percent: 40.0,
+            memory_mb: 512.0,
+            db_connections: 10,
+            duration: Duration::from_secs(30),
+            errors: vec![],
+            started_at: Utc::now(),
+        };
+
+        let results = StressTestResults {
+            config: StressTestConfig::default(),
+            steps: vec![step],
+            breaking_point: None,
+            peak_throughput_wf_per_sec: 50.0,
+            max_concurrent_achieved: 100,
+            total_duration: Duration::from_secs(30),
+            started_at: Utc::now(),
+            completed_at: Utc::now(),
+        };
+
+        let bottleneck_report = BottleneckReport {
+            primary_bottleneck: None,
+            secondary_bottlenecks: vec![],
+            recommendations: vec![],
+            capacity_estimate: CapacityEstimate {
+                safe_concurrent: 80,
+                max_concurrent: 100,
+                sustained_throughput_wf_per_sec: 50.0,
+                sustained_throughput_wf_per_min: 3000.0,
+                limiting_factor: "None".to_string(),
+                confidence: 0.5,
+            },
+        };
+
+        let config = SystemConfiguration::default();
+        let doc = generate_capacity_document(&results, &bottleneck_report, &config);
+
+        assert!(doc.contains("# Kruxia Flow Capacity Planning Guide"));
+        assert!(doc.contains("## Executive Summary"));
+        assert!(doc.contains("Safe Operating Capacity**: 80"));
+        assert!(doc.contains("Peak Capacity**: 100"));
+        assert!(doc.contains("## Capacity Matrix"));
+        assert!(doc.contains("## Bottleneck Analysis"));
+        assert!(doc.contains("No primary bottleneck detected"));
+        assert!(doc.contains("## Scaling Recommendations"));
+        assert!(doc.contains("## Hardware Requirements"));
+        assert!(doc.contains("## Failure Modes"));
+        assert!(doc.contains("## Test Configuration"));
+        assert!(doc.contains("sequential_bench_5"));
+    }
+
+    #[test]
+    fn test_generate_capacity_document_with_breaking_point() {
+        use crate::bottleneck::{
+            Bottleneck, BottleneckCategory, BottleneckReport, CapacityEstimate, Priority,
+            Recommendation,
+        };
+        use crate::stress::{
+            BreakingPoint, FailureMode, StepMetrics, StressTestConfig, StressTestResults,
+        };
+        use chrono::Utc;
+        use std::time::Duration;
+
+        let make_step = |n, c, t, sr, p99| StepMetrics {
+            step_number: n,
+            target_concurrent: c,
+            actual_concurrent: c,
+            total_workflows: 100,
+            successful_workflows: (100.0 * sr) as usize,
+            failed_workflows: (100.0 * (1.0 - sr)) as usize,
+            throughput_wf_per_sec: t,
+            success_rate: sr,
+            p50_latency_ms: 100,
+            p95_latency_ms: 200,
+            p99_latency_ms: p99,
+            cpu_percent: 50.0,
+            memory_mb: 500.0,
+            db_connections: 10,
+            duration: Duration::from_secs(30),
+            errors: vec![],
+            started_at: Utc::now(),
+        };
+
+        let results = StressTestResults {
+            config: StressTestConfig::default(),
+            steps: vec![make_step(0, 100, 50.0, 0.99, 100)],
+            breaking_point: Some(BreakingPoint {
+                concurrent_workflows: 500,
+                failure_mode: FailureMode::ErrorRateExceeded {
+                    actual_rate: 0.10,
+                    threshold: 0.05,
+                },
+                metrics: make_step(2, 500, 30.0, 0.90, 5000),
+            }),
+            peak_throughput_wf_per_sec: 50.0,
+            max_concurrent_achieved: 500,
+            total_duration: Duration::from_secs(90),
+            started_at: Utc::now(),
+            completed_at: Utc::now(),
+        };
+
+        let bottleneck_report = BottleneckReport {
+            primary_bottleneck: Some(Bottleneck {
+                category: BottleneckCategory::Cpu,
+                description: "CPU saturation".to_string(),
+                current_value: 95.0,
+                threshold: 85.0,
+                severity: 0.95,
+                impact: "Slow processing".to_string(),
+            }),
+            secondary_bottlenecks: vec![Bottleneck {
+                category: BottleneckCategory::Database,
+                description: "Connection pool pressure".to_string(),
+                current_value: 92.0,
+                threshold: 90.0,
+                severity: 0.92,
+                impact: "Request queueing".to_string(),
+            }],
+            recommendations: vec![Recommendation {
+                priority: Priority::High,
+                category: BottleneckCategory::Cpu,
+                issue: "CPU at 95%".to_string(),
+                action: "Scale horizontally".to_string(),
+                expected_impact: "Better throughput".to_string(),
+            }],
+            capacity_estimate: CapacityEstimate {
+                safe_concurrent: 400,
+                max_concurrent: 500,
+                sustained_throughput_wf_per_sec: 50.0,
+                sustained_throughput_wf_per_min: 3000.0,
+                limiting_factor: "CPU".to_string(),
+                confidence: 0.5,
+            },
+        };
+
+        let config = SystemConfiguration::default();
+        let doc = generate_capacity_document(&results, &bottleneck_report, &config);
+
+        assert!(doc.contains("Breaking Point**: 500"));
+        assert!(doc.contains("### Primary Bottleneck"));
+        assert!(doc.contains("CPU saturation"));
+        assert!(doc.contains("### Secondary Bottlenecks"));
+        assert!(doc.contains("Connection pool pressure"));
+        assert!(doc.contains("## Actionable Recommendations"));
+        assert!(doc.contains("[HIGH] CPU"));
+        assert!(doc.contains("Scale horizontally"));
+    }
+
+    #[test]
+    fn test_system_configuration_custom() {
+        let config = SystemConfiguration {
+            orchestrators: 3,
+            workers: 5,
+            db_connections_per_instance: 30,
+            worker_threads: 8,
+            postgres_max_connections: 200,
+            memory_per_instance_mb: 4096,
+        };
+        assert_eq!(config.short_description(), "3 orch + 5 workers");
+        assert_eq!(config.total_connections(), 240); // 8 * 30
     }
 }

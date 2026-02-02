@@ -173,16 +173,16 @@ impl WorkflowStorage for PostgresStorage {
         let pool = self.pool.clone();
         let stream = async_stream::try_stream! {
             let mut tx = pool.begin().await
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                .map_err(std::io::Error::other)?;
 
             // Open Large Object for reading
             let fd = Self::open_large_object(&mut tx, oid as u32, INV_READ).await
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                .map_err(std::io::Error::other)?;
 
             loop {
                 // Read chunk from Large Object
                 let chunk = Self::read_from_large_object(&mut tx, fd, CHUNK_SIZE as i32).await
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                    .map_err(std::io::Error::other)?;
 
                 if chunk.is_empty() {
                     break;
@@ -194,10 +194,10 @@ impl WorkflowStorage for PostgresStorage {
 
             // Close Large Object
             Self::close_large_object(&mut tx, fd).await
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                .map_err(std::io::Error::other)?;
 
             tx.commit().await
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                .map_err(std::io::Error::other)?;
         };
 
         Ok(Box::pin(stream))

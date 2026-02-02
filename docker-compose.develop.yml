@@ -1,0 +1,83 @@
+# Development overrides
+#
+# Usage:
+#   ./docker up --develop
+#   docker compose -f docker-compose.yml -f docker-compose.develop.yml up
+
+services:
+  # Expose postgres and redis on frontend network for local access
+  postgres:
+    networks:
+      - backend
+      - frontend
+
+  redis:
+    networks:
+      - backend
+      - frontend
+
+  # Mailpit for email testing (US-5.7a email_send activity)
+  # - SMTP server on port 1025
+  # - Web UI + REST API on port 8025 (http://localhost:8025)
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: kruxiaflow-mailpit
+    ports:
+      - "127.0.0.1:1025:1025"   # SMTP server
+      - "127.0.0.1:8025:8025"   # Web UI + REST API
+    networks:
+      - backend
+      - frontend
+    restart: unless-stopped
+    logging:
+      driver: "none"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    labels:
+      com.kruxiaflow.service: "email"
+      com.kruxiaflow.component: "mailpit"
+
+  # Override kruxiaflow for development: source mounting, cargo caches, no healthcheck
+  kruxiaflow:
+    build:
+      target: develop
+    # No health check for develop - Rust build during startup takes several minutes
+    # Use ./docker logs -f to monitor startup progress
+    healthcheck:
+      test: ["NONE"]
+    environment:
+      CARGO_HOME: /opt/.cargo
+      CARGO_TARGET_DIR: /opt/target
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    volumes:
+      - ./:/opt/
+      - cargo_cache:/opt/.cargo/registry
+      - cargo_git_cache:/opt/.cargo/git
+      - cargo_target_cache:/opt/target
+
+volumes:
+  cargo_cache:
+    name: kruxiaflow-cargo-cache
+    labels:
+      com.kruxiaflow.volume: "build-cache"
+  cargo_git_cache:
+    name: kruxiaflow-cargo-git
+    labels:
+      com.kruxiaflow.volume: "build-cache"
+  cargo_target_cache:
+    name: kruxiaflow-cargo-target
+    labels:
+      com.kruxiaflow.volume: "build-cache"

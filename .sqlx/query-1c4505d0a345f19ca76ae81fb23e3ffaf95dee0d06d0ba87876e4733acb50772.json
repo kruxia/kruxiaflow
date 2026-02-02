@@ -1,0 +1,67 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE activity_event_subscriptions\n            SET signal_data = $4\n            WHERE workflow_id = $1\n              AND activity_key = $2\n              AND event_name = $3\n              AND signal_data IS NULL\n            RETURNING id, workflow_id, activity_key, event_name, on_timeout, timeout_at, signal_data, created_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "workflow_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "activity_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "event_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "on_timeout",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "timeout_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "signal_data",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "1c4505d0a345f19ca76ae81fb23e3ffaf95dee0d06d0ba87876e4733acb50772"
+}

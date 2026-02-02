@@ -12,8 +12,8 @@ Get Kruxia Flow running in 60 seconds.
 # Clone and start
 git clone https://github.com/kruxia/kruxiaflow.git
 cd kruxiaflow
-./dev up -d
-./dev logs -f
+./docker up -d
+./docker logs -f
 
 # Wait for services to be healthy (~30 seconds)
 docker compose ps
@@ -41,7 +41,7 @@ Create a simple workflow that fetches weather data:
 # Get an auth token
 TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/oauth/token \
   -d "grant_type=client_credentials" \
-  -d "client_id=kruxiaflow-dev-client" \
+  -d "client_id=kruxiaflow-docker-client" \
   -d "client_secret=kruxiaflow-dev-secret" | jq -r '.access_token')
 
 # Submit a workflow
@@ -70,7 +70,7 @@ Kruxia Flow includes 10 production-ready examples in the `examples/` directory:
 ## Stop Kruxia Flow
 
 ```bash
-./dev down
+./docker down
 ```
 
 ## Next Steps

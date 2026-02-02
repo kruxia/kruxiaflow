@@ -10,7 +10,7 @@ pub struct WorkerConfig {
     /// Worker unique identifier
     pub worker_id: String,
 
-    /// Worker type this worker handles (e.g., "builtin", "custom")
+    /// Worker type this worker handles (e.g., "std", "custom")
     pub worker: String,
 
     /// Maximum number of activities to poll per request
@@ -43,7 +43,7 @@ impl Default for WorkerConfig {
         Self {
             api_url: "http://localhost:8080".to_string(),
             worker_id: format!("worker_{}", uuid::Uuid::now_v7()),
-            worker: "builtin".to_string(),
+            worker: "std".to_string(),
             poll_max_activities: 10,
             poll_interval: Duration::from_millis(100),
             max_concurrent_activities: 16,
@@ -221,7 +221,7 @@ mod tests {
 
         assert_eq!(config.api_url, "http://localhost:8080");
         assert!(config.worker_id.starts_with("worker_"));
-        assert_eq!(config.worker, "builtin");
+        assert_eq!(config.worker, "std");
         assert_eq!(config.poll_max_activities, 10);
         assert_eq!(config.poll_interval, Duration::from_millis(100));
         assert_eq!(config.max_concurrent_activities, 16);
@@ -239,7 +239,7 @@ mod tests {
 
             assert_eq!(config.api_url, "http://localhost:8080");
             assert!(config.worker_id.starts_with("worker_"));
-            assert_eq!(config.worker, "builtin");
+            assert_eq!(config.worker, "std");
             assert_eq!(config.max_concurrent_activities, 16);
             assert_eq!(config.concurrency, 4);
             assert_eq!(config.client_id, "worker_client");
@@ -393,9 +393,11 @@ mod tests {
 
     #[test]
     fn test_validate_no_worker() {
-        let mut config = WorkerConfig::default();
-        config.worker = "".to_string();
-        config.client_secret = "secret".to_string();
+        let config = WorkerConfig {
+            worker: "".to_string(),
+            client_secret: "secret".to_string(),
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -404,9 +406,11 @@ mod tests {
 
     #[test]
     fn test_validate_zero_max_concurrent_activities() {
-        let mut config = WorkerConfig::default();
-        config.max_concurrent_activities = 0;
-        config.client_secret = "secret".to_string();
+        let config = WorkerConfig {
+            max_concurrent_activities: 0,
+            client_secret: "secret".to_string(),
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -418,9 +422,11 @@ mod tests {
 
     #[test]
     fn test_validate_zero_poll_max_activities() {
-        let mut config = WorkerConfig::default();
-        config.poll_max_activities = 0;
-        config.client_secret = "secret".to_string();
+        let config = WorkerConfig {
+            poll_max_activities: 0,
+            client_secret: "secret".to_string(),
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -429,9 +435,11 @@ mod tests {
 
     #[test]
     fn test_validate_zero_concurrency() {
-        let mut config = WorkerConfig::default();
-        config.concurrency = 0;
-        config.client_secret = "secret".to_string();
+        let config = WorkerConfig {
+            concurrency: 0,
+            client_secret: "secret".to_string(),
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -440,8 +448,10 @@ mod tests {
 
     #[test]
     fn test_validate_missing_client_secret() {
-        let mut config = WorkerConfig::default();
-        config.client_secret = "".to_string();
+        let config = WorkerConfig {
+            client_secret: "".to_string(),
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -450,8 +460,10 @@ mod tests {
 
     #[test]
     fn test_validate_valid_config() {
-        let mut config = WorkerConfig::default();
-        config.client_secret = "secret".to_string();
+        let config = WorkerConfig {
+            client_secret: "secret".to_string(),
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_ok());

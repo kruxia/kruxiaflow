@@ -137,6 +137,7 @@ pub fn load_secrets_from_env() -> HashMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     // ============================================================================
     // Regression Tests: Secrets Loading from Environment Variables
@@ -175,7 +176,7 @@ mod tests {
         );
 
         // Should NOT include non-secret vars
-        assert!(secrets.get("OTHER_VAR").is_none());
+        assert!(!secrets.contains_key("OTHER_VAR"));
 
         // Cleanup
         // SAFETY: Environment variable operations are safe in single-threaded test context
@@ -342,12 +343,12 @@ mod tests {
         let secrets = load_secrets_from_env();
 
         // None of these should be included (wrong prefix)
-        assert!(secrets.get("extra_s").is_none());
+        assert!(!secrets.contains_key("extra_s"));
         assert!(
-            secrets.get("").is_none()
+            !secrets.contains_key("")
                 || secrets.get("").map(|v| v.as_str()) != Some("no-underscore")
         );
-        assert!(secrets.get("typo").is_none());
+        assert!(!secrets.contains_key("typo"));
 
         // Cleanup
         unsafe {
@@ -395,6 +396,152 @@ mod tests {
         // Cleanup
         unsafe {
             std::env::remove_var("KRUXIAFLOW_SECRET_SERVICE_ACCOUNT");
+        }
+    }
+
+    // =========================================================================
+    // Constructor and builder method tests
+    // =========================================================================
+
+    fn lazy_pool() -> PgPool {
+        sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://test:test@localhost:5432/test")
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_new_defaults() {
+        let config = OrchestratorConfig::new(lazy_pool());
+        assert_eq!(config.poll_interval_min, Duration::from_millis(50));
+        assert_eq!(config.poll_interval_max, Duration::from_millis(1000));
+        assert_eq!(config.backoff_multiplier, 1.5);
+        assert_eq!(config.workflow_timeout, Duration::from_secs(300));
+        assert_eq!(config.timeout_check_interval, Duration::from_secs(30));
+        assert!(config.secrets.is_empty());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_from_env_defaults() {
+        let vars = [
+            "KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MIN_MS",
+            "KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX_MS",
+            "KRUXIAFLOW_ORCHESTRATOR_BACKOFF_MULTIPLIER",
+            "KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS",
+            "KRUXIAFLOW_ORCHESTRATOR_TIMEOUT_CHECK_INTERVAL_SECS",
+        ];
+        let saved: Vec<Option<String>> = vars.iter().map(|v| std::env::var(v).ok()).collect();
+        unsafe {
+            for var in &vars {
+                std::env::remove_var(var);
+            }
+        }
+
+        let config = OrchestratorConfig::from_env(lazy_pool());
+        assert_eq!(config.poll_interval_min, Duration::from_millis(50));
+        assert_eq!(config.poll_interval_max, Duration::from_millis(1000));
+        assert_eq!(config.backoff_multiplier, 1.5);
+        assert_eq!(config.workflow_timeout, Duration::from_secs(300));
+        assert_eq!(config.timeout_check_interval, Duration::from_secs(30));
+
+        unsafe {
+            for (i, var) in vars.iter().enumerate() {
+                if let Some(val) = &saved[i] {
+                    std::env::set_var(var, val);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_from_env_custom_values() {
+        unsafe {
+            std::env::set_var("KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MIN_MS", "100");
+            std::env::set_var("KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX_MS", "2000");
+            std::env::set_var("KRUXIAFLOW_ORCHESTRATOR_BACKOFF_MULTIPLIER", "2.0");
+            std::env::set_var("KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS", "600");
+            std::env::set_var("KRUXIAFLOW_ORCHESTRATOR_TIMEOUT_CHECK_INTERVAL_SECS", "60");
+        }
+
+        let config = OrchestratorConfig::from_env(lazy_pool());
+        assert_eq!(config.poll_interval_min, Duration::from_millis(100));
+        assert_eq!(config.poll_interval_max, Duration::from_millis(2000));
+        assert_eq!(config.backoff_multiplier, 2.0);
+        assert_eq!(config.workflow_timeout, Duration::from_secs(600));
+        assert_eq!(config.timeout_check_interval, Duration::from_secs(60));
+
+        unsafe {
+            std::env::remove_var("KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MIN_MS");
+            std::env::remove_var("KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX_MS");
+            std::env::remove_var("KRUXIAFLOW_ORCHESTRATOR_BACKOFF_MULTIPLIER");
+            std::env::remove_var("KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS");
+            std::env::remove_var("KRUXIAFLOW_ORCHESTRATOR_TIMEOUT_CHECK_INTERVAL_SECS");
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_from_env_invalid_values_use_defaults() {
+        unsafe {
+            std::env::set_var(
+                "KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MIN_MS",
+                "not_a_number",
+            );
+            std::env::set_var("KRUXIAFLOW_ORCHESTRATOR_BACKOFF_MULTIPLIER", "abc");
+        }
+
+        let config = OrchestratorConfig::from_env(lazy_pool());
+        assert_eq!(config.poll_interval_min, Duration::from_millis(50));
+        assert_eq!(config.backoff_multiplier, 1.5);
+
+        unsafe {
+            std::env::remove_var("KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MIN_MS");
+            std::env::remove_var("KRUXIAFLOW_ORCHESTRATOR_BACKOFF_MULTIPLIER");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_builder_methods() {
+        let config = OrchestratorConfig::new(lazy_pool())
+            .with_poll_interval(Duration::from_millis(200), Duration::from_millis(5000))
+            .with_backoff_multiplier(3.0)
+            .with_workflow_timeout(Duration::from_secs(600))
+            .with_timeout_check_interval(Duration::from_secs(120));
+
+        assert_eq!(config.poll_interval_min, Duration::from_millis(200));
+        assert_eq!(config.poll_interval_max, Duration::from_millis(5000));
+        assert_eq!(config.backoff_multiplier, 3.0);
+        assert_eq!(config.workflow_timeout, Duration::from_secs(600));
+        assert_eq!(config.timeout_check_interval, Duration::from_secs(120));
+    }
+
+    #[tokio::test]
+    async fn test_with_secrets_builder() {
+        let mut secrets = HashMap::new();
+        secrets.insert("key1".to_string(), "value1".to_string());
+        secrets.insert("key2".to_string(), "value2".to_string());
+
+        let config = OrchestratorConfig::new(lazy_pool()).with_secrets(secrets);
+        assert_eq!(config.secrets.get("key1"), Some(&"value1".to_string()));
+        assert_eq!(config.secrets.get("key2"), Some(&"value2".to_string()));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_with_secrets_from_env_builder() {
+        unsafe {
+            std::env::set_var("KRUXIAFLOW_SECRET_TEST_KEY_BUILDER", "builder_value");
+        }
+
+        let config = OrchestratorConfig::new(lazy_pool()).with_secrets_from_env();
+        assert_eq!(
+            config.secrets.get("test_key_builder"),
+            Some(&"builder_value".to_string())
+        );
+
+        unsafe {
+            std::env::remove_var("KRUXIAFLOW_SECRET_TEST_KEY_BUILDER");
         }
     }
 }

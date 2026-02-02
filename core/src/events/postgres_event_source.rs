@@ -50,7 +50,7 @@ impl EventSource for PostgresEventSource {
     ///
     /// The nil UUID fallback (when no checkpoint exists) works because UUIDv7s are
     /// time-ordered and all come after the nil UUID lexicographically.
-    #[tracing::instrument(skip(self), level = "debug")]
+    #[tracing::instrument(skip(self), level = "trace")]
     async fn poll(&self, consumer_id: &str) -> Result<Vec<WorkflowEvent>> {
         let events = sqlx::query_as!(
             WorkflowEvent,
@@ -70,7 +70,7 @@ impl EventSource for PostgresEventSource {
         .fetch_all(&self.pool)
         .await?;
 
-        tracing::debug!(event_count = events.len(), "Polled events");
+        tracing::trace!(event_count = events.len(), "Polled events");
 
         Ok(events)
     }

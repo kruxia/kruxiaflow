@@ -207,6 +207,94 @@ mod tests {
         assert_eq!(json["status"], "ok");
     }
 
-    // Integration tests for readiness_handler and service_info_handler
+    #[tokio::test]
+    async fn test_service_info_handler_returns_version_and_features() {
+        use crate::state::tests::*;
+        use crate::state::{AppState, AppStateBuild};
+        use kruxiaflow_core::cache::NoOpCache;
+        use sqlx::PgPool;
+        use std::sync::Arc;
+        use tokio_util::sync::CancellationToken;
+
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
+        });
+        let pool = PgPool::connect(&database_url)
+            .await
+            .expect("Failed to connect to test database");
+
+        let build = AppStateBuild {
+            timestamp: "2025-11-15T10:00:00Z".to_string(),
+            git_hash: "abc123".to_string(),
+        };
+        let features = vec!["workflows".to_string(), "workers".to_string()];
+
+        let state = AppState::with_metadata(
+            pool,
+            Arc::new(MockAuthService),
+            Arc::new(MockActivityQueue),
+            Arc::new(MockEventSource),
+            Arc::new(MockWorkflowStorage),
+            Arc::new(NoOpCache::new()),
+            Arc::new(MockSubscriptionService),
+            CancellationToken::new(),
+            "1.0.0-test".to_string(),
+            build,
+            features,
+        );
+
+        let response = service_info_handler(State(state)).await.into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["version"], "1.0.0-test");
+        assert_eq!(json["api_version"], "v1");
+        assert_eq!(json["build_git_hash"], "abc123");
+        assert_eq!(json["features"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_pool_metrics_handler_returns_200() {
+        use crate::state::AppState;
+        use crate::state::tests::*;
+        use kruxiaflow_core::cache::NoOpCache;
+        use sqlx::PgPool;
+        use std::sync::Arc;
+        use tokio_util::sync::CancellationToken;
+
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
+        });
+        let pool = PgPool::connect(&database_url)
+            .await
+            .expect("Failed to connect to test database");
+
+        let state = AppState::new(
+            pool,
+            Arc::new(MockAuthService),
+            Arc::new(MockActivityQueue),
+            Arc::new(MockEventSource),
+            Arc::new(MockWorkflowStorage),
+            Arc::new(NoOpCache::new()),
+            Arc::new(MockSubscriptionService),
+            CancellationToken::new(),
+        );
+
+        let response = pool_metrics_handler(State(state)).await.into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["max_connections"].as_u64().unwrap() > 0);
+        assert!(json.get("utilization_percent").is_some());
+        assert!(json.get("status").is_some());
+    }
+
+    // Integration tests for readiness_handler
     // are in tests/health_integration_tests.rs (require database connection)
 }

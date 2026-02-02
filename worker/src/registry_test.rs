@@ -366,6 +366,7 @@ mod tests {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         };
 
         let _result = registry
@@ -400,6 +401,7 @@ mod tests {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         };
 
         let result = registry
@@ -440,6 +442,7 @@ mod tests {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         };
 
         let params = json!({"input": "cached_test"});
@@ -498,6 +501,7 @@ mod tests {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         };
 
         // First call with params A
@@ -548,6 +552,7 @@ mod tests {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         };
 
         // Execute twice with same params
@@ -598,6 +603,7 @@ mod tests {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         };
 
         let _result = registry

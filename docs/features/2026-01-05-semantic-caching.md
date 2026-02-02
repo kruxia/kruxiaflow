@@ -65,7 +65,7 @@ Add caching settings to any activity in your workflow YAML:
 ```yaml
 activities:
   - key: analyze_sentiment
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     parameters:
       provider: anthropic
@@ -83,7 +83,7 @@ activities:
 ```yaml
 activities:
   - key: fetch_user_profile
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: GET
@@ -99,7 +99,7 @@ activities:
 ```yaml
 activities:
   - key: get_analytics_report
-    worker: builtin
+    worker: std
     activity_name: postgres_query
     parameters:
       query: "SELECT * FROM analytics_reports WHERE date = {{INPUT.report_date}}"
@@ -158,7 +158,7 @@ curl http://localhost:8080/api/v1/workflows/wf_123 \
       },
       "metadata": {
         "cached": true,
-        "cache_key": "builtin.llm_prompt:a3f8d9c2e1b4567890abcdef12345678...",
+        "cache_key": "std.llm_prompt:a3f8d9c2e1b4567890abcdef12345678...",
         "cached_at": "2025-01-19T10:30:00Z",
         "cost_usd": 0.0,
         "original_cost_usd": 0.000123
@@ -191,7 +191,7 @@ curl http://localhost:8080/api/v1/workflows/wf_123 \
       },
       "metadata": {
         "cached": false,
-        "cache_key": "builtin.llm_prompt:b7e4a1d8f3c6421098fedcba98765432...",
+        "cache_key": "std.llm_prompt:b7e4a1d8f3c6421098fedcba98765432...",
         "cost_usd": 0.000123
       }
     }
@@ -242,13 +242,13 @@ Invalidate multiple cache entries matching a pattern:
 curl -X POST http://localhost:8080/api/v1/cache/invalidate \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"pattern": "builtin.llm_prompt:*"}'
+  -d '{"pattern": "std.llm_prompt:*"}'
 
 # Invalidate all HTTP request caches
 curl -X POST http://localhost:8080/api/v1/cache/invalidate \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"pattern": "builtin.http_request:*"}'
+  -d '{"pattern": "std.http_request:*"}'
 
 # Invalidate ALL caches
 curl -X POST http://localhost:8080/api/v1/cache/invalidate \
@@ -281,7 +281,7 @@ curl -X POST http://localhost:8080/api/v1/cache/invalidate \
 - Use Redis glob-style patterns
 - `*` matches any sequence of characters
 - `?` matches a single character
-- Example: `builtin.llm_*` matches all built-in LLM activities
+- Example: `std.llm_*` matches all built-in LLM activities
 
 ## Cost Savings Examples
 
@@ -448,8 +448,8 @@ flowchart TB
 {prefix}{activity.worker}.{activity.name}:{hash}
 
 Examples:
-kruxiaflow:cache:builtin.llm_prompt:a3f8d9c2e1b4567890abcdef12345678...
-kruxiaflow:cache:builtin.http_request:b7e4a1d8f3c6421098fedcba98765432...
+kruxiaflow:cache:std.llm_prompt:a3f8d9c2e1b4567890abcdef12345678...
+kruxiaflow:cache:std.http_request:b7e4a1d8f3c6421098fedcba98765432...
 ```
 
 **TTL Management:**

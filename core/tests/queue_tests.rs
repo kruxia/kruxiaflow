@@ -64,6 +64,7 @@ async fn test_idempotent_scheduling() {
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     // Schedule activity first time
@@ -111,6 +112,7 @@ async fn test_concurrent_claiming() {
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         })
         .collect();
 
@@ -166,8 +168,10 @@ async fn test_stale_activity_recovery() {
         .await
         .expect("Failed to clean test data");
 
-    let mut config = QueueConfig::default();
-    config.default_timeout = Duration::from_secs(1); // Very short timeout for testing
+    let config = QueueConfig {
+        default_timeout: Duration::from_secs(1), // Very short timeout for testing
+        ..Default::default()
+    };
 
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -195,10 +199,12 @@ async fn test_stale_activity_recovery() {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         }),
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -245,8 +251,10 @@ async fn test_stale_activity_recovery() {
 #[serial]
 async fn test_heartbeat_conflict_detection() {
     let pool = setup_test_pool().await;
-    let mut config = QueueConfig::default();
-    config.default_timeout = Duration::from_secs(1);
+    let config = QueueConfig {
+        default_timeout: Duration::from_secs(1),
+        ..Default::default()
+    };
 
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -274,10 +282,12 @@ async fn test_heartbeat_conflict_detection() {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         }),
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -330,8 +340,10 @@ async fn test_heartbeat_conflict_detection() {
 #[serial]
 async fn test_max_retries_exhaustion() {
     let pool = setup_test_pool().await;
-    let mut config = QueueConfig::default();
-    config.default_timeout = Duration::from_secs(1);
+    let config = QueueConfig {
+        default_timeout: Duration::from_secs(1),
+        ..Default::default()
+    };
 
     let queue = PostgresQueue::new(pool.clone(), config.clone());
     let workflow_id = Uuid::now_v7();
@@ -359,10 +371,12 @@ async fn test_max_retries_exhaustion() {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         }),
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -466,6 +480,7 @@ async fn test_completion_idempotency() {
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -545,6 +560,7 @@ async fn test_sequential_ordering() {
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -588,6 +604,7 @@ async fn test_sequential_ordering() {
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -628,6 +645,7 @@ async fn test_parallel_execution() {
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         })
         .collect();
 
@@ -688,8 +706,10 @@ async fn test_reclaim_stale_activities_resets_to_pending() {
     use kruxiaflow_core::queue::StaleActivityAction;
 
     let pool = setup_test_pool().await;
-    let mut config = QueueConfig::default();
-    config.default_timeout = Duration::from_secs(1);
+    let config = QueueConfig {
+        default_timeout: Duration::from_secs(1),
+        ..Default::default()
+    };
 
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -716,10 +736,12 @@ async fn test_reclaim_stale_activities_resets_to_pending() {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         }),
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -791,8 +813,10 @@ async fn test_reclaim_stale_activities_marks_failed_when_retries_exhausted() {
     use kruxiaflow_core::queue::StaleActivityAction;
 
     let pool = setup_test_pool().await;
-    let mut config = QueueConfig::default();
-    config.default_timeout = Duration::from_secs(1);
+    let config = QueueConfig {
+        default_timeout: Duration::from_secs(1),
+        ..Default::default()
+    };
 
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -819,10 +843,12 @@ async fn test_reclaim_stale_activities_marks_failed_when_retries_exhausted() {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         }),
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -886,8 +912,10 @@ async fn test_reclaim_stale_activities_marks_failed_when_retries_exhausted() {
 #[serial]
 async fn test_reclaim_stale_activities_does_not_affect_non_stale() {
     let pool = setup_test_pool().await;
-    let mut config = QueueConfig::default();
-    config.default_timeout = Duration::from_secs(60); // Long timeout
+    let config = QueueConfig {
+        default_timeout: Duration::from_secs(60), // Long timeout
+        ..Default::default()
+    };
 
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -914,10 +942,12 @@ async fn test_reclaim_stale_activities_does_not_affect_non_stale() {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         }),
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -978,8 +1008,10 @@ async fn test_reclaim_stale_activities_multiple_activities() {
     use kruxiaflow_core::queue::StaleActivityAction;
 
     let pool = setup_test_pool().await;
-    let mut config = QueueConfig::default();
-    config.default_timeout = Duration::from_secs(1);
+    let config = QueueConfig {
+        default_timeout: Duration::from_secs(1),
+        ..Default::default()
+    };
 
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -1006,10 +1038,12 @@ async fn test_reclaim_stale_activities_multiple_activities() {
                 iteration_limit: None,
                 delay: None,
                 scheduled_for: None,
+                wait_for_signal: None,
             }),
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         },
         Activity {
             key: "stale_no_retry".to_string(),
@@ -1031,10 +1065,12 @@ async fn test_reclaim_stale_activities_multiple_activities() {
                 iteration_limit: None,
                 delay: None,
                 scheduled_for: None,
+                wait_for_signal: None,
             }),
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         },
         Activity {
             key: "non_stale".to_string(),
@@ -1056,10 +1092,12 @@ async fn test_reclaim_stale_activities_multiple_activities() {
                 iteration_limit: None,
                 delay: None,
                 scheduled_for: None,
+                wait_for_signal: None,
             }),
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         },
     ];
 

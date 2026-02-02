@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, workflow_id, activity_key, event_name, on_timeout\n            FROM activity_event_subscriptions\n            WHERE expired_at IS NOT NULL\n              AND expired_at <= $1\n            ORDER BY expired_at\n            LIMIT $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "workflow_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "activity_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "event_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "on_timeout",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "afbd81188eed11c5190206b9e2e96a6c4c186ca737c970902ba13d72fb032fd9"
+}

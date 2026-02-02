@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO workflows (id, definition_name, workflow_definition_id, input, status, activities, state_data, budget_limit_usd)\n           VALUES ($1, 'budget_test_workflow', $2, '{}'::jsonb, 'running', '{}'::jsonb, '{}'::jsonb, 0.10)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "efd506fe9e1121ccc8e907b8fab8d44196424194189f42ff9235ffab876c8b7f"
+}

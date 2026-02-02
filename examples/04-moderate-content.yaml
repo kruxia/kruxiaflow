@@ -3,12 +3,13 @@ description: Use LLM to moderate user content with cost control and retry
 
 activities:
   - key: analyze_content
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     parameters:
-      model: anthropic/claude-3-5-haiku-20241022
+      model: anthropic/claude-haiku-4-5-20251001
       prompt: |
-        You are a content moderation assistant. Analyze the following text and determine if it violates community guidelines.
+        You are a content moderation assistant. Analyze the following text and determine
+        if it violates community guidelines.
 
         Text to moderate:
         {{INPUT.user_content}}
@@ -30,13 +31,14 @@ activities:
         factor: 2
         max_seconds: 60
       budget:
-        limit_usd: 0.50
+        limit: 0.50
         action: abort
 
   - key: store_moderation_result
-    worker: builtin
+    worker: std
     activity_name: postgres_query
     parameters:
+      db_url: "{{SECRET.db_url}}"
       query: |
         INSERT INTO moderation_log
         (content_id, decision, cost, tokens, moderated_at)
@@ -44,7 +46,7 @@ activities:
       params:
         - "{{INPUT.content_id}}"
         - "{{analyze_content.result.content}}"
-        - "{{analyze_content.result.usage.total_tokens}}"
+        - "{{analyze_content.result.cost_usd}}"
         - "{{analyze_content.result.usage.total_tokens}}"
     depends_on:
       - analyze_content

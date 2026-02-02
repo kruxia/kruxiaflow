@@ -1,0 +1,45 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT event_type AS \"event_type: String\", payload\n        FROM workflow_events\n        WHERE workflow_id = $1\n        ORDER BY timestamp DESC\n        LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_type: String",
+        "type_info": {
+          "Custom": {
+            "name": "workflow_event_type",
+            "kind": {
+              "Enum": [
+                "WorkflowCreated",
+                "WorkflowUpdated",
+                "ActivityScheduled",
+                "ActivityCompleted",
+                "ActivityFailed",
+                "WorkflowCompleted",
+                "WorkflowFailed",
+                "ActivityWaiting",
+                "ActivitySignaled"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "payload",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "8f88483c33a5eb4055cf16651dd79871d7e23d1ce7ed1d5cfffc75c9b0c22235"
+}

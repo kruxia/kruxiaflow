@@ -1,57 +1,94 @@
+# Example 8a: Rate-Limited API Calls (Iterative with Delay)
+#
+# Demonstrates iterative HTTP requests with rate limiting using `delay` between
+# iterations. Fetches multiple pages from httpbin.org with a configurable page
+# count and a 5-second delay between each request.
+#
+# Workflow Pattern:
+# fetch_page (iterates with delay) → aggregate_results (sends email)
+#     ↑__________________________|
+#
+# Input Parameters:
+# - num_pages: Number of pages to fetch (default: 3, max: 5)
+#
+# Expected Execution Flow:
+#
+# 1. fetch_page (iteration 0): GET httpbin.org/get?page=0
+#    - No delay on first iteration (no dependencies met yet)
+#
+# 2. fetch_page (iteration 1): GET httpbin.org/get?page=1
+#    - 5s delay after loop-back condition met
+#
+# 3. fetch_page (iteration 2): GET httpbin.org/get?page=2
+#    - 5s delay after loop-back condition met
+#    - Loop exits: iteration >= num_pages
+#
+# 4. aggregate_results: Sends all page results via Mailpit
+#
+# ```
+# t=0s     fetch_page[0] ━━━┓
+#                             │ (loop back, 5s delay)
+# t=5s     fetch_page[1] ━━━┓
+#                             │ (loop back, 5s delay)
+# t=10s    fetch_page[2] ━━━┓
+#                             │ (loop exits)
+# t=10s+                     └─→ aggregate_results
+# ```
+#
+# Prerequisites:
+# - Examples environment (for Mailpit)
+#
+# Features Demonstrated:
+# - Iterative loop with fixed count (no evaluation activity needed)
+# - `settings.delay` for rate limiting between iterations
+# - `iteration_scoped: true` for per-iteration output storage
+# - Loop-back `depends_on` (activity depends on itself with condition)
+# - Array access pattern (`{{fetch_page[*].result}}`) for all iteration results
+# - `iteration_limit` as safety bound
+# - Configurable iteration count via workflow input with default
+
 name: rate_limited_api_calls
+
 activities:
-  # First call: immediate
-  - key: call_api_1
+  # Iterative page fetcher with rate limiting
+  - key: fetch_page
     activity_name: http_request
+    iteration_scoped: true
+    iteration_limit: 5           # Safety bound: max 5 iterations
     parameters:
       method: GET
-      url: "https://api.example.com/data?page=1"
-      headers:
-        Authorization: "Bearer {{SECRET.api_key}}"
-    outputs:
-      - result
-
-  # Second call: wait 5 seconds (rate limit: 1 req/5sec)
-  - key: call_api_2
-    activity_name: http_request
-    parameters:
-      method: GET
-      url: "https://api.example.com/data?page=2"
-      headers:
-        Authorization: "Bearer {{SECRET.api_key}}"
+      url: "https://httpbin.org/get?page={{fetch_page.iteration}}"
     outputs:
       - result
     settings:
-      delay: "5s"  # Wait 5 seconds after dependencies met
+      delay: "5s"               # Rate limit: 5 seconds between iterations
     depends_on:
-      - call_api_1
+      # Loop: fetch_page depends on itself to iterate
+      - activity_key: fetch_page
+        conditions:
+          - "{{fetch_page.iteration}} < {{INPUT.num_pages | default(3)}}"
 
-  # Third call: wait another 5 seconds
-  - key: call_api_3
-    activity_name: http_request
-    parameters:
-      method: GET
-      url: "https://api.example.com/data?page=3"
-      headers:
-        Authorization: "Bearer {{SECRET.api_key}}"
-    outputs:
-      - result
-    settings:
-      delay: "5s"
-    depends_on:
-      - call_api_2
-
-  # Aggregate results after all calls complete
+  # Aggregate all page results and send via email
   - key: aggregate_results
     activity_name: http_request
     parameters:
       method: POST
-      url: "{{INPUT.webhook_url}}"
+      url: "http://mailpit:8025/api/v1/send"
       headers:
         Content-Type: "application/json"
       body:
-        page_1: "{{call_api_1.result.data}}"
-        page_2: "{{call_api_2.result.data}}"
-        page_3: "{{call_api_3.result.data}}"
+        From:
+          Name: "Kruxia Flow"
+          Email: "workflow@kruxiaflow.local"
+        To:
+          - Name: "API Consumer"
+            Email: "consumer@example.com"
+        Subject: "Rate-Limited API Results"
+        Text: |
+          Fetched {{INPUT.num_pages | default(3)}} pages from httpbin.org:
+
+          {{fetch_page[*].result}}
     depends_on:
-      - call_api_3
+      - activity_key: fetch_page
+        conditions:
+          - "{{fetch_page.iteration}} >= {{INPUT.num_pages | default(3)}}"

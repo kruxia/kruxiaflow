@@ -203,7 +203,7 @@ On rollback:
    - Create `get_or_create_pool(cache, db_url, config)` shared function
    - Create `bind_params(query, params)` helper for parameter binding
    - Create `execute_statement(executor, query, params)` generic over `PgExecutor`
-   - Update `register_builtin_activities` to create and share the cache
+   - Update `register_std_activities` to create and share the cache
 
 2. **Add PostgresTransactionActivity** (~2 hours)
    - New struct accepting shared `Arc<PoolCache>` at construction
@@ -226,7 +226,7 @@ On rollback:
 
 | Component                  | Current Location           | Change |
 |----------------------------|----------------------------|--------|
-| `PoolCache` type           | `PostgresExecutor`         | ✅ Accept via constructor, create in `register_builtin_activities` |
+| `PoolCache` type           | `PostgresExecutor`         | ✅ Accept via constructor, create in `register_std_activities` |
 | `PoolConfig` struct        | `PostgresExecutor`         | ✅ Already reusable |
 | `get_pool()` method        | `PostgresExecutor`         | ✅ Extract to `get_or_create_pool(cache, url, config)` |
 | `determine_query_type()`   | Module function            | ✅ Already shared |
@@ -254,7 +254,7 @@ worker/src/activities/
 │   └── PostgresTransactionActivity  # NEW - shares same cache
 └── ...
 
-worker/src/builtin.rs      # Creates shared PoolCache, passes to both activities
+worker/src/std_worker.rs   # Creates shared PoolCache, passes to both activities
 ```
 
 ### Shared Utilities
@@ -457,11 +457,11 @@ impl ActivityImpl for PostgresTransactionActivity {
     }
 
     fn name(&self) -> &str { "postgres_transaction" }
-    fn worker(&self) -> &str { "builtin" }
+    fn worker(&self) -> &str { "std" }
 }
 ```
 
-### Registration in builtin.rs
+### Registration in std_worker.rs
 
 ```rust
 use crate::activities::{
@@ -470,7 +470,7 @@ use crate::activities::{
     new_pool_cache,  // NEW: factory function for shared cache
 };
 
-pub fn register_builtin_activities(cache_service: Arc<dyn CacheService>) -> ActivityRegistry {
+pub fn register_std_activities(cache_service: Arc<dyn CacheService>) -> ActivityRegistry {
     let mut registry = ActivityRegistry::new(cache_service);
 
     // Create shared PostgreSQL connection pool cache

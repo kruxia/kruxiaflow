@@ -988,8 +988,8 @@ async fn test_large_batch_data_integrity() {
 
     // Verify each line is valid and has correct dimensions
     for (i, line) in lines.iter().enumerate() {
-        let embedding: Vec<f64> =
-            serde_json::from_str(line).expect(&format!("Line {} should be valid JSON", i));
+        let embedding: Vec<f64> = serde_json::from_str(line)
+            .unwrap_or_else(|_| panic!("Line {} should be valid JSON", i));
         assert_eq!(
             embedding.len(),
             dimensions,

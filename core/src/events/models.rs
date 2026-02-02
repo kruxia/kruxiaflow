@@ -68,6 +68,8 @@ pub enum WorkflowEventType {
     WorkflowCreated,
     WorkflowUpdated,
     ActivityScheduled,
+    ActivityWaiting,
+    ActivitySignaled,
     ActivityCompleted,
     ActivityFailed,
     WorkflowCompleted,
@@ -80,6 +82,8 @@ impl std::fmt::Display for WorkflowEventType {
             WorkflowEventType::WorkflowCreated => write!(f, "WorkflowCreated"),
             WorkflowEventType::WorkflowUpdated => write!(f, "WorkflowUpdated"),
             WorkflowEventType::ActivityScheduled => write!(f, "ActivityScheduled"),
+            WorkflowEventType::ActivityWaiting => write!(f, "ActivityWaiting"),
+            WorkflowEventType::ActivitySignaled => write!(f, "ActivitySignaled"),
             WorkflowEventType::ActivityCompleted => write!(f, "ActivityCompleted"),
             WorkflowEventType::ActivityFailed => write!(f, "ActivityFailed"),
             WorkflowEventType::WorkflowCompleted => write!(f, "WorkflowCompleted"),
@@ -109,5 +113,102 @@ impl std::fmt::Display for WorkflowStatus {
             WorkflowStatus::Failed => write!(f, "failed"),
             WorkflowStatus::Paused => write!(f, "paused"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_workflow_event_type_display() {
+        assert_eq!(
+            WorkflowEventType::WorkflowCreated.to_string(),
+            "WorkflowCreated"
+        );
+        assert_eq!(
+            WorkflowEventType::WorkflowUpdated.to_string(),
+            "WorkflowUpdated"
+        );
+        assert_eq!(
+            WorkflowEventType::ActivityScheduled.to_string(),
+            "ActivityScheduled"
+        );
+        assert_eq!(
+            WorkflowEventType::ActivityWaiting.to_string(),
+            "ActivityWaiting"
+        );
+        assert_eq!(
+            WorkflowEventType::ActivitySignaled.to_string(),
+            "ActivitySignaled"
+        );
+        assert_eq!(
+            WorkflowEventType::ActivityCompleted.to_string(),
+            "ActivityCompleted"
+        );
+        assert_eq!(
+            WorkflowEventType::ActivityFailed.to_string(),
+            "ActivityFailed"
+        );
+        assert_eq!(
+            WorkflowEventType::WorkflowCompleted.to_string(),
+            "WorkflowCompleted"
+        );
+        assert_eq!(
+            WorkflowEventType::WorkflowFailed.to_string(),
+            "WorkflowFailed"
+        );
+    }
+
+    #[test]
+    fn test_workflow_status_display() {
+        assert_eq!(WorkflowStatus::Created.to_string(), "created");
+        assert_eq!(WorkflowStatus::Running.to_string(), "running");
+        assert_eq!(WorkflowStatus::Completed.to_string(), "completed");
+        assert_eq!(WorkflowStatus::Failed.to_string(), "failed");
+        assert_eq!(WorkflowStatus::Paused.to_string(), "paused");
+    }
+
+    #[test]
+    fn test_workflow_event_type_serde_roundtrip() {
+        let event_type = WorkflowEventType::ActivityCompleted;
+        let json = serde_json::to_string(&event_type).unwrap();
+        let deserialized: WorkflowEventType = serde_json::from_str(&json).unwrap();
+        assert_eq!(event_type, deserialized);
+    }
+
+    #[test]
+    fn test_workflow_status_serde_roundtrip() {
+        let status = WorkflowStatus::Running;
+        let json = serde_json::to_string(&status).unwrap();
+        let deserialized: WorkflowStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(status, deserialized);
+    }
+
+    #[test]
+    fn test_new_workflow_event_serialization() {
+        let event = NewWorkflowEvent {
+            workflow_id: Uuid::now_v7(),
+            event_type: WorkflowEventType::WorkflowCreated,
+            activity_key: None,
+            payload: serde_json::json!({"input": "test"}),
+            iteration: None,
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("WorkflowCreated"));
+        assert!(!json.contains("iteration")); // skip_serializing_if = None
+    }
+
+    #[test]
+    fn test_new_workflow_event_with_iteration() {
+        let event = NewWorkflowEvent {
+            workflow_id: Uuid::now_v7(),
+            event_type: WorkflowEventType::ActivityCompleted,
+            activity_key: Some("step1".to_string()),
+            payload: serde_json::json!({}),
+            iteration: Some(3),
+        };
+        let json = serde_json::to_string(&event).unwrap();
+        assert!(json.contains("\"iteration\":3"));
     }
 }

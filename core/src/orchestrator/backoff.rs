@@ -33,3 +33,45 @@ impl AdaptiveBackoff {
         self.current = self.min;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_starts_at_min() {
+        let backoff = AdaptiveBackoff::new(Duration::from_millis(10), Duration::from_secs(5), 2.0);
+        assert_eq!(backoff.current(), Duration::from_millis(10));
+    }
+
+    #[test]
+    fn test_increase_doubles() {
+        let mut backoff =
+            AdaptiveBackoff::new(Duration::from_millis(10), Duration::from_secs(5), 2.0);
+        backoff.increase();
+        assert_eq!(backoff.current(), Duration::from_millis(20));
+        backoff.increase();
+        assert_eq!(backoff.current(), Duration::from_millis(40));
+    }
+
+    #[test]
+    fn test_increase_caps_at_max() {
+        let mut backoff =
+            AdaptiveBackoff::new(Duration::from_secs(1), Duration::from_secs(5), 10.0);
+        backoff.increase(); // 1 * 10 = 10, capped at 5
+        assert_eq!(backoff.current(), Duration::from_secs(5));
+        backoff.increase(); // 5 * 10 = 50, capped at 5
+        assert_eq!(backoff.current(), Duration::from_secs(5));
+    }
+
+    #[test]
+    fn test_reset_returns_to_min() {
+        let mut backoff =
+            AdaptiveBackoff::new(Duration::from_millis(10), Duration::from_secs(5), 2.0);
+        backoff.increase();
+        backoff.increase();
+        assert!(backoff.current() > Duration::from_millis(10));
+        backoff.reset();
+        assert_eq!(backoff.current(), Duration::from_millis(10));
+    }
+}

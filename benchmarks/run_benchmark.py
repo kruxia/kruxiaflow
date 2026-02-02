@@ -7,6 +7,7 @@ import click
 from datetime import datetime, timezone
 from pathlib import Path
 from kruxiaflow.benchmark import StreamFlowBenchmark
+from kruxiaflow.workflows import PY_STD_SEQUENTIAL_5, PY_STD_SEQUENTIAL_3, PY_STD_PARALLEL_10
 from temporal.benchmark import TemporalBenchmark
 from temporal.workflows import SequentialBench5, SequentialBench3, ParallelBench10
 from shared.report import generate_html_report
@@ -20,12 +21,12 @@ def cli():
 
 
 @cli.command()
-@click.option("--platform", "-p", type=click.Choice(["kruxiaflow", "temporal", "airflow"]), multiple=True, help="Platform(s) to benchmark (can specify multiple)")
+@click.option("--platform", "-p", type=click.Choice(["kruxiaflow", "kruxiaflow-py-std", "temporal", "airflow"]), multiple=True, help="Platform(s) to benchmark (can specify multiple)")
 @click.option("--output-dir", type=click.Path(), default="results", help="Output directory for results")
 def run(platform: tuple[str, ...], output_dir: str):
     """Run benchmarks"""
     # Default to all platforms if none specified
-    platforms = list(platform) if platform else ["kruxiaflow", "temporal", "airflow"]
+    platforms = list(platform) if platform else ["kruxiaflow", "kruxiaflow-py-std", "temporal", "airflow"]
     asyncio.run(run_benchmarks(platforms, output_dir))
 
 
@@ -62,6 +63,16 @@ async def run_benchmarks(platforms: list[str], output_dir: str):
         except Exception as e:
             click.secho(f"❌ Kruxia Flow benchmarks failed: {e}", fg="red")
             errors.append(("kruxiaflow", str(e)))
+
+    if "kruxiaflow-py-std" in platforms:
+        try:
+            py_std_results = await run_kruxiaflow_py_benchmarks(timestamp_iso)
+            all_results.extend(py_std_results)
+            save_results()
+            click.echo(f"  💾 Incremental save: {json_path}")
+        except Exception as e:
+            click.secho(f"❌ Kruxia Flow (py-std) benchmarks failed: {e}", fg="red")
+            errors.append(("kruxiaflow-py-std", str(e)))
 
     if "temporal" in platforms:
         try:
@@ -174,17 +185,28 @@ def print_summary(all_results):
     click.echo("=" * 60)
 
     kruxiaflow_results = [r for r in all_results if r.platform == "Kruxia Flow"]
+    py_std_results = [r for r in all_results if r.platform == "Kruxia Flow (py-std)"]
     temporal_results = [r for r in all_results if r.platform == "Temporal"]
     airflow_results = [r for r in all_results if r.platform == "Airflow"]
 
     if kruxiaflow_results:
         sf_avg = sum(r.throughput_wf_per_sec for r in kruxiaflow_results) / len(kruxiaflow_results)
-        click.echo(f"Kruxia Flow avg throughput: {sf_avg:.2f} wf/sec")
+        click.echo(f"Kruxia Flow (std) avg throughput: {sf_avg:.2f} wf/sec")
 
         if sf_avg >= 1000:
             click.secho("🎉 Kruxia Flow target achieved: >1,000 wf/sec!", fg="green", bold=True)
         else:
             click.secho(f"⚠️  Kruxia Flow below target: {sf_avg:.2f}/1000 wf/sec", fg="yellow")
+
+    if py_std_results:
+        py_avg = sum(r.throughput_wf_per_sec for r in py_std_results) / len(py_std_results)
+        click.echo(f"Kruxia Flow (py-std) avg throughput: {py_avg:.2f} wf/sec")
+
+    if kruxiaflow_results and py_std_results:
+        sf_avg = sum(r.throughput_wf_per_sec for r in kruxiaflow_results) / len(kruxiaflow_results)
+        py_avg = sum(r.throughput_wf_per_sec for r in py_std_results) / len(py_std_results)
+        ratio = sf_avg / py_avg if py_avg > 0 else 0
+        click.secho(f"Std vs py-std: {ratio:.1f}x", fg="cyan", bold=True)
 
     if temporal_results:
         temp_avg = sum(r.throughput_wf_per_sec for r in temporal_results) / len(temporal_results)
@@ -269,6 +291,90 @@ async def run_kruxiaflow_benchmarks(timestamp: str):
         num_workflows=300,
         max_concurrent=100,
     )
+    resource_stats = await monitor.stop()
+    result.timestamp = timestamp
+    result.container_count = resource_stats.container_count
+    result.peak_cpu_percent = resource_stats.peak_cpu_percent
+    result.avg_cpu_percent = resource_stats.avg_cpu_percent
+    result.peak_memory_mb = resource_stats.peak_memory_mb
+    result.avg_memory_mb = resource_stats.avg_memory_mb
+    print_result(result)
+    results.append(result)
+
+    monitor.close()
+    await benchmark.cleanup()
+    return results
+
+
+async def run_kruxiaflow_py_benchmarks(timestamp: str):
+    """Run Kruxia Flow benchmark scenarios using the py-std worker"""
+    print("=" * 60)
+    print("Running Kruxia Flow (py-std) Benchmarks")
+    print("=" * 60)
+
+    benchmark = StreamFlowBenchmark(base_url="http://kruxiaflow-py-std-server:8080")
+    await benchmark.setup(extra_workflows=[
+        PY_STD_SEQUENTIAL_5,
+        PY_STD_SEQUENTIAL_3,
+        PY_STD_PARALLEL_10,
+    ])
+
+    # Initialize resource monitor
+    monitor = ResourceMonitor("Kruxia Flow (py-std)")
+    monitor.connect()
+
+    results = []
+
+    # Sequential-5
+    print("\n[1/3] Sequential-5: 100 workflows, 10 concurrent...")
+    await monitor.start()
+    result = await benchmark.run_scenario(
+        "Sequential-5",
+        "sequential_bench_5_py-std",
+        num_workflows=100,
+        max_concurrent=10,
+    )
+    result.platform = "Kruxia Flow (py-std)"
+    resource_stats = await monitor.stop()
+    result.timestamp = timestamp
+    result.container_count = resource_stats.container_count
+    result.peak_cpu_percent = resource_stats.peak_cpu_percent
+    result.avg_cpu_percent = resource_stats.avg_cpu_percent
+    result.peak_memory_mb = resource_stats.peak_memory_mb
+    result.avg_memory_mb = resource_stats.avg_memory_mb
+    print_result(result)
+    results.append(result)
+
+    # Parallel-10
+    print("\n[2/3] Parallel-10: 50 workflows, 10 concurrent...")
+    await monitor.start()
+    result = await benchmark.run_scenario(
+        "Parallel-10",
+        "parallel_bench_10_py-std",
+        num_workflows=50,
+        max_concurrent=10,
+    )
+    result.platform = "Kruxia Flow (py-std)"
+    resource_stats = await monitor.stop()
+    result.timestamp = timestamp
+    result.container_count = resource_stats.container_count
+    result.peak_cpu_percent = resource_stats.peak_cpu_percent
+    result.avg_cpu_percent = resource_stats.avg_cpu_percent
+    result.peak_memory_mb = resource_stats.peak_memory_mb
+    result.avg_memory_mb = resource_stats.avg_memory_mb
+    print_result(result)
+    results.append(result)
+
+    # High-Concurrency-3
+    print("\n[3/3] High-Concurrency-3: 300 workflows, 100 concurrent...")
+    await monitor.start()
+    result = await benchmark.run_scenario(
+        "High-Concurrency-3",
+        "sequential_bench_3_py-std",
+        num_workflows=300,
+        max_concurrent=100,
+    )
+    result.platform = "Kruxia Flow (py-std)"
     resource_stats = await monitor.stop()
     result.timestamp = timestamp
     result.container_count = resource_stats.container_count

@@ -47,7 +47,7 @@ With the event-based waiting primitive (see `docs/post-mvp.md` Story 6.0), workf
 ```yaml
 activities:
   - key: trigger_enrichment
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -64,7 +64,7 @@ activities:
     depends_on: [finalize]
 
   - key: wait_for_enrichment
-    worker: builtin
+    worker: std
     activity_name: wait_for_signal
     parameters:
       event_name: "workflow_{{trigger_enrichment.child_workflow_id}}_completed"
@@ -72,7 +72,7 @@ activities:
     depends_on: [trigger_enrichment]
 
   - key: use_enrichment_results
-    worker: builtin
+    worker: std
     activity_name: postgres_query
     parameters:
       query: "SELECT * FROM bibliographic WHERE source_id = {{INPUT.source_id}}"

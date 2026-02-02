@@ -1,6 +1,7 @@
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum_test::TestServer;
 use kruxiaflow_api::{routes::app_router, state::AppState};
+use kruxiaflow_core::PostgresSubscriptionService;
 use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{Activity, ActivityQueue, PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
@@ -66,6 +67,7 @@ async fn create_test_server() -> (TestServer, PgPool) {
     let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
     let shutdown_token = CancellationToken::new();
 
+    let subscription_service = Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let state = AppState::new(
         pool.clone(),
         Arc::new(auth_service),
@@ -73,6 +75,7 @@ async fn create_test_server() -> (TestServer, PgPool) {
         event_source,
         workflow_storage,
         cache_service,
+        subscription_service,
         shutdown_token,
     );
     let app = app_router(state);
@@ -109,6 +112,7 @@ async fn schedule_test_activities(pool: &PgPool, workflow_id: Uuid, count: usize
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         })
         .collect();
 
@@ -119,6 +123,13 @@ async fn schedule_test_activities(pool: &PgPool, workflow_id: Uuid, count: usize
 }
 
 /// Helper to cleanup test data
+async fn drain_worker_queue(pool: &PgPool, worker: &str) {
+    sqlx::query!("DELETE FROM activity_queue WHERE worker = $1", worker)
+        .execute(pool)
+        .await
+        .ok();
+}
+
 async fn cleanup_test_data(pool: &PgPool, workflow_id: Uuid) {
     sqlx::query!(
         "DELETE FROM activity_queue WHERE workflow_id = $1",
@@ -698,7 +709,7 @@ async fn schedule_activity_with_timeout(
 
     let activity = Activity {
         key: activity_key.clone(),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         activity_name: "http_request".to_string(),
         parameters: json!({"url": "https://example.com"}),
         settings: Some(kruxiaflow_core::workflow::definition::ActivitySettings {
@@ -710,10 +721,12 @@ async fn schedule_activity_with_timeout(
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         }),
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -734,6 +747,7 @@ async fn schedule_activity_with_timeout(
 async fn test_poll_returns_timeout_seconds_from_settings() {
     let (server, pool) = create_test_server().await;
     let token = get_test_token(&server).await;
+    drain_worker_queue(&pool, "std").await;
     let workflow_id = Uuid::now_v7();
 
     // Schedule activity with 5-second timeout (short for testing)
@@ -747,7 +761,7 @@ async fn test_poll_returns_timeout_seconds_from_settings() {
             HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
         )
         .json(&json!({
-            "worker": "builtin",
+            "worker": "std",
             "worker_id": "worker_timeout_test",
             "max_activities": 1
         }))
@@ -791,6 +805,7 @@ async fn test_poll_returns_timeout_seconds_from_settings() {
 async fn test_poll_returns_various_timeout_values() {
     let (server, pool) = create_test_server().await;
     let token = get_test_token(&server).await;
+    drain_worker_queue(&pool, "std").await;
 
     // Test different timeout values (using short values for fast tests)
     let test_cases = vec![
@@ -801,6 +816,9 @@ async fn test_poll_returns_various_timeout_values() {
     ];
 
     for (timeout, description) in test_cases {
+        // Drain before each iteration to ensure no stale activities
+        drain_worker_queue(&pool, "std").await;
+
         let workflow_id = Uuid::now_v7();
         schedule_activity_with_timeout(&pool, workflow_id, timeout).await;
 
@@ -811,7 +829,7 @@ async fn test_poll_returns_various_timeout_values() {
                 HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
             )
             .json(&json!({
-                "worker": "builtin",
+                "worker": "std",
                 "worker_id": &format!("worker_timeout_{}", timeout),
                 "max_activities": 1
             }))
@@ -820,6 +838,11 @@ async fn test_poll_returns_various_timeout_values() {
         assert_eq!(response.status_code(), StatusCode::OK);
 
         let body: serde_json::Value = response.json();
+        assert_eq!(
+            body["count"], 1,
+            "Failed for {}: expected 1 activity polled",
+            description
+        );
         let activity = &body["activities"][0];
 
         assert_eq!(
@@ -883,13 +906,14 @@ async fn test_poll_returns_null_timeout_when_not_configured() {
 async fn test_poll_returns_null_timeout_when_settings_has_no_timeout() {
     let (server, pool) = create_test_server().await;
     let token = get_test_token(&server).await;
+    drain_worker_queue(&pool, "std").await;
     let workflow_id = Uuid::now_v7();
 
     // Schedule activity with settings but no timeout_seconds
     let queue = PostgresQueue::new(pool.clone(), QueueConfig::default());
     let activity = Activity {
         key: "activity_no_timeout".to_string(),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         activity_name: "http_request".to_string(),
         parameters: json!({"url": "https://example.com"}),
         settings: Some(kruxiaflow_core::workflow::definition::ActivitySettings {
@@ -901,10 +925,12 @@ async fn test_poll_returns_null_timeout_when_settings_has_no_timeout() {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         }),
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -919,7 +945,7 @@ async fn test_poll_returns_null_timeout_when_settings_has_no_timeout() {
             HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
         )
         .json(&json!({
-            "worker": "builtin",
+            "worker": "std",
             "worker_id": "worker_settings_no_timeout",
             "max_activities": 1
         }))

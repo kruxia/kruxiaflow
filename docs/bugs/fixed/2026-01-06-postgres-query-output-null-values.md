@@ -16,7 +16,7 @@ When passing rows from a `postgres_query` result to a subsequent activity:
 
 ```yaml
 - key: search_passages
-  worker: builtin
+  worker: std
   activity_name: postgres_query
   parameters:
     query: |
@@ -84,7 +84,7 @@ namespace: test
 
 activities:
   - key: get_data
-    worker: builtin
+    worker: std
     activity_name: postgres_query
     parameters:
       db_url: "{{INPUT.db_url}}"

@@ -5,6 +5,7 @@ pub mod events;
 pub mod orchestrator;
 pub mod queue;
 pub mod storage;
+pub mod subscription;
 pub mod workflow;
 
 // Re-export specific items to avoid ambiguity
@@ -40,10 +41,15 @@ pub use queue::{
 
 pub use storage::{FileMetadata, FileReference, PostgresStorage, StorageError, WorkflowStorage};
 
+pub use subscription::{
+    ActivitySubscription, ExpiredSubscription, NewSubscription, PostgresSubscriptionService,
+    SignalRequest, SubscriptionService,
+};
+
 pub use workflow::{
     ActivityDefinition, ActivityOutput, ActivityOutputDefinition, ActivityRelationship,
-    BackoffStrategy, OutputType, RepositoryError, RetrySettings, StoredWorkflowDefinition,
-    ValidationError, ValidationErrors, WorkflowDefinition, WorkflowDefinitionRepository,
-    WorkflowSettings,
+    BackoffStrategy, OnTimeout, OutputType, RepositoryError, RetrySettings,
+    StoredWorkflowDefinition, ValidationError, ValidationErrors, WaitForSignalSettings,
+    WorkflowDefinition, WorkflowDefinitionRepository, WorkflowSettings,
     template::{TemplateContext, TemplateError, resolve_template, resolve_template_value},
 };

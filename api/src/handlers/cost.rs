@@ -24,15 +24,11 @@ pub struct WorkflowCostSummary {
 /// Get cost summary for a specific workflow
 ///
 /// Returns the total cost, budget limit, budget remaining, and activity count
-/// for a workflow. Uses the workflow_cost_summary materialized view for
-/// efficient queries.
+/// for a workflow. Uses the workflow_cost_summary view.
 ///
 /// # Response
 /// - 200 OK: Cost summary returned
 /// - 404 Not Found: Workflow does not exist
-///
-/// # Performance
-/// Target: <10ms P99 latency (materialized view query)
 #[utoipa::path(
     get,
     path = "/api/v1/workflows/{workflow_id}/cost",
@@ -53,7 +49,7 @@ pub async fn get_workflow_cost(
     State(state): State<AppState>,
     Path(workflow_id): Path<Uuid>,
 ) -> Result<Json<WorkflowCostSummary>, StatusCode> {
-    // Query workflow cost from materialized view
+    // Query workflow cost from view
     let summary = sqlx::query!(
         r#"
         SELECT
@@ -102,6 +98,7 @@ pub struct ActivityCostDetail {
     pub cached_tokens: Option<i32>,
     pub provider: String,
     pub model: String,
+    pub budget_limit_usd: Option<Decimal>,
     pub budget_exceeded: Option<bool>,
     pub created_at: DateTime<Utc>,
 }
@@ -151,6 +148,7 @@ pub async fn get_workflow_cost_history(
             cached_tokens,
             provider,
             model,
+            activity_budget_limit_usd as budget_limit_usd,
             budget_exceeded,
             created_at
         FROM activity_costs
@@ -286,6 +284,7 @@ mod tests {
         let cache_service = Arc::new(NoOpCache::new());
         let shutdown_token = CancellationToken::new();
 
+        let subscription_service = Arc::new(crate::state::tests::MockSubscriptionService);
         AppState::new(
             pool,
             auth_service,
@@ -293,6 +292,7 @@ mod tests {
             event_source,
             workflow_storage,
             cache_service,
+            subscription_service,
             shutdown_token,
         )
     }
@@ -356,6 +356,82 @@ mod tests {
         let result = get_cost_analytics(State(state), Query(params)).await;
 
         assert!(result.is_ok(), "Should work with default dates");
+    }
+
+    #[test]
+    fn test_cost_analytics_params_defaults() {
+        let start = default_start_date();
+        let now = Utc::now();
+        // default start should be ~30 days ago
+        let diff = now - start;
+        assert!(diff.num_days() >= 29 && diff.num_days() <= 31);
+    }
+
+    #[test]
+    fn test_workflow_cost_summary_serialize() {
+        let summary = WorkflowCostSummary {
+            workflow_id: Uuid::nil(),
+            workflow_name: "test".to_string(),
+            total_cost_usd: Decimal::from_str("1.50").unwrap(),
+            budget_limit_usd: None,
+            budget_remaining_usd: None,
+            total_activities: 2,
+        };
+        let json = serde_json::to_value(&summary).unwrap();
+        assert_eq!(json["total_activities"], 2);
+        assert!(json["budget_limit_usd"].is_null());
+    }
+
+    #[test]
+    fn test_activity_cost_detail_serialize() {
+        let detail = ActivityCostDetail {
+            activity_key: "llm_prompt".to_string(),
+            attempt: 1,
+            cost_usd: Decimal::from_str("0.0023").unwrap(),
+            prompt_tokens: Some(150),
+            output_tokens: Some(50),
+            total_tokens: Some(200),
+            cached_tokens: Some(0),
+            provider: "anthropic".to_string(),
+            model: "claude-3-sonnet".to_string(),
+            budget_limit_usd: Some(Decimal::from_str("1.00").unwrap()),
+            budget_exceeded: Some(false),
+            created_at: Utc::now(),
+        };
+        let json = serde_json::to_value(&detail).unwrap();
+        assert_eq!(json["activity_key"], "llm_prompt");
+        assert_eq!(json["prompt_tokens"], 150);
+        assert_eq!(json["provider"], "anthropic");
+    }
+
+    #[test]
+    fn test_cost_analytics_serialize() {
+        let analytics = CostAnalytics {
+            total_workflows: 10,
+            total_cost_usd: Decimal::from_str("25.50").unwrap(),
+            avg_cost_per_activity: Decimal::from_str("0.0255").unwrap(),
+            start_date: Utc::now() - chrono::Duration::days(30),
+            end_date: Utc::now(),
+        };
+        let json = serde_json::to_value(&analytics).unwrap();
+        assert_eq!(json["total_workflows"], 10);
+    }
+
+    #[test]
+    fn test_budget_remaining_calculation_no_budget() {
+        // When budget_limit_usd is None, budget_remaining should be None
+        let budget_limit: Option<Decimal> = None;
+        let budget_remaining = budget_limit
+            .map(|limit| (limit - Decimal::from_str("5.00").unwrap()).max(Decimal::ZERO));
+        assert!(budget_remaining.is_none());
+    }
+
+    #[test]
+    fn test_budget_remaining_calculation_with_overspend() {
+        let budget_limit = Some(Decimal::from_str("10.00").unwrap());
+        let total_cost = Decimal::from_str("15.00").unwrap();
+        let budget_remaining = budget_limit.map(|limit| (limit - total_cost).max(Decimal::ZERO));
+        assert_eq!(budget_remaining, Some(Decimal::ZERO));
     }
 
     #[tokio::test]

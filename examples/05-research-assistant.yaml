@@ -46,7 +46,7 @@ description: Ask LLM question with automatic model fallback and budget-aware pro
 
 activities:
   - key: ask_question
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     parameters:
       # Model fallback chain - tries each in order until success
@@ -68,13 +68,14 @@ activities:
         factor: 2
         max_seconds: 60
       budget:
-        limit_usd: 0.01  # Tight budget to demonstrate budget-aware fallback
+        limit: 0.01  # Tight budget to demonstrate budget-aware fallback
         action: abort
 
   - key: store_response
-    worker: builtin
+    worker: std
     activity_name: postgres_query
     parameters:
+      db_url: "{{SECRET.db_url}}"
       query: |
         INSERT INTO research_log
         (question, answer, provider, model, cost, prompt_tokens, output_tokens, total_tokens, created_at)

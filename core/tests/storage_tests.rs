@@ -169,9 +169,7 @@ async fn test_upload_large_file_streaming() {
     let chunks: Vec<Bytes> = (0..num_chunks)
         .map(|i| {
             let mut chunk = vec![0u8; chunk_size];
-            for byte in &mut chunk {
-                *byte = (i % 256) as u8;
-            }
+            chunk.fill((i % 256) as u8);
             Bytes::from(chunk)
         })
         .collect();

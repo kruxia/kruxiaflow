@@ -276,13 +276,11 @@ impl OutputQueryService {
             let is_terminal = terminal_activities.contains(key.as_str());
 
             // Track the latest completion time for terminal activities
-            if is_terminal {
-                if let Some(ca) = completed_at {
-                    match workflow_completed_at {
-                        None => workflow_completed_at = Some(ca),
-                        Some(existing) if ca > existing => workflow_completed_at = Some(ca),
-                        _ => {}
-                    }
+            if is_terminal && let Some(ca) = completed_at {
+                match workflow_completed_at {
+                    None => workflow_completed_at = Some(ca),
+                    Some(existing) if ca > existing => workflow_completed_at = Some(ca),
+                    _ => {}
                 }
             }
 
@@ -347,12 +345,12 @@ impl OutputQueryService {
 
         // Collect all activities that are depended upon
         for (_key, activity_state) in activities_map {
-            if let Some(depends_on) = activity_state.get("depends_on") {
-                if let Some(deps) = depends_on.as_array() {
-                    for dep in deps {
-                        if let Some(dep_key) = dep.get("activity_key").and_then(|v| v.as_str()) {
-                            has_dependents.insert(dep_key.to_string());
-                        }
+            if let Some(depends_on) = activity_state.get("depends_on")
+                && let Some(deps) = depends_on.as_array()
+            {
+                for dep in deps {
+                    if let Some(dep_key) = dep.get("activity_key").and_then(|v| v.as_str()) {
+                        has_dependents.insert(dep_key.to_string());
                     }
                 }
             }
@@ -381,12 +379,12 @@ mod tests {
         let mut has_dependents: HashSet<String> = HashSet::new();
 
         for (_key, activity_state) in activities_map {
-            if let Some(depends_on) = activity_state.get("depends_on") {
-                if let Some(deps) = depends_on.as_array() {
-                    for dep in deps {
-                        if let Some(dep_key) = dep.get("activity_key").and_then(|v| v.as_str()) {
-                            has_dependents.insert(dep_key.to_string());
-                        }
+            if let Some(depends_on) = activity_state.get("depends_on")
+                && let Some(deps) = depends_on.as_array()
+            {
+                for dep in deps {
+                    if let Some(dep_key) = dep.get("activity_key").and_then(|v| v.as_str()) {
+                        has_dependents.insert(dep_key.to_string());
                     }
                 }
             }
@@ -611,5 +609,139 @@ mod tests {
                 workflow_id
             )
         );
+    }
+
+    #[test]
+    fn test_file_info_from_metadata_no_content_type() {
+        use crate::storage::FileMetadata;
+        use chrono::Utc;
+
+        let workflow_id = Uuid::now_v7();
+        let metadata = FileMetadata {
+            workflow_id,
+            activity_key: "step1".to_string(),
+            filename: "data.bin".to_string(),
+            size: 0,
+            content_type: None,
+            created_at: Utc::now(),
+        };
+
+        let file_info = FileInfo::from(metadata);
+        assert_eq!(file_info.filename, "data.bin");
+        assert_eq!(file_info.size, 0);
+        assert!(file_info.content_type.is_none());
+    }
+
+    // =========================================================================
+    // OutputQueryError Display Tests
+    // =========================================================================
+
+    #[test]
+    fn test_output_query_error_workflow_not_found() {
+        let id = Uuid::now_v7();
+        let err = OutputQueryError::WorkflowNotFound(id);
+        assert!(err.to_string().contains(&id.to_string()));
+        assert!(err.to_string().contains("Workflow not found"));
+    }
+
+    #[test]
+    fn test_output_query_error_activity_not_found() {
+        let err = OutputQueryError::ActivityNotFound("step1".to_string());
+        assert_eq!(err.to_string(), "Activity not found: step1");
+    }
+
+    #[test]
+    fn test_output_query_error_activity_not_completed() {
+        let err = OutputQueryError::ActivityNotCompleted("step2".to_string());
+        assert_eq!(err.to_string(), "Activity not completed: step2");
+    }
+
+    #[test]
+    fn test_output_query_error_workflow_not_completed() {
+        let err = OutputQueryError::WorkflowNotCompleted;
+        assert_eq!(err.to_string(), "Workflow not completed");
+    }
+
+    #[test]
+    fn test_output_query_error_file_not_found() {
+        let err = OutputQueryError::FileNotFound("missing.pdf".to_string());
+        assert_eq!(err.to_string(), "File not found: missing.pdf");
+    }
+
+    #[test]
+    fn test_output_query_error_deserialization() {
+        let err = OutputQueryError::DeserializationError("bad json".to_string());
+        assert_eq!(err.to_string(), "Deserialization error: bad json");
+    }
+
+    // =========================================================================
+    // ActivityOutputResult / WorkflowOutputResult Serde Tests
+    // =========================================================================
+
+    #[test]
+    fn test_activity_output_result_serialization() {
+        let result = ActivityOutputResult {
+            workflow_id: Uuid::nil(),
+            activity_key: "step1".to_string(),
+            status: WorkflowActivityStatus::Completed,
+            output: Some(json!({"answer": 42})),
+            cost_usd: rust_decimal::Decimal::new(50, 4),
+            completed_at: None,
+            files: vec![],
+        };
+
+        let json_str = serde_json::to_string(&result).unwrap();
+        assert!(json_str.contains("step1"));
+        assert!(json_str.contains("42"));
+
+        let deserialized: ActivityOutputResult = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(deserialized.activity_key, "step1");
+    }
+
+    #[test]
+    fn test_workflow_output_result_serialization() {
+        let mut outputs = HashMap::new();
+        outputs.insert(
+            "step1".to_string(),
+            ActivityOutputSummary {
+                status: WorkflowActivityStatus::Completed,
+                output: Some(json!({"result": "ok"})),
+                cost_usd: rust_decimal::Decimal::new(10, 2),
+                completed_at: None,
+                is_terminal: true,
+            },
+        );
+
+        let result = WorkflowOutputResult {
+            workflow_id: Uuid::nil(),
+            status: WorkflowStatus::Completed,
+            total_cost_usd: rust_decimal::Decimal::new(10, 2),
+            completed_at: None,
+            outputs,
+            terminal_outputs: vec!["step1".to_string()],
+        };
+
+        let json_str = serde_json::to_string(&result).unwrap();
+        assert!(json_str.contains("step1"));
+        assert!(json_str.contains("terminal_outputs"));
+
+        let deserialized: WorkflowOutputResult = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(deserialized.terminal_outputs, vec!["step1".to_string()]);
+    }
+
+    #[test]
+    fn test_activity_output_summary_serialization() {
+        let summary = ActivityOutputSummary {
+            status: WorkflowActivityStatus::Completed,
+            output: None,
+            cost_usd: rust_decimal::Decimal::ZERO,
+            completed_at: None,
+            is_terminal: false,
+        };
+
+        let json_str = serde_json::to_string(&summary).unwrap();
+        let deserialized: ActivityOutputSummary = serde_json::from_str(&json_str).unwrap();
+        assert!(!deserialized.is_terminal);
+        assert!(deserialized.output.is_none());
     }
 }

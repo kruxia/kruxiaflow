@@ -1,0 +1,22 @@
+name: Main CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust CI
+    uses: ./.github/workflows/rust-ci.yml
+    secrets: inherit
+
+  python:
+    name: Python SDK CI
+    uses: ./.github/workflows/py-ci.yml
+    secrets: inherit

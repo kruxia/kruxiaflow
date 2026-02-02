@@ -65,6 +65,7 @@ async fn schedule_test_activity(
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     queue
@@ -258,7 +259,7 @@ async fn test_heartbeat_wrong_worker() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        kruxiaflow_core::activity::ActivityWorkerError::WrongWorker { .. }
+        kruxiaflow_core::activity::ActivityWorkerError::WrongWorker
     ));
 
     cleanup_activities(&pool, workflow_id).await;
@@ -416,7 +417,7 @@ async fn test_complete_activity_wrong_worker() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        kruxiaflow_core::activity::ActivityWorkerError::WrongWorker { .. }
+        kruxiaflow_core::activity::ActivityWorkerError::WrongWorker
     ));
 
     cleanup_activities(&pool, workflow_id).await;
@@ -454,7 +455,7 @@ async fn test_fail_activity_success() {
         .await;
 
     assert!(result.is_ok());
-    assert_eq!(result.unwrap(), false); // will_retry = false
+    assert!(!result.unwrap()); // will_retry = false
 
     // Verify activity is marked as failed (soft-delete)
     let status = sqlx::query_scalar!(
@@ -524,7 +525,7 @@ async fn test_fail_activity_wrong_worker() {
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        kruxiaflow_core::activity::ActivityWorkerError::WrongWorker { .. }
+        kruxiaflow_core::activity::ActivityWorkerError::WrongWorker
     ));
 
     cleanup_activities(&pool, workflow_id).await;

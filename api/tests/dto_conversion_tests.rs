@@ -40,6 +40,7 @@ fn test_workflow_definition_from_core_to_dto() {
                     iteration_limit: None,
                     delay: None,
                     scheduled_for: None,
+                    wait_for_signal: None,
                 }),
                 output_definitions: None,
                 iteration_scoped: false,
@@ -145,6 +146,7 @@ fn test_workflow_definition_from_dto_to_core() {
                 iteration_limit: None,
                 delay: None,
                 scheduled_for: None,
+                wait_for_signal: None,
             }),
             output_definitions: None,
             iteration_scoped: false,
@@ -220,6 +222,7 @@ fn test_activity_settings_conversions() {
         iteration_limit: None,
         delay: None,
         scheduled_for: None,
+        wait_for_signal: None,
     };
 
     let dto_settings: dto::ActivitySettings = core_settings.clone().into();
@@ -244,6 +247,7 @@ fn test_activity_settings_conversions() {
         iteration_limit: None,
         delay: None,
         scheduled_for: None,
+        wait_for_signal: None,
     };
 
     let core_settings2: workflow::ActivitySettings = dto_settings2.clone().into();
@@ -452,6 +456,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                     iteration_limit: None,
                     delay: None,
                     scheduled_for: None,
+                    wait_for_signal: None,
                 }),
                 output_definitions: None,
                 iteration_scoped: false,
@@ -492,6 +497,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                     iteration_limit: None,
                     delay: None,
                     scheduled_for: None,
+                    wait_for_signal: None,
                 }),
                 output_definitions: None,
                 iteration_scoped: false,
@@ -734,6 +740,7 @@ fn test_activity_with_budget_settings() {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         }),
         output_definitions: None,
         iteration_scoped: false,
@@ -766,6 +773,7 @@ fn test_activity_settings_with_scheduling() {
         iteration_limit: None,
         delay: Some("30s".to_string()),
         scheduled_for: None,
+        wait_for_signal: None,
     };
 
     let dto_settings: dto::ActivitySettings = core_settings.into();
@@ -784,6 +792,7 @@ fn test_activity_settings_with_absolute_schedule() {
         iteration_limit: None,
         delay: None,
         scheduled_for: Some("2025-12-01T09:00:00Z".to_string()),
+        wait_for_signal: None,
     };
 
     let dto_settings: dto::ActivitySettings = core_settings.into();
@@ -809,6 +818,7 @@ fn test_activity_settings_with_caching() {
         iteration_limit: None,
         delay: None,
         scheduled_for: None,
+        wait_for_signal: None,
     };
 
     let dto_settings: dto::ActivitySettings = core_settings.into();

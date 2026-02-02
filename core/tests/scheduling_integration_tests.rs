@@ -5,6 +5,7 @@ use kruxiaflow_core::events::{
 };
 use kruxiaflow_core::orchestrator::OrchestratorConfig;
 use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
+use kruxiaflow_core::subscription::{PostgresSubscriptionService, SubscriptionService};
 use kruxiaflow_core::workflow::ActivitySettings;
 use serde_json::json;
 use serial_test::serial;
@@ -99,6 +100,7 @@ async fn test_delayed_activity_execution() {
                 iteration_limit: None,
                 delay: Some("2s".to_string()),
                 scheduled_for: None,
+                wait_for_signal: None,
             }),
             depends_on: None,
             dependency_of: None,
@@ -113,6 +115,8 @@ async fn test_delayed_activity_execution() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // Publish WorkflowCreated event
@@ -137,6 +141,7 @@ async fn test_delayed_activity_execution() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -195,6 +200,7 @@ async fn test_scheduled_activity_execution() {
                 iteration_limit: None,
                 delay: None,
                 scheduled_for: Some("{{INPUT.scheduled_time}}".to_string()),
+                wait_for_signal: None,
             }),
             depends_on: None,
             dependency_of: None,
@@ -221,6 +227,8 @@ async fn test_scheduled_activity_execution() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // Publish WorkflowCreated event
@@ -247,6 +255,7 @@ async fn test_scheduled_activity_execution() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -305,6 +314,8 @@ async fn test_immediate_activity_unaffected() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // Publish WorkflowCreated event
@@ -329,6 +340,7 @@ async fn test_immediate_activity_unaffected() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -382,6 +394,7 @@ async fn test_worker_respects_scheduled_for() {
                 iteration_limit: None,
                 delay: Some("5s".to_string()),
                 scheduled_for: None,
+                wait_for_signal: None,
             }),
             depends_on: None,
             dependency_of: None,
@@ -396,6 +409,8 @@ async fn test_worker_respects_scheduled_for() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // Publish WorkflowCreated and process
@@ -420,6 +435,7 @@ async fn test_worker_respects_scheduled_for() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -497,6 +513,7 @@ async fn test_multiple_delayed_activities() {
                     iteration_limit: None,
                     delay: Some("2s".to_string()),
                     scheduled_for: None,
+                    wait_for_signal: None,
                 }),
                 depends_on: Some(vec![DependencyEdge {
                     activity_key: "call_1".to_string(),
@@ -519,6 +536,7 @@ async fn test_multiple_delayed_activities() {
                     iteration_limit: None,
                     delay: Some("2s".to_string()),
                     scheduled_for: None,
+                    wait_for_signal: None,
                 }),
                 depends_on: Some(vec![DependencyEdge {
                     activity_key: "call_2".to_string(),
@@ -537,6 +555,8 @@ async fn test_multiple_delayed_activities() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     // Process WorkflowCreated
@@ -561,6 +581,7 @@ async fn test_multiple_delayed_activities() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -616,6 +637,7 @@ async fn test_multiple_delayed_activities() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -670,6 +692,7 @@ async fn test_delay_with_all_duration_units() {
                 iteration_limit: None,
                 delay: Some("500ms".to_string()),
                 scheduled_for: None,
+                wait_for_signal: None,
             }),
             depends_on: None,
             dependency_of: None,
@@ -684,6 +707,8 @@ async fn test_delay_with_all_duration_units() {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let config = OrchestratorConfig::new(pool.clone());
 
     event_source
@@ -703,6 +728,7 @@ async fn test_delay_with_all_duration_units() {
             event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -724,7 +750,7 @@ async fn test_delay_with_all_duration_units() {
 
     // Should be approximately 500ms in the future
     assert!(
-        diff >= 400 && diff <= 600,
+        (400..=600).contains(&diff),
         "Expected ~500ms delay, got {}ms",
         diff
     );
