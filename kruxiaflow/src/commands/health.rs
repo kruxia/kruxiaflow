@@ -624,7 +624,7 @@ mod tests {
 
     #[test]
     fn test_overall_status_all_healthy() {
-        let results = vec![
+        let results = [
             HealthResult {
                 service: "a".to_string(),
                 status: HealthStatus::Healthy,
@@ -654,7 +654,7 @@ mod tests {
 
     #[test]
     fn test_overall_status_any_unhealthy() {
-        let results = vec![
+        let results = [
             HealthResult {
                 service: "a".to_string(),
                 status: HealthStatus::Healthy,
@@ -684,7 +684,7 @@ mod tests {
 
     #[test]
     fn test_overall_status_degraded() {
-        let results = vec![
+        let results = [
             HealthResult {
                 service: "a".to_string(),
                 status: HealthStatus::Healthy,
