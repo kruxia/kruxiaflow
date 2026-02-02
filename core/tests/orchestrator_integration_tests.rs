@@ -1227,7 +1227,7 @@ async fn test_orchestrator_backoff_when_no_events() {
     orchestrator_handle.abort();
 
     // If we get here without hanging, backoff is working
-    assert!(true, "Orchestrator backoff works when no events");
+    // If we get here without hanging, backoff is working
 }
 
 // ============================================================================

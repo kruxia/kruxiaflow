@@ -393,9 +393,11 @@ mod tests {
 
     #[test]
     fn test_validate_no_worker() {
-        let mut config = WorkerConfig::default();
-        config.worker = "".to_string();
-        config.client_secret = "secret".to_string();
+        let config = WorkerConfig {
+            worker: "".to_string(),
+            client_secret: "secret".to_string(),
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -404,9 +406,11 @@ mod tests {
 
     #[test]
     fn test_validate_zero_max_concurrent_activities() {
-        let mut config = WorkerConfig::default();
-        config.max_concurrent_activities = 0;
-        config.client_secret = "secret".to_string();
+        let config = WorkerConfig {
+            max_concurrent_activities: 0,
+            client_secret: "secret".to_string(),
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -418,9 +422,11 @@ mod tests {
 
     #[test]
     fn test_validate_zero_poll_max_activities() {
-        let mut config = WorkerConfig::default();
-        config.poll_max_activities = 0;
-        config.client_secret = "secret".to_string();
+        let config = WorkerConfig {
+            poll_max_activities: 0,
+            client_secret: "secret".to_string(),
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -429,9 +435,11 @@ mod tests {
 
     #[test]
     fn test_validate_zero_concurrency() {
-        let mut config = WorkerConfig::default();
-        config.concurrency = 0;
-        config.client_secret = "secret".to_string();
+        let config = WorkerConfig {
+            concurrency: 0,
+            client_secret: "secret".to_string(),
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -440,8 +448,10 @@ mod tests {
 
     #[test]
     fn test_validate_missing_client_secret() {
-        let mut config = WorkerConfig::default();
-        config.client_secret = "".to_string();
+        let config = WorkerConfig {
+            client_secret: "".to_string(),
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -450,8 +460,10 @@ mod tests {
 
     #[test]
     fn test_validate_valid_config() {
-        let mut config = WorkerConfig::default();
-        config.client_secret = "secret".to_string();
+        let config = WorkerConfig {
+            client_secret: "secret".to_string(),
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_ok());

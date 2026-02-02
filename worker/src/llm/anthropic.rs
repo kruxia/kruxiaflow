@@ -137,10 +137,10 @@ impl SseParser {
 
             // Parse SSE format: "event: xxx\ndata: {...}"
             for line in chunk.lines() {
-                if let Some(data) = line.strip_prefix("data: ") {
-                    if let Some(event) = parse_sse_data(data) {
-                        events.push(event);
-                    }
+                if let Some(data) = line.strip_prefix("data: ")
+                    && let Some(event) = parse_sse_data(data)
+                {
+                    events.push(event);
                 }
             }
         }
@@ -313,13 +313,13 @@ impl LLMProvider for AnthropicProvider {
                             for event in events {
                                 match event {
                                     AnthropicEvent::ContentBlockDelta { delta, .. } => {
-                                        if delta.delta_type == "text_delta" {
-                                            if let Some(text) = delta.text {
-                                                pending_chunks.push(PromptChunk {
-                                                    content: text,
-                                                    finish_reason: None,
-                                                });
-                                            }
+                                        if delta.delta_type == "text_delta"
+                                            && let Some(text) = delta.text
+                                        {
+                                            pending_chunks.push(PromptChunk {
+                                                content: text,
+                                                finish_reason: None,
+                                            });
                                         }
                                     }
                                     AnthropicEvent::MessageDelta { delta, .. } => {

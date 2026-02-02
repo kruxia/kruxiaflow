@@ -170,13 +170,13 @@ impl FileExecutor {
             match output_def.output_type {
                 OutputType::Value => {
                     // Regular value output - extract from activity_outputs
-                    if let Some(map) = outputs_map {
-                        if let Some(value) = map.get(&output_def.name) {
-                            outputs.push(ActivityOutput::value(
-                                output_def.name.clone(),
-                                value.clone(),
-                            ));
-                        }
+                    if let Some(map) = outputs_map
+                        && let Some(value) = map.get(&output_def.name)
+                    {
+                        outputs.push(ActivityOutput::value(
+                            output_def.name.clone(),
+                            value.clone(),
+                        ));
                     }
                 }
                 OutputType::File => {

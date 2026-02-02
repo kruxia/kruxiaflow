@@ -350,13 +350,13 @@ impl ListWorkflowsQuery {
         }
 
         // Validate time range
-        if let (Some(after), Some(before)) = (self.created_after, self.created_before) {
-            if after >= before {
-                errors.add(
-                    "created_after",
-                    "created_after must be before created_before",
-                );
-            }
+        if let (Some(after), Some(before)) = (self.created_after, self.created_before)
+            && after >= before
+        {
+            errors.add(
+                "created_after",
+                "created_after must be before created_before",
+            );
         }
 
         if errors.is_empty() {

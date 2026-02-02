@@ -149,7 +149,7 @@ impl BottleneckReport {
 
         // Capacity estimate
         md.push_str("## Capacity Estimate\n\n");
-        md.push_str(&format!("| Metric | Value |\n|--------|-------|\n"));
+        md.push_str("| Metric | Value |\n|--------|-------|\n");
         md.push_str(&format!(
             "| Safe Concurrent Workflows | {} |\n",
             self.capacity_estimate.safe_concurrent
@@ -276,19 +276,20 @@ impl BottleneckAnalyzer {
         }
 
         // Analyze database metrics
-        if let Some(db) = db_metrics {
-            if db.is_pool_exhausted() {
-                let utilization = db.active_connections as f64 / db.max_connections as f64;
-                bottlenecks.push(Bottleneck {
-                    category: BottleneckCategory::Database,
-                    description: "Connection pool exhaustion".to_string(),
-                    current_value: utilization * 100.0,
-                    threshold: self.connection_pool_threshold * 100.0,
-                    severity: utilization.min(1.0),
-                    impact: "New requests blocked waiting for database connections".to_string(),
-                });
+        if let Some(db) = db_metrics
+            && db.is_pool_exhausted()
+        {
+            let utilization = db.active_connections as f64 / db.max_connections as f64;
+            bottlenecks.push(Bottleneck {
+                category: BottleneckCategory::Database,
+                description: "Connection pool exhaustion".to_string(),
+                current_value: utilization * 100.0,
+                threshold: self.connection_pool_threshold * 100.0,
+                severity: utilization.min(1.0),
+                impact: "New requests blocked waiting for database connections".to_string(),
+            });
 
-                recommendations.push(Recommendation {
+            recommendations.push(Recommendation {
                     priority: Priority::High,
                     category: BottleneckCategory::Database,
                     issue: format!(
@@ -300,7 +301,6 @@ impl BottleneckAnalyzer {
                     action: "Increase max_connections in PostgreSQL config and connection pool size in Kruxia Flow".to_string(),
                     expected_impact: "Higher concurrent workflow capacity".to_string(),
                 });
-            }
         }
 
         // Analyze step metrics for degradation patterns

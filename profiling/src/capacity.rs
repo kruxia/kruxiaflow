@@ -216,13 +216,13 @@ pub fn generate_capacity_document(
             bp.concurrent_workflows
         ));
     }
-    doc.push_str("\n");
+    doc.push('\n');
 
     // Capacity Matrix
     doc.push_str("## Capacity Matrix\n\n");
     let matrix = CapacityMatrix::from_stress_results(results, config);
     doc.push_str(&matrix.to_markdown());
-    doc.push_str("\n");
+    doc.push('\n');
 
     // Bottleneck Analysis
     doc.push_str("## Bottleneck Analysis\n\n");
@@ -245,7 +245,7 @@ pub fn generate_capacity_document(
         for bn in &bottleneck_report.secondary_bottlenecks {
             doc.push_str(&format!("- **{}**: {}\n", bn.category, bn.description));
         }
-        doc.push_str("\n");
+        doc.push('\n');
     }
 
     // Scaling Recommendations

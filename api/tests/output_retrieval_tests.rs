@@ -237,7 +237,7 @@ async fn complete_activity_with_output(pool: &PgPool, workflow_id: Uuid, activit
         "#,
     )
     .bind(workflow_id)
-    .bind(&[activity_key])
+    .bind([activity_key])
     .bind(output_json)
     .execute(pool)
     .await
@@ -270,7 +270,7 @@ async fn add_pending_activity(
         "#,
     )
     .bind(workflow_id)
-    .bind(&[activity_key])
+    .bind([activity_key])
     .bind(state_json)
     .execute(pool)
     .await

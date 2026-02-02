@@ -151,10 +151,10 @@ async fn get_mailhog_messages() -> Option<MailhogMessages> {
 async fn wait_for_message(timeout_ms: u64) -> Option<MailhogMessage> {
     let start = std::time::Instant::now();
     while start.elapsed().as_millis() < timeout_ms as u128 {
-        if let Some(messages) = get_mailhog_messages().await {
-            if !messages.items.is_empty() {
-                return Some(messages.items.into_iter().next().unwrap());
-            }
+        if let Some(messages) = get_mailhog_messages().await
+            && !messages.items.is_empty()
+        {
+            return Some(messages.items.into_iter().next().unwrap());
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }

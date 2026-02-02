@@ -6,7 +6,7 @@ use serde_json::Value;
 ///
 /// This struct wraps the outputs of an activity execution along with
 /// optional cost tracking information and metadata.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ActivityResult {
     /// Structured outputs with type information
     pub outputs: Vec<ActivityOutput>,
@@ -168,16 +168,6 @@ impl ActivityResult {
     pub fn with_metadata(mut self, metadata: Value) -> Self {
         self.metadata = Some(metadata);
         self
-    }
-}
-
-impl Default for ActivityResult {
-    fn default() -> Self {
-        Self {
-            outputs: Vec::new(),
-            cost_usd: None,
-            metadata: None,
-        }
     }
 }
 

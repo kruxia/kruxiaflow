@@ -604,7 +604,7 @@ mod tests {
 
     #[test]
     fn test_email_executor_default() {
-        let executor = EmailExecutor::default();
+        let executor = EmailExecutor;
         // Just verify it can be created
         let _ = executor;
     }

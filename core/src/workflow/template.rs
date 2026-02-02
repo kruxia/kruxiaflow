@@ -1902,8 +1902,10 @@ mod tests {
         assert_eq!(mini_int.as_i64(), Some(42));
 
         // Float
-        let mini_float = serde_json_to_minijinja(&serde_json::json!(3.14));
-        assert!(mini_float.to_string().starts_with("3.14"));
+        #[allow(clippy::approx_constant)]
+        let float_val = serde_json::json!(2.718);
+        let mini_float = serde_json_to_minijinja(&float_val);
+        assert!(mini_float.to_string().starts_with("2.718"));
 
         // Large u64 (beyond i64 range)
         let large_u64 = serde_json::json!(u64::MAX);

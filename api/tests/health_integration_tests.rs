@@ -526,25 +526,15 @@ async fn test_health_check_error_types() {
     // Test event source error mapping
     let event_result = kruxiaflow_api::health::check_event_source_health(&pool).await;
     assert!(event_result.is_err(), "Should fail with closed pool");
-    if let Err(e) = event_result {
-        match e {
-            HealthCheckError::EventSourceError(_) => {
-                // Expected error type
-            }
-            _ => {}
-        }
+    if let Err(HealthCheckError::EventSourceError(_)) = event_result {
+        // Expected error type
     }
 
     // Test queue error mapping
     let queue_result = kruxiaflow_api::health::check_activity_queue_health(&pool).await;
     assert!(queue_result.is_err(), "Should fail with closed pool");
-    if let Err(e) = queue_result {
-        match e {
-            HealthCheckError::QueueError(_) => {
-                // Expected error type
-            }
-            _ => {}
-        }
+    if let Err(HealthCheckError::QueueError(_)) = queue_result {
+        // Expected error type
     }
 }
 

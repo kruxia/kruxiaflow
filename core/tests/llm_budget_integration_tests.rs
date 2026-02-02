@@ -400,13 +400,13 @@ async fn test_token_estimation() {
     let tokens = CostCalculator::estimate_tokens("anthropic", text);
 
     // Should be around 8-9 tokens (average of 30/3.5≈8.5 and 6/0.85≈7)
-    assert!(tokens >= 7 && tokens <= 10, "Anthropic tokens: {}", tokens);
+    assert!((7..=10).contains(&tokens), "Anthropic tokens: {}", tokens);
 
     // Test OpenAI token estimation (4.0 chars/token, 0.75 words/token)
     let tokens = CostCalculator::estimate_tokens("openai", text);
 
     // Should be around 7-8 tokens (average of 30/4≈7.5 and 6/0.75=8)
-    assert!(tokens >= 7 && tokens <= 9, "OpenAI tokens: {}", tokens);
+    assert!((7..=9).contains(&tokens), "OpenAI tokens: {}", tokens);
 }
 
 #[tokio::test]

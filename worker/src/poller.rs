@@ -340,10 +340,10 @@ impl WorkerPoller {
         }
 
         // Cleanup file executor temp directory
-        if let Some(executor) = file_executor {
-            if let Err(err) = executor.cleanup().await {
-                tracing::warn!("Failed to cleanup file executor: {:?}", err);
-            }
+        if let Some(executor) = file_executor
+            && let Err(err) = executor.cleanup().await
+        {
+            tracing::warn!("Failed to cleanup file executor: {:?}", err);
         }
     }
 

@@ -92,12 +92,12 @@ impl CacheConfig {
     /// Redact password from Redis URL for logging
     fn redact_redis_url(&self, url: &str) -> String {
         // Format: redis://[:password@]host:port[/db]
-        if let Some(at_pos) = url.find('@') {
-            if let Some(colon_pos) = url[..at_pos].rfind(':') {
-                let mut redacted = url.to_string();
-                redacted.replace_range(colon_pos + 1..at_pos, "***");
-                return redacted;
-            }
+        if let Some(at_pos) = url.find('@')
+            && let Some(colon_pos) = url[..at_pos].rfind(':')
+        {
+            let mut redacted = url.to_string();
+            redacted.replace_range(colon_pos + 1..at_pos, "***");
+            return redacted;
         }
         url.to_string()
     }

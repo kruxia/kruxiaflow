@@ -276,13 +276,11 @@ impl OutputQueryService {
             let is_terminal = terminal_activities.contains(key.as_str());
 
             // Track the latest completion time for terminal activities
-            if is_terminal {
-                if let Some(ca) = completed_at {
-                    match workflow_completed_at {
-                        None => workflow_completed_at = Some(ca),
-                        Some(existing) if ca > existing => workflow_completed_at = Some(ca),
-                        _ => {}
-                    }
+            if is_terminal && let Some(ca) = completed_at {
+                match workflow_completed_at {
+                    None => workflow_completed_at = Some(ca),
+                    Some(existing) if ca > existing => workflow_completed_at = Some(ca),
+                    _ => {}
                 }
             }
 
@@ -347,12 +345,12 @@ impl OutputQueryService {
 
         // Collect all activities that are depended upon
         for (_key, activity_state) in activities_map {
-            if let Some(depends_on) = activity_state.get("depends_on") {
-                if let Some(deps) = depends_on.as_array() {
-                    for dep in deps {
-                        if let Some(dep_key) = dep.get("activity_key").and_then(|v| v.as_str()) {
-                            has_dependents.insert(dep_key.to_string());
-                        }
+            if let Some(depends_on) = activity_state.get("depends_on")
+                && let Some(deps) = depends_on.as_array()
+            {
+                for dep in deps {
+                    if let Some(dep_key) = dep.get("activity_key").and_then(|v| v.as_str()) {
+                        has_dependents.insert(dep_key.to_string());
                     }
                 }
             }
@@ -381,12 +379,12 @@ mod tests {
         let mut has_dependents: HashSet<String> = HashSet::new();
 
         for (_key, activity_state) in activities_map {
-            if let Some(depends_on) = activity_state.get("depends_on") {
-                if let Some(deps) = depends_on.as_array() {
-                    for dep in deps {
-                        if let Some(dep_key) = dep.get("activity_key").and_then(|v| v.as_str()) {
-                            has_dependents.insert(dep_key.to_string());
-                        }
+            if let Some(depends_on) = activity_state.get("depends_on")
+                && let Some(deps) = depends_on.as_array()
+            {
+                for dep in deps {
+                    if let Some(dep_key) = dep.get("activity_key").and_then(|v| v.as_str()) {
+                        has_dependents.insert(dep_key.to_string());
                     }
                 }
             }

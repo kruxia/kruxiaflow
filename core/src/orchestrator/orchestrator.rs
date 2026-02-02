@@ -1223,40 +1223,40 @@ pub async fn process_workflow_event(
                         })?;
 
                 // Debug: Log input parameters before resolution
-                if a.key == "store_passages" {
-                    if let Some(obj) = params_value.as_object() {
-                        tracing::info!(
-                            activity = %a.key,
-                            param_keys = ?obj.keys().collect::<Vec<_>>(),
-                            has_embeddings_file_key = obj.contains_key("embeddings_file"),
-                            embeddings_file_template = ?obj.get("embeddings_file"),
-                            "Input parameters BEFORE template resolution"
-                        );
-                    }
+                if a.key == "store_passages"
+                    && let Some(obj) = params_value.as_object()
+                {
+                    tracing::info!(
+                        activity = %a.key,
+                        param_keys = ?obj.keys().collect::<Vec<_>>(),
+                        has_embeddings_file_key = obj.contains_key("embeddings_file"),
+                        embeddings_file_template = ?obj.get("embeddings_file"),
+                        "Input parameters BEFORE template resolution"
+                    );
                 }
 
                 // Debug: Log dependency activity outputs for template resolution
                 for dep in a.depends_on.iter().flatten() {
-                    if let Some(dep_state) = state.activities.get(&dep.activity_key) {
-                        if let Some(outputs) = &dep_state.outputs {
-                            let output_names: Vec<_> = outputs.iter().map(|o| &o.name).collect();
-                            tracing::info!(
+                    if let Some(dep_state) = state.activities.get(&dep.activity_key)
+                        && let Some(outputs) = &dep_state.outputs
+                    {
+                        let output_names: Vec<_> = outputs.iter().map(|o| &o.name).collect();
+                        tracing::info!(
+                            activity = %a.key,
+                            dependency = %dep.activity_key,
+                            output_names = ?output_names,
+                            "Template context: dependency outputs"
+                        );
+                        // Log the actual output values for debugging
+                        for output in outputs {
+                            tracing::debug!(
                                 activity = %a.key,
                                 dependency = %dep.activity_key,
-                                output_names = ?output_names,
-                                "Template context: dependency outputs"
+                                output_name = %output.name,
+                                output_value_type = ?output.value.as_object().map(|o| o.keys().collect::<Vec<_>>()).unwrap_or_default(),
+                                output_value_preview = %format!("{:.200}", output.value),
+                                "Template context: output detail"
                             );
-                            // Log the actual output values for debugging
-                            for output in outputs {
-                                tracing::debug!(
-                                    activity = %a.key,
-                                    dependency = %dep.activity_key,
-                                    output_name = %output.name,
-                                    output_value_type = ?output.value.as_object().map(|o| o.keys().collect::<Vec<_>>()).unwrap_or_default(),
-                                    output_value_preview = %format!("{:.200}", output.value),
-                                    "Template context: output detail"
-                                );
-                            }
                         }
                     }
                 }
@@ -1265,19 +1265,19 @@ pub async fn process_workflow_event(
                 {
                     Ok(resolved) => {
                         // Debug: Log resolved embeddings-related fields
-                        if a.key == "store_passages" {
-                            if let Some(obj) = resolved.as_object() {
-                                tracing::info!(
-                                    activity = %a.key,
-                                    embeddings_type = ?obj.get("embeddings").map(|v| match v {
-                                        serde_json::Value::Null => "null",
-                                        serde_json::Value::Array(_) => "array",
-                                        _ => "other",
-                                    }),
-                                    embeddings_file = ?obj.get("embeddings_file"),
-                                    "Resolved store_passages parameters"
-                                );
-                            }
+                        if a.key == "store_passages"
+                            && let Some(obj) = resolved.as_object()
+                        {
+                            tracing::info!(
+                                activity = %a.key,
+                                embeddings_type = ?obj.get("embeddings").map(|v| match v {
+                                    serde_json::Value::Null => "null",
+                                    serde_json::Value::Array(_) => "array",
+                                    _ => "other",
+                                }),
+                                embeddings_file = ?obj.get("embeddings_file"),
+                                "Resolved store_passages parameters"
+                            );
                         }
                         resolved
                     }
@@ -1322,7 +1322,7 @@ pub async fn process_workflow_event(
                 };
 
                 // Check if activity has wait_for_signal setting
-                if let Some(ref wait_settings) =
+                if let Some(wait_settings) =
                     a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref())
                 {
                     // Activity needs to wait for an external signal before executing
