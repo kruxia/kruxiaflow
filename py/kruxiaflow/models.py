@@ -120,9 +120,9 @@ class Dependency(BaseModel):
     @classmethod
     def on(
         cls,
-        activity: "Activity | str",
-        *conditions: "str | OutputComparison",
-    ) -> "Dependency":
+        activity: Activity | str,
+        *conditions: str | OutputComparison,
+    ) -> Dependency:
         """Create a dependency with optional conditions.
 
         Args:
@@ -308,7 +308,7 @@ class Activity(BaseModel):
         self.settings.streaming = enabled
         return self
 
-    def with_dependencies(self, *dependencies: "Activity | Dependency | str") -> Self:
+    def with_dependencies(self, *dependencies: Activity | Dependency | str) -> Self:
         """Add activity dependencies.
 
         Activities listed here must complete before this activity runs.
