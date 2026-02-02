@@ -1,7 +1,8 @@
 # Kruxia Flow
 
 [![CI](https://github.com/kruxia/kruxiaflow/actions/workflows/main-ci.yml/badge.svg)](https://github.com/kruxia/kruxiaflow/actions/workflows/main-ci.yml)
-[![codecov](https://codecov.io/gh/kruxia/kruxiaflow/branch/main/graph/badge.svg)](https://codecov.io/gh/kruxia/kruxiaflow)
+[![Rust coverage](https://codecov.io/gh/kruxia/kruxiaflow/branch/main/graph/badge.svg)](https://codecov.io/gh/kruxia/kruxiaflow)
+[![Python SDK coverage](https://codecov.io/gh/kruxia/kruxiaflow/branch/main/graph/badge.svg?flag=python-sdk)](https://codecov.io/gh/kruxia/kruxiaflow?flags[0]=python-sdk)
 [![Docker Image](https://img.shields.io/docker/image-size/kruxia/kruxiaflow/latest?label=docker%20image)](https://hub.docker.com/r/kruxia/kruxiaflow)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Rust](https://img.shields.io/badge/rust-1.90%2B-orange.svg)](https://www.rust-lang.org/)
