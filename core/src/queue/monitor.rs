@@ -357,7 +357,7 @@ mod tests {
         vacuum_handle.abort();
 
         // If we get here without error, vacuum loop executed successfully
-        assert!(true, "Vacuum loop executed without errors");
+        // If we get here without error, vacuum loop executed successfully
     }
 
     #[tokio::test]

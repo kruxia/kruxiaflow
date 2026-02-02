@@ -176,7 +176,7 @@ mod tests {
         );
 
         // Should NOT include non-secret vars
-        assert!(secrets.get("OTHER_VAR").is_none());
+        assert!(!secrets.contains_key("OTHER_VAR"));
 
         // Cleanup
         // SAFETY: Environment variable operations are safe in single-threaded test context
@@ -343,12 +343,12 @@ mod tests {
         let secrets = load_secrets_from_env();
 
         // None of these should be included (wrong prefix)
-        assert!(secrets.get("extra_s").is_none());
+        assert!(!secrets.contains_key("extra_s"));
         assert!(
-            secrets.get("").is_none()
+            !secrets.contains_key("")
                 || secrets.get("").map(|v| v.as_str()) != Some("no-underscore")
         );
-        assert!(secrets.get("typo").is_none());
+        assert!(!secrets.contains_key("typo"));
 
         // Cleanup
         unsafe {

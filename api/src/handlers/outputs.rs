@@ -348,9 +348,7 @@ pub async fn upload_activity_file(
 
     // Convert axum Body to a stream compatible with WorkflowStorage::upload_file
     let body_stream = body.into_data_stream();
-    let stream = body_stream.map(|result| {
-        result.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
-    });
+    let stream = body_stream.map(|result| result.map_err(|e| std::io::Error::other(e.to_string())));
 
     // Pin the stream for upload_file
     let pinned_stream: Pin<

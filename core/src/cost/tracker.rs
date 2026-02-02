@@ -118,8 +118,8 @@ impl CostTracker {
             .await?
             .unwrap_or(Decimal::ZERO);
 
-        let activity_budget_ok = activity_limit.map_or(true, |limit| activity_cost < limit);
-        let workflow_budget_ok = workflow_limit.map_or(true, |limit| workflow_cost < limit);
+        let activity_budget_ok = activity_limit.is_none_or(|limit| activity_cost < limit);
+        let workflow_budget_ok = workflow_limit.is_none_or(|limit| workflow_cost < limit);
 
         Ok(BudgetStatus {
             activity_cost,
@@ -147,8 +147,8 @@ impl CostTracker {
         let projected_activity_cost = status.activity_cost + estimated_cost;
         let projected_workflow_cost = status.workflow_cost + estimated_cost;
 
-        let activity_ok = activity_limit.map_or(true, |limit| projected_activity_cost <= limit);
-        let workflow_ok = workflow_limit.map_or(true, |limit| projected_workflow_cost <= limit);
+        let activity_ok = activity_limit.is_none_or(|limit| projected_activity_cost <= limit);
+        let workflow_ok = workflow_limit.is_none_or(|limit| projected_workflow_cost <= limit);
 
         Ok(BudgetCheckResult {
             can_execute: activity_ok && workflow_ok,

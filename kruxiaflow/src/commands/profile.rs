@@ -429,10 +429,8 @@ async fn explain_hot_paths(pool: &PgPool) -> Result<()> {
     .await
     .unwrap_or_default();
 
-    for line in explain_result {
-        if let Some(l) = line {
-            println!("  {}", l);
-        }
+    for l in explain_result.into_iter().flatten() {
+        println!("  {}", l);
     }
 
     // Activity claim_next query explanation
@@ -463,10 +461,8 @@ async fn explain_hot_paths(pool: &PgPool) -> Result<()> {
     .await
     .unwrap_or_default();
 
-    for line in explain_result {
-        if let Some(l) = line {
-            println!("  {}", l);
-        }
+    for l in explain_result.into_iter().flatten() {
+        println!("  {}", l);
     }
 
     // Load workflow state query explanation
@@ -485,10 +481,8 @@ async fn explain_hot_paths(pool: &PgPool) -> Result<()> {
     .await
     .unwrap_or_default();
 
-    for line in explain_result {
-        if let Some(l) = line {
-            println!("  {}", l);
-        }
+    for l in explain_result.into_iter().flatten() {
+        println!("  {}", l);
     }
 
     Ok(())

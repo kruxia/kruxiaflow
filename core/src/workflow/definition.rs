@@ -957,19 +957,15 @@ pub enum BudgetAction {
 /// Supports both shorthand `streaming: true` and detailed `streaming: { enabled: true }`
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
+#[derive(Default)]
 pub enum StreamingConfig {
     /// Streaming disabled (default)
+    #[default]
     Disabled,
     /// Shorthand: `streaming: true` or `streaming: false`
     Simple(bool),
     /// Detailed: `streaming: { enabled: true }`
     Detailed(StreamingOptions),
-}
-
-impl Default for StreamingConfig {
-    fn default() -> Self {
-        StreamingConfig::Disabled
-    }
 }
 
 impl<'de> Deserialize<'de> for StreamingConfig {

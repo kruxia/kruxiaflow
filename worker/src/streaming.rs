@@ -685,7 +685,7 @@ mod tests {
 
     #[test]
     fn test_noop_stream_sender_default() {
-        let sender = NoOpStreamSender::default();
+        let sender = NoOpStreamSender;
         let debug_str = format!("{:?}", sender);
         assert!(debug_str.contains("NoOpStreamSender"));
     }

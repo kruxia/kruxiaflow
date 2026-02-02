@@ -155,7 +155,7 @@ fn test_cors_config_default() {
     let config = CorsConfig::default();
 
     assert_eq!(config.allowed_origins, vec!["*".to_string()]);
-    assert_eq!(config.allow_credentials, true);
+    assert!(config.allow_credentials);
     assert_eq!(config.max_age_seconds, 3600);
 }
 
@@ -174,7 +174,7 @@ fn test_cors_config_custom() {
         config.allowed_origins,
         vec!["https://example.com".to_string()]
     );
-    assert_eq!(config.allow_credentials, false);
+    assert!(!config.allow_credentials);
     assert_eq!(config.max_age_seconds, 7200);
 }
 

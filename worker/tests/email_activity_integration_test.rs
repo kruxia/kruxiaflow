@@ -163,12 +163,11 @@ async fn wait_for_message(
 ) -> Option<(MailpitMessageSummary, MailpitMessageDetail)> {
     let start = std::time::Instant::now();
     while start.elapsed().as_millis() < timeout_ms as u128 {
-        if let Some(messages) = get_mailpit_messages().await {
-            if let Some(summary) = messages.messages.into_iter().next() {
-                if let Some(detail) = get_mailpit_message_detail(&summary.id).await {
-                    return Some((summary, detail));
-                }
-            }
+        if let Some(messages) = get_mailpit_messages().await
+            && let Some(summary) = messages.messages.into_iter().next()
+            && let Some(detail) = get_mailpit_message_detail(&summary.id).await
+        {
+            return Some((summary, detail));
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
@@ -243,10 +242,10 @@ async fn test_email_send_html() {
 
     // Check content type header via headers endpoint
     let headers = get_mailpit_message_headers(&summary.id).await;
-    if let Some(headers) = headers {
-        if let Some(content_types) = &headers.content_type {
-            assert!(content_types[0].contains("text/html"));
-        }
+    if let Some(headers) = headers
+        && let Some(content_types) = &headers.content_type
+    {
+        assert!(content_types[0].contains("text/html"));
     }
     assert!(detail.html.contains("<h1>Hello</h1>"));
 }
@@ -514,10 +513,10 @@ async fn test_email_send_default_content_type() {
 
     // Check content type defaults to text/plain via headers endpoint
     let headers = get_mailpit_message_headers(&summary.id).await;
-    if let Some(headers) = headers {
-        if let Some(content_types) = &headers.content_type {
-            assert!(content_types[0].contains("text/plain"));
-        }
+    if let Some(headers) = headers
+        && let Some(content_types) = &headers.content_type
+    {
+        assert!(content_types[0].contains("text/plain"));
     }
 }
 

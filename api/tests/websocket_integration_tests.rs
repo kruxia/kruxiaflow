@@ -405,9 +405,9 @@ async fn test_websocket_multiple_connections_same_activity() {
     for (i, ws) in [&mut ws1, &mut ws2, &mut ws3].iter_mut().enumerate() {
         let received = timeout(Duration::from_secs(2), ws.next())
             .await
-            .expect(&format!("ws{} should not timeout", i + 1))
-            .expect(&format!("ws{} should receive message", i + 1))
-            .expect(&format!("ws{} message should be valid", i + 1));
+            .unwrap_or_else(|_| panic!("ws{} should not timeout", i + 1))
+            .unwrap_or_else(|| panic!("ws{} should receive message", i + 1))
+            .unwrap_or_else(|_| panic!("ws{} message should be valid", i + 1));
 
         match received {
             Message::Text(text) => {
@@ -895,7 +895,7 @@ async fn test_internal_api_full_streaming_flow() {
     assert_eq!(body["count"], 1, "Should have subscriber");
 
     // Worker streams tokens
-    let tokens = vec!["Hello", ", ", "world", "!"];
+    let tokens = ["Hello", ", ", "world", "!"];
     for (index, text) in tokens.iter().enumerate() {
         client
             .post(format!(

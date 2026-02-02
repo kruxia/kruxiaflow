@@ -337,10 +337,10 @@ fn should_loop_back(
     // will be evaluated in is_activity_ready
 
     // Check if activity state exists and is completed
-    if let Some(s) = state {
-        if s.status == WorkflowActivityStatus::Completed {
-            return Ok(true);
-        }
+    if let Some(s) = state
+        && s.status == WorkflowActivityStatus::Completed
+    {
+        return Ok(true);
     }
 
     Ok(false)
@@ -551,10 +551,10 @@ pub fn find_skipped_activities<'a>(
 
     for activity in &definition.activities {
         // Only consider NotScheduled activities
-        if let Some(activity_state) = state.activities.get(&activity.key) {
-            if activity_state.status != WorkflowActivityStatus::NotScheduled {
-                continue;
-            }
+        if let Some(activity_state) = state.activities.get(&activity.key)
+            && activity_state.status != WorkflowActivityStatus::NotScheduled
+        {
+            continue;
         }
 
         // Get dependencies
@@ -568,16 +568,16 @@ pub fn find_skipped_activities<'a>(
         // Check if all dependencies are in terminal states
         let mut all_dependencies_terminal = true;
         for dep_rel in &dependencies {
-            if let Some(dependency_state) = state.activities.get(&dep_rel.activity_key) {
-                if !matches!(
+            if let Some(dependency_state) = state.activities.get(&dep_rel.activity_key)
+                && !matches!(
                     dependency_state.status,
                     WorkflowActivityStatus::Completed
                         | WorkflowActivityStatus::Failed
                         | WorkflowActivityStatus::Skipped
-                ) {
-                    all_dependencies_terminal = false;
-                    break;
-                }
+                )
+            {
+                all_dependencies_terminal = false;
+                break;
             }
         }
 

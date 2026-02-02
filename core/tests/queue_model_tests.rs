@@ -185,7 +185,7 @@ fn test_activity_settings_default_values() {
 
     let json = serde_json::to_string(&settings).unwrap();
     let deserialized: ActivitySettings = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized.cache, false);
+    assert!(!deserialized.cache);
     assert_eq!(deserialized.cache_ttl, None);
 }
 
@@ -599,6 +599,6 @@ fn test_activity_settings_deserialization_defaults() {
     // When deserializing without cache field, should default to false
     let json = r#"{"retry": null, "timeout_seconds": null, "budget": null}"#;
     let settings: ActivitySettings = serde_json::from_str(json).unwrap();
-    assert_eq!(settings.cache, false);
+    assert!(!settings.cache);
     assert_eq!(settings.cache_ttl, None);
 }

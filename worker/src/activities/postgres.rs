@@ -744,10 +744,11 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_serialize_object_with_numeric_values() {
         let param = json!({
             "integer": 42,
-            "float": 3.14159,
+            "float": 3.141_59,
             "negative": -100,
             "zero": 0,
             "big": 9223372036854775807_i64
@@ -772,7 +773,7 @@ mod tests {
             "hello"
         );
         assert_eq!(serialize_param_for_postgres(&json!(42)).unwrap(), "42");
-        assert_eq!(serialize_param_for_postgres(&json!(3.14)).unwrap(), "3.14");
+        assert_eq!(serialize_param_for_postgres(&json!(3.15)).unwrap(), "3.15");
         assert_eq!(serialize_param_for_postgres(&json!(true)).unwrap(), "true");
         assert_eq!(
             serialize_param_for_postgres(&json!(false)).unwrap(),
@@ -1004,6 +1005,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_statement_result_roundtrip() {
         // Verify StatementResult survives JSON roundtrip (important for activity output storage)
         let original = StatementResult {

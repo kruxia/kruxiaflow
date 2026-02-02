@@ -47,13 +47,13 @@ impl SubscriptionService for PostgresSubscriptionService {
         .fetch_one(&self.pool)
         .await
         .map_err(|e| {
-            if let sqlx::Error::Database(ref db_err) = e {
-                if db_err.is_unique_violation() {
-                    return SubscriptionError::AlreadyExists(
-                        subscription.workflow_id,
-                        subscription.activity_key.clone(),
-                    );
-                }
+            if let sqlx::Error::Database(ref db_err) = e
+                && db_err.is_unique_violation()
+            {
+                return SubscriptionError::AlreadyExists(
+                    subscription.workflow_id,
+                    subscription.activity_key.clone(),
+                );
             }
             SubscriptionError::Database(e)
         })?;

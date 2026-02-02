@@ -177,14 +177,12 @@ impl ActivityQueue for PostgresQueue {
         let mut results = Vec::with_capacity(activities.len());
 
         for row in activities {
-            let settings: Option<ActivitySettings> = row
-                .settings
-                .map(|v| serde_json::from_value(v))
-                .transpose()?;
+            let settings: Option<ActivitySettings> =
+                row.settings.map(serde_json::from_value).transpose()?;
 
             let output_definitions = row
                 .output_definitions
-                .map(|v| serde_json::from_value(v))
+                .map(serde_json::from_value)
                 .transpose()?;
 
             let queued = QueuedActivity {

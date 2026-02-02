@@ -750,7 +750,7 @@ async fn test_delay_with_all_duration_units() {
 
     // Should be approximately 500ms in the future
     assert!(
-        diff >= 400 && diff <= 600,
+        (400..=600).contains(&diff),
         "Expected ~500ms delay, got {}ms",
         diff
     );

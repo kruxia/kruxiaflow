@@ -338,39 +338,39 @@ impl LLMProvider for GoogleProvider {
                         Some(Ok(bytes)) => {
                             let events = parser.process(&bytes);
                             for event in events {
-                                if let Some(candidates) = &event.candidates {
-                                    if let Some(candidate) = candidates.first() {
-                                        // Extract text from content parts
-                                        if let Some(content) = &candidate.content {
-                                            if let Some(parts) = &content.parts {
-                                                for part in parts {
-                                                    if let Some(text) = &part.text {
-                                                        if !text.is_empty() {
-                                                            pending_chunks.push(PromptChunk {
-                                                                content: text.clone(),
-                                                                finish_reason: None,
-                                                            });
-                                                        }
-                                                    }
-                                                }
+                                if let Some(candidates) = &event.candidates
+                                    && let Some(candidate) = candidates.first()
+                                {
+                                    // Extract text from content parts
+                                    if let Some(content) = &candidate.content
+                                        && let Some(parts) = &content.parts
+                                    {
+                                        for part in parts {
+                                            if let Some(text) = &part.text
+                                                && !text.is_empty()
+                                            {
+                                                pending_chunks.push(PromptChunk {
+                                                    content: text.clone(),
+                                                    finish_reason: None,
+                                                });
                                             }
                                         }
+                                    }
 
-                                        // Check for finish reason
-                                        if let Some(reason) = &candidate.finish_reason {
-                                            finish_reason = Some(match reason.as_str() {
-                                                "STOP" => FinishReason::Stop,
-                                                "MAX_TOKENS" => FinishReason::MaxTokens,
-                                                "SAFETY" => FinishReason::ContentFilter,
-                                                _ => FinishReason::Stop,
-                                            });
+                                    // Check for finish reason
+                                    if let Some(reason) = &candidate.finish_reason {
+                                        finish_reason = Some(match reason.as_str() {
+                                            "STOP" => FinishReason::Stop,
+                                            "MAX_TOKENS" => FinishReason::MaxTokens,
+                                            "SAFETY" => FinishReason::ContentFilter,
+                                            _ => FinishReason::Stop,
+                                        });
 
-                                            // Add final chunk with finish reason
-                                            pending_chunks.push(PromptChunk {
-                                                content: String::new(),
-                                                finish_reason: finish_reason.take(),
-                                            });
-                                        }
+                                        // Add final chunk with finish reason
+                                        pending_chunks.push(PromptChunk {
+                                            content: String::new(),
+                                            finish_reason: finish_reason.take(),
+                                        });
                                     }
                                 }
                             }

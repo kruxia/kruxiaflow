@@ -320,12 +320,11 @@ async fn test_workflow_definition_with_dependencies() {
 
     assert_eq!(retrieved.activities.len(), 2);
     assert!(
-        retrieved.activities[0]
+        !retrieved.activities[0]
             .dependency_of
             .as_ref()
             .unwrap()
-            .len()
-            > 0
+            .is_empty()
     );
 
     clean_test_data(&pool).await;

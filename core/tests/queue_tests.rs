@@ -168,8 +168,10 @@ async fn test_stale_activity_recovery() {
         .await
         .expect("Failed to clean test data");
 
-    let mut config = QueueConfig::default();
-    config.default_timeout = Duration::from_secs(1); // Very short timeout for testing
+    let config = QueueConfig {
+        default_timeout: Duration::from_secs(1), // Very short timeout for testing
+        ..Default::default()
+    };
 
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -249,8 +251,10 @@ async fn test_stale_activity_recovery() {
 #[serial]
 async fn test_heartbeat_conflict_detection() {
     let pool = setup_test_pool().await;
-    let mut config = QueueConfig::default();
-    config.default_timeout = Duration::from_secs(1);
+    let config = QueueConfig {
+        default_timeout: Duration::from_secs(1),
+        ..Default::default()
+    };
 
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -336,8 +340,10 @@ async fn test_heartbeat_conflict_detection() {
 #[serial]
 async fn test_max_retries_exhaustion() {
     let pool = setup_test_pool().await;
-    let mut config = QueueConfig::default();
-    config.default_timeout = Duration::from_secs(1);
+    let config = QueueConfig {
+        default_timeout: Duration::from_secs(1),
+        ..Default::default()
+    };
 
     let queue = PostgresQueue::new(pool.clone(), config.clone());
     let workflow_id = Uuid::now_v7();
@@ -700,8 +706,10 @@ async fn test_reclaim_stale_activities_resets_to_pending() {
     use kruxiaflow_core::queue::StaleActivityAction;
 
     let pool = setup_test_pool().await;
-    let mut config = QueueConfig::default();
-    config.default_timeout = Duration::from_secs(1);
+    let config = QueueConfig {
+        default_timeout: Duration::from_secs(1),
+        ..Default::default()
+    };
 
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -805,8 +813,10 @@ async fn test_reclaim_stale_activities_marks_failed_when_retries_exhausted() {
     use kruxiaflow_core::queue::StaleActivityAction;
 
     let pool = setup_test_pool().await;
-    let mut config = QueueConfig::default();
-    config.default_timeout = Duration::from_secs(1);
+    let config = QueueConfig {
+        default_timeout: Duration::from_secs(1),
+        ..Default::default()
+    };
 
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -902,8 +912,10 @@ async fn test_reclaim_stale_activities_marks_failed_when_retries_exhausted() {
 #[serial]
 async fn test_reclaim_stale_activities_does_not_affect_non_stale() {
     let pool = setup_test_pool().await;
-    let mut config = QueueConfig::default();
-    config.default_timeout = Duration::from_secs(60); // Long timeout
+    let config = QueueConfig {
+        default_timeout: Duration::from_secs(60), // Long timeout
+        ..Default::default()
+    };
 
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -996,8 +1008,10 @@ async fn test_reclaim_stale_activities_multiple_activities() {
     use kruxiaflow_core::queue::StaleActivityAction;
 
     let pool = setup_test_pool().await;
-    let mut config = QueueConfig::default();
-    config.default_timeout = Duration::from_secs(1);
+    let config = QueueConfig {
+        default_timeout: Duration::from_secs(1),
+        ..Default::default()
+    };
 
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();

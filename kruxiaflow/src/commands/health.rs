@@ -285,13 +285,11 @@ fn print_text_report(report: &HealthReport, verbose: bool) {
             println!("   Latency: {}ms", latency);
         }
 
-        if verbose {
-            if let Some(ref details) = result.details {
-                println!(
-                    "   Details: {}",
-                    serde_json::to_string_pretty(details).unwrap_or_default()
-                );
-            }
+        if verbose && let Some(ref details) = result.details {
+            println!(
+                "   Details: {}",
+                serde_json::to_string_pretty(details).unwrap_or_default()
+            );
         }
     }
 
@@ -582,7 +580,7 @@ mod tests {
     fn test_health_status_copy_clone() {
         let status = HealthStatus::Healthy;
         let copied = status;
-        let cloned = status.clone();
+        let cloned = status;
         assert_eq!(copied, HealthStatus::Healthy);
         assert_eq!(cloned, HealthStatus::Healthy);
     }
@@ -716,7 +714,7 @@ mod tests {
 
     #[test]
     fn test_overall_status_unknown_is_degraded() {
-        let results = vec![HealthResult {
+        let results = [HealthResult {
             service: "a".to_string(),
             status: HealthStatus::Unknown,
             message: None,

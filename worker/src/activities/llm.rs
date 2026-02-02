@@ -877,7 +877,7 @@ impl ActivityImpl for EmbeddingActivity {
         let mut provider_name = String::new();
         let mut embedding_count = 0usize;
 
-        let num_batches = (total_inputs + batch_size - 1) / batch_size;
+        let num_batches = total_inputs.div_ceil(batch_size);
         tracing::info!(
             total_inputs = total_inputs,
             batch_size = batch_size,
@@ -1022,7 +1022,7 @@ impl ActivityImpl for EmbeddingActivity {
         tracing::info!(
             total_inputs = total_inputs,
             batch_size = batch_size,
-            num_batches = (total_inputs + batch_size - 1) / batch_size,
+            num_batches = total_inputs.div_ceil(batch_size),
             "Processing embeddings in batches"
         );
 
@@ -1387,7 +1387,6 @@ mod tests {
             assert!(huge_cost > limit); // Would fail if budget existed
         } else {
             // No budget means always proceed
-            assert!(true);
         }
     }
 
@@ -2149,12 +2148,10 @@ mod tests {
     fn test_budget_params_from_pricing_and_limit() {
         let pricing = create_test_pricing();
         let limit = dec!(1.00);
-        let cumulative = Some(dec!(0.25));
-
         let budget = BudgetParams {
             model_pricing: pricing.clone(),
             budget_limit_usd: limit,
-            cumulative_cost_usd: cumulative.unwrap_or(Decimal::ZERO),
+            cumulative_cost_usd: dec!(0.25),
         };
 
         assert_eq!(budget.budget_limit_usd, dec!(1.00));
@@ -2165,12 +2162,10 @@ mod tests {
     #[test]
     fn test_budget_params_default_cumulative_cost() {
         let pricing = create_test_pricing();
-        let cumulative: Option<Decimal> = None;
-
         let budget = BudgetParams {
             model_pricing: pricing,
             budget_limit_usd: dec!(1.00),
-            cumulative_cost_usd: cumulative.unwrap_or(Decimal::ZERO),
+            cumulative_cost_usd: Decimal::ZERO,
         };
 
         assert_eq!(budget.cumulative_cost_usd, Decimal::ZERO);
@@ -2312,13 +2307,13 @@ mod tests {
 
     #[test]
     fn test_llm_prompt_activity_default() {
-        let activity = LLMPromptActivity::default();
+        let activity = LLMPromptActivity;
         assert_eq!(activity.name(), "llm_prompt");
     }
 
     #[test]
     fn test_embedding_activity_default() {
-        let activity = EmbeddingActivity::default();
+        let activity = EmbeddingActivity;
         assert_eq!(activity.name(), "embedding");
     }
 

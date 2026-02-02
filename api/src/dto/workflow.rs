@@ -145,19 +145,15 @@ impl From<ActivityDefinition> for kruxiaflow_core::workflow::ActivityDefinition 
 /// Supports both shorthand `streaming: true` and detailed `streaming: { enabled: true }`
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(untagged)]
+#[derive(Default)]
 pub enum StreamingConfig {
     /// Streaming disabled (default)
+    #[default]
     Disabled,
     /// Shorthand: `streaming: true` or `streaming: false`
     Simple(bool),
     /// Detailed: `streaming: { enabled: true }`
     Detailed(StreamingOptions),
-}
-
-impl Default for StreamingConfig {
-    fn default() -> Self {
-        StreamingConfig::Disabled
-    }
 }
 
 impl<'de> Deserialize<'de> for StreamingConfig {

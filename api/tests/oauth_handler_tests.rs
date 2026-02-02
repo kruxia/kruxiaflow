@@ -540,7 +540,7 @@ async fn test_token_response_structure() {
     assert!(body["refresh_token"].is_null());
 
     // scope is optional and should be null in MVP
-    assert!(body["scope"].is_null() || !body.get("scope").is_some());
+    assert!(body["scope"].is_null() || body.get("scope").is_none());
 }
 
 // ============================================================================

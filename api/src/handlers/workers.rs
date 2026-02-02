@@ -182,10 +182,10 @@ impl CompleteActivityRequest {
         }
 
         // Validate cost_usd if provided
-        if let Some(cost) = self.cost_usd {
-            if cost < Decimal::ZERO {
-                errors.add("cost_usd", "Cost must be non-negative");
-            }
+        if let Some(cost) = self.cost_usd
+            && cost < Decimal::ZERO
+        {
+            errors.add("cost_usd", "Cost must be non-negative");
         }
 
         if errors.is_empty() {

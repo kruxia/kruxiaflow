@@ -91,6 +91,7 @@ impl AppState {
     /// - `build.timestamp`: Captured via build.rs at compile time (BUILD_TIMESTAMP env var)
     /// - `build.git_hash`: Captured via build.rs at compile time (BUILD_GIT_HASH env var)
     /// - `features`: Hardcoded feature list for MVP
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db_pool: PgPool,
         auth_service: Arc<dyn AuthenticationService>,
@@ -145,6 +146,7 @@ impl AppState {
     /// * `features` - List of enabled features
     ///
     /// Useful for testing or custom deployments
+    #[allow(clippy::too_many_arguments)]
     pub fn with_metadata(
         db_pool: PgPool,
         auth_service: Arc<dyn AuthenticationService>,
