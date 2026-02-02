@@ -13,7 +13,7 @@
 A lightweight, high-performance workflow engine designed for AI applications. Track every token, cache intelligently, and never exceed your LLM budget. Run on anything from the edge to the cloud.
 
 ```
-Single Binary Deployment | 40% Lower Memory | AI Cost Tracking Built-in | Runs Anywhere
+Single Binary Deployment | AI Cost Tracking Built-in | Runs Anywhere
 ```
 
 ## Why Kruxia Flow?
@@ -156,8 +156,9 @@ curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/cost/history \
   -H "Authorization: Bearer $TOKEN" | jq .
 ```
 
-See `examples/` for 15+ workflows covering parallel execution, model fallback, caching,
-loops, scheduling, and RAG patterns. API docs at http://localhost:8080/api/v1/docs.
+See `examples/` for 10+ example workflows covering parallel execution, model fallback,
+caching, loops, scheduling, and RAG patterns. API docs at
+http://localhost:8080/api/v1/docs.
 
 ## Key Features
 
@@ -468,7 +469,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed development setup and guidel
 
 ## License
 
-MIT License - See [LICENSE](LICENSE) for details.
+AGPL-3.0 License - See [LICENSE](LICENSE) for details.
 
 ---
 
