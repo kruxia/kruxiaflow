@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO llm_models (provider, name, display_name, input_price_per_million, output_price_per_million, cached_input_price_per_million, supports_completion)\n           VALUES\n               ('anthropic', 'claude-3-5-sonnet-20241022', 'Claude 3.5 Sonnet', 3.00, 15.00, 0.30, true),\n               ('anthropic', 'claude-3-5-haiku-20241022', 'Claude 3.5 Haiku', 0.80, 4.00, 0.08, true),\n               ('ollama', 'llama3.2', 'Llama 3.2', 0.00, 0.00, NULL, true)\n           ON CONFLICT (provider, name) DO UPDATE SET\n               input_price_per_million = EXCLUDED.input_price_per_million,\n               output_price_per_million = EXCLUDED.output_price_per_million,\n               cached_input_price_per_million = EXCLUDED.cached_input_price_per_million",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "7c788f647f7e48c9a3022b2cab446b704978ea6d8cf33d791956f59308a5a56a"
+}
