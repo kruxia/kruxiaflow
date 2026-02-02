@@ -1,6 +1,6 @@
 """Tests for workflow storage."""
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 import pytest
@@ -48,7 +48,7 @@ class TestFileMetadata:
 
     def test_create_file_metadata(self):
         workflow_id = uuid4()
-        created_at = datetime.now(UTC)
+        created_at = datetime.now(timezone.utc)
 
         metadata = FileMetadata(
             workflow_id=workflow_id,
@@ -73,7 +73,7 @@ class TestFileMetadata:
             filename="data.bin",
             size=500,
             content_type=None,
-            created_at=datetime.now(UTC),
+            created_at=datetime.now(timezone.utc),
         )
 
         assert metadata.content_type is None
