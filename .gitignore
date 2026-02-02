@@ -50,3 +50,4 @@ var/
 *.pyc
 *.egg-info
 py/.coverage
+py/coverage.xml
