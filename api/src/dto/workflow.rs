@@ -46,7 +46,7 @@ pub struct ActivityDefinition {
     /// Unique key for this activity within the workflow
     pub key: String,
 
-    /// Activity worker type (e.g., "builtin", "custom-python")
+    /// Activity worker type (e.g., "std", "custom-python")
     pub worker: String,
 
     /// Activity name within worker (e.g., "http_request", "postgres_query")
@@ -145,19 +145,15 @@ impl From<ActivityDefinition> for kruxiaflow_core::workflow::ActivityDefinition 
 /// Supports both shorthand `streaming: true` and detailed `streaming: { enabled: true }`
 #[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(untagged)]
+#[derive(Default)]
 pub enum StreamingConfig {
     /// Streaming disabled (default)
+    #[default]
     Disabled,
     /// Shorthand: `streaming: true` or `streaming: false`
     Simple(bool),
     /// Detailed: `streaming: { enabled: true }`
     Detailed(StreamingOptions),
-}
-
-impl Default for StreamingConfig {
-    fn default() -> Self {
-        StreamingConfig::Disabled
-    }
 }
 
 impl<'de> Deserialize<'de> for StreamingConfig {
@@ -309,6 +305,78 @@ pub struct ActivitySettings {
     /// Example: "2025-12-01T09:00:00-08:00" or "{{INPUT.report_deadline}}"
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scheduled_for: Option<String>,
+
+    /// Wait for an external signal before running the activity
+    /// When set, the activity enters 'waiting' state until signaled or timeout
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub wait_for_signal: Option<WaitForSignalSettings>,
+}
+
+/// Settings for activities that wait for external signals
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct WaitForSignalSettings {
+    /// The event name to wait for (matched against signal requests)
+    pub event_name: String,
+
+    /// Timeout in seconds before taking the on_timeout action
+    pub timeout_seconds: u64,
+
+    /// Action to take when timeout occurs (default: fail)
+    #[serde(default)]
+    pub on_timeout: OnTimeout,
+}
+
+/// Action to take when a signal wait times out
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum OnTimeout {
+    /// Continue with the activity (run with null signal data)
+    Continue,
+    /// Skip the activity
+    Skip,
+    /// Fail the activity (default)
+    #[default]
+    Fail,
+}
+
+impl From<kruxiaflow_core::workflow::WaitForSignalSettings> for WaitForSignalSettings {
+    fn from(settings: kruxiaflow_core::workflow::WaitForSignalSettings) -> Self {
+        Self {
+            event_name: settings.event_name,
+            timeout_seconds: settings.timeout_seconds,
+            on_timeout: settings.on_timeout.into(),
+        }
+    }
+}
+
+impl From<WaitForSignalSettings> for kruxiaflow_core::workflow::WaitForSignalSettings {
+    fn from(settings: WaitForSignalSettings) -> Self {
+        Self {
+            event_name: settings.event_name,
+            timeout_seconds: settings.timeout_seconds,
+            on_timeout: settings.on_timeout.into(),
+        }
+    }
+}
+
+impl From<kruxiaflow_core::workflow::OnTimeout> for OnTimeout {
+    fn from(action: kruxiaflow_core::workflow::OnTimeout) -> Self {
+        match action {
+            kruxiaflow_core::workflow::OnTimeout::Continue => Self::Continue,
+            kruxiaflow_core::workflow::OnTimeout::Skip => Self::Skip,
+            kruxiaflow_core::workflow::OnTimeout::Fail => Self::Fail,
+        }
+    }
+}
+
+impl From<OnTimeout> for kruxiaflow_core::workflow::OnTimeout {
+    fn from(action: OnTimeout) -> Self {
+        match action {
+            OnTimeout::Continue => Self::Continue,
+            OnTimeout::Skip => Self::Skip,
+            OnTimeout::Fail => Self::Fail,
+        }
+    }
 }
 
 /// Budget configuration for activities
@@ -381,6 +449,7 @@ impl From<kruxiaflow_core::workflow::ActivitySettings> for ActivitySettings {
             iteration_limit: settings.iteration_limit,
             delay: settings.delay,
             scheduled_for: settings.scheduled_for,
+            wait_for_signal: settings.wait_for_signal.map(Into::into),
         }
     }
 }
@@ -396,6 +465,7 @@ impl From<ActivitySettings> for kruxiaflow_core::workflow::ActivitySettings {
             iteration_limit: settings.iteration_limit,
             delay: settings.delay,
             scheduled_for: settings.scheduled_for,
+            wait_for_signal: settings.wait_for_signal.map(Into::into),
         }
     }
 }
@@ -553,5 +623,430 @@ impl From<OutputType> for kruxiaflow_core::workflow::OutputType {
             OutputType::File => Self::File,
             OutputType::Folder => Self::Folder,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    // --- StreamingConfig tests ---
+
+    #[test]
+    fn test_streaming_config_default_is_disabled() {
+        let config = StreamingConfig::default();
+        assert!(!config.is_enabled());
+        assert!(config.is_disabled());
+    }
+
+    #[test]
+    fn test_streaming_config_simple_true() {
+        let config = StreamingConfig::Simple(true);
+        assert!(config.is_enabled());
+        assert!(!config.is_disabled());
+    }
+
+    #[test]
+    fn test_streaming_config_simple_false() {
+        let config = StreamingConfig::Simple(false);
+        assert!(!config.is_enabled());
+        assert!(config.is_disabled());
+    }
+
+    #[test]
+    fn test_streaming_config_detailed_enabled() {
+        let config = StreamingConfig::Detailed(StreamingOptions { enabled: true });
+        assert!(config.is_enabled());
+    }
+
+    #[test]
+    fn test_streaming_config_detailed_disabled() {
+        let config = StreamingConfig::Detailed(StreamingOptions { enabled: false });
+        assert!(!config.is_enabled());
+    }
+
+    #[test]
+    fn test_streaming_config_deserialize_bool_true() {
+        let config: StreamingConfig = serde_json::from_str("true").unwrap();
+        assert!(config.is_enabled());
+    }
+
+    #[test]
+    fn test_streaming_config_deserialize_bool_false() {
+        let config: StreamingConfig = serde_json::from_str("false").unwrap();
+        assert!(!config.is_enabled());
+    }
+
+    #[test]
+    fn test_streaming_config_deserialize_object() {
+        let config: StreamingConfig = serde_json::from_str(r#"{"enabled": true}"#).unwrap();
+        assert!(config.is_enabled());
+    }
+
+    #[test]
+    fn test_streaming_config_deserialize_null() {
+        let config: StreamingConfig = serde_json::from_str("null").unwrap();
+        assert!(!config.is_enabled());
+    }
+
+    #[test]
+    fn test_streaming_config_deserialize_invalid() {
+        let result: Result<StreamingConfig, _> = serde_json::from_str("\"invalid\"");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_streaming_config_deserialize_number_invalid() {
+        let result: Result<StreamingConfig, _> = serde_json::from_str("42");
+        assert!(result.is_err());
+    }
+
+    // --- StreamingConfig From conversions ---
+
+    #[test]
+    fn test_streaming_config_from_core_disabled() {
+        let core = kruxiaflow_core::workflow::StreamingConfig::Disabled;
+        let api: StreamingConfig = core.into();
+        assert!(matches!(api, StreamingConfig::Disabled));
+    }
+
+    #[test]
+    fn test_streaming_config_from_core_simple() {
+        let core = kruxiaflow_core::workflow::StreamingConfig::Simple(true);
+        let api: StreamingConfig = core.into();
+        assert!(matches!(api, StreamingConfig::Simple(true)));
+    }
+
+    #[test]
+    fn test_streaming_config_from_core_detailed() {
+        let core = kruxiaflow_core::workflow::StreamingConfig::Detailed(
+            kruxiaflow_core::workflow::StreamingOptions { enabled: true },
+        );
+        let api: StreamingConfig = core.into();
+        assert!(matches!(api, StreamingConfig::Detailed(_)));
+    }
+
+    #[test]
+    fn test_streaming_config_to_core_disabled() {
+        let api = StreamingConfig::Disabled;
+        let core: kruxiaflow_core::workflow::StreamingConfig = api.into();
+        assert!(matches!(
+            core,
+            kruxiaflow_core::workflow::StreamingConfig::Disabled
+        ));
+    }
+
+    #[test]
+    fn test_streaming_config_to_core_simple() {
+        let api = StreamingConfig::Simple(true);
+        let core: kruxiaflow_core::workflow::StreamingConfig = api.into();
+        assert!(matches!(
+            core,
+            kruxiaflow_core::workflow::StreamingConfig::Simple(true)
+        ));
+    }
+
+    // --- OnTimeout conversions ---
+
+    #[test]
+    fn test_on_timeout_default_is_fail() {
+        assert_eq!(OnTimeout::default(), OnTimeout::Fail);
+    }
+
+    #[test]
+    fn test_on_timeout_from_core() {
+        assert_eq!(
+            OnTimeout::from(kruxiaflow_core::workflow::OnTimeout::Continue),
+            OnTimeout::Continue
+        );
+        assert_eq!(
+            OnTimeout::from(kruxiaflow_core::workflow::OnTimeout::Skip),
+            OnTimeout::Skip
+        );
+        assert_eq!(
+            OnTimeout::from(kruxiaflow_core::workflow::OnTimeout::Fail),
+            OnTimeout::Fail
+        );
+    }
+
+    #[test]
+    fn test_on_timeout_to_core() {
+        let core: kruxiaflow_core::workflow::OnTimeout = OnTimeout::Continue.into();
+        assert!(matches!(
+            core,
+            kruxiaflow_core::workflow::OnTimeout::Continue
+        ));
+        let core: kruxiaflow_core::workflow::OnTimeout = OnTimeout::Skip.into();
+        assert!(matches!(core, kruxiaflow_core::workflow::OnTimeout::Skip));
+    }
+
+    #[test]
+    fn test_on_timeout_serde_roundtrip() {
+        let json = serde_json::to_string(&OnTimeout::Continue).unwrap();
+        assert_eq!(json, "\"continue\"");
+        let back: OnTimeout = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, OnTimeout::Continue);
+    }
+
+    // --- BudgetAction conversions ---
+
+    #[test]
+    fn test_budget_action_default_is_abort() {
+        assert_eq!(BudgetAction::default(), BudgetAction::Abort);
+    }
+
+    #[test]
+    fn test_budget_action_from_core() {
+        assert_eq!(
+            BudgetAction::from(kruxiaflow_core::workflow::BudgetAction::Abort),
+            BudgetAction::Abort
+        );
+        assert_eq!(
+            BudgetAction::from(kruxiaflow_core::workflow::BudgetAction::Continue),
+            BudgetAction::Continue
+        );
+    }
+
+    #[test]
+    fn test_budget_action_to_core() {
+        let core: kruxiaflow_core::workflow::BudgetAction = BudgetAction::Abort.into();
+        assert!(matches!(
+            core,
+            kruxiaflow_core::workflow::BudgetAction::Abort
+        ));
+    }
+
+    #[test]
+    fn test_budget_settings_roundtrip() {
+        let api = BudgetSettings {
+            limit: Decimal::from_str("10.50").unwrap(),
+            action: BudgetAction::Continue,
+        };
+        let core: kruxiaflow_core::workflow::BudgetSettings = api.clone().into();
+        let back: BudgetSettings = core.into();
+        assert_eq!(back.limit, api.limit);
+        assert_eq!(back.action, api.action);
+    }
+
+    // --- BackoffStrategy conversions ---
+
+    #[test]
+    fn test_backoff_strategy_from_core() {
+        assert!(matches!(
+            BackoffStrategy::from(kruxiaflow_core::workflow::BackoffStrategy::Fixed),
+            BackoffStrategy::Fixed
+        ));
+        assert!(matches!(
+            BackoffStrategy::from(kruxiaflow_core::workflow::BackoffStrategy::Exponential),
+            BackoffStrategy::Exponential
+        ));
+    }
+
+    #[test]
+    fn test_backoff_strategy_to_core() {
+        let core: kruxiaflow_core::workflow::BackoffStrategy = BackoffStrategy::Fixed.into();
+        assert!(matches!(
+            core,
+            kruxiaflow_core::workflow::BackoffStrategy::Fixed
+        ));
+    }
+
+    // --- RetrySettings conversions ---
+
+    #[test]
+    fn test_retry_settings_roundtrip() {
+        let api = RetrySettings {
+            max_attempts: 3,
+            strategy: BackoffStrategy::Exponential,
+            base_seconds: 2,
+            factor: 2.0,
+            max_seconds: 300,
+        };
+        let core: kruxiaflow_core::workflow::RetryPolicy = api.into();
+        let back: RetrySettings = core.into();
+        assert_eq!(back.max_attempts, 3);
+        assert_eq!(back.base_seconds, 2);
+        assert_eq!(back.max_seconds, 300);
+    }
+
+    #[test]
+    fn test_retry_settings_defaults() {
+        let json = r#"{"max_attempts": 3}"#;
+        let settings: RetrySettings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.max_attempts, 3);
+        assert!(matches!(settings.strategy, BackoffStrategy::Exponential));
+        assert_eq!(settings.base_seconds, 2);
+        assert_eq!(settings.factor, 2.0);
+        assert_eq!(settings.max_seconds, 300);
+    }
+
+    // --- OutputType conversions ---
+
+    #[test]
+    fn test_output_type_default_is_value() {
+        assert!(matches!(OutputType::default(), OutputType::Value));
+    }
+
+    #[test]
+    fn test_output_type_roundtrip() {
+        let api = OutputType::File;
+        let core: kruxiaflow_core::workflow::OutputType = api.into();
+        let back: OutputType = core.into();
+        assert!(matches!(back, OutputType::File));
+    }
+
+    #[test]
+    fn test_output_type_folder_roundtrip() {
+        let api = OutputType::Folder;
+        let core: kruxiaflow_core::workflow::OutputType = api.into();
+        let back: OutputType = core.into();
+        assert!(matches!(back, OutputType::Folder));
+    }
+
+    #[test]
+    fn test_output_type_serde() {
+        let json = serde_json::to_string(&OutputType::File).unwrap();
+        assert_eq!(json, "\"file\"");
+        let back: OutputType = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, OutputType::File));
+    }
+
+    // --- ActivityOutputDefinition conversion ---
+
+    #[test]
+    fn test_activity_output_definition_roundtrip() {
+        let api = ActivityOutputDefinition {
+            name: "document".to_string(),
+            output_type: OutputType::File,
+        };
+        let core: kruxiaflow_core::workflow::ActivityOutputDefinition = api.into();
+        let back: ActivityOutputDefinition = core.into();
+        assert_eq!(back.name, "document");
+        assert!(matches!(back.output_type, OutputType::File));
+    }
+
+    // --- ActivityRelationship conversion ---
+
+    #[test]
+    fn test_activity_relationship_roundtrip() {
+        let api = ActivityRelationship {
+            activity_key: "step1".to_string(),
+            conditions: Some(vec!["output.status == 'ok'".to_string()]),
+            is_back_edge: true,
+        };
+        let core: kruxiaflow_core::workflow::ActivityRelationship = api.into();
+        let back: ActivityRelationship = core.into();
+        assert_eq!(back.activity_key, "step1");
+        assert!(back.is_back_edge);
+        assert_eq!(back.conditions.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_activity_relationship_no_conditions() {
+        let api = ActivityRelationship {
+            activity_key: "step1".to_string(),
+            conditions: None,
+            is_back_edge: false,
+        };
+        let core: kruxiaflow_core::workflow::ActivityRelationship = api.into();
+        assert!(core.conditions.is_none());
+    }
+
+    // --- WaitForSignalSettings conversion ---
+
+    #[test]
+    fn test_wait_for_signal_settings_roundtrip() {
+        let api = WaitForSignalSettings {
+            event_name: "approval".to_string(),
+            timeout_seconds: 3600,
+            on_timeout: OnTimeout::Skip,
+        };
+        let core: kruxiaflow_core::workflow::WaitForSignalSettings = api.into();
+        let back: WaitForSignalSettings = core.into();
+        assert_eq!(back.event_name, "approval");
+        assert_eq!(back.timeout_seconds, 3600);
+        assert_eq!(back.on_timeout, OnTimeout::Skip);
+    }
+
+    // --- ActivitySettings conversion ---
+
+    #[test]
+    fn test_activity_settings_default() {
+        let settings = ActivitySettings::default();
+        assert!(settings.timeout_seconds.is_none());
+        assert!(settings.retry.is_none());
+        assert!(settings.budget.is_none());
+        assert!(!settings.cache);
+        assert!(settings.cache_ttl.is_none());
+        assert!(settings.delay.is_none());
+        assert!(settings.scheduled_for.is_none());
+        assert!(settings.wait_for_signal.is_none());
+    }
+
+    #[test]
+    fn test_activity_settings_roundtrip_with_all_fields() {
+        let api = ActivitySettings {
+            timeout_seconds: Some(300),
+            retry: Some(RetrySettings {
+                max_attempts: 3,
+                strategy: BackoffStrategy::Fixed,
+                base_seconds: 5,
+                factor: 1.0,
+                max_seconds: 60,
+            }),
+            budget: Some(BudgetSettings {
+                limit: Decimal::from_str("50.00").unwrap(),
+                action: BudgetAction::Continue,
+            }),
+            cache: true,
+            cache_ttl: Some(600),
+            iteration_limit: Some(10),
+            delay: Some("5s".to_string()),
+            scheduled_for: Some("2025-12-01T09:00:00Z".to_string()),
+            wait_for_signal: Some(WaitForSignalSettings {
+                event_name: "done".to_string(),
+                timeout_seconds: 120,
+                on_timeout: OnTimeout::Continue,
+            }),
+        };
+        let core: kruxiaflow_core::workflow::ActivitySettings = api.into();
+        let back: ActivitySettings = core.into();
+        assert_eq!(back.timeout_seconds, Some(300));
+        assert!(back.retry.is_some());
+        assert!(back.budget.is_some());
+        assert!(back.cache);
+        assert_eq!(back.cache_ttl, Some(600));
+        assert_eq!(back.delay, Some("5s".to_string()));
+        assert!(back.wait_for_signal.is_some());
+    }
+
+    // --- WorkflowDefinition conversion ---
+
+    #[test]
+    fn test_workflow_definition_roundtrip() {
+        let api = WorkflowDefinition {
+            name: "test-workflow".to_string(),
+            activities: vec![ActivityDefinition {
+                key: "step1".to_string(),
+                worker: "std".to_string(),
+                activity_name: Some("http_request".to_string()),
+                parameters: None,
+                depends_on: None,
+                dependency_of: None,
+                output_definitions: None,
+                settings: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
+                streaming: StreamingConfig::default(),
+            }],
+        };
+        let core: kruxiaflow_core::workflow::WorkflowDefinition = api.clone().into();
+        let back: WorkflowDefinition = core.into();
+        assert_eq!(back.name, "test-workflow");
+        assert_eq!(back.activities.len(), 1);
+        assert_eq!(back.activities[0].key, "step1");
     }
 }

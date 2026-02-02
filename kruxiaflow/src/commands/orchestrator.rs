@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Args;
 use kruxiaflow_core::{
     ActivityQueue, EventSource, OrchestratorConfig, PostgresEventSource, PostgresQueue,
-    QueueConfig, run_orchestrator,
+    PostgresSubscriptionService, QueueConfig, SubscriptionService, run_orchestrator,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -135,6 +135,10 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
     // Create event source
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
 
+    // Create subscription service
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
+
     // Create orchestrator config from CLI parameters
     let config = OrchestratorConfig::new(pool.clone())
         .with_poll_interval(
@@ -154,6 +158,7 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
         run_orchestrator(
             event_source,
             activity_queue,
+            subscription_service,
             config,
             Some(orch_shutdown_token),
         )
@@ -276,5 +281,117 @@ mod tests {
         cmd.backoff_multiplier = 10.0;
         cmd.shutdown_timeout = 300;
         assert!(cmd.validate().is_ok());
+    }
+
+    // =========================================================================
+    // Validation order tests
+    // =========================================================================
+
+    #[test]
+    fn test_orchestrator_command_validation_order_min_poll_first() {
+        let mut cmd = valid_orchestrator_command();
+        cmd.poll_interval_min = 0;
+        cmd.poll_interval_max = 0;
+        cmd.backoff_multiplier = 0.0;
+        cmd.shutdown_timeout = 0;
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Minimum poll interval")
+        );
+    }
+
+    #[test]
+    fn test_orchestrator_command_validation_order_max_poll_after_min() {
+        let mut cmd = valid_orchestrator_command();
+        cmd.poll_interval_max = 10; // Less than min (50)
+        cmd.backoff_multiplier = 0.0;
+        cmd.shutdown_timeout = 0;
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Maximum poll interval")
+        );
+    }
+
+    #[test]
+    fn test_orchestrator_command_validation_order_backoff_after_max_poll() {
+        let mut cmd = valid_orchestrator_command();
+        cmd.backoff_multiplier = 0.5;
+        cmd.shutdown_timeout = 0;
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Backoff multiplier")
+        );
+    }
+
+    #[test]
+    fn test_orchestrator_command_validation_order_shutdown_after_backoff() {
+        let mut cmd = valid_orchestrator_command();
+        cmd.shutdown_timeout = 1;
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Shutdown timeout"));
+    }
+
+    // =========================================================================
+    // Construction tests
+    // =========================================================================
+
+    #[test]
+    fn test_orchestrator_command_custom_consumer_id() {
+        let cmd = OrchestratorCommand {
+            consumer_id: "orch_prod_1".to_string(),
+            poll_interval_min: 100,
+            poll_interval_max: 5000,
+            backoff_multiplier: 2.0,
+            shutdown_timeout: 60,
+        };
+
+        assert!(cmd.validate().is_ok());
+        assert_eq!(cmd.consumer_id, "orch_prod_1");
+    }
+
+    #[test]
+    fn test_orchestrator_command_poll_interval_max_equals_min() {
+        let cmd = OrchestratorCommand {
+            consumer_id: "test".to_string(),
+            poll_interval_min: 500,
+            poll_interval_max: 500, // Equal to min
+            backoff_multiplier: 1.0,
+            shutdown_timeout: 30,
+        };
+
+        assert!(cmd.validate().is_ok());
+    }
+
+    #[test]
+    fn test_orchestrator_command_error_message_includes_min_interval() {
+        let cmd = OrchestratorCommand {
+            consumer_id: "test".to_string(),
+            poll_interval_min: 200,
+            poll_interval_max: 100, // Less than min
+            backoff_multiplier: 1.5,
+            shutdown_timeout: 30,
+        };
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("200")); // Should include the min value
     }
 }

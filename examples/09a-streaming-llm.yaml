@@ -52,14 +52,14 @@ description: LLM prompt with token streaming over WebSocket
 
 activities:
   - key: generate_story
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     # Enable streaming for this activity
     streaming: true
     parameters:
       # Provider fallback chain (all support streaming)
       model:
-        - anthropic/claude-3-5-haiku-20241022
+        - anthropic/claude-haiku-4-5-20251001
         - openai/gpt-4o-mini
         - google/gemini-1.5-flash
       prompt: |

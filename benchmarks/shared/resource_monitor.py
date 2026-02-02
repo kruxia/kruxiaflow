@@ -1,6 +1,7 @@
 """Resource monitoring using Docker Stats API"""
 
 import asyncio
+import re
 import docker
 from dataclasses import dataclass, field
 from typing import Optional
@@ -37,6 +38,17 @@ PLATFORM_CONTAINERS = {
         "kruxiaflow-1",
         "kruxiaflow_kruxiaflow_1",
         "kruxiaflow",
+        "kruxiaflow-postgres-1",
+        "kruxiaflow_kruxiaflow-postgres_1",
+        "kruxiaflow-postgres",
+    ],
+    "Kruxia Flow (py-std)": [
+        "kruxiaflow-py-std-1",
+        "kruxiaflow_kruxiaflow-py-std_1",
+        "kruxiaflow-py-std",
+        "kruxiaflow-py-std-server-1",
+        "kruxiaflow_kruxiaflow-py-std-server_1",
+        "kruxiaflow-py-std-server",
         "kruxiaflow-postgres-1",
         "kruxiaflow_kruxiaflow-postgres_1",
         "kruxiaflow-postgres",
@@ -120,9 +132,13 @@ class ResourceMonitor:
         self.containers = []
         for container in all_containers:
             container_name = container.name
-            # Check if container name matches any pattern for this platform
+            # Check if container name matches any pattern for this platform.
+            # Match pattern as a complete service name segment — the pattern must
+            # be followed by end-of-string, or a separator + replica number (e.g.
+            # "-1", "_1"), NOT by more name segments like "-py-std".
             for pattern in container_patterns:
-                if pattern in container_name or container_name.startswith(pattern.replace("-1", "")):
+                escaped = re.escape(pattern)
+                if re.search(rf'(^|[-_]){escaped}([-_]\d+)?$', container_name):
                     self.containers.append(container)
                     break
 
@@ -168,6 +184,16 @@ class ResourceMonitor:
         except (KeyError, TypeError):
             return 0.0, 0.0
 
+    def _get_container_stats(self, container) -> tuple[float, float, float]:
+        """Get stats for a single container. Returns (cpu, memory, limit)."""
+        try:
+            stats = container.stats(stream=False)
+            cpu = self._calculate_cpu_percent(stats)
+            memory, limit = self._get_memory_usage_mb(stats)
+            return cpu, memory, limit
+        except Exception:
+            return 0.0, 0.0, 0.0
+
     def _collect_sample(self) -> tuple[float, float]:
         """Collect a single sample of CPU and memory usage across all containers"""
         total_cpu = 0.0
@@ -175,19 +201,40 @@ class ResourceMonitor:
         total_limit = 0.0
 
         for container in self.containers:
-            try:
-                # Get stats with stream=False for a single snapshot
-                stats = container.stats(stream=False)
+            cpu, memory, limit = self._get_container_stats(container)
+            total_cpu += cpu
+            total_memory += memory
+            total_limit += limit
 
-                cpu = self._calculate_cpu_percent(stats)
-                memory, limit = self._get_memory_usage_mb(stats)
+        self._memory_limit = max(self._memory_limit, total_limit)
+        return total_cpu, total_memory
 
+    async def _collect_sample_async(self) -> tuple[float, float]:
+        """Collect stats from all containers in parallel."""
+        import concurrent.futures
+
+        total_cpu = 0.0
+        total_memory = 0.0
+        total_limit = 0.0
+
+        if not self.containers:
+            return 0.0, 0.0
+
+        loop = asyncio.get_event_loop()
+        # Collect stats from all containers in parallel using thread pool
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(self.containers)) as executor:
+            futures = [
+                loop.run_in_executor(executor, self._get_container_stats, container)
+                for container in self.containers
+            ]
+            results = await asyncio.gather(*futures, return_exceptions=True)
+
+        for result in results:
+            if isinstance(result, tuple):
+                cpu, memory, limit = result
                 total_cpu += cpu
                 total_memory += memory
                 total_limit += limit
-            except Exception as e:
-                # Container may have stopped
-                pass
 
         self._memory_limit = max(self._memory_limit, total_limit)
         return total_cpu, total_memory
@@ -195,9 +242,8 @@ class ResourceMonitor:
     async def _monitor_loop(self) -> None:
         """Background monitoring loop"""
         while self._monitoring:
-            cpu, memory = await asyncio.get_event_loop().run_in_executor(
-                None, self._collect_sample
-            )
+            # Collect stats from all containers in parallel (much faster)
+            cpu, memory = await self._collect_sample_async()
 
             self._cpu_samples.append(cpu)
             self._memory_samples.append(memory)
@@ -208,6 +254,10 @@ class ResourceMonitor:
 
     async def start(self) -> None:
         """Start monitoring in background"""
+        # Always refresh container list to ensure we have valid references
+        # (container objects can become stale between benchmark scenarios)
+        if self.client:
+            self._find_containers()
         if not self.containers:
             self.connect()
 
@@ -216,6 +266,15 @@ class ResourceMonitor:
         self._memory_samples = []
         self._peak_cpu = 0.0
         self._peak_memory = 0.0
+
+        # Collect an initial sample immediately to ensure we have data
+        # even for fast benchmarks
+        if self.containers:
+            cpu, memory = await self._collect_sample_async()
+            self._cpu_samples.append(cpu)
+            self._memory_samples.append(memory)
+            self._peak_cpu = max(self._peak_cpu, cpu)
+            self._peak_memory = max(self._peak_memory, memory)
 
         self._monitor_task = asyncio.create_task(self._monitor_loop())
 

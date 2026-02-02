@@ -9,9 +9,11 @@ use kruxiaflow_api::{AppState, app_router};
 use kruxiaflow_core::events::{EventSource, PostgresEventSource};
 use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
 use kruxiaflow_core::storage::{PostgresStorage, WorkflowStorage};
-use kruxiaflow_core::{OrchestratorConfig, run_orchestrator};
+use kruxiaflow_core::{
+    OrchestratorConfig, PostgresSubscriptionService, SubscriptionService, run_orchestrator,
+};
 use kruxiaflow_oauth::{AuthenticationService, PostgresAuthService};
-use kruxiaflow_worker::{WorkerConfig, WorkerManager, register_builtin_activities};
+use kruxiaflow_worker::{WorkerConfig, WorkerManager, register_std_activities};
 use serde_json::json;
 use serial_test::serial;
 use sqlx::PgPool;
@@ -166,6 +168,8 @@ async fn test_end_to_end_file_workflow() -> Result<()> {
 
     // Create API state
     let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let state = AppState::new(
         pool.clone(),
         auth_service.clone(),
@@ -173,6 +177,7 @@ async fn test_end_to_end_file_workflow() -> Result<()> {
         event_source.clone(),
         workflow_storage.clone(),
         cache_service,
+        subscription_service.clone(),
         shutdown_token.clone(),
     );
 
@@ -196,14 +201,18 @@ async fn test_end_to_end_file_workflow() -> Result<()> {
 
     // Start orchestrator
     let orchestrator_config = OrchestratorConfig::new(pool.clone());
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let orchestrator_handle = tokio::spawn({
         let event_source = event_source.clone();
         let activity_queue = activity_queue.clone();
         let shutdown_token = shutdown_token.clone();
+        let subscription_service = subscription_service.clone();
         async move {
             run_orchestrator(
                 event_source,
                 activity_queue,
+                subscription_service,
                 orchestrator_config,
                 Some(shutdown_token),
             )
@@ -233,12 +242,12 @@ async fn test_end_to_end_file_workflow() -> Result<()> {
 
     // Start worker with storage
     let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
-    let registry = register_builtin_activities(cache_service);
+    let registry = register_std_activities(cache_service);
     #[allow(deprecated)]
     let worker_config = WorkerConfig {
         api_url: server_url.clone(),
         worker_id: "test_worker".to_string(),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         poll_interval: Duration::from_millis(100),
         poll_max_activities: 5,
         max_concurrent_activities: 16,
@@ -265,7 +274,7 @@ async fn test_end_to_end_file_workflow() -> Result<()> {
         "activities": [
             {
                 "key": "fetch_file",
-                "worker": "builtin",
+                "worker": "std",
                 "activity_name": "http_request",
                 "parameters": {
                     "method": "GET",

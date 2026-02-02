@@ -4,7 +4,7 @@ use crate::queue::{
 };
 use async_trait::async_trait;
 use sqlx::PgPool;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, trace, warn};
 use uuid::Uuid;
 
 pub struct PostgresQueue {
@@ -35,7 +35,7 @@ impl PostgresQueue {
 
 #[async_trait]
 impl ActivityQueue for PostgresQueue {
-    #[tracing::instrument(skip(self, activities), level = "debug", fields(num_activities = activities.len()))]
+    #[tracing::instrument(skip(self, activities), level = "trace", fields(num_activities = activities.len()))]
     async fn schedule(&self, workflow_id: Uuid, activities: Vec<Activity>) -> Result<()> {
         for activity in activities {
             // Validate parameters are valid JSON
@@ -75,11 +75,11 @@ impl ActivityQueue for PostgresQueue {
                 r#"
                 INSERT INTO activity_queue (
                     workflow_id, activity_key, worker, name,
-                    parameters, settings, scheduled_for, timeout_duration, 
-                    max_retries, output_definitions, iteration
-                ) VALUES ($1, $2, $3, $4, 
-                          $5, $6, COALESCE($7, NOW()), make_interval(secs => $8), 
-                          $9, $10, $11)
+                    parameters, settings, scheduled_for, timeout_duration,
+                    max_retries, output_definitions, iteration, signal_data
+                ) VALUES ($1, $2, $3, $4,
+                          $5, $6, COALESCE($7, NOW()), make_interval(secs => $8),
+                          $9, $10, $11, $12)
                 ON CONFLICT (workflow_id, activity_key, iteration) DO NOTHING
                 "#,
                 workflow_id,
@@ -92,19 +92,20 @@ impl ActivityQueue for PostgresQueue {
                 timeout as f64,
                 max_retries,
                 output_definitions_json,
-                activity.iteration
+                activity.iteration,
+                activity.signal_data
             )
             .execute(&self.pool)
             .await?;
 
             if result.rows_affected() > 0 {
-                debug!(
+                trace!(
                     workflow_id = %workflow_id,
                     activity_key = %activity.key,
                     "Activity scheduled"
                 );
             } else {
-                debug!(
+                trace!(
                     workflow_id = %workflow_id,
                     activity_key = %activity.key,
                     "Activity already scheduled (idempotent)"
@@ -115,7 +116,7 @@ impl ActivityQueue for PostgresQueue {
         Ok(())
     }
 
-    #[tracing::instrument(skip(self), level = "debug", fields(worker = %worker, max_activities = max_activities))]
+    #[tracing::instrument(skip(self), level = "trace", fields(worker = %worker, max_activities = max_activities))]
     async fn claim_next(
         &self,
         worker_id: &str,
@@ -163,8 +164,8 @@ impl ActivityQueue for PostgresQueue {
                 LIMIT $3
                 FOR UPDATE SKIP LOCKED
             )
-            RETURNING id, workflow_id, activity_key, worker, name as activity_name,
-                      parameters, settings, retry_count, claimed_at, output_definitions, iteration
+            RETURNING id, workflow_id, activity_key, worker, name as activity_name, parameters, 
+                      settings, retry_count, claimed_at, output_definitions, iteration, signal_data
             "#,
             worker_id,
             worker,
@@ -176,14 +177,12 @@ impl ActivityQueue for PostgresQueue {
         let mut results = Vec::with_capacity(activities.len());
 
         for row in activities {
-            let settings: Option<ActivitySettings> = row
-                .settings
-                .map(|v| serde_json::from_value(v))
-                .transpose()?;
+            let settings: Option<ActivitySettings> =
+                row.settings.map(serde_json::from_value).transpose()?;
 
             let output_definitions = row
                 .output_definitions
-                .map(|v| serde_json::from_value(v))
+                .map(serde_json::from_value)
                 .transpose()?;
 
             let queued = QueuedActivity {
@@ -198,6 +197,7 @@ impl ActivityQueue for PostgresQueue {
                 claimed_at: row.claimed_at.unwrap(),
                 output_definitions,
                 iteration: row.iteration,
+                signal_data: row.signal_data,
             };
 
             if queued.retry_count > 0 {
@@ -219,9 +219,9 @@ impl ActivityQueue for PostgresQueue {
         }
 
         if results.is_empty() {
-            debug!(worker = %worker, "No claimable activities for worker");
+            trace!(worker = %worker, "No claimable activities for worker");
         } else {
-            debug!(worker = %worker, claimed_count = results.len(), "Activities claimed");
+            trace!(worker = %worker, claimed_count = results.len(), "Activities claimed");
         }
 
         Ok(results)

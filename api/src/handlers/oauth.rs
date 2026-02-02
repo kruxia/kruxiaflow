@@ -264,3 +264,279 @@ pub async fn token_handler(
         scope: None, // MVP doesn't use scopes
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::state::AppState;
+    use crate::state::tests::*;
+    use axum::extract::State;
+    use kruxiaflow_core::cache::NoOpCache;
+    use sqlx::PgPool;
+    use std::sync::Arc;
+    use tokio_util::sync::CancellationToken;
+
+    async fn setup_test_state() -> AppState {
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
+        });
+        let pool = PgPool::connect(&database_url)
+            .await
+            .expect("Failed to connect to test database");
+
+        AppState::new(
+            pool,
+            Arc::new(MockAuthService),
+            Arc::new(MockActivityQueue),
+            Arc::new(MockEventSource),
+            Arc::new(MockWorkflowStorage),
+            Arc::new(NoOpCache::new()),
+            Arc::new(MockSubscriptionService),
+            CancellationToken::new(),
+        )
+    }
+
+    // --- TokenRequest validation tests ---
+
+    #[test]
+    fn test_validate_client_credentials_valid() {
+        let request = TokenRequest {
+            grant_type: GrantType::ClientCredentials,
+            client_id: Some("client".to_string()),
+            client_secret: Some("secret".to_string()),
+            username: None,
+            password: None,
+            refresh_token: None,
+            scope: None,
+        };
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_client_credentials_missing_id() {
+        let request = TokenRequest {
+            grant_type: GrantType::ClientCredentials,
+            client_id: None,
+            client_secret: Some("secret".to_string()),
+            username: None,
+            password: None,
+            refresh_token: None,
+            scope: None,
+        };
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_client_credentials_missing_secret() {
+        let request = TokenRequest {
+            grant_type: GrantType::ClientCredentials,
+            client_id: Some("client".to_string()),
+            client_secret: None,
+            username: None,
+            password: None,
+            refresh_token: None,
+            scope: None,
+        };
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_password_grant_valid() {
+        let request = TokenRequest {
+            grant_type: GrantType::Password,
+            client_id: None,
+            client_secret: None,
+            username: Some("user".to_string()),
+            password: Some("pass".to_string()),
+            refresh_token: None,
+            scope: None,
+        };
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_password_grant_missing_username() {
+        let request = TokenRequest {
+            grant_type: GrantType::Password,
+            client_id: None,
+            client_secret: None,
+            username: None,
+            password: Some("pass".to_string()),
+            refresh_token: None,
+            scope: None,
+        };
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_password_grant_missing_password() {
+        let request = TokenRequest {
+            grant_type: GrantType::Password,
+            client_id: None,
+            client_secret: None,
+            username: Some("user".to_string()),
+            password: None,
+            refresh_token: None,
+            scope: None,
+        };
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_refresh_token_valid() {
+        let request = TokenRequest {
+            grant_type: GrantType::RefreshToken,
+            client_id: None,
+            client_secret: None,
+            username: None,
+            password: None,
+            refresh_token: Some("token".to_string()),
+            scope: None,
+        };
+        assert!(request.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_refresh_token_missing() {
+        let request = TokenRequest {
+            grant_type: GrantType::RefreshToken,
+            client_id: None,
+            client_secret: None,
+            username: None,
+            password: None,
+            refresh_token: None,
+            scope: None,
+        };
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn test_grant_type_deserialize() {
+        let json = r#""client_credentials""#;
+        let gt: GrantType = serde_json::from_str(json).unwrap();
+        assert_eq!(gt, GrantType::ClientCredentials);
+
+        let json = r#""password""#;
+        let gt: GrantType = serde_json::from_str(json).unwrap();
+        assert_eq!(gt, GrantType::Password);
+
+        let json = r#""refresh_token""#;
+        let gt: GrantType = serde_json::from_str(json).unwrap();
+        assert_eq!(gt, GrantType::RefreshToken);
+    }
+
+    #[test]
+    fn test_token_response_serialize() {
+        let response = TokenResponse {
+            access_token: "token".to_string(),
+            token_type: "Bearer".to_string(),
+            expires_in: 3600,
+            refresh_token: None,
+            scope: None,
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["access_token"], "token");
+        assert_eq!(json["token_type"], "Bearer");
+        assert!(json.get("refresh_token").is_none());
+        assert!(json.get("scope").is_none());
+    }
+
+    #[test]
+    fn test_token_response_with_refresh() {
+        let response = TokenResponse {
+            access_token: "token".to_string(),
+            token_type: "Bearer".to_string(),
+            expires_in: 3600,
+            refresh_token: Some("refresh".to_string()),
+            scope: None,
+        };
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["refresh_token"], "refresh");
+    }
+
+    // --- Handler tests ---
+
+    #[tokio::test]
+    async fn test_token_handler_client_credentials() {
+        let state = setup_test_state().await;
+
+        let request = TokenRequest {
+            grant_type: GrantType::ClientCredentials,
+            client_id: Some("client".to_string()),
+            client_secret: Some("secret".to_string()),
+            username: None,
+            password: None,
+            refresh_token: None,
+            scope: None,
+        };
+
+        let result = token_handler(State(state), JsonOrForm(request)).await;
+
+        assert!(result.is_ok());
+        let Json(response) = result.unwrap();
+        assert_eq!(response.access_token, "mock_token");
+        assert_eq!(response.token_type, "Bearer");
+    }
+
+    #[tokio::test]
+    async fn test_token_handler_password_grant() {
+        let state = setup_test_state().await;
+
+        let request = TokenRequest {
+            grant_type: GrantType::Password,
+            client_id: None,
+            client_secret: None,
+            username: Some("user".to_string()),
+            password: Some("pass".to_string()),
+            refresh_token: None,
+            scope: None,
+        };
+
+        let result = token_handler(State(state), JsonOrForm(request)).await;
+
+        assert!(result.is_ok());
+        let Json(response) = result.unwrap();
+        assert_eq!(response.access_token, "mock_token");
+        assert!(response.refresh_token.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_token_handler_refresh_token() {
+        let state = setup_test_state().await;
+
+        let request = TokenRequest {
+            grant_type: GrantType::RefreshToken,
+            client_id: None,
+            client_secret: None,
+            username: None,
+            password: None,
+            refresh_token: Some("old_token".to_string()),
+            scope: None,
+        };
+
+        let result = token_handler(State(state), JsonOrForm(request)).await;
+
+        assert!(result.is_ok());
+        let Json(response) = result.unwrap();
+        assert_eq!(response.access_token, "new_token");
+    }
+
+    #[tokio::test]
+    async fn test_token_handler_validation_error() {
+        let state = setup_test_state().await;
+
+        let request = TokenRequest {
+            grant_type: GrantType::ClientCredentials,
+            client_id: None,
+            client_secret: None,
+            username: None,
+            password: None,
+            refresh_token: None,
+            scope: None,
+        };
+
+        let result = token_handler(State(state), JsonOrForm(request)).await;
+
+        assert!(result.is_err());
+    }
+}

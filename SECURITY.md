@@ -2,12 +2,14 @@
 
 ## Supported Versions
 
-Kruxia Flow is currently in active development. Security updates are provided for the following versions:
+Kruxia Flow is currently in active development and is in pre-release. There are not yet any supported versions.
+
+<!-- Security updates are provided for the following versions:
 
 | Version | Supported          |
 |--------:|--------------------|
 | 0.3.x   | Yes                |
-| < 0.3   | No                 |
+| < 0.3   | No                 | -->
 
 ## Reporting a Vulnerability
 
@@ -27,7 +29,7 @@ Instead, please send an email to [security@kruxia.com](mailto:security@kruxia.co
 
 ### What to Expect
 
-- **Acknowledgment**: We will acknowledge receipt of your report within 48 hours
+<!-- - **Acknowledgment**: We will acknowledge receipt of your report within 48 hours -->
 - **Initial Assessment**: We will provide an initial assessment within 7 days
 - **Resolution Timeline**: We aim to resolve critical vulnerabilities within 30 days
 - **Disclosure**: We will coordinate with you on public disclosure timing
@@ -81,7 +83,7 @@ We will not pursue civil action or initiate a complaint against researchers who:
 # Example secure Docker Compose configuration
 services:
   kruxiaflow:
-    image: ghcr.io/kruxia/kruxiaflow:latest
+    image: kruxia/kruxiaflow:latest
     security_opt:
       - no-new-privileges:true
     read_only: true
@@ -121,4 +123,4 @@ Security updates are announced through:
 
 For security-related inquiries, contact [security@kruxia.com](mailto:security@kruxia.com).
 
-For general questions, use [GitHub Discussions](https://github.com/kruxia/kruxiaflow/discussions).
+For general questions, join us on [Discord](https://discord.gg/ZJAzygCq).

@@ -253,7 +253,7 @@ fn generate_markdown_summary(results: &kruxiaflow_profiling::stress::StressTestR
     ));
 
     md.push_str("## Summary\n\n");
-    md.push_str(&format!("| Metric | Value |\n|--------|-------|\n"));
+    md.push_str("| Metric | Value |\n|--------|-------|\n");
     md.push_str(&format!(
         "| Duration | {:.1}s |\n",
         results.total_duration.as_secs_f64()
@@ -280,7 +280,7 @@ fn generate_markdown_summary(results: &kruxiaflow_profiling::stress::StressTestR
         ));
         md.push_str(&format!("**Reason**: {}\n\n", bp.failure_mode));
         md.push_str("### Metrics at Breaking Point\n\n");
-        md.push_str(&format!("| Metric | Value |\n|--------|-------|\n"));
+        md.push_str("| Metric | Value |\n|--------|-------|\n");
         md.push_str(&format!(
             "| Throughput | {:.2} wf/sec |\n",
             bp.metrics.throughput_wf_per_sec

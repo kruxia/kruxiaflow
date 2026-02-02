@@ -1,6 +1,7 @@
 use axum::http::StatusCode;
 use axum_test::TestServer;
 use kruxiaflow_api::{AppState, AppStateBuild, app_router};
+use kruxiaflow_core::PostgresSubscriptionService;
 use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
@@ -60,6 +61,7 @@ async fn setup_test_state() -> AppState {
     let workflow_storage = Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone()));
     let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
 
+    let subscription_service = Arc::new(PostgresSubscriptionService::new(pool.clone()));
     AppState::with_metadata(
         pool,
         Arc::new(auth_service),
@@ -67,6 +69,7 @@ async fn setup_test_state() -> AppState {
         event_source,
         workflow_storage,
         cache_service,
+        subscription_service,
         CancellationToken::new(),
         "0.2.0-test".to_string(),
         AppStateBuild {
@@ -523,25 +526,15 @@ async fn test_health_check_error_types() {
     // Test event source error mapping
     let event_result = kruxiaflow_api::health::check_event_source_health(&pool).await;
     assert!(event_result.is_err(), "Should fail with closed pool");
-    if let Err(e) = event_result {
-        match e {
-            HealthCheckError::EventSourceError(_) => {
-                // Expected error type
-            }
-            _ => {}
-        }
+    if let Err(HealthCheckError::EventSourceError(_)) = event_result {
+        // Expected error type
     }
 
     // Test queue error mapping
     let queue_result = kruxiaflow_api::health::check_activity_queue_health(&pool).await;
     assert!(queue_result.is_err(), "Should fail with closed pool");
-    if let Err(e) = queue_result {
-        match e {
-            HealthCheckError::QueueError(_) => {
-                // Expected error type
-            }
-            _ => {}
-        }
+    if let Err(HealthCheckError::QueueError(_)) = queue_result {
+        // Expected error type
     }
 }
 

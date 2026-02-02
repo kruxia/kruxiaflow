@@ -58,7 +58,7 @@ Example: --max-activities 32"
         long_help = "Activity types this worker handles\n\n\
 If not specified, handles all built-in activity types.\n\
 Use to create specialized workers for specific activities.\n\n\
-Example: --activity-types builtin.echo,builtin.http_request,builtin.llm_prompt"
+Example: --activity-types std.echo,std.http_request,std.llm_prompt"
     )]
     pub activity_types: Option<String>,
 
@@ -218,13 +218,13 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
     // Create cache service based on environment configuration
     let cache_config = crate::config::CacheConfig::new();
     cache_config.log_config();
-    let cache_service = cache_config.create_cache_service();
+    let cache_service = cache_config.create_cache_service().await;
 
     // Create activity registry with built-in activities
     let registry = if let Some(ref types_str) = cmd.activity_types {
         // Filter registry to only specified types
         let requested_types: Vec<&str> = types_str.split(',').map(|s| s.trim()).collect();
-        let full_registry = kruxiaflow_worker::register_builtin_activities(cache_service);
+        let full_registry = kruxiaflow_worker::register_std_activities(cache_service);
 
         // Log which types are available vs requested
         let available_types = full_registry.activity_types();
@@ -238,7 +238,7 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
         // TODO: Implement registry filtering in kruxiaflow_worker
         full_registry
     } else {
-        kruxiaflow_worker::register_builtin_activities(cache_service)
+        kruxiaflow_worker::register_std_activities(cache_service)
     };
 
     tracing::info!(
@@ -250,7 +250,7 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
     let config = WorkerConfig {
         api_url: cmd.api_url.clone(),
         worker_id: worker_id.clone(),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         poll_max_activities: cmd.poll_max_activities,
         poll_interval: Duration::from_millis(cmd.poll_interval),
         max_concurrent_activities: cmd.max_activities,
@@ -294,6 +294,7 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     fn valid_worker_command() -> WorkerCommand {
         WorkerCommand {
@@ -387,5 +388,184 @@ mod tests {
         cmd.poll_max_activities = 100;
         cmd.shutdown_timeout = 300;
         assert!(cmd.validate().is_ok());
+    }
+
+    // =========================================================================
+    // load_secret tests
+    // =========================================================================
+
+    #[test]
+    #[serial]
+    fn test_load_secret_from_env_var() {
+        unsafe {
+            std::env::set_var("TEST_WORKER_SECRET_A", "direct_value");
+            std::env::remove_var("TEST_WORKER_SECRET_A_FILE");
+        }
+
+        let result = load_secret("TEST_WORKER_SECRET_A");
+        assert_eq!(result, Some("direct_value".to_string()));
+
+        unsafe {
+            std::env::remove_var("TEST_WORKER_SECRET_A");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_secret_from_file() {
+        let file_path = std::env::temp_dir().join("kruxiaflow_test_worker_secret_b.txt");
+        std::fs::write(&file_path, "file_value\n").unwrap();
+
+        unsafe {
+            std::env::set_var("TEST_WORKER_SECRET_B_FILE", file_path.to_str().unwrap());
+            std::env::set_var("TEST_WORKER_SECRET_B", "ignored");
+        }
+
+        let result = load_secret("TEST_WORKER_SECRET_B");
+        assert_eq!(result, Some("file_value".to_string()));
+
+        unsafe {
+            std::env::remove_var("TEST_WORKER_SECRET_B_FILE");
+            std::env::remove_var("TEST_WORKER_SECRET_B");
+        }
+        let _ = std::fs::remove_file(&file_path);
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_secret_file_trims_whitespace() {
+        let file_path = std::env::temp_dir().join("kruxiaflow_test_worker_secret_c.txt");
+        std::fs::write(&file_path, "  trimmed  \n").unwrap();
+
+        unsafe {
+            std::env::set_var("TEST_WORKER_SECRET_C_FILE", file_path.to_str().unwrap());
+        }
+
+        let result = load_secret("TEST_WORKER_SECRET_C");
+        assert_eq!(result, Some("trimmed".to_string()));
+
+        unsafe {
+            std::env::remove_var("TEST_WORKER_SECRET_C_FILE");
+        }
+        let _ = std::fs::remove_file(&file_path);
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_secret_not_set() {
+        unsafe {
+            std::env::remove_var("TEST_WORKER_SECRET_D");
+            std::env::remove_var("TEST_WORKER_SECRET_D_FILE");
+        }
+
+        let result = load_secret("TEST_WORKER_SECRET_D");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_secret_file_not_found_falls_back() {
+        unsafe {
+            std::env::set_var("TEST_WORKER_SECRET_E_FILE", "/nonexistent/path.txt");
+            std::env::set_var("TEST_WORKER_SECRET_E", "fallback");
+        }
+
+        let result = load_secret("TEST_WORKER_SECRET_E");
+        assert_eq!(result, Some("fallback".to_string()));
+
+        unsafe {
+            std::env::remove_var("TEST_WORKER_SECRET_E_FILE");
+            std::env::remove_var("TEST_WORKER_SECRET_E");
+        }
+    }
+
+    // =========================================================================
+    // Additional worker command tests
+    // =========================================================================
+
+    #[test]
+    fn test_worker_command_with_activity_types() {
+        let mut cmd = valid_worker_command();
+        cmd.activity_types = Some("std.echo,std.llm_prompt".to_string());
+        assert!(cmd.validate().is_ok());
+        assert_eq!(
+            cmd.activity_types,
+            Some("std.echo,std.llm_prompt".to_string())
+        );
+    }
+
+    #[test]
+    fn test_worker_command_no_worker_id() {
+        let mut cmd = valid_worker_command();
+        cmd.worker_id = None;
+        assert!(cmd.validate().is_ok());
+    }
+
+    #[test]
+    fn test_worker_command_custom_timeouts() {
+        let mut cmd = valid_worker_command();
+        cmd.activity_timeout = 600;
+        cmd.heartbeat_interval = 60;
+        cmd.poll_interval = 200;
+        assert!(cmd.validate().is_ok());
+        assert_eq!(cmd.activity_timeout, 600);
+        assert_eq!(cmd.heartbeat_interval, 60);
+        assert_eq!(cmd.poll_interval, 200);
+    }
+
+    #[test]
+    fn test_worker_command_validation_order_max_activities_first() {
+        let mut cmd = valid_worker_command();
+        cmd.max_activities = 0;
+        cmd.poll_max_activities = 0;
+        cmd.client_secret = None;
+        cmd.api_url = "".to_string();
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Max concurrent activities")
+        );
+    }
+
+    #[test]
+    fn test_worker_command_validation_order_poll_after_max() {
+        let mut cmd = valid_worker_command();
+        cmd.poll_max_activities = 0;
+        cmd.client_secret = None;
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Max activities per poll")
+        );
+    }
+
+    #[test]
+    fn test_worker_command_validation_order_secret_after_poll() {
+        let mut cmd = valid_worker_command();
+        cmd.client_secret = None;
+        cmd.api_url = "".to_string();
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Client secret"));
+    }
+
+    #[test]
+    fn test_worker_command_validation_order_api_url_after_secret() {
+        let mut cmd = valid_worker_command();
+        cmd.api_url = "".to_string();
+        cmd.shutdown_timeout = 1;
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("API URL"));
     }
 }

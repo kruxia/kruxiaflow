@@ -285,13 +285,11 @@ fn print_text_report(report: &HealthReport, verbose: bool) {
             println!("   Latency: {}ms", latency);
         }
 
-        if verbose {
-            if let Some(ref details) = result.details {
-                println!(
-                    "   Details: {}",
-                    serde_json::to_string_pretty(details).unwrap_or_default()
-                );
-            }
+        if verbose && let Some(ref details) = result.details {
+            println!(
+                "   Details: {}",
+                serde_json::to_string_pretty(details).unwrap_or_default()
+            );
         }
     }
 
@@ -373,5 +371,795 @@ mod tests {
 
         let result = extract_service_health("database", &readiness);
         assert_eq!(result.status, HealthStatus::Unknown);
+    }
+
+    // =========================================================================
+    // extract_service_health edge cases
+    // =========================================================================
+
+    #[test]
+    fn test_extract_service_health_unhealthy() {
+        let readiness = serde_json::json!({
+            "checks": {
+                "database": {
+                    "status": "unhealthy",
+                    "message": "Connection refused"
+                }
+            }
+        });
+
+        let result = extract_service_health("database", &readiness);
+        assert_eq!(result.status, HealthStatus::Unhealthy);
+        assert_eq!(result.message, Some("Connection refused".to_string()));
+    }
+
+    #[test]
+    fn test_extract_service_health_degraded() {
+        let readiness = serde_json::json!({
+            "checks": {
+                "orchestrator": {
+                    "status": "degraded",
+                    "message": "High latency"
+                }
+            }
+        });
+
+        let result = extract_service_health("orchestrator", &readiness);
+        assert_eq!(result.status, HealthStatus::Degraded);
+    }
+
+    #[test]
+    fn test_extract_service_health_unknown_status_string() {
+        let readiness = serde_json::json!({
+            "checks": {
+                "database": {
+                    "status": "starting_up"
+                }
+            }
+        });
+
+        let result = extract_service_health("database", &readiness);
+        assert_eq!(result.status, HealthStatus::Unknown);
+        // Message falls back to status string when no message field
+        assert_eq!(result.message, Some("starting_up".to_string()));
+    }
+
+    #[test]
+    fn test_extract_service_health_missing_status_field() {
+        let readiness = serde_json::json!({
+            "checks": {
+                "database": {
+                    "message": "some message"
+                }
+            }
+        });
+
+        let result = extract_service_health("database", &readiness);
+        assert_eq!(result.status, HealthStatus::Unknown);
+    }
+
+    #[test]
+    fn test_extract_service_health_no_checks_key() {
+        let readiness = serde_json::json!({
+            "status": "ok"
+        });
+
+        let result = extract_service_health("database", &readiness);
+        assert_eq!(result.status, HealthStatus::Unknown);
+        assert_eq!(
+            result.message,
+            Some("Not reported in readiness check".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_service_health_has_details() {
+        let readiness = serde_json::json!({
+            "checks": {
+                "database": {
+                    "status": "healthy",
+                    "message": "Connected",
+                    "latency_ms": 5
+                }
+            }
+        });
+
+        let result = extract_service_health("database", &readiness);
+        assert!(result.details.is_some());
+        let details = result.details.unwrap();
+        assert_eq!(details.get("latency_ms").unwrap().as_i64(), Some(5));
+    }
+
+    // =========================================================================
+    // HealthResult serde tests
+    // =========================================================================
+
+    #[test]
+    fn test_health_result_deserialization() {
+        let json = r#"{
+            "service": "api",
+            "status": "healthy",
+            "message": "OK",
+            "latency_ms": 42
+        }"#;
+
+        let result: HealthResult = serde_json::from_str(json).unwrap();
+        assert_eq!(result.service, "api");
+        assert_eq!(result.status, HealthStatus::Healthy);
+        assert_eq!(result.latency_ms, Some(42));
+    }
+
+    #[test]
+    fn test_health_result_serialization_skips_none_details() {
+        let result = HealthResult {
+            service: "api".to_string(),
+            status: HealthStatus::Healthy,
+            message: Some("OK".to_string()),
+            latency_ms: Some(10),
+            details: None,
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(!json.contains("details"));
+    }
+
+    #[test]
+    fn test_health_result_serialization_includes_details() {
+        let result = HealthResult {
+            service: "api".to_string(),
+            status: HealthStatus::Healthy,
+            message: None,
+            latency_ms: None,
+            details: Some(serde_json::json!({"key": "value"})),
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("details"));
+        assert!(json.contains("value"));
+    }
+
+    #[test]
+    fn test_health_result_with_none_message() {
+        let result = HealthResult {
+            service: "test".to_string(),
+            status: HealthStatus::Unknown,
+            message: None,
+            latency_ms: None,
+            details: None,
+        };
+
+        let json = serde_json::to_string(&result).unwrap();
+        assert!(json.contains("\"message\":null"));
+    }
+
+    // =========================================================================
+    // HealthStatus serde tests
+    // =========================================================================
+
+    #[test]
+    fn test_health_status_serialization_all_variants() {
+        assert_eq!(
+            serde_json::to_string(&HealthStatus::Healthy).unwrap(),
+            "\"healthy\""
+        );
+        assert_eq!(
+            serde_json::to_string(&HealthStatus::Unhealthy).unwrap(),
+            "\"unhealthy\""
+        );
+        assert_eq!(
+            serde_json::to_string(&HealthStatus::Degraded).unwrap(),
+            "\"degraded\""
+        );
+        assert_eq!(
+            serde_json::to_string(&HealthStatus::Unknown).unwrap(),
+            "\"unknown\""
+        );
+    }
+
+    #[test]
+    fn test_health_status_deserialization() {
+        assert_eq!(
+            serde_json::from_str::<HealthStatus>("\"healthy\"").unwrap(),
+            HealthStatus::Healthy
+        );
+        assert_eq!(
+            serde_json::from_str::<HealthStatus>("\"unhealthy\"").unwrap(),
+            HealthStatus::Unhealthy
+        );
+        assert_eq!(
+            serde_json::from_str::<HealthStatus>("\"degraded\"").unwrap(),
+            HealthStatus::Degraded
+        );
+        assert_eq!(
+            serde_json::from_str::<HealthStatus>("\"unknown\"").unwrap(),
+            HealthStatus::Unknown
+        );
+    }
+
+    #[test]
+    fn test_health_status_copy_clone() {
+        let status = HealthStatus::Healthy;
+        let copied = status;
+        let cloned = status;
+        assert_eq!(copied, HealthStatus::Healthy);
+        assert_eq!(cloned, HealthStatus::Healthy);
+    }
+
+    // =========================================================================
+    // HealthReport tests
+    // =========================================================================
+
+    #[test]
+    fn test_health_report_serialization() {
+        let report = HealthReport {
+            overall_status: HealthStatus::Healthy,
+            services: vec![
+                HealthResult {
+                    service: "api".to_string(),
+                    status: HealthStatus::Healthy,
+                    message: Some("HTTP 200".to_string()),
+                    latency_ms: Some(5),
+                    details: None,
+                },
+                HealthResult {
+                    service: "database".to_string(),
+                    status: HealthStatus::Healthy,
+                    message: Some("Connected".to_string()),
+                    latency_ms: None,
+                    details: None,
+                },
+            ],
+            timestamp: "2026-02-01T00:00:00Z".to_string(),
+        };
+
+        let json = serde_json::to_string_pretty(&report).unwrap();
+        assert!(json.contains("api"));
+        assert!(json.contains("database"));
+        assert!(json.contains("2026-02-01"));
+    }
+
+    // =========================================================================
+    // Overall status determination tests
+    // =========================================================================
+
+    #[test]
+    fn test_overall_status_all_healthy() {
+        let results = [
+            HealthResult {
+                service: "a".to_string(),
+                status: HealthStatus::Healthy,
+                message: None,
+                latency_ms: None,
+                details: None,
+            },
+            HealthResult {
+                service: "b".to_string(),
+                status: HealthStatus::Healthy,
+                message: None,
+                latency_ms: None,
+                details: None,
+            },
+        ];
+
+        let overall = if results.iter().all(|r| r.status == HealthStatus::Healthy) {
+            HealthStatus::Healthy
+        } else if results.iter().any(|r| r.status == HealthStatus::Unhealthy) {
+            HealthStatus::Unhealthy
+        } else {
+            HealthStatus::Degraded
+        };
+
+        assert_eq!(overall, HealthStatus::Healthy);
+    }
+
+    #[test]
+    fn test_overall_status_any_unhealthy() {
+        let results = [
+            HealthResult {
+                service: "a".to_string(),
+                status: HealthStatus::Healthy,
+                message: None,
+                latency_ms: None,
+                details: None,
+            },
+            HealthResult {
+                service: "b".to_string(),
+                status: HealthStatus::Unhealthy,
+                message: None,
+                latency_ms: None,
+                details: None,
+            },
+        ];
+
+        let overall = if results.iter().all(|r| r.status == HealthStatus::Healthy) {
+            HealthStatus::Healthy
+        } else if results.iter().any(|r| r.status == HealthStatus::Unhealthy) {
+            HealthStatus::Unhealthy
+        } else {
+            HealthStatus::Degraded
+        };
+
+        assert_eq!(overall, HealthStatus::Unhealthy);
+    }
+
+    #[test]
+    fn test_overall_status_degraded() {
+        let results = [
+            HealthResult {
+                service: "a".to_string(),
+                status: HealthStatus::Healthy,
+                message: None,
+                latency_ms: None,
+                details: None,
+            },
+            HealthResult {
+                service: "b".to_string(),
+                status: HealthStatus::Degraded,
+                message: None,
+                latency_ms: None,
+                details: None,
+            },
+        ];
+
+        let overall = if results.iter().all(|r| r.status == HealthStatus::Healthy) {
+            HealthStatus::Healthy
+        } else if results.iter().any(|r| r.status == HealthStatus::Unhealthy) {
+            HealthStatus::Unhealthy
+        } else {
+            HealthStatus::Degraded
+        };
+
+        assert_eq!(overall, HealthStatus::Degraded);
+    }
+
+    #[test]
+    fn test_overall_status_unknown_is_degraded() {
+        let results = [HealthResult {
+            service: "a".to_string(),
+            status: HealthStatus::Unknown,
+            message: None,
+            latency_ms: None,
+            details: None,
+        }];
+
+        let overall = if results.iter().all(|r| r.status == HealthStatus::Healthy) {
+            HealthStatus::Healthy
+        } else if results.iter().any(|r| r.status == HealthStatus::Unhealthy) {
+            HealthStatus::Unhealthy
+        } else {
+            HealthStatus::Degraded
+        };
+
+        assert_eq!(overall, HealthStatus::Degraded);
+    }
+
+    // =========================================================================
+    // Output formatting tests
+    // =========================================================================
+
+    #[test]
+    fn test_print_text_report_no_panic() {
+        let report = HealthReport {
+            overall_status: HealthStatus::Healthy,
+            services: vec![HealthResult {
+                service: "api".to_string(),
+                status: HealthStatus::Healthy,
+                message: Some("HTTP 200".to_string()),
+                latency_ms: Some(5),
+                details: None,
+            }],
+            timestamp: "2026-02-01T00:00:00Z".to_string(),
+        };
+
+        // Should not panic
+        print_text_report(&report, false);
+    }
+
+    #[test]
+    fn test_print_text_report_verbose_no_panic() {
+        let report = HealthReport {
+            overall_status: HealthStatus::Degraded,
+            services: vec![HealthResult {
+                service: "api".to_string(),
+                status: HealthStatus::Healthy,
+                message: Some("OK".to_string()),
+                latency_ms: Some(10),
+                details: Some(serde_json::json!({"version": "0.3.0"})),
+            }],
+            timestamp: "2026-02-01T00:00:00Z".to_string(),
+        };
+
+        // Should not panic with verbose output and details
+        print_text_report(&report, true);
+    }
+
+    #[test]
+    fn test_print_text_report_no_message() {
+        let report = HealthReport {
+            overall_status: HealthStatus::Unknown,
+            services: vec![HealthResult {
+                service: "test".to_string(),
+                status: HealthStatus::Unknown,
+                message: None,
+                latency_ms: None,
+                details: None,
+            }],
+            timestamp: "2026-02-01T00:00:00Z".to_string(),
+        };
+
+        // Should not panic when message is None (shows "No details")
+        print_text_report(&report, false);
+    }
+
+    #[test]
+    fn test_print_json_report_no_panic() {
+        let report = HealthReport {
+            overall_status: HealthStatus::Unhealthy,
+            services: vec![
+                HealthResult {
+                    service: "api".to_string(),
+                    status: HealthStatus::Unhealthy,
+                    message: Some("Connection refused".to_string()),
+                    latency_ms: None,
+                    details: None,
+                },
+                HealthResult {
+                    service: "database".to_string(),
+                    status: HealthStatus::Unknown,
+                    message: Some("API unreachable".to_string()),
+                    latency_ms: None,
+                    details: None,
+                },
+            ],
+            timestamp: "2026-02-01T00:00:00Z".to_string(),
+        };
+
+        // Should not panic
+        print_json_report(&report);
+    }
+
+    #[test]
+    fn test_print_text_report_verbose_no_details() {
+        let report = HealthReport {
+            overall_status: HealthStatus::Healthy,
+            services: vec![HealthResult {
+                service: "api".to_string(),
+                status: HealthStatus::Healthy,
+                message: Some("OK".to_string()),
+                latency_ms: None,
+                details: None,
+            }],
+            timestamp: "2026-02-01T00:00:00Z".to_string(),
+        };
+
+        // Verbose mode with no details should not panic
+        print_text_report(&report, true);
+    }
+
+    // =========================================================================
+    // HealthCommand construction tests
+    // =========================================================================
+
+    #[test]
+    fn test_health_command_with_service_filter() {
+        let cmd = HealthCommand {
+            api_url: "http://localhost:8080".to_string(),
+            timeout: 10,
+            format: "json".to_string(),
+            service: Some("database".to_string()),
+            verbose: true,
+        };
+
+        assert_eq!(cmd.service, Some("database".to_string()));
+        assert!(cmd.verbose);
+        assert_eq!(cmd.format, "json");
+    }
+
+    #[test]
+    fn test_health_command_verbose_flag() {
+        let cmd = HealthCommand {
+            api_url: "http://127.0.0.1:8080".to_string(),
+            timeout: 5,
+            format: "text".to_string(),
+            service: None,
+            verbose: true,
+        };
+
+        assert!(cmd.verbose);
+    }
+
+    #[test]
+    fn test_health_result_clone() {
+        let result = HealthResult {
+            service: "api".to_string(),
+            status: HealthStatus::Healthy,
+            message: Some("OK".to_string()),
+            latency_ms: Some(10),
+            details: Some(serde_json::json!({"key": "value"})),
+        };
+
+        let cloned = result.clone();
+        assert_eq!(cloned.service, "api");
+        assert_eq!(cloned.status, HealthStatus::Healthy);
+        assert_eq!(cloned.latency_ms, Some(10));
+    }
+
+    #[test]
+    fn test_health_result_debug() {
+        let result = HealthResult {
+            service: "api".to_string(),
+            status: HealthStatus::Healthy,
+            message: None,
+            latency_ms: None,
+            details: None,
+        };
+
+        let debug_str = format!("{:?}", result);
+        assert!(debug_str.contains("HealthResult"));
+        assert!(debug_str.contains("api"));
+    }
+
+    #[test]
+    fn test_health_status_debug() {
+        let debug_str = format!("{:?}", HealthStatus::Healthy);
+        assert_eq!(debug_str, "Healthy");
+
+        let debug_str = format!("{:?}", HealthStatus::Unhealthy);
+        assert_eq!(debug_str, "Unhealthy");
+    }
+
+    // =========================================================================
+    // check_api_and_readiness integration tests with wiremock
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_check_api_and_readiness_healthy() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"status": "healthy"})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/health/ready"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ready",
+                "checks": {
+                    "database": {"status": "healthy", "message": "Connected"},
+                    "orchestrator": {"status": "healthy"}
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = Client::new();
+        let (api_result, readiness) = check_api_and_readiness(&client, &mock_server.uri()).await;
+
+        assert_eq!(api_result.status, HealthStatus::Healthy);
+        assert!(api_result.latency_ms.is_some());
+        assert!(readiness.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_check_api_and_readiness_unhealthy_api() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&mock_server)
+            .await;
+
+        let client = Client::new();
+        let (api_result, readiness) = check_api_and_readiness(&client, &mock_server.uri()).await;
+
+        assert_eq!(api_result.status, HealthStatus::Unhealthy);
+        assert!(readiness.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_check_api_and_readiness_connection_refused() {
+        let client = Client::builder()
+            .timeout(Duration::from_millis(100))
+            .build()
+            .unwrap();
+        let (api_result, readiness) = check_api_and_readiness(&client, "http://127.0.0.1:1").await;
+
+        assert_eq!(api_result.status, HealthStatus::Unhealthy);
+        assert!(api_result.message.unwrap().contains("Request failed"));
+        assert!(readiness.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_check_api_and_readiness_healthy_but_readiness_fails() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"status": "healthy"})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        // readiness endpoint returns 500
+        Mock::given(method("GET"))
+            .and(path("/health/ready"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&mock_server)
+            .await;
+
+        let client = Client::new();
+        let (api_result, _readiness) = check_api_and_readiness(&client, &mock_server.uri()).await;
+
+        assert_eq!(api_result.status, HealthStatus::Healthy);
+        // readiness might be None since the response is not valid JSON
+        // (or Some if wiremock returns empty JSON body for 500)
+    }
+
+    #[tokio::test]
+    async fn test_execute_healthy_api() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"status": "healthy"})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/health/ready"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ready",
+                "checks": {
+                    "database": {"status": "healthy"},
+                    "orchestrator": {"status": "healthy"}
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let cmd = HealthCommand {
+            api_url: mock_server.uri(),
+            service: None,
+            format: "text".to_string(),
+            timeout: 5,
+            verbose: false,
+        };
+
+        let result = execute(cmd).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_json_format() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"status": "healthy"})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/health/ready"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ready",
+                "checks": {
+                    "database": {"status": "healthy"},
+                    "orchestrator": {"status": "healthy"}
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let cmd = HealthCommand {
+            api_url: mock_server.uri(),
+            service: None,
+            format: "json".to_string(),
+            timeout: 5,
+            verbose: false,
+        };
+
+        let result = execute(cmd).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_specific_service() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"status": "healthy"})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/health/ready"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ready",
+                "checks": {
+                    "database": {"status": "healthy"},
+                    "orchestrator": {"status": "healthy"}
+                }
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let cmd = HealthCommand {
+            api_url: mock_server.uri(),
+            service: Some("database".to_string()),
+            format: "text".to_string(),
+            timeout: 5,
+            verbose: true,
+        };
+
+        let result = execute(cmd).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_execute_api_only() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/health"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"status": "healthy"})),
+            )
+            .mount(&mock_server)
+            .await;
+
+        Mock::given(method("GET"))
+            .and(path("/health/ready"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "status": "ready",
+                "checks": {}
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let cmd = HealthCommand {
+            api_url: mock_server.uri(),
+            service: Some("api".to_string()),
+            format: "text".to_string(),
+            timeout: 5,
+            verbose: false,
+        };
+
+        let result = execute(cmd).await;
+        assert!(result.is_ok());
     }
 }

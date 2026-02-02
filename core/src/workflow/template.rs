@@ -67,6 +67,10 @@ pub struct TemplateContext {
 
     /// Budget settings for current activity (used for remaining_budget_usd calculation)
     pub current_activity_budget_limit: Option<rust_decimal::Decimal>,
+
+    /// Signal data for current activity (when wait_for_signal is configured)
+    /// Available as {{SIGNAL}} or {{SIGNAL.field}} in templates
+    pub signal: Option<Value>,
 }
 
 impl TemplateContext {
@@ -78,6 +82,7 @@ impl TemplateContext {
             workflow: HashMap::new(),
             current_activity_key: None,
             current_activity_budget_limit: None,
+            signal: None,
         }
     }
 
@@ -313,6 +318,11 @@ impl TemplateContext {
                 "ACTIVITY".to_string(),
                 serde_json_to_minijinja(&activity_context),
             );
+        }
+
+        // Add SIGNAL context (for activities that received an external signal)
+        if let Some(signal_data) = &self.signal {
+            context_map.insert("SIGNAL".to_string(), serde_json_to_minijinja(signal_data));
         }
 
         MiniValue::from_object(context_map)
@@ -1830,6 +1840,447 @@ mod tests {
         let value = Value::String("{{search.results | length}}".to_string());
         let result = resolve_template_value(&value, &context).unwrap();
         assert_eq!(result, Value::Number(2.into()));
+    }
+
+    // ============================================================================
+    // Template Helper Function Tests
+    // ============================================================================
+
+    #[test]
+    fn test_contains_templates_true() {
+        assert!(contains_templates("{{INPUT.x}}"));
+        assert!(contains_templates("Hello {{name}}!"));
+        assert!(contains_templates("{{a}} and {{b}}"));
+    }
+
+    #[test]
+    fn test_contains_templates_false() {
+        assert!(!contains_templates("no templates here"));
+        assert!(!contains_templates("{{ only opening"));
+        assert!(!contains_templates("only closing }}"));
+        assert!(!contains_templates(""));
+    }
+
+    #[test]
+    fn test_is_whole_template() {
+        assert!(is_whole_template("{{INPUT.x}}"));
+        assert!(is_whole_template("  {{INPUT.x}}  "));
+        assert!(!is_whole_template("prefix {{INPUT.x}}"));
+        assert!(!is_whole_template("{{INPUT.x}} suffix"));
+        assert!(!is_whole_template("{{a}} {{b}}")); // nested
+    }
+
+    #[test]
+    fn test_extract_expression() {
+        assert_eq!(extract_expression("{{INPUT.x}}"), "INPUT.x");
+        assert_eq!(extract_expression("{{ INPUT.x }}"), "INPUT.x");
+        assert_eq!(extract_expression("not a template"), "not a template");
+    }
+
+    // ============================================================================
+    // Type Conversion Edge Cases
+    // ============================================================================
+
+    #[test]
+    fn test_serde_json_to_minijinja_null() {
+        let mini = serde_json_to_minijinja(&Value::Null);
+        assert!(mini.is_none());
+    }
+
+    #[test]
+    fn test_serde_json_to_minijinja_bool() {
+        let mini_true = serde_json_to_minijinja(&Value::Bool(true));
+        assert!(mini_true.is_true());
+        let mini_false = serde_json_to_minijinja(&Value::Bool(false));
+        assert!(!mini_false.is_true());
+    }
+
+    #[test]
+    fn test_serde_json_to_minijinja_numbers() {
+        // Integer
+        let mini_int = serde_json_to_minijinja(&serde_json::json!(42));
+        assert_eq!(mini_int.as_i64(), Some(42));
+
+        // Float
+        #[allow(clippy::approx_constant)]
+        let float_val = serde_json::json!(2.718);
+        let mini_float = serde_json_to_minijinja(&float_val);
+        assert!(mini_float.to_string().starts_with("2.718"));
+
+        // Large u64 (beyond i64 range)
+        let large_u64 = serde_json::json!(u64::MAX);
+        let mini_large = serde_json_to_minijinja(&large_u64);
+        // Should still produce a value (via u64 path)
+        assert!(!mini_large.is_undefined());
+    }
+
+    #[test]
+    fn test_serde_json_to_minijinja_array() {
+        let arr = serde_json::json!([1, "two", true]);
+        let mini = serde_json_to_minijinja(&arr);
+        let items: Vec<_> = mini.try_iter().unwrap().collect();
+        assert_eq!(items.len(), 3);
+    }
+
+    #[test]
+    fn test_serde_json_to_minijinja_object() {
+        let obj = serde_json::json!({"key": "value", "num": 42});
+        let mini = serde_json_to_minijinja(&obj);
+        let val = mini.get_item(&MiniValue::from("key")).unwrap();
+        assert_eq!(val.to_string(), "value");
+    }
+
+    #[test]
+    fn test_minijinja_to_serde_json_bool() {
+        let mini = MiniValue::from(true);
+        let json = minijinja_to_serde_json(&mini);
+        assert_eq!(json, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_minijinja_to_serde_json_integer() {
+        let mini = MiniValue::from(42_i64);
+        let json = minijinja_to_serde_json(&mini);
+        assert_eq!(json, serde_json::json!(42));
+    }
+
+    #[test]
+    fn test_minijinja_to_serde_json_string() {
+        let mini = MiniValue::from("hello");
+        let json = minijinja_to_serde_json(&mini);
+        assert_eq!(json, Value::String("hello".to_string()));
+    }
+
+    #[test]
+    fn test_minijinja_to_serde_json_undefined() {
+        let mini = MiniValue::UNDEFINED;
+        let json = minijinja_to_serde_json(&mini);
+        assert_eq!(json, Value::Null);
+    }
+
+    #[test]
+    fn test_minijinja_to_serde_json_none() {
+        let mini = MiniValue::from(());
+        let json = minijinja_to_serde_json(&mini);
+        assert_eq!(json, Value::Null);
+    }
+
+    #[test]
+    fn test_minijinja_to_serde_json_seq() {
+        let mini = MiniValue::from(vec![MiniValue::from(1), MiniValue::from(2)]);
+        let json = minijinja_to_serde_json(&mini);
+        assert_eq!(json, serde_json::json!([1, 2]));
+    }
+
+    // ============================================================================
+    // Template Resolution Edge Cases
+    // ============================================================================
+
+    #[test]
+    fn test_resolve_template_value_passthrough_number() {
+        let context = TemplateContext::new();
+        let value = serde_json::json!(42);
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, serde_json::json!(42));
+    }
+
+    #[test]
+    fn test_resolve_template_value_passthrough_bool() {
+        let context = TemplateContext::new();
+        let value = Value::Bool(true);
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_resolve_template_value_passthrough_null() {
+        let context = TemplateContext::new();
+        let value = Value::Null;
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Null);
+    }
+
+    #[test]
+    fn test_resolve_template_value_no_template_string() {
+        let context = TemplateContext::new();
+        let value = Value::String("plain string".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("plain string".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_template_invalid_syntax() {
+        let context = TemplateContext::new();
+        let value = Value::String("{{a +}}".to_string());
+        let result = resolve_template_value(&value, &context);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_resolve_template_no_templates_returns_string() {
+        let context = TemplateContext::new();
+        let result = resolve_template("no templates", &context).unwrap();
+        assert_eq!(result, "no templates");
+    }
+
+    // ============================================================================
+    // FILE and FOLDER Context Tests
+    // ============================================================================
+
+    #[test]
+    fn test_file_context() {
+        use crate::workflow::{ActivityOutput, OutputType};
+
+        let mut context = TemplateContext::new();
+        let outputs = vec![ActivityOutput {
+            name: "document".to_string(),
+            output_type: OutputType::File,
+            value: Value::String("file:abc123:doc.pdf".to_string()),
+        }];
+        context.add_activity_output("upload".to_string(), outputs);
+
+        // FILE.upload.document should be accessible
+        let value = Value::String("{{FILE.upload.document}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("file:abc123:doc.pdf".to_string()));
+    }
+
+    #[test]
+    fn test_folder_context() {
+        use crate::workflow::{ActivityOutput, OutputType};
+
+        let mut context = TemplateContext::new();
+        let outputs = vec![ActivityOutput {
+            name: "output_dir".to_string(),
+            output_type: OutputType::Folder,
+            value: Value::String("folder:xyz789:output".to_string()),
+        }];
+        context.add_activity_output("process".to_string(), outputs);
+
+        // FOLDER.process.output_dir should be accessible
+        let value = Value::String("{{FOLDER.process.output_dir}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("folder:xyz789:output".to_string()));
+    }
+
+    #[test]
+    fn test_file_output_non_string_value_ignored() {
+        use crate::workflow::{ActivityOutput, OutputType};
+
+        let mut context = TemplateContext::new();
+        let outputs = vec![ActivityOutput {
+            name: "document".to_string(),
+            output_type: OutputType::File,
+            value: serde_json::json!(42), // Not a string - should be ignored for FILE context
+        }];
+        context.add_activity_output("upload".to_string(), outputs);
+
+        // FILE context should not have upload entry since value is not a string
+        let value = Value::String("{{FILE.upload.document}}".to_string());
+        let result = resolve_template_value(&value, &context);
+        // FILE might not even exist if no file outputs added
+        assert!(result.is_err() || result.unwrap() == Value::Null);
+    }
+
+    // ============================================================================
+    // SIGNAL Context Tests
+    // ============================================================================
+
+    #[test]
+    fn test_signal_context() {
+        let mut context = TemplateContext::new();
+        context.signal = Some(serde_json::json!({"approved": true, "comment": "looks good"}));
+
+        let value = Value::String("{{SIGNAL.approved}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::Bool(true));
+
+        let value = Value::String("{{SIGNAL.comment}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("looks good".to_string()));
+    }
+
+    #[test]
+    fn test_signal_context_not_set() {
+        let context = TemplateContext::new();
+        // SIGNAL is not set, should error in strict mode
+        let value = Value::String("{{SIGNAL.field}}".to_string());
+        let result = resolve_template_value(&value, &context);
+        assert!(result.is_err());
+    }
+
+    // ============================================================================
+    // Remaining Budget Edge Cases
+    // ============================================================================
+
+    #[test]
+    fn test_remaining_budget_overspent() {
+        let mut context = TemplateContext::new();
+        context.add_activity_state(
+            "expensive".to_string(),
+            vec![],
+            None,
+            0,
+            rust_decimal::Decimal::new(1500, 2), // $15.00 spent
+            "running".to_string(),
+        );
+
+        // Budget limit is $10.00 but already spent $15.00
+        context = context.with_current_activity(
+            "expensive".to_string(),
+            Some(rust_decimal::Decimal::new(1000, 2)),
+        );
+
+        let value = Value::String("{{ACTIVITY.remaining_budget_usd}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        // Should be clamped to 0 (not negative)
+        assert_eq!(result, Value::String("0".to_string()));
+    }
+
+    #[test]
+    fn test_remaining_budget_no_limit() {
+        let mut context = TemplateContext::new();
+        context.add_activity_state(
+            "unlimited".to_string(),
+            vec![],
+            None,
+            0,
+            rust_decimal::Decimal::new(500, 2),
+            "running".to_string(),
+        );
+
+        // No budget limit
+        context = context.with_current_activity("unlimited".to_string(), None);
+
+        let value = Value::String("{{ACTIVITY.remaining_budget_usd}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("0.00".to_string()));
+    }
+
+    // ============================================================================
+    // Empty Iteration Outputs
+    // ============================================================================
+
+    #[test]
+    fn test_empty_iteration_outputs() {
+        let mut context = TemplateContext::new();
+        let iteration_outputs = HashMap::new(); // Empty
+
+        context.add_activity_state(
+            "loop_step".to_string(),
+            vec![],
+            Some(iteration_outputs),
+            0,
+            rust_decimal::Decimal::ZERO,
+            "pending".to_string(),
+        );
+
+        // Status should still be accessible
+        let value = Value::String("{{loop_step.status}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("pending".to_string()));
+    }
+
+    // ============================================================================
+    // WORKFLOW Context Tests
+    // ============================================================================
+
+    #[test]
+    fn test_workflow_context() {
+        let mut context = TemplateContext::new();
+        context
+            .workflow
+            .insert("id".to_string(), serde_json::json!("wf-123"));
+        context
+            .workflow
+            .insert("name".to_string(), serde_json::json!("my_workflow"));
+
+        let value = Value::String("{{WORKFLOW.id}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, Value::String("wf-123".to_string()));
+    }
+
+    // ============================================================================
+    // TemplateContext Builder Methods
+    // ============================================================================
+
+    #[test]
+    fn test_template_context_default() {
+        let context = TemplateContext::default();
+        assert!(context.inputs.is_empty());
+        assert!(context.activity_states.is_empty());
+        assert!(context.secrets.is_empty());
+        assert!(context.workflow.is_empty());
+        assert!(context.current_activity_key.is_none());
+        assert!(context.current_activity_budget_limit.is_none());
+        assert!(context.signal.is_none());
+    }
+
+    #[test]
+    fn test_template_context_with_inputs() {
+        let mut inputs = HashMap::new();
+        inputs.insert("key".to_string(), serde_json::json!("value"));
+        let context = TemplateContext::new().with_inputs(inputs);
+        assert_eq!(context.inputs.len(), 1);
+        assert_eq!(context.inputs.get("key").unwrap(), "value");
+    }
+
+    #[test]
+    fn test_add_activity_output_legacy() {
+        use crate::workflow::{ActivityOutput, OutputType};
+
+        let mut context = TemplateContext::new();
+        let outputs = vec![ActivityOutput {
+            name: "result".to_string(),
+            output_type: OutputType::Value,
+            value: serde_json::json!("done"),
+        }];
+        context.add_activity_output("step".to_string(), outputs);
+
+        // Should default to completed status
+        let info = context.activity_states.get("step").unwrap();
+        assert_eq!(info.status, "completed");
+        assert_eq!(info.iteration, 0);
+        assert!(info.iteration_outputs.is_none());
+    }
+
+    // ============================================================================
+    // TemplateError Tests
+    // ============================================================================
+
+    #[test]
+    fn test_template_error_display() {
+        let err = TemplateError::ReferenceNotFound("INPUT.missing".to_string());
+        assert_eq!(
+            err.to_string(),
+            "Template reference not found: INPUT.missing"
+        );
+
+        let err = TemplateError::InvalidSyntax("bad syntax".to_string());
+        assert_eq!(err.to_string(), "Invalid template syntax: bad syntax");
+
+        let err = TemplateError::TypeError("expected string".to_string());
+        assert_eq!(err.to_string(), "Type error: expected string");
+
+        let err = TemplateError::EvaluationError("eval failed".to_string());
+        assert_eq!(err.to_string(), "Template evaluation error: eval failed");
+    }
+
+    #[test]
+    fn test_template_error_from_minijinja() {
+        // Create a minijinja error by attempting invalid evaluation
+        let env = Environment::new();
+        let expr = env.compile_expression("1 / 0");
+        if let Ok(expr) = expr {
+            let result = expr.eval(MiniValue::UNDEFINED);
+            if let Err(e) = result {
+                let template_err: TemplateError = e.into();
+                match template_err {
+                    TemplateError::EvaluationError(_) => {} // expected
+                    _ => panic!("Expected EvaluationError"),
+                }
+            }
+        }
     }
 
     #[test]

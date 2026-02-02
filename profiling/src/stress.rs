@@ -651,3 +651,371 @@ fn percentile(sorted_values: &[u64], p: f64) -> u64 {
     let index = ((sorted_values.len() as f64) * p) as usize;
     sorted_values[index.min(sorted_values.len() - 1)]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stress_test_config_default() {
+        let config = StressTestConfig::default();
+        assert_eq!(config.initial_concurrent, 100);
+        assert_eq!(config.peak_concurrent, 10_000);
+        assert_eq!(config.step_size, 500);
+        assert_eq!(config.error_rate_threshold, 0.05);
+        assert!(config.stop_on_failure);
+    }
+
+    #[test]
+    fn test_stress_test_config_quick() {
+        let config = StressTestConfig::quick();
+        assert_eq!(config.initial_concurrent, 100);
+        assert_eq!(config.peak_concurrent, 1_000);
+        assert_eq!(config.step_size, 100);
+    }
+
+    #[test]
+    fn test_stress_test_config_standard() {
+        let config = StressTestConfig::standard();
+        assert_eq!(config.initial_concurrent, 100);
+        assert_eq!(config.peak_concurrent, 5_000);
+        assert_eq!(config.step_size, 300);
+    }
+
+    #[test]
+    fn test_num_steps() {
+        let config = StressTestConfig {
+            initial_concurrent: 100,
+            peak_concurrent: 1000,
+            step_size: 100,
+            ..StressTestConfig::default()
+        };
+        assert_eq!(config.num_steps(), 10); // (1000-100)/100 + 1
+
+        // Edge case: peak == initial
+        let config2 = StressTestConfig {
+            initial_concurrent: 100,
+            peak_concurrent: 100,
+            step_size: 100,
+            ..StressTestConfig::default()
+        };
+        assert_eq!(config2.num_steps(), 1);
+
+        // Edge case: peak < initial
+        let config3 = StressTestConfig {
+            initial_concurrent: 200,
+            peak_concurrent: 100,
+            step_size: 100,
+            ..StressTestConfig::default()
+        };
+        assert_eq!(config3.num_steps(), 1);
+    }
+
+    #[test]
+    fn test_estimated_duration() {
+        let config = StressTestConfig {
+            initial_concurrent: 100,
+            peak_concurrent: 600,
+            step_size: 100,
+            step_duration: Duration::from_secs(30),
+            cooldown: Duration::from_secs(5),
+            ..StressTestConfig::default()
+        };
+        // 6 steps * (30 + 5) = 210 seconds
+        assert_eq!(config.estimated_duration(), Duration::from_secs(210));
+    }
+
+    #[test]
+    fn test_step_metrics_exceeded_error_threshold() {
+        let step = StepMetrics {
+            step_number: 0,
+            target_concurrent: 100,
+            actual_concurrent: 100,
+            total_workflows: 100,
+            successful_workflows: 90,
+            failed_workflows: 10,
+            throughput_wf_per_sec: 50.0,
+            success_rate: 0.90,
+            p50_latency_ms: 100,
+            p95_latency_ms: 200,
+            p99_latency_ms: 500,
+            cpu_percent: 50.0,
+            memory_mb: 500.0,
+            db_connections: 10,
+            duration: Duration::from_secs(30),
+            errors: vec![],
+            started_at: Utc::now(),
+        };
+
+        assert!(step.exceeded_error_threshold(0.05)); // 10% > 5%
+        assert!(!step.exceeded_error_threshold(0.15)); // 10% < 15%
+    }
+
+    #[test]
+    fn test_step_metrics_exceeded_latency_threshold() {
+        let step = StepMetrics {
+            step_number: 0,
+            target_concurrent: 100,
+            actual_concurrent: 100,
+            total_workflows: 100,
+            successful_workflows: 99,
+            failed_workflows: 1,
+            throughput_wf_per_sec: 50.0,
+            success_rate: 0.99,
+            p50_latency_ms: 100,
+            p95_latency_ms: 200,
+            p99_latency_ms: 5000,
+            cpu_percent: 50.0,
+            memory_mb: 500.0,
+            db_connections: 10,
+            duration: Duration::from_secs(30),
+            errors: vec![],
+            started_at: Utc::now(),
+        };
+
+        assert!(step.exceeded_latency_threshold(3000)); // 5000 > 3000
+        assert!(!step.exceeded_latency_threshold(10000)); // 5000 < 10000
+    }
+
+    #[test]
+    fn test_failure_mode_display() {
+        let error_rate = FailureMode::ErrorRateExceeded {
+            actual_rate: 0.10,
+            threshold: 0.05,
+        };
+        let display = format!("{}", error_rate);
+        assert!(display.contains("10.0%"));
+        assert!(display.contains("5.0%"));
+
+        let latency = FailureMode::LatencyExceeded {
+            actual_ms: 20000,
+            threshold_ms: 15000,
+        };
+        let display = format!("{}", latency);
+        assert!(display.contains("20000ms"));
+        assert!(display.contains("15000ms"));
+
+        let throughput = FailureMode::ThroughputDegraded {
+            current_wf_per_sec: 20.0,
+            baseline_wf_per_sec: 50.0,
+            degradation_percent: 60.0,
+        };
+        let display = format!("{}", throughput);
+        assert!(display.contains("60.0%"));
+        assert!(display.contains("50.0"));
+        assert!(display.contains("20.0"));
+
+        let resource = FailureMode::ResourceExhausted {
+            resource: "CPU".to_string(),
+            current_value: 99.0,
+            threshold: 85.0,
+        };
+        let display = format!("{}", resource);
+        assert!(display.contains("CPU"));
+        assert!(display.contains("99.0"));
+        assert!(display.contains("85.0"));
+    }
+
+    #[test]
+    fn test_detect_failure_error_rate() {
+        let step = StepMetrics {
+            step_number: 0,
+            target_concurrent: 100,
+            actual_concurrent: 100,
+            total_workflows: 100,
+            successful_workflows: 90,
+            failed_workflows: 10,
+            throughput_wf_per_sec: 50.0,
+            success_rate: 0.90,
+            p50_latency_ms: 100,
+            p95_latency_ms: 200,
+            p99_latency_ms: 500,
+            cpu_percent: 50.0,
+            memory_mb: 500.0,
+            db_connections: 10,
+            duration: Duration::from_secs(30),
+            errors: vec![],
+            started_at: Utc::now(),
+        };
+        let config = StressTestConfig::default();
+
+        let failure = detect_failure(&step, &config, 50.0);
+        assert!(failure.is_some());
+        assert!(matches!(
+            failure.unwrap(),
+            FailureMode::ErrorRateExceeded { .. }
+        ));
+    }
+
+    #[test]
+    fn test_detect_failure_latency() {
+        let step = StepMetrics {
+            step_number: 0,
+            target_concurrent: 100,
+            actual_concurrent: 100,
+            total_workflows: 100,
+            successful_workflows: 99,
+            failed_workflows: 1,
+            throughput_wf_per_sec: 50.0,
+            success_rate: 0.99,
+            p50_latency_ms: 100,
+            p95_latency_ms: 200,
+            p99_latency_ms: 20000, // Over threshold
+            cpu_percent: 50.0,
+            memory_mb: 500.0,
+            db_connections: 10,
+            duration: Duration::from_secs(30),
+            errors: vec![],
+            started_at: Utc::now(),
+        };
+        let config = StressTestConfig::default();
+
+        let failure = detect_failure(&step, &config, 50.0);
+        assert!(failure.is_some());
+        assert!(matches!(
+            failure.unwrap(),
+            FailureMode::LatencyExceeded { .. }
+        ));
+    }
+
+    #[test]
+    fn test_detect_failure_throughput_degradation() {
+        let step = StepMetrics {
+            step_number: 1, // Not first step
+            target_concurrent: 500,
+            actual_concurrent: 500,
+            total_workflows: 100,
+            successful_workflows: 99,
+            failed_workflows: 1,
+            throughput_wf_per_sec: 20.0, // 60% degradation from baseline of 50
+            success_rate: 0.99,
+            p50_latency_ms: 100,
+            p95_latency_ms: 200,
+            p99_latency_ms: 500,
+            cpu_percent: 50.0,
+            memory_mb: 500.0,
+            db_connections: 10,
+            duration: Duration::from_secs(30),
+            errors: vec![],
+            started_at: Utc::now(),
+        };
+        let config = StressTestConfig::default();
+
+        let failure = detect_failure(&step, &config, 50.0);
+        assert!(failure.is_some());
+        assert!(matches!(
+            failure.unwrap(),
+            FailureMode::ThroughputDegraded { .. }
+        ));
+    }
+
+    #[test]
+    fn test_detect_failure_no_failure() {
+        let step = StepMetrics {
+            step_number: 0,
+            target_concurrent: 100,
+            actual_concurrent: 100,
+            total_workflows: 100,
+            successful_workflows: 99,
+            failed_workflows: 1,
+            throughput_wf_per_sec: 50.0,
+            success_rate: 0.99,
+            p50_latency_ms: 100,
+            p95_latency_ms: 200,
+            p99_latency_ms: 500,
+            cpu_percent: 50.0,
+            memory_mb: 500.0,
+            db_connections: 10,
+            duration: Duration::from_secs(30),
+            errors: vec![],
+            started_at: Utc::now(),
+        };
+        let config = StressTestConfig::default();
+
+        let failure = detect_failure(&step, &config, 50.0);
+        assert!(failure.is_none());
+    }
+
+    #[test]
+    fn test_percentile_empty() {
+        assert_eq!(percentile(&[], 0.5), 0);
+    }
+
+    #[test]
+    fn test_percentile_single() {
+        assert_eq!(percentile(&[100], 0.5), 100);
+        assert_eq!(percentile(&[100], 0.99), 100);
+    }
+
+    #[test]
+    fn test_percentile_multiple() {
+        let values: Vec<u64> = (1..=100).collect();
+        assert_eq!(percentile(&values, 0.50), 51);
+        assert_eq!(percentile(&values, 0.95), 96);
+        assert_eq!(percentile(&values, 0.99), 100);
+    }
+
+    #[test]
+    fn test_stress_test_results_summary() {
+        let results = StressTestResults {
+            config: StressTestConfig::default(),
+            steps: vec![],
+            breaking_point: None,
+            peak_throughput_wf_per_sec: 50.0,
+            max_concurrent_achieved: 100,
+            total_duration: Duration::from_secs(60),
+            started_at: Utc::now(),
+            completed_at: Utc::now(),
+        };
+
+        let summary = results.summary();
+        assert!(summary.contains("STRESS TEST RESULTS"));
+        assert!(summary.contains("60.0s"));
+        assert!(summary.contains("50.00 wf/sec"));
+        assert!(summary.contains("No breaking point detected"));
+    }
+
+    #[test]
+    fn test_stress_test_results_summary_with_breaking_point() {
+        let step = StepMetrics {
+            step_number: 2,
+            target_concurrent: 1100,
+            actual_concurrent: 1100,
+            total_workflows: 100,
+            successful_workflows: 90,
+            failed_workflows: 10,
+            throughput_wf_per_sec: 70.0,
+            success_rate: 0.90,
+            p50_latency_ms: 100,
+            p95_latency_ms: 200,
+            p99_latency_ms: 500,
+            cpu_percent: 50.0,
+            memory_mb: 500.0,
+            db_connections: 10,
+            duration: Duration::from_secs(30),
+            errors: vec![],
+            started_at: Utc::now(),
+        };
+
+        let results = StressTestResults {
+            config: StressTestConfig::default(),
+            steps: vec![step.clone()],
+            breaking_point: Some(BreakingPoint {
+                concurrent_workflows: 1100,
+                failure_mode: FailureMode::ErrorRateExceeded {
+                    actual_rate: 0.10,
+                    threshold: 0.05,
+                },
+                metrics: step,
+            }),
+            peak_throughput_wf_per_sec: 80.0,
+            max_concurrent_achieved: 1100,
+            total_duration: Duration::from_secs(120),
+            started_at: Utc::now(),
+            completed_at: Utc::now(),
+        };
+
+        let summary = results.summary();
+        assert!(summary.contains("BREAKING POINT DETECTED at 1100"));
+    }
+}

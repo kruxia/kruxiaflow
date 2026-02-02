@@ -220,17 +220,17 @@ let scheduled_for = if activity_state.attempt > 0 {
    ```yaml
    activities:
      - key: call_1
-       worker: builtin
+       worker: std
        activity_name: http_request
 
      - key: call_2
-       worker: builtin
+       worker: std
        activity_name: http_request
        scheduled_for: "1s"  # 1 call per second
        depends_on: [call_1]
 
      - key: call_3
-       worker: builtin
+       worker: std
        activity_name: http_request
        scheduled_for: "1s"
        depends_on: [call_2]
@@ -240,7 +240,7 @@ let scheduled_for = if activity_state.attempt > 0 {
    ```yaml
    activities:
      - key: check_status
-       worker: builtin
+       worker: std
        activity_name: http_request
        iteration_scoped: true
        outputs:
@@ -248,7 +248,7 @@ let scheduled_for = if activity_state.attempt > 0 {
          - complete
 
      - key: check_again
-       worker: builtin
+       worker: std
        activity_name: http_request
        scheduled_for: "{{check_status.retry_after | last}}s"
        depends_on:
@@ -261,7 +261,7 @@ let scheduled_for = if activity_state.attempt > 0 {
    ```yaml
    activities:
      - key: generate_report
-       worker: builtin
+       worker: std
        activity_name: llm_call
        scheduled_for: "2025-12-01T09:00:00Z"  # Specific time
    ```

@@ -56,6 +56,7 @@ fn test_apply_activity_scheduled_event() {
                 accumulated_cost_usd: Decimal::ZERO,
                 iteration: 0,
                 iteration_outputs: None,
+                signal_data: None,
             },
         )]
         .into_iter()
@@ -102,6 +103,7 @@ fn test_apply_activity_completed_event() {
                 accumulated_cost_usd: Decimal::ZERO,
                 iteration: 0,
                 iteration_outputs: None,
+                signal_data: None,
             },
         )]
         .into_iter()
@@ -156,6 +158,7 @@ fn test_apply_activity_failed_event() {
                 accumulated_cost_usd: Decimal::ZERO,
                 iteration: 0,
                 iteration_outputs: None,
+                signal_data: None,
             },
         )]
         .into_iter()
@@ -258,6 +261,7 @@ fn test_apply_multiple_events_sequential() {
                     accumulated_cost_usd: Decimal::ZERO,
                     iteration: 0,
                     iteration_outputs: None,
+                    signal_data: None,
                 },
             ),
             (
@@ -274,6 +278,7 @@ fn test_apply_multiple_events_sequential() {
                     accumulated_cost_usd: Decimal::ZERO,
                     iteration: 0,
                     iteration_outputs: None,
+                    signal_data: None,
                 },
             ),
         ]

@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE activity_event_subscriptions\n            SET expired_at = $1\n            WHERE id IN (\n                SELECT id FROM activity_event_subscriptions\n                WHERE timeout_at <= $1\n                  AND signal_data IS NULL\n                  AND expired_at IS NULL\n                ORDER BY timeout_at\n                LIMIT $2\n            )\n            RETURNING id, workflow_id, activity_key, event_name, on_timeout\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "workflow_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "activity_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "event_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "on_timeout",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "67756059750e69df13c12f010db6949a3f97d1eac19ce810c366b1ba02d6b89e"
+}

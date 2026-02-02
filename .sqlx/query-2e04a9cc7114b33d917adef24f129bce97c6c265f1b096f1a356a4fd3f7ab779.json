@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "TRUNCATE activity_costs, workflows, workflow_definitions, llm_models, llm_providers CASCADE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "2e04a9cc7114b33d917adef24f129bce97c6c265f1b096f1a356a4fd3f7ab779"
+}

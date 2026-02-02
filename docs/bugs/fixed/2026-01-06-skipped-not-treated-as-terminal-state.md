@@ -16,12 +16,12 @@ When a workflow has conditional dependencies where some paths don't run:
 ```yaml
 activities:
   - key: fetch_source
-    worker: builtin
+    worker: std
     activity_name: postgres_query
     # ...
 
   - key: lookup_doi_org
-    worker: builtin
+    worker: std
     activity_name: http_request
     depends_on:
       - activity_key: fetch_source
@@ -29,7 +29,7 @@ activities:
     # Only runs if DOI is available
 
   - key: search_openalex
-    worker: builtin
+    worker: std
     activity_name: http_request
     depends_on:
       - activity_key: fetch_source
@@ -37,7 +37,7 @@ activities:
     # Runs if title is available
 
   - key: extract_bibliography
-    worker: builtin
+    worker: std
     activity_name: llm_prompt
     depends_on:
       - activity_key: search_openalex

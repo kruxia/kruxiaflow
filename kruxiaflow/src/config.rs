@@ -34,9 +34,9 @@ impl CacheConfig {
     }
 
     /// Create cache service based on configuration
-    pub fn create_cache_service(&self) -> Arc<dyn CacheService> {
+    pub async fn create_cache_service(&self) -> Arc<dyn CacheService> {
         match self.provider.as_str() {
-            "redis" => self.create_redis_cache(),
+            "redis" => self.create_redis_cache().await,
             _ => {
                 tracing::info!("Cache disabled (using NoOpCache)");
                 Arc::new(kruxiaflow_core::NoOpCache::new())
@@ -45,7 +45,7 @@ impl CacheConfig {
     }
 
     #[cfg(feature = "redis-cache")]
-    fn create_redis_cache(&self) -> Arc<dyn CacheService> {
+    async fn create_redis_cache(&self) -> Arc<dyn CacheService> {
         let redis_url = self
             .redis_url
             .as_deref()
@@ -54,10 +54,7 @@ impl CacheConfig {
         match kruxiaflow_core::RedisCache::new(redis_url, self.redis_key_prefix.clone()) {
             Ok(cache) => {
                 // Test connectivity
-                match tokio::runtime::Runtime::new()
-                    .unwrap()
-                    .block_on(cache.ping())
-                {
+                match cache.ping().await {
                     Ok(_) => {
                         tracing::info!(
                             redis_url = %self.redact_redis_url(redis_url),
@@ -85,7 +82,7 @@ impl CacheConfig {
     }
 
     #[cfg(not(feature = "redis-cache"))]
-    fn create_redis_cache(&self) -> Arc<dyn CacheService> {
+    async fn create_redis_cache(&self) -> Arc<dyn CacheService> {
         tracing::warn!(
             "Redis caching requested but redis-cache feature not enabled, falling back to NoOpCache"
         );
@@ -95,12 +92,12 @@ impl CacheConfig {
     /// Redact password from Redis URL for logging
     fn redact_redis_url(&self, url: &str) -> String {
         // Format: redis://[:password@]host:port[/db]
-        if let Some(at_pos) = url.find('@') {
-            if let Some(colon_pos) = url[..at_pos].rfind(':') {
-                let mut redacted = url.to_string();
-                redacted.replace_range(colon_pos + 1..at_pos, "***");
-                return redacted;
-            }
+        if let Some(at_pos) = url.find('@')
+            && let Some(colon_pos) = url[..at_pos].rfind(':')
+        {
+            let mut redacted = url.to_string();
+            redacted.replace_range(colon_pos + 1..at_pos, "***");
+            return redacted;
         }
         url.to_string()
     }
@@ -527,6 +524,39 @@ mod tests {
         assert_eq!(cloned.database_url, config.database_url);
         assert_eq!(cloned.port, config.port);
         assert_eq!(cloned.bind, config.bind);
+    }
+
+    #[test]
+    fn test_cache_config_log_config_with_redis() {
+        let config = CacheConfig {
+            provider: "redis".to_string(),
+            redis_url: Some("redis://:secret@localhost:6379".to_string()),
+            redis_key_prefix: Some("test:".to_string()),
+        };
+        // Should not panic
+        config.log_config();
+    }
+
+    #[test]
+    fn test_cache_config_log_config_without_redis() {
+        let config = CacheConfig {
+            provider: "noop".to_string(),
+            redis_url: None,
+            redis_key_prefix: None,
+        };
+        // Should not panic
+        config.log_config();
+    }
+
+    #[test]
+    fn test_api_config_log_config() {
+        let config = ApiConfig {
+            database_url: "postgres://user:pass@localhost:5432/db".to_string(),
+            port: 8080,
+            bind: "0.0.0.0".to_string(),
+        };
+        // Should not panic
+        config.log_config();
     }
 
     #[test]

@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO oauth_users (username, email, password_hash, is_active)\n        VALUES ($1, $2, $3, true)\n        ON CONFLICT (email) DO UPDATE\n        SET username = EXCLUDED.username, password_hash = EXCLUDED.password_hash, is_active = true\n        RETURNING id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c199a0edc44278c7eb29237a873f3f4f55721894240cce1a70d15bd2a2b5ea53"
+}

@@ -72,18 +72,19 @@ fn test_activity_status_all_variants() {
 fn test_activity_serialization() {
     let activity = Activity {
         key: "act1".to_string(),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         activity_name: "TestActivity".to_string(),
         parameters: json!({"input": "data"}),
         settings: None,
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     let json = serde_json::to_string(&activity).unwrap();
     assert!(json.contains("act1"));
-    assert!(json.contains("builtin"));
+    assert!(json.contains("std"));
     assert!(json.contains("TestActivity"));
     assert!(json.contains("input"));
 }
@@ -105,17 +106,19 @@ fn test_activity_with_settings() {
         iteration_limit: None,
         delay: None,
         scheduled_for: None,
+        wait_for_signal: None,
     };
 
     let activity = Activity {
         key: "act1".to_string(),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         activity_name: "TestActivity".to_string(),
         parameters: json!({}),
         settings: Some(settings),
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     let json = serde_json::to_string(&activity).unwrap();
@@ -128,13 +131,14 @@ fn test_activity_with_scheduled_for() {
     let scheduled = Utc::now();
     let activity = Activity {
         key: "act1".to_string(),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         activity_name: "TestActivity".to_string(),
         parameters: json!({}),
         settings: None,
         scheduled_for: Some(scheduled),
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     let json = serde_json::to_string(&activity).unwrap();
@@ -152,6 +156,7 @@ fn test_activity_clone() {
         scheduled_for: None,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     let activity2 = activity1.clone();
@@ -175,11 +180,12 @@ fn test_activity_settings_default_values() {
         iteration_limit: None,
         delay: None,
         scheduled_for: None,
+        wait_for_signal: None,
     };
 
     let json = serde_json::to_string(&settings).unwrap();
     let deserialized: ActivitySettings = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized.cache, false);
+    assert!(!deserialized.cache);
     assert_eq!(deserialized.cache_ttl, None);
 }
 
@@ -203,6 +209,7 @@ fn test_activity_settings_with_all_options() {
         iteration_limit: None,
         delay: None,
         scheduled_for: None,
+        wait_for_signal: None,
     };
 
     let json = serde_json::to_string(&settings).unwrap();
@@ -223,6 +230,7 @@ fn test_activity_settings_serialization_skips_none() {
         iteration_limit: None,
         delay: None,
         scheduled_for: None,
+        wait_for_signal: None,
     };
 
     let json = serde_json::to_string(&settings).unwrap();
@@ -251,6 +259,7 @@ fn test_activity_settings_clone() {
         iteration_limit: None,
         delay: None,
         scheduled_for: None,
+        wait_for_signal: None,
     };
 
     let settings2 = settings1.clone();
@@ -368,7 +377,7 @@ fn test_queued_activity_serialization() {
         id,
         workflow_id,
         activity_key: "act1".to_string(),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         activity_name: "TestActivity".to_string(),
         parameters: json!({"input": "data"}),
         settings: None,
@@ -376,6 +385,7 @@ fn test_queued_activity_serialization() {
         claimed_at,
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     let json = serde_json::to_string(&activity).unwrap();
@@ -405,13 +415,14 @@ fn test_queued_activity_with_settings() {
         iteration_limit: None,
         delay: None,
         scheduled_for: None,
+        wait_for_signal: None,
     };
 
     let activity = QueuedActivity {
         id,
         workflow_id,
         activity_key: "act1".to_string(),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         activity_name: "TestActivity".to_string(),
         parameters: json!({}),
         settings: Some(settings),
@@ -419,6 +430,7 @@ fn test_queued_activity_with_settings() {
         claimed_at: Utc::now(),
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     let json = serde_json::to_string(&activity).unwrap();
@@ -443,6 +455,7 @@ fn test_queued_activity_clone() {
         claimed_at: Utc::now(),
         output_definitions: None,
         iteration: None,
+        signal_data: None,
     };
 
     let activity2 = activity1.clone();
@@ -586,6 +599,6 @@ fn test_activity_settings_deserialization_defaults() {
     // When deserializing without cache field, should default to false
     let json = r#"{"retry": null, "timeout_seconds": null, "budget": null}"#;
     let settings: ActivitySettings = serde_json::from_str(json).unwrap();
-    assert_eq!(settings.cache, false);
+    assert!(!settings.cache);
     assert_eq!(settings.cache_ttl, None);
 }

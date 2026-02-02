@@ -3,7 +3,8 @@ use clap::Args;
 use kruxiaflow_api::{AppState, app_router};
 use kruxiaflow_core::{
     ActivityQueue, CacheService, EventSource, OrchestratorConfig, PostgresEventSource,
-    PostgresQueue, QueueConfig, RedisCache, orchestrator::OrchestratorError, run_orchestrator,
+    PostgresQueue, PostgresSubscriptionService, QueueConfig, RedisCache, SubscriptionService,
+    orchestrator::OrchestratorError, run_orchestrator,
 };
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use kruxiaflow_worker::{WorkerConfig, WorkerManager};
@@ -178,6 +179,18 @@ Example: kruxiaflow serve --seed-client"
     )]
     pub seed_client: bool,
 
+    /// Seed LLM model catalog before starting
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_SEED_LLM",
+        value_name = "YAML_FILE",
+        help = "Seed LLM model catalog from YAML file before starting server",
+        long_help = "Load LLM provider and model catalog from a YAML file.\n\
+Upserts providers and models (idempotent).\n\n\
+Example: kruxiaflow serve --seed-llm /config/llm_models.yaml"
+    )]
+    pub seed_llm: Option<String>,
+
     /// Database connection timeout for --migrate/--seed-client (seconds)
     #[arg(
         long,
@@ -190,6 +203,18 @@ Default: 60 seconds\n\
 Example: --db-connect-timeout 120"
     )]
     pub db_connect_timeout: u64,
+
+    /// Disable built-in worker (run API + orchestrator only)
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_NO_WORKER",
+        help = "Disable built-in worker (API + orchestrator only)",
+        long_help = "Disable the built-in activity worker.\n\
+Runs only the API server and orchestrator. Use this when external\n\
+workers (e.g. Python SDK workers) handle activity execution.\n\n\
+Example: kruxiaflow serve --no-worker"
+    )]
+    pub no_worker: bool,
 }
 
 impl ServeCommand {
@@ -225,6 +250,7 @@ impl ServeCommand {
 async fn spawn_orchestrator(
     event_source: Arc<dyn EventSource>,
     activity_queue: Arc<dyn ActivityQueue>,
+    subscription_service: Arc<dyn SubscriptionService>,
     pool: PgPool,
     shutdown_token: CancellationToken,
 ) -> Result<(JoinHandle<Result<()>>, Arc<Notify>)> {
@@ -242,9 +268,15 @@ async fn spawn_orchestrator(
 
         // Run orchestrator (polls events and schedules activities)
         // Note: run_orchestrator will check shutdown_token in its loop
-        run_orchestrator(event_source, activity_queue, config, Some(shutdown_token))
-            .await
-            .map_err(|e: OrchestratorError| anyhow::anyhow!("Orchestrator error: {}", e))
+        run_orchestrator(
+            event_source,
+            activity_queue,
+            subscription_service,
+            config,
+            Some(shutdown_token),
+        )
+        .await
+        .map_err(|e: OrchestratorError| anyhow::anyhow!("Orchestrator error: {}", e))
     });
 
     // Wait for orchestrator to signal ready (or timeout)
@@ -330,16 +362,16 @@ async fn spawn_workers(
     // Create cache service based on environment configuration
     let cache_config = crate::config::CacheConfig::new();
     cache_config.log_config();
-    let cache_service = cache_config.create_cache_service();
+    let cache_service = cache_config.create_cache_service().await;
 
     // Create activity registry with all built-in activities pre-registered
-    let registry = kruxiaflow_worker::register_builtin_activities(cache_service);
+    let registry = kruxiaflow_worker::register_std_activities(cache_service);
 
     #[allow(deprecated)]
     let config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("internal_worker_{}", Uuid::now_v7()),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         poll_max_activities,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities,
@@ -439,8 +471,8 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         cmd.client_secret = load_secret("KRUXIAFLOW_CLIENT_SECRET");
     }
 
-    // Run startup tasks if requested (--migrate or --seed-client)
-    if cmd.migrate || cmd.seed_client {
+    // Run startup tasks if requested (--migrate, --seed-client, --seed-llm)
+    if cmd.migrate || cmd.seed_client || cmd.seed_llm.is_some() {
         // Wait for database with retry (for container startup scenarios)
         let init_pool = wait_for_postgres(&database_url, cmd.db_connect_timeout).await?;
 
@@ -462,6 +494,20 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
 
             // Check if client exists and seed if not (idempotent)
             seed_client::seed_oauth_client(&init_pool, client_id, client_secret, false).await?;
+        }
+
+        // Seed LLM model catalog if requested
+        if let Some(ref llm_models_file) = cmd.seed_llm {
+            let llm_path = std::path::Path::new(llm_models_file);
+            if llm_path.exists() {
+                tracing::info!("Seeding LLM model catalog from {}...", llm_models_file);
+                crate::llm_catalog::load_catalog_from_yaml(&init_pool, llm_path).await?;
+            } else {
+                tracing::warn!(
+                    "LLM models file not found: {} (skipping --seed-llm)",
+                    llm_models_file
+                );
+            }
         }
 
         // Close the init pool - main server will create its own
@@ -532,6 +578,10 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
             .map_err(|e| anyhow::anyhow!("Failed to connect to Redis: {}", e))?,
     );
 
+    // Create subscription service for activities waiting for signals
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
+
     // Create API state with shutdown token
     let state = AppState::new(
         pool.clone(),
@@ -540,6 +590,7 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         event_source.clone(),
         workflow_storage.clone(),
         cache_service.clone(),
+        subscription_service.clone(),
         shutdown_token.clone(),
     );
 
@@ -549,6 +600,7 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     let (orchestrator_handle, _) = spawn_orchestrator(
         event_source.clone(),
         activity_queue.clone(),
+        subscription_service,
         pool.clone(),
         shutdown_token.clone(),
     )
@@ -559,17 +611,22 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     let (api_handle, _) =
         spawn_api_server(state, cmd.bind.clone(), cmd.port, shutdown_token.clone()).await?;
 
-    // 5. Spawn workers (workers will be gracefully stopped via manager)
-    let worker_handles = spawn_workers(
-        cmd.max_activities,
-        cmd.poll_max_activities,
-        api_url.clone(),
-        cmd.client_id.clone(),
-        cmd.client_secret.unwrap(),
-        workflow_storage.clone(),
-        cmd.activity_timeout,
-    )
-    .await?;
+    // 5. Spawn workers (unless --no-worker)
+    let worker_handles = if cmd.no_worker {
+        tracing::info!("Built-in worker disabled (--no-worker), skipping worker startup");
+        vec![]
+    } else {
+        spawn_workers(
+            cmd.max_activities,
+            cmd.poll_max_activities,
+            api_url.clone(),
+            cmd.client_id.clone(),
+            cmd.client_secret.unwrap(),
+            workflow_storage.clone(),
+            cmd.activity_timeout,
+        )
+        .await?
+    };
 
     tracing::info!("All services started successfully");
     tracing::info!(
@@ -669,6 +726,7 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     /// Helper to create a valid ServeCommand for testing
     fn valid_serve_command() -> ServeCommand {
@@ -688,8 +746,10 @@ mod tests {
             redis_url: "redis://127.0.0.1:6379".to_string(),
             migrate: false,
             seed_client: false,
+            seed_llm: None,
             db_connect_timeout: 60,
             activity_timeout: 300,
+            no_worker: false,
         }
     }
 
@@ -884,8 +944,10 @@ mod tests {
             redis_url: "redis://redis.example.com:6379/0".to_string(),
             migrate: true,
             seed_client: true,
+            seed_llm: None,
             db_connect_timeout: 120,
             activity_timeout: 300,
+            no_worker: false,
         };
 
         assert!(cmd.validate().is_ok());
@@ -918,5 +980,245 @@ mod tests {
                 .to_string()
                 .contains("Max concurrent activities")
         );
+    }
+
+    // =========================================================================
+    // load_secret tests
+    // =========================================================================
+
+    #[test]
+    #[serial]
+    fn test_load_secret_from_env_var() {
+        unsafe {
+            std::env::set_var("TEST_LOAD_SECRET_A", "direct_value");
+            std::env::remove_var("TEST_LOAD_SECRET_A_FILE");
+        }
+
+        let result = load_secret("TEST_LOAD_SECRET_A");
+        assert_eq!(result, Some("direct_value".to_string()));
+
+        unsafe {
+            std::env::remove_var("TEST_LOAD_SECRET_A");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_secret_from_file() {
+        let file_path = std::env::temp_dir().join("kruxiaflow_test_secret_b.txt");
+        std::fs::write(&file_path, "file_secret_value\n").unwrap();
+
+        unsafe {
+            std::env::set_var("TEST_LOAD_SECRET_B_FILE", file_path.to_str().unwrap());
+            std::env::set_var("TEST_LOAD_SECRET_B", "should_be_ignored");
+        }
+
+        let result = load_secret("TEST_LOAD_SECRET_B");
+        // File takes precedence over direct env var
+        assert_eq!(result, Some("file_secret_value".to_string()));
+
+        unsafe {
+            std::env::remove_var("TEST_LOAD_SECRET_B_FILE");
+            std::env::remove_var("TEST_LOAD_SECRET_B");
+        }
+        let _ = std::fs::remove_file(&file_path);
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_secret_file_trims_whitespace() {
+        let file_path = std::env::temp_dir().join("kruxiaflow_test_secret_c.txt");
+        std::fs::write(&file_path, "  trimmed_value  \n").unwrap();
+
+        unsafe {
+            std::env::set_var("TEST_LOAD_SECRET_C_FILE", file_path.to_str().unwrap());
+        }
+
+        let result = load_secret("TEST_LOAD_SECRET_C");
+        assert_eq!(result, Some("trimmed_value".to_string()));
+
+        unsafe {
+            std::env::remove_var("TEST_LOAD_SECRET_C_FILE");
+        }
+        let _ = std::fs::remove_file(&file_path);
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_secret_file_not_found_falls_back_to_env() {
+        unsafe {
+            std::env::set_var("TEST_LOAD_SECRET_D_FILE", "/nonexistent/path/secret.txt");
+            std::env::set_var("TEST_LOAD_SECRET_D", "fallback_value");
+        }
+
+        let result = load_secret("TEST_LOAD_SECRET_D");
+        // File doesn't exist, falls back to direct env var
+        assert_eq!(result, Some("fallback_value".to_string()));
+
+        unsafe {
+            std::env::remove_var("TEST_LOAD_SECRET_D_FILE");
+            std::env::remove_var("TEST_LOAD_SECRET_D");
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_secret_not_set() {
+        unsafe {
+            std::env::remove_var("TEST_LOAD_SECRET_E");
+            std::env::remove_var("TEST_LOAD_SECRET_E_FILE");
+        }
+
+        let result = load_secret("TEST_LOAD_SECRET_E");
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    #[serial]
+    fn test_load_secret_file_not_found_no_fallback() {
+        unsafe {
+            std::env::set_var("TEST_LOAD_SECRET_F_FILE", "/nonexistent/path.txt");
+            std::env::remove_var("TEST_LOAD_SECRET_F");
+        }
+
+        let result = load_secret("TEST_LOAD_SECRET_F");
+        assert_eq!(result, None);
+
+        unsafe {
+            std::env::remove_var("TEST_LOAD_SECRET_F_FILE");
+        }
+    }
+
+    // =========================================================================
+    // Additional serve command configuration tests
+    // =========================================================================
+
+    #[test]
+    fn test_serve_command_no_worker_flag() {
+        let mut cmd = valid_serve_command();
+        cmd.no_worker = true;
+        assert!(cmd.validate().is_ok());
+        assert!(cmd.no_worker);
+    }
+
+    #[test]
+    fn test_serve_command_migrate_flag() {
+        let mut cmd = valid_serve_command();
+        cmd.migrate = true;
+        assert!(cmd.validate().is_ok());
+        assert!(cmd.migrate);
+    }
+
+    #[test]
+    fn test_serve_command_seed_llm_with_path() {
+        let mut cmd = valid_serve_command();
+        cmd.seed_llm = Some("/config/llm_models.yaml".to_string());
+        assert!(cmd.validate().is_ok());
+        assert_eq!(cmd.seed_llm.as_deref(), Some("/config/llm_models.yaml"));
+    }
+
+    #[test]
+    fn test_serve_command_seed_llm_none() {
+        let cmd = valid_serve_command();
+        assert!(cmd.seed_llm.is_none());
+    }
+
+    #[test]
+    fn test_serve_command_activity_timeout() {
+        let mut cmd = valid_serve_command();
+        cmd.activity_timeout = 600;
+        assert!(cmd.validate().is_ok());
+        assert_eq!(cmd.activity_timeout, 600);
+    }
+
+    #[test]
+    fn test_serve_command_db_connect_timeout() {
+        let mut cmd = valid_serve_command();
+        cmd.db_connect_timeout = 120;
+        assert!(cmd.validate().is_ok());
+        assert_eq!(cmd.db_connect_timeout, 120);
+    }
+
+    #[test]
+    fn test_serve_command_validation_order_poll_activities_after_max_activities() {
+        // When max_activities is valid but poll_max_activities is invalid
+        let mut cmd = valid_serve_command();
+        cmd.poll_max_activities = 0;
+        cmd.client_secret = None;
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Max activities per poll")
+        );
+    }
+
+    #[test]
+    fn test_serve_command_validation_order_secret_after_poll() {
+        // When activities are valid but secret is missing
+        let mut cmd = valid_serve_command();
+        cmd.client_secret = None;
+        cmd.oauth_private_key = None;
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Client secret"));
+    }
+
+    #[test]
+    fn test_serve_command_validation_order_oauth_after_secret() {
+        // When secret is valid but oauth key is missing
+        let mut cmd = valid_serve_command();
+        cmd.oauth_private_key = None;
+        cmd.shutdown_timeout = 1; // Also invalid, but should fail on oauth first
+
+        let result = cmd.validate();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("OAuth private key")
+        );
+    }
+
+    #[test]
+    fn test_serve_command_redis_url() {
+        let mut cmd = valid_serve_command();
+        cmd.redis_url = "redis://redis.example.com:6379/0".to_string();
+        assert!(cmd.validate().is_ok());
+        assert_eq!(cmd.redis_url, "redis://redis.example.com:6379/0");
+    }
+
+    #[test]
+    fn test_serve_command_orchestrator_id() {
+        let mut cmd = valid_serve_command();
+        cmd.orchestrator_id = "custom_orch_id".to_string();
+        assert!(cmd.validate().is_ok());
+        assert_eq!(cmd.orchestrator_id, "custom_orch_id");
+    }
+
+    #[test]
+    fn test_serve_command_client_id() {
+        let mut cmd = valid_serve_command();
+        cmd.client_id = "custom_client".to_string();
+        assert!(cmd.validate().is_ok());
+        assert_eq!(cmd.client_id, "custom_client");
+    }
+
+    // =========================================================================
+    // wait_for_postgres tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_wait_for_postgres_timeout_with_invalid_url() {
+        // Should timeout quickly with an invalid URL
+        let result = wait_for_postgres("postgres://invalid:1/nonexistent", 1).await;
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Timed out"));
     }
 }

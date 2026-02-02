@@ -257,3 +257,133 @@ pub enum RepositoryError {
     #[error("Serialization error: {0}")]
     SerializationError(#[from] serde_json::Error),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_repository_error_display_validation() {
+        let err = RepositoryError::ValidationError(ValidationError::SingleError(
+            "invalid activity".to_string(),
+        ));
+        let msg = format!("{}", err);
+        assert!(msg.contains("Validation error"));
+        assert!(msg.contains("invalid activity"));
+    }
+
+    #[test]
+    fn test_repository_error_display_duplicate_version() {
+        let err = RepositoryError::DuplicateVersion {
+            name: "my-workflow".to_string(),
+            version: "20250105.143022.123456".to_string(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("already exists"));
+        assert!(msg.contains("my-workflow"));
+        assert!(msg.contains("20250105.143022.123456"));
+    }
+
+    #[test]
+    fn test_repository_error_display_invalid_version() {
+        let err = RepositoryError::InvalidVersion {
+            version: "bad-version".to_string(),
+            error: "expected YYYYmmdd.HHMMSS.uuuuuu".to_string(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("Invalid version format"));
+        assert!(msg.contains("bad-version"));
+    }
+
+    #[test]
+    fn test_repository_error_display_serialization() {
+        let json_err = serde_json::from_str::<serde_json::Value>("not json").unwrap_err();
+        let err = RepositoryError::SerializationError(json_err);
+        let msg = format!("{}", err);
+        assert!(msg.contains("Serialization error"));
+    }
+
+    #[test]
+    fn test_stored_workflow_definition_clone() {
+        let stored = StoredWorkflowDefinition {
+            id: Uuid::nil(),
+            name: "test-workflow".to_string(),
+            version: "20250105.143022.123456".to_string(),
+            activities: vec![],
+            content_hash: Some(vec![1, 2, 3]),
+            created_at: Utc::now(),
+        };
+        let cloned = stored.clone();
+        assert_eq!(cloned.name, stored.name);
+        assert_eq!(cloned.version, stored.version);
+        assert_eq!(cloned.content_hash, stored.content_hash);
+    }
+
+    #[test]
+    fn test_stored_workflow_definition_debug() {
+        let stored = StoredWorkflowDefinition {
+            id: Uuid::nil(),
+            name: "test".to_string(),
+            version: "20250105.143022.000000".to_string(),
+            activities: vec![],
+            content_hash: None,
+            created_at: Utc::now(),
+        };
+        let debug = format!("{:?}", stored);
+        assert!(debug.contains("test"));
+    }
+
+    #[test]
+    fn test_store_result_is_new_flag() {
+        let result = StoreResult {
+            definition: StoredWorkflowDefinition {
+                id: Uuid::nil(),
+                name: "wf".to_string(),
+                version: "20250105.143022.000000".to_string(),
+                activities: vec![],
+                content_hash: None,
+                created_at: Utc::now(),
+            },
+            is_new: true,
+        };
+        assert!(result.is_new);
+
+        let result2 = StoreResult {
+            definition: result.definition.clone(),
+            is_new: false,
+        };
+        assert!(!result2.is_new);
+    }
+
+    #[test]
+    fn test_store_result_debug() {
+        let result = StoreResult {
+            definition: StoredWorkflowDefinition {
+                id: Uuid::nil(),
+                name: "wf".to_string(),
+                version: "v1".to_string(),
+                activities: vec![],
+                content_hash: None,
+                created_at: Utc::now(),
+            },
+            is_new: true,
+        };
+        let debug = format!("{:?}", result);
+        assert!(debug.contains("is_new"));
+        assert!(debug.contains("true"));
+    }
+
+    #[test]
+    fn test_repository_error_from_validation_error() {
+        let validation_err = ValidationError::SingleError("test error".to_string());
+        let repo_err: RepositoryError = validation_err.into();
+        assert!(matches!(repo_err, RepositoryError::ValidationError(_)));
+    }
+
+    #[test]
+    fn test_repository_error_from_serde_error() {
+        let serde_err = serde_json::from_str::<String>("not valid").unwrap_err();
+        let repo_err: RepositoryError = serde_err.into();
+        assert!(matches!(repo_err, RepositoryError::SerializationError(_)));
+    }
+}

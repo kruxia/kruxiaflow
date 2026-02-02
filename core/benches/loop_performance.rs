@@ -31,6 +31,7 @@ fn create_loop_workflow(num_activities: usize) -> WorkflowDefinition {
             iteration_scoped: true,
             iteration_limit: Some(10),
             is_loop_activity: true, // Precomputed metadata
+            streaming: Default::default(),
         });
     }
 

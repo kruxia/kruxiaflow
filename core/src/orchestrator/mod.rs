@@ -2,6 +2,7 @@ pub mod backoff;
 pub mod config;
 pub mod dependency_evaluator;
 pub mod error;
+#[allow(clippy::module_inception)]
 pub mod orchestrator;
 pub mod workflow_state;
 

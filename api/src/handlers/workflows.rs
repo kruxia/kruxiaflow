@@ -350,13 +350,13 @@ impl ListWorkflowsQuery {
         }
 
         // Validate time range
-        if let (Some(after), Some(before)) = (self.created_after, self.created_before) {
-            if after >= before {
-                errors.add(
-                    "created_after",
-                    "created_after must be before created_before",
-                );
-            }
+        if let (Some(after), Some(before)) = (self.created_after, self.created_before)
+            && after >= before
+        {
+            errors.add(
+                "created_after",
+                "created_after must be before created_before",
+            );
         }
 
         if errors.is_empty() {
@@ -1038,5 +1038,206 @@ mod tests {
         assert!(json.contains("workflows"));
         assert!(json.contains("total"));
         assert!(json.contains("count"));
+    }
+
+    // =========================================================================
+    // Handler integration tests
+    // =========================================================================
+
+    use crate::middleware::auth::ValidatedClaims;
+    use kruxiaflow_core::workflow::{WorkflowDefinitionRepository, WorkflowQueryService};
+    use kruxiaflow_oauth::Claims;
+    use sqlx::PgPool;
+
+    fn test_claims() -> ValidatedClaims {
+        ValidatedClaims(Claims {
+            sub: "test_user".to_string(),
+            jti: "test_jti".to_string(),
+            iss: "test".to_string(),
+            aud: "test".to_string(),
+            exp: 9999999999,
+            iat: 1000000000,
+        })
+    }
+
+    async fn test_pool() -> PgPool {
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
+        });
+        PgPool::connect(&database_url)
+            .await
+            .expect("Failed to connect to test database")
+    }
+
+    #[tokio::test]
+    async fn test_get_workflow_not_found() {
+        let pool = test_pool().await;
+        let service = WorkflowQueryService::new(pool);
+        let workflow_id = Uuid::now_v7();
+
+        let result = get_workflow(service, Extension(test_claims()), Path(workflow_id)).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_list_workflows_handler_defaults() {
+        let pool = test_pool().await;
+        let service = WorkflowQueryService::new(pool);
+
+        let query = ListWorkflowsQuery {
+            status: None,
+            definition_name: None,
+            created_after: None,
+            created_before: None,
+            limit: 10,
+            offset: 0,
+        };
+
+        let result = list_workflows(service, Extension(test_claims()), Query(query)).await;
+
+        assert!(result.is_ok());
+        let Json(response) = result.unwrap();
+        assert_eq!(response.limit, 10);
+        assert_eq!(response.offset, 0);
+    }
+
+    #[tokio::test]
+    async fn test_list_workflows_handler_with_status_filter() {
+        let pool = test_pool().await;
+        let service = WorkflowQueryService::new(pool);
+
+        let query = ListWorkflowsQuery {
+            status: Some("completed".to_string()),
+            definition_name: None,
+            created_after: None,
+            created_before: None,
+            limit: 50,
+            offset: 0,
+        };
+
+        let result = list_workflows(service, Extension(test_claims()), Query(query)).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_list_workflows_handler_invalid_limit() {
+        let pool = test_pool().await;
+        let service = WorkflowQueryService::new(pool);
+
+        let query = ListWorkflowsQuery {
+            status: None,
+            definition_name: None,
+            created_after: None,
+            created_before: None,
+            limit: 0,
+            offset: 0,
+        };
+
+        let result = list_workflows(service, Extension(test_claims()), Query(query)).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_submit_workflow_definition_not_found() {
+        let pool = test_pool().await;
+        let service = WorkflowService::new(pool);
+
+        let request = SubmitWorkflowRequest {
+            definition_name: "nonexistent-workflow-def-xyz".to_string(),
+            version: None,
+            input: json!({"key": "value"}),
+            unique_key: None,
+        };
+
+        let result = submit_workflow(service, Extension(test_claims()), Json(request)).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_submit_workflow_validation_error_empty_name() {
+        let pool = test_pool().await;
+        let service = WorkflowService::new(pool);
+
+        let request = SubmitWorkflowRequest {
+            definition_name: "".to_string(),
+            version: None,
+            input: json!({}),
+            unique_key: None,
+        };
+
+        let result = submit_workflow(service, Extension(test_claims()), Json(request)).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_submit_workflow_validation_error_non_object_input() {
+        let pool = test_pool().await;
+        let service = WorkflowService::new(pool);
+
+        let request = SubmitWorkflowRequest {
+            definition_name: "test".to_string(),
+            version: None,
+            input: json!("not an object"),
+            unique_key: None,
+        };
+
+        let result = submit_workflow(service, Extension(test_claims()), Json(request)).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_submit_and_get_workflow() {
+        let pool = test_pool().await;
+
+        // First, deploy a workflow definition
+        let repo = WorkflowDefinitionRepository::new(pool.clone());
+        let yaml = r#"
+name: test-submit-get-wf
+activities:
+  - key: step1
+    activity_type: std.echo
+    params:
+      message: hello
+"#;
+        use crate::handlers::workflow_definitions::deploy_workflow_definition;
+        let _ = deploy_workflow_definition(repo, Extension(test_claims()), yaml.to_string())
+            .await
+            .unwrap();
+
+        // Now submit a workflow
+        let service = WorkflowService::new(pool.clone());
+        let request = SubmitWorkflowRequest {
+            definition_name: "test-submit-get-wf".to_string(),
+            version: None,
+            input: json!({"test": true}),
+            unique_key: None,
+        };
+
+        let submit_result = submit_workflow(service, Extension(test_claims()), Json(request)).await;
+
+        assert!(submit_result.is_ok());
+        let (status, Json(response)) = submit_result.unwrap();
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(response.definition_name, "test-submit-get-wf");
+
+        // Now get the workflow
+        let query_service = WorkflowQueryService::new(pool);
+        let get_result = get_workflow(
+            query_service,
+            Extension(test_claims()),
+            Path(response.workflow_id),
+        )
+        .await;
+
+        assert!(get_result.is_ok());
+        let Json(workflow) = get_result.unwrap();
+        assert_eq!(workflow.id, response.workflow_id);
+        assert_eq!(workflow.definition_name, "test-submit-get-wf");
     }
 }

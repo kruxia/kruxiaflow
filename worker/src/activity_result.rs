@@ -6,7 +6,7 @@ use serde_json::Value;
 ///
 /// This struct wraps the outputs of an activity execution along with
 /// optional cost tracking information and metadata.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ActivityResult {
     /// Structured outputs with type information
     pub outputs: Vec<ActivityOutput>,
@@ -171,16 +171,6 @@ impl ActivityResult {
     }
 }
 
-impl Default for ActivityResult {
-    fn default() -> Self {
-        Self {
-            outputs: Vec::new(),
-            cost_usd: None,
-            metadata: None,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,6 +255,46 @@ mod tests {
         assert_eq!(status.value, json!("success"));
 
         assert!(result.get_output("missing").is_none());
+    }
+
+    #[test]
+    fn test_output_count() {
+        let result = ActivityResult::values(vec![
+            ActivityOutput::value("a", json!(1)),
+            ActivityOutput::value("b", json!(2)),
+            ActivityOutput::file("c", "ref"),
+        ]);
+        assert_eq!(result.output_count(), 3);
+    }
+
+    #[test]
+    fn test_default_result() {
+        let result = ActivityResult::default();
+        assert!(result.outputs.is_empty());
+        assert_eq!(result.cost_usd, None);
+        assert_eq!(result.metadata, None);
+        assert_eq!(result.output_count(), 0);
+    }
+
+    #[test]
+    fn test_with_metadata() {
+        let result = ActivityResult::value("result", json!("data"))
+            .with_metadata(json!({"cached": true, "ttl": 300}));
+
+        assert!(result.metadata.is_some());
+        let meta = result.metadata.unwrap();
+        assert_eq!(meta["cached"], true);
+        assert_eq!(meta["ttl"], 300);
+    }
+
+    #[test]
+    fn test_folder_outputs() {
+        let result = ActivityResult::values(vec![
+            ActivityOutput::folder("out_dir", "postgres://wf/act/output/"),
+            ActivityOutput::value("status", json!("done")),
+        ]);
+        assert_eq!(result.folder_outputs().len(), 1);
+        assert_eq!(result.folder_outputs()[0].name, "out_dir");
     }
 
     #[test]

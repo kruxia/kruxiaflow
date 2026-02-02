@@ -1,4 +1,5 @@
 use kruxiaflow_api::{routes::app_router, state::AppState};
+use kruxiaflow_core::PostgresSubscriptionService;
 use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{Activity, ActivityQueue as _, PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
@@ -66,6 +67,7 @@ async fn create_real_server() -> (String, PgPool, tokio::task::JoinHandle<()>) {
     let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
     let shutdown_token = CancellationToken::new();
 
+    let subscription_service = Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let state = AppState::new(
         pool.clone(),
         Arc::new(auth_service),
@@ -73,6 +75,7 @@ async fn create_real_server() -> (String, PgPool, tokio::task::JoinHandle<()>) {
         event_source,
         workflow_storage.clone(),
         cache_service,
+        subscription_service,
         shutdown_token,
     );
     let app = app_router(state);
@@ -103,13 +106,14 @@ async fn schedule_test_activities(pool: &PgPool, workflow_id: Uuid, count: usize
     let activities: Vec<Activity> = (0..count)
         .map(|i| Activity {
             key: format!("activity_{}", i),
-            worker: "builtin".to_string(),
+            worker: "std".to_string(),
             activity_name: "echo".to_string(),
             parameters: json!({"test": format!("value_{}", i)}),
             settings: None,
             scheduled_for: None,
             output_definitions: None,
             iteration: None,
+            signal_data: None,
         })
         .collect();
 
@@ -143,7 +147,7 @@ async fn test_worker_poll_and_execute_echo() {
     let config = WorkerConfig {
         api_url: server_url,
         worker_id: "test_worker".to_string(),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities: 16,
@@ -214,7 +218,7 @@ async fn test_worker_concurrency() {
     let config = WorkerConfig {
         api_url: server_url,
         worker_id: "test_worker_concurrent".to_string(),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities: 16,

@@ -15,8 +15,9 @@ use crate::events::{
     EventSource, NewWorkflowEvent, WorkflowEvent, WorkflowEventType, WorkflowStatus,
 };
 use crate::queue::{Activity, ActivityQueue, StaleActivityAction};
+use crate::subscription::{ExpiredSubscription, NewSubscription, SubscriptionService};
 use crate::workflow::template::{TemplateContext, resolve_template_value};
-use crate::workflow::{BudgetAction, apply_duration, parse_scheduled_for};
+use crate::workflow::{BudgetAction, OnTimeout, apply_duration, parse_scheduled_for};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde_json::json;
@@ -51,10 +52,17 @@ macro_rules! profile_span {
 /// * `activity_queue` - Activity queue for scheduling activities
 /// * `config` - Orchestrator configuration
 /// * `shutdown_token` - Optional cancellation token for graceful shutdown
-#[tracing::instrument(skip(event_source, activity_queue, config, shutdown_token))]
+#[tracing::instrument(skip(
+    event_source,
+    activity_queue,
+    subscription_service,
+    config,
+    shutdown_token
+))]
 pub async fn run_orchestrator(
     event_source: Arc<dyn EventSource>,
     activity_queue: Arc<dyn ActivityQueue>,
+    subscription_service: Arc<dyn SubscriptionService>,
     config: OrchestratorConfig,
     shutdown_token: Option<CancellationToken>,
 ) -> Result<()> {
@@ -78,12 +86,14 @@ pub async fn run_orchestrator(
     let timeout_config = config.clone();
     let timeout_event_source = event_source.clone();
     let timeout_activity_queue = activity_queue.clone();
+    let timeout_subscription_service = subscription_service.clone();
     let timeout_shutdown = shutdown_token.clone();
     tokio::spawn(async move {
         timeout_checker_task(
             timeout_config,
             timeout_event_source,
             timeout_activity_queue,
+            timeout_subscription_service,
             timeout_shutdown,
         )
         .await;
@@ -105,12 +115,12 @@ pub async fn run_orchestrator(
             // No events - increase backoff
             backoff.increase();
             let interval = backoff.current();
-            tracing::debug!("No events found, backoff interval: {:?}", interval);
+            tracing::trace!("No events found, backoff interval: {:?}", interval);
             tokio::time::sleep(interval).await;
             continue;
         }
 
-        tracing::debug!("Polled {} events, resetting backoff", events.len());
+        tracing::trace!("Polled {} events, resetting backoff", events.len());
 
         // Process each event
         for event in &events {
@@ -122,8 +132,14 @@ pub async fn run_orchestrator(
                 return Ok(());
             }
 
-            if let Err(e) =
-                process_workflow_event(event, &event_source, &activity_queue, &config).await
+            if let Err(e) = process_workflow_event(
+                event,
+                &event_source,
+                &activity_queue,
+                &subscription_service,
+                &config,
+            )
+            .await
             {
                 // Track failure count for this event
                 let failure_count = event_failures.entry(event.id).or_insert(0);
@@ -511,6 +527,7 @@ async fn handle_activity_failed(
         } else {
             None
         },
+        signal_data: activity_state.signal_data.clone(),
     };
 
     // Log info when retry activity is started
@@ -800,7 +817,7 @@ async fn handle_activity_failed(
 /// **Cost Recording Failures**:
 /// - Logged but don't fail workflow (non-critical)
 #[tracing::instrument(
-    skip(event, event_source, activity_queue, config),
+    skip(event, event_source, activity_queue, subscription_service, config),
     fields(
         workflow_id = %event.workflow_id,
         event_type = ?event.event_type
@@ -810,13 +827,17 @@ pub async fn process_workflow_event(
     event: &WorkflowEvent,
     event_source: &Arc<dyn EventSource>,
     activity_queue: &Arc<dyn ActivityQueue>,
+    subscription_service: &Arc<dyn SubscriptionService>,
     config: &OrchestratorConfig,
 ) -> Result<()> {
-    // Skip ActivityScheduled events - they are for observability only, not orchestration
+    // Skip ActivityScheduled and ActivityWaiting events - they are for observability only, not orchestration
     // Processing them causes duplicate scheduling and performance issues
-    if event.event_type == WorkflowEventType::ActivityScheduled {
+    if event.event_type == WorkflowEventType::ActivityScheduled
+        || event.event_type == WorkflowEventType::ActivityWaiting
+    {
         tracing::trace!(
-            "Skipping ActivityScheduled event for workflow {} (observability only)",
+            "Skipping {:?} event for workflow {}",
+            event.event_type,
             event.workflow_id
         );
         return Ok(());
@@ -937,6 +958,38 @@ pub async fn process_workflow_event(
 
     // 3. Handle ActivityFailed event with retry logic BEFORE applying to state
     if event.event_type == WorkflowEventType::ActivityFailed {
+        // Only process if the activity is in a state where failure makes sense.
+        // A duplicate event (e.g., from event replay) should not trigger another
+        // retry or re-fail an activity that has already moved on.
+        let activity_key = event
+            .activity_key
+            .as_ref()
+            .ok_or_else(|| super::OrchestratorError::MissingActivityKey)?;
+        let current_status = state.activities.get(activity_key).map(|a| a.status);
+
+        match current_status {
+            Some(
+                WorkflowActivityStatus::Running
+                | WorkflowActivityStatus::Waiting
+                | WorkflowActivityStatus::Pending,
+            ) => {
+                // Expected states for a failure event — proceed with retry logic
+            }
+            Some(status) => {
+                tracing::debug!(
+                    activity_key = %activity_key,
+                    status = ?status,
+                    "Ignoring duplicate ActivityFailed event, activity is not running or waiting"
+                );
+                tx.commit().await?;
+                return Ok(());
+            }
+            None => {
+                // Activity not in state — shouldn't happen, but let it fall through
+                // to apply_event_to_state which will handle the missing key
+            }
+        }
+
         let retry_start = std::time::Instant::now();
         let retry_handled = handle_activity_failed(
             &mut state,
@@ -1170,42 +1223,40 @@ pub async fn process_workflow_event(
                         })?;
 
                 // Debug: Log input parameters before resolution
-                if a.key == "store_passages" {
-                    if let Some(obj) = params_value.as_object() {
-                        tracing::info!(
-                            activity = %a.key,
-                            param_keys = ?obj.keys().collect::<Vec<_>>(),
-                            has_embeddings_file_key = obj.contains_key("embeddings_file"),
-                            embeddings_file_template = ?obj.get("embeddings_file"),
-                            "Input parameters BEFORE template resolution"
-                        );
-                    }
+                if a.key == "store_passages"
+                    && let Some(obj) = params_value.as_object()
+                {
+                    tracing::info!(
+                        activity = %a.key,
+                        param_keys = ?obj.keys().collect::<Vec<_>>(),
+                        has_embeddings_file_key = obj.contains_key("embeddings_file"),
+                        embeddings_file_template = ?obj.get("embeddings_file"),
+                        "Input parameters BEFORE template resolution"
+                    );
                 }
 
                 // Debug: Log dependency activity outputs for template resolution
                 for dep in a.depends_on.iter().flatten() {
-                    if let Some(dep_state) = state.activities.get(&dep.activity_key) {
-                        if let Some(outputs) = &dep_state.outputs {
-                            let output_names: Vec<_> = outputs.iter().map(|o| &o.name).collect();
-                            tracing::info!(
+                    if let Some(dep_state) = state.activities.get(&dep.activity_key)
+                        && let Some(outputs) = &dep_state.outputs
+                    {
+                        let output_names: Vec<_> = outputs.iter().map(|o| &o.name).collect();
+                        tracing::info!(
+                            activity = %a.key,
+                            dependency = %dep.activity_key,
+                            output_names = ?output_names,
+                            "Template context: dependency outputs"
+                        );
+                        // Log the actual output values for debugging
+                        for output in outputs {
+                            tracing::debug!(
                                 activity = %a.key,
                                 dependency = %dep.activity_key,
-                                output_names = ?output_names,
-                                "Template context: dependency outputs"
+                                output_name = %output.name,
+                                output_value_type = ?output.value.as_object().map(|o| o.keys().collect::<Vec<_>>()).unwrap_or_default(),
+                                output_value_preview = %format!("{:.200}", output.value),
+                                "Template context: output detail"
                             );
-                            // Log the actual output values for debugging
-                            for output in outputs {
-                                if output.name == "result" {
-                                    if let Some(obj) = output.value.as_object() {
-                                        tracing::info!(
-                                            activity = %a.key,
-                                            dependency = %dep.activity_key,
-                                            result_keys = ?obj.keys().collect::<Vec<_>>(),
-                                            "Template context: result object keys"
-                                        );
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -1214,19 +1265,19 @@ pub async fn process_workflow_event(
                 {
                     Ok(resolved) => {
                         // Debug: Log resolved embeddings-related fields
-                        if a.key == "store_passages" {
-                            if let Some(obj) = resolved.as_object() {
-                                tracing::info!(
-                                    activity = %a.key,
-                                    embeddings_type = ?obj.get("embeddings").map(|v| match v {
-                                        serde_json::Value::Null => "null",
-                                        serde_json::Value::Array(_) => "array",
-                                        _ => "other",
-                                    }),
-                                    embeddings_file = ?obj.get("embeddings_file"),
-                                    "Resolved store_passages parameters"
-                                );
-                            }
+                        if a.key == "store_passages"
+                            && let Some(obj) = resolved.as_object()
+                        {
+                            tracing::info!(
+                                activity = %a.key,
+                                embeddings_type = ?obj.get("embeddings").map(|v| match v {
+                                    serde_json::Value::Null => "null",
+                                    serde_json::Value::Array(_) => "array",
+                                    _ => "other",
+                                }),
+                                embeddings_file = ?obj.get("embeddings_file"),
+                                "Resolved store_passages parameters"
+                            );
                         }
                         resolved
                     }
@@ -1270,8 +1321,79 @@ pub async fn process_workflow_event(
                     None
                 };
 
+                // Check if activity has wait_for_signal setting
+                if let Some(wait_settings) =
+                    a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref())
+                {
+                    // Activity needs to wait for an external signal before executing
+                    // Create a subscription instead of scheduling to queue
+                    let new_sub = NewSubscription {
+                        workflow_id: event.workflow_id,
+                        activity_key: a.key.clone(),
+                        event_name: wait_settings.event_name.clone(),
+                        on_timeout: wait_settings.on_timeout.clone(),
+                        timeout_seconds: wait_settings.timeout_seconds,
+                    };
+
+                    match subscription_service.create_subscription(new_sub).await {
+                        Ok(sub_id) => {
+                            tracing::info!(
+                                workflow_id = %event.workflow_id,
+                                activity_key = %a.key,
+                                event_name = %wait_settings.event_name,
+                                timeout_seconds = wait_settings.timeout_seconds,
+                                subscription_id = %sub_id,
+                                "Activity now waiting for signal"
+                            );
+
+                            // Mark activity as Waiting in state
+                            if let Some(activity_state) = state.activities.get_mut(&a.key) {
+                                activity_state.status = WorkflowActivityStatus::Waiting;
+                                activity_state.started_at = Some(chrono::Utc::now());
+                            }
+
+                            // Publish ActivityWaiting event
+                            let waiting_event = NewWorkflowEvent {
+                                workflow_id: event.workflow_id,
+                                event_type: WorkflowEventType::ActivityWaiting,
+                                activity_key: Some(a.key.clone()),
+                                payload: json!({
+                                    "event_name": wait_settings.event_name,
+                                    "timeout_seconds": wait_settings.timeout_seconds,
+                                    "on_timeout": format!("{:?}", wait_settings.on_timeout),
+                                }),
+                                iteration,
+                            };
+                            event_source.publish(waiting_event).await?;
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                workflow_id = %event.workflow_id,
+                                activity_key = %a.key,
+                                "Failed to create subscription: {}",
+                                e
+                            );
+                            // Mark activity as failed
+                            if let Some(activity_state) = state.activities.get_mut(&a.key) {
+                                activity_state.status = WorkflowActivityStatus::Failed;
+                                activity_state.set_error(format!(
+                                    "Failed to create signal subscription: {}",
+                                    e
+                                ));
+                            }
+                        }
+                    }
+                    continue;
+                }
+
                 // Compute scheduled_for based on activity settings
                 let scheduled_for = compute_scheduled_for(a, &template_context, iteration)?;
+
+                // Get signal_data from activity state if present
+                let signal_data = state
+                    .activities
+                    .get(&a.key)
+                    .and_then(|s| s.signal_data.clone());
 
                 activities_to_schedule.push(Activity {
                     key: a.key.clone(),
@@ -1282,6 +1404,7 @@ pub async fn process_workflow_event(
                     scheduled_for,
                     output_definitions: a.output_definitions.clone(),
                     iteration,
+                    signal_data,
                 });
             }
 
@@ -1303,8 +1426,18 @@ pub async fn process_workflow_event(
 
             // Update state immediately to mark activities as Pending
             // This prevents race condition where activity completes before ActivityScheduled event is processed
+            // (Only for activities that were actually scheduled, not those entering Waiting state)
             for activity in &ready_activities {
                 if let Some(activity_state) = state.activities.get_mut(&activity.key) {
+                    // Skip activities that entered Waiting state (already handled above)
+                    if activity_state.status == WorkflowActivityStatus::Waiting {
+                        continue;
+                    }
+                    // Skip activities that failed (e.g., budget or subscription error)
+                    if activity_state.status == WorkflowActivityStatus::Failed {
+                        continue;
+                    }
+
                     // Check if this is a loop-back (re-execution)
                     let is_loop_back = activity_state.status == WorkflowActivityStatus::Completed;
 
@@ -1343,6 +1476,16 @@ pub async fn process_workflow_event(
             // Publish ActivityScheduled events (for external observers)
             // Note: Orchestrator skips these events to avoid duplicate processing
             for activity in &ready_activities {
+                // Skip activities that entered Waiting state (they got ActivityWaiting events instead)
+                if let Some(activity_state) = state.activities.get(&activity.key) {
+                    if activity_state.status == WorkflowActivityStatus::Waiting {
+                        continue;
+                    }
+                    if activity_state.status == WorkflowActivityStatus::Failed {
+                        continue;
+                    }
+                }
+
                 tracing::debug!(
                     "Publishing ActivityScheduled event for {} in workflow {}",
                     activity.key,
@@ -1894,6 +2037,7 @@ async fn timeout_checker_task(
     config: OrchestratorConfig,
     event_source: Arc<dyn EventSource>,
     activity_queue: Arc<dyn ActivityQueue>,
+    subscription_service: Arc<dyn SubscriptionService>,
     shutdown_token: Option<CancellationToken>,
 ) {
     tracing::info!(
@@ -1923,11 +2067,18 @@ async fn timeout_checker_task(
         if let Err(e) = check_and_reclaim_stale_activities(&activity_queue, &event_source).await {
             tracing::error!("Failed to check for stale activities: {}", e);
         }
+
+        // Check for expired signal subscriptions
+        if let Err(e) =
+            check_and_handle_expired_subscriptions(&subscription_service, &event_source).await
+        {
+            tracing::error!("Failed to check for expired subscriptions: {}", e);
+        }
     }
 }
 
 /// Check for workflows that have been running longer than the timeout and mark them as failed
-async fn check_and_timeout_stuck_workflows(
+pub async fn check_and_timeout_stuck_workflows(
     config: &OrchestratorConfig,
     event_source: &Arc<dyn EventSource>,
 ) -> Result<()> {
@@ -2061,6 +2212,146 @@ async fn check_and_reclaim_stale_activities(
     Ok(())
 }
 
+/// Check for expired signal subscriptions and handle them based on their on_timeout action
+///
+/// When an activity is waiting for a signal and the timeout expires:
+/// - Continue: Publish ActivitySignaled event with null data (activity proceeds without signal)
+/// - Skip: Publish ActivitySignaled event with on_timeout=skip (activity is skipped)
+/// - Fail: Publish ActivityFailed event (activity fails)
+///
+/// Also recovers any subscriptions that were marked expired but not fully processed
+/// (e.g., due to a server crash between marking expired and publishing events).
+async fn check_and_handle_expired_subscriptions(
+    subscription_service: &Arc<dyn SubscriptionService>,
+    event_source: &Arc<dyn EventSource>,
+) -> Result<()> {
+    // First, recover any previously-expired-but-unprocessed subscriptions (crash recovery)
+    let recovered = subscription_service
+        .recover_expired(100)
+        .await
+        .map_err(|e| {
+            super::OrchestratorError::InternalError(format!(
+                "Failed to recover expired subscriptions: {}",
+                e
+            ))
+        })?;
+
+    if !recovered.is_empty() {
+        tracing::warn!(
+            "Recovering {} expired-but-unprocessed signal subscriptions",
+            recovered.len()
+        );
+        process_expired_subscriptions(&recovered, subscription_service, event_source).await;
+    }
+
+    // Then, mark newly expired subscriptions
+    let expired = subscription_service
+        .expire_subscriptions(100)
+        .await
+        .map_err(|e| {
+            super::OrchestratorError::InternalError(format!(
+                "Failed to expire subscriptions: {}",
+                e
+            ))
+        })?;
+
+    if !expired.is_empty() {
+        tracing::info!("Found {} expired signal subscriptions", expired.len());
+        process_expired_subscriptions(&expired, subscription_service, event_source).await;
+    }
+
+    Ok(())
+}
+
+/// Publish timeout events for expired subscriptions and delete them on success.
+async fn process_expired_subscriptions(
+    expired: &[ExpiredSubscription],
+    subscription_service: &Arc<dyn SubscriptionService>,
+    event_source: &Arc<dyn EventSource>,
+) {
+    for sub in expired {
+        let event = match sub.on_timeout {
+            OnTimeout::Continue => {
+                tracing::info!(
+                    workflow_id = %sub.workflow_id,
+                    activity_key = %sub.activity_key,
+                    event_name = %sub.event_name,
+                    "Signal subscription timed out, continuing without signal data"
+                );
+                NewWorkflowEvent {
+                    workflow_id: sub.workflow_id,
+                    event_type: WorkflowEventType::ActivitySignaled,
+                    activity_key: Some(sub.activity_key.clone()),
+                    payload: json!({
+                        "event_name": sub.event_name,
+                        "reason": "timeout",
+                        "on_timeout": "continue",
+                    }),
+                    iteration: None,
+                }
+            }
+            OnTimeout::Skip => {
+                tracing::info!(
+                    workflow_id = %sub.workflow_id,
+                    activity_key = %sub.activity_key,
+                    event_name = %sub.event_name,
+                    "Signal subscription timed out, skipping activity"
+                );
+                NewWorkflowEvent {
+                    workflow_id: sub.workflow_id,
+                    event_type: WorkflowEventType::ActivitySignaled,
+                    activity_key: Some(sub.activity_key.clone()),
+                    payload: json!({
+                        "event_name": sub.event_name,
+                        "reason": "timeout",
+                        "on_timeout": "skip",
+                    }),
+                    iteration: None,
+                }
+            }
+            OnTimeout::Fail => {
+                tracing::warn!(
+                    workflow_id = %sub.workflow_id,
+                    activity_key = %sub.activity_key,
+                    event_name = %sub.event_name,
+                    "Signal subscription timed out, failing activity"
+                );
+                NewWorkflowEvent {
+                    workflow_id: sub.workflow_id,
+                    event_type: WorkflowEventType::ActivityFailed,
+                    activity_key: Some(sub.activity_key.clone()),
+                    payload: json!({
+                        "error": format!("Signal '{}' not received before timeout", sub.event_name),
+                        "error_code": "SIGNAL_TIMEOUT",
+                        "event_name": sub.event_name,
+                        "on_timeout": "fail",
+                    }),
+                    iteration: None,
+                }
+            }
+        };
+
+        // Only delete the subscription after the event is successfully published.
+        // If publish fails, the subscription stays marked as expired and will be
+        // retried on the next cycle via recover_expired.
+        match event_source.publish(event).await {
+            Ok(_) => {
+                let _ = subscription_service
+                    .delete_subscription(sub.workflow_id, &sub.activity_key)
+                    .await;
+            }
+            Err(e) => {
+                tracing::error!(
+                    workflow_id = %sub.workflow_id,
+                    activity_key = %sub.activity_key,
+                    "Failed to publish timeout event, will retry on next cycle: {}",
+                    e
+                );
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2072,6 +2363,7 @@ mod tests {
     use rust_decimal::Decimal;
     use serde_json::json;
     use std::collections::HashMap;
+    use std::time::Duration;
     use uuid::Uuid;
 
     fn create_activity_def(key: &str, settings: Option<ActivitySettings>) -> ActivityDefinition {
@@ -2112,6 +2404,7 @@ mod tests {
                         accumulated_cost_usd: Decimal::ZERO,
                         iteration: 0,
                         iteration_outputs: None,
+                        signal_data: None,
                     },
                 )
             })
@@ -2154,6 +2447,7 @@ mod tests {
             iteration_limit: None,
             delay: None,
             scheduled_for: None,
+            wait_for_signal: None,
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -2176,6 +2470,7 @@ mod tests {
             iteration_limit: None,
             delay: Some("10s".to_string()),
             scheduled_for: None,
+            wait_for_signal: None,
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -2209,6 +2504,7 @@ mod tests {
             iteration_limit: None,
             delay: Some("5m".to_string()),
             scheduled_for: None,
+            wait_for_signal: None,
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -2242,6 +2538,7 @@ mod tests {
             iteration_limit: None,
             delay: Some("1h".to_string()), // 1 hour delay
             scheduled_for: None,
+            wait_for_signal: None,
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -2268,6 +2565,7 @@ mod tests {
             iteration_limit: None,
             delay: None,
             scheduled_for: Some(iso_time.clone()),
+            wait_for_signal: None,
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -2296,6 +2594,7 @@ mod tests {
             iteration_limit: None,
             delay: Some("{{INPUT.delay_value}}".to_string()),
             scheduled_for: None,
+            wait_for_signal: None,
         };
         let activity_def = create_activity_def("test", Some(settings));
 
@@ -2462,6 +2761,7 @@ mod tests {
                     );
                     map
                 }),
+                signal_data: None,
             },
         );
 
@@ -2501,5 +2801,936 @@ mod tests {
             "postgres://secret:pass@localhost/db"
         );
         assert_eq!(context.secrets.get("api_key").unwrap(), "sk-12345");
+    }
+
+    // =========================================================================
+    // Mock definitions
+    // =========================================================================
+
+    use crate::queue::{
+        ActivityResult as QueueActivityResult, ActivitySummary, QueuedActivity, StaleActivityInfo,
+    };
+    use crate::subscription::{ActivitySubscription, SignalRequest};
+    use async_trait::async_trait;
+    use mockall::mock;
+
+    mock! {
+        pub EventSrc {}
+
+        #[async_trait]
+        impl EventSource for EventSrc {
+            async fn publish(&self, event: NewWorkflowEvent) -> std::result::Result<(), crate::events::EventError>;
+            async fn poll(&self, consumer_id: &str) -> std::result::Result<Vec<WorkflowEvent>, crate::events::EventError>;
+            async fn update_position(&self, consumer_id: &str, last_event_id: Uuid) -> std::result::Result<(), crate::events::EventError>;
+        }
+    }
+
+    mock! {
+        pub ActivityQ {}
+
+        #[async_trait]
+        impl ActivityQueue for ActivityQ {
+            async fn schedule(&self, workflow_id: Uuid, activities: Vec<Activity>) -> std::result::Result<(), crate::queue::QueueError>;
+            async fn claim_next(&self, worker_id: &str, worker: &str, max_activities: usize) -> std::result::Result<Vec<QueuedActivity>, crate::queue::QueueError>;
+            async fn get_activity_summary(&self, activity_id: Uuid) -> std::result::Result<ActivitySummary, crate::queue::QueueError>;
+            async fn complete(&self, activity_id: Uuid, worker_id: &str, result: QueueActivityResult) -> std::result::Result<(), crate::queue::QueueError>;
+            async fn fail(&self, activity_id: Uuid, worker_id: &str, retryable: bool, result: QueueActivityResult) -> std::result::Result<bool, crate::queue::QueueError>;
+            async fn heartbeat(&self, activity_id: Uuid, worker_id: &str) -> std::result::Result<(), crate::queue::QueueError>;
+            async fn reclaim_stale_activities(&self, limit: i64) -> std::result::Result<Vec<StaleActivityInfo>, crate::queue::QueueError>;
+        }
+    }
+
+    mock! {
+        pub SubSvc {}
+
+        #[async_trait]
+        impl SubscriptionService for SubSvc {
+            async fn create_subscription(&self, subscription: NewSubscription) -> std::result::Result<Uuid, crate::subscription::SubscriptionError>;
+            async fn signal_activity(&self, request: SignalRequest) -> std::result::Result<Option<ActivitySubscription>, crate::subscription::SubscriptionError>;
+            async fn get_signal_data(&self, workflow_id: Uuid, activity_key: &str) -> std::result::Result<Option<serde_json::Value>, crate::subscription::SubscriptionError>;
+            async fn expire_subscriptions(&self, limit: i64) -> std::result::Result<Vec<ExpiredSubscription>, crate::subscription::SubscriptionError>;
+            async fn recover_expired(&self, limit: i64) -> std::result::Result<Vec<ExpiredSubscription>, crate::subscription::SubscriptionError>;
+            async fn delete_subscription(&self, workflow_id: Uuid, activity_key: &str) -> std::result::Result<(), crate::subscription::SubscriptionError>;
+        }
+    }
+
+    fn create_test_event(
+        event_type: WorkflowEventType,
+        activity_key: Option<&str>,
+    ) -> WorkflowEvent {
+        WorkflowEvent {
+            id: Uuid::now_v7(),
+            workflow_id: Uuid::now_v7(),
+            event_type,
+            activity_key: activity_key.map(|k| k.to_string()),
+            payload: json!({}),
+            timestamp: Utc::now(),
+            iteration: None,
+        }
+    }
+
+    // =========================================================================
+    // publish_failure_for_poison_event tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_publish_failure_with_activity_key() {
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(1).returning(|event| {
+            assert_eq!(event.event_type, WorkflowEventType::ActivityFailed);
+            assert_eq!(event.activity_key, Some("step_a".to_string()));
+            let error_str = event.payload["error"].as_str().unwrap();
+            assert!(error_str.contains("ORCHESTRATOR_ERROR"));
+            assert!(error_str.contains("test error"));
+            Ok(())
+        });
+
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+        let event = create_test_event(WorkflowEventType::ActivityCompleted, Some("step_a"));
+
+        let result = publish_failure_for_poison_event(&event, &arc_es, "test error").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_publish_failure_without_activity_key() {
+        let mut mock_es = MockEventSrc::new();
+        // publish should NOT be called
+        mock_es.expect_publish().times(0);
+
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+        let event = create_test_event(WorkflowEventType::WorkflowCreated, None);
+
+        let result = publish_failure_for_poison_event(&event, &arc_es, "some error").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_publish_failure_payload_content() {
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(1).returning(|event| {
+            assert_eq!(
+                event.payload["error_code"].as_str().unwrap(),
+                "ORCHESTRATOR_PROCESSING_ERROR"
+            );
+            assert!(event.payload["poison_event_id"].as_str().is_some());
+            assert!(event.payload["original_event_type"].as_str().is_some());
+            Ok(())
+        });
+
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+        let event = create_test_event(WorkflowEventType::ActivityCompleted, Some("step_b"));
+
+        publish_failure_for_poison_event(&event, &arc_es, "error details")
+            .await
+            .unwrap();
+    }
+
+    // =========================================================================
+    // check_and_reclaim_stale_activities tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_reclaim_stale_empty() {
+        let mut mock_q = MockActivityQ::new();
+        mock_q
+            .expect_reclaim_stale_activities()
+            .times(1)
+            .returning(|_| Ok(vec![]));
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(0);
+
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        let result = check_and_reclaim_stale_activities(&arc_q, &arc_es).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_reclaim_stale_reset_to_pending() {
+        let mut mock_q = MockActivityQ::new();
+        mock_q
+            .expect_reclaim_stale_activities()
+            .times(1)
+            .returning(|_| {
+                Ok(vec![StaleActivityInfo {
+                    workflow_id: Uuid::now_v7(),
+                    activity_key: "step_a".to_string(),
+                    iteration: None,
+                    action: StaleActivityAction::ResetToPending,
+                    retry_count: 1,
+                    max_retries: 3,
+                }])
+            });
+
+        let mut mock_es = MockEventSrc::new();
+        // ResetToPending does NOT publish events
+        mock_es.expect_publish().times(0);
+
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        let result = check_and_reclaim_stale_activities(&arc_q, &arc_es).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_reclaim_stale_marked_failed() {
+        let workflow_id = Uuid::now_v7();
+        let mut mock_q = MockActivityQ::new();
+        mock_q
+            .expect_reclaim_stale_activities()
+            .times(1)
+            .returning(move |_| {
+                Ok(vec![StaleActivityInfo {
+                    workflow_id,
+                    activity_key: "step_b".to_string(),
+                    iteration: None,
+                    action: StaleActivityAction::MarkedFailed,
+                    retry_count: 3,
+                    max_retries: 3,
+                }])
+            });
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(1).returning(|event| {
+            assert_eq!(event.event_type, WorkflowEventType::ActivityFailed);
+            assert_eq!(event.activity_key, Some("step_b".to_string()));
+            assert_eq!(
+                event.payload["error_code"].as_str().unwrap(),
+                "ACTIVITY_TIMEOUT"
+            );
+            Ok(())
+        });
+
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        let result = check_and_reclaim_stale_activities(&arc_q, &arc_es).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_reclaim_stale_mixed_actions() {
+        let mut mock_q = MockActivityQ::new();
+        mock_q
+            .expect_reclaim_stale_activities()
+            .times(1)
+            .returning(|_| {
+                Ok(vec![
+                    StaleActivityInfo {
+                        workflow_id: Uuid::now_v7(),
+                        activity_key: "reset_me".to_string(),
+                        iteration: None,
+                        action: StaleActivityAction::ResetToPending,
+                        retry_count: 1,
+                        max_retries: 3,
+                    },
+                    StaleActivityInfo {
+                        workflow_id: Uuid::now_v7(),
+                        activity_key: "fail_me".to_string(),
+                        iteration: Some(2),
+                        action: StaleActivityAction::MarkedFailed,
+                        retry_count: 5,
+                        max_retries: 5,
+                    },
+                ])
+            });
+
+        let mut mock_es = MockEventSrc::new();
+        // Only MarkedFailed publishes an event
+        mock_es.expect_publish().times(1).returning(|event| {
+            assert_eq!(event.activity_key, Some("fail_me".to_string()));
+            assert_eq!(event.iteration, Some(2));
+            Ok(())
+        });
+
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        check_and_reclaim_stale_activities(&arc_q, &arc_es)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_reclaim_stale_publish_error_is_not_fatal() {
+        let mut mock_q = MockActivityQ::new();
+        mock_q
+            .expect_reclaim_stale_activities()
+            .times(1)
+            .returning(|_| {
+                Ok(vec![StaleActivityInfo {
+                    workflow_id: Uuid::now_v7(),
+                    activity_key: "step_c".to_string(),
+                    iteration: None,
+                    action: StaleActivityAction::MarkedFailed,
+                    retry_count: 3,
+                    max_retries: 3,
+                }])
+            });
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(1).returning(|_| {
+            Err(crate::events::EventError::Database(sqlx::Error::Protocol(
+                "publish failed".to_string(),
+            )))
+        });
+
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        // Should not propagate publish error (it's logged but ignored)
+        let result = check_and_reclaim_stale_activities(&arc_q, &arc_es).await;
+        assert!(result.is_ok());
+    }
+
+    // =========================================================================
+    // check_and_handle_expired_subscriptions tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_expired_subscriptions_none() {
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub
+            .expect_recover_expired()
+            .times(1)
+            .returning(|_| Ok(vec![]));
+        mock_sub
+            .expect_expire_subscriptions()
+            .times(1)
+            .returning(|_| Ok(vec![]));
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(0);
+
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        let result = check_and_handle_expired_subscriptions(&arc_sub, &arc_es).await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_expired_subscriptions_recovered_and_new() {
+        let wf_id = Uuid::now_v7();
+        let mut mock_sub = MockSubSvc::new();
+
+        // Return one recovered subscription
+        mock_sub
+            .expect_recover_expired()
+            .times(1)
+            .returning(move |_| {
+                Ok(vec![ExpiredSubscription {
+                    id: Uuid::now_v7(),
+                    workflow_id: wf_id,
+                    activity_key: "recovered_step".to_string(),
+                    event_name: "approval".to_string(),
+                    on_timeout: OnTimeout::Fail,
+                }])
+            });
+
+        // Return one newly expired subscription
+        let wf_id2 = Uuid::now_v7();
+        mock_sub
+            .expect_expire_subscriptions()
+            .times(1)
+            .returning(move |_| {
+                Ok(vec![ExpiredSubscription {
+                    id: Uuid::now_v7(),
+                    workflow_id: wf_id2,
+                    activity_key: "new_expired".to_string(),
+                    event_name: "signal".to_string(),
+                    on_timeout: OnTimeout::Continue,
+                }])
+            });
+
+        // delete_subscription called once per successful publish
+        mock_sub
+            .expect_delete_subscription()
+            .times(2)
+            .returning(|_, _| Ok(()));
+
+        let mut mock_es = MockEventSrc::new();
+        // Two publishes: one for recovered, one for newly expired
+        mock_es.expect_publish().times(2).returning(|_| Ok(()));
+
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        check_and_handle_expired_subscriptions(&arc_sub, &arc_es)
+            .await
+            .unwrap();
+    }
+
+    // =========================================================================
+    // process_expired_subscriptions tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_process_expired_continue() {
+        let wf_id = Uuid::now_v7();
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub
+            .expect_delete_subscription()
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(1).returning(|event| {
+            assert_eq!(event.event_type, WorkflowEventType::ActivitySignaled);
+            assert_eq!(event.payload["on_timeout"].as_str().unwrap(), "continue");
+            assert_eq!(event.payload["reason"].as_str().unwrap(), "timeout");
+            Ok(())
+        });
+
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        let expired = vec![ExpiredSubscription {
+            id: Uuid::now_v7(),
+            workflow_id: wf_id,
+            activity_key: "wait_step".to_string(),
+            event_name: "approval".to_string(),
+            on_timeout: OnTimeout::Continue,
+        }];
+
+        process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
+    }
+
+    #[tokio::test]
+    async fn test_process_expired_skip() {
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub
+            .expect_delete_subscription()
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(1).returning(|event| {
+            assert_eq!(event.event_type, WorkflowEventType::ActivitySignaled);
+            assert_eq!(event.payload["on_timeout"].as_str().unwrap(), "skip");
+            Ok(())
+        });
+
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        let expired = vec![ExpiredSubscription {
+            id: Uuid::now_v7(),
+            workflow_id: Uuid::now_v7(),
+            activity_key: "skip_step".to_string(),
+            event_name: "signal".to_string(),
+            on_timeout: OnTimeout::Skip,
+        }];
+
+        process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
+    }
+
+    #[tokio::test]
+    async fn test_process_expired_fail() {
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub
+            .expect_delete_subscription()
+            .times(1)
+            .returning(|_, _| Ok(()));
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(1).returning(|event| {
+            assert_eq!(event.event_type, WorkflowEventType::ActivityFailed);
+            assert_eq!(
+                event.payload["error_code"].as_str().unwrap(),
+                "SIGNAL_TIMEOUT"
+            );
+            let error_msg = event.payload["error"].as_str().unwrap();
+            assert!(error_msg.contains("not received before timeout"));
+            Ok(())
+        });
+
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        let expired = vec![ExpiredSubscription {
+            id: Uuid::now_v7(),
+            workflow_id: Uuid::now_v7(),
+            activity_key: "fail_step".to_string(),
+            event_name: "required_signal".to_string(),
+            on_timeout: OnTimeout::Fail,
+        }];
+
+        process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
+    }
+
+    #[tokio::test]
+    async fn test_process_expired_publish_error_skips_delete() {
+        let mut mock_sub = MockSubSvc::new();
+        // delete should NOT be called when publish fails
+        mock_sub.expect_delete_subscription().times(0);
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(1).returning(|_| {
+            Err(crate::events::EventError::Database(sqlx::Error::Protocol(
+                "connection lost".to_string(),
+            )))
+        });
+
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        let expired = vec![ExpiredSubscription {
+            id: Uuid::now_v7(),
+            workflow_id: Uuid::now_v7(),
+            activity_key: "step".to_string(),
+            event_name: "signal".to_string(),
+            on_timeout: OnTimeout::Fail,
+        }];
+
+        // Should not panic — error is logged and subscription is retained for retry
+        process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
+    }
+
+    #[tokio::test]
+    async fn test_process_expired_multiple_subscriptions() {
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub
+            .expect_delete_subscription()
+            .times(3)
+            .returning(|_, _| Ok(()));
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(3).returning(|_| Ok(()));
+
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+
+        let expired = vec![
+            ExpiredSubscription {
+                id: Uuid::now_v7(),
+                workflow_id: Uuid::now_v7(),
+                activity_key: "a".to_string(),
+                event_name: "sig".to_string(),
+                on_timeout: OnTimeout::Continue,
+            },
+            ExpiredSubscription {
+                id: Uuid::now_v7(),
+                workflow_id: Uuid::now_v7(),
+                activity_key: "b".to_string(),
+                event_name: "sig".to_string(),
+                on_timeout: OnTimeout::Skip,
+            },
+            ExpiredSubscription {
+                id: Uuid::now_v7(),
+                workflow_id: Uuid::now_v7(),
+                activity_key: "c".to_string(),
+                event_name: "sig".to_string(),
+                on_timeout: OnTimeout::Fail,
+            },
+        ];
+
+        process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
+    }
+
+    // =========================================================================
+    // compute_scheduled_for error path tests
+    // =========================================================================
+
+    #[test]
+    fn test_compute_scheduled_for_invalid_delay_format() {
+        let settings = ActivitySettings {
+            timeout_seconds: None,
+            retry: None,
+            budget: None,
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: Some("invalid_duration".to_string()),
+            scheduled_for: None,
+            wait_for_signal: None,
+        };
+        let activity_def = create_activity_def("test", Some(settings));
+        let context = TemplateContext::new();
+
+        let result = compute_scheduled_for(&activity_def, &context, None);
+        assert!(result.is_err(), "Invalid delay format should return error");
+    }
+
+    #[test]
+    fn test_compute_scheduled_for_invalid_scheduled_for_format() {
+        let settings = ActivitySettings {
+            timeout_seconds: None,
+            retry: None,
+            budget: None,
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: None,
+            scheduled_for: Some("not-a-timestamp".to_string()),
+            wait_for_signal: None,
+        };
+        let activity_def = create_activity_def("test", Some(settings));
+        let context = TemplateContext::new();
+
+        let result = compute_scheduled_for(&activity_def, &context, None);
+        assert!(
+            result.is_err(),
+            "Invalid timestamp format should return error"
+        );
+    }
+
+    #[test]
+    fn test_compute_scheduled_for_past_scheduled_time() {
+        let past_time = Utc::now() - chrono::Duration::hours(1);
+        let settings = ActivitySettings {
+            timeout_seconds: None,
+            retry: None,
+            budget: None,
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: None,
+            scheduled_for: Some(past_time.to_rfc3339()),
+            wait_for_signal: None,
+        };
+        let activity_def = create_activity_def("test", Some(settings));
+        let context = TemplateContext::new();
+
+        // Past time is a warning, not an error — should return Ok with the past time
+        let result = compute_scheduled_for(&activity_def, &context, None).unwrap();
+        assert!(result.is_some());
+        let scheduled = result.unwrap();
+        assert!(scheduled < Utc::now());
+    }
+
+    #[test]
+    fn test_compute_scheduled_for_delay_precedence_over_scheduled_for() {
+        // When both delay and scheduled_for are set, delay takes precedence
+        let future_time = Utc::now() + chrono::Duration::hours(5);
+        let settings = ActivitySettings {
+            timeout_seconds: None,
+            retry: None,
+            budget: None,
+            cache: false,
+            cache_ttl: None,
+            iteration_limit: None,
+            delay: Some("2s".to_string()),
+            scheduled_for: Some(future_time.to_rfc3339()),
+            wait_for_signal: None,
+        };
+        let activity_def = create_activity_def("test", Some(settings));
+        let context = TemplateContext::new();
+
+        let before = Utc::now();
+        let result = compute_scheduled_for(&activity_def, &context, None)
+            .unwrap()
+            .unwrap();
+
+        // Should be ~2 seconds from now (from delay), not ~5 hours (from scheduled_for)
+        let max_expected = before + chrono::Duration::seconds(5);
+        assert!(
+            result < max_expected,
+            "delay should take precedence over scheduled_for"
+        );
+    }
+
+    // =========================================================================
+    // build_template_context edge case tests
+    // =========================================================================
+
+    #[test]
+    fn test_build_template_context_with_non_object_input() {
+        // If input is not a JSON object, inputs should be empty
+        let state = create_test_workflow_state(vec![], json!("just a string"));
+        let workflow_id = state.workflow_id;
+        let secrets = HashMap::new();
+
+        let context = build_template_context(&state, workflow_id, &secrets);
+        assert!(
+            context.inputs.is_empty(),
+            "Non-object input should result in empty inputs"
+        );
+    }
+
+    #[test]
+    fn test_build_template_context_with_error_state() {
+        let mut activities_map = HashMap::new();
+        activities_map.insert(
+            "failed_step".to_string(),
+            ActivityState {
+                key: "failed_step".to_string(),
+                status: WorkflowActivityStatus::Failed,
+                outputs: None,
+                error: Some("something went wrong".to_string()),
+                started_at: None,
+                completed_at: None,
+                attempt: 3,
+                last_error: Some("something went wrong".to_string()),
+                accumulated_cost_usd: Decimal::new(250, 4), // $0.0250
+                iteration: 0,
+                iteration_outputs: None,
+                signal_data: None,
+            },
+        );
+
+        let state = WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: WorkflowStatus::Running,
+            activities: activities_map,
+            state_data: json!({}),
+            input: json!({}),
+        };
+        let workflow_id = state.workflow_id;
+        let secrets = HashMap::new();
+
+        let context = build_template_context(&state, workflow_id, &secrets);
+
+        // Failed activities should still be present in context
+        assert!(context.activity_states.contains_key("failed_step"));
+    }
+
+    // =========================================================================
+    // timeout_checker_task tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_timeout_checker_task_shutdown() {
+        // Test that the timeout checker task stops when shutdown is requested
+        let config = OrchestratorConfig {
+            poll_interval_min: Duration::from_millis(10),
+            poll_interval_max: Duration::from_millis(50),
+            backoff_multiplier: 1.5,
+            workflow_timeout: Duration::from_secs(3600),
+            timeout_check_interval: Duration::from_millis(50),
+            pool: {
+                // We need a PgPool but it won't actually be used since we cancel immediately
+                // Use a placeholder that will fail on connect - the task should stop before using it
+                sqlx::PgPool::connect_lazy("postgres://invalid:5432/test").unwrap()
+            },
+            secrets: HashMap::new(),
+        };
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().times(0);
+        let mut mock_q = MockActivityQ::new();
+        mock_q.expect_reclaim_stale_activities().times(0);
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub.expect_recover_expired().times(0);
+        mock_sub.expect_expire_subscriptions().times(0);
+
+        let shutdown_token = CancellationToken::new();
+        // Cancel immediately so the task exits on first loop iteration
+        shutdown_token.cancel();
+
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+
+        // This should return quickly due to shutdown
+        let handle = tokio::spawn(timeout_checker_task(
+            config,
+            arc_es,
+            arc_q,
+            arc_sub,
+            Some(shutdown_token),
+        ));
+
+        let result = tokio::time::timeout(Duration::from_secs(2), handle).await;
+        assert!(
+            result.is_ok(),
+            "timeout_checker_task should exit on shutdown"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_timeout_checker_task_no_shutdown_token() {
+        // Test with no shutdown token - task runs until we drop it
+        let config = OrchestratorConfig {
+            poll_interval_min: Duration::from_millis(10),
+            poll_interval_max: Duration::from_millis(50),
+            backoff_multiplier: 1.5,
+            workflow_timeout: Duration::from_secs(3600),
+            timeout_check_interval: Duration::from_millis(10),
+            pool: sqlx::PgPool::connect_lazy("postgres://invalid:5432/test").unwrap(),
+            secrets: HashMap::new(),
+        };
+
+        let mut mock_es = MockEventSrc::new();
+        mock_es.expect_publish().returning(|_| Ok(()));
+        let mut mock_q = MockActivityQ::new();
+        mock_q
+            .expect_reclaim_stale_activities()
+            .returning(|_| Ok(vec![]));
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub.expect_recover_expired().returning(|_| Ok(vec![]));
+        mock_sub
+            .expect_expire_subscriptions()
+            .returning(|_| Ok(vec![]));
+
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+
+        let handle = tokio::spawn(timeout_checker_task(
+            config, arc_es, arc_q, arc_sub, None, // No shutdown token
+        ));
+
+        // Let it run for a bit then abort
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        handle.abort();
+
+        // Task should have been running (will error with JoinError::Cancelled)
+        let result = handle.await;
+        assert!(result.is_err()); // Cancelled
+    }
+
+    // =========================================================================
+    // run_orchestrator tests
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_run_orchestrator_immediate_shutdown() {
+        let config = OrchestratorConfig {
+            poll_interval_min: Duration::from_millis(10),
+            poll_interval_max: Duration::from_millis(50),
+            backoff_multiplier: 1.5,
+            workflow_timeout: Duration::from_secs(3600),
+            timeout_check_interval: Duration::from_secs(60),
+            pool: sqlx::PgPool::connect_lazy("postgres://invalid:5432/test").unwrap(),
+            secrets: HashMap::new(),
+        };
+
+        let mut mock_es = MockEventSrc::new();
+        // poll should not be called since shutdown is immediate
+        mock_es.expect_poll().times(0);
+        mock_es.expect_publish().returning(|_| Ok(()));
+
+        let mut mock_q = MockActivityQ::new();
+        mock_q
+            .expect_reclaim_stale_activities()
+            .returning(|_| Ok(vec![]));
+
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub.expect_recover_expired().returning(|_| Ok(vec![]));
+        mock_sub
+            .expect_expire_subscriptions()
+            .returning(|_| Ok(vec![]));
+
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+
+        let shutdown_token = CancellationToken::new();
+        shutdown_token.cancel(); // Cancel before running
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            run_orchestrator(arc_es, arc_q, arc_sub, config, Some(shutdown_token)),
+        )
+        .await;
+
+        assert!(
+            result.is_ok(),
+            "Should complete quickly on immediate shutdown"
+        );
+        assert!(result.unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_run_orchestrator_empty_poll_with_shutdown() {
+        let config = OrchestratorConfig {
+            poll_interval_min: Duration::from_millis(1),
+            poll_interval_max: Duration::from_millis(10),
+            backoff_multiplier: 1.5,
+            workflow_timeout: Duration::from_secs(3600),
+            timeout_check_interval: Duration::from_secs(60),
+            pool: sqlx::PgPool::connect_lazy("postgres://invalid:5432/test").unwrap(),
+            secrets: HashMap::new(),
+        };
+
+        let mut mock_es = MockEventSrc::new();
+        // Return empty events, then shutdown will be detected
+        mock_es.expect_poll().returning(|_| Ok(vec![]));
+        mock_es.expect_publish().returning(|_| Ok(()));
+
+        let mut mock_q = MockActivityQ::new();
+        mock_q
+            .expect_reclaim_stale_activities()
+            .returning(|_| Ok(vec![]));
+
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub.expect_recover_expired().returning(|_| Ok(vec![]));
+        mock_sub
+            .expect_expire_subscriptions()
+            .returning(|_| Ok(vec![]));
+
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+
+        let shutdown_token = CancellationToken::new();
+        let token_clone = shutdown_token.clone();
+
+        // Cancel after a short delay
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            token_clone.cancel();
+        });
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            run_orchestrator(arc_es, arc_q, arc_sub, config, Some(shutdown_token)),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Should stop after shutdown token cancelled");
+        assert!(result.unwrap().is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_run_orchestrator_poll_error() {
+        let config = OrchestratorConfig {
+            poll_interval_min: Duration::from_millis(1),
+            poll_interval_max: Duration::from_millis(10),
+            backoff_multiplier: 1.5,
+            workflow_timeout: Duration::from_secs(3600),
+            timeout_check_interval: Duration::from_secs(60),
+            pool: sqlx::PgPool::connect_lazy("postgres://invalid:5432/test").unwrap(),
+            secrets: HashMap::new(),
+        };
+
+        let mut mock_es = MockEventSrc::new();
+        // poll returns an error
+        mock_es.expect_poll().returning(|_| {
+            Err(crate::events::EventError::Invalid(
+                "connection refused".to_string(),
+            ))
+        });
+        mock_es.expect_publish().returning(|_| Ok(()));
+
+        let mut mock_q = MockActivityQ::new();
+        mock_q
+            .expect_reclaim_stale_activities()
+            .returning(|_| Ok(vec![]));
+
+        let mut mock_sub = MockSubSvc::new();
+        mock_sub.expect_recover_expired().returning(|_| Ok(vec![]));
+        mock_sub
+            .expect_expire_subscriptions()
+            .returning(|_| Ok(vec![]));
+
+        let arc_es: Arc<dyn EventSource> = Arc::new(mock_es);
+        let arc_q: Arc<dyn ActivityQueue> = Arc::new(mock_q);
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(mock_sub);
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            run_orchestrator(arc_es, arc_q, arc_sub, config, None),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Should return on poll error");
+        assert!(result.unwrap().is_err(), "Poll error should propagate");
     }
 }

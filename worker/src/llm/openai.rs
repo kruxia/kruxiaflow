@@ -91,10 +91,10 @@ impl SseParser {
 
             // Parse SSE format: "data: {...}"
             for line in chunk.lines() {
-                if let Some(data) = line.strip_prefix("data: ") {
-                    if let Some(event) = parse_sse_data(data) {
-                        events.push(event);
-                    }
+                if let Some(data) = line.strip_prefix("data: ")
+                    && let Some(event) = parse_sse_data(data)
+                {
+                    events.push(event);
                 }
             }
         }
@@ -104,10 +104,10 @@ impl SseParser {
             let line = self.buffer[..pos].to_string();
             self.buffer = self.buffer[pos + 1..].to_string();
 
-            if let Some(data) = line.strip_prefix("data: ") {
-                if let Some(event) = parse_sse_data(data) {
-                    events.push(event);
-                }
+            if let Some(data) = line.strip_prefix("data: ")
+                && let Some(event) = parse_sse_data(data)
+            {
+                events.push(event);
             }
         }
 
@@ -299,13 +299,13 @@ impl LLMProvider for OpenAIProvider {
                             for event in events {
                                 if let Some(choice) = event.choices.first() {
                                     // Check for content delta
-                                    if let Some(content) = &choice.delta.content {
-                                        if !content.is_empty() {
-                                            pending_chunks.push(PromptChunk {
-                                                content: content.clone(),
-                                                finish_reason: None,
-                                            });
-                                        }
+                                    if let Some(content) = &choice.delta.content
+                                        && !content.is_empty()
+                                    {
+                                        pending_chunks.push(PromptChunk {
+                                            content: content.clone(),
+                                            finish_reason: None,
+                                        });
                                     }
 
                                     // Check for finish reason

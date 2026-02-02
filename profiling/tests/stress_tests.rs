@@ -241,7 +241,7 @@ async fn test_graceful_degradation() {
     let has_error_info = results
         .steps
         .iter()
-        .any(|s| s.failed_workflows > 0 && s.errors.len() > 0);
+        .any(|s| s.failed_workflows > 0 && !s.errors.is_empty());
     if total_failed > 0 {
         println!(
             "  Error tracking: {}",

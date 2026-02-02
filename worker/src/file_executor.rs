@@ -170,13 +170,13 @@ impl FileExecutor {
             match output_def.output_type {
                 OutputType::Value => {
                     // Regular value output - extract from activity_outputs
-                    if let Some(map) = outputs_map {
-                        if let Some(value) = map.get(&output_def.name) {
-                            outputs.push(ActivityOutput::value(
-                                output_def.name.clone(),
-                                value.clone(),
-                            ));
-                        }
+                    if let Some(map) = outputs_map
+                        && let Some(value) = map.get(&output_def.name)
+                    {
+                        outputs.push(ActivityOutput::value(
+                            output_def.name.clone(),
+                            value.clone(),
+                        ));
                     }
                 }
                 OutputType::File => {
@@ -313,6 +313,250 @@ mod tests {
         assert_eq!(outputs[0].output_type, OutputType::Value);
 
         // Cleanup
+        executor.cleanup().await.expect("Failed to cleanup");
+    }
+
+    #[tokio::test]
+    async fn test_process_file_outputs_non_object_value() {
+        let storage = setup_test_storage().await;
+        let workflow_id = Uuid::now_v7();
+        let activity_key = "test_activity".to_string();
+
+        let executor = FileExecutor::new(workflow_id, activity_key, storage)
+            .await
+            .expect("Failed to create file executor");
+
+        let output_defs = vec![ActivityOutputDefinition {
+            name: "result".to_string(),
+            output_type: OutputType::Value,
+        }];
+
+        // Non-object value (array) — value outputs won't be found
+        let activity_outputs = serde_json::json!([1, 2, 3]);
+
+        let outputs = executor
+            .process_file_outputs(&output_defs, activity_outputs)
+            .await
+            .expect("Should succeed but with no outputs");
+
+        assert_eq!(outputs.len(), 0);
+
+        executor.cleanup().await.expect("Failed to cleanup");
+    }
+
+    #[tokio::test]
+    async fn test_process_file_outputs_folder_type_errors() {
+        let storage = setup_test_storage().await;
+        let workflow_id = Uuid::now_v7();
+        let activity_key = "test_activity".to_string();
+
+        let executor = FileExecutor::new(workflow_id, activity_key, storage)
+            .await
+            .expect("Failed to create file executor");
+
+        let output_defs = vec![ActivityOutputDefinition {
+            name: "results_dir".to_string(),
+            output_type: OutputType::Folder,
+        }];
+
+        let activity_outputs = serde_json::json!({});
+
+        let result = executor
+            .process_file_outputs(&output_defs, activity_outputs)
+            .await;
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("not yet supported")
+        );
+
+        executor.cleanup().await.expect("Failed to cleanup");
+    }
+
+    #[tokio::test]
+    async fn test_process_file_outputs_missing_file() {
+        let storage = setup_test_storage().await;
+        let workflow_id = Uuid::now_v7();
+        let activity_key = "test_activity".to_string();
+
+        let executor = FileExecutor::new(workflow_id, activity_key, storage)
+            .await
+            .expect("Failed to create file executor");
+
+        let output_defs = vec![ActivityOutputDefinition {
+            name: "report.pdf".to_string(),
+            output_type: OutputType::File,
+        }];
+
+        let activity_outputs = serde_json::json!({});
+
+        let result = executor
+            .process_file_outputs(&output_defs, activity_outputs)
+            .await;
+
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("did not create expected file output")
+        );
+
+        executor.cleanup().await.expect("Failed to cleanup");
+    }
+
+    #[tokio::test]
+    async fn test_download_file_invalid_reference_format() {
+        let storage = setup_test_storage().await;
+        let workflow_id = Uuid::now_v7();
+        let activity_key = "test_activity".to_string();
+
+        let executor = FileExecutor::new(workflow_id, activity_key, storage)
+            .await
+            .expect("Failed to create file executor");
+
+        // Invalid format: missing parts
+        let result = executor.download_file("just-one-part", "local.txt").await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid file reference format")
+        );
+
+        // Invalid format: too many parts
+        let result = executor.download_file("a/b/c/d", "local.txt").await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid file reference format")
+        );
+
+        // Invalid UUID
+        let result = executor
+            .download_file("not-a-uuid/activity/file.txt", "local.txt")
+            .await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Invalid workflow ID")
+        );
+
+        executor.cleanup().await.expect("Failed to cleanup");
+    }
+
+    #[tokio::test]
+    async fn test_output_file_exists() {
+        let storage = setup_test_storage().await;
+        let workflow_id = Uuid::now_v7();
+        let activity_key = "test_activity".to_string();
+
+        let executor = FileExecutor::new(workflow_id, activity_key, storage)
+            .await
+            .expect("Failed to create file executor");
+
+        // File doesn't exist yet
+        assert!(!executor.output_file_exists("nonexistent.txt").await);
+
+        // Create a file
+        let path = executor.output_file_path("test_output.txt");
+        create_output_file(&path, b"hello world").await.unwrap();
+
+        // Now it exists
+        assert!(executor.output_file_exists("test_output.txt").await);
+
+        executor.cleanup().await.expect("Failed to cleanup");
+    }
+
+    #[tokio::test]
+    async fn test_create_output_file() {
+        let temp_dir = std::env::temp_dir()
+            .join("kruxiaflow_test")
+            .join(Uuid::now_v7().to_string());
+        tokio::fs::create_dir_all(&temp_dir).await.unwrap();
+
+        let file_path = temp_dir.join("test_output.txt");
+        create_output_file(&file_path, b"test content")
+            .await
+            .unwrap();
+
+        let content = tokio::fs::read_to_string(&file_path).await.unwrap();
+        assert_eq!(content, "test content");
+
+        // Cleanup
+        tokio::fs::remove_dir_all(&temp_dir).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_upload_file_not_found() {
+        let storage = setup_test_storage().await;
+        let workflow_id = Uuid::now_v7();
+        let activity_key = "test_activity".to_string();
+
+        let executor = FileExecutor::new(workflow_id, activity_key, storage)
+            .await
+            .expect("Failed to create file executor");
+
+        let result = executor.upload_file("nonexistent.txt", None).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("File not found"));
+
+        executor.cleanup().await.expect("Failed to cleanup");
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_nonexistent_dir() {
+        let storage = setup_test_storage().await;
+        let workflow_id = Uuid::now_v7();
+        let activity_key = "test_cleanup".to_string();
+
+        let executor = FileExecutor::new(workflow_id, activity_key, storage)
+            .await
+            .expect("Failed to create file executor");
+
+        // Remove dir first
+        let _ = tokio::fs::remove_dir_all(executor.temp_dir()).await;
+
+        // Cleanup of non-existent dir should succeed
+        executor
+            .cleanup()
+            .await
+            .expect("Cleanup should succeed even if dir is gone");
+    }
+
+    #[tokio::test]
+    async fn test_process_file_outputs_value_missing_key() {
+        let storage = setup_test_storage().await;
+        let workflow_id = Uuid::now_v7();
+        let activity_key = "test_activity".to_string();
+
+        let executor = FileExecutor::new(workflow_id, activity_key, storage)
+            .await
+            .expect("Failed to create file executor");
+
+        let output_defs = vec![ActivityOutputDefinition {
+            name: "missing_key".to_string(),
+            output_type: OutputType::Value,
+        }];
+
+        // Object that doesn't contain the expected key
+        let activity_outputs = serde_json::json!({"other_key": 42});
+
+        let outputs = executor
+            .process_file_outputs(&output_defs, activity_outputs)
+            .await
+            .expect("Should succeed but with no matching outputs");
+
+        assert_eq!(outputs.len(), 0);
+
         executor.cleanup().await.expect("Failed to cleanup");
     }
 }

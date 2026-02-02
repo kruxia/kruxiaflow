@@ -1,7 +1,9 @@
 use kruxiaflow_api::{AppState, app_router};
 use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
-use kruxiaflow_core::{OrchestratorConfig, run_orchestrator};
+use kruxiaflow_core::{
+    OrchestratorConfig, PostgresSubscriptionService, SubscriptionService, run_orchestrator,
+};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use kruxiaflow_worker::{
     ActivityRegistry, EmailSendActivity, HttpRequestActivity, PostgresQueryActivity, WorkerConfig,
@@ -149,10 +151,10 @@ async fn get_mailhog_messages() -> Option<MailhogMessages> {
 async fn wait_for_message(timeout_ms: u64) -> Option<MailhogMessage> {
     let start = std::time::Instant::now();
     while start.elapsed().as_millis() < timeout_ms as u128 {
-        if let Some(messages) = get_mailhog_messages().await {
-            if !messages.items.is_empty() {
-                return Some(messages.items.into_iter().next().unwrap());
-            }
+        if let Some(messages) = get_mailhog_messages().await
+            && !messages.items.is_empty()
+        {
+            return Some(messages.items.into_iter().next().unwrap());
         }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
@@ -263,6 +265,8 @@ async fn test_example_10_order_processing_with_email() {
 
     // Start Kruxia Flow API server
     let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let state = AppState::new(
         pool.clone(),
         Arc::new(auth_service),
@@ -270,6 +274,7 @@ async fn test_example_10_order_processing_with_email() {
         event_source.clone(),
         workflow_storage.clone(),
         cache_service,
+        subscription_service.clone(),
         shutdown_token.clone(),
     );
     let app = app_router(state);
@@ -294,11 +299,15 @@ async fn test_example_10_order_processing_with_email() {
     let orchestrator_queue = activity_queue.clone();
     let orchestrator_pool = pool.clone();
     let orchestrator_shutdown = shutdown_token.clone();
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
+    let orchestrator_subscription = subscription_service.clone();
     tokio::spawn(async move {
         let config = OrchestratorConfig::new(orchestrator_pool);
         run_orchestrator(
             orchestrator_event_source,
             orchestrator_queue,
+            orchestrator_subscription,
             config,
             Some(orchestrator_shutdown),
         )
@@ -325,7 +334,7 @@ async fn test_example_10_order_processing_with_email() {
     let worker_config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("test_worker_ex10_{}", Uuid::now_v7()),
-        worker: "builtin".to_string(),
+        worker: "std".to_string(),
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities: 20,
@@ -352,7 +361,7 @@ description: Test order processing with database transaction and email confirmat
 activities:
   # Step 1: Mock inventory check (using health endpoint as mock)
   - key: validate_inventory
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: GET
@@ -363,7 +372,7 @@ activities:
 
   # Step 2: Mock inventory reservation (using health endpoint as mock)
   - key: reserve_inventory
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -380,7 +389,7 @@ activities:
 
   # Step 3: Mock payment processing (using health endpoint as mock)
   - key: process_payment
-    worker: builtin
+    worker: std
     activity_name: http_request
     parameters:
       method: POST
@@ -397,7 +406,7 @@ activities:
 
   # Step 4: Record order in database (atomic transaction)
   - key: record_order
-    worker: builtin
+    worker: std
     activity_name: postgres_transaction
     parameters:
       db_url: "{db_url}"
@@ -430,7 +439,7 @@ activities:
 
   # Step 5: Send confirmation email
   - key: send_confirmation
-    worker: builtin
+    worker: std
     activity_name: email_send
     parameters:
       smtp_url: "smtp://127.0.0.1:1025"

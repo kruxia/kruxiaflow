@@ -10,6 +10,7 @@ use kruxiaflow_core::workflow::{
     ActivityDefinition, ActivityRelationship, ActivitySettings, BudgetAction, BudgetSettings,
     WorkflowDefinition,
 };
+use kruxiaflow_core::{PostgresSubscriptionService, SubscriptionService};
 use serde_json::json;
 use serial_test::serial;
 use sqlx::PgPool;
@@ -128,6 +129,8 @@ async fn test_simple_loop_workflow() {
     };
     let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config.clone()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
 
     // Publish WorkflowCreated event
     event_source
@@ -163,6 +166,7 @@ async fn test_simple_loop_workflow() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -175,9 +179,7 @@ async fn test_simple_loop_workflow() {
 
     // Verify process activity was scheduled (iteration 0)
     let mut tx = pool.begin().await.unwrap();
-    let state = load_materialized_state(&mut *tx, workflow_id)
-        .await
-        .unwrap();
+    let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
     tx.commit().await.unwrap();
 
     let process_state = state.activities.get("process").unwrap();
@@ -208,6 +210,7 @@ async fn test_simple_loop_workflow() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -220,9 +223,7 @@ async fn test_simple_loop_workflow() {
 
     // Verify check activity was scheduled
     let mut tx = pool.begin().await.unwrap();
-    let state = load_materialized_state(&mut *tx, workflow_id)
-        .await
-        .unwrap();
+    let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
     tx.commit().await.unwrap();
 
     let check_state = state.activities.get("check").unwrap();
@@ -255,6 +256,7 @@ async fn test_simple_loop_workflow() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -267,9 +269,7 @@ async fn test_simple_loop_workflow() {
 
     // Verify process activity was scheduled again (iteration 1 - loop back)
     let mut tx = pool.begin().await.unwrap();
-    let state = load_materialized_state(&mut *tx, workflow_id)
-        .await
-        .unwrap();
+    let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
     tx.commit().await.unwrap();
 
     let process_state = state.activities.get("process").unwrap();
@@ -323,6 +323,8 @@ async fn test_loop_max_iterations_enforced() {
     };
     let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
 
     // Create workflow
     event_source
@@ -356,6 +358,7 @@ async fn test_loop_max_iterations_enforced() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -386,6 +389,7 @@ async fn test_loop_max_iterations_enforced() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -398,9 +402,7 @@ async fn test_loop_max_iterations_enforced() {
 
     // Verify iteration 1 was scheduled
     let mut tx = pool.begin().await.unwrap();
-    let state = load_materialized_state(&mut *tx, workflow_id)
-        .await
-        .unwrap();
+    let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
     tx.commit().await.unwrap();
 
     let task_state = state.activities.get("loop_task").unwrap();
@@ -427,6 +429,7 @@ async fn test_loop_max_iterations_enforced() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -439,9 +442,7 @@ async fn test_loop_max_iterations_enforced() {
 
     // Verify loop stopped (iteration limit reached)
     let mut tx = pool.begin().await.unwrap();
-    let state = load_materialized_state(&mut *tx, workflow_id)
-        .await
-        .unwrap();
+    let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
     tx.commit().await.unwrap();
 
     let task_state = state.activities.get("loop_task").unwrap();
@@ -495,6 +496,8 @@ async fn test_iteration_counter_without_scoping() {
     };
     let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
 
     event_source
         .publish(NewWorkflowEvent {
@@ -527,6 +530,7 @@ async fn test_iteration_counter_without_scoping() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -557,6 +561,7 @@ async fn test_iteration_counter_without_scoping() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -569,9 +574,7 @@ async fn test_iteration_counter_without_scoping() {
 
     // Verify iteration counter incremented but no iteration_outputs
     let mut tx = pool.begin().await.unwrap();
-    let state = load_materialized_state(&mut *tx, workflow_id)
-        .await
-        .unwrap();
+    let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
     tx.commit().await.unwrap();
 
     let counter_state = state.activities.get("counter").unwrap();
@@ -617,6 +620,7 @@ async fn test_iteration_budget_accumulation() {
                 iteration_limit: None,
                 delay: None,
                 scheduled_for: None,
+                wait_for_signal: None,
             }),
             depends_on: Some(vec![ActivityRelationship {
                 activity_key: "expensive_task".to_string(),
@@ -646,6 +650,8 @@ async fn test_iteration_budget_accumulation() {
     };
     let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
 
     // Create workflow
     event_source
@@ -679,6 +685,7 @@ async fn test_iteration_budget_accumulation() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -711,6 +718,7 @@ async fn test_iteration_budget_accumulation() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -723,9 +731,7 @@ async fn test_iteration_budget_accumulation() {
 
     // Verify accumulated cost after iteration 0
     let mut tx = pool.begin().await.unwrap();
-    let state = load_materialized_state(&mut *tx, workflow_id)
-        .await
-        .unwrap();
+    let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
     tx.commit().await.unwrap();
 
     let task_state = state.activities.get("expensive_task").unwrap();
@@ -755,6 +761,7 @@ async fn test_iteration_budget_accumulation() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -767,9 +774,7 @@ async fn test_iteration_budget_accumulation() {
 
     // Verify accumulated cost after iteration 1
     let mut tx = pool.begin().await.unwrap();
-    let state = load_materialized_state(&mut *tx, workflow_id)
-        .await
-        .unwrap();
+    let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
     tx.commit().await.unwrap();
 
     let task_state = state.activities.get("expensive_task").unwrap();
@@ -828,6 +833,8 @@ async fn test_loop_pattern_1_fixed_iterations() {
     };
     let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
 
     // Create and execute workflow
     event_source
@@ -861,6 +868,7 @@ async fn test_loop_pattern_1_fixed_iterations() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -881,7 +889,7 @@ async fn test_loop_pattern_1_fixed_iterations() {
                 payload: json!({
                     "outputs": { "issue": format!("issue_{}", i) }
                 }),
-                iteration: Some(i as i32),
+                iteration: Some(i),
             })
             .await
             .unwrap();
@@ -892,6 +900,7 @@ async fn test_loop_pattern_1_fixed_iterations() {
                 &event,
                 &event_source,
                 &activity_queue,
+                &subscription_service,
                 &config,
             )
             .await
@@ -905,9 +914,7 @@ async fn test_loop_pattern_1_fixed_iterations() {
 
     // Verify exactly 3 iterations completed
     let mut tx = pool.begin().await.unwrap();
-    let state = load_materialized_state(&mut *tx, workflow_id)
-        .await
-        .unwrap();
+    let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
     tx.commit().await.unwrap();
 
     let newsletter_state = state.activities.get("newsletter").unwrap();
@@ -992,6 +999,8 @@ async fn test_loop_pattern_2_condition_only() {
     };
     let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
 
     event_source
         .publish(NewWorkflowEvent {
@@ -1024,6 +1033,7 @@ async fn test_loop_pattern_2_condition_only() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -1045,7 +1055,7 @@ async fn test_loop_pattern_2_condition_only() {
                 payload: json!({
                     "outputs": { "result": format!("poll_{}", i) }
                 }),
-                iteration: Some(i as i32),
+                iteration: Some(i),
             })
             .await
             .unwrap();
@@ -1056,6 +1066,7 @@ async fn test_loop_pattern_2_condition_only() {
                 &event,
                 &event_source,
                 &activity_queue,
+                &subscription_service,
                 &config,
             )
             .await
@@ -1075,7 +1086,7 @@ async fn test_loop_pattern_2_condition_only() {
                 payload: json!({
                     "outputs": { "ready": false }
                 }),
-                iteration: Some(i as i32),
+                iteration: Some(i),
             })
             .await
             .unwrap();
@@ -1086,6 +1097,7 @@ async fn test_loop_pattern_2_condition_only() {
                 &event,
                 &event_source,
                 &activity_queue,
+                &subscription_service,
                 &config,
             )
             .await
@@ -1117,6 +1129,7 @@ async fn test_loop_pattern_2_condition_only() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -1146,6 +1159,7 @@ async fn test_loop_pattern_2_condition_only() {
             &event,
             &event_source,
             &activity_queue,
+            &subscription_service,
             &config,
         )
         .await
@@ -1158,9 +1172,7 @@ async fn test_loop_pattern_2_condition_only() {
 
     // Verify loop exited due to condition (not limit)
     let mut tx = pool.begin().await.unwrap();
-    let state = load_materialized_state(&mut *tx, workflow_id)
-        .await
-        .unwrap();
+    let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
     tx.commit().await.unwrap();
 
     let poll_state = state.activities.get("poll").unwrap();

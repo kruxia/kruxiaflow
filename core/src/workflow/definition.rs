@@ -623,7 +623,8 @@ pub struct ActivityDefinition {
     /// Unique key for this activity within the workflow
     pub key: String,
 
-    /// Activity worker type (e.g., "builtin", "custom-python")
+    /// Activity worker type (e.g., "std", "custom-python")
+    #[serde(default = "default_worker")]
     pub worker: String,
 
     /// Activity name within worker (e.g., "http_request", "postgres_query")
@@ -793,6 +794,38 @@ pub struct ActivitySettings {
     /// Example: "2025-12-01T09:00:00-08:00" or "{{INPUT.report_deadline}}"
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub scheduled_for: Option<String>,
+
+    /// Wait for an external signal before running the activity
+    /// When set, the activity enters 'waiting' state until signaled or timeout
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_for_signal: Option<WaitForSignalSettings>,
+}
+
+/// Settings for activities that wait for external signals
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WaitForSignalSettings {
+    /// The event name to wait for (matched against signal requests)
+    pub event_name: String,
+
+    /// Timeout in seconds before taking the on_timeout action
+    pub timeout_seconds: u64,
+
+    /// Action to take when timeout occurs (default: fail)
+    #[serde(default)]
+    pub on_timeout: OnTimeout,
+}
+
+/// Action to take when a signal wait times out
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum OnTimeout {
+    /// Continue with the activity (run with null signal data)
+    Continue,
+    /// Skip the activity
+    Skip,
+    /// Fail the activity (default)
+    #[default]
+    Fail,
 }
 
 impl ActivitySettings {
@@ -852,6 +885,10 @@ pub struct RetryPolicy {
     /// Maximum backoff delay cap in seconds
     #[serde(default = "default_max_seconds")]
     pub max_seconds: u64,
+}
+
+fn default_worker() -> String {
+    "std".to_string()
 }
 
 fn default_max_attempts() -> u32 {
@@ -920,19 +957,15 @@ pub enum BudgetAction {
 /// Supports both shorthand `streaming: true` and detailed `streaming: { enabled: true }`
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
+#[derive(Default)]
 pub enum StreamingConfig {
     /// Streaming disabled (default)
+    #[default]
     Disabled,
     /// Shorthand: `streaming: true` or `streaming: false`
     Simple(bool),
     /// Detailed: `streaming: { enabled: true }`
     Detailed(StreamingOptions),
-}
-
-impl Default for StreamingConfig {
-    fn default() -> Self {
-        StreamingConfig::Disabled
-    }
 }
 
 impl<'de> Deserialize<'de> for StreamingConfig {
@@ -2377,5 +2410,1060 @@ activities:
             !forward_edge_search.is_back_edge,
             "Edge from search to evaluate (evaluate depends_on search) should NOT be marked as back-edge"
         );
+    }
+
+    // ========================================================================
+    // is_valid_identifier Tests
+    // ========================================================================
+
+    #[test]
+    fn test_is_valid_identifier_valid() {
+        assert!(is_valid_identifier("step1"));
+        assert!(is_valid_identifier("my-step"));
+        assert!(is_valid_identifier("my_step"));
+        assert!(is_valid_identifier("UPPER"));
+        assert!(is_valid_identifier("a"));
+        assert!(is_valid_identifier("step-1_two"));
+        assert!(is_valid_identifier("123"));
+    }
+
+    #[test]
+    fn test_is_valid_identifier_invalid() {
+        assert!(!is_valid_identifier(""));
+        assert!(!is_valid_identifier("has space"));
+        assert!(!is_valid_identifier("has.dot"));
+        assert!(!is_valid_identifier("has/slash"));
+        assert!(!is_valid_identifier("has@at"));
+        assert!(!is_valid_identifier("has:colon"));
+        assert!(!is_valid_identifier("日本語")); // unicode
+        assert!(!is_valid_identifier("step!"));
+        assert!(!is_valid_identifier("step#1"));
+    }
+
+    // ========================================================================
+    // ValidationErrors Tests
+    // ========================================================================
+
+    #[test]
+    fn test_validation_errors_new_is_empty() {
+        let errors = ValidationErrors::new();
+        assert!(errors.is_empty());
+        assert!(errors.errors().is_empty());
+    }
+
+    #[test]
+    fn test_validation_errors_default() {
+        let errors = ValidationErrors::default();
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn test_validation_errors_add_and_check() {
+        let mut errors = ValidationErrors::new();
+        errors.add("field1", "error message 1");
+        errors.add("field1", "error message 2");
+        errors.add("field2", "error message 3");
+
+        assert!(!errors.is_empty());
+        assert_eq!(errors.errors().len(), 2); // 2 fields
+        assert_eq!(errors.errors().get("field1").unwrap().len(), 2);
+        assert_eq!(errors.errors().get("field2").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_validation_errors_merge() {
+        let mut errors1 = ValidationErrors::new();
+        errors1.add("field1", "error1");
+
+        let mut errors2 = ValidationErrors::new();
+        errors2.add("field1", "error2");
+        errors2.add("field2", "error3");
+
+        errors1.merge(errors2);
+        assert_eq!(errors1.errors().get("field1").unwrap().len(), 2);
+        assert_eq!(errors1.errors().get("field2").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_validation_errors_to_json() {
+        let mut errors = ValidationErrors::new();
+        errors.add("name", "cannot be empty");
+
+        let json = errors.to_json();
+        let field_errors = json.get("field_errors").unwrap();
+        let name_errors = field_errors.get("name").unwrap().as_array().unwrap();
+        assert_eq!(name_errors[0], "cannot be empty");
+    }
+
+    // ========================================================================
+    // ValidationError Display Tests
+    // ========================================================================
+
+    #[test]
+    fn test_validation_error_single_display() {
+        let err = ValidationError::SingleError("parse failed".to_string());
+        assert_eq!(err.to_string(), "Validation failed: parse failed");
+    }
+
+    #[test]
+    fn test_validation_error_multiple_display() {
+        let errors = ValidationErrors::new();
+        let err = ValidationError::MultipleErrors(errors);
+        assert_eq!(err.to_string(), "Multiple validation errors");
+    }
+
+    // ========================================================================
+    // from_yaml / from_json Tests
+    // ========================================================================
+
+    #[test]
+    fn test_from_yaml_invalid_yaml() {
+        let result = WorkflowDefinition::from_yaml("not: [valid: yaml:");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ValidationError::SingleError(msg) => {
+                assert!(msg.contains("Failed to parse YAML"));
+            }
+            _ => panic!("Expected SingleError"),
+        }
+    }
+
+    #[test]
+    fn test_from_json_invalid_json() {
+        let result = WorkflowDefinition::from_json("{invalid}");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ValidationError::SingleError(msg) => {
+                assert!(msg.contains("Failed to parse JSON"));
+            }
+            _ => panic!("Expected SingleError"),
+        }
+    }
+
+    #[test]
+    fn test_from_yaml_valid_simple() {
+        let yaml = r#"
+name: test_workflow
+activities:
+  - key: step1
+    worker: builtin
+"#;
+        let result = WorkflowDefinition::from_yaml(yaml);
+        assert!(result.is_ok());
+        let def = result.unwrap();
+        assert_eq!(def.name, "test_workflow");
+        assert_eq!(def.activities.len(), 1);
+        assert_eq!(def.activities[0].key, "step1");
+    }
+
+    #[test]
+    fn test_from_json_valid_simple() {
+        let json = r#"{"name":"test_workflow","activities":[{"key":"step1","worker":"builtin"}]}"#;
+        let result = WorkflowDefinition::from_json(json);
+        assert!(result.is_ok());
+        let def = result.unwrap();
+        assert_eq!(def.name, "test_workflow");
+    }
+
+    #[test]
+    fn test_from_yaml_validation_failure() {
+        // Valid YAML but invalid workflow (empty name)
+        let yaml = r#"
+name: ""
+activities:
+  - key: step1
+    worker: builtin
+"#;
+        let result = WorkflowDefinition::from_yaml(yaml);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_to_yaml_and_to_json() {
+        let def = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![ActivityDefinition {
+                key: "step1".to_string(),
+                worker: "builtin".to_string(),
+                activity_name: None,
+                parameters: None,
+                depends_on: None,
+                dependency_of: None,
+                settings: None,
+                output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
+                streaming: Default::default(),
+            }],
+        };
+
+        let yaml = def.to_yaml().unwrap();
+        assert!(yaml.contains("test"));
+        assert!(yaml.contains("step1"));
+
+        let json = def.to_json().unwrap();
+        assert!(json.contains("test"));
+        assert!(json.contains("step1"));
+    }
+
+    // ========================================================================
+    // ActivityRelationship Serde Tests
+    // ========================================================================
+
+    #[test]
+    fn test_activity_relationship_simple_string() {
+        let json = "\"step1\"";
+        let rel: ActivityRelationship = serde_json::from_str(json).unwrap();
+        assert_eq!(rel.activity_key, "step1");
+        assert!(rel.conditions.is_none());
+        assert!(!rel.is_back_edge);
+    }
+
+    #[test]
+    fn test_activity_relationship_full_object() {
+        let json = r#"{"activity_key":"step1","conditions":["{{x == true}}"]}"#;
+        let rel: ActivityRelationship = serde_json::from_str(json).unwrap();
+        assert_eq!(rel.activity_key, "step1");
+        assert_eq!(rel.conditions.unwrap(), vec!["{{x == true}}"]);
+        assert!(!rel.is_back_edge);
+    }
+
+    #[test]
+    fn test_activity_relationship_single_condition() {
+        // "condition" alias (single string)
+        let json = r#"{"activity_key":"step1","condition":"{{x == true}}"}"#;
+        let rel: ActivityRelationship = serde_json::from_str(json).unwrap();
+        assert_eq!(rel.conditions.unwrap(), vec!["{{x == true}}"]);
+    }
+
+    #[test]
+    fn test_activity_relationship_with_back_edge() {
+        let json = r#"{"activity_key":"step1","is_back_edge":true}"#;
+        let rel: ActivityRelationship = serde_json::from_str(json).unwrap();
+        assert!(rel.is_back_edge);
+    }
+
+    #[test]
+    fn test_activity_relationship_serialization() {
+        let rel = ActivityRelationship {
+            activity_key: "step1".to_string(),
+            conditions: Some(vec!["{{x}}".to_string()]),
+            is_back_edge: false,
+        };
+        let json = serde_json::to_string(&rel).unwrap();
+        assert!(json.contains("step1"));
+        assert!(json.contains("conditions"));
+        // is_back_edge=false should be skipped
+        assert!(!json.contains("is_back_edge"));
+    }
+
+    #[test]
+    fn test_activity_relationship_back_edge_serialized() {
+        let rel = ActivityRelationship {
+            activity_key: "step1".to_string(),
+            conditions: None,
+            is_back_edge: true,
+        };
+        let json = serde_json::to_string(&rel).unwrap();
+        assert!(json.contains("is_back_edge"));
+    }
+
+    // ========================================================================
+    // StreamingConfig Tests
+    // ========================================================================
+
+    #[test]
+    fn test_streaming_config_default() {
+        let config = StreamingConfig::default();
+        assert!(!config.is_enabled());
+        assert!(config.is_disabled());
+    }
+
+    #[test]
+    fn test_streaming_config_simple_true() {
+        let config: StreamingConfig = serde_json::from_str("true").unwrap();
+        assert!(config.is_enabled());
+        assert!(!config.is_disabled());
+    }
+
+    #[test]
+    fn test_streaming_config_simple_false() {
+        let config: StreamingConfig = serde_json::from_str("false").unwrap();
+        assert!(!config.is_enabled());
+    }
+
+    #[test]
+    fn test_streaming_config_detailed() {
+        let config: StreamingConfig = serde_json::from_str(r#"{"enabled": true}"#).unwrap();
+        assert!(config.is_enabled());
+    }
+
+    #[test]
+    fn test_streaming_config_detailed_disabled() {
+        let config: StreamingConfig = serde_json::from_str(r#"{"enabled": false}"#).unwrap();
+        assert!(!config.is_enabled());
+    }
+
+    #[test]
+    fn test_streaming_config_null() {
+        let config: StreamingConfig = serde_json::from_str("null").unwrap();
+        assert!(!config.is_enabled());
+    }
+
+    #[test]
+    fn test_streaming_config_invalid_type() {
+        let result: Result<StreamingConfig, _> = serde_json::from_str("42");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_streaming_config_invalid_string() {
+        let result: Result<StreamingConfig, _> = serde_json::from_str("\"yes\"");
+        assert!(result.is_err());
+    }
+
+    // ========================================================================
+    // Normalization Tests
+    // ========================================================================
+
+    #[test]
+    fn test_normalize_dependency_of_to_depends_on() {
+        let mut definition = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![
+                ActivityDefinition {
+                    key: "step1".to_string(),
+                    worker: "test".to_string(),
+                    activity_name: None,
+                    parameters: None,
+                    depends_on: None,
+                    dependency_of: Some(vec![ActivityRelationship {
+                        activity_key: "step2".to_string(),
+                        conditions: None,
+                        is_back_edge: false,
+                    }]),
+                    settings: None,
+                    output_definitions: None,
+                    iteration_scoped: false,
+                    iteration_limit: None,
+                    is_loop_activity: false,
+                    streaming: Default::default(),
+                },
+                ActivityDefinition {
+                    key: "step2".to_string(),
+                    worker: "test".to_string(),
+                    activity_name: None,
+                    parameters: None,
+                    depends_on: None,
+                    dependency_of: None,
+                    settings: None,
+                    output_definitions: None,
+                    iteration_scoped: false,
+                    iteration_limit: None,
+                    is_loop_activity: false,
+                    streaming: Default::default(),
+                },
+            ],
+        };
+
+        definition.normalize();
+
+        // step1 should have dependency_of cleared
+        assert!(definition.activities[0].dependency_of.is_none());
+
+        // step2 should now depend on step1
+        let step2_deps = definition.activities[1].depends_on.as_ref().unwrap();
+        assert_eq!(step2_deps.len(), 1);
+        assert_eq!(step2_deps[0].activity_key, "step1");
+    }
+
+    #[test]
+    fn test_normalize_preserves_existing_depends_on() {
+        let mut definition = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![
+                ActivityDefinition {
+                    key: "step1".to_string(),
+                    worker: "test".to_string(),
+                    activity_name: None,
+                    parameters: None,
+                    depends_on: None,
+                    dependency_of: Some(vec![ActivityRelationship {
+                        activity_key: "step3".to_string(),
+                        conditions: None,
+                        is_back_edge: false,
+                    }]),
+                    settings: None,
+                    output_definitions: None,
+                    iteration_scoped: false,
+                    iteration_limit: None,
+                    is_loop_activity: false,
+                    streaming: Default::default(),
+                },
+                ActivityDefinition {
+                    key: "step2".to_string(),
+                    worker: "test".to_string(),
+                    activity_name: None,
+                    parameters: None,
+                    depends_on: None,
+                    dependency_of: Some(vec![ActivityRelationship {
+                        activity_key: "step3".to_string(),
+                        conditions: None,
+                        is_back_edge: false,
+                    }]),
+                    settings: None,
+                    output_definitions: None,
+                    iteration_scoped: false,
+                    iteration_limit: None,
+                    is_loop_activity: false,
+                    streaming: Default::default(),
+                },
+                ActivityDefinition {
+                    key: "step3".to_string(),
+                    worker: "test".to_string(),
+                    activity_name: None,
+                    parameters: None,
+                    depends_on: Some(vec![ActivityRelationship {
+                        activity_key: "step1".to_string(),
+                        conditions: Some(vec!["{{step1.status == 'completed'}}".to_string()]),
+                        is_back_edge: false,
+                    }]),
+                    dependency_of: None,
+                    settings: None,
+                    output_definitions: None,
+                    iteration_scoped: false,
+                    iteration_limit: None,
+                    is_loop_activity: false,
+                    streaming: Default::default(),
+                },
+            ],
+        };
+
+        definition.normalize();
+
+        // step3 should have depends_on for both step1 (existing) and step2 (from normalization)
+        let step3_deps = definition.activities[2].depends_on.as_ref().unwrap();
+        assert!(step3_deps.len() >= 2);
+        assert!(step3_deps.iter().any(|d| d.activity_key == "step1"));
+        assert!(step3_deps.iter().any(|d| d.activity_key == "step2"));
+    }
+
+    // ========================================================================
+    // Validation Edge Cases
+    // ========================================================================
+
+    #[test]
+    fn test_validate_empty_worker() {
+        let mut definition = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![ActivityDefinition {
+                key: "step1".to_string(),
+                worker: "".to_string(), // Empty worker
+                activity_name: None,
+                parameters: None,
+                depends_on: None,
+                dependency_of: None,
+                settings: None,
+                output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
+                streaming: Default::default(),
+            }],
+        };
+
+        let result = definition.validate();
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ValidationError::MultipleErrors(errors) => {
+                let json_str = errors.to_json().to_string();
+                assert!(json_str.contains("worker"));
+                assert!(json_str.contains("cannot be empty"));
+            }
+            _ => panic!("Expected MultipleErrors"),
+        }
+    }
+
+    #[test]
+    fn test_validate_empty_activity_key() {
+        let mut definition = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![ActivityDefinition {
+                key: "".to_string(), // Empty key
+                worker: "test".to_string(),
+                activity_name: None,
+                parameters: None,
+                depends_on: None,
+                dependency_of: None,
+                settings: None,
+                output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
+                streaming: Default::default(),
+            }],
+        };
+
+        let result = definition.validate();
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ValidationError::MultipleErrors(errors) => {
+                let json_str = errors.to_json().to_string();
+                assert!(json_str.contains("cannot be empty"));
+            }
+            _ => panic!("Expected MultipleErrors"),
+        }
+    }
+
+    #[test]
+    fn test_validate_invalid_activity_key_chars() {
+        let mut definition = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![ActivityDefinition {
+                key: "step.invalid".to_string(), // dots not allowed
+                worker: "test".to_string(),
+                activity_name: None,
+                parameters: None,
+                depends_on: None,
+                dependency_of: None,
+                settings: None,
+                output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
+                streaming: Default::default(),
+            }],
+        };
+
+        let result = definition.validate();
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ValidationError::MultipleErrors(errors) => {
+                let json_str = errors.to_json().to_string();
+                assert!(json_str.contains("valid identifier"));
+            }
+            _ => panic!("Expected MultipleErrors"),
+        }
+    }
+
+    // ========================================================================
+    // YAML Parsing with Dependencies
+    // ========================================================================
+
+    #[test]
+    fn test_from_yaml_with_depends_on() {
+        let yaml = r#"
+name: test_deps
+activities:
+  - key: step1
+    worker: builtin
+  - key: step2
+    worker: builtin
+    depends_on:
+      - step1
+"#;
+        let def = WorkflowDefinition::from_yaml(yaml).unwrap();
+        assert_eq!(def.activities.len(), 2);
+        let step2 = &def.activities[1];
+        let deps = step2.depends_on.as_ref().unwrap();
+        assert_eq!(deps[0].activity_key, "step1");
+    }
+
+    #[test]
+    fn test_from_yaml_with_dependency_of() {
+        let yaml = r#"
+name: test_dep_of
+activities:
+  - key: step1
+    worker: builtin
+    dependency_of:
+      - step2
+  - key: step2
+    worker: builtin
+"#;
+        let def = WorkflowDefinition::from_yaml(yaml).unwrap();
+        // After normalization, step2 should depend_on step1
+        let step2 = def.activities.iter().find(|a| a.key == "step2").unwrap();
+        let deps = step2.depends_on.as_ref().unwrap();
+        assert_eq!(deps[0].activity_key, "step1");
+        // dependency_of should be cleared
+        let step1 = def.activities.iter().find(|a| a.key == "step1").unwrap();
+        assert!(step1.dependency_of.is_none());
+    }
+
+    #[test]
+    fn test_from_yaml_with_conditions() {
+        let yaml = r#"
+name: test_conditions
+activities:
+  - key: step1
+    worker: builtin
+  - key: step2
+    worker: builtin
+    depends_on:
+      - activity_key: step1
+        condition: "{{step1.status == 'completed'}}"
+"#;
+        let def = WorkflowDefinition::from_yaml(yaml).unwrap();
+        let step2 = &def.activities[1];
+        let deps = step2.depends_on.as_ref().unwrap();
+        assert_eq!(deps[0].activity_key, "step1");
+        let conditions = deps[0].conditions.as_ref().unwrap();
+        assert_eq!(conditions[0], "{{step1.status == 'completed'}}");
+    }
+
+    // ========================================================================
+    // apply_duration Edge Cases
+    // ========================================================================
+
+    #[test]
+    fn test_apply_duration_zero() {
+        let base = Utc::now();
+        let result = apply_duration(base, "0s").unwrap();
+        assert_eq!(result, base);
+    }
+
+    #[test]
+    fn test_apply_duration_large_value() {
+        let base = Utc::now();
+        let result = apply_duration(base, "1000000s");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_apply_duration_empty_string() {
+        let base = Utc::now();
+        let result = apply_duration(base, "");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_apply_duration_no_number() {
+        let base = Utc::now();
+        let result = apply_duration(base, "ms");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_apply_duration_months_boundary() {
+        use chrono::NaiveDate;
+        // March 31 + 1 month = April 30 (April has 30 days)
+        let base = DateTime::<Utc>::from_naive_utc_and_offset(
+            chrono::NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2025, 3, 31).unwrap(),
+                chrono::NaiveTime::from_hms_opt(12, 0, 0).unwrap(),
+            ),
+            Utc,
+        );
+        let result = apply_duration(base, "1mo").unwrap();
+        assert_eq!(result.month(), 4);
+        assert_eq!(result.day(), 30);
+    }
+
+    // ========================================================================
+    // ActivitySettings Tests
+    // ========================================================================
+
+    #[test]
+    fn test_activity_settings_default() {
+        let settings = ActivitySettings::default();
+        assert!(settings.timeout_seconds.is_none());
+        assert!(settings.retry.is_none());
+        assert!(settings.delay.is_none());
+        assert!(settings.scheduled_for.is_none());
+    }
+
+    #[test]
+    fn test_retry_policy_default() {
+        let retry = RetryPolicy::default();
+        assert_eq!(retry.max_attempts, 1);
+        assert_eq!(retry.base_seconds, 2);
+        assert_eq!(retry.factor, 2.0);
+        assert_eq!(retry.max_seconds, 300);
+        assert!(matches!(retry.strategy, BackoffStrategy::Exponential));
+    }
+
+    #[test]
+    fn test_backoff_strategy_serde() {
+        let exp: BackoffStrategy = serde_json::from_str("\"exponential\"").unwrap();
+        assert_eq!(exp, BackoffStrategy::Exponential);
+
+        let fixed: BackoffStrategy = serde_json::from_str("\"fixed\"").unwrap();
+        assert_eq!(fixed, BackoffStrategy::Fixed);
+    }
+
+    #[test]
+    fn test_budget_action_default() {
+        let action = BudgetAction::default();
+        assert_eq!(action, BudgetAction::Abort);
+    }
+
+    #[test]
+    fn test_budget_settings_serde() {
+        let json = r#"{"limit":"10.00","action":"continue"}"#;
+        let settings: BudgetSettings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.limit, Decimal::new(1000, 2));
+        assert_eq!(settings.action, BudgetAction::Continue);
+    }
+
+    // ========================================================================
+    // is_false Helper Tests
+    // ========================================================================
+
+    #[test]
+    fn test_is_false_helper() {
+        assert!(is_false(&false));
+        assert!(!is_false(&true));
+    }
+
+    // ========================================================================
+    // Long Dependency Chain Tests
+    // ========================================================================
+
+    #[test]
+    fn test_validate_long_dependency_chain() {
+        // Build a chain: step0 -> step1 -> step2 -> ... -> step9
+        let mut activities: Vec<ActivityDefinition> = Vec::new();
+        for i in 0..10 {
+            let depends_on = if i == 0 {
+                None
+            } else {
+                Some(vec![ActivityRelationship {
+                    activity_key: format!("step{}", i - 1),
+                    conditions: None,
+                    is_back_edge: false,
+                }])
+            };
+            activities.push(ActivityDefinition {
+                key: format!("step{}", i),
+                worker: "test".to_string(),
+                activity_name: None,
+                parameters: None,
+                depends_on,
+                dependency_of: None,
+                settings: None,
+                output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
+                streaming: Default::default(),
+            });
+        }
+
+        let mut definition = WorkflowDefinition {
+            name: "long_chain".to_string(),
+            activities,
+        };
+
+        let result = definition.validate();
+        assert!(result.is_ok());
+    }
+
+    // ========================================================================
+    // Fan-in / Fan-out Tests
+    // ========================================================================
+
+    #[test]
+    fn test_validate_fan_out_fan_in() {
+        // step1 -> step2, step3 (fan-out)
+        // step2, step3 -> step4 (fan-in)
+        let yaml = r#"
+name: fan_test
+activities:
+  - key: step1
+    worker: builtin
+    dependency_of:
+      - step2
+      - step3
+  - key: step2
+    worker: builtin
+    dependency_of:
+      - step4
+  - key: step3
+    worker: builtin
+    dependency_of:
+      - step4
+  - key: step4
+    worker: builtin
+"#;
+        let def = WorkflowDefinition::from_yaml(yaml).unwrap();
+        assert_eq!(def.activities.len(), 4);
+        let step4 = def.activities.iter().find(|a| a.key == "step4").unwrap();
+        let deps = step4.depends_on.as_ref().unwrap();
+        assert_eq!(deps.len(), 2);
+    }
+
+    // ========================================================================
+    // default_worker Tests
+    // ========================================================================
+
+    #[test]
+    fn test_default_worker_from_yaml() {
+        let yaml = r#"
+name: test_default_worker
+activities:
+  - key: step1
+"#;
+        let def = WorkflowDefinition::from_yaml(yaml).unwrap();
+        assert_eq!(def.activities[0].worker, "std");
+    }
+
+    // ========================================================================
+    // ActivityDefinition Serde Edge Cases
+    // ========================================================================
+
+    #[test]
+    fn test_activity_definition_with_streaming() {
+        let yaml = r#"
+name: test_streaming
+activities:
+  - key: llm_step
+    worker: std
+    streaming: true
+"#;
+        let def = WorkflowDefinition::from_yaml(yaml).unwrap();
+        assert!(def.activities[0].streaming.is_enabled());
+    }
+
+    #[test]
+    fn test_activity_definition_with_iteration_limit() {
+        let yaml = r#"
+name: test_iter
+activities:
+  - key: step1
+    worker: std
+    iteration_limit: 5
+    iteration_scoped: true
+"#;
+        let def = WorkflowDefinition::from_yaml(yaml).unwrap();
+        assert_eq!(def.activities[0].iteration_limit, Some(5));
+        assert!(def.activities[0].iteration_scoped);
+    }
+
+    #[test]
+    fn test_activity_definition_with_output_definitions() {
+        let yaml = r#"
+name: test_outputs
+activities:
+  - key: step1
+    worker: std
+    outputs:
+      - name: result
+        output_type: value
+"#;
+        let def = WorkflowDefinition::from_yaml(yaml).unwrap();
+        let outputs = def.activities[0].output_definitions.as_ref().unwrap();
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(outputs[0].name, "result");
+    }
+
+    // ========================================================================
+    // content_hash Tests
+    // ========================================================================
+
+    #[test]
+    fn test_content_hash_deterministic() {
+        let def = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![ActivityDefinition {
+                key: "step1".to_string(),
+                worker: "std".to_string(),
+                activity_name: None,
+                parameters: None,
+                depends_on: None,
+                dependency_of: None,
+                settings: None,
+                output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
+                streaming: Default::default(),
+            }],
+        };
+
+        let hash1 = def.content_hash();
+        let hash2 = def.content_hash();
+        assert_eq!(hash1, hash2);
+        assert_eq!(hash1.len(), 32); // SHA-256 = 32 bytes
+    }
+
+    #[test]
+    fn test_content_hash_differs_for_different_definitions() {
+        let def1 = WorkflowDefinition {
+            name: "workflow_a".to_string(),
+            activities: vec![ActivityDefinition {
+                key: "step1".to_string(),
+                worker: "std".to_string(),
+                activity_name: None,
+                parameters: None,
+                depends_on: None,
+                dependency_of: None,
+                settings: None,
+                output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
+                streaming: Default::default(),
+            }],
+        };
+
+        let def2 = WorkflowDefinition {
+            name: "workflow_b".to_string(),
+            activities: vec![ActivityDefinition {
+                key: "step1".to_string(),
+                worker: "std".to_string(),
+                activity_name: None,
+                parameters: None,
+                depends_on: None,
+                dependency_of: None,
+                settings: None,
+                output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
+                streaming: Default::default(),
+            }],
+        };
+
+        assert_ne!(def1.content_hash(), def2.content_hash());
+    }
+
+    #[test]
+    fn test_content_hash_differs_for_different_activities() {
+        let def1 = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![ActivityDefinition {
+                key: "step1".to_string(),
+                worker: "std".to_string(),
+                activity_name: None,
+                parameters: None,
+                depends_on: None,
+                dependency_of: None,
+                settings: None,
+                output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
+                streaming: Default::default(),
+            }],
+        };
+
+        let def2 = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![ActivityDefinition {
+                key: "step2".to_string(),
+                worker: "std".to_string(),
+                activity_name: None,
+                parameters: None,
+                depends_on: None,
+                dependency_of: None,
+                settings: None,
+                output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
+                streaming: Default::default(),
+            }],
+        };
+
+        assert_ne!(def1.content_hash(), def2.content_hash());
+    }
+
+    // ========================================================================
+    // validate_activity_settings Tests
+    // ========================================================================
+
+    #[test]
+    fn test_validate_activity_settings_delay_and_scheduled_for_mutually_exclusive() {
+        let mut def = WorkflowDefinition {
+            name: "test".to_string(),
+            activities: vec![ActivityDefinition {
+                key: "step1".to_string(),
+                worker: "std".to_string(),
+                activity_name: None,
+                parameters: None,
+                depends_on: None,
+                dependency_of: None,
+                settings: Some(ActivitySettings {
+                    delay: Some("5s".to_string()),
+                    scheduled_for: Some("2025-12-01T09:00:00Z".to_string()),
+                    timeout_seconds: None,
+                    retry: None,
+                    budget: None,
+                    cache: false,
+                    cache_ttl: None,
+                    iteration_limit: None,
+                    wait_for_signal: None,
+                }),
+                output_definitions: None,
+                iteration_scoped: false,
+                iteration_limit: None,
+                is_loop_activity: false,
+                streaming: Default::default(),
+            }],
+        };
+
+        let result = def.validate();
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ValidationError::MultipleErrors(errors) => {
+                let json_str = errors.to_json().to_string();
+                assert!(json_str.contains("mutually exclusive"));
+            }
+            _ => panic!("Expected MultipleErrors"),
+        }
+    }
+
+    #[test]
+    fn test_validate_activity_settings_delay_only_is_valid() {
+        let yaml = r#"
+name: test_delay
+activities:
+  - key: step1
+    worker: std
+    settings:
+      delay: "5s"
+"#;
+        let def = WorkflowDefinition::from_yaml(yaml).unwrap();
+        assert_eq!(
+            def.activities[0].settings.as_ref().unwrap().delay,
+            Some("5s".to_string())
+        );
+    }
+
+    #[test]
+    fn test_validate_activity_settings_scheduled_for_only_is_valid() {
+        let yaml = r#"
+name: test_scheduled
+activities:
+  - key: step1
+    worker: std
+    settings:
+      scheduled_for: "2025-12-01T09:00:00Z"
+"#;
+        let def = WorkflowDefinition::from_yaml(yaml).unwrap();
+        assert_eq!(
+            def.activities[0].settings.as_ref().unwrap().scheduled_for,
+            Some("2025-12-01T09:00:00Z".to_string())
+        );
+    }
+
+    // ========================================================================
+    // parse_scheduled_for Edge Cases
+    // ========================================================================
+
+    #[test]
+    fn test_parse_scheduled_for_invalid_format() {
+        let result = parse_scheduled_for("not-a-timestamp");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid ISO 8601"));
+    }
+
+    #[test]
+    fn test_parse_scheduled_for_epoch() {
+        let result = parse_scheduled_for("1970-01-01T00:00:00Z");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().timestamp(), 0);
     }
 }
