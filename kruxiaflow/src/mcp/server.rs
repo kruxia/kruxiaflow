@@ -20,27 +20,39 @@
 /// - Multi-client AI agent access over network
 /// - Coexistence with API server and other services
 
-use anyhow::Result;
-use sqlx::PgPool;
+use std::collections::HashMap;
 use std::sync::Arc;
+
+use anyhow::Result;
+use async_trait::async_trait;
+use sqlx::PgPool;
 use tokio::task::JoinHandle;
 
+use rust_mcp_sdk::{
+    auth::{AuthenticationError, AuthInfo, AuthProvider, OauthEndpoint},
+    mcp_http::{GenericBody, GenericBodyExt},
+    mcp_server::{
+        error::TransportServerError, hyper_server, HyperServerOptions, McpAppState,
+        ToMcpServerHandler,
+    },
+    schema::{
+        Implementation, InitializeResult, ProtocolVersion, ServerCapabilities,
+        ServerCapabilitiesTools,
+    },
+};
+
 use crate::mcp::config::McpConfig;
-use crate::mcp::handler::KruxiaFlowMcpHandler;
 
 /// MCP server instance
 pub struct McpServer {
     config: Arc<McpConfig>,
-    _pool: PgPool,
+    pool: PgPool,
 }
 
 impl McpServer {
     /// Create a new MCP server instance
     pub fn new(config: Arc<McpConfig>, pool: PgPool) -> Self {
-        Self {
-            config,
-            _pool: pool,
-        }
+        Self { config, pool }
     }
 
     /// Start the MCP server (HTTP transport only)
@@ -61,22 +73,53 @@ impl McpServer {
             .clone()
             .expect("HTTP transport requires bind address");
 
-        tracing::info!("MCP server running on HTTP transport at {}:{}", bind, port);
+        let server_info = InitializeResult {
+            server_info: Implementation {
+                name: "kruxiaflow-mcp".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+                title: Some("Kruxia Flow MCP Server".into()),
+                description: Some(
+                    "MCP server for Kruxia Flow workflow orchestration".into(),
+                ),
+                icons: vec![],
+                website_url: None,
+            },
+            capabilities: ServerCapabilities {
+                tools: Some(ServerCapabilitiesTools { list_changed: None }),
+                ..Default::default()
+            },
+            protocol_version: ProtocolVersion::V2025_11_25.into(),
+            instructions: Some(
+                "Use the available tools to discover, submit, monitor, \
+                 and control Kruxia Flow workflows."
+                    .into(),
+            ),
+            meta: None,
+        };
 
-        // TODO: Implement HTTP transport using rust-mcp-sdk
-        // For now, this is a placeholder
+        let handler =
+            super::handler::KruxiaFlowMcpHandler::new(self.config.clone(), self.pool.clone())
+                .to_mcp_server_handler();
 
-        // In actual implementation:
-        // 1. Create HTTP server with hyper_server::create_server()
-        // 2. Set up authentication middleware if auth_required
-        // 3. Start server
+        let options = HyperServerOptions {
+            host: bind,
+            port,
+            auth: build_auth_provider(&self.config),
+            ..Default::default()
+        };
 
-        tracing::warn!("MCP HTTP transport not yet implemented (placeholder)");
+        tracing::info!(
+            "MCP server listening on {}:{}",
+            options.host, options.port
+        );
 
-        // Keep task alive for now
-        loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
-        }
+        let server = hyper_server::create_server(server_info, handler, options);
+        server
+            .start()
+            .await
+            .map_err(|e| anyhow::anyhow!("MCP server: {e}"))?;
+
+        Ok(())
     }
 }
 
@@ -94,4 +137,98 @@ pub fn create_mcp_server(config: Arc<McpConfig>, pool: PgPool) -> McpServer {
 pub fn spawn_mcp_server(config: Arc<McpConfig>, pool: PgPool) -> JoinHandle<Result<()>> {
     let server = create_mcp_server(config, pool);
     tokio::spawn(async move { server.start().await })
+}
+
+// ---------------------------------------------------------------------------
+// Auth provider
+// ---------------------------------------------------------------------------
+
+/// Build an auth provider if auth is required and a JWT secret is configured.
+fn build_auth_provider(config: &McpConfig) -> Option<Arc<dyn AuthProvider>> {
+    if !config.auth_required {
+        return None;
+    }
+    let secret = config.jwt_secret.as_ref()?;
+    Some(Arc::new(McpJwtAuthProvider {
+        secret: secret.clone(),
+    }))
+}
+
+/// Bearer-token auth provider using HS256 JWT validation.
+///
+/// The SDK's AuthMiddleware handles Bearer-token extraction and expiry checking.
+/// We only need to decode the token and map claims to AuthInfo.
+struct McpJwtAuthProvider {
+    secret: String,
+}
+
+#[async_trait]
+impl AuthProvider for McpJwtAuthProvider {
+    /// Decode the JWT and return extracted claims as AuthInfo.
+    async fn verify_token(
+        &self,
+        access_token: String,
+    ) -> std::result::Result<AuthInfo, AuthenticationError> {
+        let token_data = jsonwebtoken::decode::<serde_json::Value>(
+            &access_token,
+            &jsonwebtoken::DecodingKey::from_secret(self.secret.as_bytes()),
+            &jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256),
+        )
+        .map_err(|e| AuthenticationError::TokenVerificationFailed {
+            description: format!("JWT validation failed: {e}"),
+            status_code: None,
+        })?;
+
+        let claims = &token_data.claims;
+
+        let expires_at = claims
+            .get("exp")
+            .and_then(|v| v.as_i64())
+            .map(|exp| {
+                std::time::SystemTime::UNIX_EPOCH
+                    + std::time::Duration::from_secs(exp as u64)
+            });
+
+        let token_unique_id = claims
+            .get("jti")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or(access_token);
+
+        Ok(AuthInfo {
+            token_unique_id,
+            client_id: None,
+            user_id: claims
+                .get("sub")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            scopes: None,
+            expires_at,
+            audience: None,
+            extra: None,
+        })
+    }
+
+    /// No OAuth endpoints — this server only validates Bearer tokens.
+    fn auth_endpoints(&self) -> Option<&HashMap<String, OauthEndpoint>> {
+        None
+    }
+
+    /// Not called when auth_endpoints() returns None.
+    async fn handle_request(
+        &self,
+        _request: http::Request<&str>,
+        _state: Arc<McpAppState>,
+    ) -> std::result::Result<http::Response<GenericBody>, TransportServerError> {
+        Ok(http::Response::builder()
+            .status(http::StatusCode::NOT_FOUND)
+            .body(GenericBody::from_string(
+                "No auth endpoints configured".to_string(),
+            ))
+            .unwrap())
+    }
+
+    fn protected_resource_metadata_url(&self) -> Option<&str> {
+        None
+    }
 }
