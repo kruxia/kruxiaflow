@@ -1,21 +1,18 @@
-// MCP tools for workflow orchestration
-//
-// Tools are organized into 5 categories:
-// - Discovery: List and explore workflow definitions and activities
-// - Execution: Submit, validate, and cancel workflows
-// - Observability: Monitor workflow status and costs
-// - Visualization: Generate Mermaid diagrams
-// - Control: Send signals to waiting workflows
-//
-// Tools will be implemented in future prompts:
-// - Prompt 3: Discovery tools (4 tools)
-// - Prompt 4: Execution tools (3 tools)
-// - Prompt 5: Observability tools (5 tools)
-// - Prompt 6: Visualization & Control tools (4 tools)
+/// MCP tool registry
+///
+/// Tools are organised into categories, each in its own module.
+/// Each module uses `tool_box!` to generate an enum that provides:
+///   - `::tools()` → Vec<Tool> for the list_tools MCP response
+///   - `TryFrom<CallToolRequestParams>` → parse an incoming call (succeeds only if the name matches)
 
-// TODO: Add tool modules as they are implemented
-// pub mod discovery;
-// pub mod execution;
-// pub mod observability;
-// pub mod visualization;
-// pub mod control;
+pub mod discovery;
+pub mod execution;
+pub mod observability;
+pub mod visualization;
+pub mod control;
+
+pub use discovery::DiscoveryTools;
+pub use execution::ExecutionTools;
+pub use observability::ObservabilityTools;
+pub use visualization::VisualizationTools;
+pub use control::ControlTools;

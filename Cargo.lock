@@ -1758,10 +1758,13 @@ name = "kruxiaflow"
 version = "0.3.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum 0.7.9",
  "bcrypt",
  "chrono",
  "clap",
+ "http 1.3.1",
+ "jsonwebtoken 9.3.1",
  "kruxiaflow-api",
  "kruxiaflow-core",
  "kruxiaflow-oauth",
