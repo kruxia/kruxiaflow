@@ -6,10 +6,9 @@
 /// - get_activity_output: output + cost for a specific activity
 /// - get_workflow_cost: cost breakdown with per-activity and per-provider aggregation
 /// - estimate_workflow_cost: pre-execution cost estimate for a definition
-
 use rust_decimal::prelude::*;
-use rust_mcp_sdk::macros::{mcp_tool, JsonSchema};
-use rust_mcp_sdk::schema::{schema_utils::CallToolError, CallToolResult, TextContent};
+use rust_mcp_sdk::macros::{JsonSchema, mcp_tool};
+use rust_mcp_sdk::schema::{CallToolResult, TextContent, schema_utils::CallToolError};
 use rust_mcp_sdk::tool_box;
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
@@ -29,7 +28,7 @@ use std::collections::HashMap;
         When to use: After submitting a workflow (via submit_workflow) to monitor \
         its progress. Poll periodically or check after expected completion time.",
     read_only_hint = true,
-    idempotent_hint = true,
+    idempotent_hint = true
 )]
 #[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct GetWorkflowStatus {
@@ -56,7 +55,7 @@ pub struct GetWorkflowStatus {
         When to use: To get an overview of workflow activity, find specific \
         workflows, or monitor the health of a deployment.",
     read_only_hint = true,
-    idempotent_hint = true,
+    idempotent_hint = true
 )]
 #[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct ListWorkflows {
@@ -94,7 +93,7 @@ fn default_limit() -> Option<i64> {
         retrieve intermediate or final results. The activity must be in \
         'completed' status.",
     read_only_hint = true,
-    idempotent_hint = true,
+    idempotent_hint = true
 )]
 #[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct GetActivityOutput {
@@ -121,7 +120,7 @@ pub struct GetActivityOutput {
         When to use: After or during workflow execution to understand costs. \
         Useful for budget monitoring and post-execution cost analysis.",
     read_only_hint = true,
-    idempotent_hint = true,
+    idempotent_hint = true
 )]
 #[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct GetWorkflowCost {
@@ -146,7 +145,7 @@ pub struct GetWorkflowCost {
         activities — to understand expected costs and plan budgets. Only \
         llm_prompt activities contribute to the estimate; all others are zero-cost.",
     read_only_hint = true,
-    idempotent_hint = true,
+    idempotent_hint = true
 )]
 #[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct EstimateWorkflowCost {
@@ -245,8 +244,7 @@ pub async fn run_list_workflows(
                 .iter()
                 .map(|r| {
                     let status_str = r.status.to_string();
-                    let is_terminal =
-                        status_str == "completed" || status_str == "failed";
+                    let is_terminal = status_str == "completed" || status_str == "failed";
                     serde_json::json!({
                         "workflow_id": r.id.to_string(),
                         "definition_name": r.definition_name,
@@ -403,9 +401,7 @@ pub async fn run_get_workflow_cost(
     .fetch_all(pool)
     .await
     .map_err(|e| {
-        CallToolError::from_message(format!(
-            "Database error querying activity costs: {e}"
-        ))
+        CallToolError::from_message(format!("Database error querying activity costs: {e}"))
     })?;
 
     let mut activities: Vec<serde_json::Value> = Vec::new();
@@ -538,10 +534,7 @@ pub async fn run_estimate_workflow_cost(
                 .estimate_llm_cost(provider, model, &rendered, max_tokens)
                 .await
                 .unwrap_or_else(|e| {
-                    tracing::warn!(
-                        "Could not estimate cost for {}/{}: {e}",
-                        provider, model
-                    );
+                    tracing::warn!("Could not estimate cost for {}/{}: {e}", provider, model);
                     Decimal::ZERO
                 });
 
@@ -553,7 +546,8 @@ pub async fn run_estimate_workflow_cost(
                 .unwrap_or_else(|e| {
                     tracing::warn!(
                         "Could not estimate min cost for {}/{}: {e}",
-                        provider, model
+                        provider,
+                        model
                     );
                     Decimal::ZERO
                 });
@@ -616,10 +610,7 @@ fn text_response(value: &serde_json::Value) -> Result<CallToolResult, CallToolEr
 /// Parse a string as UUID, returning a tool error if invalid.
 fn parse_uuid(s: &str) -> Result<uuid::Uuid, CallToolError> {
     uuid::Uuid::parse_str(s).map_err(|_| {
-        CallToolError::from_message(format!(
-            "Invalid workflow_id '{}': must be a valid UUID",
-            s
-        ))
+        CallToolError::from_message(format!("Invalid workflow_id '{}': must be a valid UUID", s))
     })
 }
 

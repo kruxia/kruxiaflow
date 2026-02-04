@@ -5,7 +5,6 @@
 ///
 /// The MCP server is opt-in at compile time (requires `mcp-server` feature)
 /// to keep the default binary lean for edge deployments.
-
 pub mod config;
 pub mod handler;
 pub mod server;

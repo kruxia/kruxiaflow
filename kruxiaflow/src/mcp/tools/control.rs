@@ -3,9 +3,8 @@
 /// Two tools for interacting with workflows that are waiting for signals:
 /// - send_workflow_signal: deliver a signal to a waiting activity
 /// - list_waiting_workflows: find workflows with activities waiting for signals
-
-use rust_mcp_sdk::macros::{mcp_tool, JsonSchema};
-use rust_mcp_sdk::schema::{schema_utils::CallToolError, CallToolResult, TextContent};
+use rust_mcp_sdk::macros::{JsonSchema, mcp_tool};
+use rust_mcp_sdk::schema::{CallToolResult, TextContent, schema_utils::CallToolError};
 use rust_mcp_sdk::tool_box;
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
@@ -35,7 +34,7 @@ use kruxiaflow_core::{
         decision.",
     read_only_hint = false,
     destructive_hint = true,
-    idempotent_hint = false,
+    idempotent_hint = false
 )]
 #[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct SendWorkflowSignal {
@@ -68,7 +67,7 @@ pub struct SendWorkflowSignal {
         events before they can continue. Combine with send_workflow_signal to \
         deliver the required signal.",
     read_only_hint = true,
-    idempotent_hint = true,
+    idempotent_hint = true
 )]
 #[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct ListWaitingWorkflows {
@@ -156,7 +155,8 @@ pub async fn run_send_workflow_signal(
         Err(e) => {
             tracing::warn!(
                 "ActivitySignaled event publish failed for activity '{}' in workflow '{}': {e}",
-                params.activity_key, params.workflow_id
+                params.activity_key,
+                params.workflow_id
             );
             false
         }
@@ -313,9 +313,6 @@ fn text_response(value: &serde_json::Value) -> Result<CallToolResult, CallToolEr
 /// Parse a string as UUID, returning a tool error if invalid.
 fn parse_uuid(s: &str) -> Result<uuid::Uuid, CallToolError> {
     uuid::Uuid::parse_str(s).map_err(|_| {
-        CallToolError::from_message(format!(
-            "Invalid workflow_id '{}': must be a valid UUID",
-            s
-        ))
+        CallToolError::from_message(format!("Invalid workflow_id '{}': must be a valid UUID", s))
     })
 }

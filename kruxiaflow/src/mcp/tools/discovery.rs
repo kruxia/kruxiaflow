@@ -5,9 +5,8 @@
 /// - get_workflow_definition: full structure of a specific workflow
 /// - list_activities: what activity types exist
 /// - get_workflow_authoring_guide: how to write workflows
-
-use rust_mcp_sdk::macros::{mcp_tool, JsonSchema};
-use rust_mcp_sdk::schema::{schema_utils::CallToolError, CallToolResult, TextContent};
+use rust_mcp_sdk::macros::{JsonSchema, mcp_tool};
+use rust_mcp_sdk::schema::{CallToolResult, TextContent, schema_utils::CallToolError};
 use rust_mcp_sdk::tool_box;
 use sqlx::PgPool;
 
@@ -26,7 +25,7 @@ use sqlx::PgPool;
         When to use: Start here to discover what workflows are available before submitting \
         or monitoring them.",
     read_only_hint = true,
-    idempotent_hint = true,
+    idempotent_hint = true
 )]
 #[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct ListWorkflowDefinitions {
@@ -49,7 +48,7 @@ pub struct ListWorkflowDefinitions {
         When to use: After list_workflow_definitions to inspect a specific workflow before \
         submitting it, or to understand its structure for monitoring.",
     read_only_hint = true,
-    idempotent_hint = true,
+    idempotent_hint = true
 )]
 #[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct GetWorkflowDefinition {
@@ -75,7 +74,7 @@ pub struct GetWorkflowDefinition {
         When to use: When authoring a workflow and need to know what activities exist and \
         what parameters they accept.",
     read_only_hint = true,
-    idempotent_hint = true,
+    idempotent_hint = true
 )]
 #[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct ListActivities {}
@@ -247,7 +246,7 @@ impl ListActivities {
         When to use: Before authoring a workflow. Pair with list_activities to see the \
         full set of available activities.",
     read_only_hint = true,
-    idempotent_hint = true,
+    idempotent_hint = true
 )]
 #[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct GetWorkflowAuthoringGuide {}
@@ -492,10 +491,8 @@ pub async fn run_get_workflow_definition(
     let response = match stored {
         Some(def) => {
             // Serialise activities as-is from the stored JSONB representation
-            let activities: serde_json::Value =
-                serde_json::to_value(&def.activities).map_err(|e| {
-                    CallToolError::from_message(format!("Serialization error: {e}"))
-                })?;
+            let activities: serde_json::Value = serde_json::to_value(&def.activities)
+                .map_err(|e| CallToolError::from_message(format!("Serialization error: {e}")))?;
 
             serde_json::json!({
                 "name": def.name,
@@ -505,10 +502,7 @@ pub async fn run_get_workflow_definition(
             })
         }
         None => {
-            let version_label = params
-                .version
-                .as_deref()
-                .unwrap_or("latest");
+            let version_label = params.version.as_deref().unwrap_or("latest");
             serde_json::json!({
                 "error": format!(
                     "Workflow '{}' (version: {}) not found",

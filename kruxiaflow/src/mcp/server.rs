@@ -19,7 +19,6 @@
 /// - Production deployments with full observability
 /// - Multi-client AI agent access over network
 /// - Coexistence with API server and other services
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -29,11 +28,11 @@ use sqlx::PgPool;
 use tokio::task::JoinHandle;
 
 use rust_mcp_sdk::{
-    auth::{AuthenticationError, AuthInfo, AuthProvider, OauthEndpoint},
+    auth::{AuthInfo, AuthProvider, AuthenticationError, OauthEndpoint},
     mcp_http::{GenericBody, GenericBodyExt},
     mcp_server::{
-        error::TransportServerError, hyper_server, HyperServerOptions, McpAppState,
-        ToMcpServerHandler,
+        HyperServerOptions, McpAppState, ToMcpServerHandler, error::TransportServerError,
+        hyper_server,
     },
     schema::{
         Implementation, InitializeResult, ProtocolVersion, ServerCapabilities,
@@ -63,10 +62,7 @@ impl McpServer {
 
     /// Start MCP server with HTTP transport
     async fn start_http(self) -> Result<()> {
-        let port = self
-            .config
-            .http_port
-            .expect("HTTP transport requires port");
+        let port = self.config.http_port.expect("HTTP transport requires port");
         let bind = self
             .config
             .http_bind
@@ -78,9 +74,7 @@ impl McpServer {
                 name: "kruxiaflow-mcp".into(),
                 version: env!("CARGO_PKG_VERSION").into(),
                 title: Some("Kruxia Flow MCP Server".into()),
-                description: Some(
-                    "MCP server for Kruxia Flow workflow orchestration".into(),
-                ),
+                description: Some("MCP server for Kruxia Flow workflow orchestration".into()),
                 icons: vec![],
                 website_url: None,
             },
@@ -108,10 +102,7 @@ impl McpServer {
             ..Default::default()
         };
 
-        tracing::info!(
-            "MCP server listening on {}:{}",
-            options.host, options.port
-        );
+        tracing::info!("MCP server listening on {}:{}", options.host, options.port);
 
         let server = hyper_server::create_server(server_info, handler, options);
         server
@@ -181,13 +172,9 @@ impl AuthProvider for McpJwtAuthProvider {
 
         let claims = &token_data.claims;
 
-        let expires_at = claims
-            .get("exp")
-            .and_then(|v| v.as_i64())
-            .map(|exp| {
-                std::time::SystemTime::UNIX_EPOCH
-                    + std::time::Duration::from_secs(exp as u64)
-            });
+        let expires_at = claims.get("exp").and_then(|v| v.as_i64()).map(|exp| {
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(exp as u64)
+        });
 
         let token_unique_id = claims
             .get("jti")
