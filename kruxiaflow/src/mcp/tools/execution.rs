@@ -4,9 +4,8 @@
 /// - validate_workflow: parse + validate YAML/JSON in-process (no DB)
 /// - submit_workflow: deploy definition (if needed) and submit a workflow instance
 /// - cancel_workflow: cancel a running workflow (stub — endpoint not yet implemented)
-
-use rust_mcp_sdk::macros::{mcp_tool, JsonSchema};
-use rust_mcp_sdk::schema::{schema_utils::CallToolError, CallToolResult, TextContent};
+use rust_mcp_sdk::macros::{JsonSchema, mcp_tool};
+use rust_mcp_sdk::schema::{CallToolResult, TextContent, schema_utils::CallToolError};
 use rust_mcp_sdk::tool_box;
 use sqlx::PgPool;
 
@@ -26,7 +25,7 @@ use sqlx::PgPool;
         dependencies, duplicate keys, missing required fields, and circular \
         dependencies — all without touching the database.",
     read_only_hint = true,
-    idempotent_hint = true,
+    idempotent_hint = true
 )]
 #[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct ValidateWorkflow {
@@ -107,7 +106,7 @@ impl ValidateWorkflow {
         object must match what the workflow's template expressions expect.",
     destructive_hint = true,
     read_only_hint = false,
-    idempotent_hint = false,
+    idempotent_hint = false
 )]
 #[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct SubmitWorkflow {
@@ -141,7 +140,7 @@ pub struct SubmitWorkflow {
         the cancellation endpoint is available.",
     destructive_hint = true,
     read_only_hint = false,
-    idempotent_hint = true,
+    idempotent_hint = true
 )]
 #[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct CancelWorkflow {

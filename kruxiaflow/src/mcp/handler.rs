@@ -6,25 +6,24 @@
 ///   - Execution tools: validate, submit, cancel
 ///   - Observability tools: status, list, outputs, cost, estimate
 ///   - Visualization & Control tools: diagrams, signals (future)
-
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use rust_mcp_sdk::{
+    McpServer,
     mcp_server::ServerHandler,
     schema::{
-        schema_utils::CallToolError, CallToolRequestParams, CallToolResult, ListToolsResult,
-        PaginatedRequestParams, RpcError,
+        CallToolRequestParams, CallToolResult, ListToolsResult, PaginatedRequestParams, RpcError,
+        schema_utils::CallToolError,
     },
-    McpServer,
 };
 use sqlx::PgPool;
 
-use crate::mcp::config::McpConfig;
 use super::tools::{
-    control, discovery, execution, observability, visualization, ControlTools, DiscoveryTools,
-    ExecutionTools, ObservabilityTools, VisualizationTools,
+    ControlTools, DiscoveryTools, ExecutionTools, ObservabilityTools, VisualizationTools, control,
+    discovery, execution, observability, visualization,
 };
+use crate::mcp::config::McpConfig;
 
 /// Handler that dispatches MCP tool calls to Kruxia Flow services.
 pub struct KruxiaFlowMcpHandler {
@@ -131,8 +130,7 @@ impl ServerHandler for KruxiaFlowMcpHandler {
 
             // --- Visualization tools ---
             "render_workflow_diagram" | "render_cost_diagram" => {
-                let tool =
-                    VisualizationTools::try_from(params).map_err(CallToolError::new)?;
+                let tool = VisualizationTools::try_from(params).map_err(CallToolError::new)?;
                 match tool {
                     VisualizationTools::RenderWorkflowDiagram(ref p) => {
                         visualization::run_render_workflow_diagram(&self.pool, p).await

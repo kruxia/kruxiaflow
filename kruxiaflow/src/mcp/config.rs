@@ -24,7 +24,6 @@
 /// - Production deployments with monitoring/logging
 /// - Multi-client AI agent access
 /// - Network-accessible MCP endpoints
-
 use anyhow::Result;
 use std::time::Duration;
 
@@ -142,11 +141,10 @@ impl McpConfig {
         };
 
         // Resource limits
-        let max_concurrent_requests =
-            std::env::var("KRUXIAFLOW_MCP_MAX_CONCURRENT_REQUESTS")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(10);
+        let max_concurrent_requests = std::env::var("KRUXIAFLOW_MCP_MAX_CONCURRENT_REQUESTS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(10);
 
         let request_timeout = std::env::var("KRUXIAFLOW_MCP_REQUEST_TIMEOUT_SECS")
             .ok()

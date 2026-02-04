@@ -3,10 +3,9 @@
 /// Two read-only tools that generate Mermaid diagrams:
 /// - render_workflow_diagram: dependency graph with optional execution-status colours
 /// - render_cost_diagram: cost tree rooted at total cost
-
 use rust_decimal::prelude::*;
-use rust_mcp_sdk::macros::{mcp_tool, JsonSchema};
-use rust_mcp_sdk::schema::{schema_utils::CallToolError, CallToolResult, TextContent};
+use rust_mcp_sdk::macros::{JsonSchema, mcp_tool};
+use rust_mcp_sdk::schema::{CallToolResult, TextContent, schema_utils::CallToolError};
 use rust_mcp_sdk::tool_box;
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
@@ -30,7 +29,7 @@ use std::collections::HashMap;
         Paste the returned 'diagram' string into any Mermaid renderer (GitHub, \
         mdBook, online playground) to see the graph.",
     read_only_hint = true,
-    idempotent_hint = true,
+    idempotent_hint = true
 )]
 #[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct RenderWorkflowDiagram {
@@ -57,7 +56,7 @@ pub struct RenderWorkflowDiagram {
         recorded. Useful for understanding which activities contribute most to \
         the total cost.",
     read_only_hint = true,
-    idempotent_hint = true,
+    idempotent_hint = true
 )]
 #[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct RenderCostDiagram {
@@ -118,15 +117,12 @@ pub async fn run_render_workflow_diagram(
 
     // Fetch the deployed definition for dependency structure
     let repo = kruxiaflow_core::WorkflowDefinitionRepository::new(pool.clone());
-    let stored = repo
-        .get_latest(&definition_name)
-        .await
-        .map_err(|e| {
-            CallToolError::from_message(format!(
-                "Error looking up definition '{}': {e}",
-                definition_name
-            ))
-        })?;
+    let stored = repo.get_latest(&definition_name).await.map_err(|e| {
+        CallToolError::from_message(format!(
+            "Error looking up definition '{}': {e}",
+            definition_name
+        ))
+    })?;
 
     let stored = match stored {
         Some(s) => s,
@@ -335,17 +331,20 @@ fn text_response(value: &serde_json::Value) -> Result<CallToolResult, CallToolEr
 /// Parse a string as UUID, returning a tool error if invalid.
 fn parse_uuid(s: &str) -> Result<uuid::Uuid, CallToolError> {
     uuid::Uuid::parse_str(s).map_err(|_| {
-        CallToolError::from_message(format!(
-            "Invalid workflow_id '{}': must be a valid UUID",
-            s
-        ))
+        CallToolError::from_message(format!("Invalid workflow_id '{}': must be a valid UUID", s))
     })
 }
 
 /// Sanitise a key for use as a Mermaid node ID (alphanumeric + underscore only).
 fn node_id(key: &str) -> String {
     key.chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
