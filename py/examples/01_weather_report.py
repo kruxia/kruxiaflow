@@ -1,57 +1,64 @@
 """Weather Report Workflow - Simple sequential workflow example.
 
 This example demonstrates:
-- Basic activity definition with HTTP requests
+- Declarative activity definition with HTTP requests
 - Activity dependencies (sequential execution)
 - Referencing activity outputs in subsequent activities
-- Referencing workflow inputs
 - Using workflow metadata (workflow.id)
+- Sending email notifications via Mailpit
 """
 
-from kruxiaflow import Activity, Input, Workflow, workflow
-
-# Define workflow inputs
-webhook_url = Input("webhook_url", type=str, required=True)
+from kruxiaflow import Activity, Workflow, workflow
 
 # Step 1: Fetch weather data from the weather API
-fetch_weather = (
-    Activity(key="fetch_weather")
-    .with_worker("std", "http_request")
-    .with_params(
-        method="GET",
-        url="https://api.weather.gov/gridpoints/LOT/76,73/forecast",
-    )
+fetch_weather = Activity(
+    key="fetch_weather",
+    worker="std",
+    activity_name="http_request",
+    parameters={
+        "method": "GET",
+        "url": "https://api.weather.gov/gridpoints/LOT/76,73/forecast",
+    },
+    outputs=["response"],  # String auto-converted to ActivityOutputDefinition
 )
 
-# Step 2: Send notification with weather data to webhook
+# Step 2: Send notification with weather data via email
 # Depends on fetch_weather completing first
-send_notification = (
-    Activity(key="send_notification")
-    .with_worker("std", "http_request")
-    .with_params(
-        method="POST",
-        url=webhook_url,
-        headers={"Content-Type": "application/json"},
-        body={
-            "temperature": fetch_weather[
-                "response.json.properties.periods[0].temperature"
+send_notification = Activity(
+    key="send_notification",
+    worker="std",
+    activity_name="http_request",
+    parameters={
+        "method": "POST",
+        "url": "http://mailpit:8025/api/v1/send",
+        "headers": {"Content-Type": "application/json"},
+        "body": {
+            "From": {
+                "Name": "Kruxia Flow",
+                "Email": "workflow@kruxiaflow.local",
+            },
+            "To": [
+                {
+                    "Name": "Weather Subscriber",
+                    "Email": "weather@example.com",
+                }
             ],
-            "conditions": fetch_weather[
-                "response.json.properties.periods[0].shortForecast"
-            ],
-            "workflow_id": workflow.id,  # Use workflow metadata accessor
+            "Subject": f"Weather Report - {workflow.id}",
+            "Text": f"""
+                Temperature: {fetch_weather["response.body.properties.periods[0].temperature"]}
+                Forecast: {fetch_weather["response.body.properties.periods[0].detailedForecast"]}
+            """,
         },
-    )
-    .with_dependencies(fetch_weather)
+    },
+    depends_on=["fetch_weather"],
 )
 
 # Build the workflow
-weather_workflow = (
-    Workflow(name="weather_report")
-    .with_inputs(webhook_url)
-    .with_activities(fetch_weather, send_notification)
+weather_workflow = Workflow(
+    name="weather_report",
+    activities=[fetch_weather, send_notification],
 )
 
 if __name__ == "__main__":
     # Print the compiled YAML to verify
-    print(weather_workflow.to_yaml())
+    print(weather_workflow)

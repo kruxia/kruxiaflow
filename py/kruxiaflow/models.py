@@ -8,12 +8,73 @@ from __future__ import annotations
 
 import sys
 from enum import Enum
+from textwrap import dedent
 from typing import TYPE_CHECKING, Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .types import ActivityKey, ActivityNameOptional, WorkerName
+from .types import ActivityKey, WorkerName
+
+# =============================================================================
+# YAML Configuration
+# =============================================================================
+
+
+class LiteralString(str):
+    """String subclass to force YAML literal block scalar representation."""
+
+
+def str_representer(dumper: yaml.Dumper, data: str) -> yaml.Node:
+    """Custom string representer that uses block literal style for multiline strings.
+
+    Automatically applies dedent and uses trimming block literal style (|-).
+
+    Args:
+        dumper: YAML dumper instance
+        data: String to represent
+
+    Returns:
+        YAML scalar node
+    """
+    if "\n" in data:
+        # Apply dedent to remove common leading whitespace and strip leading/trailing whitespace
+        dedented = dedent(data).strip()
+        # Use literal block scalar (|) for multiline strings
+        return dumper.represent_scalar("tag:yaml.org,2002:str", dedented, style="|")
+    # Use default representation for single-line strings
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+
+
+def expression_representer(dumper: yaml.Dumper, data: Any) -> yaml.Node:
+    """Custom representer for Expression objects.
+
+    Converts Expression objects to their string representation.
+
+    Args:
+        dumper: YAML dumper instance
+        data: Expression object to represent
+
+    Returns:
+        YAML scalar node
+    """
+    return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
+
+
+# Create custom YAML dumper with block literal style for multiline strings
+class BlockLiteralDumper(yaml.SafeDumper):
+    """YAML dumper that uses block literal style for multiline strings."""
+
+
+BlockLiteralDumper.add_representer(str, str_representer)
+
+# Add representer for Expression objects (OutputRef, Input, etc.)
+# This is imported later to avoid circular imports, so we'll add it lazily
+
+
+# =============================================================================
+# Enum Classes
+# =============================================================================
 
 
 class BackoffStrategy(str, Enum):
@@ -30,13 +91,61 @@ class BudgetAction(str, Enum):
     CONTINUE = "continue"
 
 
+class OutputType(str, Enum):
+    """Activity output type."""
+
+    VALUE = "value"
+    FILE = "file"
+    FOLDER = "folder"
+
+
 if sys.version_info >= (3, 11):
-    from typing import Self
+    pass
 else:
-    from typing_extensions import Self
+    pass
 
 if TYPE_CHECKING:
-    from .expressions import Input, OutputComparison, OutputRef
+    from .expressions import OutputComparison, OutputRef
+
+
+# =============================================================================
+# Output Models
+# =============================================================================
+
+
+class ActivityOutputDefinition(BaseModel):
+    """Activity output definition.
+
+    Specifies the name and type of an activity output.
+    Supports shorthand string format or explicit object format.
+
+    Examples:
+        # Shorthand (string) - defaults to type "value"
+        outputs=["response", "result"]
+
+        # Explicit object format
+        outputs=[
+            ActivityOutputDefinition(name="response", output_type=OutputType.VALUE),
+            ActivityOutputDefinition(name="data_file", output_type=OutputType.FILE),
+        ]
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    name: str
+    output_type: OutputType = OutputType.VALUE
+
+    @classmethod
+    def from_string(cls, name: str) -> ActivityOutputDefinition:
+        """Create output definition from shorthand string.
+
+        Args:
+            name: Output name (defaults to type "value")
+
+        Returns:
+            ActivityOutputDefinition with type "value"
+        """
+        return cls(name=name, output_type=OutputType.VALUE)
 
 
 # =============================================================================
@@ -151,200 +260,78 @@ class Activity(BaseModel):
     """Activity within a workflow definition.
 
     Specifies which activity to run on which worker with what parameters.
-    Can be constructed declaratively or using method chaining.
+    Activities are constructed using declarative Pydantic-style parameters.
 
-    Declarative example:
+    Example:
         activity = Activity(
             key="fetch_data",
             worker="std",
             activity_name="http_request",
             parameters={"url": "https://api.example.com"},
             settings=ActivitySettings(timeout_seconds=300),
-        )
-
-    Fluent example:
-        activity = (
-            Activity(key="fetch_data")
-            .with_worker("std", "http_request")
-            .with_params(url="https://api.example.com")
-            .with_timeout(300)
+            outputs=["response"],
         )
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
     key: ActivityKey
-    worker: WorkerName
-    # activity_name allows empty during construction for fluent API,
-    # validated non-empty at serialization in to_dict()
-    activity_name: ActivityNameOptional
+    worker: WorkerName = "std"
+    activity_name: str
     parameters: dict[str, Any] = Field(default_factory=dict)
     settings: ActivitySettings = Field(default_factory=ActivitySettings)
     depends_on: list[str | Dependency] = Field(default_factory=list)
+    outputs: list[ActivityOutputDefinition] = Field(default_factory=list)
 
-    # -------------------------------------------------------------------------
-    # Fluent Builder Methods
-    # -------------------------------------------------------------------------
+    @field_validator("parameters", mode="before")
+    @classmethod
+    def convert_expression_parameters(cls, v: dict[str, Any]) -> dict[str, Any]:
+        """Convert Expression objects in parameters to their string representation.
 
-    def with_worker(self, worker: str, activity_name: str) -> Self:
-        """Set the worker and activity name.
-
-        Args:
-            worker: Worker identifier (e.g., "std", "python")
-            activity_name: Activity name within the worker (e.g., "http_request")
-
-        Returns:
-            self for chaining
-        """
-        self.worker = worker
-        self.activity_name = activity_name
-        return self
-
-    def with_params(self, **parameters: Any) -> Self:
-        """Set activity parameters.
-
-        Parameters can include template expressions (Input, OutputRef, etc.)
-        which will be serialized appropriately when exported to YAML.
+        Allows users to pass Expression objects (Input, OutputRef, etc.) directly
+        in parameters, which are automatically converted to strings.
 
         Args:
-            **parameters: Keyword arguments for activity parameters
+            v: Dictionary of parameters
 
         Returns:
-            self for chaining
+            Dictionary with Expression objects converted to strings
         """
-        self.parameters.update(_serialize_parameters(parameters))
-        return self
+        if not isinstance(v, dict):
+            return v
+        return _serialize_parameters(v)
 
-    def with_timeout(self, seconds: int) -> Self:
-        """Set activity timeout in seconds.
+    @field_validator("outputs", mode="before")
+    @classmethod
+    def convert_output_strings(
+        cls, v: list[str | ActivityOutputDefinition | dict[str, Any]]
+    ) -> list[ActivityOutputDefinition]:
+        """Convert string outputs to ActivityOutputDefinition objects.
+
+        Allows users to specify outputs as simple strings which are automatically
+        converted to ActivityOutputDefinition with type "value".
 
         Args:
-            seconds: Maximum execution time before timeout
+            v: List of outputs (strings, dicts, or ActivityOutputDefinition objects)
 
         Returns:
-            self for chaining
+            List of ActivityOutputDefinition objects
         """
-        self.settings.timeout_seconds = seconds
-        return self
+        if not isinstance(v, list):
+            return v
 
-    def with_retry(
-        self,
-        max_attempts: int = 3,
-        strategy: BackoffStrategy = BackoffStrategy.EXPONENTIAL,
-        base_seconds: float | None = None,
-        factor: float | None = None,
-        max_seconds: float | None = None,
-    ) -> Self:
-        """Set retry policy.
-
-        Args:
-            max_attempts: Maximum number of retry attempts
-            strategy: Backoff strategy (exponential or fixed)
-            base_seconds: Initial backoff duration
-            factor: Multiplier for exponential backoff
-            max_seconds: Maximum backoff duration
-
-        Returns:
-            self for chaining
-        """
-        self.settings.retry = RetrySettings(
-            max_attempts=max_attempts,
-            strategy=strategy,
-            base_seconds=base_seconds,
-            factor=factor,
-            max_seconds=max_seconds,
-        )
-        return self
-
-    def with_cache(self, ttl: int, key: str | None = None) -> Self:
-        """Enable result caching.
-
-        Args:
-            ttl: Cache time-to-live in seconds
-            key: Optional custom cache key template
-
-        Returns:
-            self for chaining
-        """
-        self.settings.cache = CacheSettings(ttl=ttl, key=key)
-        return self
-
-    def with_budget(
-        self, limit_usd: float, action: BudgetAction = BudgetAction.ABORT
-    ) -> Self:
-        """Set cost budget limit.
-
-        Args:
-            limit_usd: Maximum cost in USD
-            action: Action when budget exceeded (abort or continue)
-
-        Returns:
-            self for chaining
-        """
-        self.settings.budget = BudgetSettings(limit_usd=limit_usd, action=action)
-        return self
-
-    def with_delay(self, delay: str) -> Self:
-        """Set execution delay.
-
-        Args:
-            delay: Delay duration (e.g., "5s", "1m", "30s")
-
-        Returns:
-            self for chaining
-        """
-        self.settings.delay = delay
-        return self
-
-    def with_streaming(self, enabled: bool = True) -> Self:
-        """Enable token streaming for LLM activities.
-
-        Args:
-            enabled: Whether to enable streaming
-
-        Returns:
-            self for chaining
-        """
-        self.settings.streaming = enabled
-        return self
-
-    def with_dependencies(self, *dependencies: Activity | Dependency | str) -> Self:
-        """Add activity dependencies.
-
-        Activities listed here must complete before this activity runs.
-        Use Dependency.on() to add conditions to dependencies.
-
-        Args:
-            *dependencies: Activity instances, Dependency objects, or activity key strings
-
-        Returns:
-            self for chaining
-
-        Example:
-            # Simple dependencies
-            activity.with_dependencies(step1, step2)
-            activity.with_dependencies("step1", "step2")
-
-            # Dependency with conditions
-            activity.with_dependencies(
-                Dependency.on(step1, step1["success"] == True)
-            )
-
-            # Mix of simple and conditional
-            activity.with_dependencies(
-                step1,
-                Dependency.on(step2, step2["valid"] == True),
-            )
-        """
-        for dep in dependencies:
-            if isinstance(dep, Dependency):
-                self.depends_on.append(dep)
-            elif isinstance(dep, Activity):
-                self.depends_on.append(dep.key)
+        result = []
+        for item in v:
+            if isinstance(item, str):
+                # Convert string to ActivityOutputDefinition
+                result.append(ActivityOutputDefinition(name=item))
+            elif isinstance(item, dict):
+                # Convert dict to ActivityOutputDefinition
+                result.append(ActivityOutputDefinition(**item))
             else:
-                # String key
-                self.depends_on.append(dep)
-        return self
+                # Already an ActivityOutputDefinition
+                result.append(item)
+        return result
 
     # -------------------------------------------------------------------------
     # Output Reference Support
@@ -363,11 +350,21 @@ class Activity(BaseModel):
 
         Example:
             # Use in parameters
-            save.with_params(data=process["result"])
+            save_activity = Activity(
+                key="save",
+                worker="std",
+                activity_name="postgres_query",
+                parameters={"data": process["result"]},
+            )
 
             # Use in dependency conditions
-            notify.with_dependencies(
-                Dependency.on(analyze, analyze["confidence"] > 0.8)
+            notify = Activity(
+                key="notify",
+                worker="std",
+                activity_name="http_request",
+                depends_on=[
+                    Dependency.on(analyze, analyze["confidence"] > 0.8)
+                ],
             )
         """
         from .expressions import OutputRef
@@ -381,7 +378,12 @@ class Activity(BaseModel):
         Use in Dependency to run an activity only if this one failed.
 
         Example:
-            handle_error.with_dependencies(Dependency.on(process, process.failed))
+            handle_error = Activity(
+                key="handle_error",
+                worker="std",
+                activity_name="http_request",
+                depends_on=[Dependency.on(process, process.failed)],
+            )
         """
         return f"{{{{ {self.key}.status == 'failed' }}}}"
 
@@ -392,7 +394,12 @@ class Activity(BaseModel):
         Use in Dependency to run an activity only if this one succeeded.
 
         Example:
-            next_step.with_dependencies(Dependency.on(process, process.succeeded))
+            next_step = Activity(
+                key="next_step",
+                worker="std",
+                activity_name="http_request",
+                depends_on=[Dependency.on(process, process.succeeded)],
+            )
         """
         return f"{{{{ {self.key}.status == 'succeeded' }}}}"
 
@@ -409,7 +416,7 @@ class Activity(BaseModel):
         if not self.activity_name:
             raise ValueError(
                 f"Activity '{self.key}' has no activity_name. "
-                "Use .with_worker(worker, activity_name) or set activity_name directly."
+                "Set activity_name parameter when constructing the Activity."
             )
 
         result: dict[str, Any] = {
@@ -419,7 +426,7 @@ class Activity(BaseModel):
         }
 
         if self.parameters:
-            result["parameters"] = self.parameters
+            result["parameters"] = _serialize_parameters(self.parameters)
 
         # Add settings if any are set
         settings_dict: dict[str, Any] = {}
@@ -481,23 +488,36 @@ class Activity(BaseModel):
                     deps_list.append(dep.activity_key)
             result["depends_on"] = deps_list
 
+        # Add outputs
+        if self.outputs:
+            outputs_list: list[str | dict[str, str]] = []
+            for output in self.outputs:
+                # Use shorthand if type is default "value", otherwise full object
+                if output.output_type == OutputType.VALUE:
+                    outputs_list.append(output.name)
+                else:
+                    outputs_list.append(
+                        {
+                            "name": output.name,
+                            "type": output.output_type.value,
+                        }
+                    )
+            result["outputs"] = outputs_list
+
         return result
 
+    def __str__(self) -> str:
+        """Return YAML representation of the activity.
 
-# =============================================================================
-# Input Schema Model
-# =============================================================================
-
-
-class InputSchema(BaseModel):
-    """Schema definition for a workflow input."""
-
-    model_config = ConfigDict(validate_assignment=True)
-
-    type: str = "string"
-    required: bool = True
-    default: Any = None
-    description: str | None = None
+        Returns:
+            YAML string representation
+        """
+        return yaml.dump(
+            self.to_dict(),
+            Dumper=BlockLiteralDumper,
+            sort_keys=False,
+            default_flow_style=False,
+        )
 
 
 # =============================================================================
@@ -506,103 +526,24 @@ class InputSchema(BaseModel):
 
 
 class Workflow(BaseModel):
-    """Workflow definition with fluent builder methods.
+    """Workflow definition.
 
-    Can be constructed declaratively or using method chaining.
+    Workflows are constructed using declarative Pydantic-style parameters.
 
-    Declarative example:
+    Note: Version is auto-generated by the server when the workflow is stored.
+    Namespace, description, and inputs are managed separately from the workflow definition.
+
+    Example:
         workflow = Workflow(
             name="my_workflow",
-            version="1.0.0",
             activities=[activity1, activity2],
-        )
-
-    Fluent example:
-        workflow = (
-            Workflow(name="my_workflow")
-            .with_inputs(text_input, url_input)
-            .with_activities(activity1, activity2, activity3)
         )
     """
 
     model_config = ConfigDict(validate_assignment=True)
 
     name: str
-    version: str = "1.0.0"
-    namespace: str = "default"
-    description: str | None = None
-    inputs: dict[str, InputSchema] = Field(default_factory=dict)
     activities: list[Activity] = Field(default_factory=list)
-
-    # -------------------------------------------------------------------------
-    # Fluent Builder Methods
-    # -------------------------------------------------------------------------
-
-    def with_version(self, version: str) -> Self:
-        """Set the workflow version.
-
-        Args:
-            version: Version string (e.g., "1.0.0")
-
-        Returns:
-            self for chaining
-        """
-        self.version = version
-        return self
-
-    def with_namespace(self, namespace: str) -> Self:
-        """Set the workflow namespace.
-
-        Args:
-            namespace: Namespace for organization
-
-        Returns:
-            self for chaining
-        """
-        self.namespace = namespace
-        return self
-
-    def with_description(self, description: str) -> Self:
-        """Set the workflow description.
-
-        Args:
-            description: Human-readable description
-
-        Returns:
-            self for chaining
-        """
-        self.description = description
-        return self
-
-    def with_inputs(self, *inputs: Input) -> Self:
-        """Declare workflow inputs.
-
-        Args:
-            *inputs: Input definitions
-
-        Returns:
-            self for chaining
-        """
-        for inp in inputs:
-            self.inputs[inp.name] = InputSchema(
-                type=_python_type_to_schema_type(inp._type),
-                required=inp.required,
-                default=inp.default,
-                description=inp._description,
-            )
-        return self
-
-    def with_activities(self, *activities: Activity) -> Self:
-        """Add activity definitions to the workflow.
-
-        Args:
-            *activities: Activity instances to add
-
-        Returns:
-            self for chaining
-        """
-        self.activities.extend(activities)
-        return self
 
     # -------------------------------------------------------------------------
     # Serialization
@@ -612,41 +553,31 @@ class Workflow(BaseModel):
         """Convert to YAML-compatible dictionary format."""
         result: dict[str, Any] = {
             "name": self.name,
-            "version": self.version,
+            "activities": [activity.to_dict() for activity in self.activities],
         }
-
-        if self.namespace != "default":
-            result["namespace"] = self.namespace
-
-        if self.description is not None:
-            result["description"] = self.description
-
-        if self.inputs:
-            inputs_dict: dict[str, Any] = {}
-            for name, schema in self.inputs.items():
-                input_schema: dict[str, Any] = {
-                    "type": schema.type,
-                    "required": schema.required,
-                }
-                if schema.default is not None:
-                    input_schema["default"] = schema.default
-                if schema.description is not None:
-                    input_schema["description"] = schema.description
-                inputs_dict[name] = input_schema
-            result["inputs"] = inputs_dict
-
-        if self.activities:
-            result["activities"] = [activity.to_dict() for activity in self.activities]
 
         return result
 
     def to_yaml(self) -> str:
         """Serialize to YAML format."""
-        return yaml.dump(self.to_dict(), sort_keys=False, default_flow_style=False)
+        return yaml.dump(
+            self.to_dict(),
+            Dumper=BlockLiteralDumper,
+            sort_keys=False,
+            default_flow_style=False,
+        )
 
     def to_json(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dictionary (for API deployment)."""
         return self.model_dump(mode="json", exclude_none=True)
+
+    def __str__(self) -> str:
+        """Return YAML representation of the workflow.
+
+        Returns:
+            YAML string representation
+        """
+        return self.to_yaml()
 
 
 # =============================================================================

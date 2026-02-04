@@ -111,13 +111,14 @@ from .expressions import (
 )
 from .models import (
     Activity,
+    ActivityOutputDefinition,
     ActivitySettings,
     BackoffStrategy,
     BudgetAction,
     BudgetSettings,
     CacheSettings,
     Dependency,
-    InputSchema,
+    OutputType,
     RetrySettings,
     Workflow,
 )
@@ -130,6 +131,7 @@ except PackageNotFoundError:
 __all__ = [
     # Models
     "Activity",
+    "ActivityOutputDefinition",
     "ActivitySettings",
     # Expression types
     "And",
@@ -151,7 +153,6 @@ __all__ = [
     "Gt",
     "In",
     "Input",
-    "InputSchema",
     "IsNotNull",
     "IsNull",
     "KruxiaFlow",
@@ -164,6 +165,7 @@ __all__ = [
     "Or",
     "OutputComparison",  # Backward compatibility
     "OutputRef",
+    "OutputType",
     "RetrySettings",
     "SecretRef",
     "Workflow",

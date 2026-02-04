@@ -10,7 +10,6 @@ from kruxiaflow.models import (
     BudgetSettings,
     CacheSettings,
     Dependency,
-    InputSchema,
     RetrySettings,
     Workflow,
 )
@@ -140,20 +139,6 @@ class TestActivity:
         assert activity.parameters == {}
         assert activity.depends_on == []
 
-    def test_activity_allows_empty_activity_name_for_fluent_api(self):
-        """Activity can be constructed without activity_name for fluent API."""
-        activity = Activity(key="test")
-        assert activity.activity_name == ""
-        # with_worker sets activity_name
-        activity.with_worker("std", "echo")
-        assert activity.activity_name == "echo"
-
-    def test_to_dict_requires_activity_name(self):
-        """to_dict() raises error if activity_name is empty."""
-        activity = Activity(key="test")
-        with pytest.raises(ValueError, match="has no activity_name"):
-            activity.to_dict()
-
     def test_full_activity(self):
         activity = Activity(
             key="fetch",
@@ -171,127 +156,69 @@ class TestActivity:
         assert "step1" in activity.depends_on
 
 
-class TestActivityFluentMethods:
-    """Tests for Activity fluent builder methods."""
+class TestActivityDeclarativeConstruction:
+    """Tests for Activity declarative construction."""
 
-    def test_with_worker(self):
-        activity = Activity(key="test", activity_name="placeholder").with_worker(
-            "std", "http_request"
-        )
-        assert activity.worker == "std"
-        assert activity.activity_name == "http_request"
-
-    def test_with_worker_returns_self(self):
-        activity = Activity(key="test", activity_name="placeholder")
-        result = activity.with_worker("std", "http_request")
-        assert result is activity
-
-    def test_with_params(self):
-        activity = Activity(key="test", activity_name="echo").with_params(
-            url="https://example.com", method="GET"
+    def test_with_all_parameters(self):
+        activity = Activity(
+            key="test",
+            worker="std",
+            activity_name="echo",
+            parameters={"url": "https://example.com", "method": "GET"},
         )
         assert activity.parameters["url"] == "https://example.com"
         assert activity.parameters["method"] == "GET"
 
-    def test_with_params_merges(self):
-        activity = (
-            Activity(key="test", activity_name="echo")
-            .with_params(url="https://example.com")
-            .with_params(method="POST")
+    def test_with_settings(self):
+        activity = Activity(
+            key="test",
+            activity_name="echo",
+            settings=ActivitySettings(
+                timeout_seconds=300,
+                retry=RetrySettings(max_attempts=5, strategy=BackoffStrategy.FIXED),
+                cache=CacheSettings(ttl=3600, key="my_key"),
+                budget=BudgetSettings(limit_usd=10.0),
+                delay="5s",
+                streaming=True,
+            ),
         )
-        assert activity.parameters["url"] == "https://example.com"
-        assert activity.parameters["method"] == "POST"
-
-    def test_with_timeout(self):
-        activity = Activity(key="test", activity_name="echo").with_timeout(300)
         assert activity.settings.timeout_seconds == 300
-
-    def test_with_retry(self):
-        activity = Activity(key="test", activity_name="echo").with_retry(
-            max_attempts=5, strategy=BackoffStrategy.FIXED
-        )
         assert activity.settings.retry.max_attempts == 5
         assert activity.settings.retry.strategy == BackoffStrategy.FIXED
-
-    def test_with_retry_defaults(self):
-        activity = Activity(key="test", activity_name="echo").with_retry()
-        assert activity.settings.retry.max_attempts == 3
-        assert activity.settings.retry.strategy == BackoffStrategy.EXPONENTIAL
-
-    def test_with_cache(self):
-        activity = Activity(key="test", activity_name="echo").with_cache(
-            ttl=3600, key="my_key"
-        )
         assert activity.settings.cache.ttl == 3600
         assert activity.settings.cache.key == "my_key"
-
-    def test_with_budget(self):
-        activity = Activity(key="test", activity_name="echo").with_budget(
-            limit_usd=10.0
-        )
         assert activity.settings.budget.limit_usd == 10.0
         assert activity.settings.budget.action == BudgetAction.ABORT
-
-    def test_with_delay(self):
-        activity = Activity(key="test", activity_name="echo").with_delay("5s")
         assert activity.settings.delay == "5s"
-
-    def test_with_streaming(self):
-        activity = Activity(key="test", activity_name="echo").with_streaming(True)
         assert activity.settings.streaming is True
 
-    def test_with_dependencies_from_activities(self):
-        step1 = Activity(key="step1", activity_name="echo")
-        step2 = Activity(key="step2", activity_name="echo")
-        step3 = Activity(key="step3", activity_name="echo").with_dependencies(
-            step1, step2
-        )
-        assert "step1" in step3.depends_on
-        assert "step2" in step3.depends_on
-
     def test_with_dependencies_from_strings(self):
-        activity = Activity(key="test", activity_name="echo").with_dependencies(
-            "step1", "step2"
+        activity = Activity(
+            key="test",
+            activity_name="echo",
+            depends_on=["step1", "step2"],
         )
         assert "step1" in activity.depends_on
         assert "step2" in activity.depends_on
 
     def test_with_dependencies_from_dependency_objects(self):
         dep = Dependency(activity_key="step1", conditions=["{{ step1.ok }} == true"])
-        activity = Activity(key="test", activity_name="echo").with_dependencies(dep)
+        activity = Activity(
+            key="test",
+            activity_name="echo",
+            depends_on=[dep],
+        )
         assert len(activity.depends_on) == 1
         assert isinstance(activity.depends_on[0], Dependency)
 
     def test_with_dependencies_mixed(self):
-        step1 = Activity(key="step1", activity_name="echo")
         dep = Dependency(activity_key="step2", conditions=["condition"])
-        activity = Activity(key="test", activity_name="echo").with_dependencies(
-            step1, dep, "step3"
+        activity = Activity(
+            key="test",
+            activity_name="echo",
+            depends_on=["step1", dep, "step3"],
         )
         assert len(activity.depends_on) == 3
-
-    def test_chaining_all_methods(self):
-        activity = (
-            Activity(key="complete", activity_name="placeholder")
-            .with_worker("std", "http_request")
-            .with_params(url="https://example.com")
-            .with_timeout(300)
-            .with_retry(max_attempts=3)
-            .with_cache(ttl=3600)
-            .with_budget(limit_usd=1.0)
-            .with_delay("1s")
-            .with_streaming(True)
-        )
-        assert activity.key == "complete"
-        assert activity.worker == "std"
-        assert activity.activity_name == "http_request"
-        assert activity.parameters["url"] == "https://example.com"
-        assert activity.settings.timeout_seconds == 300
-        assert activity.settings.retry.max_attempts == 3
-        assert activity.settings.cache.ttl == 3600
-        assert activity.settings.budget.limit_usd == 1.0
-        assert activity.settings.delay == "1s"
-        assert activity.settings.streaming is True
 
 
 class TestActivityOutputReference:
@@ -337,17 +264,22 @@ class TestActivitySerialization:
         assert "depends_on" not in d
 
     def test_activity_with_parameters_to_dict(self):
-        activity = Activity(key="test", activity_name="echo").with_params(
-            url="https://example.com"
+        activity = Activity(
+            key="test",
+            activity_name="echo",
+            parameters={"url": "https://example.com"},
         )
         d = activity.to_dict()
         assert d["parameters"]["url"] == "https://example.com"
 
     def test_activity_with_settings_to_dict(self):
-        activity = (
-            Activity(key="test", activity_name="echo")
-            .with_timeout(300)
-            .with_retry(max_attempts=5, strategy=BackoffStrategy.FIXED)
+        activity = Activity(
+            key="test",
+            activity_name="echo",
+            settings=ActivitySettings(
+                timeout_seconds=300,
+                retry=RetrySettings(max_attempts=5, strategy=BackoffStrategy.FIXED),
+            ),
         )
         d = activity.to_dict()
         assert d["settings"]["timeout_seconds"] == 300
@@ -355,15 +287,21 @@ class TestActivitySerialization:
         assert d["settings"]["retry"]["strategy"] == "fixed"
 
     def test_activity_with_simple_dependencies_to_dict(self):
-        activity = Activity(key="test", activity_name="echo").with_dependencies(
-            "step1", "step2"
+        activity = Activity(
+            key="test",
+            activity_name="echo",
+            depends_on=["step1", "step2"],
         )
         d = activity.to_dict()
         assert d["depends_on"] == ["step1", "step2"]
 
     def test_activity_with_conditional_dependency_to_dict(self):
         dep = Dependency(activity_key="step1", conditions=["{{ step1.ok }} == true"])
-        activity = Activity(key="test", activity_name="echo").with_dependencies(dep)
+        activity = Activity(
+            key="test",
+            activity_name="echo",
+            depends_on=[dep],
+        )
         d = activity.to_dict()
         assert len(d["depends_on"]) == 1
         assert d["depends_on"][0]["activity_key"] == "step1"
@@ -372,18 +310,28 @@ class TestActivitySerialization:
     def test_activity_with_dependency_object_no_conditions_to_dict(self):
         """Dependency object without conditions should serialize to string."""
         dep = Dependency(activity_key="step1")
-        activity = Activity(key="test", activity_name="echo").with_dependencies(dep)
+        activity = Activity(
+            key="test",
+            activity_name="echo",
+            depends_on=[dep],
+        )
         d = activity.to_dict()
         assert d["depends_on"] == ["step1"]
 
     def test_activity_with_full_retry_settings_to_dict(self):
         """Test retry settings with all optional fields."""
-        activity = Activity(key="test", activity_name="echo").with_retry(
-            max_attempts=5,
-            strategy=BackoffStrategy.EXPONENTIAL,
-            base_seconds=1.0,
-            factor=2.0,
-            max_seconds=60.0,
+        activity = Activity(
+            key="test",
+            activity_name="echo",
+            settings=ActivitySettings(
+                retry=RetrySettings(
+                    max_attempts=5,
+                    strategy=BackoffStrategy.EXPONENTIAL,
+                    base_seconds=1.0,
+                    factor=2.0,
+                    max_seconds=60.0,
+                ),
+            ),
         )
         d = activity.to_dict()
         retry = d["settings"]["retry"]
@@ -395,15 +343,21 @@ class TestActivitySerialization:
 
     def test_activity_with_scheduled_for_to_dict(self):
         """Test scheduled_for setting serialization."""
-        activity = Activity(key="test", activity_name="echo")
-        activity.settings.scheduled_for = "2024-01-01T00:00:00Z"
+        activity = Activity(
+            key="test",
+            activity_name="echo",
+            settings=ActivitySettings(scheduled_for="2024-01-01T00:00:00Z"),
+        )
         d = activity.to_dict()
         assert d["settings"]["scheduled_for"] == "2024-01-01T00:00:00Z"
 
     def test_activity_with_iteration_scoped_to_dict(self):
         """Test iteration_scoped setting serialization."""
-        activity = Activity(key="test", activity_name="echo")
-        activity.settings.iteration_scoped = True
+        activity = Activity(
+            key="test",
+            activity_name="echo",
+            settings=ActivitySettings(iteration_scoped=True),
+        )
         d = activity.to_dict()
         assert d["settings"]["iteration_scoped"] is True
 
@@ -414,93 +368,19 @@ class TestWorkflow:
     def test_minimal_workflow(self):
         wf = Workflow(name="test")
         assert wf.name == "test"
-        assert wf.version == "1.0.0"
-        assert wf.namespace == "default"
         assert wf.activities == []
-        assert wf.inputs == {}
 
-    def test_full_workflow(self):
-        wf = Workflow(
-            name="test",
-            version="2.0.0",
-            namespace="production",
-            description="A test workflow",
-        )
-        assert wf.name == "test"
-        assert wf.version == "2.0.0"
-        assert wf.namespace == "production"
-        assert wf.description == "A test workflow"
-
-
-class TestWorkflowFluentMethods:
-    """Tests for Workflow fluent builder methods."""
-
-    def test_with_version(self):
-        wf = Workflow(name="test").with_version("2.0.0")
-        assert wf.version == "2.0.0"
-
-    def test_with_namespace(self):
-        wf = Workflow(name="test").with_namespace("production")
-        assert wf.namespace == "production"
-
-    def test_with_description(self):
-        wf = Workflow(name="test").with_description("My workflow")
-        assert wf.description == "My workflow"
-
-    def test_with_inputs(self):
-        from kruxiaflow.expressions import Input
-
-        text_input = Input("text", type=str, required=True)
-        count_input = Input("count", type=int, default=10)
-        wf = Workflow(name="test").with_inputs(text_input, count_input)
-
-        assert "text" in wf.inputs
-        assert wf.inputs["text"].type == "string"
-        assert wf.inputs["text"].required is True
-        assert "count" in wf.inputs
-        assert wf.inputs["count"].type == "integer"
-        assert wf.inputs["count"].default == 10
-
-    def test_with_activities(self):
+    def test_workflow_with_activities(self):
         activity1 = Activity(key="step1", activity_name="echo")
         activity2 = Activity(key="step2", activity_name="echo")
-        wf = Workflow(name="test").with_activities(activity1, activity2)
+        wf = Workflow(
+            name="test",
+            activities=[activity1, activity2],
+        )
+        assert wf.name == "test"
         assert len(wf.activities) == 2
         assert wf.activities[0].key == "step1"
         assert wf.activities[1].key == "step2"
-
-    def test_with_activities_appends(self):
-        activity1 = Activity(key="step1", activity_name="echo")
-        activity2 = Activity(key="step2", activity_name="echo")
-        activity3 = Activity(key="step3", activity_name="echo")
-        wf = (
-            Workflow(name="test")
-            .with_activities(activity1, activity2)
-            .with_activities(activity3)
-        )
-        assert len(wf.activities) == 3
-
-    def test_chaining_all_methods(self):
-        from kruxiaflow.expressions import Input
-
-        text_input = Input("text", type=str)
-        activity = Activity(key="process", activity_name="echo")
-
-        wf = (
-            Workflow(name="complete")
-            .with_version("2.0.0")
-            .with_namespace("production")
-            .with_description("Complete workflow")
-            .with_inputs(text_input)
-            .with_activities(activity)
-        )
-
-        assert wf.name == "complete"
-        assert wf.version == "2.0.0"
-        assert wf.namespace == "production"
-        assert wf.description == "Complete workflow"
-        assert "text" in wf.inputs
-        assert len(wf.activities) == 1
 
 
 class TestWorkflowSerialization:
@@ -510,93 +390,23 @@ class TestWorkflowSerialization:
         wf = Workflow(name="test")
         d = wf.to_dict()
         assert d["name"] == "test"
-        assert d["version"] == "1.0.0"
-        assert "namespace" not in d  # default namespace omitted
-        assert "inputs" not in d
-        assert "activities" not in d
-
-    def test_workflow_with_namespace_to_dict(self):
-        wf = Workflow(name="test").with_namespace("production")
-        d = wf.to_dict()
-        assert d["namespace"] == "production"
-
-    def test_workflow_with_inputs_to_dict(self):
-        from kruxiaflow.expressions import Input
-
-        text_input = Input("text", type=str, required=True, description="User text")
-        wf = Workflow(name="test").with_inputs(text_input)
-        d = wf.to_dict()
-        assert "inputs" in d
-        assert d["inputs"]["text"]["type"] == "string"
-        assert d["inputs"]["text"]["required"] is True
-        assert d["inputs"]["text"]["description"] == "User text"
+        assert d["activities"] == []
 
     def test_workflow_with_activities_to_dict(self):
         activity = Activity(key="step1", activity_name="echo")
-        wf = Workflow(name="test").with_activities(activity)
+        wf = Workflow(name="test", activities=[activity])
         d = wf.to_dict()
         assert len(d["activities"]) == 1
         assert d["activities"][0]["key"] == "step1"
 
-    def test_workflow_with_description_to_dict(self):
-        wf = Workflow(name="test").with_description("My workflow description")
-        d = wf.to_dict()
-        assert d["description"] == "My workflow description"
-
     def test_workflow_to_yaml(self):
         activity = Activity(key="step1", activity_name="echo")
-        wf = Workflow(name="test").with_activities(activity)
+        wf = Workflow(name="test", activities=[activity])
         yaml_str = wf.to_yaml()
         assert "name: test" in yaml_str
-        assert "version: '1.0.0'" in yaml_str or "version: 1.0.0" in yaml_str
         assert "step1" in yaml_str
 
     def test_workflow_to_json(self):
         wf = Workflow(name="test")
         json_dict = wf.to_json()
         assert json_dict["name"] == "test"
-
-    def test_workflow_with_unknown_input_type(self):
-        """Unknown types should default to 'string' in schema."""
-        from kruxiaflow.expressions import Input
-
-        # Using bytes as an unknown type (not in type_map)
-        inp = Input("data", type=bytes)
-        wf = Workflow(name="test").with_inputs(inp)
-        d = wf.to_dict()
-        # Unknown types fall back to "string"
-        assert d["inputs"]["data"]["type"] == "string"
-
-    def test_workflow_with_input_no_type(self):
-        """Input without type should default to 'string' in schema."""
-        from kruxiaflow.expressions import Input
-
-        # No type specified (type=None internally)
-        inp = Input("text")
-        wf = Workflow(name="test").with_inputs(inp)
-        d = wf.to_dict()
-        # None type defaults to "string"
-        assert d["inputs"]["text"]["type"] == "string"
-
-
-class TestInputSchema:
-    """Tests for InputSchema model."""
-
-    def test_default_values(self):
-        schema = InputSchema()
-        assert schema.type == "string"
-        assert schema.required is True
-        assert schema.default is None
-        assert schema.description is None
-
-    def test_all_fields(self):
-        schema = InputSchema(
-            type="integer",
-            required=False,
-            default=42,
-            description="Count value",
-        )
-        assert schema.type == "integer"
-        assert schema.required is False
-        assert schema.default == 42
-        assert schema.description == "Count value"

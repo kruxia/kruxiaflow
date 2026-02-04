@@ -24,10 +24,13 @@ from kruxiaflow.client import (
 @pytest.fixture
 def simple_workflow() -> Workflow:
     """Create a simple workflow for testing."""
-    step1 = (
-        Activity(key="step1").with_worker("python", "echo").with_params(message="hello")
+    step1 = Activity(
+        key="step1",
+        worker="python",
+        activity_name="echo",
+        parameters={"message": "hello"},
     )
-    return Workflow(name="test_workflow", version="1.0.0").with_activities(step1)
+    return Workflow(name="test_workflow", activities=[step1])
 
 
 @pytest.fixture
