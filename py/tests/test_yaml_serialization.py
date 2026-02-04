@@ -22,15 +22,15 @@ class TestSimpleWorkflowYAML:
         data = yaml.safe_load(yaml_str)
 
         assert data["name"] == "test"
-        assert data["version"] == "1.0.0"
 
     def test_single_activity_workflow_yaml(self):
-        activity = (
-            Activity(key="fetch")
-            .with_worker("std", "http_request")
-            .with_params(url="https://example.com", method="GET")
+        activity = Activity(
+            key="fetch",
+            worker="std",
+            activity_name="http_request",
+            parameters={"url": "https://example.com", "method": "GET"},
         )
-        wf = Workflow(name="simple").with_activities(activity)
+        wf = Workflow(name="simple", activities=[activity])
         yaml_str = wf.to_yaml()
         data = yaml.safe_load(yaml_str)
 
@@ -41,38 +41,28 @@ class TestSimpleWorkflowYAML:
         assert data["activities"][0]["activity_name"] == "http_request"
         assert data["activities"][0]["parameters"]["url"] == "https://example.com"
 
-    def test_workflow_with_inputs_yaml(self):
-        text_input = Input("text", type=str, required=True, description="Input text")
-        count_input = Input("count", type=int, default=10)
-
-        wf = Workflow(name="with_inputs").with_inputs(text_input, count_input)
-        yaml_str = wf.to_yaml()
-        data = yaml.safe_load(yaml_str)
-
-        assert "inputs" in data
-        assert data["inputs"]["text"]["type"] == "string"
-        assert data["inputs"]["text"]["required"] is True
-        assert data["inputs"]["text"]["description"] == "Input text"
-        assert data["inputs"]["count"]["type"] == "integer"
-        assert data["inputs"]["count"]["default"] == 10
-
 
 class TestSequentialWorkflowYAML:
     """Tests for sequential workflow YAML serialization."""
 
     def test_two_step_sequential_workflow(self):
-        step1 = (
-            Activity(key="step1")
-            .with_worker("std", "http_request")
-            .with_params(url="https://api.example.com")
+        step1 = Activity(
+            key="step1",
+            worker="std",
+            activity_name="http_request",
+            parameters={"url": "https://api.example.com"},
         )
-        step2 = (
-            Activity(key="step2")
-            .with_worker("std", "http_request")
-            .with_params(url="https://api.example.com/next", data=step1["response"])
-            .with_dependencies(step1)
+        step2 = Activity(
+            key="step2",
+            worker="std",
+            activity_name="http_request",
+            parameters={
+                "url": "https://api.example.com/next",
+                "data": step1["response"],
+            },
+            depends_on=["step1"],
         )
-        wf = Workflow(name="sequential").with_activities(step1, step2)
+        wf = Workflow(name="sequential", activities=[step1, step2])
         yaml_str = wf.to_yaml()
         data = yaml.safe_load(yaml_str)
 
@@ -90,12 +80,15 @@ class TestParallelWorkflowYAML:
     def test_fan_out_workflow(self):
         # Three parallel activities with no dependencies
         activities = [
-            Activity(key=f"fetch_{i}")
-            .with_worker("std", "http_request")
-            .with_params(url=f"https://api{i}.example.com")
+            Activity(
+                key=f"fetch_{i}",
+                worker="std",
+                activity_name="http_request",
+                parameters={"url": f"https://api{i}.example.com"},
+            )
             for i in range(3)
         ]
-        wf = Workflow(name="fan_out").with_activities(*activities)
+        wf = Workflow(name="fan_out", activities=activities)
         yaml_str = wf.to_yaml()
         data = yaml.safe_load(yaml_str)
 
@@ -106,18 +99,22 @@ class TestParallelWorkflowYAML:
     def test_fan_in_workflow(self):
         # Three parallel activities that fan into one
         fetches = [
-            Activity(key=f"fetch_{i}")
-            .with_worker("std", "http_request")
-            .with_params(url=f"https://api{i}.example.com")
+            Activity(
+                key=f"fetch_{i}",
+                worker="std",
+                activity_name="http_request",
+                parameters={"url": f"https://api{i}.example.com"},
+            )
             for i in range(3)
         ]
-        aggregate = (
-            Activity(key="aggregate")
-            .with_worker("std", "http_request")
-            .with_params(results=[f["response"] for f in fetches])
-            .with_dependencies(*fetches)
+        aggregate = Activity(
+            key="aggregate",
+            worker="std",
+            activity_name="http_request",
+            parameters={"results": [f["response"] for f in fetches]},
+            depends_on=["fetch_0", "fetch_1", "fetch_2"],
         )
-        wf = Workflow(name="fan_in").with_activities(*fetches, aggregate)
+        wf = Workflow(name="fan_in", activities=[*fetches, aggregate])
         yaml_str = wf.to_yaml()
         data = yaml.safe_load(yaml_str)
 
@@ -130,29 +127,28 @@ class TestConditionalWorkflowYAML:
     """Tests for conditional workflow YAML serialization."""
 
     def test_conditional_dependency(self):
-        check = (
-            Activity(key="check")
-            .with_worker("std", "http_request")
-            .with_params(url="https://api.example.com/validate")
+        check = Activity(
+            key="check",
+            worker="std",
+            activity_name="http_request",
+            parameters={"url": "https://api.example.com/validate"},
         )
-        success_path = (
-            Activity(key="success")
-            .with_worker("std", "http_request")
-            .with_params(url="https://api.example.com/success")
-            .with_dependencies(
-                Dependency.on(check, check["valid"] == True)  # noqa: E712
-            )
+        success_path = Activity(
+            key="success",
+            worker="std",
+            activity_name="http_request",
+            parameters={"url": "https://api.example.com/success"},
+            depends_on=[Dependency.on(check, check["valid"] == True)],  # noqa: E712
         )
-        failure_path = (
-            Activity(key="failure")
-            .with_worker("std", "http_request")
-            .with_params(url="https://api.example.com/failure")
-            .with_dependencies(
-                Dependency.on(check, check["valid"] == False)  # noqa: E712
-            )
+        failure_path = Activity(
+            key="failure",
+            worker="std",
+            activity_name="http_request",
+            parameters={"url": "https://api.example.com/failure"},
+            depends_on=[Dependency.on(check, check["valid"] == False)],  # noqa: E712
         )
-        wf = Workflow(name="conditional").with_activities(
-            check, success_path, failure_path
+        wf = Workflow(
+            name="conditional", activities=[check, success_path, failure_path]
         )
         yaml_str = wf.to_yaml()
         data = yaml.safe_load(yaml_str)
@@ -175,26 +171,36 @@ class TestActivitySettingsYAML:
     """Tests for activity settings YAML serialization."""
 
     def test_activity_with_timeout(self):
-        activity = (
-            Activity(key="slow")
-            .with_worker("std", "http_request")
-            .with_params(url="https://slow.api.com")
-            .with_timeout(300)
+        from kruxiaflow.models import ActivitySettings
+
+        activity = Activity(
+            key="slow",
+            worker="std",
+            activity_name="http_request",
+            parameters={"url": "https://slow.api.com"},
+            settings=ActivitySettings(timeout_seconds=300),
         )
-        wf = Workflow(name="timeout").with_activities(activity)
+        wf = Workflow(name="timeout", activities=[activity])
         yaml_str = wf.to_yaml()
         data = yaml.safe_load(yaml_str)
 
         assert data["activities"][0]["settings"]["timeout_seconds"] == 300
 
     def test_activity_with_retry(self):
-        activity = (
-            Activity(key="retry")
-            .with_worker("std", "http_request")
-            .with_params(url="https://flaky.api.com")
-            .with_retry(max_attempts=5, strategy=BackoffStrategy.EXPONENTIAL)
+        from kruxiaflow.models import ActivitySettings, RetrySettings
+
+        activity = Activity(
+            key="retry",
+            worker="std",
+            activity_name="http_request",
+            parameters={"url": "https://flaky.api.com"},
+            settings=ActivitySettings(
+                retry=RetrySettings(
+                    max_attempts=5, strategy=BackoffStrategy.EXPONENTIAL
+                )
+            ),
         )
-        wf = Workflow(name="retry").with_activities(activity)
+        wf = Workflow(name="retry", activities=[activity])
         yaml_str = wf.to_yaml()
         data = yaml.safe_load(yaml_str)
 
@@ -203,13 +209,16 @@ class TestActivitySettingsYAML:
         assert retry_settings["strategy"] == "exponential"
 
     def test_activity_with_cache(self):
-        activity = (
-            Activity(key="cached")
-            .with_worker("std", "http_request")
-            .with_params(url="https://api.example.com")
-            .with_cache(ttl=3600, key="custom_key")
+        from kruxiaflow.models import ActivitySettings, CacheSettings
+
+        activity = Activity(
+            key="cached",
+            worker="std",
+            activity_name="http_request",
+            parameters={"url": "https://api.example.com"},
+            settings=ActivitySettings(cache=CacheSettings(ttl=3600, key="custom_key")),
         )
-        wf = Workflow(name="cache").with_activities(activity)
+        wf = Workflow(name="cache", activities=[activity])
         yaml_str = wf.to_yaml()
         data = yaml.safe_load(yaml_str)
 
@@ -219,13 +228,18 @@ class TestActivitySettingsYAML:
         assert cache_settings["key"] == "custom_key"
 
     def test_activity_with_budget(self):
-        activity = (
-            Activity(key="llm")
-            .with_worker("std", "llm_prompt")
-            .with_params(prompt="Hello")
-            .with_budget(limit_usd=1.0, action=BudgetAction.ABORT)
+        from kruxiaflow.models import ActivitySettings, BudgetSettings
+
+        activity = Activity(
+            key="llm",
+            worker="std",
+            activity_name="llm_prompt",
+            parameters={"prompt": "Hello"},
+            settings=ActivitySettings(
+                budget=BudgetSettings(limit_usd=1.0, action=BudgetAction.ABORT)
+            ),
         )
-        wf = Workflow(name="budget").with_activities(activity)
+        wf = Workflow(name="budget", activities=[activity])
         yaml_str = wf.to_yaml()
         data = yaml.safe_load(yaml_str)
 
@@ -234,18 +248,28 @@ class TestActivitySettingsYAML:
         assert budget_settings["action"] == "abort"
 
     def test_activity_with_all_settings(self):
-        activity = (
-            Activity(key="complete")
-            .with_worker("std", "http_request")
-            .with_params(url="https://api.example.com")
-            .with_timeout(300)
-            .with_retry(max_attempts=3)
-            .with_cache(ttl=3600)
-            .with_budget(limit_usd=0.5)
-            .with_delay("5s")
-            .with_streaming(True)
+        from kruxiaflow.models import (
+            ActivitySettings,
+            BudgetSettings,
+            CacheSettings,
+            RetrySettings,
         )
-        wf = Workflow(name="all_settings").with_activities(activity)
+
+        activity = Activity(
+            key="complete",
+            worker="std",
+            activity_name="http_request",
+            parameters={"url": "https://api.example.com"},
+            settings=ActivitySettings(
+                timeout_seconds=300,
+                retry=RetrySettings(max_attempts=3),
+                cache=CacheSettings(ttl=3600),
+                budget=BudgetSettings(limit_usd=0.5),
+                delay="5s",
+                streaming=True,
+            ),
+        )
+        wf = Workflow(name="all_settings", activities=[activity])
         yaml_str = wf.to_yaml()
         data = yaml.safe_load(yaml_str)
 
@@ -265,80 +289,78 @@ class TestCompleteWorkflowYAML:
         """Test a realistic weather report workflow."""
         webhook_url = Input("webhook_url", type=str, required=True)
 
-        fetch_weather = (
-            Activity(key="fetch_weather")
-            .with_worker("std", "http_request")
-            .with_params(
-                method="GET",
-                url="https://api.weather.gov/gridpoints/LOT/76,73/forecast",
-            )
+        fetch_weather = Activity(
+            key="fetch_weather",
+            worker="std",
+            activity_name="http_request",
+            parameters={
+                "method": "GET",
+                "url": "https://api.weather.gov/gridpoints/LOT/76,73/forecast",
+            },
         )
 
-        send_notification = (
-            Activity(key="send_notification")
-            .with_worker("std", "http_request")
-            .with_params(
-                method="POST",
-                url=webhook_url,
-                headers={"Content-Type": "application/json"},
-                body={
+        send_notification = Activity(
+            key="send_notification",
+            worker="std",
+            activity_name="http_request",
+            parameters={
+                "method": "POST",
+                "url": webhook_url,
+                "headers": {"Content-Type": "application/json"},
+                "body": {
                     "temperature": fetch_weather[
                         "response.json.properties.periods[0].temperature"
                     ],
                     "workflow_id": "{{WORKFLOW.id}}",
                 },
-            )
-            .with_dependencies(fetch_weather)
+            },
+            depends_on=["fetch_weather"],
         )
 
-        workflow = (
-            Workflow(name="weather_report")
-            .with_inputs(webhook_url)
-            .with_activities(fetch_weather, send_notification)
+        workflow = Workflow(
+            name="weather_report", activities=[fetch_weather, send_notification]
         )
 
         yaml_str = workflow.to_yaml()
         data = yaml.safe_load(yaml_str)
 
         assert data["name"] == "weather_report"
-        assert "inputs" in data
-        assert data["inputs"]["webhook_url"]["type"] == "string"
         assert len(data["activities"]) == 2
         assert data["activities"][1]["depends_on"] == ["fetch_weather"]
 
     def test_user_validation_workflow(self):
         """Test a realistic user validation workflow with branching."""
-        email = Input("email", type=str, required=True)
         db_url = SecretRef("db_url")
 
-        check_email = (
-            Activity(key="check_email")
-            .with_worker("std", "http_request")
-            .with_params(method="GET", url="https://httpbin.org/json")
+        check_email = Activity(
+            key="check_email",
+            worker="std",
+            activity_name="http_request",
+            parameters={"method": "GET", "url": "https://httpbin.org/json"},
         )
 
-        store_valid = (
-            Activity(key="store_valid")
-            .with_worker("std", "postgres_query")
-            .with_params(db_url=db_url, query="INSERT INTO valid_users...")
-            .with_dependencies(
+        store_valid = Activity(
+            key="store_valid",
+            worker="std",
+            activity_name="postgres_query",
+            parameters={"db_url": db_url, "query": "INSERT INTO valid_users..."},
+            depends_on=[
                 Dependency.on(check_email, check_email["response.success"] == True)  # noqa: E712
-            )
+            ],
         )
 
-        store_invalid = (
-            Activity(key="store_invalid")
-            .with_worker("std", "postgres_query")
-            .with_params(db_url=db_url, query="INSERT INTO invalid_users...")
-            .with_dependencies(
+        store_invalid = Activity(
+            key="store_invalid",
+            worker="std",
+            activity_name="postgres_query",
+            parameters={"db_url": db_url, "query": "INSERT INTO invalid_users..."},
+            depends_on=[
                 Dependency.on(check_email, check_email["response.success"] != True)  # noqa: E712
-            )
+            ],
         )
 
-        workflow = (
-            Workflow(name="validate_user")
-            .with_inputs(email)
-            .with_activities(check_email, store_valid, store_invalid)
+        workflow = Workflow(
+            name="validate_user", activities=[check_email, store_valid, store_invalid]
         )
 
         yaml_str = workflow.to_yaml()
@@ -361,8 +383,8 @@ class TestYAMLRoundTrip:
 
     def test_yaml_is_valid(self):
         """Ensure generated YAML is valid YAML syntax."""
-        activity = Activity(key="test").with_worker("std", "echo")
-        wf = Workflow(name="test").with_activities(activity)
+        activity = Activity(key="test", worker="std", activity_name="echo")
+        wf = Workflow(name="test", activities=[activity])
         yaml_str = wf.to_yaml()
 
         # Should not raise
@@ -372,12 +394,13 @@ class TestYAMLRoundTrip:
     def test_yaml_no_python_objects(self):
         """Ensure no Python-specific objects leak into YAML."""
         text_input = Input("text", type=str)
-        activity = (
-            Activity(key="test")
-            .with_worker("std", "echo")
-            .with_params(input=text_input)
+        activity = Activity(
+            key="test",
+            worker="std",
+            activity_name="echo",
+            parameters={"input": text_input},
         )
-        wf = Workflow(name="test").with_inputs(text_input).with_activities(activity)
+        wf = Workflow(name="test", activities=[activity])
         yaml_str = wf.to_yaml()
 
         # Should not contain Python object representations
@@ -386,15 +409,16 @@ class TestYAMLRoundTrip:
 
     def test_special_characters_in_strings(self):
         """Ensure special characters are properly escaped."""
-        activity = (
-            Activity(key="test")
-            .with_worker("std", "echo")
-            .with_params(
-                text="Hello 'world'",
-                query="SELECT * FROM users WHERE name = 'John's'",
-            )
+        activity = Activity(
+            key="test",
+            worker="std",
+            activity_name="echo",
+            parameters={
+                "text": "Hello 'world'",
+                "query": "SELECT * FROM users WHERE name = 'John's'",
+            },
         )
-        wf = Workflow(name="test").with_activities(activity)
+        wf = Workflow(name="test", activities=[activity])
         yaml_str = wf.to_yaml()
         data = yaml.safe_load(yaml_str)
 

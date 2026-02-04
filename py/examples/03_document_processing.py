@@ -1,149 +1,158 @@
 """Document Processing Workflow - Parallel execution (fan-out/fan-in) example.
 
 This example demonstrates:
-- Parallel activity execution (fan-out)
+- Declarative activity definition with parallel execution
 - Multiple dependencies for aggregation (fan-in)
 - Referencing outputs from multiple upstream activities
-- HTTP POST requests with body data
+- Echo activity to simulate processing
+- Email notification with aggregated results
+
+Workflow DAG:
+
+  fetch_doc1 ──→ process_doc1 ──┐
+  fetch_doc2 ──→ process_doc2 ──┼──→ aggregate_results ──→ store_summary
+  fetch_doc3 ──→ process_doc3 ──┘
 """
 
-from kruxiaflow import Activity, Input, Workflow, workflow
+from textwrap import dedent
 
-# Define workflow inputs
-doc1_url = Input("doc1_url", type=str, required=True)
-doc2_url = Input("doc2_url", type=str, required=True)
-doc3_url = Input("doc3_url", type=str, required=True)
-processing_service_url = Input("processing_service_url", type=str, required=True)
-aggregator_url = Input("aggregator_url", type=str, required=True)
-storage_webhook_url = Input("storage_webhook_url", type=str, required=True)
-
+from kruxiaflow import Activity, Workflow, workflow
 
 # === PARALLEL FETCH (Fan-Out) ===
 # These three activities have no dependencies and execute in parallel
 
-fetch_doc1 = (
-    Activity(key="fetch_doc1")
-    .with_worker("std", "http_request")
-    .with_params(method="GET", url=doc1_url)
+fetch_doc1 = Activity(
+    key="fetch_doc1",
+    worker="std",
+    activity_name="http_request",
+    parameters={
+        "method": "GET",
+        "url": "https://httpbin.org/get?doc=1&title=Introduction",
+    },
+    outputs=["response"],  # String auto-converted to ActivityOutputDefinition
 )
 
-fetch_doc2 = (
-    Activity(key="fetch_doc2")
-    .with_worker("std", "http_request")
-    .with_params(method="GET", url=doc2_url)
+fetch_doc2 = Activity(
+    key="fetch_doc2",
+    worker="std",
+    activity_name="http_request",
+    parameters={
+        "method": "GET",
+        "url": "https://httpbin.org/get?doc=2&title=Architecture",
+    },
+    outputs=["response"],  # String auto-converted to ActivityOutputDefinition
 )
 
-fetch_doc3 = (
-    Activity(key="fetch_doc3")
-    .with_worker("std", "http_request")
-    .with_params(method="GET", url=doc3_url)
+fetch_doc3 = Activity(
+    key="fetch_doc3",
+    worker="std",
+    activity_name="http_request",
+    parameters={
+        "method": "GET",
+        "url": "https://httpbin.org/get?doc=3&title=Conclusion",
+    },
+    outputs=["response"],  # String auto-converted to ActivityOutputDefinition
 )
 
 
 # === PARALLEL PROCESS (Fan-Out) ===
-# Each process activity depends on its corresponding fetch activity
-# These also execute in parallel (independent dependencies)
+# Each process activity depends on its corresponding fetch activity.
+# Echo passes through the fetched data, simulating a processing step.
 
-process_doc1 = (
-    Activity(key="process_doc1")
-    .with_worker("std", "http_request")
-    .with_params(
-        method="POST",
-        url=processing_service_url,
-        body={
-            "document_data": fetch_doc1["response.body"],
-            "operation": "extract_text",
-            "language": "en",
-        },
-    )
-    .with_dependencies(fetch_doc1)
+process_doc1 = Activity(
+    key="process_doc1",
+    worker="std",
+    activity_name="echo",
+    parameters={
+        "doc": 1,
+        "title": fetch_doc1["response.body.args.title"],
+        "url": fetch_doc1["response.body.url"],
+    },
+    depends_on=["fetch_doc1"],
 )
 
-process_doc2 = (
-    Activity(key="process_doc2")
-    .with_worker("std", "http_request")
-    .with_params(
-        method="POST",
-        url=processing_service_url,
-        body={
-            "document_data": fetch_doc2["response.body"],
-            "operation": "extract_text",
-            "language": "en",
-        },
-    )
-    .with_dependencies(fetch_doc2)
+process_doc2 = Activity(
+    key="process_doc2",
+    worker="std",
+    activity_name="echo",
+    parameters={
+        "doc": 2,
+        "title": fetch_doc2["response.body.args.title"],
+        "url": fetch_doc2["response.body.url"],
+    },
+    depends_on=["fetch_doc2"],
 )
 
-process_doc3 = (
-    Activity(key="process_doc3")
-    .with_worker("std", "http_request")
-    .with_params(
-        method="POST",
-        url=processing_service_url,
-        body={
-            "document_data": fetch_doc3["response.body"],
-            "operation": "extract_text",
-            "language": "en",
-        },
-    )
-    .with_dependencies(fetch_doc3)
+process_doc3 = Activity(
+    key="process_doc3",
+    worker="std",
+    activity_name="echo",
+    parameters={
+        "doc": 3,
+        "title": fetch_doc3["response.body.args.title"],
+        "url": fetch_doc3["response.body.url"],
+    },
+    depends_on=["fetch_doc3"],
 )
 
 
 # === FAN-IN AGGREGATION ===
 # This activity waits for ALL three process activities to complete
 
-aggregate_results = (
-    Activity(key="aggregate_results")
-    .with_worker("std", "http_request")
-    .with_params(
-        method="POST",
-        url=aggregator_url,
-        body={
-            "workflow_id": workflow.id,
-            "doc1_result": process_doc1["response.body"],
-            "doc2_result": process_doc2["response.body"],
-            "doc3_result": process_doc3["response.body"],
-            "operation": "summarize",
-        },
-    )
-    .with_dependencies(
-        process_doc1, process_doc2, process_doc3
-    )  # Fan-in: waits for all three
+aggregate_results = Activity(
+    key="aggregate_results",
+    worker="std",
+    activity_name="echo",
+    parameters={
+        "workflow_id": workflow.id,
+        "doc1": process_doc1["echo.title"],
+        "doc2": process_doc2["echo.title"],
+        "doc3": process_doc3["echo.title"],
+        "documents_processed": 3,
+    },
+    depends_on=["process_doc1", "process_doc2", "process_doc3"],
 )
 
 
-# === FINAL STORAGE ===
-# Store the final summary
+# === FINAL NOTIFICATION ===
+# Send the summary via Mailpit
 
-store_summary = (
-    Activity(key="store_summary")
-    .with_worker("std", "http_request")
-    .with_params(
-        method="POST",
-        url=storage_webhook_url,
-        body={
-            "workflow_id": workflow.id,
-            "summary": aggregate_results["response.body"],
-            "document_count": 3,
+store_summary = Activity(
+    key="store_summary",
+    worker="std",
+    activity_name="http_request",
+    parameters={
+        "method": "POST",
+        "url": "http://mailpit:8025/api/v1/send",
+        "headers": {"Content-Type": "application/json"},
+        "body": {
+            "From": {
+                "Name": "Kruxia Flow",
+                "Email": "workflow@kruxiaflow.local",
+            },
+            "To": [
+                {
+                    "Name": "Document Consumer",
+                    "Email": "docs@example.com",
+                }
+            ],
+            "Subject": f"Document Processing Summary - {workflow.id}",
+            "Text": dedent(f"""\
+                Documents Processed: {aggregate_results["echo.documents_processed"]}
+                Doc 1: {aggregate_results["echo.doc1"]}
+                Doc 2: {aggregate_results["echo.doc2"]}
+                Doc 3: {aggregate_results["echo.doc3"]}
+            """),
         },
-    )
-    .with_dependencies(aggregate_results)
+    },
+    depends_on=["aggregate_results"],
 )
 
 
 # Build the workflow
-document_workflow = (
-    Workflow(name="process_documents")
-    .with_inputs(
-        doc1_url,
-        doc2_url,
-        doc3_url,
-        processing_service_url,
-        aggregator_url,
-        storage_webhook_url,
-    )
-    .with_activities(
+document_workflow = Workflow(
+    name="process_documents",
+    activities=[
         # Parallel fetch
         fetch_doc1,
         fetch_doc2,
@@ -155,9 +164,9 @@ document_workflow = (
         # Aggregation and storage
         aggregate_results,
         store_summary,
-    )
+    ],
 )
 
 if __name__ == "__main__":
     # Print the compiled YAML to verify
-    print(document_workflow.to_yaml())
+    print(document_workflow)
