@@ -120,7 +120,9 @@ from .models import (
     Dependency,
     OutputType,
     RetrySettings,
+    ScriptActivity,
     Workflow,
+    script,
 )
 
 try:
@@ -167,6 +169,7 @@ __all__ = [
     "OutputRef",
     "OutputType",
     "RetrySettings",
+    "ScriptActivity",
     "SecretRef",
     "Workflow",
     "WorkflowNotFoundError",
@@ -181,6 +184,8 @@ __all__ = [
     "is_null",
     "not_",
     "or_",
+    # Script utilities
+    "script",
     # Workflow metadata accessor
     "workflow",
 ]

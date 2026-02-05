@@ -1,0 +1,464 @@
+"""Sales ETL Pipeline - py-std worker example.
+
+This example demonstrates py-std worker data processing capabilities:
+- DataFrame operations with pandas and polars
+- In-process SQL queries with DuckDB
+- Data validation and cleansing
+- Parquet file handling with pyarrow
+- Performance comparison between pandas and polars
+
+The workflow processes sales transaction data, performs SQL transformations,
+validates data quality, and generates aggregated reports.
+"""
+
+from kruxiaflow import ScriptActivity, Workflow
+
+
+# Step 1: Load raw sales data using both pandas and polars
+# Demonstrates performance differences between the two DataFrame libraries
+@ScriptActivity.from_function(
+    inputs={
+        # Sample sales data as JSON (would typically come from file/API)
+        "sales_data": [
+            {
+                "order_id": "ORD001",
+                "customer_id": "C123",
+                "product": "Laptop",
+                "category": "Electronics",
+                "amount": 1200.00,
+                "quantity": 1,
+                "order_date": "2025-01-15",
+                "region": "North",
+            },
+            {
+                "order_id": "ORD002",
+                "customer_id": "C124",
+                "product": "Mouse",
+                "category": "Electronics",
+                "amount": 25.50,
+                "quantity": 2,
+                "order_date": "2025-01-16",
+                "region": "South",
+            },
+            {
+                "order_id": "ORD003",
+                "customer_id": "C125",
+                "product": "Desk",
+                "category": "Furniture",
+                "amount": 450.00,
+                "quantity": 1,
+                "order_date": "2025-01-16",
+                "region": "East",
+            },
+            {
+                "order_id": "ORD004",
+                "customer_id": "C123",
+                "product": "Keyboard",
+                "category": "Electronics",
+                "amount": 75.00,
+                "quantity": 1,
+                "order_date": "2025-01-17",
+                "region": "North",
+            },
+            {
+                "order_id": "ORD005",
+                "customer_id": "C126",
+                "product": "Chair",
+                "category": "Furniture",
+                "amount": 200.00,
+                "quantity": 2,
+                "order_date": "2025-01-18",
+                "region": "West",
+            },
+            {
+                "order_id": "ORD006",
+                "customer_id": "C127",
+                "product": "Monitor",
+                "category": "Electronics",
+                "amount": 350.00,
+                "quantity": 1,
+                "order_date": "2025-01-19",
+                "region": "North",
+            },
+            {
+                "order_id": "ORD007",
+                "customer_id": "C128",
+                "product": "Notebook",
+                "category": "Stationery",
+                "amount": 5.99,
+                "quantity": 10,
+                "order_date": "2025-01-19",
+                "region": "South",
+            },
+            {
+                "order_id": "ORD008",
+                "customer_id": "C124",
+                "product": "Laptop",
+                "category": "Electronics",
+                "amount": 1200.00,
+                "quantity": 1,
+                "order_date": "2025-01-20",
+                "region": "South",
+            },
+            {
+                "order_id": "ORD009",
+                "customer_id": None,
+                "product": "Pen",
+                "category": "Stationery",
+                "amount": 1.50,
+                "quantity": 20,
+                "order_date": "2025-01-21",
+                "region": "East",
+            },  # Missing customer_id
+            {
+                "order_id": "ORD010",
+                "customer_id": "C129",
+                "product": "Desk",
+                "category": "Furniture",
+                "amount": 450.00,
+                "quantity": 1,
+                "order_date": "2025-01-22",
+                "region": "West",
+            },
+            {
+                "order_id": "ORD003",
+                "customer_id": "C125",
+                "product": "Desk",
+                "category": "Furniture",
+                "amount": 450.00,
+                "quantity": 1,
+                "order_date": "2025-01-16",
+                "region": "East",
+            },  # Duplicate
+        ],
+    },
+)
+async def load_raw_data(sales_data):
+    import time
+
+    import pandas as pd
+    import polars as pl
+
+    # Load with pandas
+    start_pandas = time.perf_counter()
+    df_pandas = pd.DataFrame(sales_data)
+    df_pandas["order_date"] = pd.to_datetime(df_pandas["order_date"])
+    time_pandas = time.perf_counter() - start_pandas
+
+    # Load with polars (faster for larger datasets)
+    start_polars = time.perf_counter()
+    df_polars = pl.DataFrame(sales_data)
+    df_polars = df_polars.with_columns(pl.col("order_date").str.to_date())
+    time_polars = time.perf_counter() - start_polars
+
+    return {
+        "row_count": len(df_pandas),
+        "column_count": len(df_pandas.columns),
+        "performance": {
+            "pandas_ms": round(time_pandas * 1000, 2),
+            "polars_ms": round(time_polars * 1000, 2),
+            "speedup": round(time_pandas / time_polars, 2),
+        },
+        "sales_data": sales_data,  # Pass through for next activities
+    }
+
+
+# Step 2: Validate data quality
+# Check for missing values, duplicates, and data type issues
+@ScriptActivity.from_function(
+    inputs={
+        "sales_data": load_raw_data["sales_data"],
+    },
+    depends_on=["load_raw_data"],
+)
+async def validate_data(sales_data):
+    import pandas as pd
+
+    df = pd.DataFrame(sales_data)
+
+    # Data quality checks
+    missing_values = df.isnull().sum().to_dict()
+    duplicate_orders = df["order_id"].duplicated().sum()
+    negative_amounts = (df["amount"] < 0).sum()
+    negative_quantities = (df["quantity"] < 0).sum()
+
+    # Identify problematic records
+    missing_customer_ids = df[df["customer_id"].isnull()]["order_id"].tolist()
+    duplicate_order_ids = (
+        df[df["order_id"].duplicated(keep=False)]["order_id"].unique().tolist()
+    )
+
+    # Calculate data quality score
+    total_checks = 4
+    issues = sum(
+        [
+            1 if any(v > 0 for v in missing_values.values()) else 0,
+            1 if duplicate_orders > 0 else 0,
+            1 if negative_amounts > 0 else 0,
+            1 if negative_quantities > 0 else 0,
+        ]
+    )
+    quality_score = round(((total_checks - issues) / total_checks) * 100, 1)
+
+    return {
+        "quality_score": quality_score,
+        "issues": {
+            "missing_values": missing_values,
+            "duplicate_count": int(duplicate_orders),
+            "negative_amounts": int(negative_amounts),
+            "negative_quantities": int(negative_quantities),
+        },
+        "problematic_records": {
+            "missing_customer_ids": missing_customer_ids,
+            "duplicate_order_ids": duplicate_order_ids,
+        },
+        "passed": quality_score >= 80,
+    }
+
+
+# Step 3: Clean and deduplicate data
+@ScriptActivity.from_function(
+    inputs={
+        "sales_data": load_raw_data["sales_data"],
+    },
+    depends_on=["validate_data"],
+)
+async def cleanse_data(sales_data):
+    import pandas as pd
+
+    df = pd.DataFrame(sales_data)
+
+    # Store original count
+    original_count = len(df)
+
+    # Remove duplicates (keep first occurrence)
+    df_clean = df.drop_duplicates(subset=["order_id"], keep="first")
+    duplicates_removed = original_count - len(df_clean)
+
+    # Remove records with missing critical fields
+    df_clean = df_clean.dropna(subset=["customer_id", "amount", "quantity"])
+    nulls_removed = len(df) - duplicates_removed - len(df_clean)
+
+    # Convert to proper types
+    df_clean["order_date"] = pd.to_datetime(df_clean["order_date"])
+    df_clean["amount"] = df_clean["amount"].astype(float)
+    df_clean["quantity"] = df_clean["quantity"].astype(int)
+
+    # Convert to list of dicts for passing to next activity
+    clean_data = df_clean.to_dict(orient="records")
+    # Convert Timestamp to string for JSON serialization
+    for record in clean_data:
+        record["order_date"] = record["order_date"].strftime("%Y-%m-%d")
+
+    return {
+        "clean_data": clean_data,
+        "original_count": original_count,
+        "final_count": len(df_clean),
+        "duplicates_removed": duplicates_removed,
+        "nulls_removed": nulls_removed,
+    }
+
+
+# Step 4: Perform SQL transformations using DuckDB
+# Demonstrates complex SQL queries on DataFrame data
+@ScriptActivity.from_function(
+    inputs={
+        "clean_data": cleanse_data["clean_data"],
+    },
+    depends_on=["cleanse_data"],
+)
+async def sql_transform(clean_data):
+    import duckdb
+    import pandas as pd
+
+    # Load clean data into DataFrame
+    df = pd.DataFrame(clean_data)
+    df["order_date"] = pd.to_datetime(df["order_date"])
+
+    # DuckDB can query pandas DataFrames directly
+    # Query 1: Sales by category and region
+    category_region_sales = duckdb.sql("""
+        SELECT
+            category,
+            region,
+            COUNT(*) as order_count,
+            SUM(amount) as total_sales,
+            AVG(amount) as avg_order_value,
+            SUM(quantity) as total_quantity
+        FROM df
+        GROUP BY category, region
+        ORDER BY total_sales DESC
+    """).df()
+
+    # Query 2: Top customers by revenue
+    top_customers = duckdb.sql("""
+        SELECT
+            customer_id,
+            COUNT(DISTINCT order_id) as order_count,
+            SUM(amount) as total_spent,
+            AVG(amount) as avg_order_value,
+            MAX(order_date) as last_order_date
+        FROM df
+        GROUP BY customer_id
+        ORDER BY total_spent DESC
+        LIMIT 5
+    """).df()
+
+    # Query 3: Daily sales trend with running total
+    daily_trends = duckdb.sql("""
+        SELECT
+            order_date,
+            COUNT(*) as orders,
+            SUM(amount) as daily_sales,
+            SUM(SUM(amount)) OVER (ORDER BY order_date) as running_total
+        FROM df
+        GROUP BY order_date
+        ORDER BY order_date
+    """).df()
+
+    return {
+        "category_region_sales": category_region_sales.to_dict(orient="records"),
+        "top_customers": top_customers.to_dict(orient="records"),
+        "daily_trends": daily_trends.to_dict(orient="records"),
+    }
+
+
+# Step 5: Calculate aggregate metrics
+@ScriptActivity.from_function(
+    inputs={
+        "clean_data": cleanse_data["clean_data"],
+        "category_sales": sql_transform["category_region_sales"],
+    },
+    depends_on=["sql_transform"],
+)
+async def aggregate_metrics(clean_data, category_sales):
+    import pandas as pd
+
+    df = pd.DataFrame(clean_data)
+    df["order_date"] = pd.to_datetime(df["order_date"])
+
+    # Overall metrics
+    total_revenue = df["amount"].sum()
+    total_orders = len(df)
+    avg_order_value = df["amount"].mean()
+    median_order_value = df["amount"].median()
+
+    # Category performance
+    category_df = pd.DataFrame(category_sales)
+    total_by_category = category_df.groupby("category")["total_sales"].sum().to_dict()
+    best_category = max(total_by_category.items(), key=lambda x: x[1])[0]
+
+    # Time-based metrics
+    date_range = (df["order_date"].max() - df["order_date"].min()).days + 1
+    revenue_per_day = total_revenue / date_range
+
+    # Customer metrics
+    unique_customers = df["customer_id"].nunique()
+    repeat_customers = df.groupby("customer_id").size()
+    repeat_customer_count = (repeat_customers > 1).sum()
+    repeat_rate = (repeat_customer_count / unique_customers) * 100
+
+    return {
+        "summary": {
+            "total_revenue": round(total_revenue, 2),
+            "total_orders": total_orders,
+            "avg_order_value": round(avg_order_value, 2),
+            "median_order_value": round(median_order_value, 2),
+            "revenue_per_day": round(revenue_per_day, 2),
+        },
+        "categories": {
+            "total_by_category": total_by_category,
+            "best_performing": best_category,
+        },
+        "customers": {
+            "unique_count": int(unique_customers),
+            "repeat_count": int(repeat_customer_count),
+            "repeat_rate": round(repeat_rate, 1),
+        },
+    }
+
+
+# Step 6: Export results to Parquet format
+# Demonstrates high-performance columnar data export
+@ScriptActivity.from_function(
+    inputs={
+        "category_sales": sql_transform["category_region_sales"],
+        "top_customers": sql_transform["top_customers"],
+        "daily_trends": sql_transform["daily_trends"],
+    },
+    depends_on=["aggregate_metrics"],
+)
+async def export_reports(category_sales, top_customers, daily_trends):
+    import io
+
+    import pandas as pd
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    # Convert data to DataFrames
+    category_df = pd.DataFrame(category_sales)
+    customers_df = pd.DataFrame(top_customers)
+    trends_df = pd.DataFrame(daily_trends)
+
+    # Convert to Parquet using PyArrow (in-memory)
+    # In production, you would write to file storage or S3
+
+    # Category sales report
+    category_table = pa.Table.from_pandas(category_df)
+    category_buffer = io.BytesIO()
+    pq.write_table(category_table, category_buffer)
+    category_size = len(category_buffer.getvalue())
+
+    # Top customers report
+    customers_table = pa.Table.from_pandas(customers_df)
+    customers_buffer = io.BytesIO()
+    pq.write_table(customers_table, customers_buffer)
+    customers_size = len(customers_buffer.getvalue())
+
+    # Daily trends report
+    trends_table = pa.Table.from_pandas(trends_df)
+    trends_buffer = io.BytesIO()
+    pq.write_table(trends_table, trends_buffer)
+    trends_size = len(trends_buffer.getvalue())
+
+    return {
+        "export_status": "success",
+        "files_generated": {
+            "category_sales": {
+                "format": "parquet",
+                "rows": len(category_df),
+                "size_bytes": category_size,
+            },
+            "top_customers": {
+                "format": "parquet",
+                "rows": len(customers_df),
+                "size_bytes": customers_size,
+            },
+            "daily_trends": {
+                "format": "parquet",
+                "rows": len(trends_df),
+                "size_bytes": trends_size,
+            },
+        },
+        "total_size_kb": round(
+            (category_size + customers_size + trends_size) / 1024, 2
+        ),
+    }
+
+
+# Build the workflow
+sales_etl_workflow = Workflow(
+    name="sales_etl_pipeline",
+    activities=[
+        load_raw_data,
+        validate_data,
+        cleanse_data,
+        sql_transform,
+        aggregate_metrics,
+        export_reports,
+    ],
+)
+
+if __name__ == "__main__":
+    # Print the compiled YAML to verify
+    print(sales_etl_workflow)
