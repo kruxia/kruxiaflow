@@ -6,10 +6,12 @@ Models can be constructed declaratively (by passing arguments) or using fluent m
 
 from __future__ import annotations
 
+import inspect
 import sys
+from collections.abc import Callable
 from enum import Enum
 from textwrap import dedent
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -180,7 +182,7 @@ class BudgetSettings(BaseModel):
 
     model_config = ConfigDict(validate_assignment=True)
 
-    limit_usd: float
+    limit: float
     action: BudgetAction = BudgetAction.ABORT
 
 
@@ -454,7 +456,7 @@ class Activity(BaseModel):
             settings_dict["cache"] = cache_dict
         if self.settings.budget is not None:
             settings_dict["budget"] = {
-                "limit_usd": self.settings.budget.limit_usd,
+                "limit": self.settings.budget.limit,
                 "action": self.settings.budget.action.value,
             }
         if self.settings.delay is not None:
@@ -521,6 +523,154 @@ class Activity(BaseModel):
 
 
 # =============================================================================
+# ScriptActivity - Subclass for Python Script Activities
+# =============================================================================
+
+
+class ScriptActivity(Activity):
+    """Factory class for creating Python script activities from functions.
+
+    This class provides a clear, explicit way to create Activity instances that
+    execute Python scripts using the built-in "script" activity type. It is
+    distinct from the worker module's @activity decorator, which defines custom
+    activity implementations.
+
+    Functions use standard Python conventions:
+    - Function parameters are populated from INPUT dict keys
+    - Return value becomes the OUTPUT dict
+
+    The class serves as a namespace and factory - instances created are still
+    regular Activity objects, not ScriptActivity objects.
+
+    Example:
+        ```python
+        from kruxiaflow import ScriptActivity
+
+
+        @ScriptActivity.from_function()  # worker="py-std" is the default
+        async def transform_data(records):
+            import pandas as pd
+
+            df = pd.DataFrame(records)
+            return {"summary": df.describe().to_dict()}
+        ```
+
+    Note:
+        This is not a different runtime type - it's a factory that returns
+        regular Activity instances. Use it when you want to be explicit that
+        you're creating a Python script activity.
+    """
+
+    @classmethod
+    def from_function(
+        cls,
+        key: str | None = None,
+        worker: str = "py-std",
+        inputs: dict[str, Any] | None = None,
+        depends_on: list[str] | None = None,
+        **kwargs: Any,
+    ) -> Callable[[Callable], Activity]:
+        """Create a script Activity from a Python function.
+
+        This provides IDE support for syntax highlighting, linting, and auto-formatting
+        by allowing you to define script logic as actual Python code instead of strings.
+
+        Function parameters are automatically extracted from the INPUT dict, and the
+        return value becomes the OUTPUT dict.
+
+        The activity key defaults to the function's __name__, similar to the worker
+        module's @activity decorator.
+
+        Args:
+            key: Activity key/identifier. Defaults to the function's __name__.
+            worker: Worker name (default: "py-std"). Optional - use the default unless you've
+                    deployed a custom worker that extends py-std.
+            inputs: Input data mapping (OutputRef expressions supported)
+            depends_on: List of activity keys this depends on
+            **kwargs: Additional Activity parameters (settings, outputs, etc.)
+
+        Returns:
+            Activity instance (not ScriptActivity - regular Activity)
+
+        Raises:
+            ValueError: If key cannot be determined from function name
+
+        Example:
+            ```python
+            from kruxiaflow import ScriptActivity, Workflow
+
+
+            # Function parameters are populated from INPUT dict
+            # Return value becomes OUTPUT dict
+            @ScriptActivity.from_function()  # worker defaults to "py-std"
+            async def load_data(url):
+                import httpx
+
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(url)
+                    data = response.json()
+
+                return {"records": data}
+
+
+            # Parameters are extracted from inputs
+            @ScriptActivity.from_function(
+                key="transform",
+                inputs={"records": load_data["records"]},
+                depends_on=["load_data"],
+            )
+            async def transform_records(records):
+                import pandas as pd
+
+                df = pd.DataFrame(records)
+                return {"summary": df.to_dict()}
+
+
+            workflow = Workflow(
+                name="pipeline",
+                activities=[load_data, transform_records],
+            )
+            ```
+
+        Comparison with worker @activity:
+            - worker.activity(name="foo") -> Defines activity implementation
+            - ScriptActivity.from_function(key="foo") -> Creates activity instance
+        """
+
+        def decorator(func: Callable) -> Activity:
+            """Create Activity from function."""
+            # Default key to function name (like worker @activity decorator)
+            activity_key = key or getattr(func, "__name__", None)
+            if not activity_key:
+                raise ValueError(
+                    "Activity key could not be determined. "
+                    "Provide explicit 'key' parameter or ensure function has __name__."
+                )
+
+            # Extract function body as script
+            script_code = script(func)
+
+            # Build parameters
+            parameters = {"script": script_code}
+            if inputs is not None:
+                parameters["inputs"] = inputs
+
+            # Create and return regular Activity (not ScriptActivity)
+            return Activity(
+                key=activity_key,
+                worker=worker,
+                activity_name="script",
+                parameters=parameters,
+                depends_on=cast(
+                    list[str | Dependency], depends_on if depends_on is not None else []
+                ),
+                **kwargs,
+            )
+
+        return decorator
+
+
+# =============================================================================
 # Workflow Model
 # =============================================================================
 
@@ -559,13 +709,53 @@ class Workflow(BaseModel):
         return result
 
     def to_yaml(self) -> str:
-        """Serialize to YAML format."""
-        return yaml.dump(
+        """Serialize to YAML format with optional module docstring as header comment."""
+        # Get the caller's module docstring by walking up the stack
+        module_doc = None
+        for frame_info in inspect.stack():
+            frame = frame_info.frame
+            # Look for __main__ module (when script is executed directly)
+            if frame.f_globals.get("__name__") == "__main__":
+                module_doc = frame.f_globals.get("__doc__")
+                break
+
+        # Generate base YAML
+        base_yaml = yaml.dump(
             self.to_dict(),
             Dumper=BlockLiteralDumper,
             sort_keys=False,
             default_flow_style=False,
         )
+
+        # Add blank lines before each activity for readability
+        yaml_lines = base_yaml.split("\n")
+        formatted_lines = []
+        first_activity = True
+        for line in yaml_lines:
+            # Add blank line before each activity (except the first one)
+            # Activities start with "- key:" in YAML
+            if line.startswith("- key:"):
+                if (
+                    not first_activity
+                    and formatted_lines
+                    and formatted_lines[-1].strip()
+                ):
+                    formatted_lines.append("")
+                first_activity = False
+            formatted_lines.append(line)
+
+        formatted_yaml = "\n".join(formatted_lines)
+
+        # Prepend module docstring as YAML comment if present
+        if module_doc:
+            # Format docstring as YAML comments
+            comment_lines = []
+            for line in module_doc.strip().split("\n"):
+                comment_lines.append(f"# {line}" if line.strip() else "#")
+            comment_header = "\n".join(comment_lines) + "\n\n"
+            return comment_header + formatted_yaml
+
+        return formatted_yaml
 
     def to_json(self) -> dict[str, Any]:
         """Serialize to JSON-compatible dictionary (for API deployment)."""
@@ -619,3 +809,109 @@ def _python_type_to_schema_type(python_type: type | None) -> str:
         dict: "object",
     }
     return type_map.get(python_type, "string")
+
+
+def script(func: Callable) -> str:
+    """Convert a Python function into a script activity that uses kwargs and return values.
+
+    This helper function allows you to define script activity code as actual Python
+    functions, enabling IDE features like syntax highlighting, linting, and formatting.
+
+    The function should follow these conventions:
+    - Function parameters are populated from INPUT dict keys
+    - Return value becomes the OUTPUT dict
+    - Should be an async function (async def) for async/await support
+    - Has access to `ctx`, `logger`, `workflow_id`, `activity_key` variables
+
+    Args:
+        func: Python function (preferably async) containing the script logic
+
+    Returns:
+        String containing the complete script that:
+        1. Defines the function
+        2. Extracts parameters from INPUT
+        3. Calls the function
+        4. Assigns return value to OUTPUT
+
+    Example:
+        ```python
+        @ScriptActivity.from_function(worker="py-data")
+        async def transform_data(records):
+            import pandas as pd
+
+            df = pd.DataFrame(records)
+            return {"summary": df.describe().to_dict()}
+
+
+        # Generates script that extracts 'records' from INPUT,
+        # calls the function, and assigns result to OUTPUT
+        ```
+
+    Note:
+        - The function is never actually called during definition
+        - Leading indentation is automatically removed
+        - Both sync and async functions are supported
+    """
+    import textwrap
+
+    # Get the source code and signature
+    source = inspect.getsource(func)
+    sig = inspect.signature(func)
+
+    # Extract parameter names (excluding *args, **kwargs)
+    param_names = [
+        name
+        for name, param in sig.parameters.items()
+        if param.kind
+        in (
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            inspect.Parameter.POSITIONAL_ONLY,
+            inspect.Parameter.KEYWORD_ONLY,
+        )
+    ]
+
+    # Parse the source to remove decorator lines
+    lines = source.split("\n")
+
+    # Find the function definition line (skip decorators)
+    func_def_idx = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith(("def ", "async def ")):
+            func_def_idx = i
+            break
+
+    # Get source without decorators
+    source_without_decorators = "\n".join(lines[func_def_idx:])
+
+    # Dedent the source
+    dedented_source = textwrap.dedent(source_without_decorators).strip()
+
+    # Check if it's async
+    is_async = inspect.iscoroutinefunction(func)
+    await_keyword = "await " if is_async else ""
+
+    # Build the wrapper script
+    func_name = func.__name__  # type: ignore[attr-defined]
+
+    # Generate parameter extraction code
+    if param_names:
+        param_extract = "\n".join(
+            f"{name} = INPUT.get('{name}')" for name in param_names
+        )
+        call_args = ", ".join(param_names)
+        wrapper = f"""{dedented_source}
+
+# Extract parameters from INPUT
+{param_extract}
+
+# Call function and assign result to OUTPUT
+OUTPUT = {await_keyword}{func_name}({call_args})"""
+    else:
+        # No parameters
+        wrapper = f"""{dedented_source}
+
+# Call function and assign result to OUTPUT
+OUTPUT = {await_keyword}{func_name}()"""
+
+    return wrapper

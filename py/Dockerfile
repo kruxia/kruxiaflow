@@ -1,16 +1,15 @@
-# Python Workers - Multi-stage Dockerfile
+# Python Worker - Single comprehensive worker for 80-90% of use cases
 #
-# Build targets (uncompressed / compressed):
-#   - py-std:  Universal utilities (~240MB / ~50MB)
-#   - py-data: ETL/transformation (~1.3GB / ~310MB)
-#   - py-ml:   Machine learning (~2.0GB / ~435MB)
-#   - py-nlp:  Natural language processing (~2.4GB / ~515MB)
+# Includes: pandas, polars, numpy, scikit-learn, duckdb, pyarrow,
+#           sentence-transformers, tiktoken, transformers, and core utilities
+#
+# Image size (uncompressed / compressed): ~1.25GB / ~320-350MB
 #
 # Usage (from repo root):
-#   docker build -f py/Dockerfile --target py-std -t ghcr.io/kruxia/kruxiaflow-worker-py-std py/
-#   docker build -f py/Dockerfile --target py-data -t ghcr.io/kruxia/kruxiaflow-worker-py-data py/
-#   docker build -f py/Dockerfile --target py-ml -t ghcr.io/kruxia/kruxiaflow-worker-py-ml py/
-#   docker build -f py/Dockerfile --target py-nlp -t ghcr.io/kruxia/kruxiaflow-worker-py-nlp py/
+#   docker build -f py/Dockerfile -t kruxia/kruxiaflow-py-std py/
+#
+# For specialized needs (PyTorch training, spacy NER, etc.),
+# community can contribute custom worker definitions.
 
 # =============================================================================
 # Base stage - common setup for all Python workers
@@ -29,57 +28,20 @@ COPY pyproject.toml README.md ./
 COPY kruxiaflow/ ./kruxiaflow/
 
 # =============================================================================
-# py-std: Universal utilities
-# Packages: pydantic, httpx, pyyaml, orjson, python-dateutil
-# =============================================================================
-FROM base AS py-std
-
-RUN pip install ".[std]"
-
-ENV WORKER_TYPE=py-std
-CMD ["kruxiaflow-worker"]
-
-# =============================================================================
-# Base build stage - adds build dependencies for compiled packages
+# py-std: Comprehensive Python worker
+# Includes: pandas, polars, numpy, scikit-learn, duckdb, pyarrow,
+#           sentence-transformers, tiktoken, transformers, and core utilities
 # =============================================================================
 FROM base AS base-build
 
+# Add build dependencies for compiled packages (numpy, scikit-learn, etc.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# =============================================================================
-# py-data: ETL and transformation
-# Packages: pandas, polars, pyarrow, duckdb, sqlalchemy + std
-# =============================================================================
-FROM base-build AS py-data
+FROM base-build AS py-std
 
-RUN pip install ".[data]"
+RUN pip install ".[std]"
 
-ENV WORKER_TYPE=py-data
-CMD ["kruxiaflow-worker"]
-
-# =============================================================================
-# py-ml: Machine learning
-# Packages: numpy, pandas, scikit-learn, scipy, torch (CPU) + std
-# =============================================================================
-FROM base-build AS py-ml
-
-RUN pip install ".[ml]"
-
-ENV WORKER_TYPE=py-ml
-CMD ["kruxiaflow-worker"]
-
-# =============================================================================
-# py-nlp: Natural language processing
-# Packages: numpy, transformers, sentence-transformers, tiktoken, spacy + std
-# =============================================================================
-FROM base-build AS py-nlp
-
-RUN pip install ".[nlp]"
-
-# Download small spacy model
-RUN python -m spacy download en_core_web_sm
-
-ENV WORKER_TYPE=py-nlp
+ENV WORKER_TYPE=py-std
 CMD ["kruxiaflow-worker"]

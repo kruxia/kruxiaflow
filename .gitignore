@@ -51,3 +51,4 @@ var/
 *.egg-info
 py/.coverage
 py/coverage.xml
+py/examples/.coverage

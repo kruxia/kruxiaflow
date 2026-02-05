@@ -236,7 +236,7 @@ class TestActivitySettingsYAML:
             activity_name="llm_prompt",
             parameters={"prompt": "Hello"},
             settings=ActivitySettings(
-                budget=BudgetSettings(limit_usd=1.0, action=BudgetAction.ABORT)
+                budget=BudgetSettings(limit=1.0, action=BudgetAction.ABORT)
             ),
         )
         wf = Workflow(name="budget", activities=[activity])
@@ -244,7 +244,7 @@ class TestActivitySettingsYAML:
         data = yaml.safe_load(yaml_str)
 
         budget_settings = data["activities"][0]["settings"]["budget"]
-        assert budget_settings["limit_usd"] == 1.0
+        assert budget_settings["limit"] == 1.0
         assert budget_settings["action"] == "abort"
 
     def test_activity_with_all_settings(self):
@@ -264,7 +264,7 @@ class TestActivitySettingsYAML:
                 timeout_seconds=300,
                 retry=RetrySettings(max_attempts=3),
                 cache=CacheSettings(ttl=3600),
-                budget=BudgetSettings(limit_usd=0.5),
+                budget=BudgetSettings(limit=0.5),
                 delay="5s",
                 streaming=True,
             ),
@@ -277,7 +277,7 @@ class TestActivitySettingsYAML:
         assert settings["timeout_seconds"] == 300
         assert settings["retry"]["max_attempts"] == 3
         assert settings["cache"]["ttl"] == 3600
-        assert settings["budget"]["limit_usd"] == 0.5
+        assert settings["budget"]["limit"] == 0.5
         assert settings["delay"] == "5s"
         assert settings["streaming"] is True
 

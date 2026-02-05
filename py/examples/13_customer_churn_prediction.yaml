@@ -1,0 +1,553 @@
+# Customer Churn Prediction - py-std worker example.
+#
+# This example demonstrates py-std worker machine learning capabilities:
+# - Feature engineering with numpy and pandas
+# - Model training with scikit-learn (Random Forest)
+# - Cross-validation and hyperparameter tuning
+# - Model evaluation metrics (accuracy, precision, recall, F1, AUC)
+# - Batch inference and probability predictions
+# - Scientific computing with scipy
+#
+# The workflow trains a customer churn prediction model, evaluates performance,
+# and performs batch inference on new customer data.
+
+name: customer_churn_prediction
+activities:
+- key: load_training_data
+  worker: py-std
+  activity_name: script
+  parameters:
+    script: |-
+      async def load_training_data(customer_data):
+          import pandas as pd
+
+          # Load customer data
+          df = pd.DataFrame(customer_data)
+
+          # Basic statistics
+          total_customers = len(df)
+          churned_customers = df["churned"].sum()
+          churn_rate = (churned_customers / total_customers) * 100
+
+          return {
+              "customer_count": total_customers,
+              "churned_count": int(churned_customers),
+              "churn_rate": round(churn_rate, 1),
+              "customer_data": customer_data,
+          }
+
+      # Extract parameters from INPUT
+      customer_data = INPUT.get('customer_data')
+
+      # Call function and assign result to OUTPUT
+      OUTPUT = await load_training_data(customer_data)
+    inputs:
+      customer_data:
+      - customer_id: C001
+        tenure_months: 12
+        monthly_charges: 50.0
+        total_charges: 600.0
+        support_tickets: 2
+        num_products: 1
+        contract_type: month-to-month
+        churned: 1
+      - customer_id: C002
+        tenure_months: 36
+        monthly_charges: 80.0
+        total_charges: 2880.0
+        support_tickets: 0
+        num_products: 3
+        contract_type: two-year
+        churned: 0
+      - customer_id: C003
+        tenure_months: 6
+        monthly_charges: 45.0
+        total_charges: 270.0
+        support_tickets: 5
+        num_products: 1
+        contract_type: month-to-month
+        churned: 1
+      - customer_id: C004
+        tenure_months: 24
+        monthly_charges: 70.0
+        total_charges: 1680.0
+        support_tickets: 1
+        num_products: 2
+        contract_type: one-year
+        churned: 0
+      - customer_id: C005
+        tenure_months: 3
+        monthly_charges: 40.0
+        total_charges: 120.0
+        support_tickets: 3
+        num_products: 1
+        contract_type: month-to-month
+        churned: 1
+      - customer_id: C006
+        tenure_months: 48
+        monthly_charges: 90.0
+        total_charges: 4320.0
+        support_tickets: 0
+        num_products: 4
+        contract_type: two-year
+        churned: 0
+      - customer_id: C007
+        tenure_months: 9
+        monthly_charges: 55.0
+        total_charges: 495.0
+        support_tickets: 4
+        num_products: 1
+        contract_type: month-to-month
+        churned: 1
+      - customer_id: C008
+        tenure_months: 18
+        monthly_charges: 65.0
+        total_charges: 1170.0
+        support_tickets: 1
+        num_products: 2
+        contract_type: one-year
+        churned: 0
+      - customer_id: C009
+        tenure_months: 15
+        monthly_charges: 60.0
+        total_charges: 900.0
+        support_tickets: 2
+        num_products: 2
+        contract_type: month-to-month
+        churned: 0
+      - customer_id: C010
+        tenure_months: 30
+        monthly_charges: 75.0
+        total_charges: 2250.0
+        support_tickets: 0
+        num_products: 3
+        contract_type: two-year
+        churned: 0
+
+- key: feature_engineering
+  worker: py-std
+  activity_name: script
+  parameters:
+    script: |-
+      async def feature_engineering(customer_data):
+          import pandas as pd
+
+          df = pd.DataFrame(customer_data)
+
+          # Calculate derived features
+          df["avg_monthly_spend"] = df["total_charges"] / df["tenure_months"]
+          df["tickets_per_month"] = df["support_tickets"] / df["tenure_months"]
+          df["revenue_per_product"] = df["total_charges"] / df["num_products"]
+
+          # Create engagement score (lower is better for churn prediction)
+          df["engagement_score"] = (
+              (df["tenure_months"] / 12) * 0.4
+              + (df["num_products"] / 4) * 0.3
+              + (1 - df["tickets_per_month"]) * 0.3
+          )
+
+          # Create risk segments based on tenure and tickets
+          def categorize_risk(row):
+              if row["tenure_months"] < 12 and row["support_tickets"] > 2:
+                  return "high_risk"
+              if row["tenure_months"] < 24 and row["support_tickets"] > 1:
+                  return "medium_risk"
+              return "low_risk"
+
+          df["risk_segment"] = df.apply(categorize_risk, axis=1)
+
+          # One-hot encode contract type
+          contract_dummies = pd.get_dummies(df["contract_type"], prefix="contract")
+          df = pd.concat([df, contract_dummies], axis=1)
+
+          return {
+              "engineered_data": df.to_dict(orient="records"),
+              "feature_list": [
+                  "tenure_months",
+                  "monthly_charges",
+                  "total_charges",
+                  "support_tickets",
+                  "num_products",
+                  "avg_monthly_spend",
+                  "tickets_per_month",
+                  "revenue_per_product",
+                  "engagement_score",
+                  "contract_month-to-month",
+                  "contract_one-year",
+                  "contract_two-year",
+              ],
+          }
+
+      # Extract parameters from INPUT
+      customer_data = INPUT.get('customer_data')
+
+      # Call function and assign result to OUTPUT
+      OUTPUT = await feature_engineering(customer_data)
+    inputs:
+      customer_data: '{{load_training_data.customer_data}}'
+  depends_on:
+  - load_training_data
+
+- key: split_data
+  worker: py-std
+  activity_name: script
+  parameters:
+    script: |-
+      async def split_data(engineered_data, feature_list):
+          import pandas as pd
+          from sklearn.model_selection import train_test_split
+
+          df = pd.DataFrame(engineered_data)
+
+          # Select features and target
+          feature_cols = feature_list
+          X = df[feature_cols].values
+          y = df["churned"].values
+
+          # Split: 60% train, 20% validation, 20% test
+          X_train, X_temp, y_train, y_temp = train_test_split(
+              X, y, test_size=0.4, random_state=42, stratify=y
+          )
+          X_val, X_test, y_val, y_test = train_test_split(
+              X_temp, y_temp, test_size=0.5, random_state=42, stratify=y_temp
+          )
+
+          return {
+              "X_train": X_train.tolist(),
+              "X_val": X_val.tolist(),
+              "X_test": X_test.tolist(),
+              "y_train": y_train.tolist(),
+              "y_val": y_val.tolist(),
+              "y_test": y_test.tolist(),
+              "feature_names": feature_cols,
+              "split_sizes": {
+                  "train": len(X_train),
+                  "validation": len(X_val),
+                  "test": len(X_test),
+              },
+          }
+
+      # Extract parameters from INPUT
+      engineered_data = INPUT.get('engineered_data')
+      feature_list = INPUT.get('feature_list')
+
+      # Call function and assign result to OUTPUT
+      OUTPUT = await split_data(engineered_data, feature_list)
+    inputs:
+      engineered_data: '{{feature_engineering.engineered_data}}'
+      feature_list: '{{feature_engineering.feature_list}}'
+  depends_on:
+  - feature_engineering
+
+- key: train_model
+  worker: py-std
+  activity_name: script
+  parameters:
+    script: |-
+      async def train_model(X_train, y_train, X_val, y_val, feature_names):
+          import numpy as np
+          from sklearn.ensemble import RandomForestClassifier
+          from sklearn.model_selection import GridSearchCV
+          from sklearn.preprocessing import StandardScaler
+
+          X_train = np.array(X_train)
+          y_train = np.array(y_train)
+          X_val = np.array(X_val)
+          y_val = np.array(y_val)
+
+          # Scale features (important for many ML algorithms)
+          scaler = StandardScaler()
+          X_train_scaled = scaler.fit_transform(X_train)
+          X_val_scaled = scaler.transform(X_val)
+
+          # Hyperparameter grid for Random Forest
+          param_grid = {
+              "n_estimators": [50, 100],
+              "max_depth": [5, 10, None],
+              "min_samples_split": [2, 5],
+          }
+
+          # Train with GridSearchCV (cross-validation)
+          rf = RandomForestClassifier(random_state=42)
+          grid_search = GridSearchCV(
+              rf,
+              param_grid,
+              cv=3,
+              scoring="f1",
+              n_jobs=-1,
+          )
+          grid_search.fit(X_train_scaled, y_train)
+
+          # Best model
+          best_model = grid_search.best_estimator_
+
+          # Validation performance
+          val_score = best_model.score(X_val_scaled, y_val)
+
+          # Feature importance
+          feature_importance = best_model.feature_importances_
+          importance_dict = {
+              name: round(float(importance), 4)
+              for name, importance in zip(feature_names, feature_importance, strict=True)
+          }
+          # Sort by importance
+          importance_sorted = sorted(
+              importance_dict.items(), key=lambda x: x[1], reverse=True
+          )
+
+          return {
+              "best_params": grid_search.best_params_,
+              "validation_accuracy": round(val_score, 4),
+              "feature_importance": dict(importance_sorted),
+              "scaler_mean": scaler.mean_.tolist(),
+              "scaler_scale": scaler.scale_.tolist(),
+              # Store model state (simplified - in production use pickle/joblib)
+              "model_trained": True,
+          }
+
+      # Extract parameters from INPUT
+      X_train = INPUT.get('X_train')
+      y_train = INPUT.get('y_train')
+      X_val = INPUT.get('X_val')
+      y_val = INPUT.get('y_val')
+      feature_names = INPUT.get('feature_names')
+
+      # Call function and assign result to OUTPUT
+      OUTPUT = await train_model(X_train, y_train, X_val, y_val, feature_names)
+    inputs:
+      X_train: '{{split_data.X_train}}'
+      y_train: '{{split_data.y_train}}'
+      X_val: '{{split_data.X_val}}'
+      y_val: '{{split_data.y_val}}'
+      feature_names: '{{split_data.feature_names}}'
+  depends_on:
+  - split_data
+
+- key: evaluate_model
+  worker: py-std
+  activity_name: script
+  parameters:
+    script: |-
+      async def evaluate_model(
+          X_train, y_train, X_test, y_test, scaler_mean, scaler_scale, best_params
+      ):
+          import numpy as np
+          from sklearn.ensemble import RandomForestClassifier
+          from sklearn.metrics import (
+              accuracy_score,
+              confusion_matrix,
+              f1_score,
+              precision_score,
+              recall_score,
+              roc_auc_score,
+          )
+          from sklearn.preprocessing import StandardScaler
+
+          # Reconstruct scaler
+          scaler = StandardScaler()
+          scaler.mean_ = np.array(scaler_mean)
+          scaler.scale_ = np.array(scaler_scale)
+
+          # Reconstruct and retrain model
+          X_train = np.array(X_train)
+          y_train = np.array(y_train)
+          X_test = np.array(X_test)
+          y_test = np.array(y_test)
+
+          X_train_scaled = scaler.transform(X_train)
+          X_test_scaled = scaler.transform(X_test)
+
+          # Train final model with best params
+          model = RandomForestClassifier(**best_params, random_state=42)
+          model.fit(X_train_scaled, y_train)
+
+          # Predictions
+          y_pred = model.predict(X_test_scaled)
+          y_pred_proba = model.predict_proba(X_test_scaled)[:, 1]
+
+          # Calculate metrics
+          accuracy = accuracy_score(y_test, y_pred)
+          precision = precision_score(y_test, y_pred, zero_division=0)
+          recall = recall_score(y_test, y_pred, zero_division=0)
+          f1 = f1_score(y_test, y_pred, zero_division=0)
+          roc_auc = roc_auc_score(y_test, y_pred_proba)
+
+          # Confusion matrix
+          cm = confusion_matrix(y_test, y_pred)
+          tn, fp, fn, tp = cm.ravel()
+
+          return {
+              "metrics": {
+                  "accuracy": round(accuracy, 4),
+                  "precision": round(precision, 4),
+                  "recall": round(recall, 4),
+                  "f1_score": round(f1, 4),
+                  "roc_auc": round(roc_auc, 4),
+              },
+              "confusion_matrix": {
+                  "true_negatives": int(tn),
+                  "false_positives": int(fp),
+                  "false_negatives": int(fn),
+                  "true_positives": int(tp),
+              },
+              "evaluation_summary": f"Accuracy: {accuracy:.2%}, F1: {f1:.4f}, AUC: {roc_auc:.4f}",
+          }
+
+      # Extract parameters from INPUT
+      X_train = INPUT.get('X_train')
+      y_train = INPUT.get('y_train')
+      X_test = INPUT.get('X_test')
+      y_test = INPUT.get('y_test')
+      scaler_mean = INPUT.get('scaler_mean')
+      scaler_scale = INPUT.get('scaler_scale')
+      best_params = INPUT.get('best_params')
+
+      # Call function and assign result to OUTPUT
+      OUTPUT = await evaluate_model(X_train, y_train, X_test, y_test, scaler_mean, scaler_scale, best_params)
+    inputs:
+      X_train: '{{split_data.X_train}}'
+      y_train: '{{split_data.y_train}}'
+      X_test: '{{split_data.X_test}}'
+      y_test: '{{split_data.y_test}}'
+      scaler_mean: '{{train_model.scaler_mean}}'
+      scaler_scale: '{{train_model.scaler_scale}}'
+      best_params: '{{train_model.best_params}}'
+  depends_on:
+  - train_model
+
+- key: batch_inference
+  worker: py-std
+  activity_name: script
+  parameters:
+    script: |-
+      async def batch_inference(
+          X_train, y_train, scaler_mean, scaler_scale, best_params, new_customers
+      ):
+          import numpy as np
+          import pandas as pd
+          from sklearn.ensemble import RandomForestClassifier
+          from sklearn.preprocessing import StandardScaler
+
+          # Reconstruct scaler and model
+          scaler = StandardScaler()
+          scaler.mean_ = np.array(scaler_mean)
+          scaler.scale_ = np.array(scaler_scale)
+
+          X_train = np.array(X_train)
+          y_train = np.array(y_train)
+          X_train_scaled = scaler.transform(X_train)
+
+          model = RandomForestClassifier(**best_params, random_state=42)
+          model.fit(X_train_scaled, y_train)
+
+          # Prepare new customer data
+          new_df = pd.DataFrame(new_customers)
+
+          # Feature engineering (same as training)
+          new_df["avg_monthly_spend"] = new_df["total_charges"] / new_df["tenure_months"]
+          new_df["tickets_per_month"] = new_df["support_tickets"] / new_df["tenure_months"]
+          new_df["revenue_per_product"] = new_df["total_charges"] / new_df["num_products"]
+          new_df["engagement_score"] = (
+              (new_df["tenure_months"] / 12) * 0.4
+              + (new_df["num_products"] / 4) * 0.3
+              + (1 - new_df["tickets_per_month"]) * 0.3
+          )
+
+          # One-hot encode contract type
+          contract_dummies = pd.get_dummies(new_df["contract_type"], prefix="contract")
+          new_df = pd.concat([new_df, contract_dummies], axis=1)
+
+          # Ensure all contract types exist
+          for contract_type in ["month-to-month", "one-year", "two-year"]:
+              col_name = f"contract_{contract_type}"
+              if col_name not in new_df.columns:
+                  new_df[col_name] = 0
+
+          # Select features in correct order
+          feature_cols = [
+              "tenure_months",
+              "monthly_charges",
+              "total_charges",
+              "support_tickets",
+              "num_products",
+              "avg_monthly_spend",
+              "tickets_per_month",
+              "revenue_per_product",
+              "engagement_score",
+              "contract_month-to-month",
+              "contract_one-year",
+              "contract_two-year",
+          ]
+          X_new = new_df[feature_cols].values
+          X_new_scaled = scaler.transform(X_new)
+
+          # Predict
+          predictions = model.predict(X_new_scaled)
+          probabilities = model.predict_proba(X_new_scaled)[:, 1]
+
+          # Create results
+          results = []
+          for i, customer in enumerate(new_customers):
+              churn_risk = (
+                  "high"
+                  if probabilities[i] > 0.7
+                  else "medium"
+                  if probabilities[i] > 0.4
+                  else "low"
+              )
+              results.append(
+                  {
+                      "customer_id": customer["customer_id"],
+                      "predicted_churn": int(predictions[i]),
+                      "churn_probability": round(float(probabilities[i]), 4),
+                      "risk_level": churn_risk,
+                  }
+              )
+
+          return {
+              "predictions": results,
+              "high_risk_count": sum(1 for r in results if r["risk_level"] == "high"),
+              "total_scored": len(results),
+          }
+
+      # Extract parameters from INPUT
+      X_train = INPUT.get('X_train')
+      y_train = INPUT.get('y_train')
+      scaler_mean = INPUT.get('scaler_mean')
+      scaler_scale = INPUT.get('scaler_scale')
+      best_params = INPUT.get('best_params')
+      new_customers = INPUT.get('new_customers')
+
+      # Call function and assign result to OUTPUT
+      OUTPUT = await batch_inference(X_train, y_train, scaler_mean, scaler_scale, best_params, new_customers)
+    inputs:
+      X_train: '{{split_data.X_train}}'
+      y_train: '{{split_data.y_train}}'
+      scaler_mean: '{{train_model.scaler_mean}}'
+      scaler_scale: '{{train_model.scaler_scale}}'
+      best_params: '{{train_model.best_params}}'
+      new_customers:
+      - customer_id: N001
+        tenure_months: 4
+        monthly_charges: 42.0
+        total_charges: 168.0
+        support_tickets: 4
+        num_products: 1
+        contract_type: month-to-month
+      - customer_id: N002
+        tenure_months: 28
+        monthly_charges: 78.0
+        total_charges: 2184.0
+        support_tickets: 0
+        num_products: 3
+        contract_type: two-year
+      - customer_id: N003
+        tenure_months: 11
+        monthly_charges: 58.0
+        total_charges: 638.0
+        support_tickets: 3
+        num_products: 2
+        contract_type: month-to-month
+  depends_on:
+  - train_model
+

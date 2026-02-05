@@ -11,7 +11,9 @@ from kruxiaflow.models import (
     CacheSettings,
     Dependency,
     RetrySettings,
+    ScriptActivity,
     Workflow,
+    script,
 )
 
 
@@ -56,12 +58,12 @@ class TestBudgetSettings:
     """Tests for BudgetSettings model."""
 
     def test_default_action(self):
-        settings = BudgetSettings(limit_usd=10.0)
-        assert settings.limit_usd == 10.0
+        settings = BudgetSettings(limit=10.0)
+        assert settings.limit == 10.0
         assert settings.action == BudgetAction.ABORT
 
     def test_custom_action(self):
-        settings = BudgetSettings(limit_usd=5.0, action=BudgetAction.CONTINUE)
+        settings = BudgetSettings(limit=5.0, action=BudgetAction.CONTINUE)
         assert settings.action == BudgetAction.CONTINUE
 
 
@@ -82,14 +84,14 @@ class TestActivitySettings:
             timeout_seconds=300,
             retry=RetrySettings(max_attempts=5),
             cache=CacheSettings(ttl=3600),
-            budget=BudgetSettings(limit_usd=1.0),
+            budget=BudgetSettings(limit=1.0),
             delay="5s",
             streaming=True,
         )
         assert settings.timeout_seconds == 300
         assert settings.retry.max_attempts == 5
         assert settings.cache.ttl == 3600
-        assert settings.budget.limit_usd == 1.0
+        assert settings.budget.limit == 1.0
         assert settings.delay == "5s"
         assert settings.streaming is True
 
@@ -177,7 +179,7 @@ class TestActivityDeclarativeConstruction:
                 timeout_seconds=300,
                 retry=RetrySettings(max_attempts=5, strategy=BackoffStrategy.FIXED),
                 cache=CacheSettings(ttl=3600, key="my_key"),
-                budget=BudgetSettings(limit_usd=10.0),
+                budget=BudgetSettings(limit=10.0),
                 delay="5s",
                 streaming=True,
             ),
@@ -187,7 +189,7 @@ class TestActivityDeclarativeConstruction:
         assert activity.settings.retry.strategy == BackoffStrategy.FIXED
         assert activity.settings.cache.ttl == 3600
         assert activity.settings.cache.key == "my_key"
-        assert activity.settings.budget.limit_usd == 10.0
+        assert activity.settings.budget.limit == 10.0
         assert activity.settings.budget.action == BudgetAction.ABORT
         assert activity.settings.delay == "5s"
         assert activity.settings.streaming is True
@@ -410,3 +412,100 @@ class TestWorkflowSerialization:
         wf = Workflow(name="test")
         json_dict = wf.to_json()
         assert json_dict["name"] == "test"
+
+
+class TestScriptActivity:
+    """Tests for ScriptActivity decorator functionality."""
+
+    def test_from_function_basic(self):
+        """Test basic function decoration."""
+
+        @ScriptActivity.from_function()
+        async def my_task():
+            return {"result": "done"}
+
+        assert isinstance(my_task, Activity)
+        assert my_task.key == "my_task"
+        assert my_task.worker == "py-std"
+        assert my_task.activity_name == "script"
+        assert "script" in my_task.parameters
+
+    def test_from_function_with_params(self):
+        """Test function decoration with parameters."""
+
+        @ScriptActivity.from_function(
+            key="custom_key", worker="py-data", inputs={"url": "https://api.example.com"}
+        )
+        async def fetch_data(url):
+            import httpx
+
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url)
+                return {"data": response.json()}
+
+        assert isinstance(fetch_data, Activity)
+        assert fetch_data.key == "custom_key"
+        assert fetch_data.worker == "py-data"
+        assert fetch_data.parameters["inputs"]["url"] == "https://api.example.com"
+
+    def test_from_function_with_depends_on(self):
+        """Test function decoration with dependencies."""
+
+        @ScriptActivity.from_function(depends_on=["task1", "task2"])
+        async def dependent_task():
+            return {"status": "ok"}
+
+        assert isinstance(dependent_task, Activity)
+        assert dependent_task.depends_on == ["task1", "task2"]
+
+    def test_from_function_explicit_key(self):
+        """Test that explicit key parameter is used when provided."""
+
+        @ScriptActivity.from_function(key="explicit_name")
+        async def my_function():
+            return {"result": "ok"}
+
+        assert my_function.key == "explicit_name"
+
+
+class TestScriptHelper:
+    """Tests for script() helper function."""
+
+    def test_script_async_function(self):
+        """Test script generation for async function."""
+
+        async def process_data(records):
+            import pandas as pd
+
+            df = pd.DataFrame(records)
+            return {"count": len(df)}
+
+        result = script(process_data)
+        assert "async def process_data" in result
+        assert "records = INPUT.get('records')" in result
+        assert "OUTPUT = await process_data(records)" in result
+
+    def test_script_sync_function(self):
+        """Test script generation for sync function."""
+
+        def calculate(x, y):
+            return {"sum": x + y}
+
+        result = script(calculate)
+        assert "def calculate" in result
+        assert "x = INPUT.get('x')" in result
+        assert "y = INPUT.get('y')" in result
+        assert "OUTPUT = calculate(x, y)" in result
+
+    def test_script_no_params(self):
+        """Test script generation for function with no parameters."""
+
+        async def get_timestamp():
+            from datetime import datetime
+
+            return {"timestamp": datetime.now().isoformat()}
+
+        result = script(get_timestamp)
+        assert "async def get_timestamp" in result
+        assert "OUTPUT = await get_timestamp()" in result
+        assert "INPUT.get" not in result

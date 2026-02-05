@@ -1,75 +1,67 @@
-# Standard Python Workers Guide
+# Standard Python Worker Guide
 
-Pre-built Python workers for zero-setup script execution with domain-specific packages.
+Pre-built comprehensive Python worker for zero-setup script execution covering 80-90% of data engineering, ML, and NLP use cases.
 
 ## Overview
 
-Standard Python workers provide ready-to-use Docker images with pre-installed packages for common use cases. Each worker includes a `script` activity that executes arbitrary Python code.
+The standard Python worker (`py-std`) provides a ready-to-use Docker image with pre-installed packages for common data processing, machine learning, and NLP tasks. It includes a `script` activity that executes arbitrary Python code.
 
 > **Context**: This guide covers two aspects:
-> 1. **Workflow definitions** - How to reference standard workers and write scripts (runs at deploy time)
-> 2. **Worker deployment** - How to run the Docker containers (ops/infrastructure)
+> 1. **Workflow definitions** - How to reference the worker and write scripts (runs at deploy time)
+> 2. **Worker deployment** - How to run the Docker container (ops/infrastructure)
 >
 > See the [Quick Start](quickstart.md#architecture-overview) for an architecture diagram.
 
-## Available Workers
+## The py-std Worker
 
-| Worker | Image | Size (raw/compressed) | Focus |
-|--------|-------|----------------------|-------|
-| `py-std` | `ghcr.io/kruxia/kruxiaflow-worker-py-std` | 240MB / 50MB | Universal utilities |
-| `py-data` | `ghcr.io/kruxia/kruxiaflow-worker-py-data` | 1.3GB / 310MB | ETL/transformation |
-| `py-ml` | `ghcr.io/kruxia/kruxiaflow-worker-py-ml` | 2.0GB / 435MB | Machine learning |
-| `py-nlp` | `ghcr.io/kruxia/kruxiaflow-worker-py-nlp` | 2.4GB / 515MB | NLP/text processing |
+| Worker | Image | Size (raw/compressed) | Coverage |
+|--------|-------|----------------------|----------|
+| `py-std` | `kruxia/kruxiaflow-py-std` | 1.25GB / 320-350MB | Data engineering, ML, NLP |
 
 ## Pre-installed Packages
 
-### py-std (Universal Utilities)
+The `py-std` worker includes a comprehensive set of packages covering most common use cases:
 
+### Core Utilities
 ```
-pydantic>=2.0      # Data validation
-httpx>=0.24        # HTTP client
-pyyaml>=6.0        # YAML parsing
-orjson>=3.9        # Fast JSON
-python-dateutil>=2.8  # Date utilities
-```
-
-### py-data (ETL/Transformation)
-
-Includes all `py-std` packages plus:
-
-```
-pandas>=2.2        # DataFrames
-polars>=0.20       # Fast DataFrames
-pyarrow>=15.0      # Parquet/Arrow
-duckdb>=0.10       # In-process SQL
-sqlalchemy>=2.0    # Database interface
+pydantic>=2.0           # Data validation
+httpx>=0.24             # HTTP client
+pyyaml>=6.0             # YAML parsing
+orjson>=3.9             # Fast JSON
+python-dateutil>=2.8    # Date utilities
 ```
 
-### py-ml (Machine Learning)
-
-Includes all `py-std` packages plus:
-
+### Data Processing
 ```
-numpy>=1.26        # Numerical computing
-pandas>=2.2        # DataFrames
-scikit-learn>=1.4  # ML algorithms
-scipy>=1.12        # Scientific computing
-torch>=2.2         # Deep learning (CPU)
+pandas>=2.2             # DataFrames (standard library)
+polars>=0.20            # Fast DataFrames (alternative)
+pyarrow>=15.0           # Parquet/Arrow format
+duckdb>=0.10            # In-process SQL analytics
+numpy>=1.26             # Numerical computing
 ```
 
-### py-nlp (Natural Language Processing)
-
-Includes all `py-std` packages plus:
-
+### Machine Learning
 ```
-numpy>=1.26                 # Numerical computing
+scikit-learn>=1.4       # Traditional ML algorithms
+```
+
+### Natural Language Processing
+```
 transformers>=4.38          # Hugging Face models
-sentence-transformers>=2.3  # Embeddings
-tiktoken>=0.6               # Token counting
-spacy>=3.7                  # NLP pipeline
+sentence-transformers>=2.3  # Semantic embeddings
+tiktoken>=0.6               # Token counting for LLMs
 ```
 
-The `en_core_web_sm` spacy model is pre-downloaded. Below ("[Model Caching](#model-caching)") are instructions for caching other NLP models in infrastructure for use in activities.
+## Custom Workers for Specialized Needs
+
+The `py-std` worker covers 80-90% of use cases. For specialized needs, the community can contribute custom worker definitions:
+
+- **PyTorch Training**: Add `torch>=2.2` for deep learning model training
+- **Spacy NER**: Add `spacy>=3.7` with language models for advanced NLP
+- **Scientific Computing**: Add `scipy>=1.12` for specialized algorithms
+- **Geospatial**: Add `geopandas`, `shapely` for GIS processing
+
+See [custom workers](custom-workers.md) for details on building specialized workers.
 
 ## Using the Script Activity
 
@@ -122,14 +114,30 @@ Inside the script, these variables are available:
 **File: `my_workflow.py`** (Workflow Definition)
 
 ```python
-from kruxiaflow import Activity, Workflow
+from kruxiaflow import ScriptActivity, Workflow
 
-transform = (
-    Activity(key="transform")
-    .with_worker("py-data", "script")  # ← References the py-data worker
+# Using ScriptActivity.from_function (recommended)
+@ScriptActivity.from_function(
+    inputs={"records": fetch["response.json"]},
+    depends_on=["fetch"],
+)
+async def transform(records):
+    import pandas as pd
+    import duckdb
+
+    df = pd.DataFrame(records)
+    result = duckdb.sql("SELECT * FROM df WHERE value > 100").df()
+
+    return {"rows": len(result), "data": result.to_dict()}
+
+# Or using Activity with script parameter (if needed)
+from kruxiaflow import Activity
+
+transform_alt = (
+    Activity(key="transform_alt")
+    .with_worker("py-std", "script")  # ← worker defaults to py-std
     .with_params(
         inputs={"records": fetch["response.json"]},
-        # The script string runs ON THE WORKER at execution time
         script="""
 import pandas as pd
 import duckdb
@@ -148,11 +156,11 @@ Note: The outer Python code (importing `Activity`, calling `.with_worker()`) run
 
 ## Use Case Examples
 
-### Data Transformation (py-data)
+### Data Transformation
 
 ```yaml
 - key: transform_data
-  worker: py-data
+  worker: py-std
   activity_name: script
   parameters:
     inputs:
@@ -180,11 +188,11 @@ Note: The outer Python code (importing `Activity`, calling `.with_worker()`) run
       }
 ```
 
-### ML Inference (py-ml)
+### ML Inference
 
 ```yaml
 - key: predict
-  worker: py-ml
+  worker: py-std
   activity_name: script
   parameters:
     inputs:
@@ -209,11 +217,11 @@ Note: The outer Python code (importing `Activity`, calling `.with_worker()`) run
       }
 ```
 
-### Text Embeddings (py-nlp)
+### Text Embeddings
 
 ```yaml
 - key: embed_texts
-  worker: py-nlp
+  worker: py-std
   activity_name: script
   parameters:
     inputs:
@@ -230,11 +238,11 @@ Note: The outer Python code (importing `Activity`, calling `.with_worker()`) run
       }
 ```
 
-### Sentiment Analysis (py-nlp)
+### Sentiment Analysis
 
 ```yaml
 - key: analyze_sentiment
-  worker: py-nlp
+  worker: py-std
   activity_name: script
   parameters:
     inputs:
@@ -268,11 +276,11 @@ ML/NLP workers download models on first use, which can be slow. Use volume mount
 version: "3.8"
 
 services:
-  py-nlp-worker:
-    image: ghcr.io/kruxia/kruxiaflow-worker-py-nlp:latest
+  py-std-worker:
+    image: kruxia/kruxiaflow-py-std:latest
     environment:
       KRUXIAFLOW_API_URL: http://api:8080
-      KRUXIAFLOW_CLIENT_ID: nlp-worker
+      KRUXIAFLOW_CLIENT_ID: py-std-worker
       KRUXIAFLOW_CLIENT_SECRET: ${WORKER_SECRET}
       # Point all caches to /cache
       HF_HOME: /cache/huggingface
@@ -282,18 +290,7 @@ services:
     volumes:
       - model-cache:/cache
     deploy:
-      replicas: 2
-
-  py-ml-worker:
-    image: ghcr.io/kruxia/kruxiaflow-worker-py-ml:latest
-    environment:
-      KRUXIAFLOW_API_URL: http://api:8080
-      KRUXIAFLOW_CLIENT_ID: ml-worker
-      KRUXIAFLOW_CLIENT_SECRET: ${WORKER_SECRET}
-    volumes:
-      - model-cache:/cache
-    deploy:
-      replicas: 2
+      replicas: 3
 
 volumes:
   model-cache:
@@ -318,25 +315,25 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: py-nlp-worker
+  name: py-std-worker
 spec:
   replicas: 3
   selector:
     matchLabels:
-      app: py-nlp-worker
+      app: py-std-worker
   template:
     metadata:
       labels:
-        app: py-nlp-worker
+        app: py-std-worker
     spec:
       containers:
         - name: worker
-          image: ghcr.io/kruxia/kruxiaflow-worker-py-nlp:latest
+          image: kruxia/kruxiaflow-py-std:latest
           env:
             - name: KRUXIAFLOW_API_URL
               value: "http://kruxiaflow-api:8080"
             - name: KRUXIAFLOW_CLIENT_ID
-              value: "nlp-worker"
+              value: "py-std-worker"
             - name: KRUXIAFLOW_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
@@ -382,7 +379,7 @@ spec:
     spec:
       containers:
         - name: prewarm
-          image: ghcr.io/kruxia/kruxiaflow-worker-py-nlp:latest
+          image: kruxia/kruxiaflow-py-std:latest
           command: ["python", "-c"]
           args:
             - |
@@ -414,24 +411,29 @@ spec:
   backoffLimit: 2
 ```
 
-## Choosing the Right Worker
+## Use Cases
 
-| Use Case | Recommended Worker |
-|----------|-------------------|
-| API calls, JSON processing, simple transforms | `py-std` |
-| DataFrames, SQL, ETL pipelines, Parquet files | `py-data` |
-| Model training, inference, numerical computing | `py-ml` |
-| Text embeddings, sentiment analysis, NLP pipelines | `py-nlp` |
+The `py-std` worker covers:
+
+| Use Case | Capabilities |
+|----------|-------------|
+| **Data Engineering** | DataFrames (pandas/polars), SQL (DuckDB), Parquet (PyArrow) |
+| **Machine Learning** | scikit-learn for classification, regression, clustering |
+| **NLP** | Text embeddings, sentiment analysis, transformers |
+| **API Integration** | HTTP clients, JSON processing, data validation |
 
 ## When to Use Standard vs. Custom Workers
 
-Use standard workers for:
-- Ad-hoc data transformations
-- Scripts using only pre-installed packages
+Use the `py-std` worker for:
+- Data transformation and ETL pipelines
+- Traditional machine learning (scikit-learn)
+- Text embeddings and sentiment analysis
+- Scripts using pre-installed packages
 - Prototyping and quick iterations
-- Simple scripts
 
-Use [custom workers](custom-workers.md) when you need:
+Build [custom workers](custom-workers.md) when you need:
+- PyTorch for deep learning training
+- Spacy for advanced NER
 - Custom or proprietary packages
 - Type-safe parameters with validation
 - Model caching across activity calls
@@ -446,10 +448,10 @@ Use [custom workers](custom-workers.md) when you need:
 ```bash
 docker run -d \
   -e KRUXIAFLOW_API_URL=http://host.docker.internal:8080 \
-  -e KRUXIAFLOW_CLIENT_ID=py-data-worker \
+  -e KRUXIAFLOW_CLIENT_ID=py-std-worker \
   -e KRUXIAFLOW_CLIENT_SECRET=your_secret \
   -v model-cache:/cache \
-  ghcr.io/kruxia/kruxiaflow-worker-py-data:latest
+  kruxia/kruxiaflow-py-std:latest
 ```
 
 ### Scaling
@@ -458,10 +460,10 @@ Scale workers based on workload:
 
 ```bash
 # Docker Compose
-docker compose up -d --scale py-data-worker=5
+docker compose up -d --scale py-std-worker=5
 
 # Kubernetes
-kubectl scale deployment py-data-worker --replicas=5
+kubectl scale deployment py-std-worker --replicas=5
 ```
 
 Workers automatically:

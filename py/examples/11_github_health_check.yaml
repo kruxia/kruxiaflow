@@ -1,0 +1,347 @@
+# GitHub Repository Health Check - py-std worker example.
+#
+# This example demonstrates py-std worker capabilities:
+# - HTTP API calls with httpx
+# - JSON schema validation with pydantic
+# - Date parsing and manipulation with python-dateutil
+# - Fast JSON processing with orjson
+# - YAML configuration parsing with pyyaml
+#
+# The workflow fetches GitHub repository data, validates the structure,
+# analyzes activity metrics, and generates a health score report.
+
+name: github_health_check
+activities:
+- key: fetch_repo
+  worker: py-std
+  activity_name: script
+  parameters:
+    script: |-
+      async def fetch_repo(owner, repo):
+          from datetime import datetime
+
+          import httpx
+
+          # Fetch repository data from GitHub API
+          repo_url = f"https://api.github.com/repos/{owner}/{repo}"
+          headers = {"Accept": "application/vnd.github.v3+json"}
+
+          async with httpx.AsyncClient() as client:
+              response = await client.get(repo_url, headers=headers)
+              response.raise_for_status()
+              repo_data = response.json()
+
+          return {
+              "repo_data": repo_data,
+              "fetched_at": datetime.utcnow().isoformat(),
+          }
+
+      # Extract parameters from INPUT
+      owner = INPUT.get('owner')
+      repo = INPUT.get('repo')
+
+      # Call function and assign result to OUTPUT
+      OUTPUT = await fetch_repo(owner, repo)
+    inputs:
+      owner: anthropics
+      repo: anthropic-sdk-python
+
+- key: validate_structure
+  worker: py-std
+  activity_name: script
+  parameters:
+    script: |-
+      async def validate_structure(repo_data):
+          from pydantic import BaseModel, ValidationError
+
+          # Define expected schema for GitHub repository data
+          class GitHubRepoSchema(BaseModel):
+              id: int
+              name: str
+              full_name: str
+              description: str | None
+              stargazers_count: int
+              forks_count: int
+              open_issues_count: int
+              created_at: str
+              updated_at: str
+              pushed_at: str
+              size: int
+              language: str | None
+
+              class Config:
+                  extra = "allow"  # Allow additional fields from GitHub API
+
+          try:
+              # Validate the repository data
+              validated = GitHubRepoSchema(**repo_data)
+
+              return {
+                  "valid": True,
+                  "repo_name": validated.full_name,
+                  "stars": validated.stargazers_count,
+                  "forks": validated.forks_count,
+                  "open_issues": validated.open_issues_count,
+                  "created_at": validated.created_at,
+                  "updated_at": validated.updated_at,
+                  "pushed_at": validated.pushed_at,
+                  "size_kb": validated.size,
+                  "language": validated.language,
+              }
+          except ValidationError as e:
+              return {
+                  "valid": False,
+                  "errors": e.errors(),
+              }
+
+      # Extract parameters from INPUT
+      repo_data = INPUT.get('repo_data')
+
+      # Call function and assign result to OUTPUT
+      OUTPUT = await validate_structure(repo_data)
+    inputs:
+      repo_data: '{{fetch_repo.repo_data}}'
+  depends_on:
+  - fetch_repo
+
+- key: parse_dates
+  worker: py-std
+  activity_name: script
+  parameters:
+    script: |-
+      async def parse_dates(created_at, updated_at, pushed_at):
+          from datetime import datetime, timezone
+
+          from dateutil import parser
+
+          # Parse ISO 8601 dates from GitHub API
+          created = parser.isoparse(created_at)
+          updated = parser.isoparse(updated_at)
+          pushed = parser.isoparse(pushed_at)
+          now = datetime.now(timezone.utc)
+
+          # Calculate time deltas
+          age_days = (now - created).days
+          days_since_update = (now - updated).days
+          days_since_push = (now - pushed).days
+
+          return {
+              "age_days": age_days,
+              "age_years": round(age_days / 365.25, 1),
+              "days_since_update": days_since_update,
+              "days_since_push": days_since_push,
+              "created_date": created.strftime("%Y-%m-%d"),
+              "last_push_date": pushed.strftime("%Y-%m-%d"),
+          }
+
+      # Extract parameters from INPUT
+      created_at = INPUT.get('created_at')
+      updated_at = INPUT.get('updated_at')
+      pushed_at = INPUT.get('pushed_at')
+
+      # Call function and assign result to OUTPUT
+      OUTPUT = await parse_dates(created_at, updated_at, pushed_at)
+    inputs:
+      created_at: '{{validate_structure.created_at}}'
+      updated_at: '{{validate_structure.updated_at}}'
+      pushed_at: '{{validate_structure.pushed_at}}'
+  depends_on:
+  - validate_structure
+
+- key: fetch_commits
+  worker: py-std
+  activity_name: script
+  parameters:
+    script: |-
+      async def fetch_commits(owner, repo):
+          from datetime import datetime, timedelta, timezone
+
+          import httpx
+
+          # Fetch commits from the last 30 days
+          since_date = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+          commits_url = f"https://api.github.com/repos/{owner}/{repo}/commits"
+          headers = {"Accept": "application/vnd.github.v3+json"}
+          params = {"since": since_date, "per_page": 100}
+
+          async with httpx.AsyncClient() as client:
+              response = await client.get(commits_url, headers=headers, params=params)
+              response.raise_for_status()
+              commits = response.json()
+
+          # Calculate commit statistics
+          commit_count = len(commits)
+          unique_authors = len(
+              {c["commit"]["author"]["name"] for c in commits if "commit" in c}
+          )
+
+          return {
+              "commit_count_30d": commit_count,
+              "unique_authors_30d": unique_authors,
+              "commits_per_day": round(commit_count / 30, 2),
+          }
+
+      # Extract parameters from INPUT
+      owner = INPUT.get('owner')
+      repo = INPUT.get('repo')
+
+      # Call function and assign result to OUTPUT
+      OUTPUT = await fetch_commits(owner, repo)
+    inputs:
+      owner: anthropics
+      repo: anthropic-sdk-python
+  depends_on:
+  - validate_structure
+
+- key: calculate_health
+  worker: py-std
+  activity_name: script
+  parameters:
+    script: |-
+      async def calculate_health(
+          stars, forks, open_issues, days_since_push, commit_count_30d, unique_authors_30d
+      ):
+          # Health score calculation based on multiple factors
+          # Scale: 0-100, higher is better
+
+          # Activity score (0-30 points): Recent commits indicate active development
+          activity_score = 0
+          if days_since_push <= 7:
+              activity_score = 30
+          elif days_since_push <= 30:
+              activity_score = 20
+          elif days_since_push <= 90:
+              activity_score = 10
+
+          # Engagement score (0-30 points): Stars and forks indicate community interest
+          engagement_score = min(30, (stars // 100) + (forks // 20))
+
+          # Maintenance score (0-20 points): Active commits and contributors
+          maintenance_score = min(20, (commit_count_30d // 5) + (unique_authors_30d * 2))
+
+          # Issue management score (0-20 points): Lower open issues is better
+          issue_score = max(0, 20 - (open_issues // 10))
+
+          # Calculate total health score
+          total_score = activity_score + engagement_score + maintenance_score + issue_score
+
+          # Determine health status
+          if total_score >= 80:
+              status = "excellent"
+          elif total_score >= 60:
+              status = "good"
+          elif total_score >= 40:
+              status = "fair"
+          else:
+              status = "needs_attention"
+
+          return {
+              "health_score": total_score,
+              "status": status,
+              "breakdown": {
+                  "activity": activity_score,
+                  "engagement": engagement_score,
+                  "maintenance": maintenance_score,
+                  "issue_management": issue_score,
+              },
+          }
+
+      # Extract parameters from INPUT
+      stars = INPUT.get('stars')
+      forks = INPUT.get('forks')
+      open_issues = INPUT.get('open_issues')
+      days_since_push = INPUT.get('days_since_push')
+      commit_count_30d = INPUT.get('commit_count_30d')
+      unique_authors_30d = INPUT.get('unique_authors_30d')
+
+      # Call function and assign result to OUTPUT
+      OUTPUT = await calculate_health(stars, forks, open_issues, days_since_push, commit_count_30d, unique_authors_30d)
+    inputs:
+      stars: '{{validate_structure.stars}}'
+      forks: '{{validate_structure.forks}}'
+      open_issues: '{{validate_structure.open_issues}}'
+      days_since_push: '{{parse_dates.days_since_push}}'
+      commit_count_30d: '{{fetch_commits.commit_count_30d}}'
+      unique_authors_30d: '{{fetch_commits.unique_authors_30d}}'
+  depends_on:
+  - parse_dates
+  - fetch_commits
+
+- key: format_report
+  worker: py-std
+  activity_name: script
+  parameters:
+    script: |-
+      async def format_report(
+          repo_name,
+          language,
+          stars,
+          forks,
+          age_years,
+          days_since_push,
+          commit_count_30d,
+          health_score,
+          status,
+          breakdown,
+      ):
+          from datetime import datetime
+
+          import orjson
+
+          # Build comprehensive health report
+          report = {
+              "repository": repo_name,
+              "language": language,
+              "metrics": {
+                  "stars": stars,
+                  "forks": forks,
+                  "age_years": age_years,
+                  "days_since_last_push": days_since_push,
+                  "commits_last_30_days": commit_count_30d,
+              },
+              "health": {
+                  "score": health_score,
+                  "status": status,
+                  "breakdown": breakdown,
+              },
+              "generated_at": datetime.utcnow().isoformat(),
+          }
+
+          # Serialize using orjson (faster than standard json library)
+          # orjson returns bytes, so decode to string for return
+          report_json = orjson.dumps(report, option=orjson.OPT_INDENT_2).decode()
+
+          return {
+              "report_json": report_json,
+              "report": report,
+              "summary": f"{repo_name}: Health Score {health_score}/100 ({status})",
+          }
+
+      # Extract parameters from INPUT
+      repo_name = INPUT.get('repo_name')
+      language = INPUT.get('language')
+      stars = INPUT.get('stars')
+      forks = INPUT.get('forks')
+      age_years = INPUT.get('age_years')
+      days_since_push = INPUT.get('days_since_push')
+      commit_count_30d = INPUT.get('commit_count_30d')
+      health_score = INPUT.get('health_score')
+      status = INPUT.get('status')
+      breakdown = INPUT.get('breakdown')
+
+      # Call function and assign result to OUTPUT
+      OUTPUT = await format_report(repo_name, language, stars, forks, age_years, days_since_push, commit_count_30d, health_score, status, breakdown)
+    inputs:
+      repo_name: '{{validate_structure.repo_name}}'
+      language: '{{validate_structure.language}}'
+      stars: '{{validate_structure.stars}}'
+      forks: '{{validate_structure.forks}}'
+      age_years: '{{parse_dates.age_years}}'
+      days_since_push: '{{parse_dates.days_since_push}}'
+      commit_count_30d: '{{fetch_commits.commit_count_30d}}'
+      health_score: '{{calculate_health.health_score}}'
+      status: '{{calculate_health.status}}'
+      breakdown: '{{calculate_health.breakdown}}'
+  depends_on:
+  - calculate_health
+
