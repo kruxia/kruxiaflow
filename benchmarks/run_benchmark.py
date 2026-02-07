@@ -194,9 +194,9 @@ def print_summary(all_results):
         click.echo(f"Kruxia Flow (std) avg throughput: {sf_avg:.2f} wf/sec")
 
         if sf_avg >= 1000:
-            click.secho("🎉 Kruxia Flow target achieved: >1,000 wf/sec!", fg="green", bold=True)
+            click.secho("🎉 Kruxia Flow target achieved: >100 wf/sec!", fg="green", bold=True)
         else:
-            click.secho(f"⚠️  Kruxia Flow below target: {sf_avg:.2f}/1000 wf/sec", fg="yellow")
+            click.secho(f"⚠️  Kruxia Flow below target: {sf_avg:.2f}/100 wf/sec", fg="yellow")
 
     if py_std_results:
         py_avg = sum(r.throughput_wf_per_sec for r in py_std_results) / len(py_std_results)

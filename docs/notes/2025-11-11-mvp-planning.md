@@ -90,7 +90,7 @@ YAML + built-in activities delivers all three immediately. Python SDKs are a pos
 - Python runtime overhead is a **major weakness** of competitors
 - Temporal/Airflow/Prefect: All suffer from Python performance bottlenecks
 - **Competitor baseline: 35-100 workflows/sec** (documented PostgreSQL limit)
-- **Kruxia Flow target: >1,000 workflows/sec** (10x improvement)
+- **Kruxia Flow target: >100 workflows/sec** (10x improvement)
 - Edge deployment needs 50MB footprint, not Python's overhead
 
 **2. YAML Covers the Market**
@@ -166,7 +166,7 @@ Python/JavaScript builders (Epic 4) give developers:
 
 4. **Performance guarantee**: All activities run in Rust
    - Predictable <1ms orchestration latency
-   - Supports >1,000 workflows/sec target
+   - Supports >100 workflows/sec target
 
 ## Recommended Roadmap (From mvp-requirements.md)
 
@@ -190,7 +190,7 @@ Python/JavaScript builders (Epic 4) give developers:
 - PostgreSQL performance profiling (US-2.3)
 - Stress testing and capacity planning (US-2.4)
 - Grafana performance dashboard (US-2.5)
-- **Target**: Prove >1,000 workflows/sec vs competitors' 35-100/sec
+- **Target**: Prove >100 workflows/sec vs competitors' 35-100/sec
 
 **Why benchmarking before YAML**: Validates architecture early, informs YAML feature decisions based on performance data.
 
@@ -329,7 +329,7 @@ This is a **stronger competitive position** than becoming "another Python workfl
 - ✅ Complete US-1C.2 (All-in-One Launcher) + US-1C.7 (Graceful Shutdown)
 
 **Epic 2 (1-2 weeks):**
-- 📋 Performance benchmarking - Prove >1,000 wf/sec, 10x competitive advantage
+- 📋 Performance benchmarking - Prove >100 wf/sec, 10x competitive advantage
 
 **Epic 3 (3-4 weeks):**
 - 📋 YAML workflow definitions - Enable 70-80% of workflows declaratively

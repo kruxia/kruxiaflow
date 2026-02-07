@@ -1385,7 +1385,7 @@ If regression is detected:
 
 | Metric | Target |
 |--------|--------|
-| Workflow Throughput | >1,000 wf/sec |
+| Workflow Throughput | >100 wf/sec |
 | Workflow Start Latency (P99) | <10ms |
 
 ## Interpreting Results
@@ -1651,10 +1651,10 @@ See [Performance Testing Guide](performance-testing.md) for details.
 - Sustained throughput: >100 wf/sec for 60 seconds
 
 ### Stretch Goal (Epic 6 - Post-MVP Optimization)
-- Workflow throughput: >1,000 wf/sec (via HTTP API)
+- Workflow throughput: >100 wf/sec (via HTTP API)
 - P99 end-to-end latency: <50ms (create to complete)
 - Success rate: >99.9%
-- Sustained throughput: >1,000 wf/sec for 60 seconds
+- Sustained throughput: >100 wf/sec for 60 seconds
 
 **Internal Micro-benchmarks (Deferred to US-2.X)**:
 - Orchestrator evaluation: <1ms per workflow

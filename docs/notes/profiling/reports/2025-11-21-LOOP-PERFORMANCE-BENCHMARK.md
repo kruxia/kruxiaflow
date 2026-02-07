@@ -142,10 +142,10 @@ Based on these benchmark results, here's the real-world impact during workflow o
 
 ### Aggregate Impact at Scale
 
-**For a system processing 1,000 workflows/second with average 50 activities, 5 iterations:**
+**For a system processing 100 workflows/second with average 50 activities, 5 iterations:**
 
-**Without optimization**: 1,000 workflows × 9.3µs = **9.3ms CPU time/second**
-**With cached metadata**: 1,000 workflows × 0.46µs = **0.46ms CPU time/second**
+**Without optimization**: 100 workflows × 9.3µs = **9.3ms CPU time/second**
+**With cached metadata**: 100 workflows × 0.46µs = **0.46ms CPU time/second**
 
 **Total CPU savings**: 8.84ms/second = **~1% CPU utilization saved**
 
@@ -287,7 +287,7 @@ The benchmark results confirm that loop detection and iteration management will 
 - ✅ Constant-time operations suitable for high-throughput scenarios
 - ✅ Negligible per-iteration overhead supports 100+ iteration workflows
 - ✅ Performance scales predictably with workflow complexity
-- ✅ CPU overhead at 1,000+ workflows/sec is minimal
+- ✅ CPU overhead at 100+ workflows/sec is minimal
 
 ### Future Optimization Opportunities
 

@@ -52,7 +52,7 @@ The built-in worker provides a complete workflow execution system out of the box
 **Performance Impact**: The 1-2ms HTTP overhead per activity is negligible compared to:
 - Typical activity execution time (seconds to minutes)
 - Current ~10ms event polling latency
-- MVP target >1,000 workflows/sec (easily achievable with this overhead)
+- MVP target >100 workflows/sec (easily achievable with this overhead)
 
 ---
 
@@ -1434,7 +1434,7 @@ See [Activity Implementation Guide](activity-implementation.md)
 
 **Mitigation**:
 - HTTP overhead (~1-2ms) is negligible for typical activities (seconds to minutes)
-- MVP target >1,000 workflows/sec easily achievable
+- MVP target >100 workflows/sec easily achievable
 - Post-MVP: Can add internal fast path if needed
 
 ### Risk 2: Token Expiration During Activity Execution

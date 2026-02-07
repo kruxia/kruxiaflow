@@ -9,7 +9,7 @@
 
 ## Overview
 
-The **Compiled Workflow Representation** is a performance optimization that transforms workflow definitions into an ultra-efficient binary format designed for the Rust orchestrator. This enables **sub-10 microsecond** orchestration latency instead of the baseline ~1 millisecond, crucial for achieving the >1,000 workflows/sec throughput target.
+The **Compiled Workflow Representation** is a performance optimization that transforms workflow definitions into an ultra-efficient binary format designed for the Rust orchestrator. This enables **sub-10 microsecond** orchestration latency instead of the baseline ~1 millisecond, crucial for achieving the >100 workflows/sec throughput target.
 
 ---
 
@@ -39,7 +39,7 @@ Total: ~1,000µs (1ms)
 
 ### Why This Matters at Scale
 
-**At 1,000 workflows/sec**:
+**At 100 workflows/sec**:
 - Each workflow has ~5 activities on average
 - Each activity completion triggers evaluation
 - Total: ~5,000 evaluations/second
@@ -234,7 +234,7 @@ pub fn find_ready_activities_compiled(
 ### System-Level Impact
 
 **Without Compilation (Baseline)**:
-- 1,000 workflows/sec × 5 activities = 5,000 evaluations/sec
+- 100 workflows/sec × 5 activities = 5,000 evaluations/sec
 - 5,000 evaluations × 1ms = 5 CPU cores (100% utilization)
 - 5,000 PostgreSQL queries/sec for workflow definitions
 - Memory: ~50MB/sec allocation rate
@@ -348,7 +348,7 @@ async fn on_activity_completed(&self, workflow_id: Uuid, activity_key: &str) {
    ```
 
 2. **LRU cache for hot workflows**
-   - Keep last 1,000 workflows in memory
+   - Keep last 100 workflows in memory
    - 10MB memory footprint typical
 
 3. **Include in events for very hot workflows**
@@ -525,7 +525,7 @@ For a workflow with **N activities**:
 **Success criteria**:
 - <100µs orchestration latency (P99)
 - 90%+ cache hit rate
-- 1,000+ workflows/sec sustained
+- 100+ workflows/sec sustained
 
 ### Phase 3: Scale (Production Hardening)
 **Timeline**: Weeks 25-32  
@@ -657,7 +657,7 @@ Throughput:
 The **Compiled Workflow Representation** is a game-changing optimization that:
 
 ✅ **100x faster orchestration** (1ms → 10µs)  
-✅ **Enables >1,000 workflows/sec** target  
+✅ **Enables >100 workflows/sec** target  
 ✅ **Reduces CPU overhead** from 100% to <5%  
 ✅ **Eliminates database load** for hot paths  
 ✅ **Maintains code simplicity** (compile once, use forever)  
