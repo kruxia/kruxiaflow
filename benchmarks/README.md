@@ -134,4 +134,4 @@ To add new scenarios or platforms:
 
 ## License
 
-MIT (matches Kruxia Flow license)
+AGPL-3.0 (matches Kruxia Flow license)
