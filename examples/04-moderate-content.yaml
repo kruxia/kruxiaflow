@@ -45,7 +45,7 @@ activities:
       query: |
         INSERT INTO moderation_log
         (content_id, decision, cost, tokens, moderated_at)
-        VALUES ($1, $2, $3, $4, NOW())
+        VALUES ($1, $2, $3::numeric, $4, NOW())
       params:
         - "{{INPUT.content_id}}"
         - "{{analyze_content.result.content}}"

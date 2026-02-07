@@ -67,7 +67,7 @@ store_moderation_result = Activity(
         "query": """
             INSERT INTO moderation_log
             (content_id, decision, cost, tokens, moderated_at)
-            VALUES ($1, $2, $3, $4, NOW())
+            VALUES ($1, $2, $3::numeric, $4, NOW())
         """,
         "params": [
             str(content_id),

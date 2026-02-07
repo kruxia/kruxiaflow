@@ -24,17 +24,17 @@ Kruxia Flow is a lightweight, high-performance workflow orchestration platform d
 
 ### Core Value Proposition
 
-- **Single Binary**: Complete orchestration stack in one 10-15MB executable
+- **Single Binary**: Complete orchestration stack in one 7.5 MB executable
 - **PostgreSQL-First**: All persistence (queues, events, state) using PostgreSQL 17+
-- **High Performance**: Target >1,000 workflows/sec on commodity hardware
-- **Edge-Ready**: Runs with 50MB RAM footprint
+- **High Performance**: 93 wf/sec benchmarked (target >1,000 wf/sec with query optimization)
+- **Edge-Ready**: Lightweight footprint (328 MB peak under load)
 - **AI-Native**: Built-in cost tracking, streaming, and non-deterministic activity handling
 
 ### System Boundaries
 
 ```mermaid
 flowchart TB
-    subgraph Binary["Kruxia Flow Binary (Single 10MB Executable)"]
+    subgraph Binary["Kruxia Flow Binary (Single 7.5 MB Executable)"]
         API[API Server<br/>HTTP/WS]
         Orch[Orchestrator<br/>Event-Driven]
         Worker[Built-in Worker]
