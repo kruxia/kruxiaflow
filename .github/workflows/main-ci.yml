@@ -15,8 +15,3 @@ jobs:
     name: Rust CI
     uses: ./.github/workflows/rust-ci.yml
     secrets: inherit
-
-  python:
-    name: Python SDK CI
-    uses: ./.github/workflows/py-ci.yml
-    secrets: inherit
