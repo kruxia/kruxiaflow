@@ -385,7 +385,7 @@ cargo build --release
 - Multi-provider LLM support
 - Token streaming
 - Human-in-the-loop workflows
-- [Python SDK](https://github.com/kruxia/kruxiaflow-python) (`pip install kruxiaflow-python`)
+- [Python SDK](https://github.com/kruxia/kruxiaflow-python) (install from GitHub)
 
 ### Next
 - Semantic caching
