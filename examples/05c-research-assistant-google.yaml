@@ -70,7 +70,7 @@ activities:
       query: |
         INSERT INTO research_log
         (question, answer, provider, model, cost, prompt_tokens, output_tokens, total_tokens, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+        VALUES ($1, $2, $3, $4, $5::numeric, $6, $7, $8, NOW())
         RETURNING id
       params:
         - "{{INPUT.question}}"
