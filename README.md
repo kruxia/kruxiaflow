@@ -5,7 +5,7 @@
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Discord](https://img.shields.io/discord/1457098705214640333?logo=discord&label=Discord)](https://discord.gg/ZJAzygCq)
 
-**AI-native durable workflows that run everywhere**
+**AI-native durable workflows with built-in cost controls**
 
 The only durable workflow engine built for AI. Workflows survive crashes, budgets control AI spend, and costs are tracked per token. Ships as a 7.5 MB binary that runs anywhere.
 
