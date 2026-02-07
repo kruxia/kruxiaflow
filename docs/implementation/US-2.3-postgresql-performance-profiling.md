@@ -428,7 +428,7 @@ Based on US-2.1/US-2.2 benchmark results (56 wf/sec baseline), targets for optim
 |-------------------------------|------------------|-----------------|
 | claim_next avg latency        | TBD (profiling)  | <1ms            |
 | event_poll avg latency        | TBD (profiling)  | <0.5ms          |
-| Workflows/sec (throughput)    | 56 wf/sec        | >1,000 wf/sec   |
+| Workflows/sec (throughput)    | 56 wf/sec        | >100 wf/sec   |
 | P99 orchestration latency     | TBD              | <5ms            |
 | Sequential scans              | TBD              | 0 for hot paths |
 

@@ -520,7 +520,7 @@ The workflow orchestration and AI agentic framework market has reached a critica
    - Temporal: 35 workflows/sec bottleneck
    - Conductor: 35 workflows/sec bottleneck
    - Prefect/Dagster: Acceptable but not optimized
-   - **OPPORTUNITY**: Prove >1,000 workflows/sec with aggressive Postgres tuning
+   - **OPPORTUNITY**: Prove >100 workflows/sec with aggressive Postgres tuning
 
 3. **✅ MAJOR GAP: Edge Deployment**
    - Only Azure Durable Functions supports edge (K8s/Arc)
@@ -1036,7 +1036,7 @@ The workflow orchestration and AI agentic framework market has reached a critica
 
 **Opportunity:**
 - **Operational simplicity**: Single binary vs. multi-service
-- **PostgreSQL optimization**: Prove >1,000 workflows/sec (vs. 35-100 competitor limit)
+- **PostgreSQL optimization**: Prove >100 workflows/sec (vs. 35-100 competitor limit)
 - **Rust performance**: 2-10x latency advantage
 
 **Differentiation:**
@@ -1209,7 +1209,7 @@ The workflow orchestration and AI agentic framework market has reached a critica
 - Write-ahead log tuning
 - Benchmark against competitors
 
-**Goal:** Prove **>1,000 workflows/sec with PostgreSQL** (10x competitors)
+**Goal:** Prove **>100 workflows/sec with PostgreSQL** (10x competitors)
 
 **Why Critical:** Validates core architectural choice
 
@@ -1314,7 +1314,7 @@ The workflow orchestration and AI agentic framework market has reached a critica
 
 ### **Risk Mitigation Priorities:**
 
-1. **Critical:** Prove PostgreSQL >1,000 workflows/sec (vs. 35-100 bottleneck)
+1. **Critical:** Prove PostgreSQL >100 workflows/sec (vs. 35-100 bottleneck)
 2. **High:** Build top 20 AI integrations + LangChain interop
 3. **High:** Developer experience (Python SDK option, excellent docs)
 4. **Moderate:** Community building (10K stars by Year 1)

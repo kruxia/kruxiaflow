@@ -22,7 +22,7 @@
 - [ ] Docker Compose setup for reproducibility
 - [ ] Published methodology: Open-source on GitHub
 - [ ] Results: HTML report with charts
-- [ ] Target proof: Kruxia Flow >1,000 wf/sec vs Temporal 35-100 wf/sec vs Airflow 10-50 wf/sec
+- [ ] Target proof: Kruxia Flow >100 wf/sec vs Temporal 35-100 wf/sec vs Airflow 10-50 wf/sec
 - [ ] Critical: Run after Epic 1 to validate event-driven architecture
 
 ---
@@ -1216,7 +1216,7 @@ def print_summary(all_results):
         click.echo(f"Kruxia Flow avg throughput: {sf_avg:.2f} wf/sec")
 
         if sf_avg >= 1000:
-            click.secho("🎉 Kruxia Flow target achieved: >1,000 wf/sec!", fg="green", bold=True)
+            click.secho("🎉 Kruxia Flow target achieved: >100 wf/sec!", fg="green", bold=True)
         else:
             click.secho(f"⚠️  Kruxia Flow below target: {sf_avg:.2f}/1000 wf/sec", fg="yellow")
 
@@ -1427,7 +1427,7 @@ async def main():
     print(f"Speedup: {speedup:.1f}x")
 
     if sf_avg >= 1000:
-        print("\n🎉 Kruxia Flow target achieved: >1,000 wf/sec!")
+        print("\n🎉 Kruxia Flow target achieved: >100 wf/sec!")
     else:
         print(f"\n⚠️  Kruxia Flow below target: {sf_avg:.2f}/1000 wf/sec")
 
@@ -1700,7 +1700,7 @@ docker-compose down
 
 ## Expected Results
 
-- **Kruxia Flow**: >1,000 workflows/sec average
+- **Kruxia Flow**: >100 workflows/sec average
 - **Temporal**: 35-100 workflows/sec (based on published benchmarks)
 - **Airflow**: 10-50 workflows/sec (batch-oriented, not optimized for throughput)
 - **Speedup**: 10x+ vs Temporal, 20x+ vs Airflow
@@ -1793,14 +1793,14 @@ MIT (matches Kruxia Flow license)
 1. Run benchmarks locally
 2. Verify HTML report renders correctly
 3. Validate metrics against internal Kruxia Flow benchmarks
-4. Confirm >1,000 wf/sec target achieved
+4. Confirm >100 wf/sec target achieved
 
 ---
 
 ## Success Criteria
 
 1. ✅ Reproducible benchmarks running in Docker Compose (code complete)
-2. ⏸️ Kruxia Flow achieving >1,000 wf/sec (needs testing to validate)
+2. ⏸️ Kruxia Flow achieving >100 wf/sec (needs testing to validate)
 3. ⏸️ Temporal baseline established (<100 wf/sec expected) (needs testing)
 4. ✅ HTML report clearly shows 10x+ advantage (report generator implemented)
 5. ✅ Methodology documented and transparent

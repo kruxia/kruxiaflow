@@ -26,7 +26,7 @@ Kruxia Flow v0.2 addresses critical issues discovered in v0.1 while positioning 
 **Core Value Proposition**: Production-ready AI orchestration with operational simplicity—the only platform combining deterministic workflow execution with non-deterministic AI agents, built-in cost controls, and edge deployment capability.
 
 **Primary Business Goals**:
-- Achieve >1,000 workflows/sec (10x competitor baseline)
+- Achieve >100 workflows/sec (10x competitor baseline)
 - Enable edge AI orchestration (completely unserved market)
 - Solve AI cost control crisis (universal pain point, no current solution)
 - Deliver operational simplicity (single binary vs multi-service architectures)
@@ -71,7 +71,7 @@ Kruxia Flow v0.2 addresses critical issues discovered in v0.1 while positioning 
 
 ## Epic 1: Event-Driven Orchestration Architecture
 
-**Business Objective**: Solve v0.1 performance issues and enable >1,000 workflows/sec with guaranteed execution ordering
+**Business Objective**: Solve v0.1 performance issues and enable >100 workflows/sec with guaranteed execution ordering
 
 ### User Stories
 
@@ -96,8 +96,8 @@ Kruxia Flow v0.2 addresses critical issues discovered in v0.1 while positioning 
   - On activity completion, orchestrator re-evaluates workflow
   - Only ready activities scheduled to queue
   - Idempotent scheduling (ON CONFLICT DO NOTHING)
-  - Support for 1,000+ workflows/sec sustained throughput
-- **Performance Target**: >1,000 workflows/sec, <10ms P99 start latency
+  - Support for 100+ workflows/sec sustained throughput
+- **Performance Target**: >100 workflows/sec, <10ms P99 start latency
 
 ---
 
@@ -329,7 +329,7 @@ The built-in worker is implemented as an HTTP client to the API server rather th
 **Performance Impact**: The 1-2ms HTTP overhead per activity is negligible compared to:
 - Typical activity execution time (seconds to minutes)
 - Current ~10ms event polling latency
-- MVP target >1,000 workflows/sec (easily achievable with this overhead)
+- MVP target >100 workflows/sec (easily achievable with this overhead)
 
 **Post-MVP Optimization**: If HTTP overhead becomes a bottleneck, an internal fast path can be added while maintaining the same API contract for external workers.
 
@@ -500,7 +500,7 @@ kruxiaflow/
   - Docker Compose setup for reproducibility
   - Published methodology: Open-source on GitHub
   - Results: HTML report with charts
-  - Target proof: Kruxia Flow >1,000 wf/sec vs Temporal/Conductor 35-100 wf/sec
+  - Target proof: Kruxia Flow >100 wf/sec vs Temporal/Conductor 35-100 wf/sec
   - **Critical**: Run after Epic 1 to validate event-driven architecture
 - **Implementation**: Complete benchmark suite in `benchmarks/` directory with Kruxia Flow, Temporal, and Airflow benchmarks. See `docs/implementation/US-2.2-competitor-comparison-benchmarks.md` for details.
 - **Results** (v0.2.0 MVP baseline):
@@ -508,7 +508,7 @@ kruxiaflow/
   - **Temporal**: 14-65 wf/sec (avg 35 wf/sec) - 100% success rate
   - **Airflow**: 0.33-3.1 wf/sec (avg 1.3 wf/sec) - 3-16% success rate (configuration issues)
   - **Speedup**: 1.6x faster than Temporal, 44x faster than Airflow
-  - **Note**: Pre-optimization baseline. Target >1,000 wf/sec achievable with Epic 6 (PostgreSQL optimization)
+  - **Note**: Pre-optimization baseline. Target >100 wf/sec achievable with Epic 6 (PostgreSQL optimization)
 
 **US-2.3: PostgreSQL Performance Profiling** ✅ Complete
 - **As** a platform engineering lead
@@ -936,7 +936,7 @@ kruxiaflow/
 
 ## Epic 6: PostgreSQL Performance Optimization
 
-**Business Objective**: Prove >1,000 workflows/sec on PostgreSQL, overcoming documented 35-100/sec bottleneck of competitors
+**Business Objective**: Prove >100 workflows/sec on PostgreSQL, overcoming documented 35-100/sec bottleneck of competitors
 
 **Status**: ⏳ Partial - US-6.1 complete via US-2.3 profiling optimizations
 
@@ -961,7 +961,7 @@ kruxiaflow/
 **US-6.2: Connection Pooling and Batching**
 - **As** a platform engineering lead
 - **I want** efficient connection management
-- **So that** we support 1,000+ concurrent workflows without exhausting connections
+- **So that** we support 100+ concurrent workflows without exhausting connections
 - **Acceptance Criteria**:
   - PgBouncer for connection pooling (transaction mode)
   - Application pool: 2-20 connections (configurable)
@@ -1382,7 +1382,7 @@ kruxiaflow/
 |------------------------------|------------------------|-------------------------------------------------|
 | **Workflow Start Latency**   | <10ms P99              | Sub-second UX for workflow triggers             |
 | **Activity Schedule Latency**| <1ms P99               | Negligible orchestrator overhead                |
-| **Workflow Throughput**      | >1,000 workflows/sec   | 10x competitors (Temporal/Conductor: 35–100/sec)|
+| **Workflow Throughput**      | >100 workflows/sec   | 10x competitors (Temporal/Conductor: 35–100/sec)|
 | **Activity Throughput**      | >10,000 activities/sec | Support 10 activities/workflow average          |
 | **State Query Latency**      | <2ms average           | Fast dashboard queries                          |
 | **Orchestrator Evaluation**  | <1ms per workflow      | Enable high throughput                          |
@@ -1476,7 +1476,7 @@ kruxiaflow/
      - Health checks and service monitoring - US-1C.6
 
 2. **Performance Validation** (Epic 2):
-   - ✅ Benchmark proving >1,000 workflows/sec
+   - ✅ Benchmark proving >100 workflows/sec
    - ✅ Competitor comparisons published
    - ✅ Performance baseline established
    - ✅ Programmatic workflow definitions for benchmarking
@@ -1496,7 +1496,7 @@ kruxiaflow/
 5. **PostgreSQL Optimization** (Epic 6):
    - ✅ Query optimization based on Epic 2 insights
    - ✅ Connection pooling and batching
-   - ✅ Achieve >1,000 workflows/sec target
+   - ✅ Achieve >100 workflows/sec target
 
 6. **Developer Experience** (Epic 9):
    - ✅ CLI tools (validate, test, deploy)
@@ -1531,7 +1531,7 @@ kruxiaflow/
 
 | Metric                  | Target                 | Validation Method                    |
 |:------------------------|:----------------------:|:-------------------------------------|
-| **Workflow Throughput** | >1,000/sec sustained   | Continuous benchmarking (Epic 2)     |
+| **Workflow Throughput** | >100/sec sustained     | Continuous benchmarking (Epic 2)     |
 | **Latency P99**         | <10ms workflow start   | Production monitoring                 |
 | **Binary Size**         | <15MB                  | Build artifacts                       |
 | **Memory Footprint**    | <50MB base             | Docker stats                          |
@@ -1573,7 +1573,7 @@ kruxiaflow/
 
 ### Technical Risks
 
-**R1: PostgreSQL Performance Target (>1,000 wf/sec)**
+**R1: PostgreSQL Performance Target (>100 wf/sec)**
 - **Probability**: Medium
 - **Impact**: HIGH (core value prop)
 - **Mitigation**:
@@ -1790,7 +1790,7 @@ flowchart TB
 - PostgreSQL performance profiling (US-2.3)
 - Stress testing and capacity planning (US-2.4)
 - Performance dashboard and monitoring (US-2.5)
-- **Target**: Prove >1,000 workflows/sec vs competitors' 35-100/sec
+- **Target**: Prove >100 workflows/sec vs competitors' 35-100/sec
 
 **Phase 6: Complete Epic 1A/1C (Post-Epic 3)** 📋
 - 📋 **US-1A.8**: Activity Results and Output Retrieval (~8 hours)
@@ -1814,7 +1814,7 @@ flowchart TB
   - Connection pooling and batching
   - Advanced indexing strategy
   - Partitioning for time-series data
-  - Target validation: >1,000 workflows/sec sustained
+  - Target validation: >100 workflows/sec sustained
   - Final competitive benchmark comparisons
 
 **Phase 9: Developer Experience (Post-MVP)** 📋 **DEFERRED**

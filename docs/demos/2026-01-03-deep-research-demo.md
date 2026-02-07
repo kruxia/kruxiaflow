@@ -185,7 +185,7 @@ The deep research demo aligns perfectly with Kruxia Flow's documented architectu
 - `TAVILY_API_KEY`
 
 **Optimization Scope**: MVP focus on standard event-driven DAG, ~1ms orchestration latency
-- Target: >1,000 workflows/sec via PostgreSQL query optimization
+- Target: >100 workflows/sec via PostgreSQL query optimization
 - Not implementing: Compiled workflow optimizations (post-MVP)
 
 **Database**: sqlx with compile-time query validation

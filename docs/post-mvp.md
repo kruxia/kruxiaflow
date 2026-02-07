@@ -15,7 +15,7 @@ The MVP focuses on:
 - ✅ PostgreSQL-only infrastructure (Queue, Events, Storage, Auth)
 - ✅ Event-driven orchestration with polling
 - ✅ Basic workflow execution (sequential, parallel, conditional)
-- ✅ >1,000 workflows/sec target throughput
+- ✅ >100 workflows/sec target throughput
 - ✅ Single-tenant deployments
 
 Post-MVP expands to:

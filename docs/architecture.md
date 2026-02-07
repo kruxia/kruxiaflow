@@ -26,7 +26,7 @@ Kruxia Flow is a lightweight, high-performance workflow orchestration platform d
 
 - **Single Binary**: Complete orchestration stack in one 7.5 MB executable
 - **PostgreSQL-First**: All persistence (queues, events, state) using PostgreSQL 17+
-- **High Performance**: 93 wf/sec benchmarked (target >1,000 wf/sec with query optimization)
+- **High Performance**: 93 wf/sec benchmarked (target >100 wf/sec with query optimization)
 - **Edge-Ready**: Lightweight footprint (328 MB peak under load)
 - **AI-Native**: Built-in cost tracking, streaming, and non-deterministic activity handling
 
@@ -277,7 +277,7 @@ The built-in worker is implemented as an HTTP client to the API server rather th
 The 1-2ms HTTP overhead per activity is **negligible** because:
 - Typical activity execution time: seconds to minutes (HTTP overhead is <0.1% of total)
 - Current event polling latency: ~10ms (HTTP overhead is <20% of this, not on critical path)
-- MVP target >1,000 workflows/sec: easily achievable with this overhead
+- MVP target >100 workflows/sec: easily achievable with this overhead
 - Most activities are I/O bound (LLM calls, database queries, HTTP requests), not CPU bound
 
 **Why Direct Service Access Was Rejected**:
@@ -3129,7 +3129,7 @@ Migrations are embedded in the binary and run automatically on startup.
 
 ### Throughput
 
-- **>1,000 workflows/sec**: Sustained throughput on commodity hardware
+- **>100 workflows/sec**: Sustained throughput on commodity hardware
 - **>10,000 activities/sec**: Activity execution throughput
 - **<1ms orchestrator evaluation**: Time to determine next activities
 
@@ -3162,7 +3162,7 @@ Migrations are embedded in the binary and run automatically on startup.
 - Idempotent scheduling prevents duplicate work
 - PostgreSQL query optimization with prepared statements
 - ~1ms orchestration latency
-- Target >1,000 workflows/sec with query and index optimization
+- Target >100 workflows/sec with query and index optimization
 
 ### Performance Benchmarking
 

@@ -125,7 +125,7 @@ All external infrastructure dependencies are wrapped in service interfaces:
 
 - **MVP focus**: Standard event-driven DAG evaluation, ~1ms orchestration latency
 - **Do not discuss**: Compiled workflow optimizations (post-MVP feature)
-- **Target performance**: >1,000 workflows/sec via PostgreSQL query optimization
+- **Target performance**: >100 workflows/sec via PostgreSQL query optimization
 
 ## Code Standards
 

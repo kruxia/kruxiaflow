@@ -1,4 +1,5 @@
 # The Killer Demo for Kruxia Flow: Deep Research Agent with Live Cost Control
+2026-01-06
 
 **The most compelling demo for Kruxia Flow is a Deep Research Agent that generates comprehensive research reports while displaying real-time cost tracking and intelligent model routing.** This demo hits every Kruxia Flow differentiator while solving the #1 pain point AI startups face: runaway API costs. With Perplexity valued at **$18B** and open-source GPT Researcher achieving **19K+ GitHub stars**, deep research represents the hottest intersection of proven demand and technical complexity that showcases workflow orchestration value.
 

@@ -70,7 +70,7 @@ loop {
 ### Test Scenario
 - **Database**: PostgreSQL 15, 4 CPU, 8GB RAM, max_connections=300
 - **Kruxia Flow**: 2 CPU, 4GB RAM
-- **Workload**: 1,000 workflows × 5 events each = 5,000 events
+- **Workload**: 100 workflows × 5 events each = 5,000 events
 - **Event Processing**: ~10ms per event (database I/O)
 - **Workflow**: Simple 3-activity DAG
 
@@ -727,7 +727,7 @@ See complete implementation in Appendix A (to keep main document focused).
 
 **Memory Trade-off:**
 ```
-1,000 workflows:   ~500 MB
+100 workflows:   ~500 MB
 10,000 workflows:  ~5 GB
 ```
 
@@ -1280,7 +1280,7 @@ KRUXIAFLOW_DB_MAX_CONNECTIONS=240  # 2x max_concurrent + 40
 | MVP/Sequential            | 1              | 100        | 20             | 20 MB  |
 | Small (10 wf/s)           | 10             | 100        | 40             | 50 MB  |
 | Medium (100 wf/s)         | 50             | 500        | 140            | 100 MB |
-| Large (1,000 wf/s)        | 100            | 1,000      | 240            | 200 MB |
+| Large (100 wf/s)        | 100            | 1,000      | 240            | 200 MB |
 | Very Large (10,000 wf/s)  | 200            | 2,000      | 440            | 500 MB |
 
 ---

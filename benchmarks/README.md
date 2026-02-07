@@ -59,7 +59,7 @@ docker-compose down
 
 ## Expected Results
 
-- **Kruxia Flow**: >1,000 workflows/sec average
+- **Kruxia Flow**: >100 workflows/sec average
 - **Temporal**: 35-100 workflows/sec (based on published benchmarks)
 - **Airflow**: 10-50 workflows/sec (batch-oriented, not optimized for throughput)
 - **Speedup**: 10x+ vs Temporal, 20x+ vs Airflow

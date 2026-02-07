@@ -795,7 +795,7 @@ tokio-util = { version = "0.7", features = ["time"] }
 
 | Configuration                   | Expected Capacity | Throughput Target |
 |---------------------------------|-------------------|-------------------|
-| 1 orchestrator + 1 worker       | 1,000 concurrent  | 1,000 wf/min      |
+| 1 orchestrator + 1 worker       | 1,000 concurrent  | 100 wf/min      |
 | 1 orchestrator + 4 workers      | 2,000 concurrent  | 3,000 wf/min      |
 | PostgreSQL (single)             | TBD               | Identify limit    |
 
