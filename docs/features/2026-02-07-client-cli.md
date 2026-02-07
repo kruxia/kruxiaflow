@@ -55,6 +55,39 @@ Database (direct DB — to be grouped under `kruxiaflow db`):
 
 ---
 
+## Binary Name: `kruxiaflow` with `kf` alias
+
+The canonical binary name remains `kruxiaflow`. A short alias `kf` is provided for
+convenience — all examples in this doc work with either name.
+
+**Cargo (two `[[bin]]` targets):**
+```toml
+[[bin]]
+name = "kruxiaflow"
+path = "src/main.rs"
+
+[[bin]]
+name = "kf"
+path = "src/main.rs"
+```
+
+`cargo install kruxiaflow` installs both binaries. Cargo doesn't support symlinks,
+so this produces two identical copies (~7.5 MB each).
+
+**Docker (symlink — single binary):**
+```dockerfile
+COPY --from=builder /app/target/release/kruxiaflow /usr/local/bin/kruxiaflow
+RUN ln -s /usr/local/bin/kruxiaflow /usr/local/bin/kf
+```
+
+One binary, one symlink. The Docker image stays at 63 MB.
+
+**Note:** Google Cloud ships an unrelated [Kf CLI](https://cloud.google.com/migrate/kf/docs/2.5/install-cli)
+for Cloud Foundry migration. The overlap is negligible — users who have both can
+skip the `kf` alias and use `kruxiaflow` directly.
+
+---
+
 ## Reorganization: `kruxiaflow db`
 
 The four existing commands that connect directly to PostgreSQL via `DATABASE_URL`
@@ -163,12 +196,11 @@ kruxiaflow visualize workflow.yaml --format html --output workflow.html
 
 ---
 
-#### ~~`kruxiaflow compile <path>`~~ — moved to Python SDK
+#### ~~`kruxiaflow compile <path>`~~ — moved to Python SDK (`kfpy`)
 
 Compiling Python workflow definitions to YAML requires a Python interpreter. Rather
 than embedding Python in the Rust binary, this functionality belongs in the Python
-SDK (e.g. `kruxiaflow compile workflow.py` as a Python CLI entry point, or
-`workflow.to_yaml()` as a library method). See post-mvp.md Story 4.6.
+SDK's own CLI. See the `kfpy` section below and post-mvp.md Story 4.6.
 
 ---
 
@@ -414,6 +446,53 @@ kruxiaflow import airflow --dags ./airflow/dags --output ./kruxiaflow
 - Operator/activity type mapping
 
 **Source:** mvp-requirements.md US-9.3, US-9.4
+
+---
+
+## `kfpy` — Python SDK CLI
+
+Commands that require a Python interpreter live in the Python SDK as a separate CLI
+entry point: `kfpy`. Installed via `pip install kruxiaflow`, it provides Python-
+specific tooling that complements the Rust `kruxiaflow` binary.
+
+```toml
+# py/pyproject.toml
+[project.scripts]
+kfpy = "kruxiaflow.cli:main"
+```
+
+### Commands
+
+```bash
+# Compile Python workflow to YAML
+kfpy compile workflow.py
+kfpy compile workflow.py --output workflow.yaml
+
+# Compile + validate + deploy to server
+kfpy deploy workflow.py
+kfpy deploy workflow.py --api-url http://localhost:8080
+
+# Validate a Python workflow definition (parse + check structure)
+kfpy validate workflow.py
+
+# Launch the py-std worker
+kfpy worker --api-url http://localhost:8080
+```
+
+### Relationship to `kruxiaflow`
+
+| Task                   | YAML workflows      | Python workflows    |
+|------------------------|----------------------|---------------------|
+| Validate               | `kruxiaflow validate`| `kfpy validate`    |
+| Visualize              | `kruxiaflow visualize`| `kfpy compile` then `kruxiaflow visualize` |
+| Deploy                 | `kruxiaflow workflow deploy` | `kfpy deploy` |
+| Compile to YAML        | N/A                  | `kfpy compile`     |
+| Run workflow           | `kruxiaflow workflow run` | `kruxiaflow workflow run` (same — already YAML on server) |
+| Cost tracking          | `kruxiaflow cost`    | `kruxiaflow cost`  |
+
+The Rust CLI handles everything once a workflow is deployed (run, status, logs, cost).
+`kfpy` handles the Python-specific authoring step: turning Python definitions into
+YAML and deploying them.
 
 ---
 
