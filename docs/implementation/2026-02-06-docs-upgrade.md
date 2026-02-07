@@ -100,3 +100,46 @@ Rewrote quickstart.md to follow the landing page's 4-step flow:
 | 3b  | RAM footprint 50MB → 328 MB peak   | Complete  |
 | 3c  | Mermaid diagram label update        | Complete  |
 | 3d  | Performance target caveat           | Complete  |
+
+### 4. Python SDK Repo Separation
+
+Python examples moved to separate `kruxiaflow-python` repository (`github.com/kruxia/kruxiaflow-python`).
+
+| #   | Change                                                    | Status    |
+|-----|-----------------------------------------------------------|-----------|
+| 4a  | Write comprehensive Python SDK README                     | Complete  |
+| 4b  | Update README.md example links (py/ → kruxiaflow-python)  | Complete  |
+| 4c  | Update README.md Python SDK roadmap link                  | Complete  |
+| 4d  | Update landing page example links                         | Complete  |
+| 4e  | Update landing page pip install command                   | Complete  |
+| 4f  | Update quickstart.md Python SDK references                | Complete  |
+
+#### 4a. Comprehensive Python SDK README
+
+Rewrote `kruxiaflow-python/README.md` with:
+- Installation (core + std extras)
+- Quick start: workflow definition, deployment, and ScriptActivity
+- Architecture diagram (definition vs worker contexts)
+- Feature documentation (expressions, output refs, YAML export, async client)
+- Standard worker (py-std) packages and usage
+- Custom worker example
+- Full examples table (15+ examples)
+- Development setup
+- Links to main project and community
+
+#### 4b-4c. README.md link updates
+
+- Python SDK example links (ex11-ex15) now point to `github.com/kruxia/kruxiaflow-python/blob/main/examples/`
+- Roadmap entry links to `github.com/kruxia/kruxiaflow-python`
+- "Data teams" bullet links to Python SDK repo
+- `pip install kruxiaflow` → `pip install kruxiaflow-python`
+
+#### 4d-4e. Landing page updates
+
+- Sales ETL and Churn Prediction example links updated from `kruxiaflow/blob/main/py/examples/` to `kruxiaflow-python/blob/main/examples/`
+- `pip install kruxiaflow` → `pip install kruxiaflow-python`
+
+#### 4f. Quickstart updates
+
+- `py/examples/` reference replaced with link to Python SDK repo
+- Added link to Python SDK examples alongside YAML examples

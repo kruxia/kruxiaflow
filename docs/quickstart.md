@@ -77,8 +77,8 @@ curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/cost/history \
 
 ## Example Workflows
 
-Kruxia Flow includes 15+ production-ready examples in `examples/` (YAML) and
-`py/examples/` (Python SDK):
+Kruxia Flow includes 15+ production-ready examples in `examples/` (YAML) and the
+[Python SDK repo](https://github.com/kruxia/kruxiaflow-python/tree/main/examples):
 
 | Example                     | Concepts                                    |
 |-----------------------------|---------------------------------------------|
@@ -91,8 +91,9 @@ Kruxia Flow includes 15+ production-ready examples in `examples/` (YAML) and
 | 12_sales_etl_pipeline.py    | Python SDK, pandas, DuckDB SQL             |
 | 13_customer_churn_prediction.py | Python SDK, parallel ML training        |
 
-See the full list in [examples/README.md](../examples/README.md). API docs at
-http://localhost:8080/api/v1/docs.
+See the full list in [examples/README.md](../examples/README.md) and the
+[Python SDK examples](https://github.com/kruxia/kruxiaflow-python/tree/main/examples).
+API docs at http://localhost:8080/api/v1/docs.
 
 ## Stop Kruxia Flow
 

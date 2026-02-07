@@ -21,7 +21,7 @@ Kruxia Flow is a **durable execution engine** — in the same category as Tempor
 
 - **AI startups** — Ship AI agents to production with built-in cost tracking and budget control. Survive crashes, stop runaway spend.
 - **Small businesses** — Define workflows with no code, deploy one binary and one database. No cluster, no DevOps team. Production reliability for tens of dollars a month.
-- **Data teams** — Combine batch pipelines and AI agents in one platform. Python SDK with pandas and DuckDB, without a 4GB footprint or a $1K/month vendor lock-in.
+- **Data teams** — Combine batch pipelines and AI agents in one platform. [Python SDK](https://github.com/kruxia/kruxiaflow-python) with pandas and DuckDB, without a 4GB footprint or a $1K/month vendor lock-in.
 
 ### The Problem
 
@@ -276,11 +276,11 @@ Kruxia Flow includes 15+ production-ready example workflows in YAML and Python:
 [ex8]: examples/README.md#example-8-activity-scheduling-and-delays
 [ex9]: examples/README.md#example-9a-llm-token-streaming
 [ex10]: examples/README.md#example-10-order-processing
-[ex11]: py/examples/11_github_health_check.py
-[ex12]: py/examples/12_sales_etl_pipeline.py
-[ex13]: py/examples/13_customer_churn_prediction.py
-[ex14]: py/examples/14_document_intelligence.py
-[ex15]: py/examples/15_content_moderation_system.py
+[ex11]: https://github.com/kruxia/kruxiaflow-python/blob/main/examples/11_github_health_check.py
+[ex12]: https://github.com/kruxia/kruxiaflow-python/blob/main/examples/12_sales_etl_pipeline.py
+[ex13]: https://github.com/kruxia/kruxiaflow-python/blob/main/examples/13_customer_churn_prediction.py
+[ex14]: https://github.com/kruxia/kruxiaflow-python/blob/main/examples/14_document_intelligence.py
+[ex15]: https://github.com/kruxia/kruxiaflow-python/blob/main/examples/15_content_moderation_system.py
 
 ## Architecture
 
@@ -380,12 +380,12 @@ cargo build --release
 
 ### Now (Complete)
 - Durable workflow execution
-- 10+ example workflows
+- 15+ example workflows
 - LLM cost tracking and budgets
 - Multi-provider LLM support
 - Token streaming
 - Human-in-the-loop workflows
-- Python SDK (`pip install kruxiaflow`)
+- [Python SDK](https://github.com/kruxia/kruxiaflow-python) (`pip install kruxiaflow-python`)
 
 ### Next
 - Semantic caching
