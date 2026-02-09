@@ -83,9 +83,7 @@ impl ServerHandler for KruxiaFlowMcpHandler {
                     DiscoveryTools::GetWorkflowDefinition(ref p) => {
                         discovery::run_get_workflow_definition(&self.pool, p).await
                     }
-                    DiscoveryTools::ListActivities(ref p) => {
-                        discovery::run_list_activities(p)
-                    }
+                    DiscoveryTools::ListActivities(ref p) => discovery::run_list_activities(p),
                     DiscoveryTools::GetWorkflowAuthoringGuide(ref p) => {
                         discovery::run_get_workflow_authoring_guide(p)
                     }
@@ -96,9 +94,7 @@ impl ServerHandler for KruxiaFlowMcpHandler {
             "validate_workflow" | "submit_workflow" | "cancel_workflow" => {
                 let tool = ExecutionTools::try_from(params).map_err(CallToolError::new)?;
                 match tool {
-                    ExecutionTools::ValidateWorkflow(ref p) => {
-                        execution::run_validate_workflow(p)
-                    }
+                    ExecutionTools::ValidateWorkflow(ref p) => execution::run_validate_workflow(p),
                     ExecutionTools::SubmitWorkflow(ref p) => {
                         execution::run_submit_workflow(&self.pool, p).await
                     }
