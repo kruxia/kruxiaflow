@@ -7,6 +7,8 @@
 /// - get_workflow_authoring_guide: how to write workflows
 use rust_mcp_sdk::macros::{JsonSchema, mcp_tool};
 use rust_mcp_sdk::schema::{CallToolResult, TextContent, schema_utils::CallToolError};
+
+use super::error_response;
 use rust_mcp_sdk::tool_box;
 use sqlx::PgPool;
 
@@ -80,6 +82,9 @@ pub struct GetWorkflowDefinition {
 pub struct ListActivities {}
 
 impl ListActivities {
+    /// NOTE: This catalog is manually maintained. When activities are added to
+    /// or removed from the worker, this list and its "total" count must be
+    /// updated to match. See worker/src/activities/ for the source of truth.
     pub fn call_tool(&self) -> Result<CallToolResult, CallToolError> {
         let activities = serde_json::json!([
             {
@@ -252,6 +257,9 @@ impl ListActivities {
 pub struct GetWorkflowAuthoringGuide {}
 
 impl GetWorkflowAuthoringGuide {
+    /// NOTE: This guide is manually maintained. Model names in examples
+    /// (e.g. anthropic/claude-sonnet-4-5-20250929) will become stale as models change.
+    /// Update examples when new models are released.
     pub fn call_tool(&self) -> Result<CallToolResult, CallToolError> {
         let guide = serde_json::json!({
             "yaml_structure": {
@@ -503,14 +511,14 @@ pub async fn run_get_workflow_definition(
         }
         None => {
             let version_label = params.version.as_deref().unwrap_or("latest");
-            serde_json::json!({
+            return error_response(&serde_json::json!({
                 "error": format!(
                     "Workflow '{}' (version: {}) not found",
                     params.name, version_label
                 ),
                 "name": params.name,
                 "version": params.version,
-            })
+            }));
         }
     };
 
@@ -518,4 +526,16 @@ pub async fn run_get_workflow_definition(
         serde_json::to_string_pretty(&response)
             .map_err(|e| CallToolError::from_message(e.to_string()))?,
     )]))
+}
+
+/// Wrapper for ListActivities — uniform run_* dispatch pattern.
+pub fn run_list_activities(params: &ListActivities) -> Result<CallToolResult, CallToolError> {
+    params.call_tool()
+}
+
+/// Wrapper for GetWorkflowAuthoringGuide — uniform run_* dispatch pattern.
+pub fn run_get_workflow_authoring_guide(
+    params: &GetWorkflowAuthoringGuide,
+) -> Result<CallToolResult, CallToolError> {
+    params.call_tool()
 }

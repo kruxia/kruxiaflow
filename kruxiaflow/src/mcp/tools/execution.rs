@@ -9,7 +9,7 @@ use rust_mcp_sdk::schema::{CallToolResult, schema_utils::CallToolError};
 use rust_mcp_sdk::tool_box;
 use sqlx::PgPool;
 
-use super::{parse_uuid, text_response};
+use super::{error_response, parse_uuid, text_response};
 
 // ============================================================================
 // Tool: validate_workflow
@@ -86,6 +86,13 @@ impl ValidateWorkflow {
             }
         }
     }
+}
+
+/// Wrapper for ValidateWorkflow — uniform run_* dispatch pattern.
+pub fn run_validate_workflow(
+    params: &ValidateWorkflow,
+) -> Result<CallToolResult, CallToolError> {
+    params.call_tool()
 }
 
 // ============================================================================
@@ -177,7 +184,7 @@ pub async fn run_submit_workflow(
             "error": "Input must be a JSON object, not a scalar or array",
             "definition_name": params.definition_name,
         });
-        return text_response(&response);
+        return error_response(&response);
     }
 
     let service = kruxiaflow_core::workflow::WorkflowService::new(pool.clone());
@@ -245,7 +252,7 @@ pub async fn run_submit_workflow(
                     "definition_name": params.definition_name,
                 }),
             };
-            text_response(&response)
+            error_response(&response)
         }
     }
 }
@@ -273,14 +280,14 @@ pub async fn run_cancel_workflow(
                 "current_status": workflow.status,
                 "reason_provided": params.reason,
             });
-            text_response(&response)
+            error_response(&response)
         }
         Err(kruxiaflow_core::workflow::WorkflowQueryError::WorkflowNotFound(_)) => {
             let response = serde_json::json!({
                 "error": format!("Workflow '{}' not found", params.workflow_id),
                 "workflow_id": params.workflow_id,
             });
-            text_response(&response)
+            error_response(&response)
         }
         Err(e) => {
             tracing::error!("cancel_workflow query error: {e:?}");
@@ -314,6 +321,10 @@ fn extract_validation_errors(err: &kruxiaflow_core::ValidationError) -> Vec<Stri
 
 /// Best-effort extraction of activity count and dependency map from raw YAML.
 /// Returns (0, {}) if the YAML can't be parsed at all.
+///
+/// Uses `serde_yaml` directly rather than going through `WorkflowDefinition::from_yaml`,
+/// because the definition may have failed validation — we still want to extract whatever
+/// structural info we can from the raw document.
 fn extract_partial_info(yaml: &str) -> (usize, serde_json::Value) {
     // Try to parse as YAML and extract activities — even if validation failed
     // the structure might be readable

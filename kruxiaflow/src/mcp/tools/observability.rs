@@ -13,7 +13,7 @@ use rust_mcp_sdk::tool_box;
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 
-use super::{parse_uuid, text_response};
+use super::{error_response, parse_uuid, text_response};
 
 // ============================================================================
 // Tool: get_workflow_status
@@ -210,7 +210,7 @@ pub async fn run_get_workflow_status(
             text_response(&response)
         }
         Err(kruxiaflow_core::workflow::WorkflowQueryError::WorkflowNotFound(_)) => {
-            text_response(&serde_json::json!({
+            error_response(&serde_json::json!({
                 "error": format!("Workflow '{}' not found", params.workflow_id),
                 "workflow_id": params.workflow_id,
             }))
@@ -317,13 +317,13 @@ pub async fn run_get_activity_output(
             }))
         }
         Err(kruxiaflow_core::workflow::OutputQueryError::WorkflowNotFound(_)) => {
-            text_response(&serde_json::json!({
+            error_response(&serde_json::json!({
                 "error": format!("Workflow '{}' not found", params.workflow_id),
                 "workflow_id": params.workflow_id,
             }))
         }
         Err(kruxiaflow_core::workflow::OutputQueryError::ActivityNotFound(key)) => {
-            text_response(&serde_json::json!({
+            error_response(&serde_json::json!({
                 "error": format!(
                     "Activity '{}' not found in workflow '{}'",
                     key, params.workflow_id
@@ -333,7 +333,7 @@ pub async fn run_get_activity_output(
             }))
         }
         Err(kruxiaflow_core::workflow::OutputQueryError::ActivityNotCompleted(key)) => {
-            text_response(&serde_json::json!({
+            error_response(&serde_json::json!({
                 "error": format!(
                     "Activity '{}' has not completed yet — output is not available",
                     key
@@ -364,7 +364,7 @@ pub async fn run_get_workflow_cost(
     let record = match svc.get_workflow(workflow_id).await {
         Ok(r) => r,
         Err(kruxiaflow_core::workflow::WorkflowQueryError::WorkflowNotFound(_)) => {
-            return text_response(&serde_json::json!({
+            return error_response(&serde_json::json!({
                 "error": format!("Workflow '{}' not found", params.workflow_id),
                 "workflow_id": params.workflow_id,
             }));
@@ -380,6 +380,8 @@ pub async fn run_get_workflow_cost(
     let name_map = extract_activity_name_map(&record.activities);
 
     // 2. Total cost via stored proc (same one CostTracker uses internally)
+    // TODO(#9): The per-activity query below uses raw SQL. Migrate to a stored proc
+    // with compile-time validation (sqlx::query!) per project conventions.
     let total_cost: Decimal = sqlx::query("SELECT get_workflow_cost($1)")
         .bind(workflow_id)
         .fetch_one(pool)
@@ -494,7 +496,7 @@ pub async fn run_estimate_workflow_cost(
     let stored = match stored {
         Some(s) => s,
         None => {
-            return text_response(&serde_json::json!({
+            return error_response(&serde_json::json!({
                 "error": format!(
                     "Workflow definition '{}' not found. Deploy it first.",
                     params.definition_name
@@ -516,6 +518,9 @@ pub async fn run_estimate_workflow_cost(
         if activity_name == "llm_prompt" {
             let p = activity.parameters.as_ref();
 
+            // TODO(#10): These defaults silently assume Anthropic/Claude when the
+            // definition omits provider/model. Consider warning in the response
+            // or requiring explicit provider/model in llm_prompt activities.
             let provider = p
                 .and_then(|m| m.get("provider").and_then(|v| v.as_str()))
                 .unwrap_or("anthropic");
