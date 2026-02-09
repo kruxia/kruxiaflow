@@ -21,6 +21,8 @@ POST /api/v1/oauth/token
 Content-Type: application/json
 ```
 
+Also accepts `application/x-www-form-urlencoded` per RFC 6749.
+
 **Request Body** (Client Credentials):
 ```json
 {
@@ -39,12 +41,22 @@ Content-Type: application/json
 }
 ```
 
+**Request Body** (Refresh Token):
+```json
+{
+  "grant_type": "refresh_token",
+  "refresh_token": "existing_refresh_token"
+}
+```
+
 **Response** (200 OK):
 ```json
 {
   "access_token": "eyJhbGc...",
   "token_type": "Bearer",
-  "expires_in": 3600
+  "expires_in": 86400,
+  "refresh_token": "optional_for_password_grant",
+  "scope": null
 }
 ```
 
@@ -60,13 +72,30 @@ GET /health
 
 Returns `200 OK` if the service is running.
 
+**Response**:
+```json
+{"status": "ok"}
+```
+
 ### Readiness Check
 
 ```http
 GET /health/ready
 ```
 
-Returns `200 OK` if the service is ready to accept requests (database connected, etc.).
+Returns `200 OK` if the service is ready to accept requests (database connected, etc.), or `503 Service Unavailable` if dependencies are unhealthy.
+
+**Response**:
+```json
+{
+  "status": "ok",
+  "checks": {
+    "database": "ok",
+    "event_source": "ok",
+    "queue": "ok"
+  }
+}
+```
 
 ### Connection Pool Metrics
 
@@ -76,6 +105,15 @@ GET /health/pool
 
 Returns database connection pool statistics.
 
+**Response**:
+```json
+{
+  "max_connections": 10,
+  "utilization_percent": 25.0,
+  "status": "ok"
+}
+```
+
 ### Service Info
 
 ```http
@@ -83,6 +121,17 @@ GET /api/v1/info
 ```
 
 Returns service version and configuration information.
+
+**Response**:
+```json
+{
+  "version": "0.2.0",
+  "build_timestamp": "2025-10-30T12:34:56Z",
+  "build_git_hash": "abc1234",
+  "api_version": "v1",
+  "features": ["workflows", "workers", "websockets"]
+}
+```
 
 ---
 
@@ -99,9 +148,51 @@ Content-Type: application/json
 **Request Body**:
 ```json
 {
-  "name": "my_workflow",
-  "version": "1.0.0",
-  "definition": { ... }
+  "name": "payment_processing",
+  "activities": [
+    {
+      "key": "validate_card",
+      "worker": "std",
+      "activity_name": "validate_card_details",
+      "parameters": {
+        "card_token": "tok_123"
+      }
+    },
+    {
+      "key": "authorize_payment",
+      "worker": "std",
+      "activity_name": "http_request",
+      "parameters": {
+        "url": "https://api.payment.com/authorize",
+        "method": "POST"
+      },
+      "depends_on": [
+        {"key": "validate_card"}
+      ],
+      "outputs": [
+        {"name": "auth_id", "type": "string"}
+      ]
+    }
+  ]
+}
+```
+
+**Response** (201 Created):
+```json
+{
+  "name": "payment_processing",
+  "version": "20251105.143022.123456",
+  "created_at": "2025-11-05T14:30:22.123456Z"
+}
+```
+
+**Response** (200 OK) — identical version already exists:
+```json
+{
+  "name": "payment_processing",
+  "version": "20251105.143022.123456",
+  "created_at": "2025-11-05T14:30:22.123456Z",
+  "unchanged": true
 }
 ```
 
@@ -112,11 +203,48 @@ GET /api/v1/workflow_definitions
 Authorization: Bearer <token>
 ```
 
+**Response** (200 OK):
+```json
+{
+  "definitions": [
+    {
+      "name": "payment_processing",
+      "version": "20251105.143022.123456",
+      "activity_count": 5,
+      "created_at": "2025-11-05T14:30:22.123456Z"
+    }
+  ],
+  "total": 1
+}
+```
+
 ### Get Workflow Definition
 
 ```http
 GET /api/v1/workflow_definitions/:name
 Authorization: Bearer <token>
+```
+
+**Query Parameters**:
+- `version` - Specific version to retrieve; if omitted returns latest
+
+**Response** (200 OK):
+```json
+{
+  "name": "payment_processing",
+  "version": "20251105.143022.123456",
+  "activities": [
+    {
+      "key": "authorize_payment",
+      "worker": "std",
+      "activity_name": "http_request",
+      "parameters": { ... },
+      "depends_on": [ ... ],
+      "outputs": [ ... ]
+    }
+  ],
+  "created_at": "2025-11-05T14:30:22.123456Z"
+}
 ```
 
 ---
@@ -134,18 +262,34 @@ Content-Type: application/json
 **Request Body**:
 ```json
 {
-  "workflow_definition": "my_workflow",
-  "input": { ... }
+  "definition_name": "payment_processing",
+  "version": "20251105.143022.123456",
+  "input": {
+    "amount": 100.00,
+    "card_token": "tok_123"
+  },
+  "unique_key": "order_12345_payment"
 }
 ```
 
-**Response** (200 OK):
+- `version` - Optional; uses latest if omitted
+- `unique_key` - Optional; for idempotency (max 255 characters)
+
+**Response** (201 Created):
 ```json
 {
-  "workflow_id": "019353a1-b0c1-7000-8000-000000000001",
-  "status": "pending"
+  "workflow_id": "550e8400-e29b-41d4-a716-446655440000",
+  "definition_name": "payment_processing",
+  "definition_version": "20251105.143022.123456",
+  "status": "created",
+  "created_at": "2025-11-05T14:30:22.123456Z"
 }
 ```
+
+**Error Responses**:
+- `404 Not Found` - Definition not found
+- `409 Conflict` - Duplicate `unique_key`
+- `422 Unprocessable Entity` - Validation error
 
 ### List Workflows
 
@@ -155,9 +299,31 @@ Authorization: Bearer <token>
 ```
 
 **Query Parameters**:
-- `status` - Filter by workflow status
-- `limit` - Maximum results to return
-- `offset` - Pagination offset
+- `status` - Filter by workflow status (`created`, `running`, `completed`, `failed`, `paused`)
+- `definition_name` - Filter by workflow definition
+- `created_after` - ISO 8601 timestamp
+- `created_before` - ISO 8601 timestamp
+- `limit` - Maximum results to return (default 100, max 1000)
+- `offset` - Pagination offset (default 0)
+
+**Response** (200 OK):
+```json
+{
+  "workflows": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "status": "running",
+      "definition_name": "payment_processing",
+      "created_at": "2025-11-06T10:00:00Z",
+      "updated_at": "2025-11-06T10:00:05Z"
+    }
+  ],
+  "total": 150,
+  "count": 100,
+  "limit": 100,
+  "offset": 0
+}
+```
 
 ### Get Workflow
 
@@ -169,11 +335,61 @@ Authorization: Bearer <token>
 **Response** (200 OK):
 ```json
 {
-  "workflow_id": "019353a1-b0c1-7000-8000-000000000001",
-  "status": "completed",
-  "created_at": "2025-01-10T10:00:00Z",
-  "completed_at": "2025-01-10T10:05:00Z",
-  "activities": [...]
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "running",
+  "definition_name": "payment_processing",
+  "created_at": "2025-11-06T10:00:00Z",
+  "updated_at": "2025-11-06T10:00:05Z",
+  "activities": [
+    {
+      "activity_key": "validate_payment",
+      "status": "completed",
+      "outputs": {"valid": true},
+      "started_at": "2025-11-06T10:00:00Z",
+      "completed_at": "2025-11-06T10:00:01Z"
+    }
+  ],
+  "state_data": {"custom_field": "value"}
+}
+```
+
+**Activity Status Values**: `not_scheduled`, `pending`, `running`, `completed`, `failed`
+
+---
+
+## Workflow Signals
+
+### Signal an Activity
+
+```http
+POST /api/v1/workflows/:workflow_id/signal
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+Sends a signal to a waiting activity within a workflow.
+
+**Request Body**:
+```json
+{
+  "activity_key": "wait_for_approval",
+  "event_name": "approval_received",
+  "data": {
+    "approved": true,
+    "approver": "admin@example.com"
+  }
+}
+```
+
+- `activity_key` - Required, not empty
+- `event_name` - Required, not empty
+- `data` - Optional, any JSON object
+
+**Response** (200 OK):
+```json
+{
+  "signaled": true,
+  "message": "Activity signaled successfully"
 }
 ```
 
@@ -188,7 +404,24 @@ GET /api/v1/workflows/:workflow_id/output
 Authorization: Bearer <token>
 ```
 
-Returns combined output from all completed activities.
+Returns combined output from the workflow.
+
+**Response** (200 OK):
+```json
+{
+  "workflow_id": "550e8400-e29b-41d4-a716-446655440000",
+  "output": {
+    "authorization_id": "auth_123",
+    "transaction_id": "txn_456"
+  },
+  "cost_usd": 0.025,
+  "total_tokens_used": 1500
+}
+```
+
+**Error Responses**:
+- `400 Bad Request` - Workflow not yet completed
+- `404 Not Found` - Workflow not found
 
 ### Get Activity Output
 
@@ -198,6 +431,31 @@ Authorization: Bearer <token>
 ```
 
 Returns output from a specific activity, including file references.
+
+**Response** (200 OK):
+```json
+{
+  "workflow_id": "550e8400-e29b-41d4-a716-446655440000",
+  "activity_key": "authorize_card",
+  "output": {
+    "authorization_id": "auth_123",
+    "approved": true
+  },
+  "cost_usd": 0.015,
+  "files": [
+    {
+      "name": "receipt.pdf",
+      "size": 2048,
+      "content_type": "application/pdf",
+      "created_at": "2025-11-06T10:00:01Z"
+    }
+  ]
+}
+```
+
+**Error Responses**:
+- `400 Bad Request` - Activity not completed
+- `404 Not Found` - Workflow or activity not found
 
 ### Download Activity File
 
@@ -210,6 +468,27 @@ Authorization: Bearer <token>
 - `Content-Type`: File's content type
 - `Content-Disposition`: `attachment; filename="{filename}"`
 - Body: Binary file content (streamed)
+
+### Upload Activity File
+
+```http
+POST /api/v1/workflows/:workflow_id/activities/:activity_key/files/:filename
+Authorization: Bearer <token>
+```
+
+Upload a file associated with an activity.
+
+**Request**: Raw file content (binary body)
+
+**Response** (200 OK):
+```json
+{
+  "success": true,
+  "name": "document.pdf",
+  "size": 2048,
+  "content_type": "application/pdf"
+}
+```
 
 ---
 
@@ -224,6 +503,18 @@ Authorization: Bearer <token>
 
 Returns current cost breakdown for a workflow.
 
+**Response** (200 OK):
+```json
+{
+  "workflow_id": "550e8400-e29b-41d4-a716-446655440000",
+  "workflow_name": "payment_processing",
+  "total_cost_usd": 0.045,
+  "budget_limit_usd": 1.00,
+  "budget_remaining_usd": 0.955,
+  "total_activities": 3
+}
+```
+
 ### Get Workflow Cost History
 
 ```http
@@ -231,7 +522,31 @@ GET /api/v1/workflows/:workflow_id/cost/history
 Authorization: Bearer <token>
 ```
 
+**Query Parameters**:
+- `limit` - Maximum results to return (default 100)
+- `offset` - Pagination offset (default 0)
+
 Returns cost history over time for a workflow.
+
+**Response** (200 OK):
+```json
+{
+  "costs": [
+    {
+      "activity_key": "authorize_payment",
+      "attempt": 1,
+      "cost_usd": 0.015,
+      "prompt_tokens": 500,
+      "output_tokens": 100,
+      "total_tokens": 600,
+      "cached_tokens": 50,
+      "provider": "openai",
+      "model": "gpt-4o"
+    }
+  ],
+  "total": 1
+}
+```
 
 ### Get Cost Analytics
 
@@ -241,9 +556,11 @@ Authorization: Bearer <token>
 ```
 
 **Query Parameters**:
-- `start_date` - Start of date range
-- `end_date` - End of date range
-- `group_by` - Grouping (e.g., `workflow`, `activity`, `model`)
+- `group_by` - Grouping dimension (`provider`, `model`, `activity`, `workflow`)
+- `start_date` - Start of date range (ISO 8601)
+- `end_date` - End of date range (ISO 8601)
+
+Returns cost analytics aggregated by the requested dimension.
 
 ---
 
@@ -256,7 +573,22 @@ GET /api/v1/llm/providers
 Authorization: Bearer <token>
 ```
 
-Returns available LLM providers (Anthropic, OpenAI, Google, etc.).
+Returns available LLM providers.
+
+**Response** (200 OK):
+```json
+[
+  {
+    "name": "anthropic",
+    "display_name": "Anthropic",
+    "api_endpoint": "https://api.anthropic.com",
+    "supports_completion": true,
+    "supports_embeddings": false,
+    "supports_streaming": true,
+    "requires_api_key": true
+  }
+]
+```
 
 ### Search Models
 
@@ -266,11 +598,42 @@ Authorization: Bearer <token>
 Content-Type: application/json
 ```
 
+Search for specific models by provider and model name.
+
 **Request Body**:
 ```json
 {
-  "provider": "anthropic",
-  "capabilities": ["chat", "vision"]
+  "models": [
+    {
+      "provider": "anthropic",
+      "model": "claude-3-5-sonnet-20241022"
+    },
+    {
+      "provider": "openai",
+      "model": "gpt-4o"
+    }
+  ]
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "models": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "provider": "anthropic",
+      "name": "claude-3-5-sonnet-20241022",
+      "display_name": "Claude 3.5 Sonnet",
+      "input_price_per_million": 3.00,
+      "output_price_per_million": 15.00,
+      "cached_input_price_per_million": 0.30,
+      "supports_completion": true,
+      "supports_embeddings": false,
+      "context_window": 200000,
+      "max_output_tokens": 4096
+    }
+  ]
 }
 ```
 
@@ -289,31 +652,71 @@ Content-Type: application/json
 **Request Body**:
 ```json
 {
-  "worker": "my_worker",
-  "name": "activity_name"
+  "worker": "std",
+  "worker_id": "worker_payments_01",
+  "max_activities": 5
 }
 ```
+
+- `worker` - Required, not empty
+- `worker_id` - Required, not empty
+- `max_activities` - Optional (default 1, max 100)
 
 **Response** (200 OK):
 ```json
 {
-  "activity_id": "550e8400-e29b-41d4-a716-446655440000",
-  "workflow_id": "019353a1-b0c1-7000-8000-000000000001",
-  "activity_key": "process_data",
-  "parameters": { ... }
+  "activities": [
+    {
+      "activity_id": "550e8400-e29b-41d4-a716-446655440000",
+      "workflow_id": "660e8400-e29b-41d4-a716-446655440001",
+      "activity_key": "authorize_card",
+      "worker": "std",
+      "activity_name": "http_request",
+      "parameters": {
+        "card_token": "tok_123",
+        "amount": 100.00
+      },
+      "settings": {
+        "timeout": 300,
+        "max_retries": 3
+      },
+      "timeout_seconds": 300,
+      "output_definitions": [
+        {"name": "document", "type": "file"}
+      ],
+      "signal_data": null
+    }
+  ],
+  "count": 1
 }
 ```
 
-**Response** (204 No Content): No activities available.
+When no activities are available, `activities` is an empty array and `count` is 0.
 
 ### Heartbeat
 
 ```http
 POST /api/v1/activities/:activity_id/heartbeat
 Authorization: Bearer <token>
+Content-Type: application/json
 ```
 
 Extends the activity timeout for long-running tasks.
+
+**Request Body**:
+```json
+{
+  "worker_id": "worker_payments_01"
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "acknowledged": true,
+  "next_heartbeat_seconds": 30
+}
+```
 
 ### Complete Activity
 
@@ -326,7 +729,23 @@ Content-Type: application/json
 **Request Body**:
 ```json
 {
-  "output": { ... }
+  "worker_id": "worker_payments_01",
+  "output": {
+    "authorization_id": "auth_123",
+    "approved": true
+  },
+  "cost_usd": 0.015
+}
+```
+
+- `worker_id` - Required, not empty
+- `output` - Required, must be a JSON object
+- `cost_usd` - Optional, non-negative (for AI activities with cost tracking)
+
+**Response** (200 OK):
+```json
+{
+  "acknowledged": true
 }
 ```
 
@@ -341,8 +760,25 @@ Content-Type: application/json
 **Request Body**:
 ```json
 {
-  "error": "Error description",
-  "error_code": "VALIDATION_ERROR"
+  "worker_id": "worker_payments_01",
+  "error": {
+    "code": "PAYMENT_DECLINED",
+    "message": "Card was declined by the bank",
+    "retryable": false
+  }
+}
+```
+
+- `worker_id` - Required, not empty
+- `error.code` - Required, not empty
+- `error.message` - Required, not empty
+- `error.retryable` - Whether the activity should be retried
+
+**Response** (200 OK):
+```json
+{
+  "acknowledged": true,
+  "will_retry": false
 }
 ```
 
@@ -356,35 +792,111 @@ Content-Type: application/json
 GET /api/v1/activities/:activity_id/ws?token=<jwt>
 ```
 
-WebSocket upgrade request for real-time token streaming from LLM activities.
+WebSocket upgrade request for real-time token streaming from LLM activities. Authentication is via the `token` query parameter since WebSocket upgrade bypasses HTTP middleware.
 
 **Message Types**:
 
 Token event:
 ```json
-{"type": "token", "content": "Hello"}
+{
+  "type": "token",
+  "text": "Hello",
+  "index": 0,
+  "timestamp": "2025-11-06T10:00:00Z"
+}
 ```
 
 Complete event:
 ```json
-{"type": "complete", "content": "Full response text"}
+{
+  "type": "complete",
+  "activity_id": "550e8400-e29b-41d4-a716-446655440000",
+  "result": {"content": "Full response text"},
+  "timestamp": "2025-11-06T10:00:05Z"
+}
 ```
 
 Error event:
 ```json
-{"type": "error", "error": "Error message"}
+{
+  "type": "error",
+  "activity_id": "550e8400-e29b-41d4-a716-446655440000",
+  "error": "Error message",
+  "timestamp": "2025-11-06T10:00:05Z"
+}
 ```
 
 ### Internal Streaming Endpoints
 
 These endpoints are used internally by workers to publish streaming events:
 
-| Method | Path                                       | Description            |
-|--------|-------------------------------------------|------------------------|
-| POST   | /api/v1/activities/:id/ws/token           | Publish token          |
-| POST   | /api/v1/activities/:id/ws/complete        | Signal stream complete |
-| POST   | /api/v1/activities/:id/ws/error           | Signal stream error    |
-| GET    | /api/v1/activities/:id/ws/subscribers     | Get subscriber count   |
+#### Publish Stream Token
+
+```http
+POST /api/v1/activities/:activity_id/ws/token
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+```json
+{
+  "text": "Hello",
+  "index": 0
+}
+```
+
+**Response** (200 OK):
+```json
+{
+  "subscribers": 3
+}
+```
+
+#### Signal Stream Complete
+
+```http
+POST /api/v1/activities/:activity_id/ws/complete
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+```json
+{
+  "result": {"content": "Final response text"}
+}
+```
+
+Closes all WebSocket connections for the activity.
+
+#### Signal Stream Error
+
+```http
+POST /api/v1/activities/:activity_id/ws/error
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+```json
+{
+  "error": "Rate limit exceeded"
+}
+```
+
+Closes all WebSocket connections for the activity.
+
+#### Get Subscriber Count
+
+```http
+GET /api/v1/activities/:activity_id/ws/subscribers
+Authorization: Bearer <token>
+```
+
+**Response** (200 OK):
+```json
+{
+  "count": 1
+}
+```
 
 ---
 
@@ -399,6 +911,14 @@ Authorization: Bearer <token>
 
 Invalidates a specific cache entry.
 
+**Response** (200 OK):
+```json
+{
+  "success": true,
+  "count": 1
+}
+```
+
 ### Invalidate Cache by Pattern
 
 ```http
@@ -410,7 +930,20 @@ Content-Type: application/json
 **Request Body**:
 ```json
 {
-  "pattern": "workflow:*"
+  "pattern": "std.llm_prompt:*"
+}
+```
+
+**Pattern Syntax** (Redis glob-style):
+- `*` matches any characters
+- `?` matches exactly one character
+- `[abc]` matches one character from set
+
+**Response** (200 OK):
+```json
+{
+  "success": true,
+  "count": 42
 }
 ```
 
@@ -438,38 +971,71 @@ Interactive API documentation viewer.
 
 ## Error Responses
 
-All endpoints return standard error responses:
+All endpoints return structured error responses:
 
 **400 Bad Request**:
 ```json
 {
-  "error": "validation_error",
-  "message": "Invalid request body",
-  "details": { ... }
+  "error": {
+    "code": "BAD_REQUEST",
+    "message": "Invalid request body",
+    "details": { ... }
+  }
 }
 ```
 
 **401 Unauthorized**:
 ```json
 {
-  "error": "unauthorized",
-  "message": "Invalid or expired token"
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Invalid or expired token"
+  }
 }
 ```
 
 **404 Not Found**:
 ```json
 {
-  "error": "not_found",
-  "message": "Workflow not found"
+  "error": {
+    "code": "NOT_FOUND",
+    "message": "Workflow not found"
+  }
+}
+```
+
+**409 Conflict**:
+```json
+{
+  "error": {
+    "code": "CONFLICT",
+    "message": "Duplicate unique_key"
+  }
+}
+```
+
+**422 Unprocessable Entity**:
+```json
+{
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "message": "Request validation failed",
+    "details": {
+      "field_errors": {
+        "email": ["Invalid email format"]
+      }
+    }
+  }
 }
 ```
 
 **500 Internal Server Error**:
 ```json
 {
-  "error": "internal_error",
-  "message": "An unexpected error occurred"
+  "error": {
+    "code": "INTERNAL_ERROR",
+    "message": "An unexpected error occurred"
+  }
 }
 ```
 
@@ -479,42 +1045,44 @@ All endpoints return standard error responses:
 
 ### Public Routes (No Authentication)
 
-| Method | Path                     | Description                 |
-|--------|--------------------------|----------------------------|
-| GET    | /health                  | Liveness check              |
-| GET    | /health/ready            | Readiness check             |
-| GET    | /health/pool             | Connection pool metrics     |
-| GET    | /api/v1/info             | Service information         |
-| POST   | /api/v1/oauth/token      | Obtain access token         |
-| GET    | /api/v1/activities/:id/ws| WebSocket streaming         |
-| GET    | /api/v1/docs             | API documentation (ReDoc)   |
-| GET    | /api/v1/openapi.json     | OpenAPI specification       |
+| Method | Path                      | Description             |
+|--------|---------------------------|-------------------------|
+| GET    | /health                   | Liveness check          |
+| GET    | /health/ready             | Readiness check         |
+| GET    | /health/pool              | Connection pool metrics |
+| GET    | /api/v1/info              | Service information     |
+| POST   | /api/v1/oauth/token       | Obtain access token     |
+| GET    | /api/v1/activities/:id/ws | WebSocket streaming     |
+| GET    | /api/v1/docs              | API documentation       |
+| GET    | /api/v1/openapi.json      | OpenAPI specification   |
 
 ### Protected Routes (Require JWT)
 
-| Method | Path                                                      | Description                  |
-|--------|-----------------------------------------------------------|------------------------------|
-| POST   | /api/v1/workflow_definitions                              | Deploy workflow definition   |
-| GET    | /api/v1/workflow_definitions                              | List workflow definitions    |
-| GET    | /api/v1/workflow_definitions/:name                        | Get workflow definition      |
-| POST   | /api/v1/workflows                                         | Submit workflow              |
-| GET    | /api/v1/workflows                                         | List workflows               |
-| GET    | /api/v1/workflows/:workflow_id                            | Get workflow                 |
-| GET    | /api/v1/workflows/:workflow_id/cost                       | Get workflow cost            |
-| GET    | /api/v1/workflows/:workflow_id/cost/history               | Get workflow cost history    |
-| GET    | /api/v1/cost/analytics                                    | Get cost analytics           |
-| GET    | /api/v1/workflows/:workflow_id/output                     | Get workflow output          |
-| GET    | /api/v1/workflows/:id/activities/:key/output              | Get activity output          |
-| GET    | /api/v1/workflows/:id/activities/:key/files/:filename     | Download activity file       |
-| GET    | /api/v1/llm/providers                                     | List LLM providers           |
-| POST   | /api/v1/llm/models/search                                 | Search LLM models            |
-| DELETE | /api/v1/cache/:key                                        | Invalidate cache key         |
-| POST   | /api/v1/cache/invalidate                                  | Invalidate cache by pattern  |
-| POST   | /api/v1/workers/poll                                      | Poll for activities          |
-| POST   | /api/v1/activities/:id/heartbeat                          | Activity heartbeat           |
-| POST   | /api/v1/activities/:id/complete                           | Complete activity            |
-| POST   | /api/v1/activities/:id/fail                               | Fail activity                |
-| POST   | /api/v1/activities/:id/ws/token                           | Publish stream token         |
-| POST   | /api/v1/activities/:id/ws/complete                        | Signal stream complete       |
-| POST   | /api/v1/activities/:id/ws/error                           | Signal stream error          |
-| GET    | /api/v1/activities/:id/ws/subscribers                     | Get subscriber count         |
+| Method | Path                                                  | Description                |
+|--------|-------------------------------------------------------|----------------------------|
+| POST   | /api/v1/workflow_definitions                          | Deploy workflow definition |
+| GET    | /api/v1/workflow_definitions                          | List workflow definitions  |
+| GET    | /api/v1/workflow_definitions/:name                    | Get workflow definition    |
+| POST   | /api/v1/workflows                                     | Submit workflow            |
+| GET    | /api/v1/workflows                                     | List workflows             |
+| GET    | /api/v1/workflows/:workflow_id                        | Get workflow               |
+| POST   | /api/v1/workflows/:workflow_id/signal                 | Signal an activity         |
+| GET    | /api/v1/workflows/:workflow_id/output                 | Get workflow output        |
+| GET    | /api/v1/workflows/:id/activities/:key/output          | Get activity output        |
+| GET    | /api/v1/workflows/:id/activities/:key/files/:filename | Download activity file     |
+| POST   | /api/v1/workflows/:id/activities/:key/files/:filename | Upload activity file       |
+| GET    | /api/v1/workflows/:workflow_id/cost                   | Get workflow cost          |
+| GET    | /api/v1/workflows/:workflow_id/cost/history           | Get workflow cost history  |
+| GET    | /api/v1/cost/analytics                                | Get cost analytics         |
+| GET    | /api/v1/llm/providers                                 | List LLM providers         |
+| POST   | /api/v1/llm/models/search                             | Search LLM models          |
+| DELETE | /api/v1/cache/:key                                    | Invalidate cache key       |
+| POST   | /api/v1/cache/invalidate                              | Invalidate cache pattern   |
+| POST   | /api/v1/workers/poll                                  | Poll for activities        |
+| POST   | /api/v1/activities/:id/heartbeat                      | Activity heartbeat         |
+| POST   | /api/v1/activities/:id/complete                       | Complete activity          |
+| POST   | /api/v1/activities/:id/fail                           | Fail activity              |
+| POST   | /api/v1/activities/:id/ws/token                       | Publish stream token       |
+| POST   | /api/v1/activities/:id/ws/complete                    | Signal stream complete     |
+| POST   | /api/v1/activities/:id/ws/error                       | Signal stream error        |
+| GET    | /api/v1/activities/:id/ws/subscribers                 | Get subscriber count       |

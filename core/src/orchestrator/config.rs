@@ -73,7 +73,7 @@ impl OrchestratorConfig {
             backoff_multiplier,
             workflow_timeout: Duration::from_secs(workflow_timeout_secs),
             timeout_check_interval: Duration::from_secs(timeout_check_interval_secs),
-            secrets: HashMap::new(),
+            secrets: load_secrets_from_env(),
         }
     }
 

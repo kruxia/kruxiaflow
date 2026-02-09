@@ -1,8 +1,9 @@
 # Environment overrides for quickstart with example workflows
 #
-# Adds services and configuration needed to run the example workflows locally.
-# Includes Mailpit for capturing notification emails and an examples database
-# with pre-created tables for workflows that use postgres_query.
+# Adds services and configuration needed to run the example workflows locally:
+# - py-std worker for Python script activities
+# - Mailpit for capturing notification emails
+# - Examples database with pre-created tables for postgres_query activities
 #
 # Usage:
 #   ./docker up --examples
@@ -27,6 +28,38 @@ services:
       KRUXIAFLOW_SECRET_SMTP_URL: smtp://mailpit:1025
       # 10 minutes for example workflows (workflow 10 is long-running)
       KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS: "600"
+
+  # Python worker for script activities in examples
+  py-std-worker:
+    image: kruxia/kruxiaflow-py-std:latest
+    container_name: kruxiaflow-py-std-worker
+    environment:
+      KRUXIAFLOW_API_URL: http://kruxiaflow:8080
+      KRUXIAFLOW_CLIENT_ID: ${KRUXIAFLOW_CLIENT_ID:-}
+      KRUXIAFLOW_CLIENT_SECRET: ${KRUXIAFLOW_CLIENT_SECRET:-}
+      # Cache directories for ML/NLP models
+      HF_HOME: /cache/huggingface
+      TRANSFORMERS_CACHE: /cache/huggingface
+      SENTENCE_TRANSFORMERS_HOME: /cache/sentence-transformers
+      TIKTOKEN_CACHE_DIR: /cache/tiktoken
+    volumes:
+      - py-model-cache:/cache
+    networks:
+      - backend
+    restart: unless-stopped
+    depends_on:
+      - kruxiaflow
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    labels:
+      com.kruxiaflow.service: "worker"
+      com.kruxiaflow.component: "py-std"
 
   # Mailpit for capturing notification emails and webhook-style messages.
   # - SMTP server on port 1025 for email_send activities
@@ -55,3 +88,7 @@ services:
     labels:
       com.kruxiaflow.service: "email"
       com.kruxiaflow.component: "mailpit"
+
+volumes:
+  py-model-cache:
+    driver: local

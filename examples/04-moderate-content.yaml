@@ -6,7 +6,10 @@ activities:
     worker: std
     activity_name: llm_prompt
     parameters:
-      model: anthropic/claude-haiku-4-5-20251001
+      model:
+        - anthropic/claude-haiku-4-5-20251001  # Try first (fast & cheap)
+        - openai/gpt-4o-mini                   # Fallback if Haiku unavailable
+        - google/gemini-2.0-flash-lite         # Last resort (very cheap)
       prompt: |
         You are a content moderation assistant. Analyze the following text and determine
         if it violates community guidelines.
@@ -31,7 +34,7 @@ activities:
         factor: 2
         max_seconds: 60
       budget:
-        limit: 0.50
+        limit: 0.10
         action: abort
 
   - key: store_moderation_result
@@ -42,7 +45,7 @@ activities:
       query: |
         INSERT INTO moderation_log
         (content_id, decision, cost, tokens, moderated_at)
-        VALUES ($1, $2, $3, $4, NOW())
+        VALUES ($1, $2, $3::numeric, $4, NOW())
       params:
         - "{{INPUT.content_id}}"
         - "{{analyze_content.result.content}}"
