@@ -8,10 +8,12 @@
 /// - estimate_workflow_cost: pre-execution cost estimate for a definition
 use rust_decimal::prelude::*;
 use rust_mcp_sdk::macros::{JsonSchema, mcp_tool};
-use rust_mcp_sdk::schema::{CallToolResult, TextContent, schema_utils::CallToolError};
+use rust_mcp_sdk::schema::{CallToolResult, schema_utils::CallToolError};
 use rust_mcp_sdk::tool_box;
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
+
+use super::{parse_uuid, text_response};
 
 // ============================================================================
 // Tool: get_workflow_status
@@ -598,21 +600,6 @@ pub async fn run_estimate_workflow_cost(
 // ============================================================================
 // Helpers
 // ============================================================================
-
-/// Wrap a JSON value as a pretty-printed text response.
-fn text_response(value: &serde_json::Value) -> Result<CallToolResult, CallToolError> {
-    Ok(CallToolResult::text_content(vec![TextContent::from(
-        serde_json::to_string_pretty(value)
-            .map_err(|e| CallToolError::from_message(e.to_string()))?,
-    )]))
-}
-
-/// Parse a string as UUID, returning a tool error if invalid.
-fn parse_uuid(s: &str) -> Result<uuid::Uuid, CallToolError> {
-    uuid::Uuid::parse_str(s).map_err(|_| {
-        CallToolError::from_message(format!("Invalid workflow_id '{}': must be a valid UUID", s))
-    })
-}
 
 /// Extract activities from the workflow's activities JSONB as a flat JSON array.
 ///

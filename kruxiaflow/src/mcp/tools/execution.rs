@@ -5,9 +5,11 @@
 /// - submit_workflow: deploy definition (if needed) and submit a workflow instance
 /// - cancel_workflow: cancel a running workflow (stub — endpoint not yet implemented)
 use rust_mcp_sdk::macros::{JsonSchema, mcp_tool};
-use rust_mcp_sdk::schema::{CallToolResult, TextContent, schema_utils::CallToolError};
+use rust_mcp_sdk::schema::{CallToolResult, schema_utils::CallToolError};
 use rust_mcp_sdk::tool_box;
 use sqlx::PgPool;
+
+use super::{parse_uuid, text_response};
 
 // ============================================================================
 // Tool: validate_workflow
@@ -256,13 +258,7 @@ pub async fn run_cancel_workflow(
     pool: &PgPool,
     params: &CancelWorkflow,
 ) -> Result<CallToolResult, CallToolError> {
-    // Parse workflow_id as UUID
-    let workflow_id = uuid::Uuid::parse_str(&params.workflow_id).map_err(|_| {
-        CallToolError::from_message(format!(
-            "Invalid workflow_id '{}': must be a valid UUID",
-            params.workflow_id
-        ))
-    })?;
+    let workflow_id = parse_uuid(&params.workflow_id)?;
 
     let query_svc = kruxiaflow_core::workflow::WorkflowQueryService::new(pool.clone());
 
@@ -299,14 +295,6 @@ pub async fn run_cancel_workflow(
 // ============================================================================
 // Helpers
 // ============================================================================
-
-/// Wrap a JSON value as a pretty-printed text response.
-fn text_response(value: &serde_json::Value) -> Result<CallToolResult, CallToolError> {
-    Ok(CallToolResult::text_content(vec![TextContent::from(
-        serde_json::to_string_pretty(value)
-            .map_err(|e| CallToolError::from_message(e.to_string()))?,
-    )]))
-}
 
 /// Flatten a ValidationError into a Vec of human-readable strings.
 fn extract_validation_errors(err: &kruxiaflow_core::ValidationError) -> Vec<String> {

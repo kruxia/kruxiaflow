@@ -15,3 +15,20 @@ pub use discovery::DiscoveryTools;
 pub use execution::ExecutionTools;
 pub use observability::ObservabilityTools;
 pub use visualization::VisualizationTools;
+
+use rust_mcp_sdk::schema::{CallToolResult, TextContent, schema_utils::CallToolError};
+
+/// Wrap a JSON value as a pretty-printed text response.
+pub(crate) fn text_response(value: &serde_json::Value) -> Result<CallToolResult, CallToolError> {
+    Ok(CallToolResult::text_content(vec![TextContent::from(
+        serde_json::to_string_pretty(value)
+            .map_err(|e| CallToolError::from_message(e.to_string()))?,
+    )]))
+}
+
+/// Parse a string as UUID, returning a tool error if invalid.
+pub(crate) fn parse_uuid(s: &str) -> Result<uuid::Uuid, CallToolError> {
+    uuid::Uuid::parse_str(s).map_err(|_| {
+        CallToolError::from_message(format!("Invalid workflow_id '{}': must be a valid UUID", s))
+    })
+}
