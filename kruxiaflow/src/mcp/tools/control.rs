@@ -9,7 +9,7 @@ use rust_mcp_sdk::tool_box;
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 
-use super::{parse_uuid, text_response};
+use super::{error_response, parse_uuid, text_response};
 
 use kruxiaflow_core::{
     EventSource, NewWorkflowEvent, PostgresEventSource, PostgresSubscriptionService, SignalRequest,
@@ -118,7 +118,7 @@ pub async fn run_send_workflow_signal(
     let subscription = match sub_svc.signal_activity(request).await {
         Ok(Some(sub)) => sub,
         Ok(None) => {
-            return text_response(&serde_json::json!({
+            return error_response(&serde_json::json!({
                 "error": format!(
                     "No active subscription found for activity '{}' waiting on signal '{}' \
                      in workflow '{}'. The activity may have already been signaled or is not \
@@ -185,6 +185,8 @@ pub async fn run_list_waiting_workflows(
     // Two query paths depending on whether signal_name filter is present.
     // Both use runtime sqlx::query() to avoid prepare-cache dependency on
     // the activity_event_subscriptions table.
+    // TODO(#9): Migrate to stored procs with compile-time validation (sqlx::query!)
+    // per project conventions.
     let (rows, total) = if let Some(ref signal_name) = params.signal_name {
         let rows = sqlx::query(
             "SELECT s.workflow_id, s.activity_key, s.event_name, s.created_at, \

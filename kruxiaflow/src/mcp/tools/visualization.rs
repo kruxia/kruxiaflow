@@ -10,7 +10,7 @@ use rust_mcp_sdk::tool_box;
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 
-use super::{parse_uuid, text_response};
+use super::{error_response, parse_uuid, text_response};
 
 // ============================================================================
 // Tool: render_workflow_diagram
@@ -85,7 +85,7 @@ pub async fn run_render_workflow_diagram(
     params: &RenderWorkflowDiagram,
 ) -> Result<CallToolResult, CallToolError> {
     if params.definition_name.is_none() && params.workflow_id.is_none() {
-        return text_response(&serde_json::json!({
+        return error_response(&serde_json::json!({
             "error": "At least one of 'definition_name' or 'workflow_id' must be provided",
         }));
     }
@@ -100,7 +100,7 @@ pub async fn run_render_workflow_diagram(
                 (record.definition_name.clone(), Some(statuses))
             }
             Err(kruxiaflow_core::workflow::WorkflowQueryError::WorkflowNotFound(_)) => {
-                return text_response(&serde_json::json!({
+                return error_response(&serde_json::json!({
                     "error": format!("Workflow '{}' not found", wf_id_str),
                     "workflow_id": wf_id_str,
                 }));
@@ -129,7 +129,7 @@ pub async fn run_render_workflow_diagram(
     let stored = match stored {
         Some(s) => s,
         None => {
-            return text_response(&serde_json::json!({
+            return error_response(&serde_json::json!({
                 "error": format!(
                     "Workflow definition '{}' not found. Deploy it first.",
                     definition_name
@@ -164,7 +164,7 @@ pub async fn run_render_cost_diagram(
     let record = match svc.get_workflow(workflow_id).await {
         Ok(r) => r,
         Err(kruxiaflow_core::workflow::WorkflowQueryError::WorkflowNotFound(_)) => {
-            return text_response(&serde_json::json!({
+            return error_response(&serde_json::json!({
                 "error": format!("Workflow '{}' not found", params.workflow_id),
                 "workflow_id": params.workflow_id,
             }));
@@ -188,6 +188,8 @@ pub async fn run_render_cost_diagram(
         .unwrap_or(Decimal::ZERO);
 
     // Per-activity costs — aggregate across provider/model for the diagram
+    // TODO(#9): Migrate to a stored proc with compile-time validation (sqlx::query!)
+    // per project conventions.
     let rows = sqlx::query(
         "SELECT activity_key, SUM(cost_usd) as cost_usd \
          FROM activity_costs \

@@ -26,6 +26,16 @@ pub(crate) fn text_response(value: &serde_json::Value) -> Result<CallToolResult,
     )]))
 }
 
+/// Wrap a JSON value as a pretty-printed text response with `is_error` set.
+///
+/// Use this for application-level errors (not found, invalid input, stubs)
+/// so MCP clients can detect errors via the protocol rather than parsing JSON.
+pub(crate) fn error_response(value: &serde_json::Value) -> Result<CallToolResult, CallToolError> {
+    let mut result = text_response(value)?;
+    result.is_error = Some(true);
+    Ok(result)
+}
+
 /// Parse a string as UUID, returning a tool error if invalid.
 pub(crate) fn parse_uuid(s: &str) -> Result<uuid::Uuid, CallToolError> {
     uuid::Uuid::parse_str(s).map_err(|_| {
