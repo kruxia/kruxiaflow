@@ -232,31 +232,13 @@ Example: kruxiaflow serve --mcp-enabled"
     )]
     pub mcp_enabled: Option<bool>,
 
-    /// MCP transport (http only - stdio not supported)
-    #[cfg(feature = "mcp-server")]
-    #[arg(
-        long,
-        env = "KRUXIAFLOW_MCP_TRANSPORT",
-        help = "MCP transport type (only 'http' is supported)",
-        long_help = "MCP transport type: only 'http' is supported in the integrated MCP server.\n\n\
-Stdio transport is NOT supported because the 'serve' command runs multiple services\n\
-(API server, orchestrator, workers) that log to stdout/stderr, which would corrupt\n\
-the MCP stdio protocol (requires clean stdin/stdout).\n\n\
-For stdio MCP support, use a separate process:\n  \
-  - Python MCP server: kruxiaflow-mcp/\n  \
-  - Standalone Rust MCP server: Create a dedicated binary\n\n\
-Default: http\n\
-Example: --mcp-transport http"
-    )]
-    pub mcp_transport: Option<String>,
-
-    /// MCP HTTP port (required if transport=http)
+    /// MCP HTTP port
     #[cfg(feature = "mcp-server")]
     #[arg(
         long,
         env = "KRUXIAFLOW_MCP_HTTP_PORT",
-        help = "MCP HTTP port (if transport=http)",
-        long_help = "MCP HTTP server port (only used if transport=http).\n\n\
+        help = "MCP HTTP server port",
+        long_help = "Port for the MCP Streamable HTTP server.\n\n\
 Default: 8081\n\
 Example: --mcp-http-port 9091"
     )]
@@ -268,7 +250,7 @@ Example: --mcp-http-port 9091"
         long,
         env = "KRUXIAFLOW_MCP_HTTP_BIND",
         help = "MCP HTTP bind address",
-        long_help = "Address to bind MCP HTTP server to (only used if transport=http).\n\n\
+        long_help = "Address to bind the MCP Streamable HTTP server.\n\n\
 Default: 0.0.0.0\n\
 Example: --mcp-http-bind 127.0.0.1"
     )]
@@ -691,7 +673,6 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     let mcp_handle = {
         let mcp_config = crate::mcp::config::McpConfig::new(
             cmd.mcp_enabled,
-            cmd.mcp_transport,
             cmd.mcp_http_port,
             cmd.mcp_http_bind,
         )?;
@@ -854,8 +835,6 @@ mod tests {
             no_worker: false,
             #[cfg(feature = "mcp-server")]
             mcp_enabled: None,
-            #[cfg(feature = "mcp-server")]
-            mcp_transport: None,
             #[cfg(feature = "mcp-server")]
             mcp_http_port: None,
             #[cfg(feature = "mcp-server")]
@@ -1060,8 +1039,6 @@ mod tests {
             no_worker: false,
             #[cfg(feature = "mcp-server")]
             mcp_enabled: Some(true),
-            #[cfg(feature = "mcp-server")]
-            mcp_transport: Some("http".to_string()),
             #[cfg(feature = "mcp-server")]
             mcp_http_port: Some(8081),
             #[cfg(feature = "mcp-server")]

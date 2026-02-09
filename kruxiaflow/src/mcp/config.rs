@@ -27,33 +27,24 @@
 use anyhow::Result;
 use std::time::Duration;
 
-/// MCP server transport type
-///
-/// Only HTTP transport is supported in the integrated MCP server.
-/// For stdio transport, use a separate process (e.g., the Python MCP server).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum McpTransport {
-    /// HTTP transport with SSE (for network access, multi-client)
-    /// This is the ONLY supported transport in the integrated MCP server.
-    Http,
-}
-
 /// MCP server configuration
+///
+/// This MCP server uses Streamable HTTP transport exclusively.
+/// Stdio transport is not supported because the `serve` command runs multiple
+/// services that log to stdout/stderr, which would corrupt the MCP protocol.
+/// For stdio MCP, use a separate process (e.g., the Python MCP server).
 #[derive(Debug, Clone)]
 pub struct McpConfig {
     /// Enable MCP server
     pub enabled: bool,
 
-    /// Transport type (stdio or http)
-    pub transport: McpTransport,
-
-    /// HTTP port (only if transport=http)
+    /// HTTP port for the Streamable HTTP server
     pub http_port: Option<u16>,
 
-    /// HTTP bind address (only if transport=http)
+    /// HTTP bind address
     pub http_bind: Option<String>,
 
-    /// Require authentication (default: false for stdio, true for http)
+    /// Require authentication (default: true)
     pub auth_required: bool,
 
     /// JWT secret for authentication (required if auth_required=true)
@@ -70,7 +61,6 @@ impl McpConfig {
     /// Create McpConfig with precedence: CLI flags > Environment variables > Defaults
     pub fn new(
         enabled_cli: Option<bool>,
-        transport_cli: Option<String>,
         http_port_cli: Option<u16>,
         http_bind_cli: Option<String>,
     ) -> Result<Self> {
@@ -88,30 +78,21 @@ impl McpConfig {
             return Ok(Self::disabled());
         }
 
-        // Transport: CLI > Env > Default (http)
-        // Note: Only HTTP transport is supported (stdio requires separate process)
-        let transport_str = transport_cli
-            .or_else(|| std::env::var("KRUXIAFLOW_MCP_TRANSPORT").ok())
-            .unwrap_or_else(|| "http".to_string())
-            .to_lowercase();
+        // Reject stdio if someone explicitly requests it via env var
+        if let Ok(transport) = std::env::var("KRUXIAFLOW_MCP_TRANSPORT") {
+            if transport.eq_ignore_ascii_case("stdio") {
+                anyhow::bail!(
+                    "MCP stdio transport is not supported in the integrated MCP server.\n\
+                    Reason: The 'serve' command runs multiple services with logging to stdout/stderr,\n\
+                    which corrupts the MCP stdio protocol (requires clean stdin/stdout).\n\n\
+                    For stdio MCP support, use a separate process:\n\
+                    - Python MCP server: kruxiaflow-mcp/\n\
+                    - Standalone Rust MCP server: Create a dedicated binary"
+                );
+            }
+        }
 
-        let transport = match transport_str.as_str() {
-            "http" => McpTransport::Http,
-            "stdio" => anyhow::bail!(
-                "MCP stdio transport is not supported in the integrated MCP server.\n\
-                Reason: The 'serve' command runs multiple services with logging to stdout/stderr,\n\
-                which corrupts the MCP stdio protocol (requires clean stdin/stdout).\n\n\
-                For stdio MCP support, use a separate process:\n\
-                - Python MCP server: kruxiaflow-mcp/\n\
-                - Standalone Rust MCP server: Create a dedicated binary"
-            ),
-            other => anyhow::bail!(
-                "Invalid MCP transport: {} (only 'http' is supported)",
-                other
-            ),
-        };
-
-        // HTTP settings (always required since HTTP is the only transport)
+        // HTTP settings (Streamable HTTP is the only transport)
         let http_port = Some(
             http_port_cli
                 .or_else(|| {
@@ -154,7 +135,6 @@ impl McpConfig {
 
         let config = Self {
             enabled,
-            transport,
             http_port,
             http_bind,
             auth_required,
@@ -171,7 +151,6 @@ impl McpConfig {
     fn disabled() -> Self {
         Self {
             enabled: false,
-            transport: McpTransport::Http,
             http_port: Some(8081),
             http_bind: Some("0.0.0.0".to_string()),
             auth_required: false,
@@ -224,7 +203,7 @@ impl McpConfig {
         }
 
         tracing::info!("MCP Server Configuration:");
-        tracing::info!("  Transport: HTTP (only supported transport)");
+        tracing::info!("  Transport: Streamable HTTP");
 
         if let Some(port) = self.http_port {
             tracing::info!("  HTTP Port: {}", port);
@@ -255,9 +234,8 @@ mod tests {
             std::env::remove_var("KRUXIAFLOW_MCP_ENABLED");
         }
 
-        let config = McpConfig::new(None, None, None, None).unwrap();
+        let config = McpConfig::new(None, None, None).unwrap();
         assert!(!config.enabled);
-        assert_eq!(config.transport, McpTransport::Http);
     }
 
     #[test]
@@ -269,7 +247,7 @@ mod tests {
         }
 
         // Should fail with clear error message about stdio not being supported
-        let result = McpConfig::new(None, None, None, None);
+        let result = McpConfig::new(None, None, None);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("stdio transport is not supported"));
@@ -291,8 +269,7 @@ mod tests {
             std::env::remove_var("KRUXIAFLOW_MCP_HTTP_PORT");
         }
 
-        let config = McpConfig::new(None, None, None, None).unwrap();
-        assert_eq!(config.transport, McpTransport::Http);
+        let config = McpConfig::new(None, None, None).unwrap();
         assert_eq!(config.http_port, Some(8081)); // Default port
         assert_eq!(config.http_bind, Some("0.0.0.0".to_string())); // Default bind
         assert!(config.auth_required); // Default true for security
@@ -305,21 +282,18 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_config_http_auth_required_by_default() {
+    fn test_config_auth_required_by_default() {
         unsafe {
             std::env::set_var("KRUXIAFLOW_MCP_ENABLED", "true");
-            std::env::set_var("KRUXIAFLOW_MCP_TRANSPORT", "http");
             std::env::set_var("KRUXIAFLOW_MCP_JWT_SECRET", "test-secret");
         }
 
-        let config = McpConfig::new(None, None, None, None).unwrap();
-        assert_eq!(config.transport, McpTransport::Http);
-        assert!(config.auth_required); // Default for HTTP
+        let config = McpConfig::new(None, None, None).unwrap();
+        assert!(config.auth_required);
         assert_eq!(config.jwt_secret, Some("test-secret".to_string()));
 
         unsafe {
             std::env::remove_var("KRUXIAFLOW_MCP_ENABLED");
-            std::env::remove_var("KRUXIAFLOW_MCP_TRANSPORT");
             std::env::remove_var("KRUXIAFLOW_MCP_JWT_SECRET");
         }
     }
@@ -335,14 +309,12 @@ mod tests {
 
         let config = McpConfig::new(
             Some(true),                    // enabled (overrides env false)
-            Some("http".to_string()),      // transport
             Some(9090),                    // port (overrides env 8888)
             Some("127.0.0.1".to_string()), // bind
         )
         .unwrap();
 
         assert!(config.enabled);
-        assert_eq!(config.transport, McpTransport::Http);
         assert_eq!(config.http_port, Some(9090));
         assert_eq!(config.http_bind, Some("127.0.0.1".to_string()));
 
