@@ -11,28 +11,21 @@
 
 # Python SDK
 
-- [Quick Start](python-sdk/quickstart.md)
-- [Workflow Definitions](python-sdk/workflow-definitions.md)
-- [Standard Workers](python-sdk/standard-workers.md)
-- [Custom Workers](python-sdk/custom-workers.md)
+- [Python SDK](python-sdk.md)
 
 # Features
 
 - [Budget Configuration](budget-configuration.md)
 - [Cost Dashboard API](cost-dashboard-api.md)
-- [Semantic Caching](features/semantic-caching.md)
+- [Semantic Caching](features/2026-01-05-semantic-caching.md) (PLANNED)
 
 # Operations
 
 - [Ollama Deployment](ollama-deployment.md)
-- [Profiling Guide](profiling-quickstart.md)
+- [Raspberry Pi Deployment](raspberry-pi-deployment.md)
 - [Testing](testing.md)
-
-# Development
-
-- [MVP Requirements](mvp-requirements.md)
-- [Post-MVP Roadmap](post-mvp.md)
 
 ---
 
+[Licensing FAQ](licensing-faq.md)
 [Contributing](../CONTRIBUTING.md)

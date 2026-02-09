@@ -796,7 +796,7 @@ async fn handle_activity_failed(
 /// **Scalability**:
 /// - Different workflows process in parallel (advisory lock per workflow)
 /// - No global bottlenecks
-/// - Throughput: **1,000+ workflows/sec** (limited by database, not orchestration logic)
+/// - Throughput: **100+ workflows/sec** (limited by database, not orchestration logic)
 ///
 /// ## Error Handling
 ///

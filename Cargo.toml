@@ -14,7 +14,7 @@ resolver = "2"
 version = "0.3.0"
 edition = "2024"
 authors = ["Sean Harrison <sah@kruxia.com>"]
-license = "MIT"
+license = "AGPL-3.0-or-later"
 description = "High-performance workflow orchestration platform for AI-native workloads"
 
 [workspace.dependencies]

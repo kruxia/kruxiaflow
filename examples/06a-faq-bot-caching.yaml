@@ -107,7 +107,7 @@ activities:
       query: |
         INSERT INTO faq_log
         (question, answer, cost, cache_hit, created_at)
-        VALUES ($1, $2, $3, $4, NOW())
+        VALUES ($1, $2, $3::numeric, $4, NOW())
         RETURNING id
       params:
         - "{{INPUT.question}}"

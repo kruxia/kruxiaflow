@@ -298,7 +298,11 @@ where
     if let Some(params) = params {
         for param in params {
             query = match param {
-                Value::String(s) => query.bind(s.clone()),
+                Value::String(s) => {
+                    // Bind as TEXT. For NUMERIC columns, use ::numeric cast in SQL:
+                    //   INSERT INTO t (price) VALUES ($1::numeric)
+                    query.bind(s.clone())
+                }
                 Value::Number(n) => {
                     if let Some(i) = n.as_i64() {
                         query.bind(i)
@@ -400,7 +404,15 @@ impl ActivityImpl for PostgresQueryActivity {
         );
 
         // Parse parameters from JSON
-        let params: PostgresQueryParams = serde_json::from_value(parameters)
+        let params: PostgresQueryParams = serde_json::from_value(parameters.clone())
+            .map_err(|e| {
+                tracing::error!(
+                    serde_error = %e,
+                    parameters = %parameters,
+                    "Failed to parse PostgreSQL query parameters"
+                );
+                e
+            })
             .context("Failed to parse PostgreSQL query parameters")?;
 
         // Get or create pool
