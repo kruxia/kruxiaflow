@@ -89,9 +89,7 @@ impl ValidateWorkflow {
 }
 
 /// Wrapper for ValidateWorkflow — uniform run_* dispatch pattern.
-pub fn run_validate_workflow(
-    params: &ValidateWorkflow,
-) -> Result<CallToolResult, CallToolError> {
+pub fn run_validate_workflow(params: &ValidateWorkflow) -> Result<CallToolResult, CallToolError> {
     params.call_tool()
 }
 
