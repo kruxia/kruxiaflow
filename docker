@@ -66,7 +66,7 @@ Modes:
   --profiling  Memory profiling with jemalloc (target = profiling)
   --examples   Production + examples environment (Mailpit, examples database)
 
-System mode:
+Cloud mode:
   Uses host networking with cloud-installed PostgreSQL (no containerized DB).
   All docker compose commands are supported: ./docker cloud up|down|logs|ps|...
 
