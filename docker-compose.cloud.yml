@@ -22,6 +22,9 @@ services:
   kruxiaflow:
     networks: !reset {}
     network_mode: host
+    depends_on: !override
+      redis:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-kruxiaflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@${POSTGRES_HOST:-localhost}:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-kruxiaflow}
       KRUXIAFLOW_REDIS_URL: redis://localhost:${REDIS_PORT:-6379}
