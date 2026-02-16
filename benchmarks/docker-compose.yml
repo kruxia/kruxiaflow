@@ -74,10 +74,7 @@ services:
 
   # Kruxia Flow Python worker (py-std)
   kruxiaflow-py-std:
-    build:
-      context: ../py
-      dockerfile: Dockerfile
-      target: py-std
+    image: kruxia/kruxiaflow-py-std:latest
     environment:
       KRUXIAFLOW_API_URL: http://kruxiaflow-py-std-server:8080
       KRUXIAFLOW_CLIENT_ID: benchmark
