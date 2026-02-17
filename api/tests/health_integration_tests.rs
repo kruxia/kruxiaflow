@@ -132,6 +132,7 @@ async fn test_readiness_endpoint_healthy() {
     assert_eq!(body["checks"]["database"], "ok");
     assert_eq!(body["checks"]["event_source"], "ok");
     assert_eq!(body["checks"]["queue"], "ok");
+    assert_eq!(body["checks"]["orchestrator"], "ok");
 }
 
 #[tokio::test]
@@ -268,6 +269,10 @@ async fn test_readiness_includes_all_checks() {
     assert!(
         body["checks"]["queue"].is_string(),
         "queue check should be present"
+    );
+    assert!(
+        body["checks"]["orchestrator"].is_string(),
+        "orchestrator check should be present"
     );
 }
 

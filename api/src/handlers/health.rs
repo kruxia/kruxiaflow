@@ -5,6 +5,7 @@ use crate::health::{
 };
 use crate::state::AppState;
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
+use std::sync::atomic::Ordering;
 
 /// Liveness probe handler
 ///
@@ -96,8 +97,16 @@ pub async fn readiness_handler(State(app_state): State<AppState>) -> impl IntoRe
         }
     };
 
-    let all_healthy =
-        database_status == "ok" && event_source_status == "ok" && queue_status == "ok";
+    let orchestrator_status = if app_state.orchestrator_alive.load(Ordering::Relaxed) {
+        "ok"
+    } else {
+        "unhealthy"
+    };
+
+    let all_healthy = database_status == "ok"
+        && event_source_status == "ok"
+        && queue_status == "ok"
+        && orchestrator_status == "ok";
 
     let status_code = if all_healthy {
         StatusCode::OK
@@ -113,6 +122,7 @@ pub async fn readiness_handler(State(app_state): State<AppState>) -> impl IntoRe
                 database: database_status,
                 event_source: event_source_status,
                 queue: queue_status,
+                orchestrator: orchestrator_status,
             },
         }),
     )
