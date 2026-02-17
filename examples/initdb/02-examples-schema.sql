@@ -66,9 +66,9 @@ CREATE TABLE document_chunks (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX document_chunks_embedding_idx ON document_chunks
-USING ivfflat (embedding vector_cosine_ops)
-WITH (lists = 100);
+-- Note: IVFFlat and HNSW indexes are limited to 2000 dimensions; vector(3072)
+-- (OpenAI text-embedding-3-large) exceeds that limit. No index is needed for
+-- the examples database — sequential scan is fine for small demo datasets.
 
 -- Example 06c: RAG Query Q&A Log
 CREATE TABLE qa_log (

@@ -232,14 +232,15 @@ fn extract_service_health(service_name: &str, readiness: &serde_json::Value) -> 
 
     match check {
         Some(service_check) => {
+            // Handle both flat strings ("ok") and structured objects ({"status": "healthy"})
             let status_str = service_check
-                .get("status")
-                .and_then(|s| s.as_str())
+                .as_str()
+                .or_else(|| service_check.get("status").and_then(|s| s.as_str()))
                 .unwrap_or("unknown");
 
             let status = match status_str {
-                "healthy" => HealthStatus::Healthy,
-                "unhealthy" => HealthStatus::Unhealthy,
+                "healthy" | "ok" | "ready" => HealthStatus::Healthy,
+                "unhealthy" | "error" => HealthStatus::Unhealthy,
                 "degraded" => HealthStatus::Degraded,
                 _ => HealthStatus::Unknown,
             };
@@ -406,6 +407,33 @@ mod tests {
 
         let result = extract_service_health("orchestrator", &readiness);
         assert_eq!(result.status, HealthStatus::Degraded);
+    }
+
+    #[test]
+    fn test_extract_service_health_flat_string_ok() {
+        // Readiness endpoint returns flat "ok" strings, not structured objects
+        let readiness = serde_json::json!({
+            "status": "ready",
+            "checks": {
+                "database": "ok",
+                "event_source": "ok",
+                "queue": "ok"
+            }
+        });
+
+        let result = extract_service_health("database", &readiness);
+        assert_eq!(result.status, HealthStatus::Healthy);
+        assert_eq!(result.message, Some("ok".to_string()));
+    }
+
+    #[test]
+    fn test_extract_service_health_flat_string_error() {
+        let readiness = serde_json::json!({
+            "checks": { "database": "error" }
+        });
+
+        let result = extract_service_health("database", &readiness);
+        assert_eq!(result.status, HealthStatus::Unhealthy);
     }
 
     #[test]
