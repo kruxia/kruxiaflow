@@ -55,7 +55,6 @@ Commands:
   build                       Build images
   pull                        Pull latest images
   restart                     Restart services
-  cloud <cmd>                 Cloud deployment (host PostgreSQL, host networking)
   clean                       Stop and remove volumes (WARNING: deletes data)
   init                        Re-generate secrets and keys
   *                           Any other docker compose command
@@ -66,18 +65,12 @@ Modes:
   --profiling  Memory profiling with jemalloc (target = profiling)
   --examples   Production + examples environment (Mailpit, examples database)
 
-Cloud mode:
-  Uses host networking with cloud-installed PostgreSQL (no containerized DB).
-  All docker compose commands are supported: ./docker cloud up|down|logs|ps|...
-
 Examples:
   ./docker up                        # Start production environment
   ./docker up --develop              # Start development environment
   ./docker up --examples             # Start with examples environment
   ./docker up --profiling            # Start profiling environment
   ./docker up -d                     # Start detached
-  ./docker cloud up -d              # Start cloud deployment detached
-  ./docker cloud logs -f            # Follow cloud deployment logs
   ./docker logs -f                   # Follow logs
   ./docker down                      # Stop everything
   ./docker clean                     # Stop and delete all data
@@ -142,12 +135,6 @@ main() {
                     exec docker compose -f docker-compose.yml up $other_args
                     ;;
             esac
-            ;;
-        cloud)
-            ensure_init
-            shift
-            log_info "Cloud deployment (cloud PostgreSQL, host networking)"
-            exec docker compose -f docker-compose.yml -f docker-compose.cloud.yml "$@"
             ;;
         down|stop)
             shift
