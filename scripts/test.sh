@@ -46,6 +46,15 @@
 
 set -e
 
+# Load .env if present (provides POSTGRES_PASSWORD, POSTGRES_PORT, etc.)
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/.env"
+    set +a
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -168,7 +177,7 @@ if [ "$SKIP_DB_SETUP" = false ]; then
     DB_USER="kruxiaflow"
     DB_PASSWORD="${POSTGRES_PASSWORD:-kruxiaflow_dev}"
     DB_HOST="127.0.0.1"
-    DB_PORT="5432"
+    DB_PORT="${POSTGRES_PORT:-5433}"
     DB_NAME="kruxiaflow_test"
 
     # Drop and recreate test database
