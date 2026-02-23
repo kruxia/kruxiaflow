@@ -6,6 +6,7 @@ pub mod oauth;
 pub mod outputs;
 pub mod signals;
 pub mod streaming;
+pub mod users;
 pub mod websocket;
 pub mod workers;
 pub mod workflow_definitions;
@@ -23,6 +24,7 @@ pub use signals::signal_activity;
 pub use streaming::{
     get_subscriber_count, publish_stream_complete, publish_stream_error, publish_stream_token,
 };
+pub use users::create_user;
 pub use websocket::activity_stream_handler;
 pub use workers::{complete_activity, fail_activity, heartbeat_activity, poll_activities};
 pub use workflow_definitions::{
