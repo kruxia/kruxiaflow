@@ -78,6 +78,8 @@ pub fn public_routes() -> Router<AppState> {
 /// Authentication middleware is applied in app_router() after with_state().
 pub fn protected_routes() -> Router<AppState> {
     Router::new()
+        // User Management
+        .route("/api/v1/oauth/users", post(handlers::create_user))
         // Workflow Definition Management
         .route(
             "/api/v1/workflow_definitions",

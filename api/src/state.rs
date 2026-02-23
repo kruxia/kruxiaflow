@@ -191,7 +191,10 @@ pub mod tests {
     use kruxiaflow_core::events::{EventError, NewWorkflowEvent, WorkflowEvent};
     use kruxiaflow_core::queue::{Activity, ActivityResult, QueuedActivity};
     use kruxiaflow_core::storage::{FileMetadata, StorageError};
-    use kruxiaflow_oauth::{AuthResponse, AuthResult, AuthenticationService, Claims, JwtKey};
+    use kruxiaflow_oauth::{
+        AuthResponse, AuthResult, AuthenticationService, Claims, JwtKey, RegisterUserRequest,
+        RegisterUserResponse,
+    };
     use sqlx::PgPool;
     use std::pin::Pin;
     use tokio_util::bytes::Bytes;
@@ -507,6 +510,19 @@ pub mod tests {
                 aud: "test".to_string(),
                 exp: 9999999999,
                 iat: 1000000000,
+            })
+        }
+
+        async fn register_user(
+            &self,
+            request: RegisterUserRequest,
+        ) -> AuthResult<RegisterUserResponse> {
+            Ok(RegisterUserResponse {
+                id: Uuid::now_v7(),
+                username: request.username,
+                email: request.email,
+                is_active: true,
+                created_at: chrono::Utc::now(),
             })
         }
 
