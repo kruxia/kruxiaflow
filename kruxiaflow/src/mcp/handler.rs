@@ -23,10 +23,12 @@ use super::tools::{
     ControlTools, DiscoveryTools, ExecutionTools, ObservabilityTools, VisualizationTools, control,
     discovery, execution, observability, visualization,
 };
-use crate::mcp::config::McpConfig;
+use super::config::McpConfig;
 
 /// Handler that dispatches MCP tool calls to Kruxia Flow services.
 pub struct KruxiaFlowMcpHandler {
+    /// Reserved for future per-request config access (e.g., rate limits, tenant context)
+    #[allow(dead_code)]
     pub config: Arc<McpConfig>,
     pub pool: PgPool,
 }

@@ -320,43 +320,166 @@ fn extract_validation_errors(err: &kruxiaflow_core::ValidationError) -> Vec<Stri
 /// Best-effort extraction of activity count and dependency map from raw YAML.
 /// Returns (0, {}) if the YAML can't be parsed at all.
 ///
-/// Uses `serde_yaml` directly rather than going through `WorkflowDefinition::from_yaml`,
-/// because the definition may have failed validation — we still want to extract whatever
-/// structural info we can from the raw document.
+/// TODO(#11): Uses `serde_yaml` directly rather than going through
+/// `WorkflowDefinition::from_yaml`, because the definition may have failed
+/// validation — we still want to extract whatever structural info we can from
+/// the raw document.
 fn extract_partial_info(yaml: &str) -> (usize, serde_json::Value) {
     // Try to parse as YAML and extract activities — even if validation failed
     // the structure might be readable
-    if let Ok(doc) = serde_yaml::from_str::<serde_json::Value>(yaml) {
-        if let Some(activities) = doc.get("activities").and_then(|a| a.as_object()) {
-            let count = activities.len();
-            let deps: serde_json::Map<String, serde_json::Value> = activities
-                .iter()
-                .map(|(key, val)| {
-                    let dep_keys: Vec<String> = val
-                        .get("depends_on")
-                        .and_then(|d| d.as_array())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|item| {
-                                    // depends_on entries can be plain strings or objects with activity_key
-                                    if let Some(s) = item.as_str() {
-                                        Some(s.to_string())
-                                    } else if let Some(k) =
+    if let Ok(doc) = serde_yaml::from_str::<serde_json::Value>(yaml)
+        && let Some(activities) = doc.get("activities").and_then(|a| a.as_object())
+    {
+        let count = activities.len();
+        let deps: serde_json::Map<String, serde_json::Value> = activities
+            .iter()
+            .map(|(key, val)| {
+                let dep_keys: Vec<String> = val
+                    .get("depends_on")
+                    .and_then(|d| d.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|item| {
+                                // depends_on entries can be plain strings or objects with activity_key
+                                item.as_str()
+                                    .or_else(|| {
                                         item.get("activity_key").and_then(|v| v.as_str())
-                                    {
-                                        Some(k.to_string())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    (key.clone(), serde_json::json!(dep_keys))
-                })
-                .collect();
-            return (count, serde_json::Value::Object(deps));
-        }
+                                    })
+                                    .map(|s| s.to_string())
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                (key.clone(), serde_json::json!(dep_keys))
+            })
+            .collect();
+        return (count, serde_json::Value::Object(deps));
     }
     (0, serde_json::json!({}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // extract_partial_info tests
+    // =========================================================================
+
+    #[test]
+    fn test_extract_partial_info_valid_yaml() {
+        let yaml = r#"
+name: test-workflow
+activities:
+  fetch:
+    worker: std
+    activity_name: http_request
+    parameters:
+      method: GET
+      url: "https://example.com"
+  process:
+    worker: std
+    activity_name: echo
+    depends_on: [fetch]
+"#;
+        let (count, deps) = extract_partial_info(yaml);
+        assert_eq!(count, 2);
+        assert_eq!(deps["fetch"], serde_json::json!([]));
+        assert_eq!(deps["process"], serde_json::json!(["fetch"]));
+    }
+
+    #[test]
+    fn test_extract_partial_info_conditional_depends_on() {
+        let yaml = r#"
+name: test
+activities:
+  check:
+    worker: std
+    activity_name: echo
+  handle:
+    worker: std
+    activity_name: echo
+    depends_on:
+      - activity_key: check
+        conditions: ["check.status == ok"]
+"#;
+        let (count, deps) = extract_partial_info(yaml);
+        assert_eq!(count, 2);
+        assert_eq!(deps["handle"], serde_json::json!(["check"]));
+    }
+
+    #[test]
+    fn test_extract_partial_info_invalid_yaml() {
+        let (count, deps) = extract_partial_info("{{{{not yaml at all");
+        assert_eq!(count, 0);
+        assert_eq!(deps, serde_json::json!({}));
+    }
+
+    #[test]
+    fn test_extract_partial_info_empty_string() {
+        let (count, deps) = extract_partial_info("");
+        assert_eq!(count, 0);
+        assert_eq!(deps, serde_json::json!({}));
+    }
+
+    #[test]
+    fn test_extract_partial_info_yaml_without_activities() {
+        let (count, deps) = extract_partial_info("name: test\nversion: 1");
+        assert_eq!(count, 0);
+        assert_eq!(deps, serde_json::json!({}));
+    }
+
+    // =========================================================================
+    // validate_workflow tests
+    // =========================================================================
+
+    #[test]
+    fn test_validate_workflow_valid_definition() {
+        let tool = ValidateWorkflow {
+            workflow_yaml: r#"
+name: test-workflow
+activities:
+  - key: echo_step
+    worker: std
+    activity_name: echo
+    parameters:
+      message: hello
+"#
+            .to_string(),
+        };
+
+        let result = tool.call_tool().unwrap();
+        let content = &result.content[0];
+        {
+            let text = content.as_text_content().unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(&text.text).unwrap();
+            assert_eq!(parsed["valid"], true);
+            assert_eq!(parsed["activities"], 1);
+            assert!(parsed["errors"].as_array().unwrap().is_empty());
+        }
+    }
+
+    #[test]
+    fn test_validate_workflow_invalid_definition() {
+        let tool = ValidateWorkflow {
+            workflow_yaml: r#"
+name: test-workflow
+activities:
+  - key: step_a
+    worker: std
+    activity_name: echo
+    depends_on: [nonexistent]
+"#
+            .to_string(),
+        };
+
+        let result = tool.call_tool().unwrap();
+        let content = &result.content[0];
+        {
+            let text = content.as_text_content().unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(&text.text).unwrap();
+            assert_eq!(parsed["valid"], false);
+            assert!(!parsed["errors"].as_array().unwrap().is_empty());
+        }
+    }
 }

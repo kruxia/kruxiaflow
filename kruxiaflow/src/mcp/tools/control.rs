@@ -182,13 +182,14 @@ pub async fn run_list_waiting_workflows(
     let limit = params.limit.unwrap_or(20);
     let offset = params.offset.unwrap_or(0);
 
-    // Two query paths depending on whether signal_name filter is present.
-    // Both use runtime sqlx::query() to avoid prepare-cache dependency on
+    // Use runtime sqlx::query() to avoid prepare-cache dependency on
     // the activity_event_subscriptions table.
     // TODO(#9): Migrate to stored procs with compile-time validation (sqlx::query!)
     // per project conventions.
-    let (rows, total) = if let Some(ref signal_name) = params.signal_name {
-        let rows = sqlx::query(
+    let signal_filter = params.signal_name.as_deref();
+
+    let (base_query, count_query) = if signal_filter.is_some() {
+        (
             "SELECT s.workflow_id, s.activity_key, s.event_name, s.created_at, \
              w.definition_name \
              FROM activity_event_subscriptions s \
@@ -198,31 +199,14 @@ pub async fn run_list_waiting_workflows(
                AND s.event_name = $1 \
              ORDER BY s.created_at DESC \
              LIMIT $2 OFFSET $3",
-        )
-        .bind(signal_name.as_str())
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| {
-            CallToolError::from_message(format!("Database error listing waiting workflows: {e}"))
-        })?;
-
-        let total: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM activity_event_subscriptions s \
              JOIN workflows w ON w.id = s.workflow_id \
              WHERE w.status = 'running' \
                AND s.signal_data IS NULL \
                AND s.event_name = $1",
         )
-        .bind(signal_name.as_str())
-        .fetch_one(pool)
-        .await
-        .unwrap_or(0);
-
-        (rows, total)
     } else {
-        let rows = sqlx::query(
+        (
             "SELECT s.workflow_id, s.activity_key, s.event_name, s.created_at, \
              w.definition_name \
              FROM activity_event_subscriptions s \
@@ -231,27 +215,42 @@ pub async fn run_list_waiting_workflows(
                AND s.signal_data IS NULL \
              ORDER BY s.created_at DESC \
              LIMIT $1 OFFSET $2",
-        )
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool)
-        .await
-        .map_err(|e| {
-            CallToolError::from_message(format!("Database error listing waiting workflows: {e}"))
-        })?;
-
-        let total: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM activity_event_subscriptions s \
              JOIN workflows w ON w.id = s.workflow_id \
              WHERE w.status = 'running' \
                AND s.signal_data IS NULL",
         )
-        .fetch_one(pool)
-        .await
-        .unwrap_or(0);
-
-        (rows, total)
     };
+
+    let rows = if let Some(name) = signal_filter {
+        sqlx::query(base_query)
+            .bind(name)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(pool)
+            .await
+    } else {
+        sqlx::query(base_query)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(pool)
+            .await
+    }
+    .map_err(|e| {
+        CallToolError::from_message(format!("Database error listing waiting workflows: {e}"))
+    })?;
+
+    let total: i64 = if let Some(name) = signal_filter {
+        sqlx::query_scalar(count_query)
+            .bind(name)
+            .fetch_one(pool)
+            .await
+    } else {
+        sqlx::query_scalar(count_query)
+            .fetch_one(pool)
+            .await
+    }
+    .unwrap_or(0);
 
     // Group results by workflow_id, preserving row order
     let mut workflow_map: HashMap<String, serde_json::Value> = HashMap::new();
@@ -278,14 +277,14 @@ pub async fn run_list_waiting_workflows(
             workflow_order.push(wf_key.clone());
         }
 
-        if let Some(entry) = workflow_map.get_mut(&wf_key) {
-            if let Some(activities) = entry["waiting_activities"].as_array_mut() {
-                activities.push(serde_json::json!({
-                    "activity_key": activity_key,
-                    "signal_name": event_name,
-                    "waiting_since": created_at.to_rfc3339(),
-                }));
-            }
+        if let Some(entry) = workflow_map.get_mut(&wf_key)
+            && let Some(activities) = entry["waiting_activities"].as_array_mut()
+        {
+            activities.push(serde_json::json!({
+                "activity_key": activity_key,
+                "signal_name": event_name,
+                "waiting_since": created_at.to_rfc3339(),
+            }));
         }
     }
 

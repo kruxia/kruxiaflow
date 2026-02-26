@@ -24,8 +24,9 @@
 /// - Production deployments with monitoring/logging
 /// - Multi-client AI agent access
 /// - Network-accessible MCP endpoints
-use anyhow::Result;
 use std::time::Duration;
+
+use super::error::{McpError, Result};
 
 /// MCP server configuration
 ///
@@ -79,17 +80,16 @@ impl McpConfig {
         }
 
         // Reject stdio if someone explicitly requests it via env var
-        if let Ok(transport) = std::env::var("KRUXIAFLOW_MCP_TRANSPORT") {
-            if transport.eq_ignore_ascii_case("stdio") {
-                anyhow::bail!(
-                    "MCP stdio transport is not supported in the integrated MCP server.\n\
-                    Reason: The 'serve' command runs multiple services with logging to stdout/stderr,\n\
-                    which corrupts the MCP stdio protocol (requires clean stdin/stdout).\n\n\
-                    For stdio MCP support, use a separate process:\n\
-                    - Python MCP server: kruxiaflow-mcp/\n\
-                    - Standalone Rust MCP server: Create a dedicated binary"
-                );
-            }
+        if let Ok(transport) = std::env::var("KRUXIAFLOW_MCP_TRANSPORT")
+            && transport.eq_ignore_ascii_case("stdio")
+        {
+            return Err(McpError::UnsupportedTransport(
+                "The 'serve' command runs multiple services with logging to stdout/stderr, \
+                which corrupts the MCP stdio protocol (requires clean stdin/stdout). \
+                For stdio MCP support, use a separate process: \
+                Python MCP server (kruxiaflow-mcp/) or a standalone Rust binary."
+                    .to_string(),
+            ));
         }
 
         // HTTP settings (Streamable HTTP is the only transport)
@@ -168,7 +168,9 @@ impl McpConfig {
 
         // HTTP port is always required (HTTP is the only transport)
         if self.http_port.is_none() {
-            anyhow::bail!("MCP HTTP transport requires port. Set KRUXIAFLOW_MCP_HTTP_PORT");
+            return Err(McpError::ConfigError(
+                "MCP HTTP transport requires port. Set KRUXIAFLOW_MCP_HTTP_PORT".to_string(),
+            ));
         }
 
         // Warn about insecure HTTP without auth
@@ -181,15 +183,18 @@ impl McpConfig {
 
         // Auth requires JWT secret
         if self.auth_required && self.jwt_secret.is_none() {
-            anyhow::bail!(
+            return Err(McpError::ConfigError(
                 "Authentication enabled but no JWT secret provided. \
                 Set KRUXIAFLOW_MCP_JWT_SECRET"
-            );
+                    .to_string(),
+            ));
         }
 
         // Resource limits
         if self.max_concurrent_requests == 0 {
-            anyhow::bail!("max_concurrent_requests must be > 0");
+            return Err(McpError::ConfigError(
+                "max_concurrent_requests must be > 0".to_string(),
+            ));
         }
 
         Ok(())
@@ -226,13 +231,57 @@ mod tests {
     use super::*;
     use serial_test::serial;
 
+    /// RAII guard that restores environment variables on drop (even on panic).
+    struct EnvGuard {
+        vars: Vec<(String, Option<String>)>,
+    }
+
+    impl EnvGuard {
+        /// Capture current values of the given env vars and return a guard.
+        fn new(names: &[&str]) -> Self {
+            let vars = names
+                .iter()
+                .map(|&name| (name.to_string(), std::env::var(name).ok()))
+                .collect();
+            Self { vars }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (name, original) in &self.vars {
+                match original {
+                    Some(val) => unsafe { std::env::set_var(name, val) },
+                    None => unsafe { std::env::remove_var(name) },
+                }
+            }
+        }
+    }
+
+    /// All MCP env var names used in tests.
+    const MCP_ENV_VARS: &[&str] = &[
+        "KRUXIAFLOW_MCP_ENABLED",
+        "KRUXIAFLOW_MCP_TRANSPORT",
+        "KRUXIAFLOW_MCP_HTTP_PORT",
+        "KRUXIAFLOW_MCP_HTTP_BIND",
+        "KRUXIAFLOW_MCP_JWT_SECRET",
+        "KRUXIAFLOW_MCP_AUTH_REQUIRED",
+        "KRUXIAFLOW_MCP_MAX_CONCURRENT_REQUESTS",
+        "KRUXIAFLOW_MCP_REQUEST_TIMEOUT_SECS",
+    ];
+
+    /// Helper: clean all MCP env vars for a fresh test.
+    fn clean_mcp_env() {
+        for var in MCP_ENV_VARS {
+            unsafe { std::env::remove_var(var) };
+        }
+    }
+
     #[test]
     #[serial]
     fn test_config_disabled_by_default() {
-        // Clean environment
-        unsafe {
-            std::env::remove_var("KRUXIAFLOW_MCP_ENABLED");
-        }
+        let _guard = EnvGuard::new(MCP_ENV_VARS);
+        clean_mcp_env();
 
         let config = McpConfig::new(None, None, None).unwrap();
         assert!(!config.enabled);
@@ -241,48 +290,44 @@ mod tests {
     #[test]
     #[serial]
     fn test_config_stdio_transport_rejected() {
+        let _guard = EnvGuard::new(MCP_ENV_VARS);
+        clean_mcp_env();
+
         unsafe {
             std::env::set_var("KRUXIAFLOW_MCP_ENABLED", "true");
             std::env::set_var("KRUXIAFLOW_MCP_TRANSPORT", "stdio");
         }
 
-        // Should fail with clear error message about stdio not being supported
         let result = McpConfig::new(None, None, None);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("stdio transport is not supported"));
+        assert!(err.contains("stdio"));
         assert!(err.contains("separate process"));
-
-        unsafe {
-            std::env::remove_var("KRUXIAFLOW_MCP_ENABLED");
-            std::env::remove_var("KRUXIAFLOW_MCP_TRANSPORT");
-        }
     }
 
     #[test]
     #[serial]
     fn test_config_http_defaults() {
+        let _guard = EnvGuard::new(MCP_ENV_VARS);
+        clean_mcp_env();
+
         unsafe {
             std::env::set_var("KRUXIAFLOW_MCP_ENABLED", "true");
             std::env::set_var("KRUXIAFLOW_MCP_JWT_SECRET", "test-secret");
-            std::env::remove_var("KRUXIAFLOW_MCP_TRANSPORT");
-            std::env::remove_var("KRUXIAFLOW_MCP_HTTP_PORT");
         }
 
         let config = McpConfig::new(None, None, None).unwrap();
-        assert_eq!(config.http_port, Some(8081)); // Default port
-        assert_eq!(config.http_bind, Some("0.0.0.0".to_string())); // Default bind
-        assert!(config.auth_required); // Default true for security
-
-        unsafe {
-            std::env::remove_var("KRUXIAFLOW_MCP_ENABLED");
-            std::env::remove_var("KRUXIAFLOW_MCP_JWT_SECRET");
-        }
+        assert_eq!(config.http_port, Some(8081));
+        assert_eq!(config.http_bind, Some("0.0.0.0".to_string()));
+        assert!(config.auth_required);
     }
 
     #[test]
     #[serial]
     fn test_config_auth_required_by_default() {
+        let _guard = EnvGuard::new(MCP_ENV_VARS);
+        clean_mcp_env();
+
         unsafe {
             std::env::set_var("KRUXIAFLOW_MCP_ENABLED", "true");
             std::env::set_var("KRUXIAFLOW_MCP_JWT_SECRET", "test-secret");
@@ -291,16 +336,14 @@ mod tests {
         let config = McpConfig::new(None, None, None).unwrap();
         assert!(config.auth_required);
         assert_eq!(config.jwt_secret, Some("test-secret".to_string()));
-
-        unsafe {
-            std::env::remove_var("KRUXIAFLOW_MCP_ENABLED");
-            std::env::remove_var("KRUXIAFLOW_MCP_JWT_SECRET");
-        }
     }
 
     #[test]
     #[serial]
     fn test_cli_overrides_env() {
+        let _guard = EnvGuard::new(MCP_ENV_VARS);
+        clean_mcp_env();
+
         unsafe {
             std::env::set_var("KRUXIAFLOW_MCP_ENABLED", "false");
             std::env::set_var("KRUXIAFLOW_MCP_HTTP_PORT", "8888");
@@ -308,20 +351,14 @@ mod tests {
         }
 
         let config = McpConfig::new(
-            Some(true),                    // enabled (overrides env false)
-            Some(9090),                    // port (overrides env 8888)
-            Some("127.0.0.1".to_string()), // bind
+            Some(true),
+            Some(9090),
+            Some("127.0.0.1".to_string()),
         )
         .unwrap();
 
         assert!(config.enabled);
         assert_eq!(config.http_port, Some(9090));
         assert_eq!(config.http_bind, Some("127.0.0.1".to_string()));
-
-        unsafe {
-            std::env::remove_var("KRUXIAFLOW_MCP_ENABLED");
-            std::env::remove_var("KRUXIAFLOW_MCP_HTTP_PORT");
-            std::env::remove_var("KRUXIAFLOW_MCP_JWT_SECRET");
-        }
     }
 }

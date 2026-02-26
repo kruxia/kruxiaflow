@@ -81,6 +81,10 @@ pub struct GetWorkflowDefinition {
 #[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
 pub struct ListActivities {}
 
+/// Number of activities in the hardcoded catalog. Must match ACTIVITY_CATALOG length.
+/// Update this when adding or removing activities.
+const ACTIVITY_CATALOG_COUNT: usize = 8;
+
 impl ListActivities {
     /// NOTE: This catalog is manually maintained. When activities are added to
     /// or removed from the worker, this list and its "total" count must be
@@ -223,9 +227,19 @@ impl ListActivities {
             }
         ]);
 
+        let activity_list = activities.as_array().expect("activities must be an array");
+        debug_assert_eq!(
+            activity_list.len(),
+            ACTIVITY_CATALOG_COUNT,
+            "ACTIVITY_CATALOG_COUNT ({}) does not match actual catalog length ({}). \
+             Update the constant when adding or removing activities.",
+            ACTIVITY_CATALOG_COUNT,
+            activity_list.len(),
+        );
+
         let response = serde_json::json!({
             "activities": activities,
-            "total": 8,
+            "total": activity_list.len(),
             "note": "All activities support template expressions like {{INPUT.field}} and {{activity_key.output_name}} for dynamic parameter values"
         });
 
@@ -538,4 +552,87 @@ pub fn run_get_workflow_authoring_guide(
     params: &GetWorkflowAuthoringGuide,
 ) -> Result<CallToolResult, CallToolError> {
     params.call_tool()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_list_activities_returns_correct_count() {
+        let tool = ListActivities {};
+        let result = tool.call_tool().unwrap();
+        let content = &result.content[0];
+        {
+            let text = content.as_text_content().unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(&text.text).unwrap();
+            let total = parsed["total"].as_u64().unwrap() as usize;
+            let activities = parsed["activities"].as_array().unwrap();
+            assert_eq!(total, activities.len());
+            assert_eq!(total, ACTIVITY_CATALOG_COUNT);
+        }
+    }
+
+    #[test]
+    fn test_list_activities_all_have_required_fields() {
+        let tool = ListActivities {};
+        let result = tool.call_tool().unwrap();
+        let content = &result.content[0];
+        {
+            let text = content.as_text_content().unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(&text.text).unwrap();
+            for activity in parsed["activities"].as_array().unwrap() {
+                assert!(activity.get("name").is_some(), "Activity missing 'name'");
+                assert!(activity.get("worker").is_some(), "Activity missing 'worker'");
+                assert!(
+                    activity.get("description").is_some(),
+                    "Activity missing 'description'"
+                );
+                assert!(
+                    activity.get("parameters").is_some(),
+                    "Activity missing 'parameters'"
+                );
+                assert!(
+                    activity.get("outputs").is_some(),
+                    "Activity missing 'outputs'"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_list_activities_unique_names() {
+        let tool = ListActivities {};
+        let result = tool.call_tool().unwrap();
+        let content = &result.content[0];
+        {
+            let text = content.as_text_content().unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(&text.text).unwrap();
+            let names: Vec<&str> = parsed["activities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|a| a["name"].as_str().unwrap())
+                .collect();
+            let unique: std::collections::HashSet<&str> = names.iter().copied().collect();
+            assert_eq!(names.len(), unique.len(), "Duplicate activity names found");
+        }
+    }
+
+    #[test]
+    fn test_get_workflow_authoring_guide_returns_content() {
+        let tool = GetWorkflowAuthoringGuide {};
+        let result = tool.call_tool().unwrap();
+        let content = &result.content[0];
+        {
+            let text = content.as_text_content().unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(&text.text).unwrap();
+            assert!(parsed.get("yaml_structure").is_some());
+            assert!(parsed.get("template_expressions").is_some());
+            assert!(parsed.get("dependency_patterns").is_some());
+            assert!(parsed.get("settings_configuration").is_some());
+            assert!(parsed.get("complete_examples").is_some());
+            assert!(parsed.get("best_practices").is_some());
+        }
+    }
 }
