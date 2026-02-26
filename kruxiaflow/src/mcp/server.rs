@@ -22,11 +22,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::Result;
 use async_trait::async_trait;
 use sqlx::PgPool;
 use tokio::task::JoinHandle;
 
+use super::error::{McpError, Result};
 use rust_mcp_sdk::{
     auth::{AuthInfo, AuthProvider, AuthenticationError, OauthEndpoint},
     mcp_http::{GenericBody, GenericBodyExt},
@@ -40,7 +40,7 @@ use rust_mcp_sdk::{
     },
 };
 
-use crate::mcp::config::McpConfig;
+use super::config::McpConfig;
 
 /// MCP server instance
 pub struct McpServer {
@@ -108,7 +108,7 @@ impl McpServer {
         server
             .start()
             .await
-            .map_err(|e| anyhow::anyhow!("MCP server: {e}"))?;
+            .map_err(|e| McpError::ServerError(format!("MCP server: {e}")))?;
 
         Ok(())
     }

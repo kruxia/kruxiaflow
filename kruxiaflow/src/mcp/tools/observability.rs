@@ -422,10 +422,8 @@ pub async fn run_get_workflow_cost(
         let total_tokens: Option<i64> = row.get(6);
         let row_budget: Option<Decimal> = row.get(7);
 
-        if budget_limit.is_none() {
-            if let Some(b) = row_budget {
-                budget_limit = Some(b);
-            }
+        if budget_limit.is_none() && let Some(b) = row_budget {
+            budget_limit = Some(b);
         }
 
         let cost_f64 = cost.to_f64().unwrap_or(0.0);
@@ -511,6 +509,7 @@ pub async fn run_estimate_workflow_cost(
     let mut activity_estimates: Vec<serde_json::Value> = Vec::new();
     let mut total_min = Decimal::ZERO;
     let mut total_max = Decimal::ZERO;
+    let mut warnings: Vec<String> = Vec::new();
 
     for activity in &stored.activities {
         let activity_name = activity.activity_name.as_deref().unwrap_or("unknown");
@@ -518,15 +517,28 @@ pub async fn run_estimate_workflow_cost(
         if activity_name == "llm_prompt" {
             let p = activity.parameters.as_ref();
 
-            // TODO(#10): These defaults silently assume Anthropic/Claude when the
-            // definition omits provider/model. Consider warning in the response
-            // or requiring explicit provider/model in llm_prompt activities.
-            let provider = p
-                .and_then(|m| m.get("provider").and_then(|v| v.as_str()))
-                .unwrap_or("anthropic");
-            let model = p
-                .and_then(|m| m.get("model").and_then(|v| v.as_str()))
-                .unwrap_or("claude-sonnet-4-5-20250929");
+            let explicit_provider = p.and_then(|m| m.get("provider").and_then(|v| v.as_str()));
+            let explicit_model = p.and_then(|m| m.get("model").and_then(|v| v.as_str()));
+
+            let provider = explicit_provider.unwrap_or("anthropic");
+            let model = explicit_model.unwrap_or("claude-sonnet-4-5-20250929");
+
+            if explicit_provider.is_none() || explicit_model.is_none() {
+                warnings.push(format!(
+                    "Activity '{}' missing explicit {}: defaulting to {}/{}. \
+                     Cost estimate may be inaccurate if a different model is used at runtime.",
+                    activity.key,
+                    if explicit_provider.is_none() && explicit_model.is_none() {
+                        "provider and model"
+                    } else if explicit_provider.is_none() {
+                        "provider"
+                    } else {
+                        "model"
+                    },
+                    provider,
+                    model,
+                ));
+            }
             let max_tokens = p
                 .and_then(|m| m.get("max_tokens").and_then(|v| v.as_u64()))
                 .unwrap_or(1024) as u32;
@@ -592,6 +604,7 @@ pub async fn run_estimate_workflow_cost(
             "max": total_max.to_f64().unwrap_or(0.0),
         },
         "activities": activity_estimates,
+        "warnings": warnings,
         "assumptions": [
             "Token estimates use provider-specific heuristics (Anthropic: 3.5 chars/token, OpenAI: 4.0 chars/token)",
             "Prompt length based on template text with {{INPUT.key}} values substituted from input_sample",
@@ -672,4 +685,120 @@ fn substitute_input_template(template: &str, input_sample: &serde_json::Value) -
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // extract_activities_array tests
+    // =========================================================================
+
+    #[test]
+    fn test_extract_activities_array_from_object() {
+        let input = serde_json::json!({
+            "fetch": {"status": "completed", "activity_name": "http_request"},
+            "process": {"status": "running", "activity_name": "echo"},
+        });
+        let result = extract_activities_array(&input);
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        // Object format should inject "key" field
+        for item in arr {
+            assert!(item.get("key").is_some());
+        }
+    }
+
+    #[test]
+    fn test_extract_activities_array_from_array() {
+        let input = serde_json::json!([
+            {"key": "fetch", "status": "completed"},
+            {"key": "process", "status": "running"},
+        ]);
+        let result = extract_activities_array(&input);
+        let arr = result.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+    }
+
+    #[test]
+    fn test_extract_activities_array_from_null() {
+        let result = extract_activities_array(&serde_json::Value::Null);
+        assert_eq!(result, serde_json::json!([]));
+    }
+
+    // =========================================================================
+    // extract_activity_name_map tests
+    // =========================================================================
+
+    #[test]
+    fn test_extract_activity_name_map_object_format() {
+        let input = serde_json::json!({
+            "fetch": {"activity_name": "http_request"},
+            "process": {"activity_name": "echo"},
+        });
+        let map = extract_activity_name_map(&input);
+        assert_eq!(map.get("fetch").unwrap(), "http_request");
+        assert_eq!(map.get("process").unwrap(), "echo");
+    }
+
+    #[test]
+    fn test_extract_activity_name_map_array_format() {
+        let input = serde_json::json!([
+            {"key": "fetch", "activity_name": "http_request"},
+            {"key": "process", "activity_name": "echo"},
+        ]);
+        let map = extract_activity_name_map(&input);
+        assert_eq!(map.get("fetch").unwrap(), "http_request");
+        assert_eq!(map.get("process").unwrap(), "echo");
+    }
+
+    #[test]
+    fn test_extract_activity_name_map_empty() {
+        let map = extract_activity_name_map(&serde_json::Value::Null);
+        assert!(map.is_empty());
+    }
+
+    // =========================================================================
+    // substitute_input_template tests
+    // =========================================================================
+
+    #[test]
+    fn test_substitute_input_template_basic() {
+        let template = "Hello {{INPUT.name}}, your ID is {{INPUT.id}}";
+        let input = serde_json::json!({"name": "Alice", "id": "42"});
+        let result = substitute_input_template(template, &input);
+        assert_eq!(result, "Hello Alice, your ID is 42");
+    }
+
+    #[test]
+    fn test_substitute_input_template_non_string_values() {
+        let template = "Count: {{INPUT.count}}, Active: {{INPUT.active}}";
+        let input = serde_json::json!({"count": 5, "active": true});
+        let result = substitute_input_template(template, &input);
+        assert_eq!(result, "Count: 5, Active: true");
+    }
+
+    #[test]
+    fn test_substitute_input_template_unmatched_placeholder() {
+        let template = "{{INPUT.exists}} and {{INPUT.missing}}";
+        let input = serde_json::json!({"exists": "found"});
+        let result = substitute_input_template(template, &input);
+        assert_eq!(result, "found and {{INPUT.missing}}");
+    }
+
+    #[test]
+    fn test_substitute_input_template_no_placeholders() {
+        let template = "No placeholders here";
+        let input = serde_json::json!({"key": "value"});
+        let result = substitute_input_template(template, &input);
+        assert_eq!(result, "No placeholders here");
+    }
+
+    #[test]
+    fn test_substitute_input_template_null_input() {
+        let template = "{{INPUT.key}}";
+        let result = substitute_input_template(template, &serde_json::Value::Null);
+        assert_eq!(result, "{{INPUT.key}}");
+    }
 }

@@ -6,9 +6,10 @@
 /// The MCP server is opt-in at compile time (requires `mcp-server` feature)
 /// to keep the default binary lean for edge deployments.
 pub mod config;
+pub mod error;
 pub mod handler;
 pub mod server;
 pub mod tools;
 
 pub use config::McpConfig;
-pub use server::create_mcp_server;
+pub use server::spawn_mcp_server;

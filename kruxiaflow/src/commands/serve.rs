@@ -671,15 +671,16 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     // 6. Spawn MCP server if enabled and feature is compiled in
     #[cfg(feature = "mcp-server")]
     let mcp_handle = {
-        let mcp_config = crate::mcp::config::McpConfig::new(
+        let mcp_config = crate::mcp::McpConfig::new(
             cmd.mcp_enabled,
             cmd.mcp_http_port,
             cmd.mcp_http_bind,
-        )?;
+        )
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
         if mcp_config.enabled {
             mcp_config.log_config();
-            Some(crate::mcp::server::spawn_mcp_server(
+            Some(crate::mcp::spawn_mcp_server(
                 Arc::new(mcp_config),
                 pool.clone(),
             ))
@@ -781,12 +782,16 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         Err(_) => tracing::warn!("Orchestrator shutdown timeout, forcing stop"),
     }
 
-    // Stop MCP server (if running)
+    // Stop MCP server (if running) — graceful with timeout, then abort
     #[cfg(feature = "mcp-server")]
     if let Some(handle) = mcp_handle {
         tracing::info!("Stopping MCP server...");
-        handle.abort();
-        tracing::info!("MCP server stopped");
+        match tokio::time::timeout(Duration::from_secs(5), handle).await {
+            Ok(Ok(Ok(()))) => tracing::info!("MCP server stopped gracefully"),
+            Ok(Ok(Err(e))) => tracing::warn!("MCP server error during shutdown: {}", e),
+            Ok(Err(e)) => tracing::warn!("MCP server task error: {}", e),
+            Err(_) => tracing::warn!("MCP server shutdown timeout, forcing stop"),
+        }
     }
 
     // Stop pool monitor (only in profiling mode)
