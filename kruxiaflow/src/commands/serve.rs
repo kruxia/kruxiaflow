@@ -625,7 +625,7 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     // Create API state with shutdown token
     let state = AppState::new(
         pool.clone(),
-        auth_service,
+        auth_service.clone(),
         activity_queue.clone(),
         event_source.clone(),
         workflow_storage.clone(),
@@ -683,6 +683,7 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
             Some(crate::mcp::spawn_mcp_server(
                 Arc::new(mcp_config),
                 pool.clone(),
+                Some(auth_service.clone()),
             ))
         } else {
             None
