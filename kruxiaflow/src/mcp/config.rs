@@ -24,8 +24,6 @@
 /// - Production deployments with monitoring/logging
 /// - Multi-client AI agent access
 /// - Network-accessible MCP endpoints
-use std::time::Duration;
-
 use super::error::{McpError, Result};
 
 /// MCP server configuration
@@ -44,18 +42,6 @@ pub struct McpConfig {
 
     /// HTTP bind address
     pub http_bind: Option<String>,
-
-    /// Require authentication (default: true)
-    pub auth_required: bool,
-
-    /// JWT secret for authentication (required if auth_required=true)
-    pub jwt_secret: Option<String>,
-
-    /// Maximum concurrent requests
-    pub max_concurrent_requests: usize,
-
-    /// Request timeout
-    pub request_timeout: Duration,
 }
 
 impl McpConfig {
@@ -109,38 +95,10 @@ impl McpConfig {
                 .unwrap_or_else(|| "0.0.0.0".to_string()),
         );
 
-        // Authentication (required by default for HTTP)
-        let auth_required = std::env::var("KRUXIAFLOW_MCP_AUTH_REQUIRED")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(true); // Default: true for security
-
-        let jwt_secret = if auth_required {
-            std::env::var("KRUXIAFLOW_MCP_JWT_SECRET").ok()
-        } else {
-            None
-        };
-
-        // Resource limits
-        let max_concurrent_requests = std::env::var("KRUXIAFLOW_MCP_MAX_CONCURRENT_REQUESTS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(10);
-
-        let request_timeout = std::env::var("KRUXIAFLOW_MCP_REQUEST_TIMEOUT_SECS")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .map(Duration::from_secs)
-            .unwrap_or(Duration::from_secs(30));
-
         let config = Self {
             enabled,
             http_port,
             http_bind,
-            auth_required,
-            jwt_secret,
-            max_concurrent_requests,
-            request_timeout,
         };
 
         config.validate()?;
@@ -153,10 +111,6 @@ impl McpConfig {
             enabled: false,
             http_port: Some(8081),
             http_bind: Some("0.0.0.0".to_string()),
-            auth_required: false,
-            jwt_secret: None,
-            max_concurrent_requests: 10,
-            request_timeout: Duration::from_secs(30),
         }
     }
 
@@ -170,30 +124,6 @@ impl McpConfig {
         if self.http_port.is_none() {
             return Err(McpError::ConfigError(
                 "MCP HTTP transport requires port. Set KRUXIAFLOW_MCP_HTTP_PORT".to_string(),
-            ));
-        }
-
-        // Warn about insecure HTTP without auth
-        if !self.auth_required {
-            tracing::warn!(
-                "MCP HTTP transport without authentication is insecure! \
-                Set KRUXIAFLOW_MCP_AUTH_REQUIRED=true"
-            );
-        }
-
-        // Auth requires JWT secret
-        if self.auth_required && self.jwt_secret.is_none() {
-            return Err(McpError::ConfigError(
-                "Authentication enabled but no JWT secret provided. \
-                Set KRUXIAFLOW_MCP_JWT_SECRET"
-                    .to_string(),
-            ));
-        }
-
-        // Resource limits
-        if self.max_concurrent_requests == 0 {
-            return Err(McpError::ConfigError(
-                "max_concurrent_requests must be > 0".to_string(),
             ));
         }
 
@@ -216,13 +146,8 @@ impl McpConfig {
         if let Some(ref bind) = self.http_bind {
             tracing::info!("  HTTP Bind: {}", bind);
         }
-        tracing::info!("  Auth required: {}", self.auth_required);
-
-        tracing::info!(
-            "  Max concurrent requests: {}",
-            self.max_concurrent_requests
-        );
-        tracing::info!("  Request timeout: {:?}", self.request_timeout);
+        // Auth is handled by the AuthenticationService passed to spawn_mcp_server.
+        // When an auth service is provided, MCP uses the same RS256 tokens as the REST API.
     }
 }
 
@@ -264,10 +189,6 @@ mod tests {
         "KRUXIAFLOW_MCP_TRANSPORT",
         "KRUXIAFLOW_MCP_HTTP_PORT",
         "KRUXIAFLOW_MCP_HTTP_BIND",
-        "KRUXIAFLOW_MCP_JWT_SECRET",
-        "KRUXIAFLOW_MCP_AUTH_REQUIRED",
-        "KRUXIAFLOW_MCP_MAX_CONCURRENT_REQUESTS",
-        "KRUXIAFLOW_MCP_REQUEST_TIMEOUT_SECS",
     ];
 
     /// Helper: clean all MCP env vars for a fresh test.
@@ -313,29 +234,11 @@ mod tests {
 
         unsafe {
             std::env::set_var("KRUXIAFLOW_MCP_ENABLED", "true");
-            std::env::set_var("KRUXIAFLOW_MCP_JWT_SECRET", "test-secret");
         }
 
         let config = McpConfig::new(None, None, None).unwrap();
         assert_eq!(config.http_port, Some(8081));
         assert_eq!(config.http_bind, Some("0.0.0.0".to_string()));
-        assert!(config.auth_required);
-    }
-
-    #[test]
-    #[serial]
-    fn test_config_auth_required_by_default() {
-        let _guard = EnvGuard::new(MCP_ENV_VARS);
-        clean_mcp_env();
-
-        unsafe {
-            std::env::set_var("KRUXIAFLOW_MCP_ENABLED", "true");
-            std::env::set_var("KRUXIAFLOW_MCP_JWT_SECRET", "test-secret");
-        }
-
-        let config = McpConfig::new(None, None, None).unwrap();
-        assert!(config.auth_required);
-        assert_eq!(config.jwt_secret, Some("test-secret".to_string()));
     }
 
     #[test]
@@ -347,7 +250,6 @@ mod tests {
         unsafe {
             std::env::set_var("KRUXIAFLOW_MCP_ENABLED", "false");
             std::env::set_var("KRUXIAFLOW_MCP_HTTP_PORT", "8888");
-            std::env::set_var("KRUXIAFLOW_MCP_JWT_SECRET", "test-secret");
         }
 
         let config = McpConfig::new(

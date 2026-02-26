@@ -46,12 +46,21 @@ use super::config::McpConfig;
 pub struct McpServer {
     config: Arc<McpConfig>,
     pool: PgPool,
+    auth_service: Option<Arc<dyn kruxiaflow_oauth::AuthenticationService>>,
 }
 
 impl McpServer {
     /// Create a new MCP server instance
-    pub fn new(config: Arc<McpConfig>, pool: PgPool) -> Self {
-        Self { config, pool }
+    pub fn new(
+        config: Arc<McpConfig>,
+        pool: PgPool,
+        auth_service: Option<Arc<dyn kruxiaflow_oauth::AuthenticationService>>,
+    ) -> Self {
+        Self {
+            config,
+            pool,
+            auth_service,
+        }
     }
 
     /// Start the MCP server (HTTP transport only)
@@ -95,10 +104,19 @@ impl McpServer {
             super::handler::KruxiaFlowMcpHandler::new(self.config.clone(), self.pool.clone())
                 .to_mcp_server_handler();
 
+        let auth: Option<Arc<dyn AuthProvider>> =
+            self.auth_service.map(|svc| -> Arc<dyn AuthProvider> {
+                Arc::new(McpAuthAdapter {
+                    auth_service: svc,
+                })
+            });
+
+        // TODO: Add rate limiting and request timeouts when rust-mcp-sdk
+        // supports middleware configuration in HyperServerOptions.
         let options = HyperServerOptions {
             host: bind,
             port,
-            auth: build_auth_provider(&self.config),
+            auth,
             ..Default::default()
         };
 
@@ -118,85 +136,75 @@ impl McpServer {
 ///
 /// This function creates an MCP server instance but does not start it.
 /// Call `start()` on the returned server to begin serving MCP requests.
-pub fn create_mcp_server(config: Arc<McpConfig>, pool: PgPool) -> McpServer {
-    McpServer::new(config, pool)
+pub fn create_mcp_server(
+    config: Arc<McpConfig>,
+    pool: PgPool,
+    auth_service: Option<Arc<dyn kruxiaflow_oauth::AuthenticationService>>,
+) -> McpServer {
+    McpServer::new(config, pool, auth_service)
 }
 
 /// Spawn MCP server in a background task
 ///
 /// This is the recommended way to run the MCP server alongside other services.
-pub fn spawn_mcp_server(config: Arc<McpConfig>, pool: PgPool) -> JoinHandle<Result<()>> {
-    let server = create_mcp_server(config, pool);
+/// Pass the same `AuthenticationService` used by the REST API so that a single
+/// token (RS256, issued via `/oauth/token`) works across both protocols.
+pub fn spawn_mcp_server(
+    config: Arc<McpConfig>,
+    pool: PgPool,
+    auth_service: Option<Arc<dyn kruxiaflow_oauth::AuthenticationService>>,
+) -> JoinHandle<Result<()>> {
+    let server = create_mcp_server(config, pool, auth_service);
     tokio::spawn(async move { server.start().await })
 }
 
 // ---------------------------------------------------------------------------
-// Auth provider
+// Auth adapter — delegates to the project's AuthenticationService
 // ---------------------------------------------------------------------------
 
-/// Build an auth provider if auth is required and a JWT secret is configured.
-fn build_auth_provider(config: &McpConfig) -> Option<Arc<dyn AuthProvider>> {
-    if !config.auth_required {
-        return None;
-    }
-    let secret = config.jwt_secret.as_ref()?;
-    Some(Arc::new(McpJwtAuthProvider {
-        secret: secret.clone(),
-    }))
-}
-
-/// Bearer-token auth provider using HS256 JWT validation.
+/// Auth provider that delegates token validation to the project's
+/// `AuthenticationService` (RS256 via `kruxiaflow_oauth`).
 ///
-/// The SDK's AuthMiddleware handles Bearer-token extraction and expiry checking.
-/// We only need to decode the token and map claims to AuthInfo.
-struct McpJwtAuthProvider {
-    secret: String,
+/// This ensures a single token works across both the REST API and MCP server.
+/// Tokens are issued via the existing OAuth2 endpoints (`POST /oauth/token`).
+struct McpAuthAdapter {
+    auth_service: Arc<dyn kruxiaflow_oauth::AuthenticationService>,
 }
 
 #[async_trait]
-impl AuthProvider for McpJwtAuthProvider {
-    /// Decode the JWT and return extracted claims as AuthInfo.
+impl AuthProvider for McpAuthAdapter {
+    /// Validate the token via `AuthenticationService::validate_token` and map
+    /// the returned `Claims` to the SDK's `AuthInfo`.
     async fn verify_token(
         &self,
         access_token: String,
     ) -> std::result::Result<AuthInfo, AuthenticationError> {
-        let token_data = jsonwebtoken::decode::<serde_json::Value>(
-            &access_token,
-            &jsonwebtoken::DecodingKey::from_secret(self.secret.as_bytes()),
-            &jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256),
-        )
-        .map_err(|e| AuthenticationError::TokenVerificationFailed {
-            description: format!("JWT validation failed: {e}"),
-            status_code: None,
-        })?;
+        let claims = self
+            .auth_service
+            .validate_token(&access_token)
+            .await
+            .map_err(|e| AuthenticationError::TokenVerificationFailed {
+                description: format!("Token validation failed: {e}"),
+                status_code: None,
+            })?;
 
-        let claims = &token_data.claims;
-
-        let expires_at = claims.get("exp").and_then(|v| v.as_i64()).map(|exp| {
-            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(exp as u64)
-        });
-
-        let token_unique_id = claims
-            .get("jti")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or(access_token);
+        let expires_at = Some(
+            std::time::SystemTime::UNIX_EPOCH
+                + std::time::Duration::from_secs(claims.exp as u64),
+        );
 
         Ok(AuthInfo {
-            token_unique_id,
+            token_unique_id: claims.jti,
             client_id: None,
-            user_id: claims
-                .get("sub")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
+            user_id: Some(claims.sub),
             scopes: None,
             expires_at,
-            audience: None,
+            audience: Some(rust_mcp_sdk::auth::Audience::Single(claims.aud)),
             extra: None,
         })
     }
 
-    /// No OAuth endpoints — this server only validates Bearer tokens.
+    /// No OAuth endpoints — tokens are issued by the REST API's `/oauth/token`.
     fn auth_endpoints(&self) -> Option<&HashMap<String, OauthEndpoint>> {
         None
     }
@@ -210,7 +218,8 @@ impl AuthProvider for McpJwtAuthProvider {
         Ok(http::Response::builder()
             .status(http::StatusCode::NOT_FOUND)
             .body(GenericBody::from_string(
-                "No auth endpoints configured".to_string(),
+                "No auth endpoints configured — use the REST API's /oauth/token to obtain tokens"
+                    .to_string(),
             ))
             .unwrap())
     }

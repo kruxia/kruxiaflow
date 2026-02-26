@@ -258,7 +258,7 @@ fn build_workflow_mermaid(
         lines.push(label);
     }
 
-    // --- Edges (A depends_on B  →  B --> A) ---
+    // --- Dependencies (A depends_on B  →  B --> A) ---
     for activity in &stored.activities {
         if let Some(deps) = &activity.depends_on {
             for dep in deps {
@@ -303,7 +303,7 @@ fn build_cost_mermaid(
     lines.push(format!("    total[\"Total Cost<br/>${:.4}\"]", total_cost));
     lines.push("    style total fill:#6f42c1,color:#fff".to_string());
 
-    // Per-activity nodes, edges, and styles
+    // Per-activity nodes, dependencies, and styles
     for (key, cost) in activities {
         let id = node_id(key);
         let name = name_map.get(key).map(|s| s.as_str()).unwrap_or(key);
@@ -393,5 +393,224 @@ fn status_style(status: &str) -> (&'static str, &'static str) {
         "skipped" => ("#adb5bd", "#000"),
         "not_scheduled" | "notscheduled" => ("#6c757d", "#fff"),
         _ => ("#dee2e6", "#000"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // node_id tests
+    // =========================================================================
+
+    #[test]
+    fn test_node_id_alphanumeric() {
+        assert_eq!(node_id("fetch_data"), "fetch_data");
+        assert_eq!(node_id("step1"), "step1");
+    }
+
+    #[test]
+    fn test_node_id_special_chars() {
+        assert_eq!(node_id("my-step.v2"), "my_step_v2");
+        assert_eq!(node_id("a/b:c"), "a_b_c");
+    }
+
+    #[test]
+    fn test_node_id_empty() {
+        assert_eq!(node_id(""), "");
+    }
+
+    // =========================================================================
+    // status_style tests
+    // =========================================================================
+
+    #[test]
+    fn test_status_style_known_statuses() {
+        assert_eq!(status_style("completed"), ("#28a745", "#fff"));
+        assert_eq!(status_style("running"), ("#ffc107", "#000"));
+        assert_eq!(status_style("failed"), ("#dc3545", "#fff"));
+        assert_eq!(status_style("waiting"), ("#fd7e14", "#fff"));
+        assert_eq!(status_style("pending"), ("#17a2b8", "#fff"));
+        assert_eq!(status_style("skipped"), ("#adb5bd", "#000"));
+        assert_eq!(status_style("not_scheduled"), ("#6c757d", "#fff"));
+        assert_eq!(status_style("notscheduled"), ("#6c757d", "#fff"));
+    }
+
+    #[test]
+    fn test_status_style_case_insensitive() {
+        assert_eq!(status_style("COMPLETED"), ("#28a745", "#fff"));
+        assert_eq!(status_style("Running"), ("#ffc107", "#000"));
+    }
+
+    #[test]
+    fn test_status_style_unknown() {
+        assert_eq!(status_style("unknown"), ("#dee2e6", "#000"));
+        assert_eq!(status_style(""), ("#dee2e6", "#000"));
+    }
+
+    // =========================================================================
+    // extract_status_map tests
+    // =========================================================================
+
+    #[test]
+    fn test_extract_status_map_array_format() {
+        let json = serde_json::json!([
+            {"key": "fetch", "status": "completed"},
+            {"key": "process", "status": "running"},
+        ]);
+        let map = extract_status_map(&json);
+        assert_eq!(map.get("fetch").unwrap(), "completed");
+        assert_eq!(map.get("process").unwrap(), "running");
+    }
+
+    #[test]
+    fn test_extract_status_map_object_format() {
+        let json = serde_json::json!({
+            "fetch": {"status": "completed"},
+            "process": {"status": "failed"},
+        });
+        let map = extract_status_map(&json);
+        assert_eq!(map.get("fetch").unwrap(), "completed");
+        assert_eq!(map.get("process").unwrap(), "failed");
+    }
+
+    #[test]
+    fn test_extract_status_map_null() {
+        let map = extract_status_map(&serde_json::Value::Null);
+        assert!(map.is_empty());
+    }
+
+    // =========================================================================
+    // extract_activity_name_map tests
+    // =========================================================================
+
+    #[test]
+    fn test_extract_activity_name_map_array() {
+        let json = serde_json::json!([
+            {"key": "fetch", "activity_name": "http_request"},
+            {"key": "think", "activity_name": "llm_prompt"},
+        ]);
+        let map = extract_activity_name_map(&json);
+        assert_eq!(map.get("fetch").unwrap(), "http_request");
+        assert_eq!(map.get("think").unwrap(), "llm_prompt");
+    }
+
+    #[test]
+    fn test_extract_activity_name_map_object() {
+        let json = serde_json::json!({
+            "fetch": {"activity_name": "http_request"},
+        });
+        let map = extract_activity_name_map(&json);
+        assert_eq!(map.get("fetch").unwrap(), "http_request");
+    }
+
+    // =========================================================================
+    // build_workflow_mermaid tests
+    // =========================================================================
+
+    fn make_definition(
+        activities: Vec<(
+            &str,
+            Option<&str>,
+            Option<Vec<&str>>,
+        )>,
+    ) -> kruxiaflow_core::StoredWorkflowDefinition {
+        use kruxiaflow_core::workflow::definition::ActivityDefinition;
+
+        kruxiaflow_core::StoredWorkflowDefinition {
+            id: uuid::Uuid::nil(),
+            name: "test".to_string(),
+            version: "20260101.000000.000000".to_string(),
+            activities: activities
+                .into_iter()
+                .map(|(key, name, deps)| ActivityDefinition {
+                    key: key.to_string(),
+                    worker: "std".to_string(),
+                    activity_name: name.map(|s| s.to_string()),
+                    parameters: None,
+                    output_definitions: None,
+                    depends_on: deps.map(|ds| {
+                        ds.into_iter()
+                            .map(|d| kruxiaflow_core::workflow::definition::ActivityRelationship {
+                                activity_key: d.to_string(),
+                                conditions: None,
+                                is_back_edge: false,
+                            })
+                            .collect()
+                    }),
+                    dependency_of: None,
+                    settings: None,
+                    iteration_scoped: false,
+                    iteration_limit: None,
+                    is_loop_activity: false,
+                    streaming: Default::default(),
+                })
+                .collect(),
+            content_hash: None,
+            created_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn test_build_workflow_mermaid_no_status() {
+        let def = make_definition(vec![
+            ("fetch", Some("http_request"), None),
+            ("process", Some("echo"), Some(vec!["fetch"])),
+        ]);
+        let mermaid = build_workflow_mermaid(&def, &None);
+        assert!(mermaid.starts_with("flowchart TD"));
+        assert!(mermaid.contains("http_request<br/>fetch"));
+        assert!(mermaid.contains("echo<br/>process"));
+        assert!(mermaid.contains("fetch --> process"));
+    }
+
+    #[test]
+    fn test_build_workflow_mermaid_with_status() {
+        let def = make_definition(vec![
+            ("fetch", Some("http_request"), None),
+            ("process", Some("echo"), Some(vec!["fetch"])),
+        ]);
+        let mut statuses = HashMap::new();
+        statuses.insert("fetch".to_string(), "completed".to_string());
+        statuses.insert("process".to_string(), "running".to_string());
+
+        let mermaid = build_workflow_mermaid(&def, &Some(statuses));
+        assert!(mermaid.contains("Status: completed"));
+        assert!(mermaid.contains("Status: running"));
+        assert!(mermaid.contains("style fetch fill:#28a745"));
+        assert!(mermaid.contains("style process fill:#ffc107"));
+    }
+
+    #[test]
+    fn test_build_workflow_mermaid_no_activity_name() {
+        let def = make_definition(vec![("my_step", None, None)]);
+        let mermaid = build_workflow_mermaid(&def, &None);
+        // When activity_name is None, key is used as name
+        assert!(mermaid.contains("my_step<br/>my_step"));
+    }
+
+    // =========================================================================
+    // build_cost_mermaid tests
+    // =========================================================================
+
+    #[test]
+    fn test_build_cost_mermaid_basic() {
+        let activities = vec![
+            ("llm_call".to_string(), 0.0532),
+            ("fetch".to_string(), 0.0),
+        ];
+        let mut names = HashMap::new();
+        names.insert("llm_call".to_string(), "llm_prompt".to_string());
+        names.insert("fetch".to_string(), "http_request".to_string());
+
+        let mermaid = build_cost_mermaid(0.0532, &activities, &names);
+        assert!(mermaid.starts_with("flowchart TD"));
+        assert!(mermaid.contains("Total Cost<br/>$0.0532"));
+        assert!(mermaid.contains("llm_prompt<br/>llm_call<br/>$0.0532"));
+        // Non-zero cost gets colored
+        assert!(mermaid.contains("style llm_call fill:#17a2b8"));
+        // Zero cost does NOT get colored
+        assert!(!mermaid.contains("style fetch fill:"));
     }
 }
