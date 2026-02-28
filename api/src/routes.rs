@@ -25,6 +25,7 @@ async fn fallback_404() -> impl IntoResponse {
 /// - GET /api/v1/info - Service information
 /// - POST /api/v1/oauth/token - OAuth 2.0 token issuance
 /// - GET /api/v1/activities/{id}/ws - WebSocket for activity streaming (auth via query param)
+/// - GET /api/v1/workflow_events/ws - WebSocket for workflow event streaming (auth via query param)
 ///
 /// These routes are accessible without HTTP header authentication.
 ///
@@ -41,10 +42,14 @@ pub fn public_routes() -> Router<AppState> {
         .route("/health/pool", get(handlers::pool_metrics_handler))
         .route("/api/v1/info", get(handlers::service_info_handler))
         .route("/api/v1/oauth/token", post(handlers::token_handler))
-        // WebSocket endpoint - auth handled in handler via query param
+        // WebSocket endpoints - auth handled in handlers via query param
         .route(
             "/api/v1/activities/:activity_id/ws",
             get(handlers::activity_stream_handler),
+        )
+        .route(
+            "/api/v1/workflow_events/ws",
+            get(handlers::workflow_events_ws_handler),
         )
 }
 

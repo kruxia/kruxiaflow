@@ -135,6 +135,14 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
         shutdown_token,
     );
 
+    // Spawn workflow event broadcast poller for WebSocket streaming
+    tokio::spawn(kruxiaflow_api::workflow_events::run_event_broadcast_poller(
+        app_state.event_source.clone(),
+        app_state.workflow_event_manager.clone(),
+        app_state.shutdown_token.clone(),
+    ));
+    tracing::info!("Workflow event broadcast poller spawned");
+
     // Create Axum router
     let app = kruxiaflow_api::app_router(app_state);
 
