@@ -10,6 +10,7 @@ pub mod users;
 pub mod websocket;
 pub mod workers;
 pub mod workflow_definitions;
+pub mod workflow_events;
 pub mod workflows;
 
 pub use cache::{invalidate_cache_key, invalidate_cache_pattern};
@@ -30,4 +31,5 @@ pub use workers::{complete_activity, fail_activity, heartbeat_activity, poll_act
 pub use workflow_definitions::{
     deploy_workflow_definition, get_workflow_definition, list_workflow_definitions,
 };
+pub use workflow_events::workflow_events_ws_handler;
 pub use workflows::{get_workflow, list_workflows, submit_workflow};

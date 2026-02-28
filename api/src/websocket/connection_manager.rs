@@ -16,7 +16,10 @@ use super::StreamMessage;
 pub struct ConnectionId(u64);
 
 impl ConnectionId {
-    fn new() -> Self {
+    /// Create a new unique connection ID (monotonically increasing).
+    /// Not implementing Default because each call produces a different value.
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
         static COUNTER: AtomicU64 = AtomicU64::new(0);
         Self(COUNTER.fetch_add(1, Ordering::Relaxed))
     }

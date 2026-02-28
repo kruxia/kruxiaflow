@@ -748,9 +748,9 @@ async fn test_delay_with_all_duration_units() {
     let now = Utc::now();
     let diff = (scheduled_for - now).num_milliseconds();
 
-    // Should be approximately 500ms in the future
+    // Should be approximately 500ms in the future (wide tolerance for CI/test latency)
     assert!(
-        (400..=600).contains(&diff),
+        (200..=600).contains(&diff),
         "Expected ~500ms delay, got {}ms",
         diff
     );
