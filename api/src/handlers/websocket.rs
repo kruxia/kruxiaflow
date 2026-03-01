@@ -253,6 +253,111 @@ pub async fn activity_connection_count(state: &AppState, activity_id: Uuid) -> u
     state.connection_manager.connection_count(activity_id).await
 }
 
+/// WebSocket endpoint for activity streaming by workflow ID and activity key.
+///
+/// Resolves `(workflow_id, activity_key)` to `activity_id` via DB lookup, then
+/// delegates to the existing WebSocket connection infrastructure.
+///
+/// Retries the lookup with short sleeps (3 × 100ms) to handle the timing race
+/// where a client connects before the activity is scheduled.
+#[utoipa::path(
+    get,
+    path = "/api/v1/workflows/{workflow_id}/activities/{activity_key}/ws",
+    tag = "Streaming",
+    params(
+        ("workflow_id" = Uuid, Path, description = "Workflow ID"),
+        ("activity_key" = String, Path, description = "Activity key from workflow definition"),
+        StreamParams
+    ),
+    responses(
+        (status = 101, description = "WebSocket upgrade successful"),
+        (status = 401, description = "Unauthorized - missing or invalid token"),
+        (status = 404, description = "Activity not found for given workflow/key"),
+    )
+)]
+pub async fn activity_stream_by_key_handler(
+    ws: WebSocketUpgrade,
+    Path((workflow_id, activity_key)): Path<(Uuid, String)>,
+    Query(params): Query<StreamParams>,
+    State(state): State<AppState>,
+) -> Result<Response, AppError> {
+    // Extract and validate token
+    let token = params.token.ok_or_else(|| {
+        AppError::Unauthorized(
+            "Missing authentication token. Use ?token=<jwt> query parameter".to_string(),
+        )
+    })?;
+
+    // Validate token using AuthenticationService
+    let claims = state
+        .auth_service
+        .validate_token(&token)
+        .await
+        .map_err(|e| {
+            tracing::warn!(
+                workflow_id = %workflow_id,
+                activity_key = %activity_key,
+                error = %e,
+                "WebSocket authentication failed"
+            );
+            AppError::Unauthorized(format!("Invalid token: {}", e))
+        })?;
+
+    tracing::info!(
+        workflow_id = %workflow_id,
+        activity_key = %activity_key,
+        subject = %claims.sub,
+        "WebSocket connection authenticated (by key)"
+    );
+
+    // Resolve activity_key to activity_id (with retry for timing race)
+    let activity_id = resolve_activity_id(&state, workflow_id, &activity_key).await?;
+
+    // Upgrade to WebSocket
+    Ok(ws.on_upgrade(move |socket| handle_socket(socket, activity_id, state)))
+}
+
+/// Resolve (workflow_id, activity_key) → activity_id via DB lookup.
+///
+/// Retries up to 3 times with 100ms sleeps to handle the race where a client
+/// connects before the activity is scheduled in the queue.
+async fn resolve_activity_id(
+    state: &AppState,
+    workflow_id: Uuid,
+    activity_key: &str,
+) -> Result<Uuid, AppError> {
+    for attempt in 0..3 {
+        let result = sqlx::query_scalar!(
+            r#"SELECT id as "id!" FROM activity_queue
+               WHERE workflow_id = $1 AND activity_key = $2
+               ORDER BY iteration DESC LIMIT 1"#,
+            workflow_id,
+            activity_key
+        )
+        .fetch_optional(&state.db_pool)
+        .await?;
+
+        if let Some(id) = result {
+            return Ok(id);
+        }
+
+        if attempt < 2 {
+            tracing::debug!(
+                workflow_id = %workflow_id,
+                activity_key = %activity_key,
+                attempt = attempt + 1,
+                "Activity not yet scheduled, retrying"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    }
+
+    Err(AppError::NotFound(format!(
+        "Activity '{}' not found for workflow {}",
+        activity_key, workflow_id
+    )))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

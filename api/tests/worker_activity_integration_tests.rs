@@ -722,6 +722,7 @@ async fn schedule_activity_with_timeout(
             delay: None,
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         }),
         scheduled_for: None,
         output_definitions: None,
@@ -926,6 +927,7 @@ async fn test_poll_returns_null_timeout_when_settings_has_no_timeout() {
             delay: None,
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         }),
         scheduled_for: None,
         output_definitions: None,

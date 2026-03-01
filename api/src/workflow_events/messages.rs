@@ -188,9 +188,7 @@ mod tests {
         let msg = WorkflowEventMessage::error(CLOSE_GOING_AWAY, "Server shutting down");
 
         match msg {
-            WorkflowEventMessage::Error {
-                code, message, ..
-            } => {
+            WorkflowEventMessage::Error { code, message, .. } => {
                 assert_eq!(code, 1001);
                 assert_eq!(message, "Server shutting down");
             }

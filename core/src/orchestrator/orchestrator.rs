@@ -514,12 +514,19 @@ async fn handle_activity_failed(
         None
     };
 
+    // Copy streaming config from activity definition into settings
+    let settings = {
+        let mut s = activity_def.settings.clone().unwrap_or_default();
+        s.streaming = activity_def.streaming.clone();
+        Some(s)
+    };
+
     let activity_to_schedule = Activity {
         key: activity_key.clone(),
         worker: activity_def.worker.clone(),
         activity_name: activity_def.activity_name.clone().unwrap_or_default(),
         parameters: params_w_budget,
-        settings: activity_def.settings.clone(),
+        settings,
         scheduled_for,
         output_definitions: activity_def.output_definitions.clone(),
         iteration: if activity_def.is_loop_activity {
@@ -1395,12 +1402,19 @@ pub async fn process_workflow_event(
                     .get(&a.key)
                     .and_then(|s| s.signal_data.clone());
 
+                // Copy streaming config from activity definition into settings
+                let settings = {
+                    let mut s = a.settings.clone().unwrap_or_default();
+                    s.streaming = a.streaming.clone();
+                    Some(s)
+                };
+
                 activities_to_schedule.push(Activity {
                     key: a.key.clone(),
                     worker: a.worker.clone(),
                     activity_name: a.activity_name.clone().unwrap_or_default(),
                     parameters: params_w_budget,
-                    settings: a.settings.clone(),
+                    settings,
                     scheduled_for,
                     output_definitions: a.output_definitions.clone(),
                     iteration,
@@ -2359,7 +2373,9 @@ mod tests {
     use crate::orchestrator::workflow_state::{
         ActivityState, WorkflowActivityStatus, WorkflowState,
     };
-    use crate::workflow::{ActivityDefinition, ActivityOutput, ActivitySettings, OutputType};
+    use crate::workflow::{
+        ActivityDefinition, ActivityOutput, ActivitySettings, OutputType, StreamingConfig,
+    };
     use rust_decimal::Decimal;
     use serde_json::json;
     use std::collections::HashMap;
@@ -2448,6 +2464,7 @@ mod tests {
             delay: None,
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -2471,6 +2488,7 @@ mod tests {
             delay: Some("10s".to_string()),
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -2505,6 +2523,7 @@ mod tests {
             delay: Some("5m".to_string()),
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -2539,6 +2558,7 @@ mod tests {
             delay: Some("1h".to_string()), // 1 hour delay
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -2566,6 +2586,7 @@ mod tests {
             delay: None,
             scheduled_for: Some(iso_time.clone()),
             wait_for_signal: None,
+            ..Default::default()
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -2595,6 +2616,7 @@ mod tests {
             delay: Some("{{INPUT.delay_value}}".to_string()),
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         };
         let activity_def = create_activity_def("test", Some(settings));
 
@@ -3348,6 +3370,7 @@ mod tests {
             delay: Some("invalid_duration".to_string()),
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -3368,6 +3391,7 @@ mod tests {
             delay: None,
             scheduled_for: Some("not-a-timestamp".to_string()),
             wait_for_signal: None,
+            ..Default::default()
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -3392,6 +3416,7 @@ mod tests {
             delay: None,
             scheduled_for: Some(past_time.to_rfc3339()),
             wait_for_signal: None,
+            ..Default::default()
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -3417,6 +3442,7 @@ mod tests {
             delay: Some("2s".to_string()),
             scheduled_for: Some(future_time.to_rfc3339()),
             wait_for_signal: None,
+            ..Default::default()
         };
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
@@ -3732,5 +3758,115 @@ mod tests {
 
         assert!(result.is_ok(), "Should return on poll error");
         assert!(result.unwrap().is_err(), "Poll error should propagate");
+    }
+
+    // =========================================================================
+    // Streaming config propagation tests
+    // =========================================================================
+
+    #[test]
+    fn test_streaming_config_copied_from_definition_to_settings() {
+        // Simulate the orchestrator's pattern for copying streaming config
+        let activity_def = ActivityDefinition {
+            key: "llm_step".to_string(),
+            worker: "std".to_string(),
+            activity_name: Some("llm_prompt".to_string()),
+            parameters: Some(HashMap::new()),
+            settings: Some(ActivitySettings {
+                timeout_seconds: Some(15),
+                ..Default::default()
+            }),
+            depends_on: None,
+            dependency_of: None,
+            output_definitions: None,
+            iteration_scoped: false,
+            iteration_limit: None,
+            is_loop_activity: false,
+            streaming: StreamingConfig::Simple(true),
+        };
+
+        // This is the pattern used in the orchestrator at the scheduling sites
+        let settings = {
+            let mut s = activity_def.settings.clone().unwrap_or_default();
+            s.streaming = activity_def.streaming.clone();
+            Some(s)
+        };
+
+        let settings = settings.unwrap();
+        assert!(
+            settings.streaming.is_enabled(),
+            "Streaming should be copied from definition to settings"
+        );
+        assert_eq!(
+            settings.timeout_seconds,
+            Some(15),
+            "Other settings should be preserved"
+        );
+    }
+
+    #[test]
+    fn test_streaming_config_copied_when_settings_none() {
+        // When activity definition has no settings, default settings should be created
+        let activity_def = ActivityDefinition {
+            key: "llm_step".to_string(),
+            worker: "std".to_string(),
+            activity_name: Some("llm_prompt".to_string()),
+            parameters: None,
+            settings: None, // No settings defined
+            depends_on: None,
+            dependency_of: None,
+            output_definitions: None,
+            iteration_scoped: false,
+            iteration_limit: None,
+            is_loop_activity: false,
+            streaming: StreamingConfig::Simple(true),
+        };
+
+        let settings = {
+            let mut s = activity_def.settings.clone().unwrap_or_default();
+            s.streaming = activity_def.streaming.clone();
+            Some(s)
+        };
+
+        let settings = settings.unwrap();
+        assert!(
+            settings.streaming.is_enabled(),
+            "Streaming should be set even when original settings were None"
+        );
+    }
+
+    #[test]
+    fn test_streaming_disabled_not_copied_unnecessarily() {
+        // When streaming is disabled on the definition, it stays disabled in settings
+        let activity_def = ActivityDefinition {
+            key: "echo_step".to_string(),
+            worker: "std".to_string(),
+            activity_name: Some("echo".to_string()),
+            parameters: None,
+            settings: Some(ActivitySettings {
+                cache: true,
+                ..Default::default()
+            }),
+            depends_on: None,
+            dependency_of: None,
+            output_definitions: None,
+            iteration_scoped: false,
+            iteration_limit: None,
+            is_loop_activity: false,
+            streaming: StreamingConfig::Disabled,
+        };
+
+        let settings = {
+            let mut s = activity_def.settings.clone().unwrap_or_default();
+            s.streaming = activity_def.streaming.clone();
+            Some(s)
+        };
+
+        let settings = settings.unwrap();
+        assert!(
+            settings.streaming.is_disabled(),
+            "Streaming should remain disabled"
+        );
+        assert!(settings.cache, "Other settings should be preserved");
     }
 }

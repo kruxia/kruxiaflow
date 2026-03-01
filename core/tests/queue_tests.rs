@@ -200,6 +200,7 @@ async fn test_stale_activity_recovery() {
             delay: None,
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         }),
         scheduled_for: None,
         output_definitions: None,
@@ -283,6 +284,7 @@ async fn test_heartbeat_conflict_detection() {
             delay: None,
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         }),
         scheduled_for: None,
         output_definitions: None,
@@ -372,6 +374,7 @@ async fn test_max_retries_exhaustion() {
             delay: None,
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         }),
         scheduled_for: None,
         output_definitions: None,
@@ -737,6 +740,7 @@ async fn test_reclaim_stale_activities_resets_to_pending() {
             delay: None,
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         }),
         scheduled_for: None,
         output_definitions: None,
@@ -844,6 +848,7 @@ async fn test_reclaim_stale_activities_marks_failed_when_retries_exhausted() {
             delay: None,
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         }),
         scheduled_for: None,
         output_definitions: None,
@@ -943,6 +948,7 @@ async fn test_reclaim_stale_activities_does_not_affect_non_stale() {
             delay: None,
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         }),
         scheduled_for: None,
         output_definitions: None,
@@ -1039,6 +1045,7 @@ async fn test_reclaim_stale_activities_multiple_activities() {
                 delay: None,
                 scheduled_for: None,
                 wait_for_signal: None,
+                ..Default::default()
             }),
             scheduled_for: None,
             output_definitions: None,
@@ -1066,6 +1073,7 @@ async fn test_reclaim_stale_activities_multiple_activities() {
                 delay: None,
                 scheduled_for: None,
                 wait_for_signal: None,
+                ..Default::default()
             }),
             scheduled_for: None,
             output_definitions: None,
@@ -1093,6 +1101,7 @@ async fn test_reclaim_stale_activities_multiple_activities() {
                 delay: None,
                 scheduled_for: None,
                 wait_for_signal: None,
+                ..Default::default()
             }),
             scheduled_for: None,
             output_definitions: None,
