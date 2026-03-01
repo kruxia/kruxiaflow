@@ -41,6 +41,7 @@ fn test_workflow_definition_from_core_to_dto() {
                     delay: None,
                     scheduled_for: None,
                     wait_for_signal: None,
+                    ..Default::default()
                 }),
                 output_definitions: None,
                 iteration_scoped: false,
@@ -147,6 +148,7 @@ fn test_workflow_definition_from_dto_to_core() {
                 delay: None,
                 scheduled_for: None,
                 wait_for_signal: None,
+                ..Default::default()
             }),
             output_definitions: None,
             iteration_scoped: false,
@@ -223,6 +225,7 @@ fn test_activity_settings_conversions() {
         delay: None,
         scheduled_for: None,
         wait_for_signal: None,
+        ..Default::default()
     };
 
     let dto_settings: dto::ActivitySettings = core_settings.clone().into();
@@ -248,6 +251,7 @@ fn test_activity_settings_conversions() {
         delay: None,
         scheduled_for: None,
         wait_for_signal: None,
+        ..Default::default()
     };
 
     let core_settings2: workflow::ActivitySettings = dto_settings2.clone().into();
@@ -457,6 +461,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                     delay: None,
                     scheduled_for: None,
                     wait_for_signal: None,
+                    ..Default::default()
                 }),
                 output_definitions: None,
                 iteration_scoped: false,
@@ -498,6 +503,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
                     delay: None,
                     scheduled_for: None,
                     wait_for_signal: None,
+                    ..Default::default()
                 }),
                 output_definitions: None,
                 iteration_scoped: false,
@@ -741,6 +747,7 @@ fn test_activity_with_budget_settings() {
             delay: None,
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         }),
         output_definitions: None,
         iteration_scoped: false,
@@ -774,6 +781,7 @@ fn test_activity_settings_with_scheduling() {
         delay: Some("30s".to_string()),
         scheduled_for: None,
         wait_for_signal: None,
+        ..Default::default()
     };
 
     let dto_settings: dto::ActivitySettings = core_settings.into();
@@ -793,6 +801,7 @@ fn test_activity_settings_with_absolute_schedule() {
         delay: None,
         scheduled_for: Some("2025-12-01T09:00:00Z".to_string()),
         wait_for_signal: None,
+        ..Default::default()
     };
 
     let dto_settings: dto::ActivitySettings = core_settings.into();
@@ -819,6 +828,7 @@ fn test_activity_settings_with_caching() {
         delay: None,
         scheduled_for: None,
         wait_for_signal: None,
+        ..Default::default()
     };
 
     let dto_settings: dto::ActivitySettings = core_settings.into();
@@ -848,6 +858,78 @@ fn test_activity_relationship_with_back_edge() {
     // Convert back
     let core_back: workflow::ActivityRelationship = dto_rel.into();
     assert!(core_back.is_back_edge);
+}
+
+// ============================================================================
+// ActivitySettings streaming field conversion tests
+// ============================================================================
+
+#[test]
+fn test_activity_settings_streaming_disabled_roundtrip() {
+    let core_settings = workflow::ActivitySettings {
+        streaming: workflow::StreamingConfig::Disabled,
+        ..Default::default()
+    };
+    let dto_settings: dto::ActivitySettings = core_settings.into();
+    assert!(dto_settings.streaming.is_disabled());
+
+    let back: workflow::ActivitySettings = dto_settings.into();
+    assert!(back.streaming.is_disabled());
+}
+
+#[test]
+fn test_activity_settings_streaming_simple_true_roundtrip() {
+    let core_settings = workflow::ActivitySettings {
+        streaming: workflow::StreamingConfig::Simple(true),
+        ..Default::default()
+    };
+    let dto_settings: dto::ActivitySettings = core_settings.into();
+    assert!(dto_settings.streaming.is_enabled());
+
+    let back: workflow::ActivitySettings = dto_settings.into();
+    assert!(back.streaming.is_enabled());
+}
+
+#[test]
+fn test_activity_settings_streaming_simple_false_roundtrip() {
+    let core_settings = workflow::ActivitySettings {
+        streaming: workflow::StreamingConfig::Simple(false),
+        ..Default::default()
+    };
+    let dto_settings: dto::ActivitySettings = core_settings.into();
+    assert!(!dto_settings.streaming.is_enabled());
+
+    let back: workflow::ActivitySettings = dto_settings.into();
+    assert!(!back.streaming.is_enabled());
+}
+
+#[test]
+fn test_activity_settings_streaming_detailed_roundtrip() {
+    let core_settings = workflow::ActivitySettings {
+        streaming: workflow::StreamingConfig::Detailed(workflow::StreamingOptions {
+            enabled: true,
+        }),
+        ..Default::default()
+    };
+    let dto_settings: dto::ActivitySettings = core_settings.into();
+    assert!(dto_settings.streaming.is_enabled());
+
+    let back: workflow::ActivitySettings = dto_settings.into();
+    assert!(back.streaming.is_enabled());
+}
+
+#[test]
+fn test_activity_settings_streaming_preserved_with_other_fields() {
+    let core_settings = workflow::ActivitySettings {
+        timeout_seconds: Some(60),
+        cache: true,
+        streaming: workflow::StreamingConfig::Simple(true),
+        ..Default::default()
+    };
+    let dto_settings: dto::ActivitySettings = core_settings.into();
+    assert_eq!(dto_settings.timeout_seconds, Some(60));
+    assert!(dto_settings.cache);
+    assert!(dto_settings.streaming.is_enabled());
 }
 
 // ============================================================================

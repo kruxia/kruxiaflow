@@ -58,9 +58,7 @@ fn test_rsa_public_key() -> String {
     include_str!("../../oauth/tests/public.pem").to_string()
 }
 
-async fn setup_test_state_with_token(
-    shutdown_token: CancellationToken,
-) -> AppState {
+async fn setup_test_state_with_token(shutdown_token: CancellationToken) -> AppState {
     let pool = setup_test_pool().await;
 
     let auth_config = AuthConfig {
@@ -206,7 +204,10 @@ async fn test_workflow_events_ws_invalid_workflow_id() {
     );
     let result = connect_async(&url).await;
 
-    assert!(result.is_err(), "Expected rejection for invalid workflow_id");
+    assert!(
+        result.is_err(),
+        "Expected rejection for invalid workflow_id"
+    );
 }
 
 #[tokio::test]
@@ -319,9 +320,7 @@ async fn test_workflow_events_ws_receives_broadcast_event() {
         "ws://{}/api/v1/workflow_events/ws?token={}&workflow_id={}",
         addr, token, workflow_id
     );
-    let (mut ws_stream, _) = connect_async(&url)
-        .await
-        .expect("Failed to connect");
+    let (mut ws_stream, _) = connect_async(&url).await.expect("Failed to connect");
 
     // Give the subscription time to register
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -373,9 +372,7 @@ async fn test_workflow_events_ws_shutdown_sends_close_frame() {
     let token = get_valid_token(addr).await;
 
     let url = format!("ws://{}/api/v1/workflow_events/ws?token={}", addr, token);
-    let (mut ws_stream, _) = connect_async(&url)
-        .await
-        .expect("Failed to connect");
+    let (mut ws_stream, _) = connect_async(&url).await.expect("Failed to connect");
 
     // Give the subscription time to register
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -387,9 +384,7 @@ async fn test_workflow_events_ws_shutdown_sends_close_frame() {
     let mut received_shutdown_error = false;
     let mut received_close = false;
 
-    while let Ok(Some(msg_result)) =
-        timeout(Duration::from_secs(5), ws_stream.next()).await
-    {
+    while let Ok(Some(msg_result)) = timeout(Duration::from_secs(5), ws_stream.next()).await {
         match msg_result {
             Ok(Message::Text(text)) => {
                 let json: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -472,9 +467,7 @@ async fn test_workflow_events_ws_replay_from_event_id() {
 
         // Should receive replayed events (those after from_id)
         let mut replayed = 0;
-        while let Ok(Some(msg_result)) =
-            timeout(Duration::from_secs(3), ws_stream.next()).await
-        {
+        while let Ok(Some(msg_result)) = timeout(Duration::from_secs(3), ws_stream.next()).await {
             match msg_result {
                 Ok(Message::Text(text)) => {
                     let json: serde_json::Value = serde_json::from_str(&text).unwrap();
@@ -490,7 +483,11 @@ async fn test_workflow_events_ws_replay_from_event_id() {
             }
         }
 
-        assert!(replayed >= 1, "Expected at least 1 replayed event, got {}", replayed);
+        assert!(
+            replayed >= 1,
+            "Expected at least 1 replayed event, got {}",
+            replayed
+        );
         ws_stream.close(None).await.ok();
     }
 
@@ -510,9 +507,7 @@ async fn test_workflow_events_ws_client_close() {
     let token = get_valid_token(addr).await;
 
     let url = format!("ws://{}/api/v1/workflow_events/ws?token={}", addr, token);
-    let (mut ws_stream, _) = connect_async(&url)
-        .await
-        .expect("Failed to connect");
+    let (mut ws_stream, _) = connect_async(&url).await.expect("Failed to connect");
 
     // Give subscription time to register
     tokio::time::sleep(Duration::from_millis(100)).await;

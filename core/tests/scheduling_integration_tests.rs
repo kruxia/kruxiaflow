@@ -101,6 +101,7 @@ async fn test_delayed_activity_execution() {
                 delay: Some("2s".to_string()),
                 scheduled_for: None,
                 wait_for_signal: None,
+                ..Default::default()
             }),
             depends_on: None,
             dependency_of: None,
@@ -201,6 +202,7 @@ async fn test_scheduled_activity_execution() {
                 delay: None,
                 scheduled_for: Some("{{INPUT.scheduled_time}}".to_string()),
                 wait_for_signal: None,
+                ..Default::default()
             }),
             depends_on: None,
             dependency_of: None,
@@ -395,6 +397,7 @@ async fn test_worker_respects_scheduled_for() {
                 delay: Some("5s".to_string()),
                 scheduled_for: None,
                 wait_for_signal: None,
+                ..Default::default()
             }),
             depends_on: None,
             dependency_of: None,
@@ -514,6 +517,7 @@ async fn test_multiple_delayed_activities() {
                     delay: Some("2s".to_string()),
                     scheduled_for: None,
                     wait_for_signal: None,
+                    ..Default::default()
                 }),
                 depends_on: Some(vec![DependencyEdge {
                     activity_key: "call_1".to_string(),
@@ -537,6 +541,7 @@ async fn test_multiple_delayed_activities() {
                     delay: Some("2s".to_string()),
                     scheduled_for: None,
                     wait_for_signal: None,
+                    ..Default::default()
                 }),
                 depends_on: Some(vec![DependencyEdge {
                     activity_key: "call_2".to_string(),
@@ -693,6 +698,7 @@ async fn test_delay_with_all_duration_units() {
                 delay: Some("500ms".to_string()),
                 scheduled_for: None,
                 wait_for_signal: None,
+                ..Default::default()
             }),
             depends_on: None,
             dependency_of: None,

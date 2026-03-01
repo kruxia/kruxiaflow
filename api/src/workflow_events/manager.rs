@@ -291,7 +291,10 @@ mod tests {
         };
         assert!(filter.matches(&make_event(wf1, WorkflowEventType::WorkflowCreated)));
         assert!(filter.matches(&make_event(wf2, WorkflowEventType::WorkflowCreated)));
-        assert!(!filter.matches(&make_event(Uuid::now_v7(), WorkflowEventType::WorkflowCreated)));
+        assert!(!filter.matches(&make_event(
+            Uuid::now_v7(),
+            WorkflowEventType::WorkflowCreated
+        )));
     }
 
     #[test]
@@ -303,9 +306,18 @@ mod tests {
                 WorkflowEventType::ActivityFailed,
             ],
         };
-        assert!(filter.matches(&make_event(Uuid::now_v7(), WorkflowEventType::ActivityCompleted)));
-        assert!(filter.matches(&make_event(Uuid::now_v7(), WorkflowEventType::ActivityFailed)));
-        assert!(!filter.matches(&make_event(Uuid::now_v7(), WorkflowEventType::WorkflowCreated)));
+        assert!(filter.matches(&make_event(
+            Uuid::now_v7(),
+            WorkflowEventType::ActivityCompleted
+        )));
+        assert!(filter.matches(&make_event(
+            Uuid::now_v7(),
+            WorkflowEventType::ActivityFailed
+        )));
+        assert!(!filter.matches(&make_event(
+            Uuid::now_v7(),
+            WorkflowEventType::WorkflowCreated
+        )));
     }
 
     // --- WorkflowEventManager tests ---

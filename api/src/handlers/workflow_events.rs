@@ -120,8 +120,9 @@ pub async fn workflow_events_ws_handler(
     // Parse from_event_id for replay
     let replay_from: Option<Uuid> = match &params.from_event_id {
         Some(id_str) if !id_str.is_empty() => {
-            let id = Uuid::parse_str(id_str.trim())
-                .map_err(|_| AppError::BadRequest(format!("Invalid from_event_id: '{}'", id_str)))?;
+            let id = Uuid::parse_str(id_str.trim()).map_err(|_| {
+                AppError::BadRequest(format!("Invalid from_event_id: '{}'", id_str))
+            })?;
             Some(id)
         }
         _ => None,
