@@ -13,13 +13,27 @@ Reproducible benchmarks comparing Kruxia Flow against Temporal and Airflow workf
 ## Quick Start
 
 ```bash
+# First time: generate RSA keys and .env (from repo root)
+./scripts/init.sh
+
 # Build and run all benchmarks
+cd benchmarks
 docker-compose up --build
 
 # Results will be in results/
 # - results.json (raw data)
 # - comparison.html (visual report)
 ```
+
+## Prerequisites
+
+Before running benchmarks, generate RSA keys (required for JWT signing) from the repo root:
+
+```bash
+./scripts/init.sh
+```
+
+This creates `docker-keys/private.pem` and `docker-keys/public.pem` (skips if they already exist).
 
 ## Manual Execution
 
@@ -115,6 +129,34 @@ benchmarks/
 │   └── report.py               # HTML report generator
 └── results/                     # Output directory (gitignored)
 ```
+
+## Results
+
+### 2026-03-01 (commit 86e9ac7)
+
+Compared to the previous run (2026-02-02), Kruxia Flow performance improved:
+
+| Scenario           | Metric         | Feb 2   | Mar 1   | Change |
+|--------------------|----------------|---------|---------|--------|
+| Sequential-5       | Throughput     | 15.6    | 15.0    | -3%    |
+| Parallel-10        | Throughput     | 14.2    | 17.5    | +23%   |
+| High-Concurrency-3 | Throughput    | 70.7    | 74.0    | +5%    |
+| Parallel-10        | P95 Latency   | 1406 ms | 687 ms  | -51%   |
+| High-Concurrency-3 | P95 Latency   | 2019 ms | 1503 ms | -26%   |
+| High-Concurrency-3 | Peak Memory   | 328 MB  | 343 MB  | +5%    |
+
+Throughput in wf/sec (higher is better). Latency in ms (lower is better).
+
+Key improvements: Parallel-10 throughput up 23% and P95 latency cut in half. High-Concurrency-3 throughput up 5% with P95 latency down 26%.
+
+New platforms added in March: **Kruxia Flow (py-std)** and **Airflow**.
+
+| Platform              | Sequential-5 | Parallel-10 | High-Concurrency-3 |
+|-----------------------|--------------|-------------|---------------------|
+| Kruxia Flow           | 15.0 wf/s    | 17.5 wf/s   | 74.0 wf/s           |
+| Kruxia Flow (py-std)  | 15.2 wf/s    | 17.1 wf/s   | 103.4 wf/s          |
+| Temporal              | 13.1 wf/s    | 26.1 wf/s   | 47.7 wf/s           |
+| Airflow               | 2.5 wf/s     | 2.1 wf/s    | 7.1 wf/s            |
 
 ## Caveats
 
