@@ -786,13 +786,21 @@ Content-Type: application/json
 
 ## Token Streaming (WebSocket)
 
-### Connect to Activity Stream
+### Connect to Activity Stream (by ID)
 
 ```
 GET /api/v1/activities/:activity_id/ws?token=<jwt>
 ```
 
 WebSocket upgrade request for real-time token streaming from LLM activities. Authentication is via the `token` query parameter since WebSocket upgrade bypasses HTTP middleware.
+
+### Connect to Activity Stream (by Key)
+
+```
+GET /api/v1/workflows/:workflow_id/activities/:activity_key/ws?token=<jwt>
+```
+
+Same as above, but resolves the activity by `workflow_id` + `activity_key` instead of the internal `activity_id`. This is the preferred endpoint for frontends that know the workflow ID and activity key from the workflow definition but not the queue-internal UUID. The handler retries the lookup briefly (3 x 100ms) to handle the race where a client connects before the activity is scheduled.
 
 **Message Types**:
 

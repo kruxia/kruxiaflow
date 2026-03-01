@@ -114,7 +114,8 @@ flowchart TB
 - `POST /api/v1/activities/{id}/complete` - Report activity completion
 - `POST /api/v1/activities/{id}/fail` - Report activity failure
 - `POST /api/v1/activities/{id}/heartbeat` - Long-running activity heartbeat
-- `GET /api/v1/activities/{id}/ws` - WebSocket token streaming for LLM activities
+- `GET /api/v1/activities/{id}/ws` - WebSocket token streaming for LLM activities (by ID)
+- `GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/ws` - WebSocket token streaming (by key)
 - `GET /api/v1/workflow_events/ws` - WebSocket streaming for workflow execution events
 
 *File Management*:
@@ -127,9 +128,10 @@ LLM activities with `streaming: true` support real-time token delivery via WebSo
 
 ```
 GET /api/v1/activities/{activity_id}/ws?token=<jwt>
+GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/ws?token=<jwt>
 ```
 
-(WebSocket upgrade request)
+The by-key endpoint is preferred for frontends that know `workflow_id` + `activity_key` but not the internal `activity_id`.
 
 **Client Connection Flow**:
 1. Submit workflow via `POST /api/v1/workflows`
@@ -612,7 +614,7 @@ LLM completions with multi-model fallback, budget awareness, and optional stream
 **Features**:
 - Multi-model fallback chains (tries each model in order until success)
 - Budget-aware model selection (skips expensive models when cost exceeds budget)
-- Token streaming via WebSocket (`GET /api/v1/activities/{id}/ws`)
+- Token streaming via WebSocket (by ID or by `workflow_id`/`activity_key`)
 - Cost tracking per request (`result.cost_usd`, `result.usage.total_tokens`)
 - Provider metadata (`result.provider`, `result.model`)
 - Supported providers: Anthropic, OpenAI, Google
