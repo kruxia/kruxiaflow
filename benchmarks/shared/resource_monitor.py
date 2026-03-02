@@ -127,7 +127,12 @@ class ResourceMonitor:
             return
 
         container_patterns = PLATFORM_CONTAINERS.get(self.platform, [])
-        all_containers = self.client.containers.list()
+        # Filter to benchmark compose project containers only, so dev cluster
+        # containers (e.g. kruxiaflow-postgres from root docker-compose) don't
+        # get counted alongside benchmarks-kruxiaflow-postgres-1.
+        all_containers = self.client.containers.list(
+            filters={"label": "com.docker.compose.project=benchmarks"}
+        )
 
         self.containers = []
         for container in all_containers:
