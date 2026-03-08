@@ -15,6 +15,7 @@ services:
   # NOTE: Init scripts only run when the postgres data volume is first created.
   # If you already have a running cluster, run: ./docker clean && ./docker up
   postgres:
+    image: pgvector/pgvector:pg17
     volumes:
       - ./examples/initdb:/docker-entrypoint-initdb.d:ro
     networks:
@@ -32,6 +33,7 @@ services:
   # Python worker for script activities in examples
   py-std-worker:
     image: kruxia/kruxiaflow-py-std:latest
+    platform: linux/amd64  # Use emulation on arm64 (Apple Silicon)
     container_name: kruxiaflow-py-std-worker
     environment:
       KRUXIAFLOW_API_URL: http://kruxiaflow:8080
