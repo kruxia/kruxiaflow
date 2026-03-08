@@ -5,8 +5,10 @@
 //! RSA256 signed JWT tokens.
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use uuid::Uuid;
 
 mod postgres;
 pub use postgres::{PostgresAuthService, hash_refresh_token};
@@ -81,6 +83,24 @@ pub struct AuthResponse {
     pub refresh_token: Option<String>,
 }
 
+/// Request to register a new user
+#[derive(Debug, Clone, Deserialize)]
+pub struct RegisterUserRequest {
+    pub username: String,
+    pub email: String,
+    pub password: String,
+}
+
+/// Response from user registration
+#[derive(Debug, Clone, Serialize)]
+pub struct RegisterUserResponse {
+    pub id: Uuid,
+    pub username: String,
+    pub email: String,
+    pub is_active: bool,
+    pub created_at: DateTime<Utc>,
+}
+
 /// Authentication service interface
 ///
 /// Provides OAuth 2.0 compliant authentication with JWT tokens.
@@ -114,6 +134,13 @@ pub trait AuthenticationService: Send + Sync {
     ///
     /// Used by API middleware to validate Bearer tokens.
     async fn validate_token(&self, token: &str) -> AuthResult<Claims>;
+
+    /// Register a new user (idempotent upsert)
+    ///
+    /// Creates a user or returns the existing user if the username already exists.
+    /// Does NOT update the password on conflict (safe for idempotent seeding).
+    async fn register_user(&self, request: RegisterUserRequest)
+    -> AuthResult<RegisterUserResponse>;
 
     /// Get RSA public keys for external verification (JWKS)
     ///

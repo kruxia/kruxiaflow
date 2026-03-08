@@ -2,9 +2,10 @@ use crate::client::{PendingActivity, WorkerApiClient};
 use crate::config::WorkerConfig;
 use crate::file_executor::FileExecutor;
 use crate::registry::{ActivityContext, ActivityRegistry};
+use crate::streaming::HttpStreamSender;
 use anyhow::{Context, Result};
 use kruxiaflow_core::storage::WorkflowStorage;
-use kruxiaflow_core::workflow::ActivityOutputDefinition;
+use kruxiaflow_core::workflow::{ActivityOutputDefinition, ActivitySettings};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -212,7 +213,7 @@ impl WorkerPoller {
         }
 
         // Parse activity settings
-        let settings = activity
+        let settings: Option<ActivitySettings> = activity
             .settings
             .as_ref()
             .and_then(|s| serde_json::from_value(s.clone()).ok());
@@ -225,20 +226,86 @@ impl WorkerPoller {
             Some(Arc::clone(&self.storage)),
         );
 
-        // Execute activity with context for caching and streaming support
+        // Check if streaming is enabled and a streaming implementation exists
+        let streaming_enabled = settings
+            .as_ref()
+            .map(|s| s.streaming.is_enabled())
+            .unwrap_or(false);
+
+        let streaming_impl = if streaming_enabled {
+            self.registry
+                .get_streaming(&activity.worker, &activity.activity_name)
+                .cloned()
+        } else {
+            None
+        };
+
+        // Execute activity — streaming path or normal path
         let exec_span = tracing::debug_span!("activity_handler");
         let result = {
             let _enter = exec_span.enter();
-            self.registry
-                .execute_with_context(
-                    &activity.worker,
-                    &activity.activity_name,
-                    parameters,
-                    settings,
-                    timeout,
-                    &ctx,
-                )
-                .await
+
+            if let Some(streaming_activity) = streaming_impl {
+                // Streaming path: create HttpStreamSender, check for subscribers
+                let auth_token = self.client.get_token().await.ok();
+                let sender = HttpStreamSender::new(
+                    self.config.api_url.clone(),
+                    activity.activity_id,
+                    auth_token,
+                );
+
+                let has_subscribers = sender.has_subscribers().await.unwrap_or(false);
+
+                if has_subscribers {
+                    tracing::info!(
+                        activity_id = %activity.activity_id,
+                        "Streaming dispatch: subscribers connected"
+                    );
+                    match tokio::time::timeout(
+                        timeout,
+                        streaming_activity.execute_streaming(
+                            activity.activity_id,
+                            parameters,
+                            Box::new(sender),
+                        ),
+                    )
+                    .await
+                    {
+                        Ok(inner) => inner,
+                        Err(_) => Err(anyhow::anyhow!(
+                            "Activity execution timed out after {:?}",
+                            timeout
+                        )),
+                    }
+                } else {
+                    tracing::debug!(
+                        activity_id = %activity.activity_id,
+                        "Streaming enabled but no subscribers, falling back to normal execution"
+                    );
+                    self.registry
+                        .execute_with_context(
+                            &activity.worker,
+                            &activity.activity_name,
+                            parameters,
+                            settings,
+                            timeout,
+                            &ctx,
+                        )
+                        .await
+                }
+            } else {
+                // Normal (non-streaming) execution path
+                self.registry
+                    .execute_with_context(
+                        &activity.worker,
+                        &activity.activity_name,
+                        parameters,
+                        settings,
+                        timeout,
+                        &ctx,
+                    )
+                    .await
+            }
         };
 
         // Report result BEFORE canceling heartbeat to avoid race condition
@@ -1021,5 +1088,101 @@ mod tests {
             .as_ref()
             .and_then(|d| serde_json::from_value(d.clone()).ok());
         assert!(defs.is_none());
+    }
+
+    // =========================================================================
+    // Streaming dispatch logic tests
+    // =========================================================================
+
+    #[test]
+    fn test_streaming_enabled_detection_from_settings() {
+        // streaming: true in settings JSON
+        let settings_json = json!({"streaming": true});
+        let settings: Option<ActivitySettings> = serde_json::from_value(settings_json).ok();
+        let streaming_enabled = settings
+            .as_ref()
+            .map(|s| s.streaming.is_enabled())
+            .unwrap_or(false);
+        assert!(streaming_enabled);
+    }
+
+    #[test]
+    fn test_streaming_disabled_by_default_in_settings() {
+        // No streaming field in settings
+        let settings_json = json!({"cache": false});
+        let settings: Option<ActivitySettings> = serde_json::from_value(settings_json).ok();
+        let streaming_enabled = settings
+            .as_ref()
+            .map(|s| s.streaming.is_enabled())
+            .unwrap_or(false);
+        assert!(!streaming_enabled);
+    }
+
+    #[test]
+    fn test_streaming_disabled_when_settings_none() {
+        let settings: Option<ActivitySettings> = None;
+        let streaming_enabled = settings
+            .as_ref()
+            .map(|s| s.streaming.is_enabled())
+            .unwrap_or(false);
+        assert!(!streaming_enabled);
+    }
+
+    #[test]
+    fn test_streaming_disabled_explicitly_false() {
+        let settings_json = json!({"streaming": false});
+        let settings: Option<ActivitySettings> = serde_json::from_value(settings_json).ok();
+        let streaming_enabled = settings
+            .as_ref()
+            .map(|s| s.streaming.is_enabled())
+            .unwrap_or(false);
+        assert!(!streaming_enabled);
+    }
+
+    #[test]
+    fn test_streaming_enabled_detailed_config() {
+        let settings_json = json!({"streaming": {"enabled": true}});
+        let settings: Option<ActivitySettings> = serde_json::from_value(settings_json).ok();
+        let streaming_enabled = settings
+            .as_ref()
+            .map(|s| s.streaming.is_enabled())
+            .unwrap_or(false);
+        assert!(streaming_enabled);
+    }
+
+    #[test]
+    fn test_streaming_impl_lookup_found() {
+        let mut registry =
+            ActivityRegistry::new(Arc::new(kruxiaflow_core::cache::NoOpCache::new()));
+
+        // Register a normal activity
+        registry.register(Arc::new(SuccessActivity));
+
+        // Without streaming registration, lookup should return None
+        assert!(registry.get_streaming("test", "success").is_none());
+    }
+
+    #[test]
+    fn test_streaming_fallback_when_no_impl() {
+        // When streaming is enabled in settings but no streaming impl exists,
+        // the streaming_impl variable should be None and normal path is taken
+        let registry = ActivityRegistry::new(Arc::new(kruxiaflow_core::cache::NoOpCache::new()));
+
+        let settings_json = json!({"streaming": true});
+        let settings: Option<ActivitySettings> = serde_json::from_value(settings_json).ok();
+
+        let streaming_enabled = settings
+            .as_ref()
+            .map(|s| s.streaming.is_enabled())
+            .unwrap_or(false);
+        assert!(streaming_enabled);
+
+        // But no streaming impl registered
+        let streaming_impl = if streaming_enabled {
+            registry.get_streaming("test", "success").cloned()
+        } else {
+            None
+        };
+        assert!(streaming_impl.is_none());
     }
 }
