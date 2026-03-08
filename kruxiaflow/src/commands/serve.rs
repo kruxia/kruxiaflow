@@ -265,9 +265,10 @@ async fn spawn_orchestrator(
     let handle = tokio::spawn(async move {
         tracing::info!("Starting orchestrator");
 
-        // Signal ready and mark alive before entering the loop
+        // Mark alive then signal ready — order matters so the health endpoint
+        // never sees alive=false after the startup wait returns.
+        alive.store(true, Ordering::Release);
         ready_clone.notify_one();
-        alive.store(true, Ordering::Relaxed);
 
         // Run orchestrator (polls events and schedules activities)
         // Note: run_orchestrator will check shutdown_token in its loop
@@ -284,7 +285,7 @@ async fn spawn_orchestrator(
         // Mark as dead only on unexpected exit (not graceful shutdown)
         if !shutdown_token.is_cancelled() {
             tracing::warn!("Orchestrator exited unexpectedly");
-            alive.store(false, Ordering::Relaxed);
+            alive.store(false, Ordering::Release);
         }
 
         result

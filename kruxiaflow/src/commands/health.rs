@@ -239,7 +239,8 @@ fn extract_service_health(service_name: &str, readiness: &serde_json::Value) -> 
                 .unwrap_or("unknown");
 
             let status = match status_str {
-                "healthy" | "ok" | "ready" => HealthStatus::Healthy,
+                "healthy" | "ok" => HealthStatus::Healthy,
+                // "error" is not emitted by this server but accepted defensively
                 "unhealthy" | "error" => HealthStatus::Unhealthy,
                 "degraded" => HealthStatus::Degraded,
                 _ => HealthStatus::Unknown,

@@ -97,7 +97,7 @@ pub async fn readiness_handler(State(app_state): State<AppState>) -> impl IntoRe
         }
     };
 
-    let orchestrator_status = if app_state.orchestrator_alive.load(Ordering::Relaxed) {
+    let orchestrator_status = if app_state.orchestrator_alive.load(Ordering::Acquire) {
         "ok"
     } else {
         "unhealthy"
