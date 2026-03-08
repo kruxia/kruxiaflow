@@ -238,7 +238,7 @@ jobs:
           POSTGRES_PASSWORD: kruxiaflow_dev
           POSTGRES_DB: kruxiaflow_test
         ports:
-          - 5433:5432
+          - 5432:5432
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -247,9 +247,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      
+
       - uses: dtolnay/rust-toolchain@stable
-      
+
       - name: Cache dependencies
         uses: actions/cache@v3
         with:
@@ -257,22 +257,22 @@ jobs:
             ~/.cargo
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      
+
       - name: Install sqlx-cli
         run: cargo install sqlx-cli --no-default-features --features postgres
-      
+
       - name: Install cargo-llvm-cov
         run: cargo install cargo-llvm-cov
-      
+
       - name: Run migrations
         run: sqlx migrate run
         env:
-          DATABASE_URL: postgres://kruxiaflow:kruxiaflow_dev@localhost:5433/kruxiaflow_test
-      
+          DATABASE_URL: postgres://kruxiaflow:kruxiaflow_dev@localhost:5432/kruxiaflow_test
+
       - name: Run tests with coverage
         run: ./scripts/test.sh --coverage-ci --skip-db-setup
         env:
-          DATABASE_URL: postgres://kruxiaflow:kruxiaflow_dev@localhost:5433/kruxiaflow_test
+          DATABASE_URL: postgres://kruxiaflow:kruxiaflow_dev@localhost:5432/kruxiaflow_test
       
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
@@ -373,6 +373,30 @@ docker-compose up -d postgres
 ```
 
 The test script handles DATABASE_URL automatically.
+
+#### Port conflict with a local PostgreSQL installation
+
+If you have PostgreSQL installed locally, it occupies port 5432 on the host. Docker also binds to 5432 by default, but `cargo test` will silently connect to the local server instead of Docker — causing errors like `role "kruxiaflow" does not exist`.
+
+Diagnose with:
+```bash
+lsof -i :5432
+```
+
+If you see two processes (e.g. `postgres` and `com.docker`), set `POSTGRES_PORT` in your `.env` to a free port:
+```
+POSTGRES_PORT=5433
+```
+
+Then restart the postgres container:
+```bash
+docker-compose up -d postgres
+```
+
+Your `DATABASE_URL` must match the new port:
+```
+DATABASE_URL=postgres://kruxiaflow:yourpassword@127.0.0.1:5433/kruxiaflow
+```
 
 ### Slow Tests
 

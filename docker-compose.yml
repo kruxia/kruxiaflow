@@ -53,7 +53,7 @@ services:
       - "-c"
       - "log_min_duration_statement=100"
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
     networks:
