@@ -29,10 +29,11 @@ services:
       KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE: kruxiaflow-dev-audience
       KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES: "1" # default = 5
       KRUXIAFLOW_LOG_LEVEL: info
-      # OAuth RSA keys for JWT signing/validation (dev keys from ./docker-keys/)
-      # TODO: make this seamless with dev setup
-      KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM: "${KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM:-}"
-      KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM: "${KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM:-}"
+      # OAuth RSA keys for JWT signing/validation (dev keys from ../docker-keys/)
+      KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM_FILE: /secrets/private.pem
+      KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM_FILE: /secrets/public.pem
+    volumes:
+      - ../docker-keys:/secrets:ro
     depends_on:
       - kruxiaflow-postgres
     command: [ "serve", "--migrate", "--seed-client" ]
@@ -59,8 +60,10 @@ services:
       KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE: kruxiaflow-dev-audience
       KRUXIAFLOW_LOG_LEVEL: info
       KRUXIAFLOW_NO_WORKER: "true"
-      KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM: "${KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM:-}"
-      KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM: "${KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM:-}"
+      KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM_FILE: /secrets/private.pem
+      KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM_FILE: /secrets/public.pem
+    volumes:
+      - ../docker-keys:/secrets:ro
     depends_on:
       kruxiaflow:
         condition: service_healthy

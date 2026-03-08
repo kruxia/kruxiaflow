@@ -621,6 +621,7 @@ async fn test_iteration_budget_accumulation() {
                 delay: None,
                 scheduled_for: None,
                 wait_for_signal: None,
+                ..Default::default()
             }),
             depends_on: Some(vec![ActivityRelationship {
                 activity_key: "expensive_task".to_string(),
