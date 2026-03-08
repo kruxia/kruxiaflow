@@ -7,6 +7,7 @@ use kruxiaflow_core::storage::WorkflowStorage;
 use kruxiaflow_core::subscription::SubscriptionService;
 use kruxiaflow_oauth::AuthenticationService;
 use sqlx::PgPool;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 
@@ -60,6 +61,10 @@ pub struct AppState {
     /// WebSocket connection manager for activity streaming
     /// Manages active WebSocket connections per activity for real-time token streaming
     pub connection_manager: ConnectionManager,
+
+    /// Orchestrator liveness flag — true while the orchestrator task is running.
+    /// Set to false if the orchestrator exits unexpectedly (before shutdown).
+    pub orchestrator_alive: Arc<AtomicBool>,
 
     /// WebSocket subscription manager for workflow event streaming
     /// Manages filtered subscriptions for real-time workflow event broadcast
@@ -116,6 +121,7 @@ impl AppState {
             cache_service,
             subscription_service,
             connection_manager: ConnectionManager::new(),
+            orchestrator_alive: Arc::new(AtomicBool::new(false)),
             workflow_event_manager: WorkflowEventManager::new(),
             shutdown_token,
             version: env!("CARGO_PKG_VERSION").to_string(),
@@ -176,6 +182,7 @@ impl AppState {
             cache_service,
             subscription_service,
             connection_manager: ConnectionManager::new(),
+            orchestrator_alive: Arc::new(AtomicBool::new(false)),
             workflow_event_manager: WorkflowEventManager::new(),
             shutdown_token,
             version,

@@ -10,6 +10,7 @@ use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use kruxiaflow_worker::{WorkerConfig, WorkerManager};
 use sqlx::PgPool;
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Notify;
@@ -253,6 +254,7 @@ async fn spawn_orchestrator(
     subscription_service: Arc<dyn SubscriptionService>,
     pool: PgPool,
     shutdown_token: CancellationToken,
+    alive: Arc<AtomicBool>,
 ) -> Result<(JoinHandle<Result<()>>, Arc<Notify>)> {
     let ready_notify = Arc::new(Notify::new());
     let ready_clone = Arc::clone(&ready_notify);
@@ -263,20 +265,30 @@ async fn spawn_orchestrator(
     let handle = tokio::spawn(async move {
         tracing::info!("Starting orchestrator");
 
-        // Signal ready immediately since we're just starting the loop
+        // Mark alive then signal ready — order matters so the health endpoint
+        // never sees alive=false after the startup wait returns.
+        alive.store(true, Ordering::Release);
         ready_clone.notify_one();
 
         // Run orchestrator (polls events and schedules activities)
         // Note: run_orchestrator will check shutdown_token in its loop
-        run_orchestrator(
+        let result = run_orchestrator(
             event_source,
             activity_queue,
             subscription_service,
             config,
-            Some(shutdown_token),
+            Some(shutdown_token.clone()),
         )
         .await
-        .map_err(|e: OrchestratorError| anyhow::anyhow!("Orchestrator error: {}", e))
+        .map_err(|e: OrchestratorError| anyhow::anyhow!("Orchestrator error: {}", e));
+
+        // Mark as dead only on unexpected exit (not graceful shutdown)
+        if !shutdown_token.is_cancelled() {
+            tracing::warn!("Orchestrator exited unexpectedly");
+            alive.store(false, Ordering::Release);
+        }
+
+        result
     });
 
     // Wait for orchestrator to signal ready (or timeout)
@@ -603,6 +615,7 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         subscription_service,
         pool.clone(),
         shutdown_token.clone(),
+        state.orchestrator_alive.clone(),
     )
     .await?;
 

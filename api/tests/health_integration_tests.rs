@@ -87,6 +87,11 @@ async fn setup_test_state() -> AppState {
 /// Helper to create test server
 async fn setup_test_server() -> TestServer {
     let state = setup_test_state().await;
+    // Simulate orchestrator running — tests don't spawn one, but the healthy
+    // path tests need the flag set. Unhealthy-path tests create their own state.
+    state
+        .orchestrator_alive
+        .store(true, std::sync::atomic::Ordering::Release);
     let router = app_router(state);
     TestServer::new(router).expect("Failed to create test server")
 }
@@ -132,6 +137,24 @@ async fn test_readiness_endpoint_healthy() {
     assert_eq!(body["checks"]["database"], "ok");
     assert_eq!(body["checks"]["event_source"], "ok");
     assert_eq!(body["checks"]["queue"], "ok");
+    assert_eq!(body["checks"]["orchestrator"], "ok");
+}
+
+#[tokio::test]
+#[serial]
+async fn test_readiness_endpoint_orchestrator_unhealthy() {
+    let state = setup_test_state().await;
+    // orchestrator_alive defaults to false — do not set it true
+    let router = app_router(state);
+    let server = TestServer::new(router).expect("Failed to create test server");
+
+    let response = server.get("/health/ready").await;
+
+    assert_eq!(response.status_code(), StatusCode::SERVICE_UNAVAILABLE);
+
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["status"], "not_ready");
+    assert_eq!(body["checks"]["orchestrator"], "unhealthy");
 }
 
 #[tokio::test]
@@ -268,6 +291,10 @@ async fn test_readiness_includes_all_checks() {
     assert!(
         body["checks"]["queue"].is_string(),
         "queue check should be present"
+    );
+    assert!(
+        body["checks"]["orchestrator"].is_string(),
+        "orchestrator check should be present"
     );
 }
 

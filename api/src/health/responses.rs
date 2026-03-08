@@ -23,6 +23,10 @@ pub struct HealthCheckStatus {
     /// Activity queue health status
     #[schema(example = "ok")]
     pub queue: &'static str,
+
+    /// Orchestrator task health status
+    #[schema(example = "ok")]
+    pub orchestrator: &'static str,
 }
 
 /// Readiness probe response
