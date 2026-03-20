@@ -205,7 +205,13 @@ mod tests {
 
         let retrieved = result.unwrap();
         assert_eq!(retrieved.output, cached_result.output);
-        assert_eq!(retrieved.original_cost_usd, cached_result.original_cost_usd);
+        // Compare as strings rather than raw Decimal structs: JSON round-trip can produce a
+        // Decimal with a different internal scale (e.g. 123e-6 vs 0.000123) that is numerically
+        // equal but fails a bitwise assert_eq!.
+        assert_eq!(
+            retrieved.original_cost_usd.map(|d| d.to_string()),
+            cached_result.original_cost_usd.map(|d| d.to_string()),
+        );
     }
 
     #[tokio::test]
