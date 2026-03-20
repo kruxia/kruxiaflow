@@ -61,7 +61,7 @@ reqwest = { workspace = true }
 chrono = { workspace = true }
 
 # MCP Server (optional - all gated behind mcp-server feature)
-rust-mcp-sdk = { version = "0.8.2", optional = true }
+rust-mcp-sdk = { version = "0.9.0", optional = true }
 async-trait = { workspace = true, optional = true }
 http = { version = "1", optional = true }
 

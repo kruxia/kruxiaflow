@@ -9,7 +9,7 @@ use rust_mcp_sdk::schema::{CallToolResult, schema_utils::CallToolError};
 use rust_mcp_sdk::tool_box;
 use sqlx::PgPool;
 
-use super::{error_response, parse_uuid, text_response};
+use super::{AnyJson, error_response, parse_uuid, text_response};
 
 // ============================================================================
 // Tool: validate_workflow
@@ -124,7 +124,7 @@ pub struct SubmitWorkflow {
     pub version: Option<String>,
 
     /// Input payload — must be a JSON object. Values are available as {{INPUT.key}} in the workflow.
-    pub input: serde_json::Value,
+    pub input: AnyJson,
 
     /// Optional idempotency key. A second submission with the same key is rejected with a conflict error.
     pub unique_key: Option<String>,
@@ -177,7 +177,7 @@ pub async fn run_submit_workflow(
     params: &SubmitWorkflow,
 ) -> Result<CallToolResult, CallToolError> {
     // Basic input validation before hitting the service
-    if !params.input.is_object() {
+    if !params.input.0.is_object() {
         let response = serde_json::json!({
             "error": "Input must be a JSON object, not a scalar or array",
             "definition_name": params.definition_name,
@@ -191,7 +191,7 @@ pub async fn run_submit_workflow(
         .submit_workflow(
             &params.definition_name,
             params.version.as_deref(),
-            params.input.clone(),
+            params.input.0.clone(),
             params.unique_key.clone(),
         )
         .await;
