@@ -18,6 +18,34 @@ pub use visualization::VisualizationTools;
 
 use rust_mcp_sdk::schema::{CallToolResult, TextContent, schema_utils::CallToolError};
 
+/// A transparent wrapper for `serde_json::Value` that generates a valid JSON Schema.
+///
+/// `serde_json::Value` is not recognized by the `rust-mcp-macros` `JsonSchema` derive macro
+/// and falls through to its unknown-type fallback, producing `{"type": "unknown"}` — an
+/// invalid JSON Schema draft 2020-12 value. This newtype provides a `json_schema()` method
+/// (called by the macro for any single-segment struct type) that returns `{}`, the correct
+/// draft 2020-12 representation of "any JSON value is accepted".
+///
+/// Use this as a drop-in replacement for `serde_json::Value` in tool structs that derive
+/// `JsonSchema`. Access the inner value via `.0` or the `Into<serde_json::Value>` impl.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(transparent)]
+pub(crate) struct AnyJson(pub serde_json::Value);
+
+impl AnyJson {
+    /// Returns an empty JSON Schema object, which accepts any JSON value.
+    /// Called by the `#[derive(JsonSchema)]` macro for fields typed `AnyJson`.
+    pub fn json_schema() -> serde_json::Map<String, serde_json::Value> {
+        serde_json::Map::new()
+    }
+}
+
+impl From<AnyJson> for serde_json::Value {
+    fn from(v: AnyJson) -> Self {
+        v.0
+    }
+}
+
 /// Wrap a JSON value as a pretty-printed text response.
 pub(crate) fn text_response(value: &serde_json::Value) -> Result<CallToolResult, CallToolError> {
     Ok(CallToolResult::text_content(vec![TextContent::from(

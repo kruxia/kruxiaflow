@@ -13,7 +13,7 @@ use rust_mcp_sdk::tool_box;
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 
-use super::{error_response, parse_uuid, text_response};
+use super::{AnyJson, error_response, parse_uuid, text_response};
 
 // ============================================================================
 // Tool: get_workflow_status
@@ -156,7 +156,7 @@ pub struct EstimateWorkflowCost {
 
     /// Sample input payload — keys should match what the workflow's
     /// {{INPUT.key}} expressions reference. Used to approximate prompt lengths.
-    pub input_sample: serde_json::Value,
+    pub input_sample: AnyJson,
 }
 
 // ============================================================================
@@ -546,7 +546,7 @@ pub async fn run_estimate_workflow_cost(
                 .and_then(|m| m.get("prompt").and_then(|v| v.as_str()))
                 .unwrap_or("");
 
-            let rendered = substitute_input_template(prompt_template, &params.input_sample);
+            let rendered = substitute_input_template(prompt_template, &params.input_sample.0);
 
             // max cost: full max_tokens output
             let max_cost = calculator

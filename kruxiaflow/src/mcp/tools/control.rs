@@ -9,7 +9,7 @@ use rust_mcp_sdk::tool_box;
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 
-use super::{error_response, parse_uuid, text_response};
+use super::{AnyJson, error_response, parse_uuid, text_response};
 
 use kruxiaflow_core::{
     EventSource, NewWorkflowEvent, PostgresEventSource, PostgresSubscriptionService, SignalRequest,
@@ -50,7 +50,7 @@ pub struct SendWorkflowSignal {
     pub signal_name: String,
 
     /// Optional data payload delivered to the activity
-    pub data: Option<serde_json::Value>,
+    pub data: Option<AnyJson>,
 }
 
 // ============================================================================
@@ -112,7 +112,7 @@ pub async fn run_send_workflow_signal(
         workflow_id,
         activity_key: params.activity_key.clone(),
         event_name: params.signal_name.clone(),
-        data: params.data.clone(),
+        data: params.data.as_ref().map(|v| v.0.clone()),
     };
 
     let subscription = match sub_svc.signal_activity(request).await {
@@ -148,7 +148,7 @@ pub async fn run_send_workflow_signal(
             workflow_id,
             event_type: WorkflowEventType::ActivitySignaled,
             activity_key: Some(params.activity_key.clone()),
-            payload: params.data.clone().unwrap_or(serde_json::Value::Null),
+            payload: params.data.as_ref().map(|v| v.0.clone()).unwrap_or(serde_json::Value::Null),
             iteration: None,
         })
         .await
