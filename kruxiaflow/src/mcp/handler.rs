@@ -3,7 +3,7 @@
 /// Routes incoming MCP requests to the appropriate tool functions.
 /// Tool modules are added incrementally as they are implemented:
 ///   - Discovery tools: list/get workflow definitions, activity catalog, authoring guide
-///   - Execution tools: validate, submit, cancel
+///   - Execution tools: validate, deploy, submit, cancel
 ///   - Observability tools: status, list, outputs, cost, estimate
 ///   - Visualization & Control tools: diagrams, signals (future)
 use std::sync::Arc;
@@ -93,10 +93,13 @@ impl ServerHandler for KruxiaFlowMcpHandler {
             }
 
             // --- Execution tools ---
-            "validate_workflow" | "submit_workflow" | "cancel_workflow" => {
+            "validate_workflow" | "deploy_workflow" | "submit_workflow" | "cancel_workflow" => {
                 let tool = ExecutionTools::try_from(params).map_err(CallToolError::new)?;
                 match tool {
                     ExecutionTools::ValidateWorkflow(ref p) => execution::run_validate_workflow(p),
+                    ExecutionTools::DeployWorkflow(ref p) => {
+                        execution::run_deploy_workflow(&self.pool, p).await
+                    }
                     ExecutionTools::SubmitWorkflow(ref p) => {
                         execution::run_submit_workflow(&self.pool, p).await
                     }

@@ -255,6 +255,18 @@ Default: 0.0.0.0\n\
 Example: --mcp-http-bind 127.0.0.1"
     )]
     pub mcp_http_bind: Option<String>,
+
+    /// Disable MCP authentication (for local development/testing)
+    #[cfg(feature = "mcp-server")]
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_MCP_NO_AUTH",
+        help = "Disable MCP server authentication (dev only)",
+        long_help = "Start the MCP server without requiring authentication.\n\
+WARNING: Only use for local development and testing.\n\n\
+Example: --mcp-no-auth"
+    )]
+    pub mcp_no_auth: bool,
 }
 
 impl ServeCommand {
@@ -680,10 +692,16 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
 
         if mcp_config.enabled {
             mcp_config.log_config();
+            let mcp_auth: Option<Arc<dyn kruxiaflow_oauth::AuthenticationService>> = if cmd.mcp_no_auth {
+                tracing::warn!("MCP server authentication DISABLED (--mcp-no-auth)");
+                None
+            } else {
+                Some(auth_service.clone())
+            };
             Some(crate::mcp::spawn_mcp_server(
                 Arc::new(mcp_config),
                 pool.clone(),
-                Some(auth_service.clone()),
+                mcp_auth,
             ))
         } else {
             None
@@ -845,6 +863,8 @@ mod tests {
             mcp_http_port: None,
             #[cfg(feature = "mcp-server")]
             mcp_http_bind: None,
+            #[cfg(feature = "mcp-server")]
+            mcp_no_auth: false,
         }
     }
 
@@ -1049,6 +1069,8 @@ mod tests {
             mcp_http_port: Some(8081),
             #[cfg(feature = "mcp-server")]
             mcp_http_bind: Some("127.0.0.1".to_string()),
+            #[cfg(feature = "mcp-server")]
+            mcp_no_auth: false,
         };
 
         assert!(cmd.validate().is_ok());

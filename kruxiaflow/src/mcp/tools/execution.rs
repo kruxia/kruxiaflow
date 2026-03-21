@@ -1,8 +1,9 @@
 /// MCP Execution Tools
 ///
-/// Three tools that create or modify workflow state:
+/// Four tools that create or modify workflow state:
 /// - validate_workflow: parse + validate YAML/JSON in-process (no DB)
-/// - submit_workflow: deploy definition (if needed) and submit a workflow instance
+/// - deploy_workflow: validate + persist a workflow definition to the database
+/// - submit_workflow: submit a workflow instance for execution (definition must be deployed)
 /// - cancel_workflow: cancel a running workflow (stub — endpoint not yet implemented)
 use rust_mcp_sdk::macros::{JsonSchema, mcp_tool};
 use rust_mcp_sdk::schema::{CallToolResult, schema_utils::CallToolError};
@@ -94,6 +95,34 @@ pub fn run_validate_workflow(params: &ValidateWorkflow) -> Result<CallToolResult
 }
 
 // ============================================================================
+// Tool: deploy_workflow
+// ============================================================================
+
+#[mcp_tool(
+    name = "deploy_workflow",
+    description = "Deploy a workflow definition (YAML or JSON) to the database.\n\
+        \n\
+        Validates the definition first (same checks as validate_workflow), then \
+        persists it as a new version. The version is auto-generated from the deployment \
+        timestamp.\n\
+        \n\
+        Idempotent: if an identical definition (same name and content) is already \
+        deployed, returns the existing version without creating a duplicate.\n\
+        \n\
+        When to use: After validating a workflow definition with validate_workflow \
+        and before submitting instances with submit_workflow. This is the step that \
+        makes the definition available for execution.",
+    destructive_hint = false,
+    read_only_hint = false,
+    idempotent_hint = true
+)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct DeployWorkflow {
+    /// The workflow definition as a YAML or JSON string
+    pub workflow_yaml: String,
+}
+
+// ============================================================================
 // Tool: submit_workflow
 // ============================================================================
 
@@ -102,15 +131,14 @@ pub fn run_validate_workflow(params: &ValidateWorkflow) -> Result<CallToolResult
     description = "Submit a workflow for execution.\n\
         \n\
         The workflow definition must already be deployed (use validate_workflow to check \
-        it first, then deploy via the API or include it in your workflow authoring flow). \
-        Provide the definition name, an input object, and optionally a version and \
-        unique_key for idempotent submission.\n\
+        it first, then deploy_workflow to persist it). Provide the definition name, an \
+        input object, and optionally a version and unique_key for idempotent submission.\n\
         \n\
         Returns immediately with a workflow_id — execution happens asynchronously. \
         Use get_workflow_status to monitor progress.\n\
         \n\
-        When to use: After validating and deploying a workflow definition. The input \
-        object must match what the workflow's template expressions expect.",
+        When to use: After deploying a workflow definition with deploy_workflow. The \
+        input object must match what the workflow's template expressions expect.",
     destructive_hint = true,
     read_only_hint = false,
     idempotent_hint = false
@@ -164,12 +192,76 @@ pub struct CancelWorkflow {
 
 tool_box!(
     ExecutionTools,
-    [ValidateWorkflow, SubmitWorkflow, CancelWorkflow]
+    [ValidateWorkflow, DeployWorkflow, SubmitWorkflow, CancelWorkflow]
 );
 
 // ============================================================================
 // Async runners for DB-backed tools
 // ============================================================================
+
+/// Deploy a workflow definition to the database.
+///
+/// Validates the YAML/JSON, then persists via WorkflowDefinitionRepository.
+/// Idempotent: identical content returns the existing version.
+pub async fn run_deploy_workflow(
+    pool: &PgPool,
+    params: &DeployWorkflow,
+) -> Result<CallToolResult, CallToolError> {
+    // Parse + validate the definition
+    let definition = match kruxiaflow_core::WorkflowDefinition::from_yaml(&params.workflow_yaml) {
+        Ok(def) => def,
+        Err(err) => {
+            let errors = extract_validation_errors(&err);
+            let response = serde_json::json!({
+                "error": "Workflow definition validation failed",
+                "errors": errors,
+            });
+            return error_response(&response);
+        }
+    };
+
+    let repo = kruxiaflow_core::workflow::WorkflowDefinitionRepository::new(pool.clone());
+
+    match repo.store(definition).await {
+        Ok(result) => {
+            let response = serde_json::json!({
+                "name": result.definition.name,
+                "version": result.definition.version,
+                "activity_count": result.definition.activities.len(),
+                "created_at": result.definition.created_at.to_rfc3339(),
+                "is_new": result.is_new,
+                "unchanged": !result.is_new,
+            });
+            text_response(&response)
+        }
+        Err(e) => {
+            tracing::warn!("deploy_workflow error: {e}");
+            let response = match &e {
+                kruxiaflow_core::workflow::RepositoryError::ValidationError(ve) => {
+                    let errors = extract_validation_errors(ve);
+                    serde_json::json!({
+                        "error": "Workflow definition validation failed",
+                        "errors": errors,
+                    })
+                }
+                kruxiaflow_core::workflow::RepositoryError::DuplicateVersion { name, version } => {
+                    serde_json::json!({
+                        "error": format!(
+                            "Workflow definition '{}' version '{}' already exists (timestamp collision)",
+                            name, version
+                        ),
+                        "name": name,
+                        "version": version,
+                    })
+                }
+                _ => serde_json::json!({
+                    "error": format!("Failed to deploy workflow definition: {}", e),
+                }),
+            };
+            error_response(&response)
+        }
+    }
+}
 
 /// Submit a workflow via WorkflowService.
 pub async fn run_submit_workflow(
