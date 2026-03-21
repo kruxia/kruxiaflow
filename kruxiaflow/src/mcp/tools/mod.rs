@@ -162,4 +162,76 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), uuid);
     }
+
+    // =========================================================================
+    // Tool schema validation
+    // =========================================================================
+
+    /// Valid JSON Schema draft 2020-12 type values.
+    const VALID_SCHEMA_TYPES: &[&str] = &[
+        "null", "boolean", "object", "array", "number", "string", "integer",
+    ];
+
+    /// Recursively check that every `"type"` value in a JSON schema is valid.
+    fn assert_no_invalid_types(tool_name: &str, prop_name: &str, schema: &serde_json::Value) {
+        if let Some(obj) = schema.as_object() {
+            if let Some(type_val) = obj.get("type") {
+                if let Some(s) = type_val.as_str() {
+                    assert!(
+                        VALID_SCHEMA_TYPES.contains(&s),
+                        "Tool '{tool_name}', property '{prop_name}': invalid schema type \"{s}\""
+                    );
+                }
+            }
+            // Recurse into nested schemas (properties, items, additionalProperties, etc.)
+            for (key, val) in obj {
+                if matches!(key.as_str(), "properties" | "items" | "additionalProperties") {
+                    assert_no_invalid_types(tool_name, prop_name, val);
+                }
+            }
+            if let Some(props) = obj.get("properties").and_then(|p| p.as_object()) {
+                for (nested_name, nested_schema) in props {
+                    assert_no_invalid_types(tool_name, nested_name, nested_schema);
+                }
+            }
+        }
+    }
+
+    /// The assertion helper correctly rejects `"type": "unknown"`.
+    #[test]
+    #[should_panic(expected = "invalid schema type \"unknown\"")]
+    fn test_schema_validator_catches_unknown_type() {
+        let bad_schema = serde_json::json!({"type": "unknown"});
+        assert_no_invalid_types("fake_tool", "bad_field", &bad_schema);
+    }
+
+    /// Verify that all MCP tool schemas are valid JSON Schema draft 2020-12.
+    ///
+    /// This catches the `rust-mcp-macros` fallback where unrecognised types
+    /// produce `{"type": "unknown"}`, which is rejected by JSON Schema validators
+    /// (e.g., Claude's tool loader).
+    #[test]
+    fn test_all_tool_schemas_have_valid_types() {
+        let all_tools = [
+            DiscoveryTools::tools(),
+            ExecutionTools::tools(),
+            ObservabilityTools::tools(),
+            VisualizationTools::tools(),
+            ControlTools::tools(),
+        ]
+        .concat();
+
+        assert!(!all_tools.is_empty(), "Expected at least one MCP tool");
+
+        for tool in &all_tools {
+            let schema_json = serde_json::to_value(&tool.input_schema)
+                .expect("Failed to serialize tool input_schema");
+
+            if let Some(props) = schema_json.get("properties").and_then(|p| p.as_object()) {
+                for (prop_name, prop_schema) in props {
+                    assert_no_invalid_types(&tool.name, prop_name, prop_schema);
+                }
+            }
+        }
+    }
 }
