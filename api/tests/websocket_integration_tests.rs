@@ -372,6 +372,7 @@ async fn test_websocket_receives_error_message() {
 
 #[tokio::test]
 #[serial]
+#[allow(clippy::result_large_err)]
 async fn test_websocket_multiple_connections_same_activity() {
     let state = setup_test_state().await;
     let connection_manager = state.connection_manager.clone();
