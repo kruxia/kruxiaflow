@@ -148,7 +148,11 @@ pub async fn run_send_workflow_signal(
             workflow_id,
             event_type: WorkflowEventType::ActivitySignaled,
             activity_key: Some(params.activity_key.clone()),
-            payload: params.data.as_ref().map(|v| v.0.clone()).unwrap_or(serde_json::Value::Null),
+            payload: params
+                .data
+                .as_ref()
+                .map(|v| v.0.clone())
+                .unwrap_or(serde_json::Value::Null),
             iteration: None,
         })
         .await
@@ -246,9 +250,7 @@ pub async fn run_list_waiting_workflows(
             .fetch_one(pool)
             .await
     } else {
-        sqlx::query_scalar(count_query)
-            .fetch_one(pool)
-            .await
+        sqlx::query_scalar(count_query).fetch_one(pool).await
     }
     .unwrap_or(0);
 

@@ -104,12 +104,9 @@ impl McpServer {
             super::handler::KruxiaFlowMcpHandler::new(self.config.clone(), self.pool.clone())
                 .to_mcp_server_handler();
 
-        let auth: Option<Arc<dyn AuthProvider>> =
-            self.auth_service.map(|svc| -> Arc<dyn AuthProvider> {
-                Arc::new(McpAuthAdapter {
-                    auth_service: svc,
-                })
-            });
+        let auth: Option<Arc<dyn AuthProvider>> = self
+            .auth_service
+            .map(|svc| -> Arc<dyn AuthProvider> { Arc::new(McpAuthAdapter { auth_service: svc }) });
 
         // TODO: Add rate limiting and request timeouts when rust-mcp-sdk
         // supports middleware configuration in HyperServerOptions.
@@ -189,8 +186,7 @@ impl AuthProvider for McpAuthAdapter {
             })?;
 
         let expires_at = Some(
-            std::time::SystemTime::UNIX_EPOCH
-                + std::time::Duration::from_secs(claims.exp as u64),
+            std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(claims.exp as u64),
         );
 
         Ok(AuthInfo {

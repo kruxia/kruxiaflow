@@ -683,21 +683,19 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     // 6. Spawn MCP server if enabled and feature is compiled in
     #[cfg(feature = "mcp-server")]
     let mcp_handle = {
-        let mcp_config = crate::mcp::McpConfig::new(
-            cmd.mcp_enabled,
-            cmd.mcp_http_port,
-            cmd.mcp_http_bind,
-        )
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let mcp_config =
+            crate::mcp::McpConfig::new(cmd.mcp_enabled, cmd.mcp_http_port, cmd.mcp_http_bind)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
 
         if mcp_config.enabled {
             mcp_config.log_config();
-            let mcp_auth: Option<Arc<dyn kruxiaflow_oauth::AuthenticationService>> = if cmd.mcp_no_auth {
-                tracing::warn!("MCP server authentication DISABLED (--mcp-no-auth)");
-                None
-            } else {
-                Some(auth_service.clone())
-            };
+            let mcp_auth: Option<Arc<dyn kruxiaflow_oauth::AuthenticationService>> =
+                if cmd.mcp_no_auth {
+                    tracing::warn!("MCP server authentication DISABLED (--mcp-no-auth)");
+                    None
+                } else {
+                    Some(auth_service.clone())
+                };
             Some(crate::mcp::spawn_mcp_server(
                 Arc::new(mcp_config),
                 pool.clone(),

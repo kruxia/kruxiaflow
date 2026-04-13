@@ -19,11 +19,11 @@ use rust_mcp_sdk::{
 };
 use sqlx::PgPool;
 
+use super::config::McpConfig;
 use super::tools::{
     ControlTools, DiscoveryTools, ExecutionTools, ObservabilityTools, VisualizationTools, control,
     discovery, execution, observability, visualization,
 };
-use super::config::McpConfig;
 
 /// Handler that dispatches MCP tool calls to Kruxia Flow services.
 pub struct KruxiaFlowMcpHandler {

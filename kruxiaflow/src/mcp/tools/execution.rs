@@ -192,7 +192,12 @@ pub struct CancelWorkflow {
 
 tool_box!(
     ExecutionTools,
-    [ValidateWorkflow, DeployWorkflow, SubmitWorkflow, CancelWorkflow]
+    [
+        ValidateWorkflow,
+        DeployWorkflow,
+        SubmitWorkflow,
+        CancelWorkflow
+    ]
 );
 
 // ============================================================================
@@ -434,9 +439,7 @@ fn extract_partial_info(yaml: &str) -> (usize, serde_json::Value) {
                             .filter_map(|item| {
                                 // depends_on entries can be plain strings or objects with activity_key
                                 item.as_str()
-                                    .or_else(|| {
-                                        item.get("activity_key").and_then(|v| v.as_str())
-                                    })
+                                    .or_else(|| item.get("activity_key").and_then(|v| v.as_str()))
                                     .map(|s| s.to_string())
                             })
                             .collect()

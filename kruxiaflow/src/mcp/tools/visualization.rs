@@ -510,11 +510,7 @@ mod tests {
     // =========================================================================
 
     fn make_definition(
-        activities: Vec<(
-            &str,
-            Option<&str>,
-            Option<Vec<&str>>,
-        )>,
+        activities: Vec<(&str, Option<&str>, Option<Vec<&str>>)>,
     ) -> kruxiaflow_core::StoredWorkflowDefinition {
         use kruxiaflow_core::workflow::definition::ActivityDefinition;
 
@@ -532,11 +528,13 @@ mod tests {
                     output_definitions: None,
                     depends_on: deps.map(|ds| {
                         ds.into_iter()
-                            .map(|d| kruxiaflow_core::workflow::definition::ActivityRelationship {
-                                activity_key: d.to_string(),
-                                conditions: None,
-                                is_back_edge: false,
-                            })
+                            .map(
+                                |d| kruxiaflow_core::workflow::definition::ActivityRelationship {
+                                    activity_key: d.to_string(),
+                                    conditions: None,
+                                    is_back_edge: false,
+                                },
+                            )
                             .collect()
                     }),
                     dependency_of: None,
@@ -596,10 +594,7 @@ mod tests {
 
     #[test]
     fn test_build_cost_mermaid_basic() {
-        let activities = vec![
-            ("llm_call".to_string(), 0.0532),
-            ("fetch".to_string(), 0.0),
-        ];
+        let activities = vec![("llm_call".to_string(), 0.0532), ("fetch".to_string(), 0.0)];
         let mut names = HashMap::new();
         names.insert("llm_call".to_string(), "llm_prompt".to_string());
         names.insert("fetch".to_string(), "http_request".to_string());

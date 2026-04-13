@@ -252,12 +252,7 @@ mod tests {
             std::env::set_var("KRUXIAFLOW_MCP_HTTP_PORT", "8888");
         }
 
-        let config = McpConfig::new(
-            Some(true),
-            Some(9090),
-            Some("127.0.0.1".to_string()),
-        )
-        .unwrap();
+        let config = McpConfig::new(Some(true), Some(9090), Some("127.0.0.1".to_string())).unwrap();
 
         assert!(config.enabled);
         assert_eq!(config.http_port, Some(9090));

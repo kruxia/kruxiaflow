@@ -185,7 +185,10 @@ mod tests {
             }
             // Recurse into nested schemas (properties, items, additionalProperties, etc.)
             for (key, val) in obj {
-                if matches!(key.as_str(), "properties" | "items" | "additionalProperties") {
+                if matches!(
+                    key.as_str(),
+                    "properties" | "items" | "additionalProperties"
+                ) {
                     assert_no_invalid_types(tool_name, prop_name, val);
                 }
             }

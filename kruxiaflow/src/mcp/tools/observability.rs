@@ -422,7 +422,9 @@ pub async fn run_get_workflow_cost(
         let total_tokens: Option<i64> = row.get(6);
         let row_budget: Option<Decimal> = row.get(7);
 
-        if budget_limit.is_none() && let Some(b) = row_budget {
+        if budget_limit.is_none()
+            && let Some(b) = row_budget
+        {
             budget_limit = Some(b);
         }
 

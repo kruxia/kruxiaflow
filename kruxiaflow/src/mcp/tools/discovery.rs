@@ -583,7 +583,10 @@ mod tests {
             let parsed: serde_json::Value = serde_json::from_str(&text.text).unwrap();
             for activity in parsed["activities"].as_array().unwrap() {
                 assert!(activity.get("name").is_some(), "Activity missing 'name'");
-                assert!(activity.get("worker").is_some(), "Activity missing 'worker'");
+                assert!(
+                    activity.get("worker").is_some(),
+                    "Activity missing 'worker'"
+                );
                 assert!(
                     activity.get("description").is_some(),
                     "Activity missing 'description'"
