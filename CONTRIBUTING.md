@@ -175,4 +175,10 @@ Contributors are recognized in:
 - Release notes for significant contributions
 - The project README for major features
 
+## License
+
+Kruxia Flow is licensed under the [Apache License 2.0](LICENSE). By submitting a
+contribution, you agree that it is licensed under the same terms (per Section 5
+of the Apache License). No CLA is required.
+
 Thank you for contributing to Kruxia Flow!

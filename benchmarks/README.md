@@ -176,4 +176,4 @@ To add new scenarios or platforms:
 
 ## License
 
-AGPL-3.0 (matches Kruxia Flow license)
+Apache-2.0 (matches Kruxia Flow license)
