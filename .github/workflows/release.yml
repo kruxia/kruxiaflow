@@ -26,12 +26,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # musl (fully static) targets are deferred: kruxiaflow does not currently
+        # build against musl. gnu builds are dynamically linked against glibc —
+        # x86_64 builds on ubuntu-22.04 to keep the glibc floor at 2.35; the
+        # aarch64 build runs through cross, whose container has an older baseline.
         include:
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
-            use-cross: true
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+            use-cross: false
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04
             use-cross: true
           - target: aarch64-apple-darwin
             os: macos-latest
