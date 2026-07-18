@@ -403,11 +403,12 @@ async fn test_websocket_multiple_connections_same_activity() {
 
     // All should receive the message
     for (i, ws) in [&mut ws1, &mut ws2, &mut ws3].iter_mut().enumerate() {
-        let received = timeout(Duration::from_secs(2), ws.next())
-            .await
-            .unwrap_or_else(|_| panic!("ws{} should not timeout", i + 1))
-            .unwrap_or_else(|| panic!("ws{} should receive message", i + 1))
-            .unwrap_or_else(|_| panic!("ws{} message should be valid", i + 1));
+        let received = match timeout(Duration::from_secs(2), ws.next()).await {
+            Err(_) => panic!("ws{} should not timeout", i + 1),
+            Ok(None) => panic!("ws{} should receive message", i + 1),
+            Ok(Some(Err(_))) => panic!("ws{} message should be valid", i + 1),
+            Ok(Some(Ok(msg))) => msg,
+        };
 
         match received {
             Message::Text(text) => {
