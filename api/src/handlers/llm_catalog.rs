@@ -24,6 +24,7 @@ pub struct ModelResponse {
     pub input_price_per_million: Decimal,
     pub output_price_per_million: Decimal,
     pub cached_input_price_per_million: Option<Decimal>,
+    pub cache_write_price_per_million: Option<Decimal>,
     pub supports_completion: bool,
     pub supports_embeddings: bool,
     pub context_window: Option<i32>,
@@ -159,7 +160,7 @@ pub async fn search_models(
         SELECT DISTINCT
             id, provider, name, display_name,
             input_price_per_million, output_price_per_million,
-            cached_input_price_per_million,
+            cached_input_price_per_million, cache_write_price_per_million,
             supports_completion, supports_embeddings,
             context_window, max_output_tokens
         FROM llm_models

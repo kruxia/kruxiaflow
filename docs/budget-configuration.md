@@ -24,7 +24,7 @@ description: Multi-step content analysis with budget control
 settings:
   budget:
     limit: 5.00
-    on_exceeded: abort  # or "alert"
+    action: abort  # or "continue"
 
 activities:
   # ... activities
@@ -35,11 +35,11 @@ activities:
 | Field         | Type   | Required | Description                                    |
 |---------------|--------|----------|------------------------------------------------|
 | `limit`   | number | Yes      | Maximum spend in USD for the workflow          |
-| `on_exceeded` | string | Yes      | Action when budget exceeded: `abort` or `alert` |
+| `action`      | string | No       | Action when budget exceeded: `abort` (default) or `continue` |
 
 **Actions**:
 - `abort`: Immediately stop workflow execution when budget is exceeded
-- `alert`: Log warning but continue execution (for monitoring)
+- `continue`: Log warning but continue execution (for monitoring)
 
 ### Activity-Level Budget
 
@@ -61,7 +61,7 @@ activities:
         base_seconds: 2
       budget:
         limit: 0.50
-        on_exceeded: abort
+        action: abort
 ```
 
 **Use case**: Prevent runaway costs from repeated retries or expensive LLM calls.
@@ -78,7 +78,7 @@ Before executing an activity, the orchestrator:
 2. Compares against `budget.limit`
 3. If budget exceeded:
    - `abort`: Fail the activity with `BudgetExceeded` error
-   - `alert`: Log warning and proceed
+   - `continue`: Log warning and proceed
 
 ### Post-Execution Tracking
 
@@ -89,6 +89,33 @@ After activity completion:
 3. Orchestrator calculates cost in USD
 4. Cost is recorded in `activity_costs` table
 5. Database trigger updates `workflows.total_cost_usd`
+
+Cost rows are written before the orchestrator schedules dependent activities,
+so the next budget check always sees the spend.
+
+### External Activity Usage Reporting
+
+Custom (non-built-in) activities that call LLMs themselves report their spend
+on completion or failure via the worker API:
+
+- **Per-call usage entries** (`usage` list on
+  `POST /api/v1/activities/{id}/complete` and `/fail`): one entry per LLM call
+  with `provider`, `model`, token counts, and an optional explicit `cost_usd`.
+  Entries without an explicit cost are priced server-side from the `llm_models`
+  catalog, exactly like built-in `llm_prompt` activities. An unknown
+  provider/model records the entry at cost 0 and returns a warning — a
+  completion is never rejected because of usage metadata.
+- **Lump-sum reporting** (top-level `cost_usd` only): recorded as a single cost
+  row without provider/model. When `usage` entries are present, the top-level
+  `cost_usd` means cost *not covered by the entries* (e.g., a paid non-LLM
+  API) — never repeat entry costs there.
+- **Failed attempts**: report `usage`/`cost_usd` on `/fail` too. The spend is
+  recorded under the failing attempt before any retry is scheduled, so the
+  retry's budget check already counts it.
+
+All reported spend counts against activity and workflow budgets and appears in
+the cost endpoints alongside built-in LLM costs. See the
+[API Reference](api-reference.md) for the request format.
 
 ### Model catalog must be seeded for budget enforcement to bite
 
@@ -127,6 +154,16 @@ cost_usd = (prompt_tokens × prompt_price_per_million / 1,000,000)
          + (cached_tokens × cached_price_per_million / 1,000,000)
 ```
 
+For external `usage` entries reporting `cache_creation_tokens`, those tokens
+are billed at the model's `cache_write_price_per_million` (1.25× input for
+Anthropic models in the shipped catalog), falling back to the input-token
+price for models without a cache-write price.
+
+Google's explicit Gemini caching bills cache **storage** per token-hour rather
+than a write premium; the catalog does not model time-based storage charges
+yet. Report that spend exactly via a per-entry explicit `cost_usd` or the
+completion's lump `cost_usd` (the remainder line item).
+
 **Pricing source**: PostgreSQL `llm_models` table, loaded via `kruxiaflow seed-llm` command.
 
 ---
@@ -144,7 +181,7 @@ description: Single LLM analysis with budget
 settings:
   budget:
     limit: 1.00
-    on_exceeded: abort
+    action: abort
 
 activities:
   - key: analyze
@@ -185,7 +222,7 @@ activities:
         base_seconds: 1
       budget:
         limit: 0.25  # Max $0.25 for all retry attempts
-        on_exceeded: abort
+        action: abort
 ```
 
 **Expected behavior**:
@@ -206,7 +243,7 @@ description: Multi-step content processing with global budget
 settings:
   budget:
     limit: 2.00
-    on_exceeded: abort
+    action: abort
 
 activities:
   - key: classify
@@ -256,7 +293,7 @@ description: Track costs but don't enforce limits
 settings:
   budget:
     limit: 10.00
-    on_exceeded: alert  # Log warning, don't abort
+    action: continue  # Log warning, don't abort
 
 activities:
   - key: analyze
@@ -286,7 +323,7 @@ description: Try cheap models first, fallback to expensive
 settings:
   budget:
     limit: 1.00
-    on_exceeded: abort
+    action: abort
 
 activities:
   - key: analyze
@@ -383,7 +420,7 @@ Start with conservative budgets and increase based on observed costs:
 settings:
   budget:
     limit: 0.10  # Start low, increase after testing
-    on_exceeded: abort
+    action: abort
 ```
 
 ### 2. Use Activity Budgets for Retries
@@ -396,25 +433,25 @@ settings:
     max_attempts: 10
   budget:
     limit: 0.25  # Cap total retry cost
-    on_exceeded: abort
+    action: abort
 ```
 
 ### 3. Monitor Before Enforcing
 
-Use `alert` mode to establish baselines:
+Use `continue` mode to establish baselines:
 
 ```yaml
 # Development/staging
 settings:
   budget:
     limit: 5.00
-    on_exceeded: alert  # Monitor, don't abort
+    action: continue  # Monitor, don't abort
 
 # Production
 settings:
   budget:
     limit: 5.00
-    on_exceeded: abort  # Enforce limits
+    action: abort  # Enforce limits
 ```
 
 ### 4. Use Cheap Models for Development
@@ -529,11 +566,11 @@ cost = (1000 × 3.00 / 1,000,000) + (500 × 15.00 / 1,000,000)
 **Symptom**: Workflow continues after exceeding budget
 
 **Causes**:
-1. `on_exceeded: alert` instead of `abort`
+1. `action: continue` instead of `abort`
 2. Budget check happens before execution (cost recorded after)
 
 **Solutions**:
-- Set `on_exceeded: abort` for enforcement
+- Set `action: abort` for enforcement
 - Pre-execution check uses current cost, not estimated cost
 - Add buffer to budget limits
 

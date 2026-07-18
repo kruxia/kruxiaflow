@@ -785,6 +785,7 @@ mod tests {
 
         let definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![
                 make_activity_def("activity_a", None),
                 make_activity_def(
@@ -817,6 +818,7 @@ mod tests {
 
         let definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![
                 make_activity_def("activity_a", None),
                 make_activity_def(
@@ -852,6 +854,7 @@ mod tests {
 
         let definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![
                 make_activity_def("path_a", None),
                 make_activity_def(
@@ -885,6 +888,7 @@ mod tests {
 
         let definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![
                 make_activity_def("path_a", None),
                 make_activity_def(
@@ -929,6 +933,7 @@ mod tests {
 
         let definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![
                 make_activity_def("path_a", None),
                 make_activity_def("path_b", None),
@@ -970,6 +975,7 @@ mod tests {
 
         let definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![
                 make_activity_def("path_a", None),
                 make_activity_def("path_b", None),
@@ -1117,6 +1123,7 @@ mod tests {
     fn test_find_ready_root_activity() {
         let definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![make_activity_def("root", None)],
         };
         let activities = vec![make_activity_state(
@@ -1134,6 +1141,7 @@ mod tests {
     fn test_find_ready_running_not_ready() {
         let definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![make_activity_def("a", None)],
         };
         let activities = vec![make_activity_state("a", WorkflowActivityStatus::Running)];
@@ -1147,6 +1155,7 @@ mod tests {
     fn test_find_ready_waiting_not_ready() {
         let definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![make_activity_def("a", None)],
         };
         let activities = vec![make_activity_state("a", WorkflowActivityStatus::Waiting)];
@@ -1225,6 +1234,7 @@ mod tests {
         // Root activities (no dependencies) should never be skipped
         let definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![make_activity_def("root", None)],
         };
         let activities = vec![make_activity_state(
@@ -1242,6 +1252,7 @@ mod tests {
         // Completed activities should not appear in skipped list
         let definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![
                 make_activity_def("a", None),
                 make_activity_def(

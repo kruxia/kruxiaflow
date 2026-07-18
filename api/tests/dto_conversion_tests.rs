@@ -10,6 +10,7 @@ fn test_workflow_definition_from_core_to_dto() {
     // Create a core WorkflowDefinition
     let core_def = workflow::WorkflowDefinition {
         name: "test_workflow".to_string(),
+        settings: None,
         activities: vec![
             workflow::ActivityDefinition {
                 key: "step1".to_string(),
@@ -118,6 +119,7 @@ fn test_workflow_definition_from_dto_to_core() {
     // Create a DTO WorkflowDefinition
     let dto_def = dto::WorkflowDefinition {
         name: "test_workflow".to_string(),
+        settings: None,
         activities: vec![dto::ActivityDefinition {
             key: "step1".to_string(),
             worker: "test".to_string(),
@@ -407,6 +409,7 @@ fn test_workflow_with_multiple_activities_and_relationships() {
     // Create a complex workflow
     let core_def = workflow::WorkflowDefinition {
         name: "complex_workflow".to_string(),
+        settings: None,
         activities: vec![
             workflow::ActivityDefinition {
                 key: "start".to_string(),

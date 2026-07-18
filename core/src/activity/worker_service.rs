@@ -1,3 +1,4 @@
+use crate::cost::UsageEntry;
 use crate::events::{EventSource, NewWorkflowEvent, WorkflowEventType};
 use crate::queue::{ActivityQueue, ActivityResult, QueueError, QueuedActivity};
 use rust_decimal::Decimal;
@@ -146,6 +147,7 @@ impl ActivityWorkerService {
         worker_id: String,
         outputs: Value,
         cost_usd: Option<Decimal>,
+        usage: Option<Vec<UsageEntry>>,
     ) -> ActivityWorkerResult<()> {
         // Get activity details before completion (needed for event publishing)
         // This is read-only and doesn't modify state
@@ -176,11 +178,16 @@ impl ActivityWorkerService {
         // Service-layer responsibility: Publish ActivityCompleted event via EventSource
         // IMPORTANT: outputs must be an object mapping names to values (e.g., {"response": {...}})
         // The orchestrator will convert this to Vec<ActivityOutput> using output_definitions
-        let event_payload = serde_json::json!({
+        let mut event_payload = serde_json::json!({
             "activity_key": activity.activity_key,
             "outputs": outputs,
             "cost_usd": cost_usd
         });
+        if let Some(usage) = &usage
+            && !usage.is_empty()
+        {
+            event_payload["usage"] = serde_json::to_value(usage)?;
+        }
 
         self.event_source
             .publish(NewWorkflowEvent {
@@ -206,6 +213,7 @@ impl ActivityWorkerService {
     /// Fail an activity
     ///
     /// Delegates to ActivityQueue::fail and publishes ActivityFailed event via EventSource.
+    #[allow(clippy::too_many_arguments)]
     pub async fn fail_activity(
         &self,
         activity_id: Uuid,
@@ -213,6 +221,8 @@ impl ActivityWorkerService {
         error_code: String,
         error_message: String,
         retryable: bool,
+        cost_usd: Option<Decimal>,
+        usage: Option<Vec<UsageEntry>>,
     ) -> ActivityWorkerResult<bool> {
         // Get activity details before failure (needed for event publishing)
         // This is read-only and doesn't modify state
@@ -231,7 +241,7 @@ impl ActivityWorkerService {
             success: false,
             outputs: None,
             error: Some(error_message.clone()),
-            cost_usd: None,
+            cost_usd,
             token_usage: None,
         };
 
@@ -247,13 +257,21 @@ impl ActivityWorkerService {
             })?;
 
         // Service-layer responsibility: Publish ActivityFailed event via EventSource
-        let event_payload = serde_json::json!({
+        // A failed activity may still have spent money before erroring; carry the
+        // reported cost/usage so the orchestrator records it under this attempt.
+        let mut event_payload = serde_json::json!({
             "activity_key": activity.activity_key,
             "error_code": error_code,
             "error_message": error_message,
             "retryable": retryable,
-            "will_retry": will_retry
+            "will_retry": will_retry,
+            "cost_usd": cost_usd
         });
+        if let Some(usage) = &usage
+            && !usage.is_empty()
+        {
+            event_payload["usage"] = serde_json::to_value(usage)?;
+        }
 
         self.event_source
             .publish(NewWorkflowEvent {

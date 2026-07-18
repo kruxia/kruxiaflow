@@ -37,6 +37,7 @@ fn create_loop_workflow(num_activities: usize) -> WorkflowDefinition {
 
     WorkflowDefinition {
         name: format!("loop_workflow_{}", num_activities),
+        settings: None,
         activities,
     }
 }

@@ -9,6 +9,7 @@ async fn test_store_and_get_workflow_definition(pool: PgPool) {
 
     let definition = WorkflowDefinition {
         name: "test_workflow".to_string(),
+        settings: None,
         activities: vec![ActivityDefinition {
             key: "activity1".to_string(),
             worker: "test".to_string(),
@@ -52,6 +53,7 @@ async fn test_get_latest_workflow_definition(pool: PgPool) {
 
     let definition1 = WorkflowDefinition {
         name: "versioned_workflow".to_string(),
+        settings: None,
         activities: vec![ActivityDefinition {
             key: "activity1".to_string(),
             worker: "test".to_string(),
@@ -70,6 +72,7 @@ async fn test_get_latest_workflow_definition(pool: PgPool) {
 
     let definition2 = WorkflowDefinition {
         name: "versioned_workflow".to_string(),
+        settings: None,
         activities: vec![
             ActivityDefinition {
                 key: "activity1".to_string(),
@@ -128,6 +131,7 @@ async fn test_list_workflow_definitions(pool: PgPool) {
     // Store multiple workflow definitions
     let definition1 = WorkflowDefinition {
         name: "workflow_a".to_string(),
+        settings: None,
         activities: vec![ActivityDefinition {
             key: "activity1".to_string(),
             worker: "test".to_string(),
@@ -146,6 +150,7 @@ async fn test_list_workflow_definitions(pool: PgPool) {
 
     let definition2 = WorkflowDefinition {
         name: "workflow_b".to_string(),
+        settings: None,
         activities: vec![ActivityDefinition {
             key: "activity1".to_string(),
             worker: "test".to_string(),
@@ -181,6 +186,7 @@ async fn test_validation_error_on_invalid_definition(pool: PgPool) {
     // Create invalid definition (no activities)
     let definition = WorkflowDefinition {
         name: "invalid_workflow".to_string(),
+        settings: None,
         activities: vec![],
     };
 
@@ -209,6 +215,7 @@ async fn test_workflow_definition_with_dependencies(pool: PgPool) {
 
     let definition = WorkflowDefinition {
         name: "complex_workflow".to_string(),
+        settings: None,
         activities: vec![
             ActivityDefinition {
                 key: "step1".to_string(),

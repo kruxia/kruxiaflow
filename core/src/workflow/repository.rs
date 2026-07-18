@@ -1,5 +1,6 @@
 use crate::workflow::definition::{
-    ActivityDefinition, ValidationError, WorkflowDefinition, format_version, parse_version,
+    ActivityDefinition, ValidationError, WorkflowDefinition, WorkflowSettings, format_version,
+    parse_version,
 };
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
@@ -12,6 +13,7 @@ pub struct StoredWorkflowDefinition {
     pub name: String,
     pub version: String,
     pub activities: Vec<ActivityDefinition>,
+    pub settings: Option<WorkflowSettings>,
     pub content_hash: Option<Vec<u8>>,
     pub created_at: DateTime<Utc>,
 }
@@ -65,18 +67,24 @@ impl WorkflowDefinitionRepository {
 
         let id = Uuid::now_v7();
 
-        // Store only the activities array (not the full definition)
+        // Store the activities array and workflow-level settings separately
         let activities_json = serde_json::to_value(&definition.activities)?;
+        let settings_json = definition
+            .settings
+            .as_ref()
+            .map(serde_json::to_value)
+            .transpose()?;
 
         let row = sqlx::query!(
             r#"
-            INSERT INTO workflow_definitions (id, name, activities, content_hash, created_at)
-            VALUES ($1, $2, $3, $4, NOW())
-            RETURNING id, name, activities, content_hash, created_at
+            INSERT INTO workflow_definitions (id, name, activities, settings, content_hash, created_at)
+            VALUES ($1, $2, $3, $4, $5, NOW())
+            RETURNING id, name, activities, settings, content_hash, created_at
             "#,
             id,
             name,
             activities_json,
+            settings_json,
             content_hash
         )
         .fetch_one(&self.pool)
@@ -101,6 +109,7 @@ impl WorkflowDefinitionRepository {
                 name: row.name,
                 version: format_version(&row.created_at),
                 activities: serde_json::from_value(row.activities)?,
+                settings: row.settings.map(serde_json::from_value).transpose()?,
                 content_hash: row.content_hash,
                 created_at: row.created_at,
             },
@@ -120,7 +129,7 @@ impl WorkflowDefinitionRepository {
     ) -> Result<Option<StoredWorkflowDefinition>, RepositoryError> {
         let row = sqlx::query!(
             r#"
-            SELECT id, name, activities, content_hash, created_at
+            SELECT id, name, activities, settings, content_hash, created_at
             FROM workflow_definitions
             WHERE name = $1 AND content_hash = $2
             ORDER BY created_at DESC
@@ -138,6 +147,9 @@ impl WorkflowDefinitionRepository {
             version: format_version(&r.created_at),
             activities: serde_json::from_value(r.activities)
                 .expect("Failed to deserialize activities"),
+            settings: r.settings.map(|s| {
+                serde_json::from_value(s).expect("Failed to deserialize settings")
+            }),
             content_hash: r.content_hash,
             created_at: r.created_at,
         }))
@@ -159,7 +171,7 @@ impl WorkflowDefinitionRepository {
 
         let row = sqlx::query!(
             r#"
-            SELECT id, name, activities, content_hash, created_at
+            SELECT id, name, activities, settings, content_hash, created_at
             FROM workflow_definitions
             WHERE name = $1 AND created_at = $2
             "#,
@@ -175,6 +187,9 @@ impl WorkflowDefinitionRepository {
             version: format_version(&r.created_at),
             activities: serde_json::from_value(r.activities)
                 .expect("Failed to deserialize activities"),
+            settings: r.settings.map(|s| {
+                serde_json::from_value(s).expect("Failed to deserialize settings")
+            }),
             content_hash: r.content_hash,
             created_at: r.created_at,
         }))
@@ -187,7 +202,7 @@ impl WorkflowDefinitionRepository {
     ) -> Result<Option<StoredWorkflowDefinition>, RepositoryError> {
         let row = sqlx::query!(
             r#"
-            SELECT id, name, activities, content_hash, created_at
+            SELECT id, name, activities, settings, content_hash, created_at
             FROM workflow_definitions
             WHERE name = $1
             ORDER BY created_at DESC
@@ -204,6 +219,9 @@ impl WorkflowDefinitionRepository {
             version: format_version(&r.created_at),
             activities: serde_json::from_value(r.activities)
                 .expect("Failed to deserialize activities"),
+            settings: r.settings.map(|s| {
+                serde_json::from_value(s).expect("Failed to deserialize settings")
+            }),
             content_hash: r.content_hash,
             created_at: r.created_at,
         }))
@@ -216,7 +234,7 @@ impl WorkflowDefinitionRepository {
     pub async fn list(&self) -> Result<Vec<StoredWorkflowDefinition>, RepositoryError> {
         let rows = sqlx::query!(
             r#"
-            SELECT id, name, activities, content_hash, created_at
+            SELECT id, name, activities, settings, content_hash, created_at
             FROM workflow_definitions
             ORDER BY name ASC, created_at DESC
             "#
@@ -232,6 +250,9 @@ impl WorkflowDefinitionRepository {
                 version: format_version(&r.created_at),
                 activities: serde_json::from_value(r.activities)
                     .expect("Failed to deserialize activities"),
+                settings: r.settings.map(|s| {
+                    serde_json::from_value(s).expect("Failed to deserialize settings")
+                }),
                 content_hash: r.content_hash,
                 created_at: r.created_at,
             })
@@ -310,6 +331,7 @@ mod tests {
             name: "test-workflow".to_string(),
             version: "20250105.143022.123456".to_string(),
             activities: vec![],
+            settings: None,
             content_hash: Some(vec![1, 2, 3]),
             created_at: Utc::now(),
         };
@@ -326,6 +348,7 @@ mod tests {
             name: "test".to_string(),
             version: "20250105.143022.000000".to_string(),
             activities: vec![],
+            settings: None,
             content_hash: None,
             created_at: Utc::now(),
         };
@@ -341,6 +364,7 @@ mod tests {
                 name: "wf".to_string(),
                 version: "20250105.143022.000000".to_string(),
                 activities: vec![],
+                settings: None,
                 content_hash: None,
                 created_at: Utc::now(),
             },
@@ -363,6 +387,7 @@ mod tests {
                 name: "wf".to_string(),
                 version: "v1".to_string(),
                 activities: vec![],
+                settings: None,
                 content_hash: None,
                 created_at: Utc::now(),
             },

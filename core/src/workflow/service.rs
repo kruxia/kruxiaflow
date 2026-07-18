@@ -133,14 +133,22 @@ impl WorkflowService {
         let initial_activities = serde_json::json!({});
         let initial_state_data = serde_json::json!({});
 
+        // Persist the workflow-level budget limit from the definition's settings
+        // so budget checks and cost endpoints see it
+        let budget_limit_usd = definition
+            .settings
+            .as_ref()
+            .and_then(|s| s.budget.as_ref())
+            .map(|b| b.limit);
+
         let row = sqlx::query!(
             r#"
             INSERT INTO workflows (
                 id, definition_name, workflow_definition_id,
                 input, unique_key, status, activities, state_data,
-                created_at, updated_at
+                budget_limit_usd, created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
             RETURNING id, definition_name, workflow_definition_id,
                       input, unique_key, status AS "status: WorkflowStatus", created_at
             "#,
@@ -151,7 +159,8 @@ impl WorkflowService {
             unique_key,
             status as WorkflowStatus,
             initial_activities,
-            initial_state_data
+            initial_state_data,
+            budget_limit_usd
         )
         .fetch_one(&mut *tx)
         .await?;

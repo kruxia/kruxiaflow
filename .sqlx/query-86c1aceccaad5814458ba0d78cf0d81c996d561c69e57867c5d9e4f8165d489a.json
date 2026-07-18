@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, name, activities, content_hash, created_at\n            FROM workflow_definitions\n            WHERE name = $1 AND content_hash = $2\n            ORDER BY created_at DESC\n            LIMIT 1\n            ",
+  "query": "\n            INSERT INTO workflow_definitions (id, name, activities, settings, content_hash, created_at)\n            VALUES ($1, $2, $3, $4, $5, NOW())\n            RETURNING id, name, activities, settings, content_hash, created_at\n            ",
   "describe": {
     "columns": [
       {
@@ -20,18 +20,26 @@
       },
       {
         "ordinal": 3,
+        "name": "settings",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
         "name": "content_hash",
         "type_info": "Bytea"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
+        "Uuid",
         "Text",
+        "Jsonb",
+        "Jsonb",
         "Bytea"
       ]
     },
@@ -40,8 +48,9 @@
       false,
       false,
       true,
+      true,
       false
     ]
   },
-  "hash": "4b89c135ed092bb928962fda5e58cbe07ecc7c4769b8e46814df9e640f9dd06c"
+  "hash": "86c1aceccaad5814458ba0d78cf0d81c996d561c69e57867c5d9e4f8165d489a"
 }

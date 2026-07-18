@@ -322,8 +322,8 @@ Get detailed cost history for all activities in a workflow, including token usag
 - `output_tokens` (int|null): Number of completion/output tokens
 - `total_tokens` (int|null): Total tokens (prompt + output + cached)
 - `cached_tokens` (int|null): Number of cached tokens (Anthropic only)
-- `provider` (string): LLM provider used
-- `model` (string): Model name used
+- `provider` (string|null): LLM provider used (null for lump-sum and non-LLM cost line items)
+- `model` (string|null): Model name used (null for lump-sum and non-LLM cost line items)
 - `budget_exceeded` (bool|null): Whether this execution exceeded activity budget
 - `created_at` (DateTime): Timestamp when cost was recorded (ISO 8601)
 
@@ -331,6 +331,10 @@ Get detailed cost history for all activities in a workflow, including token usag
 - Results ordered by creation time (oldest first)
 - Returns empty array if no costs recorded
 - Token fields may be null if provider didn't return them
+- External activities that report per-call `usage` entries produce one row per
+  entry, shaped identically to built-in `llm_prompt` rows; a lump-sum report
+  (top-level `cost_usd` only) produces a single row with null `provider`/`model`
+- Failed attempts that reported usage appear under their own `attempt` number
 
 **Performance**: Target <50ms P99 latency for workflows with <1000 activities
 

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        WITH search_criteria AS (\n            SELECT\n                UNNEST($1::text[]) as provider_filter,\n                UNNEST($2::text[]) as model_filter\n        )\n        SELECT DISTINCT\n            id, provider, name, display_name,\n            input_price_per_million, output_price_per_million,\n            cached_input_price_per_million,\n            supports_completion, supports_embeddings,\n            context_window, max_output_tokens\n        FROM llm_models\n        WHERE EXISTS (\n            SELECT 1 FROM search_criteria c\n            WHERE (c.provider_filter IS NULL OR provider = c.provider_filter)\n              AND (c.model_filter IS NULL OR name = c.model_filter)\n        )\n        ORDER BY provider, name\n        ",
+  "query": "\n        WITH search_criteria AS (\n            SELECT\n                UNNEST($1::text[]) as provider_filter,\n                UNNEST($2::text[]) as model_filter\n        )\n        SELECT DISTINCT\n            id, provider, name, display_name,\n            input_price_per_million, output_price_per_million,\n            cached_input_price_per_million, cache_write_price_per_million,\n            supports_completion, supports_embeddings,\n            context_window, max_output_tokens\n        FROM llm_models\n        WHERE EXISTS (\n            SELECT 1 FROM search_criteria c\n            WHERE (c.provider_filter IS NULL OR provider = c.provider_filter)\n              AND (c.model_filter IS NULL OR name = c.model_filter)\n        )\n        ORDER BY provider, name\n        ",
   "describe": {
     "columns": [
       {
@@ -40,21 +40,26 @@
       },
       {
         "ordinal": 7,
+        "name": "cache_write_price_per_million",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 8,
         "name": "supports_completion",
         "type_info": "Bool"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "supports_embeddings",
         "type_info": "Bool"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "context_window",
         "type_info": "Int4"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "max_output_tokens",
         "type_info": "Int4"
       }
@@ -73,11 +78,12 @@
       false,
       false,
       true,
+      true,
       false,
       false,
       true,
       true
     ]
   },
-  "hash": "c086c3faee01f4184041a3b7282f5cc85307f0c0a76b665c42b1aee2fe9a732a"
+  "hash": "0a7e1c7ff1101f8c70374205fa691e2c422890714b38234dd7e63b954035f57a"
 }

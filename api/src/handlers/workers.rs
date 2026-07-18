@@ -1,7 +1,12 @@
 use crate::error::{ApiResult, AppError, ValidationErrors};
 use crate::middleware::auth::ValidatedClaims;
-use axum::{Extension, Json, extract::Path};
+use crate::state::AppState;
+use axum::{
+    Extension, Json,
+    extract::{Path, State},
+};
 use kruxiaflow_core::activity::{ActivityWorkerError, ActivityWorkerService};
+use kruxiaflow_core::cost::CostCalculator;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -151,6 +156,88 @@ pub struct ActivityHeartbeatResponse {
     pub next_heartbeat_seconds: i64,
 }
 
+/// Per-LLM-call usage reported by an external activity.
+///
+/// Field names are frozen as part of the worker-API contract (worker SDK spec).
+/// `input_tokens` is the full prompt size including cache reads. When `cost_usd`
+/// is omitted the server computes the cost from the `llm_models` catalog
+/// (cache reads at the cached-input price, cache creation at the cache-write
+/// price, falling back to the input price); an unknown provider/model records
+/// the entry at cost 0 with a warning — completion never fails because of
+/// usage metadata.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct UsageEntry {
+    /// LLM provider name (matches the llm_models catalog)
+    #[schema(example = "anthropic")]
+    pub provider: String,
+
+    /// Model name (matches the llm_models catalog)
+    #[schema(example = "claude-sonnet-5")]
+    pub model: String,
+
+    /// Prompt tokens, including cache reads
+    #[serde(default)]
+    #[schema(example = 12034)]
+    pub input_tokens: u32,
+
+    /// Completion tokens
+    #[serde(default)]
+    #[schema(example = 512)]
+    pub output_tokens: u32,
+
+    /// Prompt tokens served from cache (billed at the cached-input price)
+    #[serde(default)]
+    #[schema(example = 9800)]
+    pub cache_read_tokens: u32,
+
+    /// Tokens written to cache (billed at the catalog's cache-write price,
+    /// falling back to the input price for models without one)
+    #[serde(default)]
+    #[schema(example = 0)]
+    pub cache_creation_tokens: u32,
+
+    /// Explicit cost for this call; overrides server-side computation
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = 0.015)]
+    pub cost_usd: Option<Decimal>,
+}
+
+impl UsageEntry {
+    fn validate(&self, index: usize, errors: &mut ValidationErrors) {
+        if self.provider.is_empty() {
+            errors.add(
+                format!("usage[{}].provider", index),
+                "Provider cannot be empty",
+            );
+        }
+        if self.model.is_empty() {
+            errors.add(format!("usage[{}].model", index), "Model cannot be empty");
+        }
+        if let Some(cost) = self.cost_usd
+            && cost < Decimal::ZERO
+        {
+            errors.add(
+                format!("usage[{}].cost_usd", index),
+                "Cost must be non-negative",
+            );
+        }
+    }
+}
+
+impl From<UsageEntry> for kruxiaflow_core::cost::UsageEntry {
+    fn from(entry: UsageEntry) -> Self {
+        Self {
+            provider: entry.provider,
+            model: entry.model,
+            input_tokens: entry.input_tokens,
+            output_tokens: entry.output_tokens,
+            cache_read_tokens: entry.cache_read_tokens,
+            cache_creation_tokens: entry.cache_creation_tokens,
+            cost_usd: entry.cost_usd,
+        }
+    }
+}
+
 /// Activity completion request
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CompleteActivityRequest {
@@ -162,10 +249,16 @@ pub struct CompleteActivityRequest {
     #[schema(example = json!({"authorization_id": "auth_123", "approved": true}))]
     pub output: serde_json::Value,
 
-    /// Cost in USD (for AI/LLM activities, optional)
+    /// Cost in USD. Without `usage` entries: total activity cost.
+    /// With `usage` entries: cost NOT covered by the entries (e.g., a paid
+    /// non-LLM API) — never repeat entry costs here.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(example = 0.015)]
     pub cost_usd: Option<Decimal>,
+
+    /// Per-LLM-call usage made inside the activity, one entry per call
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Vec<UsageEntry>>,
 }
 
 impl CompleteActivityRequest {
@@ -188,6 +281,13 @@ impl CompleteActivityRequest {
             errors.add("cost_usd", "Cost must be non-negative");
         }
 
+        // Validate usage entries if provided
+        if let Some(usage) = &self.usage {
+            for (index, entry) in usage.iter().enumerate() {
+                entry.validate(index, &mut errors);
+            }
+        }
+
         if errors.is_empty() {
             Ok(())
         } else {
@@ -202,6 +302,11 @@ pub struct CompleteActivityResponse {
     /// Completion acknowledged
     #[schema(example = true)]
     pub acknowledged: bool,
+
+    /// Non-fatal warnings about reported usage (e.g., unknown provider/model
+    /// recorded at cost 0)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// Activity error details
@@ -229,6 +334,17 @@ pub struct FailActivityRequest {
 
     /// Error details
     pub error: ActivityError,
+
+    /// Cost in USD spent before the failure. Without `usage` entries: total
+    /// attempt cost. With `usage` entries: cost NOT covered by the entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = 0.015)]
+    pub cost_usd: Option<Decimal>,
+
+    /// Per-LLM-call usage made inside the activity before it failed —
+    /// a failed attempt still spent the money and counts against budgets
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage: Option<Vec<UsageEntry>>,
 }
 
 impl FailActivityRequest {
@@ -245,6 +361,18 @@ impl FailActivityRequest {
 
         if self.error.message.is_empty() {
             errors.add("error.message", "Error message cannot be empty");
+        }
+
+        if let Some(cost) = self.cost_usd
+            && cost < Decimal::ZERO
+        {
+            errors.add("cost_usd", "Cost must be non-negative");
+        }
+
+        if let Some(usage) = &self.usage {
+            for (index, entry) in usage.iter().enumerate() {
+                entry.validate(index, &mut errors);
+            }
         }
 
         if errors.is_empty() {
@@ -265,6 +393,11 @@ pub struct FailActivityResponse {
     /// Whether the activity will be retried
     #[schema(example = true)]
     pub will_retry: bool,
+
+    /// Non-fatal warnings about reported usage (e.g., unknown provider/model
+    /// recorded at cost 0)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 #[cfg(test)]
@@ -386,6 +519,7 @@ mod tests {
             worker_id: "worker_01".to_string(),
             output: serde_json::json!({"result": "ok"}),
             cost_usd: Some(Decimal::from_str("0.015").unwrap()),
+            usage: None,
         };
         assert!(req.validate().is_ok());
     }
@@ -396,6 +530,7 @@ mod tests {
             worker_id: "".to_string(),
             output: serde_json::json!({"result": "ok"}),
             cost_usd: None,
+            usage: None,
         };
         let err = req.validate().unwrap_err();
         assert!(err.field_errors.contains_key("worker_id"));
@@ -407,6 +542,7 @@ mod tests {
             worker_id: "w1".to_string(),
             output: serde_json::json!("just a string"),
             cost_usd: None,
+            usage: None,
         };
         let err = req.validate().unwrap_err();
         assert!(err.field_errors.contains_key("output"));
@@ -418,6 +554,7 @@ mod tests {
             worker_id: "w1".to_string(),
             output: serde_json::json!({"result": "ok"}),
             cost_usd: Some(Decimal::from_str("-1.00").unwrap()),
+            usage: None,
         };
         let err = req.validate().unwrap_err();
         assert!(err.field_errors.contains_key("cost_usd"));
@@ -429,6 +566,7 @@ mod tests {
             worker_id: "w1".to_string(),
             output: serde_json::json!({"result": "ok"}),
             cost_usd: Some(Decimal::ZERO),
+            usage: None,
         };
         assert!(req.validate().is_ok());
     }
@@ -439,6 +577,7 @@ mod tests {
             worker_id: "w1".to_string(),
             output: serde_json::json!({"result": "ok"}),
             cost_usd: None,
+            usage: None,
         };
         assert!(req.validate().is_ok());
     }
@@ -454,6 +593,8 @@ mod tests {
                 message: "Activity timed out".to_string(),
                 retryable: true,
             },
+            cost_usd: None,
+            usage: None,
         };
         assert!(req.validate().is_ok());
     }
@@ -467,6 +608,8 @@ mod tests {
                 message: "msg".to_string(),
                 retryable: false,
             },
+            cost_usd: None,
+            usage: None,
         };
         let err = req.validate().unwrap_err();
         assert!(err.field_errors.contains_key("worker_id"));
@@ -481,6 +624,8 @@ mod tests {
                 message: "msg".to_string(),
                 retryable: false,
             },
+            cost_usd: None,
+            usage: None,
         };
         let err = req.validate().unwrap_err();
         assert!(err.field_errors.contains_key("error.code"));
@@ -495,6 +640,8 @@ mod tests {
                 message: "".to_string(),
                 retryable: false,
             },
+            cost_usd: None,
+            usage: None,
         };
         let err = req.validate().unwrap_err();
         assert!(err.field_errors.contains_key("error.message"));
@@ -509,6 +656,8 @@ mod tests {
                 message: "".to_string(),
                 retryable: false,
             },
+            cost_usd: None,
+            usage: None,
         };
         let err = req.validate().unwrap_err();
         assert!(err.field_errors.contains_key("worker_id"));
@@ -571,7 +720,10 @@ mod tests {
 
     #[test]
     fn test_complete_response_serialize() {
-        let response = CompleteActivityResponse { acknowledged: true };
+        let response = CompleteActivityResponse {
+            acknowledged: true,
+            warnings: Vec::new(),
+        };
         let json = serde_json::to_value(&response).unwrap();
         assert_eq!(json["acknowledged"], true);
     }
@@ -581,6 +733,7 @@ mod tests {
         let response = FailActivityResponse {
             acknowledged: true,
             will_retry: true,
+            warnings: Vec::new(),
         };
         let json = serde_json::to_value(&response).unwrap();
         assert_eq!(json["acknowledged"], true);
@@ -633,6 +786,22 @@ mod tests {
 
     fn test_service() -> ActivityWorkerService {
         ActivityWorkerService::new(Arc::new(MockActivityQueue), Arc::new(MockEventSource))
+    }
+
+    fn test_state(pool: sqlx::PgPool) -> AppState {
+        use kruxiaflow_core::cache::NoOpCache;
+        use tokio_util::sync::CancellationToken;
+
+        AppState::new(
+            pool,
+            Arc::new(MockAuthService),
+            Arc::new(MockActivityQueue),
+            Arc::new(MockEventSource),
+            Arc::new(MockWorkflowStorage),
+            Arc::new(NoOpCache::new()),
+            Arc::new(MockSubscriptionService),
+            CancellationToken::new(),
+        )
     }
 
     #[tokio::test]
@@ -708,8 +877,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_complete_activity_handler() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_complete_activity_handler(pool: sqlx::PgPool) {
         let service = test_service();
         let activity_id = Uuid::now_v7();
 
@@ -717,10 +886,12 @@ mod tests {
             worker_id: "worker_01".to_string(),
             output: serde_json::json!({"result": "success"}),
             cost_usd: None,
+            usage: None,
         };
 
         let result = complete_activity(
             service,
+            State(test_state(pool)),
             Extension(test_claims()),
             Path(activity_id),
             Json(request),
@@ -731,20 +902,23 @@ mod tests {
         assert!(result.is_ok());
         let Json(response) = result.unwrap();
         assert!(response.acknowledged);
+        assert!(response.warnings.is_empty());
     }
 
-    #[tokio::test]
-    async fn test_complete_activity_handler_validation_error() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_complete_activity_handler_validation_error(pool: sqlx::PgPool) {
         let service = test_service();
 
         let request = CompleteActivityRequest {
             worker_id: "".to_string(),
             output: serde_json::json!("not an object"),
             cost_usd: None,
+            usage: None,
         };
 
         let result = complete_activity(
             service,
+            State(test_state(pool)),
             Extension(test_claims()),
             Path(Uuid::now_v7()),
             Json(request),
@@ -754,8 +928,45 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_fail_activity_handler() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_complete_activity_handler_unknown_model_warning(pool: sqlx::PgPool) {
+        let service = test_service();
+        let activity_id = Uuid::now_v7();
+
+        let request = CompleteActivityRequest {
+            worker_id: "worker_01".to_string(),
+            output: serde_json::json!({"result": "success"}),
+            cost_usd: None,
+            usage: Some(vec![UsageEntry {
+                provider: "nonexistent".to_string(),
+                model: "not-a-model".to_string(),
+                input_tokens: 100,
+                output_tokens: 10,
+                cache_read_tokens: 0,
+                cache_creation_tokens: 0,
+                cost_usd: None,
+            }]),
+        };
+
+        let result = complete_activity(
+            service,
+            State(test_state(pool)),
+            Extension(test_claims()),
+            Path(activity_id),
+            Json(request),
+        )
+        .await;
+
+        // Unknown model must never fail the completion — only warn
+        assert!(result.is_ok());
+        let Json(response) = result.unwrap();
+        assert!(response.acknowledged);
+        assert_eq!(response.warnings.len(), 1);
+        assert!(response.warnings[0].contains("nonexistent/not-a-model"));
+    }
+
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_fail_activity_handler(pool: sqlx::PgPool) {
         let service = test_service();
         let activity_id = Uuid::now_v7();
 
@@ -766,10 +977,13 @@ mod tests {
                 message: "Activity timed out".to_string(),
                 retryable: true,
             },
+            cost_usd: None,
+            usage: None,
         };
 
         let result = fail_activity(
             service,
+            State(test_state(pool)),
             Extension(test_claims()),
             Path(activity_id),
             Json(request),
@@ -782,8 +996,8 @@ mod tests {
         assert!(response.acknowledged);
     }
 
-    #[tokio::test]
-    async fn test_fail_activity_handler_validation_error() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_fail_activity_handler_validation_error(pool: sqlx::PgPool) {
         let service = test_service();
 
         let request = FailActivityRequest {
@@ -793,10 +1007,13 @@ mod tests {
                 message: "".to_string(),
                 retryable: false,
             },
+            cost_usd: None,
+            usage: None,
         };
 
         let result = fail_activity(
             service,
+            State(test_state(pool)),
             Extension(test_claims()),
             Path(Uuid::now_v7()),
             Json(request),
@@ -980,6 +1197,7 @@ pub async fn heartbeat_activity(
 )]
 pub async fn complete_activity(
     service: ActivityWorkerService,
+    State(state): State<AppState>,
     Extension(_claims): Extension<ValidatedClaims>,
     Path(activity_id): Path<Uuid>,
     Json(request): Json<CompleteActivityRequest>,
@@ -993,12 +1211,24 @@ pub async fn complete_activity(
         "Completing activity"
     );
 
+    let usage: Option<Vec<kruxiaflow_core::cost::UsageEntry>> = request
+        .usage
+        .map(|entries| entries.into_iter().map(Into::into).collect());
+
+    // Surface catalog-freshness problems in the response, but never fail the
+    // completion because of them — the work is already done
+    let warnings = match &usage {
+        Some(entries) => unknown_model_warnings(&state.db_pool, entries, activity_id).await,
+        None => Vec::new(),
+    };
+
     service
         .complete_activity(
             activity_id,
             request.worker_id.clone(),
             request.output,
             request.cost_usd,
+            usage,
         )
         .await
         .map_err(|e| match e {
@@ -1017,7 +1247,66 @@ pub async fn complete_activity(
             _ => AppError::InternalError(anyhow::anyhow!(e)),
         })?;
 
-    Ok(Json(CompleteActivityResponse { acknowledged: true }))
+    Ok(Json(CompleteActivityResponse {
+        acknowledged: true,
+        warnings,
+    }))
+}
+
+/// Check reported usage entries that need server-side cost computation against
+/// the llm_models catalog, returning a warning per unknown (provider, model).
+///
+/// Read-only and best-effort: a lookup failure yields no warnings rather than
+/// failing the request — the orchestrator's recording step performs the same
+/// check when it writes the cost rows.
+async fn unknown_model_warnings(
+    pool: &sqlx::PgPool,
+    usage: &[kruxiaflow_core::cost::UsageEntry],
+    activity_id: Uuid,
+) -> Vec<String> {
+    let to_price: Vec<(String, String)> = usage
+        .iter()
+        .filter(|e| e.cost_usd.is_none())
+        .map(|e| (e.provider.clone(), e.model.clone()))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+
+    if to_price.is_empty() {
+        return Vec::new();
+    }
+
+    match CostCalculator::new(pool.clone())
+        .batch_get_pricing(&to_price)
+        .await
+    {
+        Ok(pricing) => to_price
+            .iter()
+            .filter(|(provider, model)| !pricing.contains_key(&format!("{}/{}", provider, model)))
+            .map(|(provider, model)| {
+                tracing::warn!(
+                    activity_id = %activity_id,
+                    provider = %provider,
+                    model = %model,
+                    "Unknown provider/model in reported usage; cost will be recorded as 0"
+                );
+                format!(
+                    "unknown model '{}/{}': not in the llm_models catalog; \
+                     its usage will be recorded with cost 0 — supply cost_usd \
+                     per entry or update the catalog",
+                    provider, model
+                )
+            })
+            .collect(),
+        Err(e) => {
+            tracing::error!(
+                activity_id = %activity_id,
+                error = %e,
+                "Failed to check pricing catalog for reported usage"
+            );
+            Vec::new()
+        }
+    }
 }
 
 /// Fail activity
@@ -1046,6 +1335,7 @@ pub async fn complete_activity(
 )]
 pub async fn fail_activity(
     service: ActivityWorkerService,
+    State(state): State<AppState>,
     Extension(_claims): Extension<ValidatedClaims>,
     Path(activity_id): Path<Uuid>,
     Json(request): Json<FailActivityRequest>,
@@ -1060,6 +1350,15 @@ pub async fn fail_activity(
         "Activity failed"
     );
 
+    let usage: Option<Vec<kruxiaflow_core::cost::UsageEntry>> = request
+        .usage
+        .map(|entries| entries.into_iter().map(Into::into).collect());
+
+    let warnings = match &usage {
+        Some(entries) => unknown_model_warnings(&state.db_pool, entries, activity_id).await,
+        None => Vec::new(),
+    };
+
     let will_retry = service
         .fail_activity(
             activity_id,
@@ -1067,6 +1366,8 @@ pub async fn fail_activity(
             request.error.code,
             request.error.message,
             request.error.retryable,
+            request.cost_usd,
+            usage,
         )
         .await
         .map_err(|e| match e {
@@ -1088,5 +1389,6 @@ pub async fn fail_activity(
     Ok(Json(FailActivityResponse {
         acknowledged: true,
         will_retry,
+        warnings,
     }))
 }

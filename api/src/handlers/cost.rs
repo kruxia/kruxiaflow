@@ -96,8 +96,10 @@ pub struct ActivityCostDetail {
     pub output_tokens: Option<i32>,
     pub total_tokens: Option<i32>,
     pub cached_tokens: Option<i32>,
-    pub provider: String,
-    pub model: String,
+    /// None for lump-sum and non-LLM cost line items
+    pub provider: Option<String>,
+    /// None for lump-sum and non-LLM cost line items
+    pub model: Option<String>,
     pub budget_limit_usd: Option<Decimal>,
     pub budget_exceeded: Option<bool>,
     pub created_at: DateTime<Utc>,
@@ -381,8 +383,8 @@ mod tests {
             output_tokens: Some(50),
             total_tokens: Some(200),
             cached_tokens: Some(0),
-            provider: "anthropic".to_string(),
-            model: "claude-3-sonnet".to_string(),
+            provider: Some("anthropic".to_string()),
+            model: Some("claude-3-sonnet".to_string()),
             budget_limit_usd: Some(Decimal::from_str("1.00").unwrap()),
             budget_exceeded: Some(false),
             created_at: Utc::now(),

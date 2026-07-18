@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO workflow_definitions (id, name, activities, content_hash, created_at)\n            VALUES ($1, $2, $3, $4, NOW())\n            RETURNING id, name, activities, content_hash, created_at\n            ",
+  "query": "SELECT wd.id, wd.name, wd.activities, wd.settings, wd.created_at\n           FROM workflows w\n           JOIN workflow_definitions wd ON wd.id = w.workflow_definition_id\n           WHERE w.id = $1",
   "describe": {
     "columns": [
       {
@@ -20,8 +20,8 @@
       },
       {
         "ordinal": 3,
-        "name": "content_hash",
-        "type_info": "Bytea"
+        "name": "settings",
+        "type_info": "Jsonb"
       },
       {
         "ordinal": 4,
@@ -31,10 +31,7 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text",
-        "Jsonb",
-        "Bytea"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -45,5 +42,5 @@
       false
     ]
   },
-  "hash": "c5e1f9238e61d58ff8a5dfdc05ca8c588f587beedde2f631dd73ef471dcdc12b"
+  "hash": "5798da1611d46ec00bcff0ba3554b4ef1dba0a40ce5b6aa444f4827412b18e8c"
 }

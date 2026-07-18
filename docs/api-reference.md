@@ -548,6 +548,12 @@ Returns cost history over time for a workflow.
 }
 ```
 
+**Note**: `provider` and `model` are `null` for lump-sum cost rows (external
+activities reporting only a total `cost_usd`) and for non-LLM cost line items.
+Rows created from external `usage` entries are shaped identically to built-in
+`llm_prompt` rows. Failed attempts that reported usage appear under their own
+`attempt` number.
+
 ### Get Cost Analytics
 
 ```http
@@ -734,20 +740,53 @@ Content-Type: application/json
     "authorization_id": "auth_123",
     "approved": true
   },
-  "cost_usd": 0.015
+  "cost_usd": null,
+  "usage": [
+    {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5",
+      "input_tokens": 12034,
+      "output_tokens": 512,
+      "cache_read_tokens": 9800,
+      "cache_creation_tokens": 0,
+      "cost_usd": null
+    }
+  ]
 }
 ```
 
 - `worker_id` - Required, not empty
 - `output` - Required, must be a JSON object
-- `cost_usd` - Optional, non-negative (for AI activities with cost tracking)
+- `cost_usd` - Optional, non-negative. Without `usage`: total activity cost,
+  recorded as one cost row. With `usage`: cost **not covered by the entries**
+  (e.g., a paid non-LLM API) — never repeat entry costs here.
+- `usage` - Optional, one entry per LLM call made inside the activity. Each
+  entry becomes an `activity_costs` row that counts against budgets. Per entry:
+  - `provider`, `model` - Required, matched against the `llm_models` catalog
+  - `input_tokens` - Prompt tokens, including cache reads
+  - `output_tokens` - Completion tokens
+  - `cache_read_tokens` - Tokens served from cache (billed at the cached-input
+    price when the server computes cost)
+  - `cache_creation_tokens` - Tokens written to cache (billed at the catalog's
+    `cache_write_price_per_million` — e.g., 1.25x input for Anthropic — falling
+    back to the input price for models without one)
+  - `cost_usd` - Optional explicit cost for this call; overrides server-side
+    computation
 
 **Response** (200 OK):
 ```json
 {
-  "acknowledged": true
+  "acknowledged": true,
+  "warnings": [
+    "unknown model 'acme/foo-1': not in the llm_models catalog; its usage will be recorded with cost 0 — supply cost_usd per entry or update the catalog"
+  ]
 }
 ```
+
+A completion never fails because of usage metadata: an unknown provider/model
+records the entry at cost 0 and returns a warning (the work is already done —
+rejecting the request would time out the lease and re-run a completed,
+possibly side-effectful activity). `warnings` is omitted when empty.
 
 ### Fail Activity
 
@@ -765,7 +804,9 @@ Content-Type: application/json
     "code": "PAYMENT_DECLINED",
     "message": "Card was declined by the bank",
     "retryable": false
-  }
+  },
+  "cost_usd": null,
+  "usage": []
 }
 ```
 
@@ -773,12 +814,17 @@ Content-Type: application/json
 - `error.code` - Required, not empty
 - `error.message` - Required, not empty
 - `error.retryable` - Whether the activity should be retried
+- `cost_usd`, `usage` - Optional, same semantics as on completion. A failed
+  attempt that made LLM calls still spent the money; it is recorded under the
+  failing attempt number **before** any retry is scheduled, so the retry's
+  budget check already sees the spend.
 
 **Response** (200 OK):
 ```json
 {
   "acknowledged": true,
-  "will_retry": false
+  "will_retry": false,
+  "warnings": []
 }
 ```
 

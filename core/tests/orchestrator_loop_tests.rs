@@ -42,6 +42,7 @@ async fn test_simple_loop_workflow(pool: PgPool) {
     // Create a loop workflow definition (manually validated with metadata set)
     let definition = WorkflowDefinition {
         name: "simple_loop".to_string(),
+        settings: None,
         activities: vec![
             ActivityDefinition {
                 key: "process".to_string(),
@@ -254,6 +255,7 @@ async fn test_loop_max_iterations_enforced(pool: PgPool) {
     // Create a loop workflow with iteration_limit = 2
     let definition = WorkflowDefinition {
         name: "limited_loop".to_string(),
+        settings: None,
         activities: vec![ActivityDefinition {
             key: "loop_task".to_string(),
             worker: "test".to_string(),
@@ -423,6 +425,7 @@ async fn test_iteration_counter_without_scoping(pool: PgPool) {
     // Create a loop workflow without iteration_scoped
     let definition = WorkflowDefinition {
         name: "non_scoped_loop".to_string(),
+        settings: None,
         activities: vec![ActivityDefinition {
             key: "counter".to_string(),
             worker: "test".to_string(),
@@ -551,6 +554,7 @@ async fn test_iteration_budget_accumulation(pool: PgPool) {
     // Create a loop workflow with budget limit that spans multiple iterations
     let definition = WorkflowDefinition {
         name: "budget_loop".to_string(),
+        settings: None,
         activities: vec![ActivityDefinition {
             key: "expensive_task".to_string(),
             worker: "llm".to_string(),
@@ -753,6 +757,7 @@ async fn test_loop_pattern_1_fixed_iterations(pool: PgPool) {
     // Create a loop with only iteration_limit (no condition on back-edge)
     let definition = WorkflowDefinition {
         name: "fixed_iterations".to_string(),
+        settings: None,
         activities: vec![ActivityDefinition {
             key: "newsletter".to_string(),
             worker: "test".to_string(),
@@ -895,6 +900,7 @@ async fn test_loop_pattern_2_condition_only(pool: PgPool) {
     // Should use DEFAULT_MAX_ITERATIONS = 100
     let definition = WorkflowDefinition {
         name: "condition_only".to_string(),
+        settings: None,
         activities: vec![
             ActivityDefinition {
                 key: "poll".to_string(),

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT wd.id, wd.name, wd.activities, wd.created_at\n           FROM workflows w\n           JOIN workflow_definitions wd ON wd.id = w.workflow_definition_id\n           WHERE w.id = $1",
+  "query": "\n            SELECT id, name, activities, settings, content_hash, created_at\n            FROM workflow_definitions\n            ORDER BY name ASC, created_at DESC\n            ",
   "describe": {
     "columns": [
       {
@@ -20,21 +20,31 @@
       },
       {
         "ordinal": 3,
+        "name": "settings",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "content_hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 5,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
-      "Left": [
-        "Uuid"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
       false,
       false,
+      true,
+      true,
       false
     ]
   },
-  "hash": "b127c96c940b9d31bf9c0451309039fa912af47c300fce0be07746feb41ff782"
+  "hash": "d5ff16f477a0ec26c5b50dc7879f0208d332f38b0fecd56c8a445150a4d92a74"
 }

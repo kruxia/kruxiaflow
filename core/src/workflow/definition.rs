@@ -12,6 +12,10 @@ pub struct WorkflowDefinition {
 
     /// Activities in the workflow
     pub activities: Vec<ActivityDefinition>,
+
+    /// Workflow-level settings (timeout, retries, budget)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<WorkflowSettings>,
 }
 
 impl WorkflowDefinition {
@@ -65,10 +69,16 @@ impl WorkflowDefinition {
         // Create normalized representation (excludes version, created_at)
         // Note: serde_json serializes keys in their struct definition order,
         // and we use BTreeMap-like ordering for the JSON object
-        let normalized = serde_json::json!({
+        let mut normalized = serde_json::json!({
             "activities": &self.activities,
             "name": &self.name,
         });
+
+        // Include settings only when present so definitions without settings
+        // keep their pre-existing content hashes (idempotent redeploys)
+        if let Some(settings) = &self.settings {
+            normalized["settings"] = serde_json::json!(settings);
+        }
 
         // Serialize deterministically (serde_json sorts object keys)
         let canonical =
@@ -1362,6 +1372,7 @@ mod tests {
     fn test_validate_valid_workflow() {
         let mut definition = WorkflowDefinition {
             name: "payment_processing".to_string(),
+            settings: None,
             activities: vec![
                 ActivityDefinition {
                     key: "validate".to_string(),
@@ -1405,6 +1416,7 @@ mod tests {
     fn test_validate_duplicate_activity_keys() {
         let mut definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![
                 ActivityDefinition {
                     key: "step1".to_string(),
@@ -1453,6 +1465,7 @@ mod tests {
     fn test_validate_invalid_activity_reference() {
         let mut definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![ActivityDefinition {
                 key: "step1".to_string(),
                 worker: "test".to_string(),
@@ -1489,6 +1502,7 @@ mod tests {
     fn test_validate_cycle_detection() {
         let mut definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![
                 ActivityDefinition {
                     key: "step1".to_string(),
@@ -1607,6 +1621,7 @@ mod tests {
     fn test_empty_workflow_name() {
         let mut definition = WorkflowDefinition {
             name: "".to_string(),
+            settings: None,
             activities: vec![ActivityDefinition {
                 key: "step1".to_string(),
                 worker: "test".to_string(),
@@ -1631,6 +1646,7 @@ mod tests {
     fn test_no_activities() {
         let mut definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![],
         };
 
@@ -1653,6 +1669,7 @@ mod tests {
         // Pattern 1: iteration_limit only
         let mut definition = WorkflowDefinition {
             name: "test_loop".to_string(),
+            settings: None,
             activities: vec![
                 ActivityDefinition {
                     key: "search".to_string(),
@@ -1718,6 +1735,7 @@ mod tests {
         // Pattern 2: condition only
         let mut definition = WorkflowDefinition {
             name: "test_loop".to_string(),
+            settings: None,
             activities: vec![
                 ActivityDefinition {
                     key: "search".to_string(),
@@ -1772,6 +1790,7 @@ mod tests {
         // Pattern 3: both condition and iteration_limit
         let mut definition = WorkflowDefinition {
             name: "test_loop".to_string(),
+            settings: None,
             activities: vec![
                 ActivityDefinition {
                     key: "search".to_string(),
@@ -1822,6 +1841,7 @@ mod tests {
         // Loop with neither condition nor iteration_limit
         let mut definition = WorkflowDefinition {
             name: "test_loop".to_string(),
+            settings: None,
             activities: vec![
                 ActivityDefinition {
                     key: "search".to_string(),
@@ -2283,6 +2303,7 @@ activities:
         // Create a proper loop: init -> search -> evaluate -> search (back-edge)
         let mut definition = WorkflowDefinition {
             name: "test_loop".to_string(),
+            settings: None,
             activities: vec![
                 ActivityDefinition {
                     key: "init".to_string(),
@@ -2586,6 +2607,7 @@ activities:
     fn test_to_yaml_and_to_json() {
         let def = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![ActivityDefinition {
                 key: "step1".to_string(),
                 worker: "builtin".to_string(),
@@ -2735,6 +2757,7 @@ activities:
     fn test_normalize_dependency_of_to_depends_on() {
         let mut definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![
                 ActivityDefinition {
                     key: "step1".to_string(),
@@ -2786,6 +2809,7 @@ activities:
     fn test_normalize_preserves_existing_depends_on() {
         let mut definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![
                 ActivityDefinition {
                     key: "step1".to_string(),
@@ -2861,6 +2885,7 @@ activities:
     fn test_validate_empty_worker() {
         let mut definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![ActivityDefinition {
                 key: "step1".to_string(),
                 worker: "".to_string(), // Empty worker
@@ -2893,6 +2918,7 @@ activities:
     fn test_validate_empty_activity_key() {
         let mut definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![ActivityDefinition {
                 key: "".to_string(), // Empty key
                 worker: "test".to_string(),
@@ -2924,6 +2950,7 @@ activities:
     fn test_validate_invalid_activity_key_chars() {
         let mut definition = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![ActivityDefinition {
                 key: "step.invalid".to_string(), // dots not allowed
                 worker: "test".to_string(),
@@ -3157,6 +3184,7 @@ activities:
 
         let mut definition = WorkflowDefinition {
             name: "long_chain".to_string(),
+            settings: None,
             activities,
         };
 
@@ -3270,6 +3298,7 @@ activities:
     fn test_content_hash_deterministic() {
         let def = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![ActivityDefinition {
                 key: "step1".to_string(),
                 worker: "std".to_string(),
@@ -3296,6 +3325,7 @@ activities:
     fn test_content_hash_differs_for_different_definitions() {
         let def1 = WorkflowDefinition {
             name: "workflow_a".to_string(),
+            settings: None,
             activities: vec![ActivityDefinition {
                 key: "step1".to_string(),
                 worker: "std".to_string(),
@@ -3314,6 +3344,7 @@ activities:
 
         let def2 = WorkflowDefinition {
             name: "workflow_b".to_string(),
+            settings: None,
             activities: vec![ActivityDefinition {
                 key: "step1".to_string(),
                 worker: "std".to_string(),
@@ -3337,6 +3368,7 @@ activities:
     fn test_content_hash_differs_for_different_activities() {
         let def1 = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![ActivityDefinition {
                 key: "step1".to_string(),
                 worker: "std".to_string(),
@@ -3355,6 +3387,7 @@ activities:
 
         let def2 = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![ActivityDefinition {
                 key: "step2".to_string(),
                 worker: "std".to_string(),
@@ -3382,6 +3415,7 @@ activities:
     fn test_validate_activity_settings_delay_and_scheduled_for_mutually_exclusive() {
         let mut def = WorkflowDefinition {
             name: "test".to_string(),
+            settings: None,
             activities: vec![ActivityDefinition {
                 key: "step1".to_string(),
                 worker: "std".to_string(),
