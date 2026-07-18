@@ -1,4 +1,3 @@
-use kruxiaflow_worker::ActivityResult;
 use crate::llm::{
     AnthropicProvider, EmbeddingRequest, GoogleProvider, LLMError, LLMProvider, OllamaProvider,
     OpenAIProvider, PromptRequest,
@@ -10,6 +9,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::StreamExt;
 use kruxiaflow_core::cost::{CostCalculator, ModelPricing};
+use kruxiaflow_worker::ActivityResult;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

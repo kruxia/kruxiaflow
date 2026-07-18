@@ -111,8 +111,9 @@ impl<T: TypedActivity> ActivityImpl for TypedAdapter<T> {
         parameters: Value,
         ctx: &ActivityContext,
     ) -> Result<ActivityResult, ActivityError> {
-        let params: T::Params = serde_json::from_value(parameters)
-            .map_err(|err| invalid_parameters(&format!("{}.{}", self.worker(), self.name()), err))?;
+        let params: T::Params = serde_json::from_value(parameters).map_err(|err| {
+            invalid_parameters(&format!("{}.{}", self.worker(), self.name()), err)
+        })?;
         self.0.execute(params, ctx).await
     }
 

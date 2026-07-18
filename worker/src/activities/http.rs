@@ -1,7 +1,7 @@
-use kruxiaflow_worker::ActivityResult;
 use crate::registry::ActivityImpl;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use kruxiaflow_worker::ActivityResult;
 use reqwest::{Client, Method};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};

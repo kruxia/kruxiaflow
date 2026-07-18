@@ -213,8 +213,8 @@ impl CostCalculator {
         let cache_write_price = pricing
             .cache_write_price_per_million
             .unwrap_or(pricing.input_price_per_million);
-        let cache_creation_cost =
-            Decimal::from(entry.cache_creation_tokens) * cache_write_price / Decimal::from(1_000_000);
+        let cache_creation_cost = Decimal::from(entry.cache_creation_tokens) * cache_write_price
+            / Decimal::from(1_000_000);
         base + cache_creation_cost
     }
 

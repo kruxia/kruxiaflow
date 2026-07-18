@@ -329,7 +329,11 @@ impl ActivityRunner {
         }
     }
 
-    async fn report(&self, activity_id: Uuid, result: Result<crate::ActivityResult, ActivityError>) {
+    async fn report(
+        &self,
+        activity_id: Uuid,
+        result: Result<crate::ActivityResult, ActivityError>,
+    ) {
         match result {
             Ok(activity_result) => {
                 let output = activity_result.to_json_value();

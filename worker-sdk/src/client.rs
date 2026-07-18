@@ -221,7 +221,10 @@ impl WorkerApiClient {
 
         let response = self
             .post_json(
-                &format!("{}/api/v1/activities/{}/heartbeat", self.api_url, activity_id),
+                &format!(
+                    "{}/api/v1/activities/{}/heartbeat",
+                    self.api_url, activity_id
+                ),
                 &HeartbeatRequest { worker_id },
             )
             .await?;
@@ -253,7 +256,10 @@ impl WorkerApiClient {
 
         let response = self
             .post_json(
-                &format!("{}/api/v1/activities/{}/complete", self.api_url, activity_id),
+                &format!(
+                    "{}/api/v1/activities/{}/complete",
+                    self.api_url, activity_id
+                ),
                 &CompleteRequest {
                     worker_id,
                     output,
@@ -263,7 +269,11 @@ impl WorkerApiClient {
             )
             .await?;
 
-        Ok(Self::check(response).await?.json().await.unwrap_or_default())
+        Ok(Self::check(response)
+            .await?
+            .json()
+            .await
+            .unwrap_or_default())
     }
 
     /// Report failure.
@@ -308,6 +318,10 @@ impl WorkerApiClient {
             )
             .await?;
 
-        Ok(Self::check(response).await?.json().await.unwrap_or_default())
+        Ok(Self::check(response)
+            .await?
+            .json()
+            .await
+            .unwrap_or_default())
     }
 }

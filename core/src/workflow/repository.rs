@@ -147,9 +147,9 @@ impl WorkflowDefinitionRepository {
             version: format_version(&r.created_at),
             activities: serde_json::from_value(r.activities)
                 .expect("Failed to deserialize activities"),
-            settings: r.settings.map(|s| {
-                serde_json::from_value(s).expect("Failed to deserialize settings")
-            }),
+            settings: r
+                .settings
+                .map(|s| serde_json::from_value(s).expect("Failed to deserialize settings")),
             content_hash: r.content_hash,
             created_at: r.created_at,
         }))
@@ -187,9 +187,9 @@ impl WorkflowDefinitionRepository {
             version: format_version(&r.created_at),
             activities: serde_json::from_value(r.activities)
                 .expect("Failed to deserialize activities"),
-            settings: r.settings.map(|s| {
-                serde_json::from_value(s).expect("Failed to deserialize settings")
-            }),
+            settings: r
+                .settings
+                .map(|s| serde_json::from_value(s).expect("Failed to deserialize settings")),
             content_hash: r.content_hash,
             created_at: r.created_at,
         }))
@@ -219,9 +219,9 @@ impl WorkflowDefinitionRepository {
             version: format_version(&r.created_at),
             activities: serde_json::from_value(r.activities)
                 .expect("Failed to deserialize activities"),
-            settings: r.settings.map(|s| {
-                serde_json::from_value(s).expect("Failed to deserialize settings")
-            }),
+            settings: r
+                .settings
+                .map(|s| serde_json::from_value(s).expect("Failed to deserialize settings")),
             content_hash: r.content_hash,
             created_at: r.created_at,
         }))
@@ -250,9 +250,9 @@ impl WorkflowDefinitionRepository {
                 version: format_version(&r.created_at),
                 activities: serde_json::from_value(r.activities)
                     .expect("Failed to deserialize activities"),
-                settings: r.settings.map(|s| {
-                    serde_json::from_value(s).expect("Failed to deserialize settings")
-                }),
+                settings: r
+                    .settings
+                    .map(|s| serde_json::from_value(s).expect("Failed to deserialize settings")),
                 content_hash: r.content_hash,
                 created_at: r.created_at,
             })

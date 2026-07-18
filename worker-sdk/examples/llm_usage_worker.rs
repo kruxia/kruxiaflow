@@ -12,9 +12,7 @@
 //! KRUXIAFLOW_API_URL=http://localhost:8080 cargo run --example llm_usage_worker
 //! ```
 
-use kruxiaflow_worker::{
-    ActivityContext, ActivityError, ActivityResult, UsageEntry, Worker,
-};
+use kruxiaflow_worker::{ActivityContext, ActivityError, ActivityResult, UsageEntry, Worker};
 use rust_decimal::Decimal;
 use serde_json::json;
 use std::str::FromStr;
@@ -38,8 +36,7 @@ async fn call_llm(prompt: &str) -> Result<(String, UsageEntry), ActivityError> {
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 

@@ -303,10 +303,7 @@ mod tests {
 
         assert_eq!(outputs.len(), 1);
         assert_eq!(outputs[0].name, "result");
-        assert_eq!(
-            outputs[0].output_type,
-            kruxiaflow_worker::OutputType::Value
-        );
+        assert_eq!(outputs[0].output_type, kruxiaflow_worker::OutputType::Value);
 
         // Cleanup
         executor.cleanup().await.expect("Failed to cleanup");

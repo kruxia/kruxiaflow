@@ -90,10 +90,13 @@ fn env_nonempty(var: &str) -> Option<String> {
 fn env_parse<T: std::str::FromStr>(var: &str) -> Result<Option<T>, ConfigError> {
     match env_nonempty(var) {
         None => Ok(None),
-        Some(raw) => raw.parse().map(Some).map_err(|_| ConfigError::InvalidValue {
-            var: var.to_string(),
-            reason: format!("cannot parse {raw:?}"),
-        }),
+        Some(raw) => raw
+            .parse()
+            .map(Some)
+            .map_err(|_| ConfigError::InvalidValue {
+                var: var.to_string(),
+                reason: format!("cannot parse {raw:?}"),
+            }),
     }
 }
 
@@ -356,11 +359,14 @@ mod tests {
 
     #[test]
     fn from_env_without_credentials_is_valid() {
-        with_env_vars(vec![("KRUXIAFLOW_API_URL", "http://localhost:8080")], || {
-            let config = WorkerConfig::from_env().unwrap();
-            assert!(config.client_id.is_none());
-            assert!(config.client_secret.is_none());
-        });
+        with_env_vars(
+            vec![("KRUXIAFLOW_API_URL", "http://localhost:8080")],
+            || {
+                let config = WorkerConfig::from_env().unwrap();
+                assert!(config.client_id.is_none());
+                assert!(config.client_secret.is_none());
+            },
+        );
     }
 
     #[test]

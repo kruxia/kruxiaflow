@@ -306,7 +306,13 @@ async fn test_complete_activity_idempotency(pool: PgPool) {
 
     // Complete the activity first time
     service
-        .complete_activity(activity_id, "worker_01".to_string(), output.clone(), None, None)
+        .complete_activity(
+            activity_id,
+            "worker_01".to_string(),
+            output.clone(),
+            None,
+            None,
+        )
         .await
         .unwrap();
 

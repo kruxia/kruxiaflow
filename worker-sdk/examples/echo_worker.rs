@@ -31,16 +31,18 @@ struct EchoParams {
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
     let worker = Worker::builder()
         .worker("demo")
-        .register_fn("echo", |params: EchoParams, _ctx: ActivityContext| async move {
-            Ok(ActivityResult::value("echoed", json!(params.message)))
-        })
+        .register_fn(
+            "echo",
+            |params: EchoParams, _ctx: ActivityContext| async move {
+                Ok(ActivityResult::value("echoed", json!(params.message)))
+            },
+        )
         .build()?;
 
     worker.run_until_shutdown().await;
