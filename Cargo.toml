@@ -22,7 +22,7 @@ tag-name = "v{{version}}"
 pre-release-commit-message = "release: v{{version}}"
 
 [workspace.package]
-version = "0.4.2"
+version = "0.4.3"
 edition = "2024"
 authors = ["Sean Harrison <sah@kruxia.com>"]
 license = "Apache-2.0"
