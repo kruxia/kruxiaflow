@@ -15,8 +15,8 @@ activities:
     activity_name: llm_prompt
     parameters:
       model:
-        - anthropic/claude-sonnet-4-5-20250929  # preferred
-        - openai/gpt-4o-mini                    # if budget is tight
+        - anthropic/claude-sonnet-5      # preferred
+        - openai/gpt-5.4-mini            # if budget is tight
       prompt: "Research and summarize: {{INPUT.topic}}"
       max_tokens: 1000
     settings:
@@ -57,91 +57,85 @@ Gateways cap keys; engines should cap workflows. Kruxia Flow is the only durable
 
 ## Getting Started
 
+Five minutes, no clone, no auth setup. You need Docker and (optionally) an LLM
+API key — or [Ollama](https://ollama.com/) for a fully local run.
+
 ### 1. Start Kruxia Flow
 
 ```bash
-git clone https://github.com/kruxia/kruxiaflow.git
-cd kruxiaflow
-./docker up --examples
-
-# Wait for "listening on 0.0.0.0:8080" then verify in another terminal:
-./docker exec kruxiaflow /kruxiaflow health
+curl -fsSL https://kruxiaflow.com/quickstart/docker-compose.yml -o docker-compose.yml
+ANTHROPIC_API_KEY=your-key-here docker compose up -d
 ```
 
-That's it. Kruxia Flow is running with PostgreSQL and Redis, ready to execute workflows.
-
-### 2. Get an Access Token
-
-Kruxia Flow always runs with OAuth2 security, so you'll need client authentication to
-run workflows. The simplest approach for local running is to use the generated client
-credentials to get an access token:
+That's it — Kruxia Flow is running locally in insecure dev mode (no tokens needed; local
+evaluation only). `OPENAI_API_KEY`, `GOOGLE_API_KEY`, and `OLLAMA_BASE_URL` work the
+same way.
 
 ```bash
-# Read the generated client secret from .env
-CLIENT_SECRET=$(grep KRUXIAFLOW_CLIENT_SECRET .env | cut -d= -f2)
-
-TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/oauth/token \
-  -d "grant_type=client_credentials" \
-  -d "client_id=kruxiaflow-docker-client" \
-  -d "client_secret=$CLIENT_SECRET" | jq -r '.access_token')
+# Verify it's up
+curl -s http://localhost:8080/health
 ```
 
-### 3. Run a Budgeted Workflow
+### 2. Run a Budgeted Workflow
 
-Set your provider API key and start the server (skip the key to use only non-LLM examples):
-
-```bash
-# Set your Anthropic API key (add to ~/.bashrc or ~/.zshrc to persist)
-export ANTHROPIC_API_KEY=your-key-here
-
-# Restart the server to pick up the new key
-./docker down && ./docker up -d
-```
-
-Deploy and run the content moderation example — an LLM workflow with cost tracking:
+Deploy a workflow with a **hard budget** — the engine estimates each LLM call
+against published pricing and refuses to exceed the limit:
 
 ```bash
-# Deploy the workflow definition
 curl -s -X POST http://localhost:8080/api/v1/workflow_definitions \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: text/yaml" \
-  --data-binary @examples/04-moderate-content.yaml | jq .
-
-# Submit a workflow instance
-WORKFLOW_ID=$(curl -s -X POST http://localhost:8080/api/v1/workflows \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "definition_name": "moderate_content",
-    "input": {
-      "user_content": "Check out this amazing project!",
-      "content_id": "test-001"
-    }
-  }' | jq .workflow_id | tr -d '"'); echo $WORKFLOW_ID
+  -H "Content-Type: text/yaml" --data-binary @- <<'YAML'
+name: quickstart_research
+activities:
+  - key: research
+    worker: std
+    activity_name: llm_prompt
+    parameters:
+      model:
+        - anthropic/claude-sonnet-5      # preferred
+        - openai/gpt-5.4-mini            # if budget is tight
+      prompt: "In three concise bullet points: {{INPUT.topic}}"
+      max_tokens: 500
+    settings:
+      budget:
+        limit_usd: 0.25
+        action: abort
+YAML
 ```
 
-### 4. See What It Cost
+Submit it:
 
 ```bash
-# Workflow status and result
-curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID \
-  -H "Authorization: Bearer $TOKEN" | jq .
-
-# Cost summary for the workflow
-curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/cost \
-  -H "Authorization: Bearer $TOKEN" | jq .
-
-# Token-level cost breakdown per activity
-curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/cost/history \
-  -H "Authorization: Bearer $TOKEN" | jq .
+WORKFLOW_ID=$(curl -s -X POST http://localhost:8080/api/v1/workflows \
+  -H "Content-Type: application/json" \
+  -d '{"definition_name": "quickstart_research",
+       "input": {"topic": "why do LLM agent costs spiral?"}}' \
+  | jq -r .workflow_id); echo $WORKFLOW_ID
 ```
 
-Prefer a non-LLM first run? Deploy `examples/01-weather-report.yaml` the same way — it
-fetches a forecast and POSTs it to a webhook, no API key needed.
+### 3. See What It Cost
 
-See `examples/` for 15+ example workflows covering parallel execution, model fallback,
-caching, loops, scheduling, and RAG patterns. API docs at
-http://localhost:8080/api/v1/docs.
+```bash
+# Status and result
+curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID | jq .
+
+# Cost summary — the payoff of that budget line
+curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/cost | jq .
+
+# Token-level breakdown per activity (provider/model actually used, cached tokens)
+curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/cost/history | jq .
+```
+
+Using Ollama instead? Point `OLLAMA_BASE_URL` at your Ollama server (from Docker:
+`http://host.docker.internal:11434`) and use an `ollama/...` model id from
+[config/llm_models.yaml](config/llm_models.yaml) — the whole pipeline runs locally.
+
+For the full tour — 15+ examples covering parallel execution, model fallback,
+caching, loops, scheduling, and RAG — clone the repo and run `./docker up --examples`
+(see [Development](#development)). API docs at http://localhost:8080/api/v1/docs.
+
+> **Before deploying anywhere real**: remove the two `KRUXIAFLOW_INSECURE_DEV*`
+> variables from the compose file. Without them, Kruxia Flow requires OAuth2 on
+> every request — that's the production default.
 
 ## Key Features
 
@@ -157,7 +151,7 @@ activities:
   - key: analyze
     activity_name: llm_prompt
     parameters:
-      model: anthropic/claude-sonnet-4-5-20250929
+      model: anthropic/claude-sonnet-5
       prompt: "Analyze this document..."
       max_tokens: 500
     settings:
@@ -178,9 +172,9 @@ activities:
     activity_name: llm_prompt
     parameters:
       model:
-        - anthropic/claude-sonnet-4-5-20250929  # Try first
-        - openai/gpt-4o-mini                    # If budget constrained
-        - anthropic/claude-haiku-4-20250415     # Last resort
+        - anthropic/claude-sonnet-5    # Try first
+        - openai/gpt-5.4-mini          # If budget constrained
+        - anthropic/claude-haiku-4-5   # Last resort
       prompt: "Generate a summary..."
       max_tokens: 500
     settings:
@@ -217,7 +211,7 @@ activities:
   - key: answer
     activity_name: llm_prompt
     parameters:
-      model: anthropic/claude-haiku-4-20250415
+      model: anthropic/claude-haiku-4-5
       prompt: "{{INPUT.question}}"
       max_tokens: 200
     settings:
@@ -242,9 +236,9 @@ run, including costs and approvals, is queryable after the fact.
 
 Native support for all major providers:
 
-- **Anthropic**: Claude 4.5 Sonnet, Claude 4.5 Haiku
-- **OpenAI**: GPT-5.1, GPT-4o, GPT-4o-mini, GPT-3.5 Turbo
-- **Google**: Gemini Pro, Gemini Flash
+- **Anthropic**: Claude Fable 5, Claude Opus 4.8, Claude Sonnet 5, Claude Haiku 4.5
+- **OpenAI**: GPT-5.6, GPT-5.5, and GPT-5.4 families
+- **Google**: Gemini 3.5 Flash, Gemini 3.1 Pro, Gemini 2.5 family
 - **Ollama**: Self-hosted open models — run the whole pipeline, models included, on your own hardware
 
 ## Examples

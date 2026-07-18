@@ -38,7 +38,7 @@ description: Ask LLM question with automatic model fallback and budget-aware pro
 # 2. anthropic/claude-sonnet-4-5-20250929 ($3/$15 per M tokens):
 #    Estimated cost: ~$0.0153 → SKIPPED (exceeds $0.01 budget)
 #
-# 3. google/gemini-2.0-flash-lite ($0.075/$0.30 per M tokens):
+# 3. google/gemini-2.5-flash-lite ($0.075/$0.30 per M tokens):
 #    Estimated cost: ~$0.0003 → USED (well under budget)
 #
 # The workflow will automatically skip expensive models and use the cheapest
@@ -55,7 +55,7 @@ activities:
       model:
         - openai/o1-pro                          # Expensive: $150/$600 per M tokens (will be skipped)
         - anthropic/claude-sonnet-4-5-20250929   # Moderate: $3/$15 per M tokens (may be skipped)
-        - google/gemini-2.0-flash-lite           # Very cheap: $0.075/$0.30 per M tokens (will be used)
+        - google/gemini-2.5-flash-lite           # Very cheap: $0.075/$0.30 per M tokens (will be used)
       prompt: "{{INPUT.question}}"
       max_tokens: 1000
     outputs:

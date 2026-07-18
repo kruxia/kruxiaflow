@@ -34,7 +34,7 @@ description: Ask LLM question with Google-only fallback chain (budget-aware)
 # 2. google/gemini-2.5-flash ($0.30/$2.50 per M tokens):
 #    Estimated cost: ~$0.00253 → USED (fits within budget)
 #
-# 3. google/gemini-2.0-flash-lite ($0.075/$0.30 per M tokens):
+# 3. google/gemini-2.5-flash-lite ($0.075/$0.30 per M tokens):
 #    Estimated cost: ~$0.0003075 → Backup (even cheaper)
 
 activities:
@@ -46,7 +46,7 @@ activities:
       model:
         - google/gemini-3-pro-preview   # Expensive: $2/$12 per M tokens (will be skipped)
         - google/gemini-2.5-flash        # Cheap: $0.30/$2.50 per M tokens (will be used)
-        - google/gemini-2.0-flash-lite   # Very cheap: $0.075/$0.30 per M tokens (backup)
+        - google/gemini-2.5-flash-lite   # Very cheap: $0.075/$0.30 per M tokens (backup)
       prompt: "{{INPUT.question}}"
       max_tokens: 1000
     outputs:

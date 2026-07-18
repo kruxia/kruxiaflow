@@ -61,7 +61,7 @@ activities:
       model:
         - anthropic/claude-haiku-4-5-20251001
         - openai/gpt-4o-mini
-        - google/gemini-1.5-flash
+        - google/gemini-2.5-flash
       prompt: |
         Write a short story about {{INPUT.topic}} in approximately 200 words.
         Use vivid descriptions and engaging narrative.

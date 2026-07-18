@@ -1,9 +1,12 @@
-# LLM Model Catalog - Pricing as of November 2025
+# LLM Model Catalog - Pricing as of July 2026
 # Sources:
-# - OpenAI: https://openai.com/api/pricing/
-# - Anthropic: https://claude.com/pricing
-# - Google: https://ai.google.dev/pricing
+# - OpenAI: https://developers.openai.com/api/docs/pricing
+# - Anthropic: https://platform.claude.com/docs/en/about-claude/pricing
+# - Google: https://ai.google.dev/gemini-api/docs/pricing
 # - Ollama: Self-hosted (free)
+#
+# NOTE (Sonnet 5): introductory pricing is encoded below through 2026-08-31.
+# On 2026-09-01 update claude-sonnet-5 to input 3.00 / output 15.00 / cached 0.30.
 
 providers:
   # OpenAI Provider
@@ -15,7 +18,72 @@ providers:
     supports_streaming: true
     requires_api_key: true
     models:
-      # GPT-5.1 models (November 2025)
+      # GPT-5.6 models (current flagship family)
+      - name: gpt-5.6-sol
+        display_name: GPT-5.6 Sol
+        input_price_per_million: 5.00
+        output_price_per_million: 30.00
+        cached_input_price_per_million: 0.50
+        supports_completion: true
+        context_window: 400000
+        max_output_tokens: 128000
+
+      - name: gpt-5.6-terra
+        display_name: GPT-5.6 Terra
+        input_price_per_million: 2.50
+        output_price_per_million: 15.00
+        cached_input_price_per_million: 0.25
+        supports_completion: true
+        context_window: 400000
+        max_output_tokens: 128000
+
+      - name: gpt-5.6-luna
+        display_name: GPT-5.6 Luna
+        input_price_per_million: 1.00
+        output_price_per_million: 6.00
+        cached_input_price_per_million: 0.10
+        supports_completion: true
+        context_window: 400000
+        max_output_tokens: 128000
+
+      # GPT-5.5 / GPT-5.4 models
+      - name: gpt-5.5
+        display_name: GPT-5.5
+        input_price_per_million: 5.00
+        output_price_per_million: 30.00
+        cached_input_price_per_million: 0.50
+        supports_completion: true
+        context_window: 400000
+        max_output_tokens: 128000
+
+      - name: gpt-5.4
+        display_name: GPT-5.4
+        input_price_per_million: 2.50
+        output_price_per_million: 15.00
+        cached_input_price_per_million: 0.25
+        supports_completion: true
+        context_window: 400000
+        max_output_tokens: 128000
+
+      - name: gpt-5.4-mini
+        display_name: GPT-5.4 Mini
+        input_price_per_million: 0.75
+        output_price_per_million: 4.50
+        cached_input_price_per_million: 0.075
+        supports_completion: true
+        context_window: 400000
+        max_output_tokens: 128000
+
+      - name: gpt-5.4-nano
+        display_name: GPT-5.4 Nano
+        input_price_per_million: 0.20
+        output_price_per_million: 1.25
+        cached_input_price_per_million: 0.02
+        supports_completion: true
+        context_window: 400000
+        max_output_tokens: 128000
+
+      # GPT-5.1 / GPT-5 models (legacy)
       - name: gpt-5.1
         display_name: GPT-5.1 Thinking
         input_price_per_million: 1.25
@@ -24,19 +92,8 @@ providers:
         supports_completion: true
         context_window: 400000
         max_output_tokens: 128000
-        notes: "Adaptive reasoning with deeper thinking mode"
+        notes: "Legacy (Nov 2025 generation)"
 
-      - name: gpt-5.1-chat-latest
-        display_name: GPT-5.1 Instant
-        input_price_per_million: 1.25
-        output_price_per_million: 10.00
-        cached_input_price_per_million: 0.125
-        supports_completion: true
-        context_window: 400000
-        max_output_tokens: 128000
-        notes: "Adaptive reasoning, faster/warmer default experience"
-
-      # GPT-5 models (August 2025)
       - name: gpt-5
         display_name: GPT-5
         input_price_per_million: 1.25
@@ -45,6 +102,7 @@ providers:
         supports_completion: true
         context_window: 400000
         max_output_tokens: 128000
+        notes: "Legacy (Aug 2025 generation)"
 
       - name: gpt-5-mini
         display_name: GPT-5 Mini
@@ -54,24 +112,7 @@ providers:
         supports_completion: true
         context_window: 400000
         max_output_tokens: 128000
-
-      - name: gpt-5-nano
-        display_name: GPT-5 Nano
-        input_price_per_million: 0.05
-        output_price_per_million: 0.40
-        cached_input_price_per_million: 0.005
-        supports_completion: true
-        context_window: 400000
-        max_output_tokens: 128000
-
-      - name: gpt-5-pro
-        display_name: GPT-5 Pro
-        input_price_per_million: 15.00
-        output_price_per_million: 120.00
-        cached_input_price_per_million: 1.50
-        supports_completion: true
-        context_window: 400000
-        max_output_tokens: 128000
+        notes: "Legacy (Aug 2025 generation)"
 
       # GPT-4o models (legacy)
       - name: gpt-4o
@@ -82,6 +123,7 @@ providers:
         supports_completion: true
         context_window: 128000
         max_output_tokens: 16384
+        notes: "Legacy"
 
       - name: gpt-4o-mini
         display_name: GPT-4o Mini
@@ -91,48 +133,7 @@ providers:
         supports_completion: true
         context_window: 128000
         max_output_tokens: 16384
-
-      # o1 models (reasoning)
-      - name: o1
-        display_name: o1
-        input_price_per_million: 15.00
-        output_price_per_million: 60.00
-        supports_completion: true
-        context_window: 200000
-        max_output_tokens: 100000
-
-      - name: o1-mini
-        display_name: o1 Mini
-        input_price_per_million: 3.00
-        output_price_per_million: 12.00
-        supports_completion: true
-        context_window: 128000
-        max_output_tokens: 65536
-
-      - name: o1-pro
-        display_name: o1 Pro
-        input_price_per_million: 150.00
-        output_price_per_million: 600.00
-        supports_completion: true
-        context_window: 200000
-        max_output_tokens: 100000
-
-      # o3/o4 models (next-gen reasoning)
-      - name: o3-mini
-        display_name: o3 Mini
-        input_price_per_million: 1.00
-        output_price_per_million: 4.00
-        supports_completion: true
-        context_window: 200000
-        max_output_tokens: 100000
-
-      - name: o4-mini
-        display_name: o4 Mini
-        input_price_per_million: 1.10
-        output_price_per_million: 4.40
-        supports_completion: true
-        context_window: 128000
-        max_output_tokens: 100000
+        notes: "Legacy"
 
       # Embeddings
       - name: text-embedding-3-small
@@ -160,42 +161,74 @@ providers:
     supports_streaming: true
     requires_api_key: true
     models:
-      # Claude 4.6 (latest; priced identically to 4.5)
-      - name: claude-opus-4-6
-        display_name: Claude 4.6 Opus
+      # Claude 5 family (current)
+      - name: claude-fable-5
+        display_name: Claude Fable 5
+        input_price_per_million: 10.00
+        output_price_per_million: 50.00
+        cached_input_price_per_million: 1.00
+        supports_completion: true
+        context_window: 1000000
+        max_output_tokens: 128000
+        notes: "Most capable model; full 1M context at standard pricing; requires 30-day data retention"
+
+      - name: claude-sonnet-5
+        display_name: Claude Sonnet 5
+        input_price_per_million: 2.00
+        output_price_per_million: 10.00
+        cached_input_price_per_million: 0.20
+        supports_completion: true
+        context_window: 1000000
+        max_output_tokens: 128000
+        notes: "Introductory pricing through 2026-08-31; from 2026-09-01: $3 input, $15 output, $0.30 cached. Full 1M context at standard pricing"
+
+      # Claude Opus 4.x (current)
+      - name: claude-opus-4-8
+        display_name: Claude Opus 4.8
         input_price_per_million: 5.00
         output_price_per_million: 25.00
         cached_input_price_per_million: 0.50
         supports_completion: true
-        context_window: 200000
-        max_output_tokens: 64000
-        notes: "Pricing increases for >200K tokens"
+        context_window: 1000000
+        max_output_tokens: 128000
+        notes: "Full 1M context at standard pricing (no long-context premium)"
+
+      - name: claude-opus-4-7
+        display_name: Claude Opus 4.7
+        input_price_per_million: 5.00
+        output_price_per_million: 25.00
+        cached_input_price_per_million: 0.50
+        supports_completion: true
+        context_window: 1000000
+        max_output_tokens: 128000
+        notes: "Full 1M context at standard pricing (no long-context premium)"
+
+      - name: claude-opus-4-6
+        display_name: Claude Opus 4.6
+        input_price_per_million: 5.00
+        output_price_per_million: 25.00
+        cached_input_price_per_million: 0.50
+        supports_completion: true
+        context_window: 1000000
+        max_output_tokens: 128000
+        notes: "Full 1M context at standard pricing (no long-context premium)"
 
       - name: claude-sonnet-4-6
-        display_name: Claude 4.6 Sonnet
+        display_name: Claude Sonnet 4.6
         input_price_per_million: 3.00
         output_price_per_million: 15.00
         cached_input_price_per_million: 0.30
         supports_completion: true
-        context_window: 200000
-        max_output_tokens: 8192
-        notes: "Pricing increases for >200K tokens: $6 input, $22.50 output, $0.60 cached"
-
-      - name: claude-haiku-4-6
-        display_name: Claude 4.6 Haiku
-        input_price_per_million: 1.00
-        output_price_per_million: 5.00
-        cached_input_price_per_million: 0.10
-        supports_completion: true
-        context_window: 200000
-        max_output_tokens: 8192
+        context_window: 1000000
+        max_output_tokens: 128000
+        notes: "Full 1M context at standard pricing (no long-context premium)"
 
       # Claude 4.5 — dated names plus unversioned aliases. The unversioned
       # form (claude-sonnet-4-5, etc.) is what Anthropic exposes as the
       # latest-pointing alias and what most workflow YAMLs reference; the
       # catalog needs both so cost tracking resolves either form.
       - name: claude-opus-4-5
-        display_name: Claude 4.5 Opus
+        display_name: Claude Opus 4.5
         input_price_per_million: 5.00
         output_price_per_million: 25.00
         cached_input_price_per_million: 0.50
@@ -205,93 +238,72 @@ providers:
         notes: "Unversioned alias for claude-opus-4-5-20251101"
 
       - name: claude-opus-4-5-20251101
-        display_name: Claude 4.5 Opus
+        display_name: Claude Opus 4.5
         input_price_per_million: 5.00
         output_price_per_million: 25.00
         cached_input_price_per_million: 0.50
         supports_completion: true
         context_window: 200000
         max_output_tokens: 64000
-        notes: "Pricing increases for >200K tokens"
 
       - name: claude-sonnet-4-5
-        display_name: Claude 4.5 Sonnet
+        display_name: Claude Sonnet 4.5
         input_price_per_million: 3.00
         output_price_per_million: 15.00
         cached_input_price_per_million: 0.30
         supports_completion: true
         context_window: 200000
-        max_output_tokens: 8192
+        max_output_tokens: 64000
         notes: "Unversioned alias for claude-sonnet-4-5-20250929"
 
       - name: claude-sonnet-4-5-20250929
-        display_name: Claude 4.5 Sonnet
+        display_name: Claude Sonnet 4.5
         input_price_per_million: 3.00
         output_price_per_million: 15.00
         cached_input_price_per_million: 0.30
         supports_completion: true
         context_window: 200000
-        max_output_tokens: 8192
-        notes: "Pricing increases for >200K tokens: $6 input, $22.50 output, $0.60 cached"
+        max_output_tokens: 64000
 
       - name: claude-haiku-4-5
-        display_name: Claude 4.5 Haiku
+        display_name: Claude Haiku 4.5
         input_price_per_million: 1.00
         output_price_per_million: 5.00
         cached_input_price_per_million: 0.10
         supports_completion: true
         context_window: 200000
-        max_output_tokens: 8192
+        max_output_tokens: 64000
         notes: "Unversioned alias for claude-haiku-4-5-20251001"
 
       - name: claude-haiku-4-5-20251001
-        display_name: Claude 4.5 Haiku
+        display_name: Claude Haiku 4.5
         input_price_per_million: 1.00
         output_price_per_million: 5.00
         cached_input_price_per_million: 0.10
         supports_completion: true
         context_window: 200000
-        max_output_tokens: 8192
+        max_output_tokens: 64000
 
-      # Claude 4.1 Opus
-      - name: claude-opus-4-1-20250514
-        display_name: Claude 4.1 Opus
+      # Claude Opus 4.1 (deprecated — retires 2026-08-05)
+      - name: claude-opus-4-1
+        display_name: Claude Opus 4.1
         input_price_per_million: 15.00
         output_price_per_million: 75.00
         cached_input_price_per_million: 1.50
         supports_completion: true
         context_window: 200000
-        max_output_tokens: 8192
+        max_output_tokens: 32000
+        notes: "Deprecated; retires 2026-08-05. Unversioned alias for claude-opus-4-1-20250805"
 
-      # Legacy: Claude 3.5 Sonnet
-      - name: claude-3-5-sonnet-20241022
-        display_name: Claude 3.5 Sonnet (Oct 2024)
-        input_price_per_million: 3.00
-        output_price_per_million: 15.00
-        cached_input_price_per_million: 0.30
-        supports_completion: true
-        context_window: 200000
-        max_output_tokens: 8192
-
-      # Legacy: Claude 3.5 Haiku
-      - name: claude-3-5-haiku-20241022
-        display_name: Claude 3.5 Haiku
-        input_price_per_million: 0.80
-        output_price_per_million: 4.00
-        cached_input_price_per_million: 0.08
-        supports_completion: true
-        context_window: 200000
-        max_output_tokens: 8192
-
-      # Legacy: Claude 3 Opus
-      - name: claude-3-opus-20240229
-        display_name: Claude 3 Opus
+      - name: claude-opus-4-1-20250805
+        display_name: Claude Opus 4.1
         input_price_per_million: 15.00
         output_price_per_million: 75.00
         cached_input_price_per_million: 1.50
         supports_completion: true
         context_window: 200000
-        max_output_tokens: 4096
+        max_output_tokens: 32000
+        notes: "Deprecated; retires 2026-08-05"
 
   # Google Provider
   - name: google
@@ -302,16 +314,33 @@ providers:
     supports_streaming: true
     requires_api_key: true
     models:
-      # Gemini 3 models
-      - name: gemini-3-pro-preview
-        display_name: Gemini 3 Pro Preview
+      # Gemini 3.5 / 3.1 models (current)
+      - name: gemini-3.5-flash
+        display_name: Gemini 3.5 Flash
+        input_price_per_million: 1.50
+        output_price_per_million: 9.00
+        cached_input_price_per_million: 0.15
+        supports_completion: true
+        context_window: 1000000
+        max_output_tokens: 65536
+
+      - name: gemini-3.1-pro-preview
+        display_name: Gemini 3.1 Pro Preview
         input_price_per_million: 2.00
         output_price_per_million: 12.00
         cached_input_price_per_million: 0.20
         supports_completion: true
         context_window: 1000000
-        max_output_tokens: 8192
+        max_output_tokens: 65536
         notes: "Pricing increases for >200K tokens: $4 input, $18 output, $0.40 cached"
+
+      - name: gemini-3.1-flash-lite
+        display_name: Gemini 3.1 Flash-Lite
+        input_price_per_million: 0.25
+        output_price_per_million: 1.50
+        supports_completion: true
+        context_window: 1000000
+        max_output_tokens: 65536
 
       # Gemini 2.5 models
       - name: gemini-2.5-pro
@@ -320,9 +349,9 @@ providers:
         output_price_per_million: 10.00
         cached_input_price_per_million: 0.125
         supports_completion: true
-        context_window: 2000000
-        max_output_tokens: 8192
-        notes: "Pricing increases for >200K tokens: $2.50 input, $15 output, $0.25 cached"
+        context_window: 1000000
+        max_output_tokens: 65536
+        notes: "Pricing increases for >200K tokens: $2.50 input, $15 output"
 
       - name: gemini-2.5-flash
         display_name: Gemini 2.5 Flash
@@ -331,66 +360,29 @@ providers:
         cached_input_price_per_million: 0.03
         supports_completion: true
         context_window: 1000000
-        max_output_tokens: 8192
+        max_output_tokens: 65536
 
       - name: gemini-2.5-flash-lite
-        display_name: Gemini 2.5 Flash Lite
+        display_name: Gemini 2.5 Flash-Lite
         input_price_per_million: 0.10
         output_price_per_million: 0.40
         cached_input_price_per_million: 0.01
         supports_completion: true
         context_window: 1000000
-        max_output_tokens: 8192
-
-      # Gemini 2.0 models
-      - name: gemini-2.0-flash
-        display_name: Gemini 2.0 Flash
-        input_price_per_million: 0.10
-        output_price_per_million: 0.40
-        cached_input_price_per_million: 0.025
-        supports_completion: true
-        context_window: 1000000
-        max_output_tokens: 8192
-
-      - name: gemini-2.0-flash-lite
-        display_name: Gemini 2.0 Flash Lite
-        input_price_per_million: 0.075
-        output_price_per_million: 0.30
-        supports_completion: true
-        context_window: 1000000
-        max_output_tokens: 8192
-
-      # Gemini 1.5 models (legacy)
-      - name: gemini-1.5-pro
-        display_name: Gemini 1.5 Pro
-        input_price_per_million: 1.25
-        output_price_per_million: 5.00
-        cached_input_price_per_million: 0.3125
-        supports_completion: true
-        context_window: 2000000
-        max_output_tokens: 8192
-
-      - name: gemini-1.5-flash
-        display_name: Gemini 1.5 Flash
-        input_price_per_million: 0.075
-        output_price_per_million: 0.30
-        cached_input_price_per_million: 0.01875
-        supports_completion: true
-        context_window: 1000000
-        max_output_tokens: 8192
+        max_output_tokens: 65536
 
       # Embeddings
-      - name: gemini-embedding-001
-        display_name: Gemini Embedding 001
-        input_price_per_million: 0.150
+      - name: gemini-embedding-2
+        display_name: Gemini Embedding 2
+        input_price_per_million: 0.20
         output_price_per_million: 0.000
         supports_completion: false
         supports_embeddings: true
         context_window: 2048
 
-      - name: text-embedding-004
-        display_name: Text Embedding 004
-        input_price_per_million: 0.00001
+      - name: gemini-embedding-001
+        display_name: Gemini Embedding 001
+        input_price_per_million: 0.150
         output_price_per_million: 0.000
         supports_completion: false
         supports_embeddings: true

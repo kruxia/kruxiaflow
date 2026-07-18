@@ -1,0 +1,110 @@
+# Kruxia Flow Quickstart — budgeted workflows in one command.
+#
+#   curl -fsSL https://kruxiaflow.com/quickstart/docker-compose.yml -o docker-compose.yml
+#   ANTHROPIC_API_KEY=sk-... docker compose up -d
+#
+# Then submit your first budgeted workflow — no tokens, no auth setup:
+# see https://github.com/kruxia/kruxiaflow#getting-started
+#
+# What this runs: Kruxia Flow (API + orchestrator + worker) and PostgreSQL.
+# Two one-shot init containers generate a local RSA keypair (for the OAuth
+# endpoints) and fetch the LLM pricing catalog (for budget enforcement).
+#
+# SECURITY: this compose runs with KRUXIAFLOW_INSECURE_DEV — unauthenticated
+# requests are accepted. It is for LOCAL EVALUATION ONLY. The API port is
+# published to 127.0.0.1 so nothing is reachable from your network. Before
+# deploying anywhere real: remove the two INSECURE_DEV variables and see
+# https://github.com/kruxia/kruxiaflow for production configuration.
+#
+# LLM provider (pick any, or none):
+#   ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY — passed through below
+#   OLLAMA_BASE_URL — for fully local models, e.g. http://host.docker.internal:11434
+
+services:
+  # One-shot: generate a local RSA keypair for JWT signing (kept in a volume;
+  # regenerated only if missing). Uses the postgres image so nothing extra
+  # is pulled.
+  keygen:
+    image: postgres:17-bookworm
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ ! -f /keys/private.pem ]; then
+          openssl genrsa -out /keys/private.pem 2048 &&
+          openssl rsa -in /keys/private.pem -pubout -out /keys/public.pem &&
+          echo "Generated local dev keypair"
+        else
+          echo "Keypair exists"
+        fi
+    volumes:
+      - quickstart-keys:/keys
+
+  # One-shot: fetch the LLM pricing catalog (used for cost estimation and
+  # budget enforcement).
+  catalog:
+    image: curlimages/curl:latest
+    command:
+      [
+        "-fsSL",
+        "https://raw.githubusercontent.com/kruxia/kruxiaflow/main/config/llm_models.yaml",
+        "-o",
+        "/config/llm_models.yaml",
+      ]
+    volumes:
+      - quickstart-config:/config
+
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: kruxiaflow
+      POSTGRES_PASSWORD: kruxiaflow-quickstart
+      POSTGRES_DB: kruxiaflow
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kruxiaflow"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - quickstart-pgdata:/var/lib/postgresql/data
+
+  kruxiaflow:
+    image: kruxia/kruxiaflow:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keygen:
+        condition: service_completed_successfully
+      catalog:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://kruxiaflow:kruxiaflow-quickstart@postgres:5432/kruxiaflow
+
+      # Local-only OAuth material. The keypair is generated above; the client
+      # secret is a fixed dev value (auth is optional in insecure dev mode,
+      # and this server is only reachable from your own machine).
+      KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM_FILE: /keys/private.pem
+      KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM_FILE: /keys/public.pem
+      KRUXIAFLOW_CLIENT_ID: kruxiaflow-quickstart
+      KRUXIAFLOW_CLIENT_SECRET: quickstart-local-dev-secret
+
+      # INSECURE DEV MODE — local evaluation only. The container binds
+      # 0.0.0.0 internally (hence ALLOW_NONLOOPBACK); the port mapping below
+      # publishes it to 127.0.0.1 only.
+      KRUXIAFLOW_INSECURE_DEV: "true"
+      KRUXIAFLOW_INSECURE_DEV_ALLOW_NONLOOPBACK: "true"
+
+      # LLM providers (set any of these in your shell before `up`)
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+    volumes:
+      - quickstart-keys:/keys:ro
+      - quickstart-config:/config:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+
+volumes:
+  quickstart-keys:
+  quickstart-config:
+  quickstart-pgdata:

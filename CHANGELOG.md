@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **LLM model catalog refreshed to July 2026** (`config/llm_models.yaml`),
+  verified against provider pricing pages. Added: Claude Fable 5, Opus 4.8/4.7,
+  Sonnet 5 (introductory pricing through 2026-08-31 — bump to $3/$15 on
+  2026-09-01), GPT-5.6/5.5/5.4 families, Gemini 3.5/3.1. Corrected: removed
+  nonexistent `claude-haiku-4-6` and wrong Opus 4.1 ID; 4.6+ Claude models now
+  show 1M context/128K output with no long-context premium; removed retired
+  models (Claude 3.x, Gemini 2.0/1.5 — Gemini 2.0 shut down 2026-06-01).
+  Examples, README, and landing updated off dead model IDs (including the
+  never-valid `claude-haiku-4-20250415`).
+
 - Docker builds broke when unpinned `cargo install sqlx-cli` began resolving
   to 0.9.0, which requires a newer rustc than the pinned base image. sqlx-cli
   is now pinned to 0.8.6 (matching the workspace's sqlx) and the base images
@@ -45,6 +55,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Startup refuses non-loopback binds without a second explicit override, warns
   loudly, and surfaces the flag in `/health` and `/api/v1/info`. Production
   behavior with the flag absent is unchanged.
+- **Quickstart** (`quickstart/docker-compose.yml`, published at
+  kruxiaflow.com/quickstart/): one curl + `docker compose up` runs Kruxia Flow
+  + PostgreSQL in insecure dev mode on 127.0.0.1, with generated local keys
+  and the LLM pricing catalog seeded — first budgeted workflow with zero auth
+  steps. README Getting Started rewritten around this flow.
 - Release CI (`.github/workflows/release.yml`): tagged releases build binaries
   (x86_64-linux-gnu, aarch64-linux-gnu, aarch64-macos) with SHA-256 checksums,
   publish multi-arch Docker images (`kruxia/kruxiaflow`), and create a GitHub
