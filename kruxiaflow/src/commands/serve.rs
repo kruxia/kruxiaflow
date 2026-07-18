@@ -215,6 +215,33 @@ workers (e.g. Python SDK workers) handle activity execution.\n\n\
 Example: kruxiaflow serve --no-worker"
     )]
     pub no_worker: bool,
+
+    /// INSECURE: accept unauthenticated requests (local development only)
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_INSECURE_DEV",
+        help = "INSECURE: accept unauthenticated requests as a synthetic dev principal (local development only)",
+        long_help = "INSECURE DEV MODE — local development and evaluation only.\n\
+Unauthenticated requests are accepted and execute as a synthetic dev\n\
+principal (subject: insecure-dev). Requests presenting a Bearer token are\n\
+still validated normally. Startup fails on non-loopback bind addresses\n\
+unless --insecure-dev-allow-nonloopback is also set.\n\n\
+Example: kruxiaflow serve --insecure-dev --bind 127.0.0.1"
+    )]
+    pub insecure_dev: bool,
+
+    /// Allow insecure dev mode on a non-loopback bind address
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_INSECURE_DEV_ALLOW_NONLOOPBACK",
+        help = "Allow --insecure-dev with a non-loopback bind (containers; publish ports to 127.0.0.1 on the host)",
+        long_help = "Second explicit opt-in required to combine --insecure-dev with a\n\
+non-loopback bind address. Container images bind 0.0.0.0 by design; when\n\
+using this in a compose file, publish the port bound to 127.0.0.1 on the\n\
+host (e.g. \"127.0.0.1:8080:8080\") so the server is not reachable from\n\
+the network."
+    )]
+    pub insecure_dev_allow_nonloopback: bool,
 }
 
 impl ServeCommand {
@@ -240,6 +267,19 @@ impl ServeCommand {
 
         if self.shutdown_timeout < 5 || self.shutdown_timeout > 300 {
             anyhow::bail!("Shutdown timeout must be between 5 and 300 seconds");
+        }
+
+        if self.insecure_dev
+            && !self.insecure_dev_allow_nonloopback
+            && !crate::config::is_loopback_bind(&self.bind)
+        {
+            anyhow::bail!(
+                "--insecure-dev requires a loopback bind address (got '{}').\n\
+                 Either bind to 127.0.0.1, or — for containers — also set\n\
+                 --insecure-dev-allow-nonloopback and publish the port bound to\n\
+                 127.0.0.1 on the host (e.g. \"127.0.0.1:8080:8080\").",
+                self.bind
+            );
         }
 
         Ok(())
@@ -517,6 +557,24 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     // Validate configuration
     cmd.validate()?;
 
+    if cmd.insecure_dev {
+        tracing::warn!(
+            "==============================================================="
+        );
+        tracing::warn!(
+            "INSECURE DEV MODE ENABLED — unauthenticated requests are"
+        );
+        tracing::warn!(
+            "accepted and execute as the synthetic 'insecure-dev' principal."
+        );
+        tracing::warn!(
+            "Local development only. NEVER enable this in production."
+        );
+        tracing::warn!(
+            "==============================================================="
+        );
+    }
+
     tracing::info!(
         port = cmd.port,
         bind = %cmd.bind,
@@ -592,7 +650,8 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         cache_service.clone(),
         subscription_service.clone(),
         shutdown_token.clone(),
-    );
+    )
+    .with_insecure_dev(cmd.insecure_dev);
 
     tracing::info!("Services initialized");
 
@@ -750,6 +809,8 @@ mod tests {
             db_connect_timeout: 60,
             activity_timeout: 300,
             no_worker: false,
+            insecure_dev: false,
+            insecure_dev_allow_nonloopback: false,
         }
     }
 
@@ -948,6 +1009,8 @@ mod tests {
             db_connect_timeout: 120,
             activity_timeout: 300,
             no_worker: false,
+            insecure_dev: false,
+            insecure_dev_allow_nonloopback: false,
         };
 
         assert!(cmd.validate().is_ok());

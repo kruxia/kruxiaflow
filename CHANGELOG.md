@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Insecure dev mode** (`--insecure-dev` / `KRUXIAFLOW_INSECURE_DEV`): local
+  development without the OAuth token dance. Unauthenticated requests execute
+  as a synthetic dev principal; presented tokens are still validated normally.
+  Startup refuses non-loopback binds without a second explicit override, warns
+  loudly, and surfaces the flag in `/health` and `/api/v1/info`. Production
+  behavior with the flag absent is unchanged.
 - Release CI (`.github/workflows/release.yml`): tagged releases build binaries
   (x86_64-linux-gnu, aarch64-linux-gnu, aarch64-macos) with SHA-256 checksums,
   publish multi-arch Docker images (`kruxia/kruxiaflow`), and create a GitHub

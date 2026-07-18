@@ -73,21 +73,16 @@ pub async fn workflow_events_ws_handler(
     Query(params): Query<WorkflowEventParams>,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
-    // Validate token
-    let token = params.token.ok_or_else(|| {
-        AppError::Unauthorized(
-            "Missing authentication token. Use ?token=<jwt> query parameter".to_string(),
-        )
+    // Authenticate (token optional in insecure dev mode)
+    let claims = crate::middleware::authenticate_optional_token(
+        &state,
+        params.token.as_deref(),
+        "Missing authentication token. Use ?token=<jwt> query parameter",
+    )
+    .await
+    .inspect_err(|_| {
+        tracing::warn!("WebSocket workflow events authentication failed");
     })?;
-
-    let claims = state
-        .auth_service
-        .validate_token(&token)
-        .await
-        .map_err(|e| {
-            tracing::warn!(error = %e, "WebSocket workflow events authentication failed");
-            AppError::Unauthorized(format!("Invalid token: {}", e))
-        })?;
 
     // Parse workflow_id comma-delimited string
     let workflow_ids: Vec<Uuid> = match &params.workflow_id {

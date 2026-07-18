@@ -76,6 +76,10 @@ pub struct AppState {
 
     /// Enabled features/capabilities
     pub features: Vec<String>,
+
+    /// Insecure dev mode: unauthenticated requests execute as a synthetic
+    /// dev principal. Local development only — never enabled by default.
+    pub insecure_dev: bool,
 }
 
 impl AppState {
@@ -134,7 +138,20 @@ impl AppState {
                 "workflow_events".to_string(),
                 "authentication".to_string(),
             ],
+            insecure_dev: false,
         }
+    }
+
+    /// Enable insecure dev mode: unauthenticated requests are accepted and
+    /// execute as a synthetic dev principal. Requests presenting a Bearer
+    /// token are still validated normally. The flag is surfaced in the
+    /// feature list so `/api/v1/info` and health output reflect it.
+    pub fn with_insecure_dev(mut self, enabled: bool) -> Self {
+        self.insecure_dev = enabled;
+        if enabled {
+            self.features.push("insecure-dev".to_string());
+        }
+        self
     }
 
     /// Create new application state with custom metadata
@@ -181,6 +198,7 @@ impl AppState {
             version,
             build,
             features,
+            insecure_dev: false,
         }
     }
 

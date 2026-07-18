@@ -1931,6 +1931,17 @@ pub struct TokenResponse {
 - **Custom (MVP)**: Direct JWT signing using configured private key, PostgreSQL for user storage
 - Built-in workers can use same authentication flow or bypass (direct internal access)
 
+**Insecure Dev Mode** (`KRUXIAFLOW_INSECURE_DEV` / `--insecure-dev`): a local-development
+escape hatch that removes the token requirement. All enforcement points (HTTP auth
+middleware and the WebSocket handlers) funnel through a single
+`authenticate_optional_token` seam: a presented Bearer token is always validated
+normally; an absent credential yields a synthetic dev principal (`sub: insecure-dev`)
+only when the flag is on, and a 401 otherwise. Guard rails: startup refuses non-loopback
+bind addresses unless `KRUXIAFLOW_INSECURE_DEV_ALLOW_NONLOOPBACK` is also set (container
+deployments must publish ports bound to `127.0.0.1` on the host), a prominent startup
+warning is logged, and the flag is surfaced in `GET /health` and `GET /api/v1/info`
+(`insecure_dev: true`). Production behavior with the flag absent is unchanged.
+
 Configuration:
 ```bash
 # MVP: Custom auth provider (PostgreSQL backend)
