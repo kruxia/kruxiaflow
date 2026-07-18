@@ -24,4 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (x86_64-linux-gnu, aarch64-linux-gnu, aarch64-macos) with SHA-256 checksums,
   publish multi-arch Docker images (`kruxia/kruxiaflow`), and create a GitHub
   Release. Fully static musl builds are deferred (musl does not currently build).
+- `scripts/sqlx-prepare.sh`: regenerates the sqlx offline cache for the whole
+  workspace including test targets, against a throwaway postgres — the `.sqlx`
+  cache now covers `--all-targets` as CI requires.
 - `NOTICE` file and `CHANGELOG.md` (this file).
