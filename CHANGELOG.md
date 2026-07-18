@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Docker builds broke when unpinned `cargo install sqlx-cli` began resolving
+  to 0.9.0, which requires a newer rustc than the pinned base image. sqlx-cli
+  is now pinned to 0.8.6 (matching the workspace's sqlx) and the base images
+  bumped from `rust:1.90-bookworm` to `rust:1.97-bookworm`.
+
 ### Changed
+
+- Release binaries now build with `--features redis-cache`, matching the
+  Docker image's feature set.
+- Releases are cut with `cargo release <version>` (config in `Cargo.toml`
+  under `[workspace.metadata.release]`); the release workflow's preflight job
+  fails fast if a tag doesn't match the workspace version.
+- CI caching: prebuilt tool binaries (cargo-llvm-cov, sqlx-cli, cross) instead
+  of source installs, cache-on-failure for cargo caches, Docker layer caching.
 
 - **License changed from AGPL-3.0 to Apache-2.0** (2026-07-15). All current and
   future releases are Apache-2.0; releases prior to this change remain AGPL-3.0.
