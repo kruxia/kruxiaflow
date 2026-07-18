@@ -7,6 +7,10 @@ pub struct LivenessResponse {
     /// Server liveness status (always "ok" if endpoint responds)
     #[schema(example = "ok")]
     pub status: &'static str,
+
+    /// Present (true) only when the server runs in insecure dev mode
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub insecure_dev: bool,
 }
 
 /// Individual health check status
@@ -57,6 +61,10 @@ pub struct ServiceInfo {
 
     /// Enabled features
     pub features: Vec<String>,
+
+    /// Present (true) only when the server runs in insecure dev mode
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub insecure_dev: bool,
 }
 
 /// Connection pool metrics response

@@ -121,6 +121,16 @@ impl Default for CacheConfig {
     }
 }
 
+/// True if the bind address is loopback (127.0.0.0/8, ::1, or "localhost")
+pub fn is_loopback_bind(bind: &str) -> bool {
+    if bind.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    bind.parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+}
+
 /// API Server configuration
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
@@ -132,6 +142,9 @@ pub struct ApiConfig {
 
     /// Address to bind to
     pub bind: String,
+
+    /// Insecure dev mode: accept unauthenticated requests (local dev only)
+    pub insecure_dev: bool,
 }
 
 impl ApiConfig {
@@ -140,6 +153,8 @@ impl ApiConfig {
         database_url_cli: Option<String>,
         port_cli: Option<u16>,
         bind_cli: Option<String>,
+        insecure_dev: bool,
+        insecure_dev_allow_nonloopback: bool,
     ) -> Result<Self> {
         // Database URL: Required
         let database_url = database_url_cli
@@ -165,10 +180,21 @@ impl ApiConfig {
             anyhow::bail!("Port must be between 1 and 65535");
         }
 
+        if insecure_dev && !insecure_dev_allow_nonloopback && !is_loopback_bind(&bind) {
+            anyhow::bail!(
+                "--insecure-dev requires a loopback bind address (got '{}').\n\
+                 Either bind to 127.0.0.1, or — for containers — also set\n\
+                 --insecure-dev-allow-nonloopback and publish the port bound to\n\
+                 127.0.0.1 on the host (e.g. \"127.0.0.1:8080:8080\").",
+                bind
+            );
+        }
+
         Ok(Self {
             database_url,
             port,
             bind,
+            insecure_dev,
         })
     }
 
@@ -343,6 +369,7 @@ mod tests {
             database_url: "postgres://user:secret123@localhost:5432/db".to_string(),
             port: 8080,
             bind: "0.0.0.0".to_string(),
+            insecure_dev: false,
         };
 
         let redacted = config.redact_database_url();
@@ -356,6 +383,7 @@ mod tests {
             database_url: "postgres://localhost/db".to_string(),
             port: 9090,
             bind: "127.0.0.1".to_string(),
+            insecure_dev: false,
         };
 
         assert_eq!(config.bind_address(), "127.0.0.1:9090");
@@ -369,7 +397,7 @@ mod tests {
             std::env::set_var("DATABASE_URL", "postgres://localhost/test");
         }
 
-        let config = ApiConfig::new(None, None, None).unwrap();
+        let config = ApiConfig::new(None, None, None, false, false).unwrap();
 
         assert_eq!(config.port, 8080);
         assert_eq!(config.bind, "0.0.0.0");
@@ -393,6 +421,8 @@ mod tests {
             Some("postgres://localhost/cli_db".to_string()),
             Some(8888),
             Some("192.168.1.1".to_string()),
+            false,
+            false,
         )
         .unwrap();
 
@@ -417,7 +447,7 @@ mod tests {
             std::env::set_var("KRUXIAFLOW_API_BIND", "localhost");
         }
 
-        let config = ApiConfig::new(None, None, None).unwrap();
+        let config = ApiConfig::new(None, None, None, false, false).unwrap();
 
         assert_eq!(config.port, 9000);
         assert_eq!(config.bind, "localhost");
@@ -437,7 +467,7 @@ mod tests {
             std::env::set_var("DATABASE_URL", "postgres://localhost/test");
         }
 
-        let result = ApiConfig::new(None, Some(0), None);
+        let result = ApiConfig::new(None, Some(0), None, false, false);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Port must be"));
 
@@ -453,7 +483,7 @@ mod tests {
             std::env::remove_var("DATABASE_URL");
         }
 
-        let result = ApiConfig::new(None, None, None);
+        let result = ApiConfig::new(None, None, None, false, false);
         assert!(result.is_err());
         assert!(
             result
@@ -470,6 +500,7 @@ mod tests {
             database_url: "postgres://localhost/testdb".to_string(),
             port: 8080,
             bind: "0.0.0.0".to_string(),
+            insecure_dev: false,
         };
 
         let redacted = config.redact_database_url();
@@ -485,6 +516,7 @@ mod tests {
             database_url: "postgres://user@localhost:5432/db".to_string(),
             port: 8080,
             bind: "0.0.0.0".to_string(),
+            insecure_dev: false,
         };
 
         let redacted = config.redact_database_url();
@@ -502,7 +534,7 @@ mod tests {
         }
 
         // Invalid port string should fall back to default
-        let config = ApiConfig::new(None, None, None).unwrap();
+        let config = ApiConfig::new(None, None, None, false, false).unwrap();
         assert_eq!(config.port, 8080); // Default port
 
         // Clean up
@@ -518,6 +550,7 @@ mod tests {
             database_url: "postgres://localhost/db".to_string(),
             port: 9090,
             bind: "127.0.0.1".to_string(),
+            insecure_dev: false,
         };
 
         let cloned = config.clone();
@@ -554,6 +587,7 @@ mod tests {
             database_url: "postgres://user:pass@localhost:5432/db".to_string(),
             port: 8080,
             bind: "0.0.0.0".to_string(),
+            insecure_dev: false,
         };
         // Should not panic
         config.log_config();
@@ -565,6 +599,7 @@ mod tests {
             database_url: "postgres://localhost/db".to_string(),
             port: 8080,
             bind: "0.0.0.0".to_string(),
+            insecure_dev: false,
         };
 
         let debug_str = format!("{:?}", config);

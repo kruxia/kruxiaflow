@@ -28,6 +28,50 @@ fn extract_bearer_token(request: &Request) -> Option<String> {
         })
 }
 
+/// The synthetic principal attached to unauthenticated requests when
+/// insecure dev mode is enabled. Never issued as a real token and cannot be
+/// minted via the OAuth endpoints; recognizable in logs by its subject.
+fn insecure_dev_claims() -> Claims {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    Claims {
+        sub: "insecure-dev".to_string(),
+        jti: uuid::Uuid::now_v7().to_string(),
+        iss: "kruxiaflow-insecure-dev".to_string(),
+        aud: "kruxiaflow-api".to_string(),
+        exp: now + 86_400,
+        iat: now,
+    }
+}
+
+/// Authenticate an optional credential — the single seam all enforcement
+/// points (HTTP middleware and WebSocket handlers) funnel through.
+///
+/// - Token present: validated normally via the `AuthenticationService`,
+///   regardless of dev mode (auth flows stay testable with the flag on).
+/// - Token absent + insecure dev mode: a synthetic dev principal is returned.
+/// - Token absent otherwise: 401 with the caller-provided guidance message.
+pub async fn authenticate_optional_token(
+    state: &AppState,
+    token: Option<&str>,
+    missing_credential_msg: &str,
+) -> Result<Claims, AppError> {
+    match token {
+        Some(token) => state
+            .auth_service
+            .validate_token(token)
+            .await
+            .map_err(|e| {
+                tracing::warn!("Token validation failed: {:?}", e);
+                AppError::Unauthorized(format!("Invalid token: {}", e))
+            }),
+        None if state.insecure_dev => Ok(insecure_dev_claims()),
+        None => Err(AppError::Unauthorized(missing_credential_msg.to_string())),
+    }
+}
+
 /// Authentication middleware
 ///
 /// Validates JWT Bearer token and stores claims in request extensions.
@@ -38,6 +82,8 @@ fn extract_bearer_token(request: &Request) -> Option<String> {
 /// - Checks token expiration
 /// - Stores validated claims in request extensions
 /// - Returns 401 Unauthorized for missing/invalid tokens
+/// - In insecure dev mode, requests without a token proceed as the
+///   synthetic dev principal (tokens, when present, are still validated)
 ///
 /// The middleware uses cached JWT signing keys loaded at server startup,
 /// ensuring validation overhead is <1ms per request.
@@ -46,23 +92,13 @@ pub async fn auth_middleware(
     mut request: Request,
     next: Next,
 ) -> Result<Response, AppError> {
-    // Extract Bearer token from Authorization header
-    let token = extract_bearer_token(&request).ok_or_else(|| {
-        AppError::Unauthorized(
-            "Missing or invalid Authorization header. Expected: Authorization: Bearer <token>"
-                .to_string(),
-        )
-    })?;
-
-    // Validate token using AuthenticationService
-    let claims = state
-        .auth_service
-        .validate_token(&token)
-        .await
-        .map_err(|e| {
-            tracing::warn!("Token validation failed: {:?}", e);
-            AppError::Unauthorized(format!("Invalid token: {}", e))
-        })?;
+    let token = extract_bearer_token(&request);
+    let claims = authenticate_optional_token(
+        &state,
+        token.as_deref(),
+        "Missing or invalid Authorization header. Expected: Authorization: Bearer <token>",
+    )
+    .await?;
 
     // Store validated claims in request extensions for handler access
     request.extensions_mut().insert(ValidatedClaims(claims));

@@ -38,14 +38,44 @@ Options:\n  \
 Example: --bind 127.0.0.1"
     )]
     bind: Option<String>,
+
+    /// INSECURE: accept unauthenticated requests (local development only)
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_INSECURE_DEV",
+        help = "INSECURE: accept unauthenticated requests as a synthetic dev principal (local development only)"
+    )]
+    insecure_dev: bool,
+
+    /// Allow insecure dev mode on a non-loopback bind address
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_INSECURE_DEV_ALLOW_NONLOOPBACK",
+        help = "Allow --insecure-dev with a non-loopback bind (containers; publish ports to 127.0.0.1 on the host)"
+    )]
+    insecure_dev_allow_nonloopback: bool,
 }
 
 pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Result<()> {
     // Build configuration from CLI args, env vars, and defaults
-    let config = ApiConfig::new(database_url_global, cmd.port, cmd.bind)?;
+    let config = ApiConfig::new(
+        database_url_global,
+        cmd.port,
+        cmd.bind,
+        cmd.insecure_dev,
+        cmd.insecure_dev_allow_nonloopback,
+    )?;
 
     // Log effective configuration (redacts secrets)
     config.log_config();
+
+    if config.insecure_dev {
+        tracing::warn!("===============================================================");
+        tracing::warn!("INSECURE DEV MODE ENABLED — unauthenticated requests are");
+        tracing::warn!("accepted and execute as the synthetic 'insecure-dev' principal.");
+        tracing::warn!("Local development only. NEVER enable this in production.");
+        tracing::warn!("===============================================================");
+    }
 
     // Initialize database connection pool
     tracing::info!("Connecting to database...");
@@ -133,7 +163,8 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
         cache_service,
         subscription_service,
         shutdown_token,
-    );
+    )
+    .with_insecure_dev(config.insecure_dev);
 
     // Spawn workflow event broadcast poller for WebSocket streaming
     tokio::spawn(kruxiaflow_api::workflow_events::run_event_broadcast_poller(
@@ -179,6 +210,8 @@ mod tests {
         let cmd = ApiCommand {
             port: Some(8080),
             bind: Some("127.0.0.1".to_string()),
+            insecure_dev: false,
+            insecure_dev_allow_nonloopback: false,
         };
         assert_eq!(cmd.port, Some(8080));
         assert_eq!(cmd.bind, Some("127.0.0.1".to_string()));
@@ -190,6 +223,8 @@ mod tests {
         let cmd = ApiCommand {
             port: None,
             bind: None,
+            insecure_dev: false,
+            insecure_dev_allow_nonloopback: false,
         };
         assert_eq!(cmd.port, None);
         assert_eq!(cmd.bind, None);
@@ -202,6 +237,8 @@ mod tests {
         let cmd = ApiCommand {
             port: Some(8080),
             bind: Some("127.0.0.1".to_string()),
+            insecure_dev: false,
+            insecure_dev_allow_nonloopback: false,
         };
 
         // Remove DATABASE_URL from environment
@@ -226,6 +263,8 @@ mod tests {
         let cmd = ApiCommand {
             port: Some(8080),
             bind: Some("127.0.0.1".to_string()),
+            insecure_dev: false,
+            insecure_dev_allow_nonloopback: false,
         };
 
         let result = execute(cmd, Some("invalid://url".to_string())).await;
@@ -255,6 +294,8 @@ mod tests {
         let cmd = ApiCommand {
             port: Some(8181), // Use different port to avoid conflicts
             bind: Some("127.0.0.1".to_string()),
+            insecure_dev: false,
+            insecure_dev_allow_nonloopback: false,
         };
 
         let result = execute(cmd, Some(database_url)).await;
@@ -287,6 +328,8 @@ mod tests {
         let cmd = ApiCommand {
             port: Some(8182),
             bind: Some("127.0.0.1".to_string()),
+            insecure_dev: false,
+            insecure_dev_allow_nonloopback: false,
         };
 
         let result = execute(cmd, Some(database_url)).await;
@@ -326,6 +369,8 @@ mod tests {
         let cmd = ApiCommand {
             port: Some(9999),
             bind: Some("256.256.256.256".to_string()), // Invalid IP to fail at bind
+            insecure_dev: false,
+            insecure_dev_allow_nonloopback: false,
         };
 
         let result = execute(cmd, Some(database_url)).await;
@@ -433,7 +478,7 @@ mod tests {
             std::env::remove_var("KRUXIAFLOW_API_BIND");
         }
 
-        let config = crate::config::ApiConfig::new(None, None, None).unwrap();
+        let config = crate::config::ApiConfig::new(None, None, None, false, false).unwrap();
         assert_eq!(config.port, 9090);
         assert_eq!(config.bind, "0.0.0.0"); // Default bind
 
@@ -452,7 +497,7 @@ mod tests {
             std::env::remove_var("KRUXIAFLOW_API_PORT");
         }
 
-        let config = crate::config::ApiConfig::new(None, None, None).unwrap();
+        let config = crate::config::ApiConfig::new(None, None, None, false, false).unwrap();
         assert_eq!(config.bind, "127.0.0.1");
         assert_eq!(config.port, 8080); // Default port
 
@@ -468,6 +513,8 @@ mod tests {
             Some("postgres://cli_host/db".to_string()),
             Some(3000),
             Some("10.0.0.1".to_string()),
+            false,
+            false,
         )
         .unwrap();
 
@@ -482,6 +529,7 @@ mod tests {
             database_url: "postgres://localhost/db".to_string(),
             port: 8080,
             bind: "0.0.0.0".to_string(),
+            insecure_dev: false,
         };
 
         assert_eq!(config.bind_address(), "0.0.0.0:8080");

@@ -78,26 +78,16 @@ pub async fn activity_stream_handler(
     Query(params): Query<StreamParams>,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
-    // Extract and validate token
-    let token = params.token.ok_or_else(|| {
-        AppError::Unauthorized(
-            "Missing authentication token. Use ?token=<jwt> query parameter".to_string(),
-        )
+    // Authenticate (token optional in insecure dev mode)
+    let claims = crate::middleware::authenticate_optional_token(
+        &state,
+        params.token.as_deref(),
+        "Missing authentication token. Use ?token=<jwt> query parameter",
+    )
+    .await
+    .inspect_err(|_| {
+        tracing::warn!(activity_id = %activity_id, "WebSocket authentication failed");
     })?;
-
-    // Validate token using AuthenticationService
-    let claims = state
-        .auth_service
-        .validate_token(&token)
-        .await
-        .map_err(|e| {
-            tracing::warn!(
-                activity_id = %activity_id,
-                error = %e,
-                "WebSocket authentication failed"
-            );
-            AppError::Unauthorized(format!("Invalid token: {}", e))
-        })?;
 
     tracing::info!(
         activity_id = %activity_id,
@@ -281,27 +271,20 @@ pub async fn activity_stream_by_key_handler(
     Query(params): Query<StreamParams>,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
-    // Extract and validate token
-    let token = params.token.ok_or_else(|| {
-        AppError::Unauthorized(
-            "Missing authentication token. Use ?token=<jwt> query parameter".to_string(),
-        )
+    // Authenticate (token optional in insecure dev mode)
+    let claims = crate::middleware::authenticate_optional_token(
+        &state,
+        params.token.as_deref(),
+        "Missing authentication token. Use ?token=<jwt> query parameter",
+    )
+    .await
+    .inspect_err(|_| {
+        tracing::warn!(
+            workflow_id = %workflow_id,
+            activity_key = %activity_key,
+            "WebSocket authentication failed"
+        );
     })?;
-
-    // Validate token using AuthenticationService
-    let claims = state
-        .auth_service
-        .validate_token(&token)
-        .await
-        .map_err(|e| {
-            tracing::warn!(
-                workflow_id = %workflow_id,
-                activity_key = %activity_key,
-                error = %e,
-                "WebSocket authentication failed"
-            );
-            AppError::Unauthorized(format!("Invalid token: {}", e))
-        })?;
 
     tracing::info!(
         workflow_id = %workflow_id,

@@ -25,9 +25,20 @@ use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
         (status = 200, description = "Server is alive", body = LivenessResponse)
     )
 )]
-pub async fn liveness_handler() -> impl IntoResponse {
+pub async fn liveness_handler(State(app_state): State<AppState>) -> impl IntoResponse {
     // If this handler runs, server is alive
-    (StatusCode::OK, Json(LivenessResponse { status: "ok" }))
+    liveness_response(app_state.insecure_dev)
+}
+
+/// Build the liveness response (separated from the handler for testability)
+fn liveness_response(insecure_dev: bool) -> (StatusCode, Json<LivenessResponse>) {
+    (
+        StatusCode::OK,
+        Json(LivenessResponse {
+            status: "ok",
+            insecure_dev,
+        }),
+    )
 }
 
 /// Readiness probe handler
@@ -155,6 +166,7 @@ pub async fn service_info_handler(State(app_state): State<AppState>) -> impl Int
             build_git_hash: Some(app_state.build.git_hash.clone()),
             api_version: "v1".to_string(),
             features: app_state.features.clone(),
+            insecure_dev: app_state.insecure_dev,
         }),
     )
 }
@@ -189,13 +201,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_liveness_returns_200_ok() {
-        let response = liveness_handler().await.into_response();
+        let response = liveness_response(false).into_response();
         assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]
     async fn test_liveness_response_format() {
-        let response = liveness_handler().await.into_response();
+        let response = liveness_response(false).into_response();
         assert_eq!(response.status(), StatusCode::OK);
 
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
