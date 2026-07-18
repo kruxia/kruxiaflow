@@ -1,7 +1,7 @@
-use kruxiaflow_worker::ActivityResult;
 use crate::registry::ActivityImpl;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
+use kruxiaflow_worker::ActivityResult;
 use lettre::{
     AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
     message::{Mailbox, MultiPart, SinglePart, header::ContentType},

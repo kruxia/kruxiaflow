@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod tests {
-    use kruxiaflow_worker::ActivityResult;
     use crate::registry::*;
     use anyhow::Result;
     use async_trait::async_trait;
     use kruxiaflow_core::cache::{CacheService, CachedResult, NoOpCache};
     use kruxiaflow_core::workflow::ActivitySettings;
+    use kruxiaflow_worker::ActivityResult;
     use rust_decimal::Decimal;
     use serde_json::{Value, json};
     use std::sync::Arc;
@@ -306,10 +306,12 @@ mod tests {
     impl ActivityImpl for CountingActivity {
         async fn execute(&self, parameters: Value) -> Result<ActivityResult> {
             self.execution_count.fetch_add(1, Ordering::SeqCst);
-            Ok(ActivityResult::values(vec![
-                kruxiaflow_worker::ActivityOutput::value("result", parameters),
-            ])
-            .with_cost(Decimal::new(10, 2))) // $0.10
+            Ok(
+                ActivityResult::values(vec![kruxiaflow_worker::ActivityOutput::value(
+                    "result", parameters,
+                )])
+                .with_cost(Decimal::new(10, 2)),
+            ) // $0.10
         }
 
         fn name(&self) -> &str {

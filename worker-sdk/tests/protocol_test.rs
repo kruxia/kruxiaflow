@@ -658,7 +658,10 @@ async fn shutdown_drains_in_flight_activity() {
         .iter()
         .filter(|r| r.url.path().ends_with("/complete"))
         .count();
-    assert_eq!(completes, 1, "in-flight activity must complete during drain");
+    assert_eq!(
+        completes, 1,
+        "in-flight activity must complete during drain"
+    );
 }
 
 #[tokio::test]

@@ -1,7 +1,7 @@
-use kruxiaflow_worker::ActivityResult;
 use crate::registry::ActivityImpl;
 use anyhow::Result;
 use async_trait::async_trait;
+use kruxiaflow_worker::ActivityResult;
 use serde_json::Value;
 
 /// Echo activity (for testing)
