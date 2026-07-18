@@ -8,11 +8,13 @@ name: Main CI
 #   binaries + versioned multi-arch Docker → GitHub Release. Nothing publishes
 #   unless the checks pass.
 #
-# Docker images (rolling and release) build through the reusable
-# docker-build.yml workflow: one native runner per platform (no QEMU), then a
-# manifest-list merge. The rolling build is multi-arch too, so :latest never
-# flips to amd64-only between releases and main keeps both platforms' GHA
-# layer caches warm for the release builds.
+# A single docker job serves main pushes (:latest + date tag) and tag pushes
+# (semver + :latest) through the reusable docker-build.yml workflow: one
+# native runner per platform (no QEMU), then a manifest-list merge.
+# metadata-action emits only the tags that apply to the triggering event. The
+# rolling build is multi-arch too, so :latest never flips to amd64-only
+# between releases and main keeps both platforms' GHA layer caches warm for
+# the release builds.
 #
 # `cargo release` pushes a version-bump commit AND a tag for the same SHA.
 # The branch-push run is skipped for those commits (message "release: ...",
@@ -41,19 +43,6 @@ jobs:
     if: github.ref_type == 'tag' || !startsWith(github.event.head_commit.message, 'release:')
     uses: ./.github/workflows/rust-ci.yml
     secrets: inherit
-
-  # ---- main branch: rolling image -------------------------------------------
-
-  docker-latest:
-    name: Rolling Docker image
-    needs: rust
-    if: github.ref == 'refs/heads/main'
-    uses: ./.github/workflows/docker-build.yml
-    secrets: inherit
-    with:
-      tags: |
-        type=raw,value=latest
-        type=raw,value={{date 'YYYYMMDD'}}-{{sha}}
 
   # ---- tags: release pipeline -----------------------------------------------
 
@@ -139,10 +128,21 @@ jobs:
             kruxiaflow-*.tar.gz.sha256
           if-no-files-found: error
 
-  docker-release:
-    name: Versioned Docker multi-arch
+  # ---- docker images: main pushes AND release tags --------------------------
+
+  # One job for both triggers (they never occur in the same run): main pushes
+  # publish :latest + a date-sha tag, tag pushes publish semver + :latest.
+  # metadata-action emits only the tag types that apply to the event.
+  docker:
+    name: Docker multi-arch
     needs: [rust, preflight]
-    if: github.ref_type == 'tag'
+    # `!cancelled()` lets the job run on main pushes even though preflight is
+    # skipped there; tag runs still hard-require preflight success. PRs match
+    # neither ref condition.
+    if: >-
+      !cancelled() && needs.rust.result == 'success' &&
+      (github.ref == 'refs/heads/main' ||
+       (github.ref_type == 'tag' && needs.preflight.result == 'success'))
     uses: ./.github/workflows/docker-build.yml
     secrets: inherit
     with:
@@ -150,10 +150,11 @@ jobs:
         type=semver,pattern={{version}}
         type=semver,pattern={{major}}.{{minor}}
         type=raw,value=latest
+        type=raw,value={{date 'YYYYMMDD'}}-{{sha}},enable={{is_default_branch}}
 
   release:
     name: GitHub Release
-    needs: [binaries, docker-release]
+    needs: [binaries, docker]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
