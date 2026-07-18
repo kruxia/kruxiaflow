@@ -385,10 +385,10 @@ cargo build --release
 - Token streaming
 - 15+ example workflows
 - [Python SDK](https://github.com/kruxia/kruxiaflow-python) — `pip install kruxiaflow`
+- [Rust worker SDK](https://crates.io/crates/kruxiaflow-worker) — `cargo add kruxiaflow-worker`
+- Frictionless local dev mode (`kruxiaflow serve --insecure-dev`, no token setup)
 
 ### Next
-- Frictionless local dev mode (no token setup)
-- Rust worker SDK on crates.io
 - CLI cost reports and a cost dashboard
 - MCP server: agents author, run, and monitor budgeted workflows
 - Semantic caching

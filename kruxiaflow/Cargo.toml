@@ -1,5 +1,6 @@
 [package]
 name = "kruxiaflow"
+publish = false
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -34,7 +35,7 @@ rust_decimal = { workspace = true }
 kruxiaflow-api = { path = "../api" }
 kruxiaflow-core = { path = "../core", features = [] }
 kruxiaflow-oauth = { path = "../oauth" }
-kruxiaflow-worker = { path = "../worker", features = [] }
+kruxiaflow-std-worker = { path = "../worker", features = [] }
 
 # Database
 sqlx = { workspace = true }
@@ -68,5 +69,5 @@ wiremock = "0.6"
 tikv-jemallocator = { version = "0.6", optional=true, features=["profiling"] }
 
 [features]
-profiling = ["tikv-jemallocator", "kruxiaflow-core/profiling", "kruxiaflow-worker/profiling"]
+profiling = ["tikv-jemallocator", "kruxiaflow-core/profiling", "kruxiaflow-std-worker/profiling"]
 redis-cache = ["kruxiaflow-core/redis-cache"]

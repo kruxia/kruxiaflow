@@ -1,5 +1,6 @@
 [package]
 name = "kruxiaflow-api"
+publish = false
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -34,7 +35,7 @@ utoipa = { version = "5", features = ["axum_extras", "uuid", "chrono", "decimal_
 utoipa-redoc = { version = "5", features = ["axum"] }
 
 [dev-dependencies]
-kruxiaflow-worker = { path = "../worker" }
+kruxiaflow-std-worker = { path = "../worker" }
 tokio = { workspace = true, features = ["test-util"] }
 serial_test.workspace = true
 axum-test = "15.0"

@@ -8,8 +8,8 @@
 //! - Web UI on port 8025
 //! - REST API on port 8025 for verification
 
-use kruxiaflow_worker::ActivityImpl;
-use kruxiaflow_worker::EmailSendActivity;
+use kruxiaflow_std_worker::ActivityImpl;
+use kruxiaflow_std_worker::EmailSendActivity;
 use serde::Deserialize;
 use serde_json::json;
 use serial_test::serial;

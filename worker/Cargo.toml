@@ -1,5 +1,8 @@
 [package]
-name = "kruxiaflow-worker"
+# The public SDK crate (worker-sdk/) owns the kruxiaflow-worker name; this
+# internal crate provides the built-in ("std") activities on top of it.
+name = "kruxiaflow-std-worker"
+publish = false
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
@@ -44,6 +47,7 @@ tracing = { workspace = true }
 
 # Internal dependencies
 kruxiaflow-core = { path = "../core", features = ["redis-cache"] }
+kruxiaflow-worker = { path = "../worker-sdk" }
 
 [dev-dependencies]
 tokio-test = "0.4"

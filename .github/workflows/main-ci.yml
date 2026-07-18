@@ -5,8 +5,8 @@ name: Main CI
 # - Pull requests / pushes to main: rust checks; main pushes also refresh the
 #   rolling Docker image (:latest + date tag).
 # - Tag pushes (v*): the FULL release pipeline on one run — rust checks →
-#   binaries + versioned multi-arch Docker → GitHub Release. Nothing publishes
-#   unless the checks pass.
+#   binaries + versioned multi-arch Docker + crates.io (kruxiaflow-worker) →
+#   GitHub Release. Nothing publishes unless the checks pass.
 #
 # A single docker job serves main pushes (:latest + date tag) and tag pushes
 # (semver + :latest) through the reusable docker-build.yml workflow: one
@@ -152,9 +152,56 @@ jobs:
         type=raw,value=latest
         type=raw,value={{date 'YYYYMMDD'}}-{{sha}},enable={{is_default_branch}}
 
+  # ---- crates.io: the public worker SDK crate --------------------------------
+
+  # Publishes kruxiaflow-worker (worker-sdk/) via crates.io Trusted Publishing
+  # (OIDC — no long-lived token secret). One-time setup, after the crate's
+  # first manual publish: crates.io → kruxiaflow-worker → Settings → Trusted
+  # Publishing → GitHub repo kruxia/kruxiaflow, workflow main-ci.yml,
+  # environment crates-io. Internal crates are publish = false, so only the
+  # SDK can ever ship from here. The version comes from the workspace (tag ==
+  # version is enforced by preflight); the skip guard makes tag-run re-runs
+  # idempotent when the version is already up.
+  crates:
+    name: crates.io publish
+    needs: [rust, preflight]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    environment: crates-io
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Skip if this version is already on crates.io
+        id: guard
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if curl -fsSL -A "kruxiaflow-ci (github.com/kruxia/kruxiaflow)" \
+              "https://crates.io/api/v1/crates/kruxiaflow-worker/${VERSION}" >/dev/null 2>&1; then
+            echo "::notice::kruxiaflow-worker ${VERSION} already published; skipping"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Authenticate with crates.io (OIDC)
+        if: steps.guard.outputs.publish == 'true'
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+
+      - name: Publish kruxiaflow-worker
+        if: steps.guard.outputs.publish == 'true'
+        run: cargo publish -p kruxiaflow-worker --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
   release:
     name: GitHub Release
-    needs: [binaries, docker]
+    needs: [binaries, docker, crates]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:

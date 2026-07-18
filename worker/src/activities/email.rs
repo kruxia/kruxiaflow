@@ -1,4 +1,4 @@
-use crate::activity_result::ActivityResult;
+use kruxiaflow_worker::ActivityResult;
 use crate::registry::ActivityImpl;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -47,7 +47,7 @@ impl SmtpConfig {
     ///
     /// # Examples
     /// ```
-    /// # use kruxiaflow_worker::activities::email::SmtpConfig;
+    /// # use kruxiaflow_std_worker::activities::email::SmtpConfig;
     /// let config = SmtpConfig::from_url("smtp://localhost:25").unwrap();
     /// assert_eq!(config.host, "localhost");
     /// assert_eq!(config.port, 25);

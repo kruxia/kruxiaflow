@@ -1,4 +1,4 @@
-use crate::activity_result::ActivityResult;
+use kruxiaflow_worker::ActivityResult;
 use crate::llm::{
     AnthropicProvider, EmbeddingRequest, GoogleProvider, LLMError, LLMProvider, OllamaProvider,
     OpenAIProvider, PromptRequest,

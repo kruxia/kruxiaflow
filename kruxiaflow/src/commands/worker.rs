@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Args;
-use kruxiaflow_worker::{WorkerConfig, WorkerManager};
+use kruxiaflow_std_worker::{WorkerConfig, WorkerManager};
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
@@ -224,7 +224,7 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
     let registry = if let Some(ref types_str) = cmd.activity_types {
         // Filter registry to only specified types
         let requested_types: Vec<&str> = types_str.split(',').map(|s| s.trim()).collect();
-        let full_registry = kruxiaflow_worker::register_std_activities(cache_service);
+        let full_registry = kruxiaflow_std_worker::register_std_activities(cache_service);
 
         // Log which types are available vs requested
         let available_types = full_registry.activity_types();
@@ -238,7 +238,7 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
         // TODO: Implement registry filtering in kruxiaflow_worker
         full_registry
     } else {
-        kruxiaflow_worker::register_std_activities(cache_service)
+        kruxiaflow_std_worker::register_std_activities(cache_service)
     };
 
     tracing::info!(
@@ -246,7 +246,6 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
         "Activity registry initialized"
     );
 
-    #[allow(deprecated)]
     let config = WorkerConfig {
         api_url: cmd.api_url.clone(),
         worker_id: worker_id.clone(),
@@ -254,11 +253,11 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
         poll_max_activities: cmd.poll_max_activities,
         poll_interval: Duration::from_millis(cmd.poll_interval),
         max_concurrent_activities: cmd.max_activities,
-        concurrency: 1, // Deprecated, set to 1 (single poller with semaphore)
         activity_timeout: Duration::from_secs(cmd.activity_timeout),
         heartbeat_interval: Duration::from_secs(cmd.heartbeat_interval),
-        client_id: cmd.client_id.clone(),
-        client_secret: cmd.client_secret.clone().unwrap(),
+        shutdown_timeout: Duration::from_secs(cmd.shutdown_timeout),
+        client_id: Some(cmd.client_id.clone()),
+        client_secret: cmd.client_secret.clone(),
     };
 
     let manager = WorkerManager::new(config, registry, workflow_storage);

@@ -13,7 +13,7 @@ use kruxiaflow_core::{
     OrchestratorConfig, PostgresSubscriptionService, SubscriptionService, run_orchestrator,
 };
 use kruxiaflow_oauth::{AuthenticationService, PostgresAuthService};
-use kruxiaflow_worker::{WorkerConfig, WorkerManager, register_std_activities};
+use kruxiaflow_std_worker::{WorkerConfig, WorkerManager, register_std_activities};
 use serde_json::json;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -240,7 +240,6 @@ async fn test_end_to_end_file_workflow(pool: PgPool) -> Result<()> {
     // Start worker with storage
     let cache_service = Arc::new(kruxiaflow_core::cache::NoOpCache::new());
     let registry = register_std_activities(cache_service);
-    #[allow(deprecated)]
     let worker_config = WorkerConfig {
         api_url: server_url.clone(),
         worker_id: "test_worker".to_string(),
@@ -248,11 +247,11 @@ async fn test_end_to_end_file_workflow(pool: PgPool) -> Result<()> {
         poll_interval: Duration::from_millis(10),
         poll_max_activities: 5,
         max_concurrent_activities: 16,
-        concurrency: 1,
         activity_timeout: Duration::from_secs(30),
         heartbeat_interval: Duration::from_secs(10),
-        client_id: client_id.clone(),
-        client_secret: client_secret.clone(),
+        client_id: Some(client_id.clone()),
+        client_secret: Some(client_secret.clone()),
+        shutdown_timeout: Duration::from_secs(30),
     };
 
     let manager = WorkerManager::new(worker_config, registry, workflow_storage.clone());
@@ -434,7 +433,7 @@ async fn test_file_workflow_with_multiple_outputs(pool: PgPool) -> Result<()> {
     ];
 
     // Create FileExecutor
-    use kruxiaflow_worker::file_executor::FileExecutor;
+    use kruxiaflow_std_worker::file_executor::FileExecutor;
     let executor = FileExecutor::new(
         workflow_id,
         activity_key.to_string(),
@@ -459,11 +458,17 @@ async fn test_file_workflow_with_multiple_outputs(pool: PgPool) -> Result<()> {
     assert_eq!(outputs.len(), 2);
 
     let status_output = outputs.iter().find(|o| o.name == "status").unwrap();
-    assert_eq!(status_output.output_type, OutputType::Value);
+    assert_eq!(
+        status_output.output_type,
+        kruxiaflow_std_worker::OutputType::Value
+    );
     assert_eq!(status_output.value, json!("success"));
 
     let file_output = outputs.iter().find(|o| o.name == "document").unwrap();
-    assert_eq!(file_output.output_type, OutputType::File);
+    assert_eq!(
+        file_output.output_type,
+        kruxiaflow_std_worker::OutputType::File
+    );
     let file_ref = file_output.value.as_str().unwrap();
     assert!(file_ref.contains(&workflow_id.to_string()));
     assert!(file_ref.contains(activity_key));

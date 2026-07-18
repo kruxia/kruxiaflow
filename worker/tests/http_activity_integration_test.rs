@@ -3,7 +3,7 @@ use kruxiaflow_core::PostgresSubscriptionService;
 use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
-use kruxiaflow_worker::{ActivityImpl, HttpRequestActivity};
+use kruxiaflow_std_worker::{ActivityImpl, HttpRequestActivity};
 use serde_json::json;
 use sqlx::PgPool;
 use std::io::Write;

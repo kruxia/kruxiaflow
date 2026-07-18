@@ -1,16 +1,15 @@
-use crate::client::WorkerApiClient;
-use crate::config::WorkerConfig;
-use crate::poller::WorkerPoller;
+use crate::executor::StdActivityExecutor;
 use crate::registry::ActivityRegistry;
 use anyhow::Result;
 use kruxiaflow_core::storage::WorkflowStorage;
+use kruxiaflow_worker::{WorkerApiClient, WorkerConfig, WorkerPoller};
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 
 /// Worker manager
 ///
-/// Spawns and manages a single worker poller task that uses semaphore-based
-/// concurrency to efficiently execute activities.
+/// Spawns and manages a single SDK worker poller task (semaphore-based
+/// concurrency) wired to the std-worker activity executor.
 pub struct WorkerManager {
     config: WorkerConfig,
     registry: Arc<ActivityRegistry>,
@@ -41,24 +40,24 @@ impl WorkerManager {
             "Starting worker manager with semaphore-based concurrency"
         );
 
-        let client = WorkerApiClient::new(
-            self.config.api_url.clone(),
-            self.config.client_id.clone(),
-            self.config.client_secret.clone(),
-        );
+        let client = match (&self.config.client_id, &self.config.client_secret) {
+            (Some(id), Some(secret)) => {
+                WorkerApiClient::with_credentials(&self.config.api_url, id, secret)
+            }
+            _ => WorkerApiClient::new(&self.config.api_url),
+        };
 
-        let poller = WorkerPoller::new(
-            self.config.clone(),
-            client,
+        let executor = Arc::new(StdActivityExecutor::new(
             Arc::clone(&self.registry),
             Arc::clone(&self.storage),
-        );
+            client.clone(),
+        ));
+
+        let poller = WorkerPoller::new(self.config.clone(), client, executor);
 
         let handle = tokio::spawn(async move {
             tracing::info!("Starting poller task");
-            if let Err(err) = poller.run().await {
-                tracing::error!(error = ?err, "Poller task failed");
-            }
+            poller.run().await;
         });
 
         tracing::info!(
@@ -71,7 +70,7 @@ impl WorkerManager {
 
     /// Stop worker
     ///
-    /// Gracefully shuts down the poller task.
+    /// Shuts down the poller task.
     pub async fn stop(&self, handles: Vec<JoinHandle<()>>) {
         tracing::info!("Stopping worker manager");
 
