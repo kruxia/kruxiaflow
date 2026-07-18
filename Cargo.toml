@@ -10,6 +10,14 @@ members = [
 ]
 resolver = "2"
 
+# Release flow: `cargo release <version> --execute` bumps this version,
+# commits, tags v<version>, and pushes — no manual tag/metadata sync.
+# Install once with: cargo install cargo-release
+[workspace.metadata.release]
+publish = false
+shared-version = true
+tag-name = "v{{version}}"
+
 [workspace.package]
 version = "0.4.0"
 edition = "2024"
