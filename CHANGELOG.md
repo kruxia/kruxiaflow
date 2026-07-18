@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Quickstart `catalog` init container failed with curl exit 23 on a truly
+  fresh machine: the `curlimages/curl` default user (uid 100) cannot write to
+  a newly created root-owned volume. It now runs as root; the keygen one-shot
+  also chmods the generated dev keys to 644 so the non-root distroless server
+  can always read them.
+- README, docs, and landing-page budget snippets used `limit_usd`, which the
+  schema has never accepted (`BudgetSettings` field is `limit`) — every
+  copy-pasted first workflow failed validation. All launch assets corrected
+  (the `budget_limit_usd` cost-API *response* field is unchanged and was
+  already correct).
+
 - **LLM model catalog refreshed to July 2026** (`config/llm_models.yaml`),
   verified against provider pricing pages. Added: Claude Fable 5, Opus 4.8/4.7,
   Sonnet 5 (introductory pricing through 2026-08-31 — bump to $3/$15 on
@@ -70,11 +81,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Startup refuses non-loopback binds without a second explicit override, warns
   loudly, and surfaces the flag in `/health` and `/api/v1/info`. Production
   behavior with the flag absent is unchanged.
-- **Quickstart** (the root `docker-compose.yml`, published at
-  kruxiaflow.com/quickstart/): one curl + `KRUXIAFLOW_INSECURE_DEV=true docker
-  compose up -d` runs Kruxia Flow + PostgreSQL on 127.0.0.1, with generated
-  local keys and the LLM pricing catalog seeded — first budgeted workflow with
-  zero auth steps. README Getting Started rewritten around this flow.
+- **Quickstart** (the root `docker-compose.yml`, fetched straight from the
+  repo's raw GitHub URL — no separate published copy): one curl +
+  `KRUXIAFLOW_INSECURE_DEV=true docker compose up -d` runs Kruxia Flow +
+  PostgreSQL on 127.0.0.1, with generated local keys and the LLM pricing
+  catalog seeded — first budgeted workflow with zero auth steps. README
+  Getting Started rewritten around this flow.
 - Release CI (`.github/workflows/release.yml`): tagged releases build binaries
   (x86_64-linux-gnu, aarch64-linux-gnu, aarch64-macos) with SHA-256 checksums,
   publish multi-arch Docker images (`kruxia/kruxiaflow`), and create a GitHub

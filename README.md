@@ -21,7 +21,7 @@ activities:
       max_tokens: 1000
     settings:
       budget:
-        limit_usd: 0.25   # hard ceiling, enforced before the call
+        limit: 0.25   # hard ceiling, enforced before the call
         action: abort
 ```
 
@@ -33,7 +33,7 @@ Agents make 3–10× more LLM calls than chatbots, and a retry loop at 2am can s
 
 Kruxia Flow is **cost-governed orchestration**: a durable execution engine — the same category as Temporal and Inngest, not a batch scheduler like Airflow — where budgets, per-token cost tracking, model fallback, and human approval gates are engine primitives, enforced per workflow:
 
-- **Hard budgets, enforced in the engine.** Set `limit_usd` per activity or per workflow. Activities that would exceed it don't run.
+- **Hard budgets, enforced in the engine.** Set `limit` per activity or per workflow. Activities that would exceed it don't run.
 - **Budget-aware model fallback.** Declare an ordered model list; the engine downgrades to cheaper models as budget tightens instead of failing.
 - **Ask a human.** Workflows suspend on `wait_for_signal` — for budget approvals, review gates, or any human-in-the-loop step — and resume days later, surviving restarts while they wait.
 - **Costs in your database.** Token-level splits (input / output / cache) per activity, per attempt, queryable via the cost API. Your spend data lives in your Postgres, not a vendor dashboard.
@@ -63,7 +63,7 @@ API key — or [Ollama](https://ollama.com/) for a fully local run.
 ### 1. Start Kruxia Flow
 
 ```bash
-curl -fsSL https://kruxiaflow.com/quickstart/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/kruxia/kruxiaflow/main/docker-compose.yml -o docker-compose.yml
 KRUXIAFLOW_INSECURE_DEV=true ANTHROPIC_API_KEY=your-key-here docker compose up -d
 ```
 
@@ -97,7 +97,7 @@ activities:
       max_tokens: 500
     settings:
       budget:
-        limit_usd: 0.25
+        limit: 0.25
         action: abort
 YAML
 ```
@@ -133,9 +133,9 @@ For the full tour — 15+ examples covering parallel execution, model fallback,
 caching, loops, scheduling, and RAG — clone the repo and run `./docker up --examples`
 (see [Development](#development)). API docs at http://localhost:8080/api/v1/docs.
 
-> **Before deploying anywhere real**: remove the two `KRUXIAFLOW_INSECURE_DEV*`
-> variables from the compose file. Without them, Kruxia Flow requires OAuth2 on
-> every request — that's the production default.
+> **Before deploying anywhere real**: leave `KRUXIAFLOW_INSECURE_DEV` unset and
+> configure real secrets (see the comments in the compose file). Without the
+> flag, Kruxia Flow requires OAuth2 on every request — that's the default.
 
 ## Key Features
 
@@ -156,7 +156,7 @@ activities:
       max_tokens: 500
     settings:
       budget:
-        limit_usd: 0.50
+        limit: 0.50
         action: abort
 ```
 
@@ -179,7 +179,7 @@ activities:
       max_tokens: 500
     settings:
       budget:
-        limit_usd: 0.10
+        limit: 0.10
         action: abort
 ```
 
