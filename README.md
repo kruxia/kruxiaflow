@@ -115,8 +115,9 @@ WORKFLOW_ID=$(curl -s -X POST http://localhost:8080/api/v1/workflows \
 ### 3. See What It Cost
 
 ```bash
-# Status and result
-curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID | jq .
+# Status and the answer
+curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID | \
+  jq -r '.status, .activities[].outputs[]?.value.content'
 
 # Cost summary — the payoff of that budget line
 curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/cost | jq .
