@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT activity_key, scheduled_for FROM activity_queue WHERE workflow_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "activity_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "scheduled_for",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "9b3b8c7579eba1e5f8f776c4761d34fb244fd2d12052a617f529bd528d26c23b"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO workflow_definitions (name, activities)\n           VALUES ('test_workflow', '[]'::jsonb)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "3282e1a047365513153bf594fb4b282788b8c92ce05b95f971cffecdbbebaec9"
+}
