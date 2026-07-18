@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "TRUNCATE workflow_definitions CASCADE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "6cd19c80f462b8ba8503c19dc3692f26cbdfa2a6ebafb7aaa59ece499dd483c3"
+}

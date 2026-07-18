@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "TRUNCATE workflow_events, workflow_event_consumers, workflows, workflow_definitions, activity_queue, activity_costs CASCADE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "775768d3d5e289c20388bd0cccca397c789a688d1a049de0dfc5567f0c2113b6"
+}
