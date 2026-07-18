@@ -20,6 +20,10 @@ pub struct WorkflowDefinition {
 
     /// Activities in the workflow
     pub activities: Vec<ActivityDefinition>,
+
+    /// Workflow-level settings (timeout, retries, budget)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<WorkflowSettings>,
 }
 
 impl From<kruxiaflow_core::workflow::WorkflowDefinition> for WorkflowDefinition {
@@ -27,6 +31,7 @@ impl From<kruxiaflow_core::workflow::WorkflowDefinition> for WorkflowDefinition 
         Self {
             name: def.name,
             activities: def.activities.into_iter().map(Into::into).collect(),
+            settings: def.settings.map(Into::into),
         }
     }
 }
@@ -36,6 +41,43 @@ impl From<WorkflowDefinition> for kruxiaflow_core::workflow::WorkflowDefinition 
         Self {
             name: def.name,
             activities: def.activities.into_iter().map(Into::into).collect(),
+            settings: def.settings.map(Into::into),
+        }
+    }
+}
+
+/// Workflow-level settings wrapper
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct WorkflowSettings {
+    /// Maximum workflow execution time in seconds
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<u64>,
+
+    /// Maximum retry attempts for transient failures
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_retries: Option<u32>,
+
+    /// Workflow-level budget limit
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget: Option<BudgetSettings>,
+}
+
+impl From<kruxiaflow_core::workflow::WorkflowSettings> for WorkflowSettings {
+    fn from(settings: kruxiaflow_core::workflow::WorkflowSettings) -> Self {
+        Self {
+            timeout: settings.timeout,
+            max_retries: settings.max_retries,
+            budget: settings.budget.map(Into::into),
+        }
+    }
+}
+
+impl From<WorkflowSettings> for kruxiaflow_core::workflow::WorkflowSettings {
+    fn from(settings: WorkflowSettings) -> Self {
+        Self {
+            timeout: settings.timeout,
+            max_retries: settings.max_retries,
+            budget: settings.budget.map(Into::into),
         }
     }
 }
@@ -1035,6 +1077,7 @@ mod tests {
     fn test_workflow_definition_roundtrip() {
         let api = WorkflowDefinition {
             name: "test-workflow".to_string(),
+            settings: None,
             activities: vec![ActivityDefinition {
                 key: "step1".to_string(),
                 worker: "std".to_string(),

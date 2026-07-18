@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **External activity usage reporting**: `POST /api/v1/activities/{id}/complete`
+  and `/fail` accept an optional `usage` list — one entry per LLM call made
+  inside the activity (`provider`, `model`, `input_tokens`, `output_tokens`,
+  `cache_read_tokens`, `cache_creation_tokens`, optional per-entry `cost_usd`).
+  Each entry becomes an `activity_costs` row shaped like a built-in `llm_prompt`
+  row; entries without an explicit cost are priced server-side from the
+  `llm_models` catalog. External spend now counts against budgets and appears in
+  `/cost`, `/cost/history`, `/cost/analytics`, and `workflows.total_cost_usd`.
+  An unknown provider/model never fails the completion: the entry is recorded at
+  cost 0 with a warning in the response body (`warnings`) and a WARN log.
+- **Lump-sum cost recording**: a completion reporting only top-level `cost_usd`
+  (today's wire shape, unchanged) now lands one cost row that counts against
+  budgets — previously the value was display-only and external spend was
+  invisible to budget enforcement. When `usage` entries are present, top-level
+  `cost_usd` means cost *not covered by the entries* (e.g., a paid non-LLM API)
+  and records its own row; never repeat entry costs there.
+- **Failure-path cost reporting**: `/fail` accepts the same `cost_usd` and
+  `usage` fields — a failed attempt that made LLM calls still spent the money.
+  Spend is recorded under the failing attempt before retry scheduling, so the
+  retry's budget check already sees it.
+- **Workflow-level budgets enforced**: the top-level `settings.budget` block in
+  a workflow definition (previously parsed and silently dropped) is now
+  persisted with the definition, copied to `workflows.budget_limit_usd` at
+  submission, surfaced by `GET /workflows/{id}/cost`, and enforced by the
+  scheduling-time budget check alongside activity-level budgets.
+- **Cache-write pricing in the model catalog**: new nullable
+  `llm_models.cache_write_price_per_million` column (seeded via
+  `cache_write_price_per_million` in `config/llm_models.yaml`, set to 1.25x
+  input for Anthropic models). Reported `cache_creation_tokens` are billed at
+  this price; models without one fall back to the input-token price. Exposed
+  in `POST /api/v1/llm/models/search` responses and the `model_pricing`
+  parameter enrichment. Google's Gemini explicit caching bills cache storage
+  per token-hour instead of a write premium — not yet modeled in the catalog;
+  report it via per-entry `cost_usd` or the lump remainder.
+
+### Changed
+
+- `activity_costs.provider` and `.model` are now nullable (lump-sum and
+  non-LLM cost line items have no provider/model); `/cost/history` returns
+  `null` for those fields on such rows.
+
 ### Fixed
 
 - Quickstart `catalog` init container failed with curl exit 23 on a truly

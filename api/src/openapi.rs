@@ -17,7 +17,7 @@ use crate::handlers::users::{CreateUserRequest, CreateUserResponse};
 use crate::handlers::workers::{
     ActivityError, ActivityHeartbeatRequest, ActivityHeartbeatResponse, CompleteActivityRequest,
     CompleteActivityResponse, FailActivityRequest, FailActivityResponse, PendingActivity,
-    PollActivitiesRequest, PollActivitiesResponse,
+    PollActivitiesRequest, PollActivitiesResponse, UsageEntry,
 };
 use crate::handlers::workflow_definitions::{
     DeployWorkflowDefinitionRequest, DeployWorkflowDefinitionResponse,
@@ -151,6 +151,7 @@ use utoipa::OpenApi;
             FailActivityRequest,
             FailActivityResponse,
             ActivityError,
+            UsageEntry,
 
             // Cost Tracking schemas
             WorkflowCostSummary,

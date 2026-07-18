@@ -57,6 +57,7 @@ fn create_test_state_with_activities(
 fn test_find_ready_root_activities() {
     let definition = WorkflowDefinition {
         name: "test_workflow".to_string(),
+        settings: None,
         activities: vec![
             ActivityDefinition {
                 key: "root1".to_string(),
@@ -106,6 +107,7 @@ fn test_find_ready_root_activities() {
 fn test_find_ready_sequential_workflow() {
     let definition = WorkflowDefinition {
         name: "test_workflow".to_string(),
+        settings: None,
         activities: vec![
             ActivityDefinition {
                 key: "activity1".to_string(),
@@ -225,6 +227,7 @@ fn test_find_ready_sequential_workflow() {
 fn test_find_ready_parallel_fanout() {
     let definition = WorkflowDefinition {
         name: "test_workflow".to_string(),
+        settings: None,
         activities: vec![
             ActivityDefinition {
                 key: "root".to_string(),
@@ -329,6 +332,7 @@ fn test_find_ready_parallel_fanout() {
 fn test_find_ready_parallel_fanin() {
     let definition = WorkflowDefinition {
         name: "test_workflow".to_string(),
+        settings: None,
         activities: vec![
             ActivityDefinition {
                 key: "parallel1".to_string(),
@@ -536,6 +540,7 @@ fn test_evaluate_condition_nested_boolean() {
 fn test_conditional_branching() {
     let definition = WorkflowDefinition {
         name: "test_workflow".to_string(),
+        settings: None,
         activities: vec![
             ActivityDefinition {
                 key: "validate".to_string(),
@@ -719,6 +724,7 @@ fn test_is_workflow_failed() {
 fn test_skip_already_scheduled_activities() {
     let definition = WorkflowDefinition {
         name: "test_workflow".to_string(),
+        settings: None,
         activities: vec![ActivityDefinition {
             key: "activity1".to_string(),
             worker: "test".to_string(),
@@ -768,6 +774,7 @@ fn test_failed_activity_without_conditions_blocks_following() {
     // the following activity should NOT be ready (default = success path only)
     let definition = WorkflowDefinition {
         name: "test_workflow".to_string(),
+        settings: None,
         activities: vec![
             ActivityDefinition {
                 key: "step1".to_string(),
@@ -826,6 +833,7 @@ fn test_failed_activity_with_explicit_condition_allows_following() {
     // the following activity CAN be ready if conditions are satisfied
     let definition = WorkflowDefinition {
         name: "test_workflow".to_string(),
+        settings: None,
         activities: vec![
             ActivityDefinition {
                 key: "process".to_string(),
@@ -1057,6 +1065,7 @@ fn test_find_skipped_activities_conditional_branch_not_taken() {
     // Create a workflow with conditional branches where one branch won't be taken
     let definition = WorkflowDefinition {
         name: "test_workflow".to_string(),
+        settings: None,
         activities: vec![
             ActivityDefinition {
                 key: "validate".to_string(),
@@ -1139,6 +1148,7 @@ fn test_find_skipped_activities_upstream_failed() {
     // When an upstream activity fails (no conditions), downstream should be skippable
     let definition = WorkflowDefinition {
         name: "test_workflow".to_string(),
+        settings: None,
         activities: vec![
             ActivityDefinition {
                 key: "step1".to_string(),
@@ -1194,6 +1204,7 @@ fn test_find_skipped_activities_already_scheduled_not_skipped() {
     // Activities that are already Pending/Running/Completed should not be marked as skipped
     let definition = WorkflowDefinition {
         name: "test_workflow".to_string(),
+        settings: None,
         activities: vec![
             ActivityDefinition {
                 key: "root".to_string(),
@@ -1330,6 +1341,7 @@ fn test_loop_activity_not_ready_when_max_iterations_exceeded() {
     // A loop activity should not be ready when iteration limit is exceeded
     let definition = WorkflowDefinition {
         name: "test_workflow".to_string(),
+        settings: None,
         activities: vec![ActivityDefinition {
             key: "loop_task".to_string(),
             worker: "test".to_string(),
@@ -1397,6 +1409,7 @@ fn test_back_edge_first_iteration_auto_satisfied() {
     // On first iteration (iteration 0), back-edge dependencies should be auto-satisfied
     let definition = WorkflowDefinition {
         name: "test_workflow".to_string(),
+        settings: None,
         activities: vec![ActivityDefinition {
             key: "process".to_string(),
             worker: "test".to_string(),
@@ -1461,6 +1474,7 @@ fn test_diamond_dependency_pattern() {
     // Test diamond pattern: A -> (B, C) -> D
     let definition = WorkflowDefinition {
         name: "test_workflow".to_string(),
+        settings: None,
         activities: vec![
             ActivityDefinition {
                 key: "A".to_string(),

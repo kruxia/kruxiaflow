@@ -7,10 +7,10 @@ use super::{
     workflow_state::{
         WorkflowActivityStatus, apply_event_to_state, initialize_workflow_state,
         load_materialized_state, load_workflow_definition, load_workflow_definition_by_id,
-        save_materialized_state,
+        payload_decimal, save_materialized_state,
     },
 };
-use crate::cost::{ActivityCostRecord, CostCalculator, CostTracker};
+use crate::cost::{ActivityCostRecord, CostCalculator, CostTracker, UsageEntry};
 use crate::events::{
     EventSource, NewWorkflowEvent, WorkflowEvent, WorkflowEventType, WorkflowStatus,
 };
@@ -997,6 +997,41 @@ pub async fn process_workflow_event(
             }
         }
 
+        // Record any spend reported with the failure BEFORE retry handling: a
+        // failed attempt that made LLM calls still spent the money, and writing
+        // the rows first means the retry's budget check sees them. The retry
+        // path commits and returns early, so this cannot wait for the generic
+        // recording step below. The failed attempt number is still current here
+        // (increment happens inside handle_activity_failed).
+        if let Some(activity_def) = definition
+            .activities
+            .iter()
+            .find(|a| &a.key == activity_key)
+        {
+            match record_reported_activity_cost(&mut tx, event, &state, activity_def, config).await
+            {
+                Ok(totals) => {
+                    // apply_event_to_state accumulates nothing for failures (and
+                    // never runs on the retry path), so add the full total here.
+                    let total = totals.total();
+                    if total != Decimal::ZERO
+                        && let Some(activity_state) = state.activities.get_mut(activity_key)
+                    {
+                        activity_state.add_cost(total);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(
+                        workflow_id = %event.workflow_id,
+                        activity_key = %activity_key,
+                        error = %e,
+                        "Failed to record activity cost for failed activity"
+                    );
+                    // Don't fail event processing, just log the error
+                }
+            }
+        }
+
         let retry_start = std::time::Instant::now();
         let retry_handled = handle_activity_failed(
             &mut state,
@@ -1090,29 +1125,38 @@ pub async fn process_workflow_event(
         event.workflow_id
     );
 
-    // 3.5. Record costs for completed LLM activities
+    // 3.5. Record costs for completed activities: built-in LLM usage, external
+    // usage entries, and lump-sum cost reports all become activity_costs rows
+    // here, before dependents are scheduled, so the next budget check sees them.
     if event.event_type == WorkflowEventType::ActivityCompleted {
         let cost_start = std::time::Instant::now();
         if let Some(activity_key) = &event.activity_key
-            // Get activity definition to check if it's an LLM activity
             && let Some(activity_def) = definition
                 .activities
                 .iter()
                 .find(|a| &a.key == activity_key)
         {
-            // Check if this is an LLM activity (llm_prompt or embedding)
-            if (activity_def.activity_name.as_deref() == Some("llm_prompt")
-                || activity_def.activity_name.as_deref() == Some("embedding"))
-                && let Err(e) =
-                    record_llm_activity_cost(&mut tx, event, &state, activity_def, config).await
+            match record_reported_activity_cost(&mut tx, event, &state, activity_def, config).await
             {
-                tracing::error!(
-                    workflow_id = %event.workflow_id,
-                    activity_key = %activity_key,
-                    error = %e,
-                    "Failed to record LLM activity cost"
-                );
-                // Don't fail the workflow, just log the error
+                Ok(totals) => {
+                    // apply_event_to_state already accumulated the explicit
+                    // payload costs; add only the server-computed portion so
+                    // ACTIVITY.accumulated_cost_usd matches the recorded rows.
+                    if totals.computed != Decimal::ZERO
+                        && let Some(activity_state) = state.activities.get_mut(activity_key)
+                    {
+                        activity_state.add_cost(totals.computed);
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(
+                        workflow_id = %event.workflow_id,
+                        activity_key = %activity_key,
+                        error = %e,
+                        "Failed to record activity cost"
+                    );
+                    // Don't fail the workflow, just log the error
+                }
             }
         }
 
@@ -1659,7 +1703,7 @@ async fn enrich_llm_activity_params_w_budget(
     activity_name: &str,
     mut params: serde_json::Value,
     activity_def: &crate::workflow::ActivityDefinition,
-    _workflow_def: &crate::workflow::WorkflowDefinition,
+    workflow_def: &crate::workflow::WorkflowDefinition,
     activity_key: &str,
     workflow_id: uuid::Uuid,
     pool: &sqlx::PgPool,
@@ -1711,14 +1755,27 @@ async fn enrich_llm_activity_params_w_budget(
     );
 
     // Extract budget limits from activity settings
-    // Note: Workflow-level budget settings not yet implemented (WorkflowDefinition has no settings field)
     let activity_budget_limit = activity_def
         .settings
         .as_ref()
         .and_then(|s| s.budget.as_ref())
         .map(|b| b.limit);
 
-    let workflow_budget_limit: Option<Decimal> = None; // TODO: Add workflow-level budget support
+    // Workflow-level budget limit, persisted at submission from the
+    // definition's settings.budget.limit
+    let workflow_budget_limit: Option<Decimal> = sqlx::query_scalar!(
+        "SELECT budget_limit_usd FROM workflows WHERE id = $1",
+        workflow_id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        super::OrchestratorError::CostTrackingFailed(format!(
+            "Failed to get workflow budget limit: {}",
+            e
+        ))
+    })?
+    .flatten();
 
     // Query pricing for all models in batch
     let cost_calculator = CostCalculator::new(pool.clone());
@@ -1747,12 +1804,21 @@ async fn enrich_llm_activity_params_w_budget(
         })?;
     let cumulative_cost = budget_status.activity_cost;
 
-    // Pre-execution abort check (only if budget enforcement action is Abort)
+    // Pre-execution abort check (only if budget enforcement action is Abort).
+    // The activity's own budget action wins; otherwise fall back to the
+    // workflow-level budget action so a workflow-only budget still enforces.
     let budget_action = activity_def
         .settings
         .as_ref()
         .and_then(|s| s.budget.as_ref())
-        .map(|b| b.action.clone());
+        .map(|b| b.action.clone())
+        .or_else(|| {
+            workflow_def
+                .settings
+                .as_ref()
+                .and_then(|s| s.budget.as_ref())
+                .map(|b| b.action.clone())
+        });
 
     if budget_action == Some(BudgetAction::Abort) {
         // Check if we should abort before scheduling
@@ -1782,24 +1848,24 @@ async fn enrich_llm_activity_params_w_budget(
             }
         }
 
-        // Check against budget limits
+        // Check each limit against its own cumulative spend: the activity limit
+        // against this activity's cost across attempts, the workflow limit
+        // against the whole workflow's cost (which includes external activities)
         if let Some(estimate) = cheapest_estimate {
-            let effective_limit = match (activity_budget_limit, workflow_budget_limit) {
-                (Some(a), Some(w)) => Some(if a < w { a } else { w }),
-                (Some(a), None) => Some(a),
-                (None, Some(w)) => Some(w),
-                (None, None) => None,
-            };
+            let activity_exceeds = activity_budget_limit
+                .is_some_and(|limit| budget_status.activity_cost + estimate > limit);
+            let workflow_exceeds = workflow_budget_limit
+                .is_some_and(|limit| budget_status.workflow_cost + estimate > limit);
 
-            if let Some(limit) = effective_limit
-                && cumulative_cost + estimate > limit
-            {
+            if activity_exceeds || workflow_exceeds {
                 tracing::warn!(
-                    "Aborting LLM activity {}: cheapest model estimate ${:.6} + cumulative ${:.6} exceeds budget ${:.6}",
+                    "Aborting LLM activity {}: cheapest model estimate ${:.6} + cumulative (activity ${:.6}, workflow ${:.6}) exceeds budget (activity {:?}, workflow {:?})",
                     activity_key,
                     estimate,
-                    cumulative_cost,
-                    limit
+                    budget_status.activity_cost,
+                    budget_status.workflow_cost,
+                    activity_budget_limit,
+                    workflow_budget_limit
                 );
                 return Ok((params, false)); // Don't schedule
             }
@@ -1836,14 +1902,15 @@ async fn enrich_llm_activity_params_w_budget(
     Ok((params, true))
 }
 
-/// Record LLM activity cost after completion
+/// Record built-in LLM activity cost after completion (usage reported inside
+/// `outputs.result.usage`). Returns whether a cost row was recorded.
 async fn record_llm_activity_cost(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     event: &WorkflowEvent,
     state: &super::workflow_state::WorkflowState,
     activity_def: &crate::workflow::ActivityDefinition,
     config: &OrchestratorConfig,
-) -> Result<()> {
+) -> Result<bool> {
     let activity_key = event
         .activity_key
         .as_ref()
@@ -1861,7 +1928,7 @@ async fn record_llm_activity_cost(
             "No usage information found for LLM activity {}",
             activity_key
         );
-        return Ok(());
+        return Ok(false);
     }
 
     let usage = usage.unwrap();
@@ -1960,8 +2027,8 @@ async fn record_llm_activity_cost(
         output_tokens,
         total_tokens: Some(prompt_tokens.unwrap_or(0) + output_tokens.unwrap_or(0)),
         cached_tokens,
-        provider: provider.to_string(),
-        model: model.to_string(),
+        provider: Some(provider.to_string()),
+        model: Some(model.to_string()),
         activity_budget_limit_usd: activity_limit,
         workflow_budget_limit_usd: workflow_limit,
         budget_exceeded: false, // Always false for completed activities
@@ -1982,7 +2049,238 @@ async fn record_llm_activity_cost(
         "Recorded LLM activity cost"
     );
 
-    Ok(())
+    Ok(true)
+}
+
+/// Cost totals recorded from a worker-reported completion/failure payload,
+/// split by origin so callers can reconcile in-memory accumulated cost:
+/// `apply_event_to_state` already accumulates the explicit portion for
+/// completed activities, while the computed portion is only known here.
+#[derive(Debug, Default)]
+struct ReportedCostTotals {
+    /// Costs explicit in the payload (per-entry `cost_usd` + lump remainder)
+    explicit: Decimal,
+    /// Costs computed server-side from the `llm_models` catalog
+    computed: Decimal,
+}
+
+impl ReportedCostTotals {
+    fn total(&self) -> Decimal {
+        self.explicit + self.computed
+    }
+}
+
+/// Single writer for activity cost rows from completion/failure event payloads.
+///
+/// Handles, in order:
+/// - Worker-reported `usage` entries (external activities): one `activity_costs`
+///   row per entry, using the entry's explicit `cost_usd` or computing it from
+///   the catalog; an unknown provider/model records the entry at cost 0 with a
+///   warning — a completed activity's spend must never be rejected.
+///   A top-level `cost_usd` > 0 alongside entries is the not-covered-by-entries
+///   remainder and gets its own row (null provider/model).
+/// - Built-in `llm_prompt`/`embedding` completions (usage inside
+///   `outputs.result.usage`): the pre-existing server-computed path.
+/// - Lump-only reporters: one row (null provider/model) so the spend counts
+///   against budgets and cost history.
+///
+/// Rows are written before the orchestrator schedules dependents, so the next
+/// budget check sees the spend.
+async fn record_reported_activity_cost(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    event: &WorkflowEvent,
+    state: &super::workflow_state::WorkflowState,
+    activity_def: &crate::workflow::ActivityDefinition,
+    config: &OrchestratorConfig,
+) -> Result<ReportedCostTotals> {
+    let mut totals = ReportedCostTotals::default();
+
+    let activity_key = event
+        .activity_key
+        .as_ref()
+        .ok_or_else(|| super::OrchestratorError::MissingActivityKey)?;
+
+    // Parse reported usage entries leniently — the API validated the wire shape,
+    // and a malformed payload must not fail completion processing.
+    let entries: Vec<UsageEntry> = match event.payload.get("usage") {
+        Some(value) => match serde_json::from_value(value.clone()) {
+            Ok(entries) => entries,
+            Err(e) => {
+                tracing::warn!(
+                    workflow_id = %event.workflow_id,
+                    activity_key = %activity_key,
+                    error = %e,
+                    "Ignoring malformed usage entries in event payload"
+                );
+                Vec::new()
+            }
+        },
+        None => Vec::new(),
+    };
+
+    let lump = event
+        .payload
+        .get("cost_usd")
+        .and_then(payload_decimal)
+        .filter(|c| *c > Decimal::ZERO);
+
+    if entries.is_empty() {
+        // Built-in LLM activities report usage inside outputs.result.usage —
+        // keep the existing server-computed path for them.
+        if event.event_type == WorkflowEventType::ActivityCompleted
+            && matches!(
+                activity_def.activity_name.as_deref(),
+                Some("llm_prompt") | Some("embedding")
+            )
+            && record_llm_activity_cost(tx, event, state, activity_def, config).await?
+        {
+            return Ok(totals);
+        }
+
+        if lump.is_none() {
+            return Ok(totals);
+        }
+    }
+
+    let attempt = state
+        .activities
+        .get(activity_key)
+        .map(|a| a.attempt)
+        .unwrap_or(1);
+
+    // Budget snapshot columns (same values built-in rows carry)
+    let activity_limit = activity_def
+        .settings
+        .as_ref()
+        .and_then(|s| s.budget.as_ref())
+        .map(|b| b.limit);
+    let workflow_limit = sqlx::query_scalar!(
+        "SELECT budget_limit_usd FROM workflows WHERE id = $1",
+        event.workflow_id
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    let budget_action = activity_def
+        .settings
+        .as_ref()
+        .and_then(|s| s.budget.as_ref())
+        .map(|b| match b.action {
+            BudgetAction::Abort => "abort".to_string(),
+            BudgetAction::Continue => "continue".to_string(),
+        });
+
+    // Batch pricing lookup for entries that need server-side computation
+    let to_price: Vec<(String, String)> = entries
+        .iter()
+        .filter(|e| e.cost_usd.is_none())
+        .map(|e| (e.provider.clone(), e.model.clone()))
+        .collect();
+    let pricing = if to_price.is_empty() {
+        HashMap::new()
+    } else {
+        CostCalculator::new(config.pool.clone())
+            .batch_get_pricing(&to_price)
+            .await
+            .map_err(|e| {
+                super::OrchestratorError::CostTrackingFailed(format!(
+                    "Failed to get pricing: {}",
+                    e
+                ))
+            })?
+    };
+
+    let cost_tracker = CostTracker::new(config.pool.clone());
+
+    for entry in &entries {
+        let cost = match entry.cost_usd {
+            Some(cost) => {
+                totals.explicit += cost;
+                cost
+            }
+            None => {
+                let key = format!("{}/{}", entry.provider, entry.model);
+                match pricing.get(&key) {
+                    Some(model_pricing) => {
+                        let cost = CostCalculator::calculate_usage_entry_cost(model_pricing, entry);
+                        totals.computed += cost;
+                        cost
+                    }
+                    None => {
+                        // Catalog-freshness problem the worker cannot fix: record
+                        // at cost 0 rather than losing the row. The structured
+                        // counter field makes this alertable in log aggregation.
+                        tracing::warn!(
+                            monotonic_counter.kruxiaflow_unknown_model_usage = 1u64,
+                            workflow_id = %event.workflow_id,
+                            activity_key = %activity_key,
+                            provider = %entry.provider,
+                            model = %entry.model,
+                            "Unknown provider/model in reported usage; recording entry at cost 0"
+                        );
+                        Decimal::ZERO
+                    }
+                }
+            }
+        };
+
+        cost_tracker
+            .record_cost(ActivityCostRecord {
+                workflow_id: event.workflow_id,
+                activity_key: activity_key.clone(),
+                attempt,
+                cost_usd: cost,
+                estimated_cost_usd: None,
+                prompt_tokens: Some(entry.input_tokens),
+                output_tokens: Some(entry.output_tokens),
+                total_tokens: Some(entry.input_tokens + entry.output_tokens),
+                cached_tokens: Some(entry.cache_read_tokens),
+                provider: Some(entry.provider.clone()),
+                model: Some(entry.model.clone()),
+                activity_budget_limit_usd: activity_limit,
+                workflow_budget_limit_usd: workflow_limit,
+                budget_exceeded: false,
+                budget_action: budget_action.clone(),
+            })
+            .await
+            .map_err(|e| super::OrchestratorError::CostTrackingFailed(e.to_string()))?;
+    }
+
+    // Lump row: total activity cost for lump-only reporters, or the
+    // not-covered-by-entries remainder when usage entries are present.
+    if let Some(lump_cost) = lump {
+        cost_tracker
+            .record_cost(ActivityCostRecord {
+                workflow_id: event.workflow_id,
+                activity_key: activity_key.clone(),
+                attempt,
+                cost_usd: lump_cost,
+                estimated_cost_usd: None,
+                prompt_tokens: None,
+                output_tokens: None,
+                total_tokens: None,
+                cached_tokens: None,
+                provider: None,
+                model: None,
+                activity_budget_limit_usd: activity_limit,
+                workflow_budget_limit_usd: workflow_limit,
+                budget_exceeded: false,
+                budget_action: budget_action.clone(),
+            })
+            .await
+            .map_err(|e| super::OrchestratorError::CostTrackingFailed(e.to_string()))?;
+        totals.explicit += lump_cost;
+    }
+
+    tracing::info!(
+        workflow_id = %event.workflow_id,
+        activity_key = %activity_key,
+        attempt = attempt,
+        usage_entries = entries.len(),
+        total_cost_usd = %totals.total(),
+        "Recorded reported activity cost"
+    );
+
+    Ok(totals)
 }
 
 /// Publish a failure event when a poison message is detected

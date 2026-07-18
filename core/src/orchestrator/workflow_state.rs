@@ -128,7 +128,7 @@ pub async fn load_workflow_definition(
     workflow_id: Uuid,
 ) -> Result<WorkflowDefinition> {
     let row = sqlx::query!(
-        r#"SELECT wd.id, wd.name, wd.activities, wd.created_at
+        r#"SELECT wd.id, wd.name, wd.activities, wd.settings, wd.created_at
            FROM workflows w
            JOIN workflow_definitions wd ON wd.id = w.workflow_definition_id
            WHERE w.id = $1"#,
@@ -142,9 +142,16 @@ pub async fn load_workflow_definition(
     let activities = serde_json::from_value(row.activities)
         .map_err(|e| OrchestratorError::StateDeserialization(e.to_string()))?;
 
+    let settings = row
+        .settings
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|e| OrchestratorError::StateDeserialization(e.to_string()))?;
+
     Ok(WorkflowDefinition {
         name: row.name,
         activities,
+        settings,
     })
 }
 
@@ -154,7 +161,7 @@ pub async fn load_workflow_definition_by_id(
     definition_id: Uuid,
 ) -> Result<WorkflowDefinition> {
     let row = sqlx::query!(
-        r#"SELECT id, name, activities, created_at
+        r#"SELECT id, name, activities, settings, created_at
            FROM workflow_definitions
            WHERE id = $1"#,
         definition_id
@@ -167,9 +174,16 @@ pub async fn load_workflow_definition_by_id(
     let activities = serde_json::from_value(row.activities)
         .map_err(|e| OrchestratorError::StateDeserialization(e.to_string()))?;
 
+    let settings = row
+        .settings
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|e| OrchestratorError::StateDeserialization(e.to_string()))?;
+
     Ok(WorkflowDefinition {
         name: row.name,
         activities,
+        settings,
     })
 }
 
@@ -306,6 +320,39 @@ pub async fn initialize_workflow_state(
     Ok(state)
 }
 
+/// Parse a Decimal from a JSON payload value (Decimal serializes as a string,
+/// but tolerate plain numbers from hand-built payloads)
+pub(crate) fn payload_decimal(value: &Value) -> Option<Decimal> {
+    if let Some(s) = value.as_str() {
+        s.parse::<Decimal>().ok()
+    } else if let Some(n) = value.as_f64() {
+        Decimal::from_f64_retain(n)
+    } else {
+        None
+    }
+}
+
+/// Sum the costs explicitly present in an event payload: per-usage-entry
+/// `cost_usd` values plus the top-level `cost_usd` (which is the total activity
+/// cost when no usage entries are present, and the not-covered-by-entries
+/// remainder otherwise). Server-computed entry costs are NOT included here —
+/// the orchestrator's recording step adds those to the activity state so that
+/// `ACTIVITY.accumulated_cost_usd` and recorded costs never disagree.
+pub(crate) fn explicit_reported_cost(payload: &Value) -> Decimal {
+    let mut total = Decimal::ZERO;
+    if let Some(entries) = payload.get("usage").and_then(|u| u.as_array()) {
+        for entry in entries {
+            if let Some(cost) = entry.get("cost_usd").and_then(payload_decimal) {
+                total += cost;
+            }
+        }
+    }
+    if let Some(cost) = payload.get("cost_usd").and_then(payload_decimal) {
+        total += cost;
+    }
+    total
+}
+
 /// Apply a single event to update state incrementally (not full reconstruction)
 pub fn apply_event_to_state(state: &mut WorkflowState, event: &WorkflowEvent) -> Result<()> {
     match event.event_type {
@@ -350,17 +397,12 @@ pub fn apply_event_to_state(state: &mut WorkflowState, event: &WorkflowEvent) ->
                     }
                 });
 
-                // Accumulate cost if present in event payload
-                if let Some(cost_value) = event.payload.get("cost_usd") {
-                    if let Some(cost_str) = cost_value.as_str() {
-                        if let Ok(cost) = cost_str.parse::<Decimal>() {
-                            activity.add_cost(cost);
-                        }
-                    } else if let Some(cost_num) = cost_value.as_f64()
-                        && let Some(cost) = Decimal::from_f64_retain(cost_num)
-                    {
-                        activity.add_cost(cost);
-                    }
+                // Accumulate the costs explicitly reported in the payload
+                // (usage entries + lump). Server-computed entry costs are added
+                // by the orchestrator's cost-recording step.
+                let reported = explicit_reported_cost(&event.payload);
+                if reported != Decimal::ZERO {
+                    activity.add_cost(reported);
                 }
 
                 activity.completed_at = Some(Utc::now());

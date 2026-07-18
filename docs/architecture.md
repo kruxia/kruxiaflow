@@ -286,6 +286,18 @@ flowchart TD
 - **Built-in worker**: Executes activities compiled into the binary
 - **External workers**: Custom implementations that connect to API via HTTP/WS
 
+**Cost reporting**: Both worker types report spend through the completion API,
+and the orchestrator is the single writer of `activity_costs` rows — recorded
+while processing `ActivityCompleted`/`ActivityFailed` events, before dependents
+are scheduled, so the next budget check sees the spend. Built-in LLM activities
+report usage inside `outputs.result.usage`; external activities report
+per-LLM-call `usage` entries (server-priced from the `llm_models` catalog
+unless an explicit per-entry `cost_usd` is given) and/or a lump-sum `cost_usd`
+on both `/complete` and `/fail`. Workflow-level budgets
+(`settings.budget.limit` in the definition) are persisted to
+`workflows.budget_limit_usd` at submission and enforced by the same
+scheduling-time budget check as activity-level budgets.
+
 **Architecture Decision: Built-in Worker Uses API Server**
 
 The built-in worker is implemented as an HTTP client to the API server rather than directly accessing service interfaces (ActivityQueue, EventSource, etc.). This design choice was made after evaluating two approaches:
@@ -604,7 +616,7 @@ LLM completions with multi-model fallback, budget awareness, and optional stream
     - result
   settings:
     budget:
-      limit_usd: 0.50
+      limit: 0.50
       action: abort
     retry:
       max_attempts: 3
@@ -3324,7 +3336,7 @@ activities:
 **Activity Settings**:
 - `retry`: Configurable retry with exponential backoff (`max_attempts`, `strategy`, `base_seconds`, `factor`, `max_seconds`)
 - `timeout_seconds`: Activity execution timeout
-- `budget`: Cost limits for LLM activities (`limit_usd`, `action: abort`)
+- `budget`: Cost limits for LLM activities (`limit`, `action: abort`)
 - `delay`: Delayed execution for rate limiting (e.g., `"5s"`)
 - `scheduled_for`: Absolute scheduling timestamp
 

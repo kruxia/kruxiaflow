@@ -37,6 +37,7 @@ pub fn create_sequential_workflow(num_activities: usize) -> WorkflowDefinition {
 
     WorkflowDefinition {
         name: format!("sequential_bench_{}", num_activities),
+        settings: None,
         activities,
     }
 }
@@ -121,6 +122,7 @@ pub fn create_parallel_workflow(num_parallel: usize) -> WorkflowDefinition {
 
     WorkflowDefinition {
         name: format!("parallel_bench_{}", num_parallel),
+        settings: None,
         activities,
     }
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, name, activities, content_hash, created_at\n            FROM workflow_definitions\n            ORDER BY name ASC, created_at DESC\n            ",
+  "query": "SELECT id, name, activities, settings, created_at\n           FROM workflow_definitions\n           WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -20,8 +20,8 @@
       },
       {
         "ordinal": 3,
-        "name": "content_hash",
-        "type_info": "Bytea"
+        "name": "settings",
+        "type_info": "Jsonb"
       },
       {
         "ordinal": 4,
@@ -30,7 +30,9 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Uuid"
+      ]
     },
     "nullable": [
       false,
@@ -40,5 +42,5 @@
       false
     ]
   },
-  "hash": "5f3ec35dbf5987c23ee540cff8ea4fefbc7f35084f14f056fd24b4272837b35b"
+  "hash": "a5017a31d5664a53f15202b0c44e9b0b3ecc4762928a800b5230cc766ff1b1c8"
 }

@@ -28,6 +28,7 @@ pub struct ModelDefinition {
     pub input_price_per_million: Decimal,
     pub output_price_per_million: Decimal,
     pub cached_input_price_per_million: Option<Decimal>,
+    pub cache_write_price_per_million: Option<Decimal>,
     pub supports_completion: Option<bool>,
     pub supports_embeddings: Option<bool>,
     pub context_window: Option<i32>,
@@ -78,16 +79,17 @@ pub async fn load_catalog_from_yaml(pool: &PgPool, yaml_path: &Path) -> Result<(
                 INSERT INTO llm_models (
                     provider, name, display_name,
                     input_price_per_million, output_price_per_million,
-                    cached_input_price_per_million,
+                    cached_input_price_per_million, cache_write_price_per_million,
                     supports_completion, supports_embeddings,
                     context_window, max_output_tokens
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 ON CONFLICT (provider, name) DO UPDATE SET
                     display_name = EXCLUDED.display_name,
                     input_price_per_million = EXCLUDED.input_price_per_million,
                     output_price_per_million = EXCLUDED.output_price_per_million,
                     cached_input_price_per_million = EXCLUDED.cached_input_price_per_million,
+                    cache_write_price_per_million = EXCLUDED.cache_write_price_per_million,
                     supports_completion = EXCLUDED.supports_completion,
                     supports_embeddings = EXCLUDED.supports_embeddings,
                     context_window = EXCLUDED.context_window,
@@ -100,6 +102,7 @@ pub async fn load_catalog_from_yaml(pool: &PgPool, yaml_path: &Path) -> Result<(
                 model.input_price_per_million,
                 model.output_price_per_million,
                 model.cached_input_price_per_million,
+                model.cache_write_price_per_million,
                 model.supports_completion.unwrap_or(true),
                 model.supports_embeddings.unwrap_or(false),
                 model.context_window,

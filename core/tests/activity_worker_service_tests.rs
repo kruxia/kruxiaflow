@@ -248,6 +248,7 @@ async fn test_complete_activity_success(pool: PgPool) {
             "worker_01".to_string(),
             output.clone(),
             Some(Decimal::from_str("0.05").unwrap()),
+            None,
         )
         .await;
 
@@ -305,13 +306,13 @@ async fn test_complete_activity_idempotency(pool: PgPool) {
 
     // Complete the activity first time
     service
-        .complete_activity(activity_id, "worker_01".to_string(), output.clone(), None)
+        .complete_activity(activity_id, "worker_01".to_string(), output.clone(), None, None)
         .await
         .unwrap();
 
     // Try to complete again (should succeed idempotently)
     let result = service
-        .complete_activity(activity_id, "worker_01".to_string(), output, None)
+        .complete_activity(activity_id, "worker_01".to_string(), output, None, None)
         .await;
 
     assert!(result.is_ok());
@@ -338,7 +339,7 @@ async fn test_complete_activity_wrong_worker(pool: PgPool) {
     // Try to complete from worker_02
     let output = json!({"result": "success"});
     let result = service
-        .complete_activity(activity_id, "worker_02".to_string(), output, None)
+        .complete_activity(activity_id, "worker_02".to_string(), output, None, None)
         .await;
 
     assert!(result.is_err());
@@ -374,6 +375,8 @@ async fn test_fail_activity_success(pool: PgPool) {
             "PAYMENT_DECLINED".to_string(),
             "Card was declined by the bank".to_string(),
             false,
+            None,
+            None,
         )
         .await;
 
@@ -438,6 +441,8 @@ async fn test_fail_activity_wrong_worker(pool: PgPool) {
             "ERROR".to_string(),
             "Error message".to_string(),
             false,
+            None,
+            None,
         )
         .await;
 
@@ -462,6 +467,8 @@ async fn test_fail_activity_not_found(pool: PgPool) {
             "ERROR".to_string(),
             "Error message".to_string(),
             false,
+            None,
+            None,
         )
         .await;
 

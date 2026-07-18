@@ -6,7 +6,16 @@
 # - Ollama: Self-hosted (free)
 #
 # NOTE (Sonnet 5): introductory pricing is encoded below through 2026-08-31.
-# On 2026-09-01 update claude-sonnet-5 to input 3.00 / output 15.00 / cached 0.30.
+# On 2026-09-01 update claude-sonnet-5 to input 3.00 / output 15.00 /
+# cached 0.30 / cache write 3.75.
+#
+# NOTE (cache_write_price_per_million): billed for reported
+# cache_creation_tokens. Anthropic charges 1.25x input for cache writes
+# (5-minute TTL). Models without this field bill cache writes at the
+# input-token price. OpenAI has no separate cache-write charge. Google has
+# no write premium either, but explicit Gemini caching bills STORAGE per
+# token-hour — not modeled by the catalog yet; workers report it via an
+# explicit per-entry cost_usd or the completion's lump cost_usd.
 
 providers:
   # OpenAI Provider
@@ -167,6 +176,7 @@ providers:
         input_price_per_million: 10.00
         output_price_per_million: 50.00
         cached_input_price_per_million: 1.00
+        cache_write_price_per_million: 12.50
         supports_completion: true
         context_window: 1000000
         max_output_tokens: 128000
@@ -177,10 +187,11 @@ providers:
         input_price_per_million: 2.00
         output_price_per_million: 10.00
         cached_input_price_per_million: 0.20
+        cache_write_price_per_million: 2.50
         supports_completion: true
         context_window: 1000000
         max_output_tokens: 128000
-        notes: "Introductory pricing through 2026-08-31; from 2026-09-01: $3 input, $15 output, $0.30 cached. Full 1M context at standard pricing"
+        notes: "Introductory pricing through 2026-08-31; from 2026-09-01: $3 input, $15 output, $0.30 cached, $3.75 cache write. Full 1M context at standard pricing"
 
       # Claude Opus 4.x (current)
       - name: claude-opus-4-8
@@ -188,6 +199,7 @@ providers:
         input_price_per_million: 5.00
         output_price_per_million: 25.00
         cached_input_price_per_million: 0.50
+        cache_write_price_per_million: 6.25
         supports_completion: true
         context_window: 1000000
         max_output_tokens: 128000
@@ -198,6 +210,7 @@ providers:
         input_price_per_million: 5.00
         output_price_per_million: 25.00
         cached_input_price_per_million: 0.50
+        cache_write_price_per_million: 6.25
         supports_completion: true
         context_window: 1000000
         max_output_tokens: 128000
@@ -208,6 +221,7 @@ providers:
         input_price_per_million: 5.00
         output_price_per_million: 25.00
         cached_input_price_per_million: 0.50
+        cache_write_price_per_million: 6.25
         supports_completion: true
         context_window: 1000000
         max_output_tokens: 128000
@@ -218,6 +232,7 @@ providers:
         input_price_per_million: 3.00
         output_price_per_million: 15.00
         cached_input_price_per_million: 0.30
+        cache_write_price_per_million: 3.75
         supports_completion: true
         context_window: 1000000
         max_output_tokens: 128000
@@ -232,6 +247,7 @@ providers:
         input_price_per_million: 5.00
         output_price_per_million: 25.00
         cached_input_price_per_million: 0.50
+        cache_write_price_per_million: 6.25
         supports_completion: true
         context_window: 200000
         max_output_tokens: 64000
@@ -242,6 +258,7 @@ providers:
         input_price_per_million: 5.00
         output_price_per_million: 25.00
         cached_input_price_per_million: 0.50
+        cache_write_price_per_million: 6.25
         supports_completion: true
         context_window: 200000
         max_output_tokens: 64000
@@ -251,6 +268,7 @@ providers:
         input_price_per_million: 3.00
         output_price_per_million: 15.00
         cached_input_price_per_million: 0.30
+        cache_write_price_per_million: 3.75
         supports_completion: true
         context_window: 200000
         max_output_tokens: 64000
@@ -261,6 +279,7 @@ providers:
         input_price_per_million: 3.00
         output_price_per_million: 15.00
         cached_input_price_per_million: 0.30
+        cache_write_price_per_million: 3.75
         supports_completion: true
         context_window: 200000
         max_output_tokens: 64000
@@ -270,6 +289,7 @@ providers:
         input_price_per_million: 1.00
         output_price_per_million: 5.00
         cached_input_price_per_million: 0.10
+        cache_write_price_per_million: 1.25
         supports_completion: true
         context_window: 200000
         max_output_tokens: 64000
@@ -280,6 +300,7 @@ providers:
         input_price_per_million: 1.00
         output_price_per_million: 5.00
         cached_input_price_per_million: 0.10
+        cache_write_price_per_million: 1.25
         supports_completion: true
         context_window: 200000
         max_output_tokens: 64000
@@ -290,6 +311,7 @@ providers:
         input_price_per_million: 15.00
         output_price_per_million: 75.00
         cached_input_price_per_million: 1.50
+        cache_write_price_per_million: 18.75
         supports_completion: true
         context_window: 200000
         max_output_tokens: 32000
@@ -300,6 +322,7 @@ providers:
         input_price_per_million: 15.00
         output_price_per_million: 75.00
         cached_input_price_per_million: 1.50
+        cache_write_price_per_million: 18.75
         supports_completion: true
         context_window: 200000
         max_output_tokens: 32000
