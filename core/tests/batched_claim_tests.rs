@@ -1,55 +1,15 @@
 use kruxiaflow_core::queue::{Activity, ActivityQueue, PostgresQueue, QueueConfig};
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use uuid::Uuid;
-
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    // Run migrations from workspace root
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    // Truncate activity_queue table to ensure clean state for tests
-    // Safe because tests run serially with #[serial]
-    sqlx::query!("TRUNCATE TABLE activity_queue")
-        .execute(&pool)
-        .await
-        .expect("Failed to truncate activity_queue");
-
-    pool
-}
-
-/// Helper to clean up test data
-async fn cleanup_queue(pool: &PgPool, workflow_id: Uuid) {
-    sqlx::query!(
-        "DELETE FROM activity_queue WHERE workflow_id = $1",
-        workflow_id
-    )
-    .execute(pool)
-    .await
-    .expect("Failed to cleanup test data");
-}
 
 // ===========================================================================
 // Worker-level claiming tests
 // Tests for the worker-level filtering optimization
 // ===========================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_claim_multiple_activities_single_worker() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_claim_multiple_activities_single_worker(pool: PgPool) {
     let config = QueueConfig::default();
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -93,14 +53,10 @@ async fn test_claim_multiple_activities_single_worker() {
         ids.iter().collect::<std::collections::HashSet<_>>().len(),
         "All claimed activities should be unique"
     );
-
-    cleanup_queue(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_claim_multiple_activity_types_for_same_worker() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_claim_multiple_activity_types_for_same_worker(pool: PgPool) {
     let config = QueueConfig::default();
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -185,14 +141,10 @@ async fn test_claim_multiple_activity_types_for_same_worker() {
         activity_names.contains(&"echo"),
         "Should claim echo activity"
     );
-
-    cleanup_queue(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_claim_respects_max_activities_limit() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_claim_respects_max_activities_limit(pool: PgPool) {
     let config = QueueConfig::default();
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -232,14 +184,10 @@ async fn test_claim_respects_max_activities_limit() {
         .expect("Failed to claim remaining activities");
 
     assert_eq!(remaining.len(), 5, "Should claim remaining 5 activities");
-
-    cleanup_queue(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_claim_only_returns_matching_worker() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_claim_only_returns_matching_worker(pool: PgPool) {
     let config = QueueConfig::default();
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -309,14 +257,10 @@ async fn test_claim_only_returns_matching_worker() {
 
     assert_eq!(claimed_custom.len(), 1, "Should claim custom activity");
     assert_eq!(claimed_custom[0].worker, "custom");
-
-    cleanup_queue(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_claim_when_fewer_available_than_requested() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_claim_when_fewer_available_than_requested(pool: PgPool) {
     let config = QueueConfig::default();
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -352,14 +296,10 @@ async fn test_claim_when_fewer_available_than_requested() {
         2,
         "Should claim all available activities even if less than max_activities"
     );
-
-    cleanup_queue(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_worker_level_claim_concurrent_workers() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_worker_level_claim_concurrent_workers(pool: PgPool) {
     let config = QueueConfig::default();
     let workflow_id = Uuid::now_v7();
 
@@ -422,6 +362,4 @@ async fn test_worker_level_claim_concurrent_workers() {
         "All activities should be unique (no double-claiming)"
     );
     assert_eq!(all_ids.len(), 9, "Should have claimed all 9 activities");
-
-    cleanup_queue(&pool, workflow_id).await;
 }

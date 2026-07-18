@@ -109,14 +109,7 @@ mod tests {
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
 
-    async fn setup_test_state() -> AppState {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-        let pool = PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database");
-
+    fn setup_test_state(pool: PgPool) -> AppState {
         AppState::new(
             pool,
             Arc::new(MockAuthService),
@@ -129,9 +122,9 @@ mod tests {
         )
     }
 
-    #[tokio::test]
-    async fn test_create_user_success() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_create_user_success(pool: PgPool) {
+        let state = setup_test_state(pool);
 
         let request = CreateUserRequest {
             username: "newuser".to_string(),
@@ -146,9 +139,9 @@ mod tests {
         assert_eq!(response.status(), StatusCode::CREATED);
     }
 
-    #[tokio::test]
-    async fn test_create_user_empty_username() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_create_user_empty_username(pool: PgPool) {
+        let state = setup_test_state(pool);
 
         let request = CreateUserRequest {
             username: "".to_string(),
@@ -160,9 +153,9 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_create_user_whitespace_username() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_create_user_whitespace_username(pool: PgPool) {
+        let state = setup_test_state(pool);
 
         let request = CreateUserRequest {
             username: "   ".to_string(),
@@ -174,9 +167,9 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_create_user_empty_email() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_create_user_empty_email(pool: PgPool) {
+        let state = setup_test_state(pool);
 
         let request = CreateUserRequest {
             username: "newuser".to_string(),
@@ -188,9 +181,9 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_create_user_empty_password() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_create_user_empty_password(pool: PgPool) {
+        let state = setup_test_state(pool);
 
         let request = CreateUserRequest {
             username: "newuser".to_string(),

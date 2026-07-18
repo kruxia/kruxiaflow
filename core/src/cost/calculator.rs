@@ -538,19 +538,8 @@ mod tests {
     // Integration Tests (Require Database)
     // ============================================================================
 
-    async fn setup_test_pool() -> PgPool {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-
-        PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database")
-    }
-
-    #[tokio::test]
-    async fn test_calculate_llm_cost_model_not_found() {
-        let pool = setup_test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_calculate_llm_cost_model_not_found(pool: PgPool) {
         let calculator = CostCalculator::new(pool);
 
         let result = calculator
@@ -561,9 +550,8 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("Model not found"));
     }
 
-    #[tokio::test]
-    async fn test_estimate_llm_cost_model_not_found() {
-        let pool = setup_test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_estimate_llm_cost_model_not_found(pool: PgPool) {
         let calculator = CostCalculator::new(pool);
 
         let result = calculator
@@ -574,9 +562,8 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains("Model not found"));
     }
 
-    #[tokio::test]
-    async fn test_batch_get_pricing_empty() {
-        let pool = setup_test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_batch_get_pricing_empty(pool: PgPool) {
         let calculator = CostCalculator::new(pool);
 
         let result = calculator.batch_get_pricing(&[]).await.unwrap();
@@ -584,9 +571,8 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    #[tokio::test]
-    async fn test_batch_get_pricing_nonexistent_models() {
-        let pool = setup_test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_batch_get_pricing_nonexistent_models(pool: PgPool) {
         let calculator = CostCalculator::new(pool);
 
         let models = vec![

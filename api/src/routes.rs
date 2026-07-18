@@ -251,17 +251,6 @@ mod tests {
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
 
-    /// Helper to create test database pool
-    async fn setup_test_pool() -> PgPool {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-
-        PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database")
-    }
-
     /// Generate test RSA private key
     fn test_rsa_private_key() -> String {
         include_str!("../../oauth/tests/private.pem").to_string()
@@ -290,12 +279,9 @@ mod tests {
         assert!(std::mem::size_of_val(&router) > 0);
     }
 
-    #[tokio::test]
-    #[serial]
-    async fn test_app_router_creation() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_app_router_creation(pool: PgPool) {
         // Test that app_router() creates a router with state
-        let pool = setup_test_pool().await;
-
         let auth_config = AuthConfig {
             rsa_private_key_pem: test_rsa_private_key(),
             rsa_public_key_pem: Some(test_rsa_public_key()),
@@ -344,12 +330,9 @@ mod tests {
         assert!(body_str.contains("not found") || body_str.contains("Not Found"));
     }
 
-    #[tokio::test]
-    #[serial]
-    async fn test_404_for_unknown_route() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_404_for_unknown_route(pool: PgPool) {
         // Test that unknown routes return 404
-        let pool = setup_test_pool().await;
-
         let auth_config = AuthConfig {
             rsa_private_key_pem: test_rsa_private_key(),
             rsa_public_key_pem: Some(test_rsa_public_key()),
@@ -386,12 +369,9 @@ mod tests {
         assert_eq!(response.status_code(), axum::http::StatusCode::NOT_FOUND);
     }
 
-    #[tokio::test]
-    #[serial]
-    async fn test_openapi_json_endpoint() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_openapi_json_endpoint(pool: PgPool) {
         // Test that /api/v1/openapi.json returns OpenAPI spec
-        let pool = setup_test_pool().await;
-
         let auth_config = AuthConfig {
             rsa_private_key_pem: test_rsa_private_key(),
             rsa_public_key_pem: Some(test_rsa_public_key()),

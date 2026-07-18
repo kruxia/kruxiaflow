@@ -5,18 +5,8 @@ use kruxiaflow_core::orchestrator::config::OrchestratorConfig;
 use sqlx::PgPool;
 use std::time::Duration;
 
-async fn mock_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-    PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database")
-}
-
-#[tokio::test]
-async fn test_orchestrator_config_new_defaults() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_orchestrator_config_new_defaults(pool: PgPool) {
     let config = OrchestratorConfig::new(pool);
 
     assert_eq!(config.poll_interval_min, Duration::from_millis(50));
@@ -24,9 +14,8 @@ async fn test_orchestrator_config_new_defaults() {
     assert_eq!(config.backoff_multiplier, 1.5);
 }
 
-#[tokio::test]
-async fn test_orchestrator_config_with_poll_interval() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_orchestrator_config_with_poll_interval(pool: PgPool) {
     let config = OrchestratorConfig::new(pool)
         .with_poll_interval(Duration::from_millis(100), Duration::from_secs(10));
 
@@ -35,9 +24,8 @@ async fn test_orchestrator_config_with_poll_interval() {
     assert_eq!(config.backoff_multiplier, 1.5); // Should remain default
 }
 
-#[tokio::test]
-async fn test_orchestrator_config_with_backoff_multiplier() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_orchestrator_config_with_backoff_multiplier(pool: PgPool) {
     let config = OrchestratorConfig::new(pool).with_backoff_multiplier(2.0);
 
     assert_eq!(config.poll_interval_min, Duration::from_millis(50)); // Should remain default
@@ -45,9 +33,8 @@ async fn test_orchestrator_config_with_backoff_multiplier() {
     assert_eq!(config.backoff_multiplier, 2.0);
 }
 
-#[tokio::test]
-async fn test_orchestrator_config_builder_chaining() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_orchestrator_config_builder_chaining(pool: PgPool) {
     let config = OrchestratorConfig::new(pool)
         .with_poll_interval(Duration::from_millis(20), Duration::from_secs(15))
         .with_backoff_multiplier(3.0);
@@ -57,43 +44,38 @@ async fn test_orchestrator_config_builder_chaining() {
     assert_eq!(config.backoff_multiplier, 3.0);
 }
 
-#[tokio::test]
-async fn test_orchestrator_config_with_zero_min_interval() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_orchestrator_config_with_zero_min_interval(pool: PgPool) {
     let config = OrchestratorConfig::new(pool)
         .with_poll_interval(Duration::from_millis(0), Duration::from_secs(5));
 
     assert_eq!(config.poll_interval_min, Duration::from_millis(0));
 }
 
-#[tokio::test]
-async fn test_orchestrator_config_with_very_large_max_interval() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_orchestrator_config_with_very_large_max_interval(pool: PgPool) {
     let config = OrchestratorConfig::new(pool)
         .with_poll_interval(Duration::from_millis(10), Duration::from_secs(3600));
 
     assert_eq!(config.poll_interval_max, Duration::from_secs(3600));
 }
 
-#[tokio::test]
-async fn test_orchestrator_config_with_fractional_multiplier() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_orchestrator_config_with_fractional_multiplier(pool: PgPool) {
     let config = OrchestratorConfig::new(pool).with_backoff_multiplier(1.5);
 
     assert_eq!(config.backoff_multiplier, 1.5);
 }
 
-#[tokio::test]
-async fn test_orchestrator_config_with_multiplier_one() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_orchestrator_config_with_multiplier_one(pool: PgPool) {
     let config = OrchestratorConfig::new(pool).with_backoff_multiplier(1.0);
 
     assert_eq!(config.backoff_multiplier, 1.0);
 }
 
-#[tokio::test]
-async fn test_orchestrator_config_multiple_builder_calls() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_orchestrator_config_multiple_builder_calls(pool: PgPool) {
     let config = OrchestratorConfig::new(pool)
         .with_poll_interval(Duration::from_millis(5), Duration::from_secs(1))
         .with_backoff_multiplier(2.5)
@@ -105,18 +87,16 @@ async fn test_orchestrator_config_multiple_builder_calls() {
     assert_eq!(config.backoff_multiplier, 2.5);
 }
 
-#[tokio::test]
-async fn test_orchestrator_config_backoff_default() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_orchestrator_config_backoff_default(pool: PgPool) {
     let config = OrchestratorConfig::new(pool);
 
     // Default uses moderate backoff multiplier
     assert!((config.backoff_multiplier - 1.5).abs() < 0.01);
 }
 
-#[tokio::test]
-async fn test_orchestrator_config_with_workflow_timeout() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_orchestrator_config_with_workflow_timeout(pool: PgPool) {
     let config = OrchestratorConfig::new(pool).with_workflow_timeout(Duration::from_secs(600));
 
     assert_eq!(config.workflow_timeout, Duration::from_secs(600));
@@ -125,9 +105,8 @@ async fn test_orchestrator_config_with_workflow_timeout() {
     assert_eq!(config.timeout_check_interval, Duration::from_secs(30));
 }
 
-#[tokio::test]
-async fn test_orchestrator_config_with_timeout_check_interval() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_orchestrator_config_with_timeout_check_interval(pool: PgPool) {
     let config = OrchestratorConfig::new(pool).with_timeout_check_interval(Duration::from_secs(60));
 
     assert_eq!(config.timeout_check_interval, Duration::from_secs(60));
@@ -135,9 +114,8 @@ async fn test_orchestrator_config_with_timeout_check_interval() {
     assert_eq!(config.workflow_timeout, Duration::from_secs(300));
 }
 
-#[tokio::test]
-async fn test_orchestrator_config_full_builder_chain() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_orchestrator_config_full_builder_chain(pool: PgPool) {
     let config = OrchestratorConfig::new(pool)
         .with_poll_interval(Duration::from_millis(5), Duration::from_secs(2))
         .with_backoff_multiplier(1.5)
@@ -151,9 +129,8 @@ async fn test_orchestrator_config_full_builder_chain() {
     assert_eq!(config.timeout_check_interval, Duration::from_secs(45));
 }
 
-#[tokio::test]
-async fn test_orchestrator_config_default_timeouts() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_orchestrator_config_default_timeouts(pool: PgPool) {
     let config = OrchestratorConfig::new(pool);
 
     // Verify default timeout values

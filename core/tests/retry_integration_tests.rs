@@ -7,26 +7,9 @@ use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
 use kruxiaflow_core::workflow::{ActivitySettings, BackoffStrategy, RetryPolicy};
 use kruxiaflow_core::{PostgresSubscriptionService, SubscriptionService};
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
-
-async fn setup_test_db() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://localhost/kruxiaflow_test".to_string());
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
 
 /// Helper to poll events with retries to handle timing issues
 #[allow(dead_code)]
@@ -124,15 +107,6 @@ async fn process_all_events(
     last_processed_id
 }
 
-async fn clean_test_data(pool: &PgPool) {
-    sqlx::query!(
-        "TRUNCATE workflow_events, workflow_event_consumers, workflows, workflow_definitions, activity_queue CASCADE"
-    )
-    .execute(pool)
-    .await
-    .expect("Failed to clean test data");
-}
-
 async fn insert_workflow_definition(pool: &PgPool, definition: &WorkflowDefinition) -> Uuid {
     let activities_json =
         serde_json::to_value(&definition.activities).expect("Failed to serialize activities");
@@ -172,13 +146,9 @@ async fn insert_workflow(
 /// This test is ignored because it requires full orchestrator loop (run_orchestrator)
 /// for reliable event sequencing across multiple retry attempts.
 /// The core retry logic is verified by other passing tests.
-#[tokio::test]
-#[serial]
+#[sqlx::test(migrations = "../migrations")]
 #[ignore = "Requires full orchestrator loop for reliable multi-retry event sequencing"]
-async fn test_activity_retry_with_exponential_backoff() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+async fn test_activity_retry_with_exponential_backoff(pool: PgPool) {
     // Create workflow with retry settings using exponential backoff
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -363,13 +333,9 @@ async fn test_activity_retry_with_exponential_backoff() {
 /// This test is ignored because it requires full orchestrator loop (run_orchestrator)
 /// for reliable event sequencing when max_attempts is reached.
 /// The core retry logic is verified by other passing tests.
-#[tokio::test]
-#[serial]
+#[sqlx::test(migrations = "../migrations")]
 #[ignore = "Requires full orchestrator loop for reliable event sequencing"]
-async fn test_activity_retry_max_attempts_reached() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+async fn test_activity_retry_max_attempts_reached(pool: PgPool) {
     // Create workflow with max_attempts = 2
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -524,12 +490,8 @@ async fn test_activity_retry_max_attempts_reached() {
     assert_eq!(workflow.status, WorkflowStatus::Failed);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_activity_retry_with_fixed_backoff() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_activity_retry_with_fixed_backoff(pool: PgPool) {
     // Create workflow with fixed backoff strategy
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -655,12 +617,8 @@ async fn test_activity_retry_with_fixed_backoff() {
     assert_eq!(task.get("attempt").unwrap().as_u64().unwrap(), 2);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_activity_without_retry_fails_immediately() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_activity_without_retry_fails_immediately(pool: PgPool) {
     // Create workflow WITHOUT retry settings
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -782,12 +740,8 @@ async fn test_activity_without_retry_fails_immediately() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_retry_state_tracking_with_cost_accumulation() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_retry_state_tracking_with_cost_accumulation(pool: PgPool) {
     // Create workflow with retry and budget tracking
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),

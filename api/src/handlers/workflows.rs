@@ -1060,18 +1060,8 @@ mod tests {
         })
     }
 
-    async fn test_pool() -> PgPool {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-        PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database")
-    }
-
-    #[tokio::test]
-    async fn test_get_workflow_not_found() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_get_workflow_not_found(pool: PgPool) {
         let service = WorkflowQueryService::new(pool);
         let workflow_id = Uuid::now_v7();
 
@@ -1080,9 +1070,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_list_workflows_handler_defaults() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_list_workflows_handler_defaults(pool: PgPool) {
         let service = WorkflowQueryService::new(pool);
 
         let query = ListWorkflowsQuery {
@@ -1102,9 +1091,8 @@ mod tests {
         assert_eq!(response.offset, 0);
     }
 
-    #[tokio::test]
-    async fn test_list_workflows_handler_with_status_filter() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_list_workflows_handler_with_status_filter(pool: PgPool) {
         let service = WorkflowQueryService::new(pool);
 
         let query = ListWorkflowsQuery {
@@ -1121,9 +1109,8 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[tokio::test]
-    async fn test_list_workflows_handler_invalid_limit() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_list_workflows_handler_invalid_limit(pool: PgPool) {
         let service = WorkflowQueryService::new(pool);
 
         let query = ListWorkflowsQuery {
@@ -1140,9 +1127,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_submit_workflow_definition_not_found() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_submit_workflow_definition_not_found(pool: PgPool) {
         let service = WorkflowService::new(pool);
 
         let request = SubmitWorkflowRequest {
@@ -1157,9 +1143,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_submit_workflow_validation_error_empty_name() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_submit_workflow_validation_error_empty_name(pool: PgPool) {
         let service = WorkflowService::new(pool);
 
         let request = SubmitWorkflowRequest {
@@ -1174,9 +1159,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_submit_workflow_validation_error_non_object_input() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_submit_workflow_validation_error_non_object_input(pool: PgPool) {
         let service = WorkflowService::new(pool);
 
         let request = SubmitWorkflowRequest {
@@ -1191,10 +1175,8 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_submit_and_get_workflow() {
-        let pool = test_pool().await;
-
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_submit_and_get_workflow(pool: PgPool) {
         // First, deploy a workflow definition
         let repo = WorkflowDefinitionRepository::new(pool.clone());
         let yaml = r#"

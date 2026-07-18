@@ -166,16 +166,6 @@ mod tests {
     use super::*;
     use rust_decimal_macros::dec;
 
-    async fn setup_test_pool() -> PgPool {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-
-        PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database")
-    }
-
     async fn create_test_workflow(pool: &PgPool) -> Uuid {
         let workflow_id = Uuid::now_v7();
 
@@ -210,9 +200,8 @@ mod tests {
         workflow_id
     }
 
-    #[tokio::test]
-    async fn test_record_cost_basic() {
-        let pool = setup_test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_record_cost_basic(pool: PgPool) {
         let tracker = CostTracker::new(pool.clone());
         let workflow_id = create_test_workflow(&pool).await;
 
@@ -238,9 +227,8 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[tokio::test]
-    async fn test_record_cost_with_caching() {
-        let pool = setup_test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_record_cost_with_caching(pool: PgPool) {
         let tracker = CostTracker::new(pool.clone());
         let workflow_id = create_test_workflow(&pool).await;
 
@@ -266,9 +254,8 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[tokio::test]
-    async fn test_get_budget_status_no_costs() {
-        let pool = setup_test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_get_budget_status_no_costs(pool: PgPool) {
         let tracker = CostTracker::new(pool.clone());
         let workflow_id = create_test_workflow(&pool).await;
 
@@ -290,9 +277,8 @@ mod tests {
         assert!(status.workflow_budget_ok);
     }
 
-    #[tokio::test]
-    async fn test_get_budget_status_with_costs() {
-        let pool = setup_test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_get_budget_status_with_costs(pool: PgPool) {
         let tracker = CostTracker::new(pool.clone());
         let workflow_id = create_test_workflow(&pool).await;
 
@@ -337,9 +323,8 @@ mod tests {
         assert!(status.workflow_budget_ok);
     }
 
-    #[tokio::test]
-    async fn test_get_budget_status_exceeds_activity_budget() {
-        let pool = setup_test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_get_budget_status_exceeds_activity_budget(pool: PgPool) {
         let tracker = CostTracker::new(pool.clone());
         let workflow_id = create_test_workflow(&pool).await;
 
@@ -379,9 +364,8 @@ mod tests {
         assert!(status.workflow_budget_ok); // Within workflow budget
     }
 
-    #[tokio::test]
-    async fn test_check_budget_before_execution_can_execute() {
-        let pool = setup_test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_check_budget_before_execution_can_execute(pool: PgPool) {
         let tracker = CostTracker::new(pool.clone());
         let workflow_id = create_test_workflow(&pool).await;
 
@@ -405,9 +389,8 @@ mod tests {
         assert_eq!(result.estimated_cost, dec!(0.10));
     }
 
-    #[tokio::test]
-    async fn test_check_budget_before_execution_exceeds_activity_budget() {
-        let pool = setup_test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_check_budget_before_execution_exceeds_activity_budget(pool: PgPool) {
         let tracker = CostTracker::new(pool.clone());
         let workflow_id = create_test_workflow(&pool).await;
 
@@ -450,9 +433,8 @@ mod tests {
         assert_eq!(result.projected_activity_cost, dec!(0.60));
     }
 
-    #[tokio::test]
-    async fn test_check_budget_before_execution_exceeds_workflow_budget() {
-        let pool = setup_test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_check_budget_before_execution_exceeds_workflow_budget(pool: PgPool) {
         let tracker = CostTracker::new(pool.clone());
         let workflow_id = create_test_workflow(&pool).await;
 
@@ -495,9 +477,8 @@ mod tests {
         assert_eq!(result.projected_workflow_cost, dec!(1.10));
     }
 
-    #[tokio::test]
-    async fn test_check_budget_before_execution_no_limits() {
-        let pool = setup_test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_check_budget_before_execution_no_limits(pool: PgPool) {
         let tracker = CostTracker::new(pool.clone());
         let workflow_id = create_test_workflow(&pool).await;
 

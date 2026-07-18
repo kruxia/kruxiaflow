@@ -5,23 +5,11 @@ use kruxiaflow_core::queue::{Activity, ActivityQueue as _, PostgresQueue, QueueC
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use kruxiaflow_worker::{ActivityRegistry, EchoActivity, WorkerConfig, WorkerManager};
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
-
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database")
-}
 
 /// Generate test RSA private key
 fn test_rsa_private_key() -> String {
@@ -34,9 +22,7 @@ fn test_rsa_public_key() -> String {
 }
 
 /// Create and start a real API server on a port
-async fn create_real_server() -> (String, PgPool, tokio::task::JoinHandle<()>) {
-    let pool = setup_test_pool().await;
-
+async fn create_real_server(pool: PgPool) -> (String, PgPool, tokio::task::JoinHandle<()>) {
     let auth_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
         rsa_public_key_pem: Some(test_rsa_public_key()),
@@ -54,7 +40,7 @@ async fn create_real_server() -> (String, PgPool, tokio::task::JoinHandle<()>) {
          VALUES ($1, $2, $3, NOW())
          ON CONFLICT (client_id) DO NOTHING",
         "test_worker_client",
-        bcrypt::hash("test_worker_secret", bcrypt::DEFAULT_COST).unwrap(),
+        bcrypt::hash("test_worker_secret", 4).unwrap(), // min cost: real hashing strength is not under test
         "Test Worker Client"
     )
     .execute(&pool)
@@ -123,11 +109,10 @@ async fn schedule_test_activities(pool: &PgPool, workflow_id: Uuid, count: usize
         .expect("Failed to schedule activities");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_worker_poll_and_execute_echo() {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_worker_poll_and_execute_echo(pool: PgPool) {
     // Setup: Start real API server
-    let (server_url, pool, server_handle) = create_real_server().await;
+    let (server_url, pool, server_handle) = create_real_server(pool).await;
     let workflow_id = Uuid::now_v7();
 
     // Schedule echo activity
@@ -203,11 +188,10 @@ async fn test_worker_poll_and_execute_echo() {
     server_handle.abort();
 }
 
-#[tokio::test]
-#[serial]
-async fn test_worker_concurrency() {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_worker_concurrency(pool: PgPool) {
     // Setup: Start real API server
-    let (server_url, pool, server_handle) = create_real_server().await;
+    let (server_url, pool, server_handle) = create_real_server(pool).await;
     let workflow_id = Uuid::now_v7();
 
     // Schedule 10 echo activities
@@ -263,11 +247,10 @@ async fn test_worker_concurrency() {
     server_handle.abort();
 }
 
-#[tokio::test]
-#[serial]
-async fn test_worker_authentication_failure() {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_worker_authentication_failure(pool: PgPool) {
     // Setup: Start real API server
-    let (server_url, pool, server_handle) = create_real_server().await;
+    let (server_url, pool, server_handle) = create_real_server(pool).await;
 
     // Configure worker with invalid credentials
     #[allow(deprecated)]

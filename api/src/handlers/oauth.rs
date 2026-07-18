@@ -276,14 +276,7 @@ mod tests {
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
 
-    async fn setup_test_state() -> AppState {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-        let pool = PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database");
-
+    fn setup_test_state(pool: PgPool) -> AppState {
         AppState::new(
             pool,
             Arc::new(MockAuthService),
@@ -456,9 +449,9 @@ mod tests {
 
     // --- Handler tests ---
 
-    #[tokio::test]
-    async fn test_token_handler_client_credentials() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_token_handler_client_credentials(pool: PgPool) {
+        let state = setup_test_state(pool);
 
         let request = TokenRequest {
             grant_type: GrantType::ClientCredentials,
@@ -478,9 +471,9 @@ mod tests {
         assert_eq!(response.token_type, "Bearer");
     }
 
-    #[tokio::test]
-    async fn test_token_handler_password_grant() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_token_handler_password_grant(pool: PgPool) {
+        let state = setup_test_state(pool);
 
         let request = TokenRequest {
             grant_type: GrantType::Password,
@@ -500,9 +493,9 @@ mod tests {
         assert!(response.refresh_token.is_some());
     }
 
-    #[tokio::test]
-    async fn test_token_handler_refresh_token() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_token_handler_refresh_token(pool: PgPool) {
+        let state = setup_test_state(pool);
 
         let request = TokenRequest {
             grant_type: GrantType::RefreshToken,
@@ -521,9 +514,9 @@ mod tests {
         assert_eq!(response.access_token, "new_token");
     }
 
-    #[tokio::test]
-    async fn test_token_handler_validation_error() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_token_handler_validation_error(pool: PgPool) {
+        let state = setup_test_state(pool);
 
         let request = TokenRequest {
             grant_type: GrantType::ClientCredentials,

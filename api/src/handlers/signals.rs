@@ -166,15 +166,8 @@ mod tests {
 
     // --- Handler tests using mock state ---
 
-    async fn setup_test_state() -> AppState {
+    fn setup_test_state(pool: PgPool) -> AppState {
         use kruxiaflow_core::cache::NoOpCache;
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-        let pool = PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database");
-
         AppState::new(
             pool,
             Arc::new(MockAuthService),
@@ -198,10 +191,10 @@ mod tests {
         })
     }
 
-    #[tokio::test]
-    async fn test_signal_activity_no_subscription_found() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_signal_activity_no_subscription_found(pool: PgPool) {
         // MockSubscriptionService.signal_activity returns None
-        let state = setup_test_state().await;
+        let state = setup_test_state(pool);
         let workflow_id = Uuid::now_v7();
         let request = SignalActivityRequest {
             activity_key: "wait_for_approval".to_string(),
@@ -223,9 +216,9 @@ mod tests {
         assert!(response.message.contains("No waiting activity found"));
     }
 
-    #[tokio::test]
-    async fn test_signal_activity_validation_error() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_signal_activity_validation_error(pool: PgPool) {
+        let state = setup_test_state(pool);
         let workflow_id = Uuid::now_v7();
         let request = SignalActivityRequest {
             activity_key: "".to_string(),
@@ -309,15 +302,8 @@ mod tests {
         }
     }
 
-    async fn setup_test_state_with_found_subscription() -> AppState {
+    fn setup_test_state_with_found_subscription(pool: PgPool) -> AppState {
         use kruxiaflow_core::cache::NoOpCache;
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-        let pool = PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database");
-
         AppState::new(
             pool,
             Arc::new(MockAuthService),
@@ -330,9 +316,9 @@ mod tests {
         )
     }
 
-    #[tokio::test]
-    async fn test_signal_activity_subscription_found() {
-        let state = setup_test_state_with_found_subscription().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_signal_activity_subscription_found(pool: PgPool) {
+        let state = setup_test_state_with_found_subscription(pool);
         let workflow_id = Uuid::now_v7();
         let request = SignalActivityRequest {
             activity_key: "wait_for_approval".to_string(),
@@ -354,9 +340,9 @@ mod tests {
         assert!(response.message.contains("signaled successfully"));
     }
 
-    #[tokio::test]
-    async fn test_signal_activity_subscription_found_no_data() {
-        let state = setup_test_state_with_found_subscription().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_signal_activity_subscription_found_no_data(pool: PgPool) {
+        let state = setup_test_state_with_found_subscription(pool);
         let workflow_id = Uuid::now_v7();
         let request = SignalActivityRequest {
             activity_key: "wait_step".to_string(),
@@ -433,16 +419,9 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_signal_activity_subscription_error() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_signal_activity_subscription_error(pool: PgPool) {
         use kruxiaflow_core::cache::NoOpCache;
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-        let pool = PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database");
-
         let state = AppState::new(
             pool,
             Arc::new(MockAuthService),

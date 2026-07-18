@@ -8,36 +8,9 @@ use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
 use kruxiaflow_core::subscription::{PostgresSubscriptionService, SubscriptionService};
 use kruxiaflow_core::workflow::ActivitySettings;
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
-
-async fn setup_test_db() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://localhost/kruxiaflow_test".to_string());
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    // Run migrations
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
-
-async fn clean_test_data(pool: &PgPool) {
-    sqlx::query!(
-        "TRUNCATE workflow_events, workflow_event_consumers, workflows, workflow_definitions, activity_queue CASCADE"
-    )
-    .execute(pool)
-    .await
-    .expect("Failed to clean test data");
-}
 
 async fn insert_workflow_definition(pool: &PgPool, definition: &WorkflowDefinition) -> Uuid {
     let activities_json =
@@ -75,12 +48,8 @@ async fn insert_workflow(
     .expect("Failed to insert workflow");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_delayed_activity_execution() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_delayed_activity_execution(pool: PgPool) {
     // Create workflow with a 2-second delay
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -172,12 +141,8 @@ async fn test_delayed_activity_execution() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_scheduled_activity_execution() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_scheduled_activity_execution(pool: PgPool) {
     // Schedule activity for 3 seconds in the future
     let future_time = Utc::now() + ChronoDuration::seconds(3);
     let scheduled_time_str = future_time.to_rfc3339();
@@ -286,12 +251,8 @@ async fn test_scheduled_activity_execution() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_immediate_activity_unaffected() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_immediate_activity_unaffected(pool: PgPool) {
     // Create workflow without scheduling fields
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -371,12 +332,8 @@ async fn test_immediate_activity_unaffected() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_worker_respects_scheduled_for() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_worker_respects_scheduled_for(pool: PgPool) {
     // Create workflow with 5-second delay
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -480,12 +437,8 @@ async fn test_worker_respects_scheduled_for() {
     assert_eq!(queued.status.as_ref().unwrap(), "pending");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_multiple_delayed_activities() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_multiple_delayed_activities(pool: PgPool) {
     // Create workflow with chain of delays (rate limiting pattern)
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -672,12 +625,8 @@ async fn test_multiple_delayed_activities() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_delay_with_all_duration_units() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_delay_with_all_duration_units(pool: PgPool) {
     // Test milliseconds
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -729,6 +678,7 @@ async fn test_delay_with_all_duration_units() {
         .unwrap();
 
     let events = event_source.poll("test_orch").await.unwrap();
+    let process_started = Utc::now();
     for event in &events {
         kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
@@ -740,6 +690,7 @@ async fn test_delay_with_all_duration_units() {
         .await
         .unwrap();
     }
+    let process_finished = Utc::now();
 
     // Verify millisecond precision
     let queued = sqlx::query!(
@@ -751,13 +702,14 @@ async fn test_delay_with_all_duration_units() {
     .unwrap();
 
     let scheduled_for = queued.scheduled_for;
-    let now = Utc::now();
-    let diff = (scheduled_for - now).num_milliseconds();
 
-    // Should be approximately 500ms in the future (wide tolerance for CI/test latency)
+    // scheduled_for is computed as now + 500ms during event processing, so
+    // bound it by timestamps captured around the processing step (anchoring
+    // to assertion time instead would be load-sensitive under parallel runs)
+    let min_expected = process_started + chrono::Duration::milliseconds(450);
+    let max_expected = process_finished + chrono::Duration::milliseconds(550);
     assert!(
-        (200..=600).contains(&diff),
-        "Expected ~500ms delay, got {}ms",
-        diff
+        scheduled_for >= min_expected && scheduled_for <= max_expected,
+        "Expected ~500ms delay from processing time; scheduled_for={scheduled_for}, window=[{min_expected}, {max_expected}]"
     );
 }

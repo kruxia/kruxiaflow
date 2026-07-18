@@ -21,14 +21,6 @@ fn test_public_key() -> String {
     include_str!("public.pem").to_string()
 }
 
-/// Create a mock database pool for unit tests
-/// Note: These tests don't actually use the database, but PostgresAuthService requires it
-async fn mock_pool() -> PgPool {
-    PgPool::connect(&std::env::var("DATABASE_URL").unwrap())
-        .await
-        .expect("Failed to connect to test database")
-}
-
 /// Create test auth config with both private and public keys
 fn test_auth_config() -> AuthConfig {
     AuthConfig {
@@ -40,9 +32,8 @@ fn test_auth_config() -> AuthConfig {
     }
 }
 
-#[tokio::test]
-async fn test_sign_and_verify_jwt() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_sign_and_verify_jwt(pool: PgPool) {
     let service = PostgresAuthService::new(pool, test_auth_config()).unwrap();
 
     // Create claims with standard fields
@@ -66,9 +57,8 @@ async fn test_sign_and_verify_jwt() {
     assert_eq!(verified_claims.aud, claims.aud);
 }
 
-#[tokio::test]
-async fn test_expired_token_rejected() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_expired_token_rejected(pool: PgPool) {
     let service = PostgresAuthService::new(pool, test_auth_config()).unwrap();
 
     let now = Utc::now();
@@ -92,9 +82,8 @@ async fn test_expired_token_rejected() {
     );
 }
 
-#[tokio::test]
-async fn test_invalid_issuer_rejected() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_invalid_issuer_rejected(pool: PgPool) {
     let service = PostgresAuthService::new(pool, test_auth_config()).unwrap();
 
     let now = Utc::now();
@@ -118,9 +107,8 @@ async fn test_invalid_issuer_rejected() {
     );
 }
 
-#[tokio::test]
-async fn test_invalid_audience_rejected() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_invalid_audience_rejected(pool: PgPool) {
     let service = PostgresAuthService::new(pool, test_auth_config()).unwrap();
 
     let now = Utc::now();
@@ -144,9 +132,8 @@ async fn test_invalid_audience_rejected() {
     );
 }
 
-#[tokio::test]
-async fn test_token_with_future_iat_accepted() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_token_with_future_iat_accepted(pool: PgPool) {
     let service = PostgresAuthService::new(pool, test_auth_config()).unwrap();
 
     let now = Utc::now();
@@ -166,9 +153,8 @@ async fn test_token_with_future_iat_accepted() {
     assert_eq!(verified_claims.sub, claims.sub);
 }
 
-#[tokio::test]
-async fn test_malformed_token_rejected() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_malformed_token_rejected(pool: PgPool) {
     let service = PostgresAuthService::new(pool, test_auth_config()).unwrap();
 
     // Malformed token (not a JWT)
@@ -180,9 +166,8 @@ async fn test_malformed_token_rejected() {
     );
 }
 
-#[tokio::test]
-async fn test_token_with_tampered_signature_rejected() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_token_with_tampered_signature_rejected(pool: PgPool) {
     let service = PostgresAuthService::new(pool, test_auth_config()).unwrap();
 
     let now = Utc::now();
@@ -211,9 +196,8 @@ async fn test_token_with_tampered_signature_rejected() {
     );
 }
 
-#[tokio::test]
-async fn test_token_ttl_respected() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_token_ttl_respected(pool: PgPool) {
     let service = PostgresAuthService::new(pool, test_auth_config()).unwrap();
 
     let now = Utc::now();
@@ -512,9 +496,8 @@ fn test_auth_config_clone() {
 // PostgresAuthService construction and key handling tests
 // ============================================================================
 
-#[tokio::test]
-async fn test_postgres_auth_service_with_invalid_private_key() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_postgres_auth_service_with_invalid_private_key(pool: PgPool) {
     let mut config = test_auth_config();
     config.rsa_private_key_pem = "invalid-key".to_string();
 
@@ -529,9 +512,8 @@ async fn test_postgres_auth_service_with_invalid_private_key() {
     }
 }
 
-#[tokio::test]
-async fn test_postgres_auth_service_with_invalid_public_key() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_postgres_auth_service_with_invalid_public_key(pool: PgPool) {
     let mut config = test_auth_config();
     config.rsa_public_key_pem = Some("invalid-public-key".to_string());
 
@@ -539,9 +521,8 @@ async fn test_postgres_auth_service_with_invalid_public_key() {
     assert!(result.is_err(), "Should fail with invalid public key");
 }
 
-#[tokio::test]
-async fn test_postgres_auth_service_without_public_key() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_postgres_auth_service_without_public_key(pool: PgPool) {
     let mut config = test_auth_config();
     config.rsa_public_key_pem = None;
 
@@ -553,9 +534,8 @@ async fn test_postgres_auth_service_without_public_key() {
     let _ = result;
 }
 
-#[tokio::test]
-async fn test_get_signing_keys_returns_empty() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_signing_keys_returns_empty(pool: PgPool) {
     let service = PostgresAuthService::new(pool, test_auth_config()).unwrap();
 
     // For MVP, get_signing_keys returns empty vec
@@ -566,9 +546,8 @@ async fn test_get_signing_keys_returns_empty() {
     );
 }
 
-#[tokio::test]
-async fn test_validate_token_uses_verify_jwt() {
-    let pool = mock_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_validate_token_uses_verify_jwt(pool: PgPool) {
     let service = PostgresAuthService::new(pool, test_auth_config()).unwrap();
 
     let now = Utc::now();

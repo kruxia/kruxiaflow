@@ -78,10 +78,10 @@ jobs:
 
       # Prebuilt binaries instead of `cargo install` (which compiles from
       # source on every run — minutes of CI time per tool).
-      - name: Install cargo-llvm-cov and sqlx-cli
+      - name: Install cargo-llvm-cov, cargo-nextest, and sqlx-cli
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-llvm-cov,sqlx-cli
+          tool: cargo-llvm-cov,cargo-nextest,sqlx-cli
 
       - name: Create test database
         run: psql -h localhost -U kruxiaflow -c "CREATE DATABASE kruxiaflow_test;"

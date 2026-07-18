@@ -14,28 +14,9 @@ use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
 
 /// Load test RSA keys
 fn test_rsa_private_key() -> String {
@@ -47,9 +28,7 @@ fn test_rsa_public_key() -> String {
 }
 
 /// Helper to create test AppState
-async fn setup_test_state(shutdown_token: CancellationToken) -> AppState {
-    let pool = setup_test_pool().await;
-
+async fn setup_test_state(pool: PgPool, shutdown_token: CancellationToken) -> AppState {
     let auth_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
         rsa_public_key_pem: Some(test_rsa_public_key()),
@@ -86,8 +65,8 @@ async fn setup_test_state(shutdown_token: CancellationToken) -> AppState {
 }
 
 /// Helper to create test server with shutdown middleware
-async fn setup_test_server(shutdown_token: CancellationToken) -> TestServer {
-    let state = setup_test_state(shutdown_token).await;
+async fn setup_test_server(pool: PgPool, shutdown_token: CancellationToken) -> TestServer {
+    let state = setup_test_state(pool, shutdown_token).await;
 
     // Create a simple test endpoint
     let app = Router::new()
@@ -101,11 +80,10 @@ async fn setup_test_server(shutdown_token: CancellationToken) -> TestServer {
     TestServer::new(app).expect("Failed to create test server")
 }
 
-#[tokio::test]
-#[serial]
-async fn test_shutdown_middleware_allows_requests_when_not_shutting_down() {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_shutdown_middleware_allows_requests_when_not_shutting_down(pool: PgPool) {
     let shutdown_token = CancellationToken::new();
-    let server = setup_test_server(shutdown_token.clone()).await;
+    let server = setup_test_server(pool, shutdown_token.clone()).await;
 
     // Send a request - should succeed
     let response = server.get("/test").await;
@@ -114,11 +92,10 @@ async fn test_shutdown_middleware_allows_requests_when_not_shutting_down() {
     assert_eq!(response.text(), "OK");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_shutdown_middleware_rejects_requests_during_shutdown() {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_shutdown_middleware_rejects_requests_during_shutdown(pool: PgPool) {
     let shutdown_token = CancellationToken::new();
-    let server = setup_test_server(shutdown_token.clone()).await;
+    let server = setup_test_server(pool, shutdown_token.clone()).await;
 
     // Trigger shutdown
     shutdown_token.cancel();
@@ -140,11 +117,10 @@ async fn test_shutdown_middleware_rejects_requests_during_shutdown() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_shutdown_middleware_transition() {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_shutdown_middleware_transition(pool: PgPool) {
     let shutdown_token = CancellationToken::new();
-    let server = setup_test_server(shutdown_token.clone()).await;
+    let server = setup_test_server(pool, shutdown_token.clone()).await;
 
     // First request should succeed
     let response1 = server.get("/test").await;
@@ -162,11 +138,10 @@ async fn test_shutdown_middleware_transition() {
     assert_eq!(response3.status_code(), StatusCode::SERVICE_UNAVAILABLE);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_shutdown_middleware_response_format() {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_shutdown_middleware_response_format(pool: PgPool) {
     let shutdown_token = CancellationToken::new();
-    let server = setup_test_server(shutdown_token.clone()).await;
+    let server = setup_test_server(pool, shutdown_token.clone()).await;
 
     // Trigger shutdown
     shutdown_token.cancel();
@@ -192,11 +167,10 @@ async fn test_shutdown_middleware_response_format() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_shutdown_middleware_multiple_concurrent_requests() {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_shutdown_middleware_multiple_concurrent_requests(pool: PgPool) {
     let shutdown_token = CancellationToken::new();
-    let server = setup_test_server(shutdown_token.clone()).await;
+    let server = setup_test_server(pool, shutdown_token.clone()).await;
 
     // Trigger shutdown
     shutdown_token.cancel();

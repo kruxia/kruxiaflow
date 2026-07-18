@@ -12,31 +12,12 @@ use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 #[allow(unused_imports)]
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
-
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
 
 /// Load test RSA keys
 fn test_rsa_private_key() -> String {
@@ -48,9 +29,7 @@ fn test_rsa_public_key() -> String {
 }
 
 /// Helper to create test AppState
-async fn setup_test_state() -> AppState {
-    let pool = setup_test_pool().await;
-
+async fn setup_test_state(pool: PgPool) -> AppState {
     let auth_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
         rsa_public_key_pem: Some(test_rsa_public_key()),
@@ -68,7 +47,7 @@ async fn setup_test_state() -> AppState {
          VALUES ($1, $2, $3, NOW())
          ON CONFLICT (client_id) DO NOTHING",
         "test-client",
-        hash("test-secret", bcrypt::DEFAULT_COST).unwrap(),
+        hash("test-secret", 4).unwrap(), // min cost: real hashing strength is not under test
         "Test Client"
     )
     .execute(&pool)
@@ -100,11 +79,11 @@ async fn setup_test_state() -> AppState {
 }
 
 /// Helper to create test server with protected test endpoint
-async fn setup_test_server() -> TestServer {
+async fn setup_test_server(pool: PgPool) -> TestServer {
     use axum::{Router, extract::Extension, middleware as axum_middleware, routing::get};
     use kruxiaflow_api::middleware::auth::ValidatedClaims;
 
-    let state = setup_test_state().await;
+    let state = setup_test_state(pool).await;
 
     // Create a test-only protected endpoint that requires auth
     async fn protected_test_handler(
@@ -153,10 +132,9 @@ async fn get_valid_token(server: &TestServer) -> String {
 // Bearer Token Extraction Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_auth_middleware_accepts_valid_bearer_token() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_auth_middleware_accepts_valid_bearer_token(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_valid_token(&server).await;
 
     let response = server
@@ -175,10 +153,9 @@ async fn test_auth_middleware_accepts_valid_bearer_token() {
     assert!(!body["subject"].as_str().unwrap().is_empty());
 }
 
-#[tokio::test]
-#[serial]
-async fn test_auth_middleware_rejects_missing_authorization_header() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_auth_middleware_rejects_missing_authorization_header(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server.get("/api/v1/protected").await;
 
@@ -192,10 +169,9 @@ async fn test_auth_middleware_rejects_missing_authorization_header() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_extract_bearer_token_case_insensitive() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_extract_bearer_token_case_insensitive(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_valid_token(&server).await;
 
     // Test lowercase "bearer"
@@ -232,10 +208,9 @@ async fn test_extract_bearer_token_case_insensitive() {
     assert_eq!(response.status_code(), StatusCode::OK);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_extract_bearer_token_with_extra_whitespace() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_extract_bearer_token_with_extra_whitespace(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_valid_token(&server).await;
 
     // Token with extra space after "Bearer" becomes part of the token, which will be invalid
@@ -255,10 +230,9 @@ async fn test_extract_bearer_token_with_extra_whitespace() {
 // Token Validation Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_auth_middleware_rejects_invalid_token_format() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_auth_middleware_rejects_invalid_token_format(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .get("/api/v1/protected")
@@ -278,10 +252,9 @@ async fn test_auth_middleware_rejects_invalid_token_format() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_auth_middleware_rejects_malformed_bearer_format() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_auth_middleware_rejects_malformed_bearer_format(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     // Missing "Bearer " prefix
     let response = server
@@ -302,10 +275,9 @@ async fn test_auth_middleware_rejects_malformed_bearer_format() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_auth_middleware_rejects_empty_bearer_token() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_auth_middleware_rejects_empty_bearer_token(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .get("/api/v1/protected")
@@ -322,10 +294,9 @@ async fn test_auth_middleware_rejects_empty_bearer_token() {
     assert!(error_msg.contains("Invalid token") || error_msg.contains("Missing or invalid"));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_auth_middleware_rejects_bearer_without_space() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_auth_middleware_rejects_bearer_without_space(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .get("/api/v1/protected")
@@ -349,10 +320,9 @@ async fn test_auth_middleware_rejects_bearer_without_space() {
 // Token Expiration Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_auth_middleware_rejects_expired_token() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_auth_middleware_rejects_expired_token(pool: PgPool) {
+    let server = setup_test_server(pool.clone()).await;
 
     // Create claims with past expiration
     use chrono::{Duration, Utc};
@@ -369,7 +339,6 @@ async fn test_auth_middleware_rejects_expired_token() {
     };
 
     // Create auth service to sign with custom claims
-    let pool = setup_test_pool().await;
     let auth_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
         rsa_public_key_pem: Some(test_rsa_public_key()),
@@ -402,11 +371,8 @@ async fn test_auth_middleware_rejects_expired_token() {
 // Token Claims Validation Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_auth_middleware_rejects_wrong_issuer() {
-    let pool = setup_test_pool().await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_auth_middleware_rejects_wrong_issuer(pool: PgPool) {
     // Create auth service with different issuer to sign token
     let wrong_issuer_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
@@ -416,7 +382,7 @@ async fn test_auth_middleware_rejects_wrong_issuer() {
         token_ttl: 3600,
     };
 
-    let auth_service = PostgresAuthService::new(pool, wrong_issuer_config).unwrap();
+    let auth_service = PostgresAuthService::new(pool.clone(), wrong_issuer_config).unwrap();
 
     use chrono::{Duration, Utc};
     use kruxiaflow_oauth::Claims;
@@ -433,7 +399,7 @@ async fn test_auth_middleware_rejects_wrong_issuer() {
 
     let token = auth_service.sign_jwt(claims).unwrap();
 
-    let server = setup_test_server().await;
+    let server = setup_test_server(pool).await;
 
     let response = server
         .get("/api/v1/protected")
@@ -453,11 +419,8 @@ async fn test_auth_middleware_rejects_wrong_issuer() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_auth_middleware_rejects_wrong_audience() {
-    let pool = setup_test_pool().await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_auth_middleware_rejects_wrong_audience(pool: PgPool) {
     let wrong_audience_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
         rsa_public_key_pem: Some(test_rsa_public_key()),
@@ -466,7 +429,7 @@ async fn test_auth_middleware_rejects_wrong_audience() {
         token_ttl: 3600,
     };
 
-    let auth_service = PostgresAuthService::new(pool, wrong_audience_config).unwrap();
+    let auth_service = PostgresAuthService::new(pool.clone(), wrong_audience_config).unwrap();
 
     use chrono::{Duration, Utc};
     use kruxiaflow_oauth::Claims;
@@ -483,7 +446,7 @@ async fn test_auth_middleware_rejects_wrong_audience() {
 
     let token = auth_service.sign_jwt(claims).unwrap();
 
-    let server = setup_test_server().await;
+    let server = setup_test_server(pool).await;
 
     let response = server
         .get("/api/v1/protected")
@@ -508,7 +471,6 @@ async fn test_auth_middleware_rejects_wrong_audience() {
 // ============================================================================
 
 #[tokio::test]
-#[serial]
 async fn test_validated_claims_subject_extraction() {
     use chrono::Utc;
     use kruxiaflow_api::middleware::auth::ValidatedClaims;
@@ -529,7 +491,6 @@ async fn test_validated_claims_subject_extraction() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_validated_claims_full_claims_access() {
     use chrono::Utc;
     use kruxiaflow_api::middleware::auth::ValidatedClaims;
@@ -555,10 +516,9 @@ async fn test_validated_claims_full_claims_access() {
 // Header Format Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_auth_middleware_handles_multiple_authorization_headers() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_auth_middleware_handles_multiple_authorization_headers(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_valid_token(&server).await;
 
     // HTTP spec allows multiple headers, but we should use the first one
@@ -573,10 +533,9 @@ async fn test_auth_middleware_handles_multiple_authorization_headers() {
     assert_eq!(response.status_code(), StatusCode::OK);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_auth_middleware_handles_non_ascii_in_header() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_auth_middleware_handles_non_ascii_in_header(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     // Non-ASCII characters in Authorization header should be rejected gracefully
     let response = server.get("/api/v1/protected").await;
@@ -589,10 +548,9 @@ async fn test_auth_middleware_handles_non_ascii_in_header() {
 // Performance Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_auth_middleware_validation_latency() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_auth_middleware_validation_latency(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_valid_token(&server).await;
 
     let start = std::time::Instant::now();
@@ -625,10 +583,9 @@ async fn test_auth_middleware_validation_latency() {
 // Additional Coverage Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_extract_bearer_token_with_only_bearer() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_extract_bearer_token_with_only_bearer(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     // Just "Bearer" without a token
     let response = server
@@ -642,10 +599,9 @@ async fn test_extract_bearer_token_with_only_bearer() {
     assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_auth_middleware_with_valid_token_stores_claims_in_extensions() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_auth_middleware_with_valid_token_stores_claims_in_extensions(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_valid_token(&server).await;
 
     // The protected_test_handler extracts claims from extensions
@@ -665,10 +621,9 @@ async fn test_auth_middleware_with_valid_token_stores_claims_in_extensions() {
     assert!(!body["subject"].as_str().unwrap().is_empty());
 }
 
-#[tokio::test]
-#[serial]
-async fn test_auth_middleware_logs_validation_failure() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_auth_middleware_logs_validation_failure(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     // Invalid token should trigger a warning log
     let response = server
@@ -684,7 +639,6 @@ async fn test_auth_middleware_logs_validation_failure() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_validated_claims_clone() {
     use chrono::Utc;
     use kruxiaflow_api::middleware::auth::ValidatedClaims;
@@ -706,9 +660,8 @@ async fn test_validated_claims_clone() {
     assert_eq!(validated.claims().iss, cloned.claims().iss);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_auth_middleware_with_token_signed_by_different_key() {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_auth_middleware_with_token_signed_by_different_key(pool: PgPool) {
     use chrono::{Duration, Utc};
     use jsonwebtoken::{EncodingKey, Header, encode};
     use kruxiaflow_oauth::Claims;
@@ -745,7 +698,7 @@ vnv7KLhLAgMBAAECggEBAK5nD8vXl6D0s5N8OlNJxK7Y8TJ8LHxWbKqxhU8gSVCL
             )
             .unwrap();
 
-            let server = setup_test_server().await;
+            let server = setup_test_server(pool).await;
 
             let response = server
                 .get("/api/v1/protected")

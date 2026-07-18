@@ -1,35 +1,7 @@
 use kruxiaflow_core::cost::{ActivityCostRecord, CostCalculator, CostTracker, ModelPricing};
 use rust_decimal_macros::dec;
-use serial_test::serial;
 use sqlx::PgPool;
 use uuid::Uuid;
-
-async fn setup_test_db() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-    });
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    // Run migrations
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
-
-async fn clean_test_data(pool: &PgPool) {
-    sqlx::query!(
-        "TRUNCATE activity_costs, workflows, workflow_definitions, llm_models, llm_providers CASCADE"
-    )
-    .execute(pool)
-    .await
-    .expect("Failed to clean test data");
-}
 
 async fn seed_llm_pricing(pool: &PgPool) {
     // Insert providers
@@ -61,11 +33,8 @@ async fn seed_llm_pricing(pool: &PgPool) {
     .expect("Failed to insert models");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_cost_calculator_batch_get_pricing() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_cost_calculator_batch_get_pricing(pool: PgPool) {
     seed_llm_pricing(&pool).await;
 
     let calculator = CostCalculator::new(pool.clone());
@@ -111,13 +80,10 @@ async fn test_cost_calculator_batch_get_pricing() {
     assert_eq!(ollama.output_price_per_million, dec!(0.00));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_batch_get_pricing_json_serialization() {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_batch_get_pricing_json_serialization(pool: PgPool) {
     // Regression test for bug: Model Pricing HashMap Tuple Keys Cannot Be Serialized to JSON
     // See: docs/bugs/2026-01-04-model-pricing-tuple-key-serialization.md
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
     seed_llm_pricing(&pool).await;
 
     let calculator = CostCalculator::new(pool.clone());
@@ -166,12 +132,8 @@ async fn test_batch_get_pricing_json_serialization() {
     assert_eq!(roundtrip.len(), 2);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_cost_tracker_record_and_retrieve() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_cost_tracker_record_and_retrieve(pool: PgPool) {
     let tracker = CostTracker::new(pool.clone());
 
     // Create a workflow
@@ -278,11 +240,8 @@ async fn test_cost_tracker_record_and_retrieve() {
     assert!(budget_status.activity_budget_ok); // Still within $0.10 limit
 }
 
-#[tokio::test]
-#[serial]
-async fn test_budget_check_before_execution() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_budget_check_before_execution(pool: PgPool) {
     seed_llm_pricing(&pool).await;
 
     let calculator = CostCalculator::new(pool.clone());
@@ -389,10 +348,8 @@ async fn test_budget_check_before_execution() {
     assert!(!check_result.can_execute); // Should fail - $0.09 used + ~$0.015 estimated > $0.10
 }
 
-#[tokio::test]
-#[serial]
-async fn test_token_estimation() {
-    let pool = setup_test_db().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_token_estimation(pool: PgPool) {
     let _calculator = CostCalculator::new(pool.clone());
 
     // Test Anthropic token estimation (3.5 chars/token, 0.85 words/token)
@@ -409,11 +366,8 @@ async fn test_token_estimation() {
     assert!((7..=9).contains(&tokens), "OpenAI tokens: {}", tokens);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_cost_estimation() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_cost_estimation(pool: PgPool) {
     seed_llm_pricing(&pool).await;
 
     let calculator = CostCalculator::new(pool.clone());
@@ -444,11 +398,8 @@ async fn test_cost_estimation() {
     assert_eq!(estimated_cost, dec!(0.00));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_budget_enforcement_with_activity_settings() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_budget_enforcement_with_activity_settings(pool: PgPool) {
     seed_llm_pricing(&pool).await;
 
     // Test that activity budget limit takes precedence when lower than workflow limit

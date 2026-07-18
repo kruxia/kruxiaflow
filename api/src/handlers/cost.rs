@@ -263,20 +263,9 @@ mod tests {
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
 
-    async fn setup_test_pool() -> PgPool {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-
-        PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database")
-    }
-
-    async fn setup_test_state() -> AppState {
+    fn setup_test_state(pool: PgPool) -> AppState {
         use kruxiaflow_core::cache::NoOpCache;
 
-        let pool = setup_test_pool().await;
         let auth_service = Arc::new(crate::state::tests::MockAuthService);
         let activity_queue = Arc::new(crate::state::tests::MockActivityQueue);
         let event_source = Arc::new(crate::state::tests::MockEventSource);
@@ -297,9 +286,9 @@ mod tests {
         )
     }
 
-    #[tokio::test]
-    async fn test_get_workflow_cost_not_found() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_get_workflow_cost_not_found(pool: PgPool) {
+        let state = setup_test_state(pool);
         let workflow_id = Uuid::nil(); // UUID that doesn't exist
 
         let result = get_workflow_cost(State(state), Path(workflow_id)).await;
@@ -311,9 +300,9 @@ mod tests {
         assert_eq!(result.unwrap_err(), StatusCode::NOT_FOUND);
     }
 
-    #[tokio::test]
-    async fn test_get_workflow_cost_history_empty() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_get_workflow_cost_history_empty(pool: PgPool) {
+        let state = setup_test_state(pool);
         let workflow_id = Uuid::nil(); // UUID for test
 
         let result = get_workflow_cost_history(State(state), Path(workflow_id)).await;
@@ -324,9 +313,9 @@ mod tests {
         assert_eq!(history.len(), 0, "History should be empty");
     }
 
-    #[tokio::test]
-    async fn test_get_cost_analytics() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_get_cost_analytics(pool: PgPool) {
+        let state = setup_test_state(pool);
 
         let now = Utc::now();
         let params = CostAnalyticsParams {
@@ -343,9 +332,9 @@ mod tests {
         assert!(analytics.avg_cost_per_activity >= Decimal::from_str("0.0").unwrap());
     }
 
-    #[tokio::test]
-    async fn test_cost_analytics_default_dates() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_cost_analytics_default_dates(pool: PgPool) {
+        let state = setup_test_state(pool);
 
         // Test with default dates (last 30 days)
         let params = CostAnalyticsParams {

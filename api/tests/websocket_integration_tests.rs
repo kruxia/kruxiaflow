@@ -14,7 +14,6 @@ use kruxiaflow_core::PostgresSubscriptionService;
 use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
-use serial_test::serial;
 use sqlx::PgPool;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -29,24 +28,6 @@ use uuid::Uuid;
 // Test Infrastructure
 // ============================================================================
 
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
-
 /// Load test RSA keys
 fn test_rsa_private_key() -> String {
     include_str!("../../oauth/tests/private.pem").to_string()
@@ -57,9 +38,7 @@ fn test_rsa_public_key() -> String {
 }
 
 /// Helper to create test AppState
-async fn setup_test_state() -> AppState {
-    let pool = setup_test_pool().await;
-
+async fn setup_test_state(pool: PgPool) -> AppState {
     let auth_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
         rsa_public_key_pem: Some(test_rsa_public_key()),
@@ -77,7 +56,7 @@ async fn setup_test_state() -> AppState {
          VALUES ($1, $2, $3, NOW())
          ON CONFLICT (client_id) DO NOTHING",
         "ws-test-client",
-        hash("ws-test-secret", bcrypt::DEFAULT_COST).unwrap(),
+        hash("ws-test-secret", 4).unwrap(), // min cost: real hashing strength is not under test
         "WebSocket Test Client"
     )
     .execute(&pool)
@@ -157,10 +136,9 @@ async fn get_valid_token(addr: SocketAddr) -> String {
 // Authentication Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_websocket_rejects_missing_token() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_websocket_rejects_missing_token(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let addr = start_test_server(state).await;
 
     let activity_id = Uuid::now_v7();
@@ -173,10 +151,9 @@ async fn test_websocket_rejects_missing_token() {
     assert!(result.is_err(), "Connection should fail without token");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_websocket_rejects_invalid_token() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_websocket_rejects_invalid_token(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let addr = start_test_server(state).await;
 
     let activity_id = Uuid::now_v7();
@@ -192,10 +169,9 @@ async fn test_websocket_rejects_invalid_token() {
     assert!(result.is_err(), "Connection should fail with invalid token");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_websocket_accepts_valid_token() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_websocket_accepts_valid_token(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
 
@@ -227,10 +203,9 @@ async fn test_websocket_accepts_valid_token() {
 // Broadcasting Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_websocket_receives_broadcast_token() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_websocket_receives_broadcast_token(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let connection_manager = state.connection_manager.clone();
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
@@ -273,10 +248,9 @@ async fn test_websocket_receives_broadcast_token() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_websocket_receives_complete_message() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_websocket_receives_complete_message(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let connection_manager = state.connection_manager.clone();
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
@@ -321,10 +295,9 @@ async fn test_websocket_receives_complete_message() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_websocket_receives_error_message() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_websocket_receives_error_message(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let connection_manager = state.connection_manager.clone();
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
@@ -370,10 +343,9 @@ async fn test_websocket_receives_error_message() {
 // Connection Management Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_websocket_multiple_connections_same_activity() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_websocket_multiple_connections_same_activity(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let connection_manager = state.connection_manager.clone();
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
@@ -423,10 +395,9 @@ async fn test_websocket_multiple_connections_same_activity() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_websocket_different_activities_isolated() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_websocket_different_activities_isolated(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let connection_manager = state.connection_manager.clone();
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
@@ -476,10 +447,9 @@ async fn test_websocket_different_activities_isolated() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_websocket_close_all_connections() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_websocket_close_all_connections(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let connection_manager = state.connection_manager.clone();
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
@@ -506,10 +476,9 @@ async fn test_websocket_close_all_connections() {
     assert_eq!(connection_manager.connection_count(activity_id).await, 0);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_websocket_cleanup_on_client_disconnect() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_websocket_cleanup_on_client_disconnect(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let connection_manager = state.connection_manager.clone();
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
@@ -557,10 +526,9 @@ async fn test_websocket_cleanup_on_client_disconnect() {
 // Concurrent Connections Test
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_websocket_many_concurrent_connections() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_websocket_many_concurrent_connections(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let connection_manager = state.connection_manager.clone();
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
@@ -626,10 +594,9 @@ async fn test_websocket_many_concurrent_connections() {
 // Internal Streaming API Tests (US-7.1)
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_internal_api_publish_token() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_internal_api_publish_token(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
 
@@ -685,10 +652,9 @@ async fn test_internal_api_publish_token() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_internal_api_stream_complete() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_internal_api_stream_complete(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
 
@@ -745,10 +711,9 @@ async fn test_internal_api_stream_complete() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_internal_api_stream_error() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_internal_api_stream_error(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
 
@@ -801,10 +766,9 @@ async fn test_internal_api_stream_error() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_internal_api_subscriber_count() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_internal_api_subscriber_count(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
 
@@ -854,16 +818,15 @@ async fn test_internal_api_subscriber_count() {
     assert_eq!(body["count"], 1);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_internal_api_full_streaming_flow() {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_internal_api_full_streaming_flow(pool: PgPool) {
     // This test simulates the full streaming flow:
     // 1. Worker checks for subscribers
     // 2. Worker streams tokens
     // 3. Worker sends completion
     // Verifying the WebSocket client receives all messages in order
 
-    let state = setup_test_state().await;
+    let state = setup_test_state(pool).await;
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
 
@@ -974,10 +937,9 @@ async fn test_internal_api_full_streaming_flow() {
 // Message Sequence Test
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_websocket_message_ordering() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_websocket_message_ordering(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let connection_manager = state.connection_manager.clone();
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
@@ -1034,10 +996,9 @@ async fn test_websocket_message_ordering() {
 // Activity Stream By Key Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_websocket_by_key_rejects_missing_token() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_websocket_by_key_rejects_missing_token(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let addr = start_test_server(state).await;
 
     let workflow_id = Uuid::now_v7();
@@ -1050,10 +1011,9 @@ async fn test_websocket_by_key_rejects_missing_token() {
     assert!(result.is_err(), "Connection should fail without token");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_websocket_by_key_rejects_invalid_token() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_websocket_by_key_rejects_invalid_token(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let addr = start_test_server(state).await;
 
     let workflow_id = Uuid::now_v7();
@@ -1066,10 +1026,9 @@ async fn test_websocket_by_key_rejects_invalid_token() {
     assert!(result.is_err(), "Connection should fail with invalid token");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_websocket_by_key_not_found_returns_error() {
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_websocket_by_key_not_found_returns_error(pool: PgPool) {
+    let state = setup_test_state(pool).await;
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
 
@@ -1092,11 +1051,9 @@ async fn test_websocket_by_key_not_found_returns_error() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_websocket_by_key_connects_when_activity_exists() {
-    let state = setup_test_state().await;
-    let pool = state.db_pool.clone();
+#[sqlx::test(migrations = "../migrations")]
+async fn test_websocket_by_key_connects_when_activity_exists(pool: PgPool) {
+    let state = setup_test_state(pool.clone()).await;
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
 
@@ -1155,21 +1112,4 @@ async fn test_websocket_by_key_connects_when_activity_exists() {
     );
 
     drop(ws_stream);
-
-    // Cleanup test data
-    sqlx::query("DELETE FROM activity_queue WHERE workflow_id = $1")
-        .bind(workflow_id)
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("DELETE FROM workflows WHERE id = $1")
-        .bind(workflow_id)
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("DELETE FROM workflow_definitions WHERE id = $1")
-        .bind(def_id)
-        .execute(&pool)
-        .await
-        .unwrap();
 }

@@ -18,7 +18,6 @@ use kruxiaflow_core::PostgresSubscriptionService;
 use kruxiaflow_core::events::{NewWorkflowEvent, PostgresEventSource, WorkflowEventType};
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
-use serial_test::serial;
 use sqlx::PgPool;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -33,23 +32,6 @@ use uuid::Uuid;
 // Test Infrastructure
 // ============================================================================
 
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
-
 fn test_rsa_private_key() -> String {
     include_str!("../../oauth/tests/private.pem").to_string()
 }
@@ -58,9 +40,7 @@ fn test_rsa_public_key() -> String {
     include_str!("../../oauth/tests/public.pem").to_string()
 }
 
-async fn setup_test_state_with_token(shutdown_token: CancellationToken) -> AppState {
-    let pool = setup_test_pool().await;
-
+async fn setup_test_state_with_token(pool: PgPool, shutdown_token: CancellationToken) -> AppState {
     let auth_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
         rsa_public_key_pem: Some(test_rsa_public_key()),
@@ -77,7 +57,7 @@ async fn setup_test_state_with_token(shutdown_token: CancellationToken) -> AppSt
          VALUES ($1, $2, $3, NOW())
          ON CONFLICT (client_id) DO NOTHING",
         "wfe-test-client",
-        hash("wfe-test-secret", bcrypt::DEFAULT_COST).unwrap(),
+        hash("wfe-test-secret", 4).unwrap(), // min cost: real hashing strength is not under test
         "Workflow Events Test Client"
     )
     .execute(&pool)
@@ -150,10 +130,9 @@ async fn get_valid_token(addr: SocketAddr) -> String {
 // Authentication Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_workflow_events_ws_rejects_missing_token() {
-    let state = setup_test_state_with_token(CancellationToken::new()).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_events_ws_rejects_missing_token(pool: PgPool) {
+    let state = setup_test_state_with_token(pool, CancellationToken::new()).await;
     let addr = start_test_server(state).await;
 
     let url = format!("ws://{}/api/v1/workflow_events/ws", addr);
@@ -163,10 +142,9 @@ async fn test_workflow_events_ws_rejects_missing_token() {
     assert!(result.is_err(), "Expected connection to be rejected");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_workflow_events_ws_rejects_invalid_token() {
-    let state = setup_test_state_with_token(CancellationToken::new()).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_events_ws_rejects_invalid_token(pool: PgPool) {
+    let state = setup_test_state_with_token(pool, CancellationToken::new()).await;
     let addr = start_test_server(state).await;
 
     let url = format!("ws://{}/api/v1/workflow_events/ws?token=bad-jwt", addr);
@@ -175,10 +153,9 @@ async fn test_workflow_events_ws_rejects_invalid_token() {
     assert!(result.is_err(), "Expected connection to be rejected");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_workflow_events_ws_connects_with_valid_token() {
-    let state = setup_test_state_with_token(CancellationToken::new()).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_events_ws_connects_with_valid_token(pool: PgPool) {
+    let state = setup_test_state_with_token(pool, CancellationToken::new()).await;
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
 
@@ -191,10 +168,9 @@ async fn test_workflow_events_ws_connects_with_valid_token() {
     ws_stream.close(None).await.ok();
 }
 
-#[tokio::test]
-#[serial]
-async fn test_workflow_events_ws_invalid_workflow_id() {
-    let state = setup_test_state_with_token(CancellationToken::new()).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_events_ws_invalid_workflow_id(pool: PgPool) {
+    let state = setup_test_state_with_token(pool, CancellationToken::new()).await;
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
 
@@ -210,10 +186,9 @@ async fn test_workflow_events_ws_invalid_workflow_id() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_workflow_events_ws_invalid_event_type() {
-    let state = setup_test_state_with_token(CancellationToken::new()).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_events_ws_invalid_event_type(pool: PgPool) {
+    let state = setup_test_state_with_token(pool, CancellationToken::new()).await;
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
 
@@ -226,10 +201,9 @@ async fn test_workflow_events_ws_invalid_event_type() {
     assert!(result.is_err(), "Expected rejection for invalid event_type");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_workflow_events_ws_invalid_from_event_id() {
-    let state = setup_test_state_with_token(CancellationToken::new()).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_events_ws_invalid_from_event_id(pool: PgPool) {
+    let state = setup_test_state_with_token(pool, CancellationToken::new()).await;
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
 
@@ -245,10 +219,9 @@ async fn test_workflow_events_ws_invalid_from_event_id() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_workflow_events_ws_valid_workflow_id_filter() {
-    let state = setup_test_state_with_token(CancellationToken::new()).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_events_ws_valid_workflow_id_filter(pool: PgPool) {
+    let state = setup_test_state_with_token(pool, CancellationToken::new()).await;
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
 
@@ -264,10 +237,9 @@ async fn test_workflow_events_ws_valid_workflow_id_filter() {
     ws_stream.close(None).await.ok();
 }
 
-#[tokio::test]
-#[serial]
-async fn test_workflow_events_ws_valid_event_type_filter() {
-    let state = setup_test_state_with_token(CancellationToken::new()).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_events_ws_valid_event_type_filter(pool: PgPool) {
+    let state = setup_test_state_with_token(pool, CancellationToken::new()).await;
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
 
@@ -282,10 +254,9 @@ async fn test_workflow_events_ws_valid_event_type_filter() {
     ws_stream.close(None).await.ok();
 }
 
-#[tokio::test]
-#[serial]
-async fn test_workflow_events_ws_multiple_workflow_ids() {
-    let state = setup_test_state_with_token(CancellationToken::new()).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_events_ws_multiple_workflow_ids(pool: PgPool) {
+    let state = setup_test_state_with_token(pool, CancellationToken::new()).await;
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
 
@@ -306,11 +277,10 @@ async fn test_workflow_events_ws_multiple_workflow_ids() {
 // Live Event Broadcast Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_workflow_events_ws_receives_broadcast_event() {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_events_ws_receives_broadcast_event(pool: PgPool) {
     let shutdown_token = CancellationToken::new();
-    let state = setup_test_state_with_token(shutdown_token.clone()).await;
+    let state = setup_test_state_with_token(pool, shutdown_token.clone()).await;
     let manager = state.workflow_event_manager.clone();
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
@@ -363,11 +333,10 @@ async fn test_workflow_events_ws_receives_broadcast_event() {
 // Server Shutdown Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_workflow_events_ws_shutdown_sends_close_frame() {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_events_ws_shutdown_sends_close_frame(pool: PgPool) {
     let shutdown_token = CancellationToken::new();
-    let state = setup_test_state_with_token(shutdown_token.clone()).await;
+    let state = setup_test_state_with_token(pool, shutdown_token.clone()).await;
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
 
@@ -411,11 +380,10 @@ async fn test_workflow_events_ws_shutdown_sends_close_frame() {
 // Replay Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_workflow_events_ws_replay_from_event_id() {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_events_ws_replay_from_event_id(pool: PgPool) {
     let shutdown_token = CancellationToken::new();
-    let state = setup_test_state_with_token(shutdown_token.clone()).await;
+    let state = setup_test_state_with_token(pool, shutdown_token.clone()).await;
     let event_source = state.event_source.clone();
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
@@ -498,10 +466,9 @@ async fn test_workflow_events_ws_replay_from_event_id() {
 // Client Close Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_workflow_events_ws_client_close() {
-    let state = setup_test_state_with_token(CancellationToken::new()).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_events_ws_client_close(pool: PgPool) {
+    let state = setup_test_state_with_token(pool, CancellationToken::new()).await;
     let manager = state.workflow_event_manager.clone();
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
@@ -530,10 +497,9 @@ async fn test_workflow_events_ws_client_close() {
 // Empty Filter Tests (no workflow_id or event_type)
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_workflow_events_ws_empty_filters() {
-    let state = setup_test_state_with_token(CancellationToken::new()).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_events_ws_empty_filters(pool: PgPool) {
+    let state = setup_test_state_with_token(pool, CancellationToken::new()).await;
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
 

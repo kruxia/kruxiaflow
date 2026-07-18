@@ -1101,11 +1101,23 @@ mod tests {
     // Integration Test Helpers (Database Required)
     // ========================================================================
 
-    // Helper to get test database URL
-    fn test_db_url() -> String {
-        std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-        })
+    // Helper to get the URL of the isolated per-test database created by
+    // #[sqlx::test]. These activities connect by URL (not via a provided pool),
+    // so the URL is rebuilt from DATABASE_URL with the test database's name.
+    fn test_db_url(pool: &PgPool) -> String {
+        let base = std::env::var("DATABASE_URL")
+            .expect("DATABASE_URL must be set for #[sqlx::test] tests");
+        let db_name = pool
+            .connect_options()
+            .get_database()
+            .expect("test pool should have a database name")
+            .to_string();
+        let scheme_end = base.find("://").map(|i| i + 3).unwrap_or(0);
+        let path_start = base[scheme_end..]
+            .find('/')
+            .map(|i| scheme_end + i)
+            .unwrap_or(base.len());
+        format!("{}/{}", &base[..path_start], db_name)
     }
 
     // Helper to create a shared pool cache for tests
@@ -1214,12 +1226,12 @@ mod tests {
     // PostgresQueryActivity Tests
     // ========================================================================
 
-    #[tokio::test]
-    async fn test_postgres_query_select() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_query_select(pool: PgPool) {
         let activity = PostgresQueryActivity::new(test_pool_cache());
 
         let params = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": "SELECT 1 as num, 'test' as text, true as flag"
         });
 
@@ -1237,12 +1249,12 @@ mod tests {
         assert_eq!(row.get("flag").unwrap(), true);
     }
 
-    #[tokio::test]
-    async fn test_postgres_query_with_params() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_query_with_params(pool: PgPool) {
         let activity = PostgresQueryActivity::new(test_pool_cache());
 
         let params = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": "SELECT $1::text as name, $2::int as age",
             "params": ["Alice", 30]
         });
@@ -1260,22 +1272,22 @@ mod tests {
         assert_eq!(row.get("age").unwrap(), 30);
     }
 
-    #[tokio::test]
-    async fn test_postgres_query_insert() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_query_insert(pool: PgPool) {
         let pool_cache = test_pool_cache();
         let activity = PostgresQueryActivity::new(pool_cache);
 
         // Create a test table using a unique name to avoid conflicts
         let table_name = format!("test_users_{}", uuid::Uuid::now_v7().simple());
         let setup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("CREATE TABLE {} (id SERIAL PRIMARY KEY, name TEXT, email TEXT)", table_name)
         });
         activity.execute(setup).await.unwrap();
 
         // Insert a row
         let params = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("INSERT INTO {} (name, email) VALUES ($1, $2)", table_name),
             "params": ["Alice", "alice@example.com"]
         });
@@ -1289,35 +1301,35 @@ mod tests {
 
         // Cleanup
         let cleanup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("DROP TABLE {}", table_name)
         });
         activity.execute(cleanup).await.unwrap();
     }
 
-    #[tokio::test]
-    async fn test_postgres_query_update() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_query_update(pool: PgPool) {
         let pool_cache = test_pool_cache();
         let activity = PostgresQueryActivity::new(pool_cache);
 
         // Create test table with unique name
         let table_name = format!("test_products_{}", uuid::Uuid::now_v7().simple());
         let setup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("CREATE TABLE {} (id SERIAL PRIMARY KEY, name TEXT, price INT)", table_name)
         });
         activity.execute(setup).await.unwrap();
 
         // Populate test table
         let populate = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("INSERT INTO {} (name, price) VALUES ('Widget', 100), ('Gadget', 200)", table_name)
         });
         activity.execute(populate).await.unwrap();
 
         // Update rows
         let params = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("UPDATE {} SET price = $1 WHERE name = $2", table_name),
             "params": [150, "Widget"]
         });
@@ -1331,21 +1343,21 @@ mod tests {
 
         // Cleanup
         let cleanup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("DROP TABLE {}", table_name)
         });
         activity.execute(cleanup).await.unwrap();
     }
 
-    #[tokio::test]
-    async fn test_postgres_pool_reuse() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_pool_reuse(pool: PgPool) {
         // Use shared pool cache to test reuse
         let pool_cache = test_pool_cache();
         let activity = PostgresQueryActivity::new(pool_cache.clone());
 
         // First query creates pool
         let params1 = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": "SELECT 'first' as result"
         });
         let result1 = activity.execute(params1).await.unwrap();
@@ -1361,7 +1373,7 @@ mod tests {
 
         // Second query should reuse cached pool
         let params2 = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": "SELECT 'second' as result"
         });
         let result2 = activity.execute(params2).await.unwrap();
@@ -1383,8 +1395,8 @@ mod tests {
     // PostgresTransactionActivity Tests
     // ========================================================================
 
-    #[tokio::test]
-    async fn test_postgres_transaction_commit() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_transaction_commit(pool: PgPool) {
         let pool_cache = test_pool_cache();
         let query_activity = PostgresQueryActivity::new(pool_cache.clone());
         let tx_activity = PostgresTransactionActivity::new(pool_cache);
@@ -1392,14 +1404,14 @@ mod tests {
         // Create test table
         let table_name = format!("test_tx_commit_{}", uuid::Uuid::now_v7().simple());
         let setup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("CREATE TABLE {} (id SERIAL PRIMARY KEY, name TEXT, balance INT)", table_name)
         });
         query_activity.execute(setup).await.unwrap();
 
         // Execute transaction with multiple statements
         let params = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "statements": [
                 {
                     "query": format!("INSERT INTO {} (name, balance) VALUES ($1, $2)", table_name),
@@ -1429,7 +1441,7 @@ mod tests {
 
         // Verify final state
         let verify = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("SELECT name, balance FROM {} ORDER BY name", table_name)
         });
         let verify_result = query_activity.execute(verify).await.unwrap();
@@ -1449,14 +1461,14 @@ mod tests {
 
         // Cleanup
         let cleanup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("DROP TABLE {}", table_name)
         });
         query_activity.execute(cleanup).await.unwrap();
     }
 
-    #[tokio::test]
-    async fn test_postgres_transaction_rollback() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_transaction_rollback(pool: PgPool) {
         let pool_cache = test_pool_cache();
         let query_activity = PostgresQueryActivity::new(pool_cache.clone());
         let tx_activity = PostgresTransactionActivity::new(pool_cache);
@@ -1464,21 +1476,21 @@ mod tests {
         // Create test table with unique constraint
         let table_name = format!("test_tx_rollback_{}", uuid::Uuid::now_v7().simple());
         let setup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("CREATE TABLE {} (id SERIAL PRIMARY KEY, name TEXT UNIQUE, balance INT)", table_name)
         });
         query_activity.execute(setup).await.unwrap();
 
         // Insert initial data
         let initial = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("INSERT INTO {} (name, balance) VALUES ('Alice', 1000)", table_name)
         });
         query_activity.execute(initial).await.unwrap();
 
         // Execute transaction that will fail due to duplicate key
         let params = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "statements": [
                 {
                     "query": format!("UPDATE {} SET balance = balance - 500 WHERE name = 'Alice'", table_name)
@@ -1498,7 +1510,7 @@ mod tests {
 
         // Verify Alice's balance was NOT changed (rollback worked)
         let verify = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("SELECT balance FROM {} WHERE name = 'Alice'", table_name)
         });
         let verify_result = query_activity.execute(verify).await.unwrap();
@@ -1515,14 +1527,14 @@ mod tests {
 
         // Cleanup
         let cleanup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("DROP TABLE {}", table_name)
         });
         query_activity.execute(cleanup).await.unwrap();
     }
 
-    #[tokio::test]
-    async fn test_postgres_transaction_mixed_queries() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_transaction_mixed_queries(pool: PgPool) {
         let pool_cache = test_pool_cache();
         let query_activity = PostgresQueryActivity::new(pool_cache.clone());
         let tx_activity = PostgresTransactionActivity::new(pool_cache);
@@ -1530,14 +1542,14 @@ mod tests {
         // Create test table
         let table_name = format!("test_tx_mixed_{}", uuid::Uuid::now_v7().simple());
         let setup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("CREATE TABLE {} (id SERIAL PRIMARY KEY, name TEXT, value INT)", table_name)
         });
         query_activity.execute(setup).await.unwrap();
 
         // Execute transaction with SELECT and DML mixed
         let params = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "statements": [
                 {
                     "query": format!("INSERT INTO {} (name, value) VALUES ($1, $2) RETURNING id, name", table_name),
@@ -1580,14 +1592,14 @@ mod tests {
 
         // Cleanup
         let cleanup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("DROP TABLE {}", table_name)
         });
         query_activity.execute(cleanup).await.unwrap();
     }
 
-    #[tokio::test]
-    async fn test_postgres_transaction_isolation_level() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_transaction_isolation_level(pool: PgPool) {
         let pool_cache = test_pool_cache();
         let tx_activity = PostgresTransactionActivity::new(pool_cache.clone());
         let query_activity = PostgresQueryActivity::new(pool_cache);
@@ -1595,14 +1607,14 @@ mod tests {
         // Create test table
         let table_name = format!("test_tx_isolation_{}", uuid::Uuid::now_v7().simple());
         let setup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("CREATE TABLE {} (id SERIAL PRIMARY KEY, counter INT)", table_name)
         });
         query_activity.execute(setup).await.unwrap();
 
         // Execute transaction with serializable isolation
         let params = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "isolation_level": "serializable",
             "statements": [
                 {
@@ -1618,14 +1630,14 @@ mod tests {
 
         // Cleanup
         let cleanup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("DROP TABLE {}", table_name)
         });
         query_activity.execute(cleanup).await.unwrap();
     }
 
-    #[tokio::test]
-    async fn test_postgres_shared_pool_between_activities() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_shared_pool_between_activities(pool: PgPool) {
         // Both activities should share the same pool
         let pool_cache = test_pool_cache();
         let query_activity = PostgresQueryActivity::new(pool_cache.clone());
@@ -1633,7 +1645,7 @@ mod tests {
 
         // Query activity creates pool
         let params1 = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": "SELECT 1 as num"
         });
         query_activity.execute(params1).await.unwrap();
@@ -1646,7 +1658,7 @@ mod tests {
 
         // Transaction activity should reuse the same pool
         let params2 = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "statements": [
                 { "query": "SELECT 2 as num" }
             ]
@@ -1665,15 +1677,15 @@ mod tests {
     // See docs/bugs/2026-01-06-postgres-query-output-null-values.md
     // ========================================================================
 
-    #[tokio::test]
-    async fn test_postgres_query_uuid_columns() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_query_uuid_columns(pool: PgPool) {
         let pool_cache = test_pool_cache();
         let activity = PostgresQueryActivity::new(pool_cache);
 
         // Create table with UUID column
         let table_name = format!("test_uuid_{}", uuid::Uuid::now_v7().simple());
         let setup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!(
                 "CREATE TABLE {} (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name TEXT)",
                 table_name
@@ -1684,7 +1696,7 @@ mod tests {
         // Insert a row with explicit UUID (cast string to uuid)
         let test_uuid = uuid::Uuid::now_v7();
         let insert = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("INSERT INTO {} (id, name) VALUES ($1::uuid, $2)", table_name),
             "params": [test_uuid.to_string(), "Test User"]
         });
@@ -1692,7 +1704,7 @@ mod tests {
 
         // Query the UUID column - this is the bug scenario
         let query = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("SELECT id, name FROM {}", table_name)
         });
         let result = activity.execute(query).await.unwrap();
@@ -1718,21 +1730,21 @@ mod tests {
 
         // Cleanup
         let cleanup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("DROP TABLE {}", table_name)
         });
         activity.execute(cleanup).await.unwrap();
     }
 
-    #[tokio::test]
-    async fn test_postgres_query_nullable_uuid() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_query_nullable_uuid(pool: PgPool) {
         let pool_cache = test_pool_cache();
         let activity = PostgresQueryActivity::new(pool_cache);
 
         // Create table with nullable UUID column
         let table_name = format!("test_nullable_uuid_{}", uuid::Uuid::now_v7().simple());
         let setup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!(
                 "CREATE TABLE {} (id SERIAL PRIMARY KEY, ref_id UUID, name TEXT)",
                 table_name
@@ -1743,14 +1755,14 @@ mod tests {
         // Insert rows - one with UUID, one with NULL
         let test_uuid = uuid::Uuid::now_v7();
         let insert1 = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("INSERT INTO {} (ref_id, name) VALUES ($1::uuid, $2)", table_name),
             "params": [test_uuid.to_string(), "With UUID"]
         });
         activity.execute(insert1).await.unwrap();
 
         let insert2 = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("INSERT INTO {} (ref_id, name) VALUES (NULL, $1)", table_name),
             "params": ["Without UUID"]
         });
@@ -1758,7 +1770,7 @@ mod tests {
 
         // Query both rows
         let query = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("SELECT ref_id, name FROM {} ORDER BY id", table_name)
         });
         let result = activity.execute(query).await.unwrap();
@@ -1792,21 +1804,21 @@ mod tests {
 
         // Cleanup
         let cleanup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("DROP TABLE {}", table_name)
         });
         activity.execute(cleanup).await.unwrap();
     }
 
-    #[tokio::test]
-    async fn test_postgres_query_nullable_integer() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_query_nullable_integer(pool: PgPool) {
         let pool_cache = test_pool_cache();
         let activity = PostgresQueryActivity::new(pool_cache);
 
         // Create table with nullable integer columns
         let table_name = format!("test_nullable_int_{}", uuid::Uuid::now_v7().simple());
         let setup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!(
                 "CREATE TABLE {} (id SERIAL PRIMARY KEY, page_start INTEGER, page_end INTEGER)",
                 table_name
@@ -1816,26 +1828,26 @@ mod tests {
 
         // Insert rows with various nullable integer states
         let insert1 = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("INSERT INTO {} (page_start, page_end) VALUES (1, 10)", table_name)
         });
         activity.execute(insert1).await.unwrap();
 
         let insert2 = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("INSERT INTO {} (page_start, page_end) VALUES (5, NULL)", table_name)
         });
         activity.execute(insert2).await.unwrap();
 
         let insert3 = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("INSERT INTO {} (page_start, page_end) VALUES (NULL, NULL)", table_name)
         });
         activity.execute(insert3).await.unwrap();
 
         // Query all rows
         let query = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("SELECT id, page_start, page_end FROM {} ORDER BY id", table_name)
         });
         let result = activity.execute(query).await.unwrap();
@@ -1864,21 +1876,21 @@ mod tests {
 
         // Cleanup
         let cleanup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("DROP TABLE {}", table_name)
         });
         activity.execute(cleanup).await.unwrap();
     }
 
-    #[tokio::test]
-    async fn test_postgres_query_mixed_types() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_query_mixed_types(pool: PgPool) {
         let pool_cache = test_pool_cache();
         let activity = PostgresQueryActivity::new(pool_cache);
 
         // Create table with mixed column types (reproducing the exact bug scenario)
         let table_name = format!("test_mixed_types_{}", uuid::Uuid::now_v7().simple());
         let setup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!(
                 r#"CREATE TABLE {} (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1898,7 +1910,7 @@ mod tests {
         let test_id = uuid::Uuid::now_v7();
         let test_source_id = uuid::Uuid::now_v7();
         let insert = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!(
                 "INSERT INTO {} (id, source_id, page_start, page_end, score, title, active) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7)",
                 table_name
@@ -1909,7 +1921,7 @@ mod tests {
 
         // Query - this is the exact pattern that was failing
         let query = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("SELECT id, source_id, page_start, page_end, score, title, active FROM {}", table_name)
         });
         let result = activity.execute(query).await.unwrap();
@@ -1984,21 +1996,21 @@ mod tests {
 
         // Cleanup
         let cleanup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("DROP TABLE {}", table_name)
         });
         activity.execute(cleanup).await.unwrap();
     }
 
-    #[tokio::test]
-    async fn test_postgres_query_smallint_bigint() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_query_smallint_bigint(pool: PgPool) {
         let pool_cache = test_pool_cache();
         let activity = PostgresQueryActivity::new(pool_cache);
 
         // Create table with various integer sizes
         let table_name = format!("test_int_sizes_{}", uuid::Uuid::now_v7().simple());
         let setup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!(
                 "CREATE TABLE {} (id SERIAL PRIMARY KEY, small_val SMALLINT, big_val BIGINT)",
                 table_name
@@ -2008,7 +2020,7 @@ mod tests {
 
         // Insert test data
         let insert = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("INSERT INTO {} (small_val, big_val) VALUES ($1, $2)", table_name),
             "params": [32767, 9223372036854775807_i64]
         });
@@ -2016,7 +2028,7 @@ mod tests {
 
         // Query
         let query = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("SELECT small_val, big_val FROM {}", table_name)
         });
         let result = activity.execute(query).await.unwrap();
@@ -2051,7 +2063,7 @@ mod tests {
 
         // Cleanup
         let cleanup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("DROP TABLE {}", table_name)
         });
         activity.execute(cleanup).await.unwrap();
@@ -2062,14 +2074,14 @@ mod tests {
     // See docs/bugs/2026-01-05-postgres-array-params-unsupported.md
     // ========================================================================
 
-    #[tokio::test]
-    async fn test_postgres_query_array_parameter() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_query_array_parameter(pool: PgPool) {
         let pool_cache = test_pool_cache();
         let activity = PostgresQueryActivity::new(pool_cache);
 
         // Use jsonb_array_elements to extract array elements - this is the bug scenario
         let query = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": "SELECT value::text FROM jsonb_array_elements($1::jsonb) AS value ORDER BY value",
             "params": [[1, 2, 3, 4, 5]]
         });
@@ -2091,15 +2103,15 @@ mod tests {
         assert_eq!(rows[4].get("value").unwrap(), "5");
     }
 
-    #[tokio::test]
-    async fn test_postgres_query_object_parameter() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_query_object_parameter(pool: PgPool) {
         let pool_cache = test_pool_cache();
         let activity = PostgresQueryActivity::new(pool_cache);
 
         // Create table with JSONB column
         let table_name = format!("test_jsonb_{}", uuid::Uuid::now_v7().simple());
         let setup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("CREATE TABLE {} (id SERIAL PRIMARY KEY, data JSONB)", table_name)
         });
         activity.execute(setup).await.unwrap();
@@ -2112,7 +2124,7 @@ mod tests {
             "tags": ["admin", "user"]
         });
         let insert = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("INSERT INTO {} (data) VALUES ($1::jsonb) RETURNING id, data", table_name),
             "params": [test_object.clone()]
         });
@@ -2130,7 +2142,7 @@ mod tests {
 
         // Query the inserted data
         let query = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("SELECT data->>'name' as name, (data->>'age')::int as age FROM {}", table_name)
         });
         let result = activity.execute(query).await.unwrap();
@@ -2148,14 +2160,14 @@ mod tests {
 
         // Cleanup
         let cleanup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("DROP TABLE {}", table_name)
         });
         activity.execute(cleanup).await.unwrap();
     }
 
-    #[tokio::test]
-    async fn test_postgres_query_nested_json_parameter() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_query_nested_json_parameter(pool: PgPool) {
         let pool_cache = test_pool_cache();
         let activity = PostgresQueryActivity::new(pool_cache);
 
@@ -2177,7 +2189,7 @@ mod tests {
 
         // Query nested values using PostgreSQL JSON operators
         let query = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": "SELECT $1::jsonb->'level1'->'level2'->'level3'->>'message' as message",
             "params": [nested_data]
         });
@@ -2195,8 +2207,8 @@ mod tests {
         assert_eq!(rows[0].get("message").unwrap(), "deep nested");
     }
 
-    #[tokio::test]
-    async fn test_postgres_query_json_special_characters() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_query_json_special_characters(pool: PgPool) {
         let pool_cache = test_pool_cache();
         let activity = PostgresQueryActivity::new(pool_cache);
 
@@ -2210,7 +2222,7 @@ mod tests {
         });
 
         let query = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": "SELECT $1::jsonb->>'quoted' as quoted, $1::jsonb->>'unicode' as unicode",
             "params": [special_data]
         });
@@ -2230,8 +2242,8 @@ mod tests {
         assert_eq!(rows[0].get("unicode").unwrap(), "日本語 emoji: 🎉");
     }
 
-    #[tokio::test]
-    async fn test_postgres_query_array_of_objects_parameter() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_query_array_of_objects_parameter(pool: PgPool) {
         let pool_cache = test_pool_cache();
         let activity = PostgresQueryActivity::new(pool_cache);
 
@@ -2244,7 +2256,7 @@ mod tests {
 
         // Extract each object and get specific fields
         let query = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": "SELECT (elem->>'sequence')::int as seq, elem->>'content' as content FROM jsonb_array_elements($1::jsonb) AS elem ORDER BY (elem->>'sequence')::int",
             "params": [passages]
         });
@@ -2577,8 +2589,8 @@ mod tests {
     // Integration Test Helpers (Database Required)
     // ========================================================================
 
-    #[tokio::test]
-    async fn test_postgres_transaction_json_parameters() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_postgres_transaction_json_parameters(pool: PgPool) {
         let pool_cache = test_pool_cache();
         let query_activity = PostgresQueryActivity::new(pool_cache.clone());
         let tx_activity = PostgresTransactionActivity::new(pool_cache);
@@ -2586,7 +2598,7 @@ mod tests {
         // Create table for transaction test
         let table_name = format!("test_tx_jsonb_{}", uuid::Uuid::now_v7().simple());
         let setup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("CREATE TABLE {} (id SERIAL PRIMARY KEY, data JSONB)", table_name)
         });
         query_activity.execute(setup).await.unwrap();
@@ -2596,7 +2608,7 @@ mod tests {
         let obj2 = serde_json::json!({"name": "Item 2", "value": 200});
 
         let params = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "statements": [
                 {
                     "query": format!("INSERT INTO {} (data) VALUES ($1::jsonb)", table_name),
@@ -2628,7 +2640,7 @@ mod tests {
 
         // Cleanup
         let cleanup = json!({
-            "db_url": test_db_url(),
+            "db_url": test_db_url(&pool),
             "query": format!("DROP TABLE {}", table_name)
         });
         query_activity.execute(cleanup).await.unwrap();

@@ -372,13 +372,7 @@ mod tests {
         assert_eq!(params.token, None);
     }
 
-    async fn setup_test_state() -> AppState {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-        let pool = PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database");
+    fn setup_test_state(pool: PgPool) -> AppState {
         AppState::new(
             pool,
             Arc::new(MockAuthService),
@@ -391,34 +385,34 @@ mod tests {
         )
     }
 
-    #[tokio::test]
-    async fn test_broadcast_to_activity_no_connections() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_broadcast_to_activity_no_connections(pool: PgPool) {
+        let state = setup_test_state(pool);
         let activity_id = Uuid::now_v7();
         let message = StreamMessage::ping();
         let count = broadcast_to_activity(&state, activity_id, message).await;
         assert_eq!(count, 0);
     }
 
-    #[tokio::test]
-    async fn test_activity_connection_count_no_connections() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_activity_connection_count_no_connections(pool: PgPool) {
+        let state = setup_test_state(pool);
         let activity_id = Uuid::now_v7();
         let count = activity_connection_count(&state, activity_id).await;
         assert_eq!(count, 0);
     }
 
-    #[tokio::test]
-    async fn test_close_activity_connections_no_connections() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_close_activity_connections_no_connections(pool: PgPool) {
+        let state = setup_test_state(pool);
         let activity_id = Uuid::now_v7();
         // Should not panic even when there are no connections
         close_activity_connections(&state, activity_id).await;
     }
 
-    #[tokio::test]
-    async fn test_broadcast_after_register() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_broadcast_after_register(pool: PgPool) {
+        let state = setup_test_state(pool);
         let activity_id = Uuid::now_v7();
 
         // Register a connection

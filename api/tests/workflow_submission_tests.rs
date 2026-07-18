@@ -12,28 +12,9 @@ use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
 
 /// Load test RSA keys
 fn test_rsa_private_key() -> String {
@@ -45,9 +26,7 @@ fn test_rsa_public_key() -> String {
 }
 
 /// Helper to create test AppState
-async fn setup_test_state() -> AppState {
-    let pool = setup_test_pool().await;
-
+async fn setup_test_state(pool: PgPool) -> AppState {
     let auth_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
         rsa_public_key_pem: Some(test_rsa_public_key()),
@@ -65,7 +44,7 @@ async fn setup_test_state() -> AppState {
          VALUES ($1, $2, $3, NOW())
          ON CONFLICT (client_id) DO NOTHING",
         "test-client",
-        hash("test-secret", bcrypt::DEFAULT_COST).unwrap(),
+        hash("test-secret", 4).unwrap(), // min cost: real hashing strength is not under test
         "Test Client"
     )
     .execute(&pool)
@@ -97,8 +76,8 @@ async fn setup_test_state() -> AppState {
 }
 
 /// Helper to create test server
-async fn setup_test_server() -> TestServer {
-    let state = setup_test_state().await;
+async fn setup_test_server(pool: PgPool) -> TestServer {
+    let state = setup_test_state(pool).await;
     let app = app_router(state);
     TestServer::new(app).expect("Failed to create test server")
 }
@@ -145,10 +124,9 @@ async fn deploy_test_workflow(server: &TestServer, token: &str, name: &str) -> S
     body["version"].as_str().unwrap().to_string()
 }
 
-#[tokio::test]
-#[serial]
-async fn test_submit_workflow_success() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_submit_workflow_success(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_test_token(&server).await;
 
     // Deploy workflow definition first
@@ -177,10 +155,9 @@ async fn test_submit_workflow_success() {
     assert!(!body.workflow_id.to_string().is_empty());
 }
 
-#[tokio::test]
-#[serial]
-async fn test_submit_workflow_with_specific_version() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_submit_workflow_with_specific_version(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_test_token(&server).await;
 
     let def_name = "test_submit_workflow_versioned";
@@ -206,10 +183,9 @@ async fn test_submit_workflow_with_specific_version() {
     assert_eq!(body.definition_version, version);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_submit_workflow_definition_not_found() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_submit_workflow_definition_not_found(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_test_token(&server).await;
 
     let response = server
@@ -235,10 +211,9 @@ async fn test_submit_workflow_definition_not_found() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_submit_workflow_invalid_input() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_submit_workflow_invalid_input(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_test_token(&server).await;
 
     let def_name = "test_invalid_input";
@@ -263,10 +238,9 @@ async fn test_submit_workflow_invalid_input() {
     assert_eq!(body["error"]["code"], "VALIDATION_ERROR");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_submit_workflow_idempotency() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_submit_workflow_idempotency(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_test_token(&server).await;
 
     let def_name = "test_idempotency";
@@ -317,10 +291,9 @@ async fn test_submit_workflow_idempotency() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_submit_workflow_requires_authentication() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_submit_workflow_requires_authentication(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/workflows")
@@ -333,10 +306,9 @@ async fn test_submit_workflow_requires_authentication() {
     assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_submit_workflow_empty_definition_name() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_submit_workflow_empty_definition_name(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_test_token(&server).await;
 
     let response = server
@@ -354,11 +326,9 @@ async fn test_submit_workflow_empty_definition_name() {
     assert_eq!(response.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_submit_workflow_event_published() {
-    let server = setup_test_server().await;
-    let state = setup_test_state().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_submit_workflow_event_published(pool: PgPool) {
+    let server = setup_test_server(pool.clone()).await;
     let token = get_test_token(&server).await;
 
     let def_name = "test_event_published";
@@ -388,7 +358,7 @@ async fn test_submit_workflow_event_published() {
         "#,
         body.workflow_id
     )
-    .fetch_one(&state.db_pool)
+    .fetch_one(&pool)
     .await
     .expect("Should be able to query events");
 

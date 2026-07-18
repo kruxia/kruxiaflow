@@ -145,6 +145,7 @@ mod tests {
     // ============================================================================
 
     #[test]
+    #[serial]
     fn test_load_secrets_from_env() {
         // Set test environment variables
         // SAFETY: Environment variable operations are safe in single-threaded test context
@@ -189,6 +190,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_load_secrets_from_env_empty() {
         // Ensure test isolation - save and clear any existing secrets
         let existing_secrets: Vec<(String, String)> = std::env::vars()
@@ -227,6 +229,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_load_secrets_preserves_underscores_in_name() {
         // Secret names with underscores after the prefix should be preserved
         unsafe {
@@ -251,6 +254,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_load_secrets_preserves_special_characters_in_value() {
         // Secret values with special characters should be preserved exactly
         let special_value = "p@ss=word!with#special$chars&more%stuff";
@@ -273,6 +277,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_load_secrets_handles_empty_value() {
         // Empty secret value should be preserved (not filtered out)
         unsafe {
@@ -290,6 +295,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_load_secrets_case_insensitivity() {
         // Keys should be lowercased regardless of original case
         unsafe {
@@ -314,6 +320,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_load_secrets_prefix_only_not_included() {
         // The prefix itself without any suffix should not create an entry
         unsafe {
@@ -332,6 +339,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_load_secrets_similar_prefix_not_matched() {
         // Variables with similar but not exact prefix should not be included
         unsafe {
@@ -359,6 +367,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_load_secrets_url_with_credentials() {
         // Common use case: database URLs with embedded credentials
         let db_url = "postgres://admin:super$ecret@db.example.com:5432/mydb?sslmode=require";
@@ -378,6 +387,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_load_secrets_json_value() {
         // Secret values can contain JSON (e.g., service account keys)
         let json_value = r#"{"type":"service_account","project_id":"test","private_key":"-----BEGIN RSA PRIVATE KEY-----\nMIIE..."}"#;

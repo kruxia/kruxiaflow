@@ -10,31 +10,12 @@ use kruxiaflow_oauth::{
     AuthConfig, AuthError, AuthenticationService, PostgresAuthService, RegisterUserRequest,
     hash_refresh_token,
 };
-use serial_test::serial;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 /// Load test private key
 fn test_private_key() -> String {
     include_str!("private.pem").to_string()
-}
-
-/// Setup test database pool and run migrations
-async fn setup_test_pool() -> PgPool {
-    let database_url =
-        std::env::var("DATABASE_URL").expect("DATABASE_URL must be set for integration tests");
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    // Run migrations
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
 }
 
 /// Load test public key
@@ -57,7 +38,7 @@ async fn setup_auth_service(pool: PgPool) -> PostgresAuthService {
 
 /// Helper to create a test client in the database
 async fn create_test_client(pool: &PgPool, client_id: &str, client_secret: &str) -> Uuid {
-    let secret_hash = hash(client_secret, bcrypt::DEFAULT_COST).unwrap();
+    let secret_hash = hash(client_secret, 4).unwrap(); // min cost: real hashing strength is not under test
 
     let row = sqlx::query!(
         r#"
@@ -79,7 +60,7 @@ async fn create_test_client(pool: &PgPool, client_id: &str, client_secret: &str)
 
 /// Helper to create a test user in the database
 async fn create_test_user(pool: &PgPool, username: &str, email: &str, password: &str) -> Uuid {
-    let password_hash = hash(password, bcrypt::DEFAULT_COST).unwrap();
+    let password_hash = hash(password, 4).unwrap(); // min cost: real hashing strength is not under test
 
     let row = sqlx::query!(
         r#"
@@ -100,42 +81,12 @@ async fn create_test_user(pool: &PgPool, username: &str, email: &str, password: 
     row.id
 }
 
-/// Cleanup test data
-async fn cleanup_test_data(pool: &PgPool, client_id: Option<&str>, username: Option<&str>) {
-    if let Some(uname) = username {
-        // Delete refresh tokens first (foreign key constraint)
-        sqlx::query!("DELETE FROM oauth_refresh_tokens WHERE user_id IN (SELECT id FROM oauth_users WHERE username = $1)", uname)
-            .execute(pool)
-            .await
-            .ok();
-
-        sqlx::query!("DELETE FROM oauth_users WHERE username = $1", uname)
-            .execute(pool)
-            .await
-            .ok();
-    }
-
-    if let Some(cid) = client_id {
-        sqlx::query!("DELETE FROM oauth_clients WHERE client_id = $1", cid)
-            .execute(pool)
-            .await
-            .ok();
-    }
-}
-
-/// Cleanup test data at the start of a test (in case previous run failed)
-async fn pre_cleanup_test_data(pool: &PgPool, client_id: Option<&str>, username: Option<&str>) {
-    cleanup_test_data(pool, client_id, username).await;
-}
-
 // ============================================================================
 // Client Credentials Flow Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_client_credentials_success() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_client_credentials_success(pool: PgPool) {
     let service = setup_auth_service(pool.clone()).await;
 
     let client_id = "test-client-success";
@@ -160,14 +111,10 @@ async fn test_client_credentials_success() {
     // Validate the token
     let claims = service.validate_token(&response.access_token).await;
     assert!(claims.is_ok(), "Token validation should succeed");
-
-    cleanup_test_data(&pool, Some(client_id), None).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_client_credentials_invalid_secret() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_client_credentials_invalid_secret(pool: PgPool) {
     let service = setup_auth_service(pool.clone()).await;
 
     let client_id = "test-client-invalid-secret";
@@ -182,14 +129,10 @@ async fn test_client_credentials_invalid_secret() {
         matches!(result, Err(AuthError::InvalidCredentials)),
         "Should reject invalid secret"
     );
-
-    cleanup_test_data(&pool, Some(client_id), None).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_client_credentials_nonexistent_client() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_client_credentials_nonexistent_client(pool: PgPool) {
     let service = setup_auth_service(pool.clone()).await;
 
     // Try to authenticate with non-existent client
@@ -203,10 +146,8 @@ async fn test_client_credentials_nonexistent_client() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_client_credentials_inactive_client() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_client_credentials_inactive_client(pool: PgPool) {
     let service = setup_auth_service(pool.clone()).await;
 
     let client_id = "test-client-inactive";
@@ -230,18 +171,14 @@ async fn test_client_credentials_inactive_client() {
         matches!(result, Err(AuthError::InvalidCredentials)),
         "Should reject inactive client"
     );
-
-    cleanup_test_data(&pool, Some(client_id), None).await;
 }
 
 // ============================================================================
 // Password Flow Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_password_flow_success() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_password_flow_success(pool: PgPool) {
     let service = setup_auth_service(pool.clone()).await;
 
     let username = "testuser-password-success";
@@ -271,14 +208,10 @@ async fn test_password_flow_success() {
     // Validate the token
     let claims = service.validate_token(&response.access_token).await;
     assert!(claims.is_ok(), "Token validation should succeed");
-
-    cleanup_test_data(&pool, None, Some(username)).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_password_flow_invalid_password() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_password_flow_invalid_password(pool: PgPool) {
     let service = setup_auth_service(pool.clone()).await;
 
     let username = "testuser-invalid-password";
@@ -296,14 +229,10 @@ async fn test_password_flow_invalid_password() {
         matches!(result, Err(AuthError::InvalidCredentials)),
         "Should reject invalid password"
     );
-
-    cleanup_test_data(&pool, None, Some(username)).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_password_flow_nonexistent_user() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_password_flow_nonexistent_user(pool: PgPool) {
     let service = setup_auth_service(pool).await;
 
     // Try to authenticate with non-existent user
@@ -317,10 +246,8 @@ async fn test_password_flow_nonexistent_user() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_password_flow_inactive_user() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_password_flow_inactive_user(pool: PgPool) {
     let service = setup_auth_service(pool.clone()).await;
 
     let username = "testuser-inactive";
@@ -345,26 +272,19 @@ async fn test_password_flow_inactive_user() {
         matches!(result, Err(AuthError::InvalidCredentials)),
         "Should reject inactive user"
     );
-
-    cleanup_test_data(&pool, None, Some(username)).await;
 }
 
 // ============================================================================
 // Refresh Token Flow Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_refresh_token_success() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_refresh_token_success(pool: PgPool) {
     let service = setup_auth_service(pool.clone()).await;
 
     let username = "testuser-refresh";
     let email = "testuser4@example.com";
     let password = "test-password";
-
-    // Cleanup any leftover data from previous failed runs
-    pre_cleanup_test_data(&pool, None, Some(username)).await;
 
     create_test_user(&pool, username, email, password).await;
 
@@ -410,14 +330,10 @@ async fn test_refresh_token_success() {
         matches!(old_token_result, Err(AuthError::RevokedToken)),
         "Old refresh token should be revoked after rotation"
     );
-
-    cleanup_test_data(&pool, None, Some(username)).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_refresh_token_invalid() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_refresh_token_invalid(pool: PgPool) {
     let service = setup_auth_service(pool).await;
 
     // Try to use invalid refresh token
@@ -429,18 +345,13 @@ async fn test_refresh_token_invalid() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_refresh_token_expired() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_refresh_token_expired(pool: PgPool) {
     let service = setup_auth_service(pool.clone()).await;
 
     let username = "testuser-expired-refresh";
     let email = "testuser5@example.com";
     let password = "test-password";
-
-    // Cleanup any leftover data from previous failed runs
-    pre_cleanup_test_data(&pool, None, Some(username)).await;
 
     let user_uuid = create_test_user(&pool, username, email, password).await;
 
@@ -469,18 +380,14 @@ async fn test_refresh_token_expired() {
         "Should reject expired refresh token, got {:?}",
         result
     );
-
-    cleanup_test_data(&pool, None, Some(username)).await;
 }
 
 // ============================================================================
 // Token Validation Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_validate_token_success() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_validate_token_success(pool: PgPool) {
     let service = setup_auth_service(pool.clone()).await;
 
     let client_id = "test-client-validate";
@@ -507,14 +414,10 @@ async fn test_validate_token_success() {
     // Expiration should be in the future
     let now = Utc::now().timestamp();
     assert!(claims.exp > now, "Token should not be expired");
-
-    cleanup_test_data(&pool, Some(client_id), None).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_validate_token_malformed() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_validate_token_malformed(pool: PgPool) {
     let service = setup_auth_service(pool).await;
 
     // Try to validate malformed token
@@ -526,10 +429,8 @@ async fn test_validate_token_malformed() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_validate_token_wrong_signature() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_validate_token_wrong_signature(pool: PgPool) {
     let service = setup_auth_service(pool.clone()).await;
 
     let client_id = "test-client-wrong-sig";
@@ -555,18 +456,14 @@ async fn test_validate_token_wrong_signature() {
         matches!(result, Err(AuthError::InvalidToken(_))),
         "Should reject token with wrong signature"
     );
-
-    cleanup_test_data(&pool, Some(client_id), None).await;
 }
 
 // ============================================================================
 // Cross-flow Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_multiple_clients_different_tokens() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_multiple_clients_different_tokens(pool: PgPool) {
     let service = setup_auth_service(pool.clone()).await;
 
     let client1_id = "test-client-1";
@@ -606,15 +503,10 @@ async fn test_multiple_clients_different_tokens() {
 
     // Subjects should be different (different client IDs)
     assert_ne!(claims1.sub, claims2.sub, "Subjects should be different");
-
-    cleanup_test_data(&pool, Some(client1_id), None).await;
-    cleanup_test_data(&pool, Some(client2_id), None).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_user_and_client_tokens_are_distinct() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_user_and_client_tokens_are_distinct(pool: PgPool) {
     let service = setup_auth_service(pool.clone()).await;
 
     let client_id = "test-client-distinct";
@@ -671,24 +563,17 @@ async fn test_user_and_client_tokens_are_distinct() {
         client_claims.sub, user_claims.sub,
         "Client and user should have different subjects"
     );
-
-    cleanup_test_data(&pool, Some(client_id), Some(username)).await;
 }
 
 // ============================================================================
 // Register User Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_register_user_success() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_register_user_success(pool: PgPool) {
     let service = setup_auth_service(pool.clone()).await;
 
     let username = "testuser-register";
-
-    // Pre-cleanup
-    pre_cleanup_test_data(&pool, None, Some(username)).await;
 
     let request = RegisterUserRequest {
         username: username.to_string(),
@@ -716,20 +601,13 @@ async fn test_register_user_success() {
         auth_result.is_ok(),
         "Should be able to login with registered password"
     );
-
-    cleanup_test_data(&pool, None, Some(username)).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_register_user_idempotent() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_register_user_idempotent(pool: PgPool) {
     let service = setup_auth_service(pool.clone()).await;
 
     let username = "testuser-idempotent";
-
-    // Pre-cleanup
-    pre_cleanup_test_data(&pool, None, Some(username)).await;
 
     let request = RegisterUserRequest {
         username: username.to_string(),
@@ -762,20 +640,13 @@ async fn test_register_user_idempotent() {
         auth_result.is_ok(),
         "Original password should still work after idempotent upsert"
     );
-
-    cleanup_test_data(&pool, None, Some(username)).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_register_user_then_password_login() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_register_user_then_password_login(pool: PgPool) {
     let service = setup_auth_service(pool.clone()).await;
 
     let username = "testuser-reg-login";
-
-    // Pre-cleanup
-    pre_cleanup_test_data(&pool, None, Some(username)).await;
 
     // Register user
     let request = RegisterUserRequest {
@@ -805,6 +676,4 @@ async fn test_register_user_then_password_login() {
         .expect("token should be valid");
 
     assert!(!claims.sub.is_empty());
-
-    cleanup_test_data(&pool, None, Some(username)).await;
 }

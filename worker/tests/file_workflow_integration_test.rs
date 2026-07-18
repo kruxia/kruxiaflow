@@ -15,30 +15,25 @@ use kruxiaflow_core::{
 use kruxiaflow_oauth::{AuthenticationService, PostgresAuthService};
 use kruxiaflow_worker::{WorkerConfig, WorkerManager, register_std_activities};
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-    });
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    // Run migrations
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
+/// Wait until the API server responds to /health (poll every 10ms, panic after 10s)
+async fn wait_for_api_ready(api_url: &str) {
+    let client = reqwest::Client::new();
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_secs(10) {
+        if let Ok(resp) = client.get(format!("{}/health", api_url)).send().await
+            && resp.status().is_success()
+        {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("API server did not become ready within 10s");
 }
 
 /// Generate test RSA private key
@@ -75,7 +70,10 @@ async fn setup_test_services(
 
     let auth_service: Arc<dyn AuthenticationService> = Arc::new(auth_service);
 
-    let queue_config = QueueConfig::default();
+    let queue_config = QueueConfig {
+        poll_interval: Duration::from_millis(10),
+        ..QueueConfig::default()
+    };
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
 
@@ -156,11 +154,9 @@ async fn cleanup_test_data(pool: &PgPool, workflow_id: Uuid) {
         .expect("Failed to delete workflow events");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_end_to_end_file_workflow() -> Result<()> {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_end_to_end_file_workflow(pool: PgPool) -> Result<()> {
     // Setup
-    let pool = setup_test_pool().await;
     let (auth_service, activity_queue, event_source, workflow_storage, shutdown_token) =
         setup_test_services(pool.clone()).await;
 
@@ -196,11 +192,12 @@ async fn test_end_to_end_file_workflow() -> Result<()> {
             .expect("Server failed to start");
     });
 
-    // Give the server a moment to start
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Wait for the API server to accept requests
+    wait_for_api_ready(&server_url).await;
 
     // Start orchestrator
-    let orchestrator_config = OrchestratorConfig::new(pool.clone());
+    let orchestrator_config = OrchestratorConfig::new(pool.clone())
+        .with_poll_interval(Duration::from_millis(1), Duration::from_millis(10));
     let subscription_service: Arc<dyn SubscriptionService> =
         Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let orchestrator_handle = tokio::spawn({
@@ -220,8 +217,8 @@ async fn test_end_to_end_file_workflow() -> Result<()> {
         }
     });
 
-    // Wait for orchestrator to start
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // No startup wait needed: event delivery is durable (polling), so the
+    // orchestrator picks up any events published before it starts polling.
 
     // Get OAuth token
     let client = reqwest::Client::new();
@@ -248,7 +245,7 @@ async fn test_end_to_end_file_workflow() -> Result<()> {
         api_url: server_url.clone(),
         worker_id: "test_worker".to_string(),
         worker: "std".to_string(),
-        poll_interval: Duration::from_millis(100),
+        poll_interval: Duration::from_millis(10),
         poll_max_activities: 5,
         max_concurrent_activities: 16,
         concurrency: 1,
@@ -261,8 +258,8 @@ async fn test_end_to_end_file_workflow() -> Result<()> {
     let manager = WorkerManager::new(worker_config, registry, workflow_storage.clone());
     let worker_handles = manager.start().await?;
 
-    // Wait for worker to start
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // No startup wait needed: the activity queue is durable, so the worker
+    // picks up any activities enqueued before its first successful poll.
 
     // Define a workflow that downloads a file from the API's OpenAPI spec endpoint
     // This ensures we don't depend on external services (per CLAUDE.md guidelines)
@@ -327,14 +324,12 @@ async fn test_end_to_end_file_workflow() -> Result<()> {
     let workflow_body: serde_json::Value = workflow_response.json().await?;
     let workflow_id = Uuid::parse_str(workflow_body["workflow_id"].as_str().unwrap())?;
 
-    // Wait for workflow to complete
-    let mut attempts = 0;
-    let max_attempts = 30; // 15 seconds max
+    // Wait for workflow to complete (poll every 10ms, 15 seconds max)
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
     let mut workflow_completed = false;
 
-    while attempts < max_attempts {
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        attempts += 1;
+    while std::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(10)).await;
 
         // Check workflow status via events
         let events: Vec<(String,)> = sqlx::query_as(
@@ -416,11 +411,9 @@ async fn test_end_to_end_file_workflow() -> Result<()> {
     Ok(())
 }
 
-#[tokio::test]
-#[serial]
-async fn test_file_workflow_with_multiple_outputs() -> Result<()> {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_file_workflow_with_multiple_outputs(pool: PgPool) -> Result<()> {
     // This test verifies that an activity can produce both value and file outputs
-    let pool = setup_test_pool().await;
     let workflow_storage: Arc<dyn WorkflowStorage> = Arc::new(PostgresStorage::new(pool.clone()));
 
     let workflow_id = Uuid::now_v7();

@@ -12,29 +12,9 @@ use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    // Run migrations
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
 
 /// Load test RSA private key
 fn test_rsa_private_key() -> String {
@@ -47,9 +27,7 @@ fn test_rsa_public_key() -> String {
 }
 
 /// Helper to create test AppState
-async fn setup_test_state() -> AppState {
-    let pool = setup_test_pool().await;
-
+async fn setup_test_state(pool: PgPool) -> AppState {
     let auth_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
         rsa_public_key_pem: Some(test_rsa_public_key()),
@@ -67,7 +45,7 @@ async fn setup_test_state() -> AppState {
          VALUES ($1, $2, $3, NOW())
          ON CONFLICT (client_id) DO NOTHING",
         "test-client",
-        hash("test-secret", bcrypt::DEFAULT_COST).unwrap(),
+        hash("test-secret", 4).unwrap(), // min cost: real hashing strength is not under test
         "Test Client"
     )
     .execute(&pool)
@@ -81,7 +59,7 @@ async fn setup_test_state() -> AppState {
          ON CONFLICT (username) DO NOTHING",
         "testuser",
         "testuser@example.com",
-        hash("testpass", bcrypt::DEFAULT_COST).unwrap()
+        hash("testpass", 4).unwrap() // min cost: real hashing strength is not under test
     )
     .execute(&pool)
     .await
@@ -112,8 +90,8 @@ async fn setup_test_state() -> AppState {
 }
 
 /// Helper to create test server
-async fn setup_test_server() -> TestServer {
-    let state = setup_test_state().await;
+async fn setup_test_server(pool: PgPool) -> TestServer {
+    let state = setup_test_state(pool).await;
     let router = app_router(state);
     TestServer::new(router).expect("Failed to create test server")
 }
@@ -122,10 +100,9 @@ async fn setup_test_server() -> TestServer {
 // JsonOrForm Extractor Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_token_endpoint_accepts_json() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_token_endpoint_accepts_json(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/token")
@@ -145,10 +122,9 @@ async fn test_token_endpoint_accepts_json() {
     assert_eq!(body["expires_in"], 3600);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_token_endpoint_accepts_form_urlencoded() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_token_endpoint_accepts_form_urlencoded(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/token")
@@ -167,10 +143,9 @@ async fn test_token_endpoint_accepts_form_urlencoded() {
     assert_eq!(body["token_type"], "Bearer");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_token_endpoint_rejects_unsupported_content_type() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_token_endpoint_rejects_unsupported_content_type(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/token")
@@ -186,10 +161,9 @@ async fn test_token_endpoint_rejects_unsupported_content_type() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_token_endpoint_rejects_invalid_json() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_token_endpoint_rejects_invalid_json(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/token")
@@ -207,10 +181,9 @@ async fn test_token_endpoint_rejects_invalid_json() {
 // Client Credentials Grant Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_client_credentials_grant_success() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_client_credentials_grant_success(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/token")
@@ -230,10 +203,9 @@ async fn test_client_credentials_grant_success() {
     assert!(body["refresh_token"].is_null());
 }
 
-#[tokio::test]
-#[serial]
-async fn test_client_credentials_missing_client_id() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_client_credentials_missing_client_id(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/token")
@@ -249,10 +221,9 @@ async fn test_client_credentials_missing_client_id() {
     assert!(body.contains("client_id is required"));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_client_credentials_missing_client_secret() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_client_credentials_missing_client_secret(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/token")
@@ -268,10 +239,9 @@ async fn test_client_credentials_missing_client_secret() {
     assert!(body.contains("client_secret is required"));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_client_credentials_invalid_credentials() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_client_credentials_invalid_credentials(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/token")
@@ -288,10 +258,9 @@ async fn test_client_credentials_invalid_credentials() {
     assert!(body.contains("Invalid client credentials"));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_client_credentials_nonexistent_client() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_client_credentials_nonexistent_client(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/token")
@@ -309,10 +278,9 @@ async fn test_client_credentials_nonexistent_client() {
 // Password Grant Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_password_grant_success() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_password_grant_success(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/token")
@@ -332,10 +300,9 @@ async fn test_password_grant_success() {
     assert!(body["refresh_token"].is_string());
 }
 
-#[tokio::test]
-#[serial]
-async fn test_password_grant_missing_username() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_password_grant_missing_username(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/token")
@@ -351,10 +318,9 @@ async fn test_password_grant_missing_username() {
     assert!(body.contains("username is required"));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_password_grant_missing_password() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_password_grant_missing_password(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/token")
@@ -370,10 +336,9 @@ async fn test_password_grant_missing_password() {
     assert!(body.contains("password is required"));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_password_grant_invalid_password() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_password_grant_invalid_password(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/token")
@@ -390,10 +355,9 @@ async fn test_password_grant_invalid_password() {
     assert!(body.contains("Invalid username or password"));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_password_grant_nonexistent_user() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_password_grant_nonexistent_user(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/token")
@@ -411,10 +375,9 @@ async fn test_password_grant_nonexistent_user() {
 // Refresh Token Grant Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_refresh_token_grant_success() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_refresh_token_grant_success(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     // First, get a refresh token using password grant
     let initial_response = server
@@ -450,10 +413,9 @@ async fn test_refresh_token_grant_success() {
     assert!(body["refresh_token"].is_string());
 }
 
-#[tokio::test]
-#[serial]
-async fn test_refresh_token_grant_missing_refresh_token() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_refresh_token_grant_missing_refresh_token(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/token")
@@ -468,10 +430,9 @@ async fn test_refresh_token_grant_missing_refresh_token() {
     assert!(body.contains("refresh_token is required"));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_refresh_token_grant_invalid_token() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_refresh_token_grant_invalid_token(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/token")
@@ -491,10 +452,9 @@ async fn test_refresh_token_grant_invalid_token() {
 // Token Validation Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_issued_token_is_valid_jwt() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_issued_token_is_valid_jwt(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/token")
@@ -515,10 +475,9 @@ async fn test_issued_token_is_valid_jwt() {
     assert_eq!(parts.len(), 3, "JWT should have 3 parts");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_token_response_structure() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_token_response_structure(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/token")
@@ -547,10 +506,9 @@ async fn test_token_response_structure() {
 // Multiple Requests Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_multiple_token_requests_generate_different_tokens() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_multiple_token_requests_generate_different_tokens(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response1 = server
         .post("/api/v1/oauth/token")
@@ -580,10 +538,9 @@ async fn test_multiple_token_requests_generate_different_tokens() {
     assert_ne!(token1, token2);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_concurrent_token_requests() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_concurrent_token_requests(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     // Issue multiple token requests (sequentially in TestServer)
     let mut tokens = Vec::new();

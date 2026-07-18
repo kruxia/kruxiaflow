@@ -239,21 +239,13 @@ mod tests {
     use kruxiaflow_core::storage::PostgresStorage;
     use sqlx::PgPool;
 
-    async fn setup_test_storage() -> Arc<dyn WorkflowStorage> {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-
-        let pool = PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database");
-
+    fn test_storage(pool: PgPool) -> Arc<dyn WorkflowStorage> {
         Arc::new(PostgresStorage::new(pool))
     }
 
-    #[tokio::test]
-    async fn test_file_executor_creates_temp_dir() {
-        let storage = setup_test_storage().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_file_executor_creates_temp_dir(pool: PgPool) {
+        let storage = test_storage(pool);
         let workflow_id = Uuid::now_v7();
         let activity_key = "test_activity".to_string();
 
@@ -267,9 +259,9 @@ mod tests {
         executor.cleanup().await.expect("Failed to cleanup");
     }
 
-    #[tokio::test]
-    async fn test_file_executor_output_path() {
-        let storage = setup_test_storage().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_file_executor_output_path(pool: PgPool) {
+        let storage = test_storage(pool);
         let workflow_id = Uuid::now_v7();
         let activity_key = "test_activity".to_string();
 
@@ -284,9 +276,9 @@ mod tests {
         executor.cleanup().await.expect("Failed to cleanup");
     }
 
-    #[tokio::test]
-    async fn test_process_file_outputs_with_value() {
-        let storage = setup_test_storage().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_process_file_outputs_with_value(pool: PgPool) {
+        let storage = test_storage(pool);
         let workflow_id = Uuid::now_v7();
         let activity_key = "test_activity".to_string();
 
@@ -316,9 +308,9 @@ mod tests {
         executor.cleanup().await.expect("Failed to cleanup");
     }
 
-    #[tokio::test]
-    async fn test_process_file_outputs_non_object_value() {
-        let storage = setup_test_storage().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_process_file_outputs_non_object_value(pool: PgPool) {
+        let storage = test_storage(pool);
         let workflow_id = Uuid::now_v7();
         let activity_key = "test_activity".to_string();
 
@@ -344,9 +336,9 @@ mod tests {
         executor.cleanup().await.expect("Failed to cleanup");
     }
 
-    #[tokio::test]
-    async fn test_process_file_outputs_folder_type_errors() {
-        let storage = setup_test_storage().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_process_file_outputs_folder_type_errors(pool: PgPool) {
+        let storage = test_storage(pool);
         let workflow_id = Uuid::now_v7();
         let activity_key = "test_activity".to_string();
 
@@ -376,9 +368,9 @@ mod tests {
         executor.cleanup().await.expect("Failed to cleanup");
     }
 
-    #[tokio::test]
-    async fn test_process_file_outputs_missing_file() {
-        let storage = setup_test_storage().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_process_file_outputs_missing_file(pool: PgPool) {
+        let storage = test_storage(pool);
         let workflow_id = Uuid::now_v7();
         let activity_key = "test_activity".to_string();
 
@@ -408,9 +400,9 @@ mod tests {
         executor.cleanup().await.expect("Failed to cleanup");
     }
 
-    #[tokio::test]
-    async fn test_download_file_invalid_reference_format() {
-        let storage = setup_test_storage().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_download_file_invalid_reference_format(pool: PgPool) {
+        let storage = test_storage(pool);
         let workflow_id = Uuid::now_v7();
         let activity_key = "test_activity".to_string();
 
@@ -453,9 +445,9 @@ mod tests {
         executor.cleanup().await.expect("Failed to cleanup");
     }
 
-    #[tokio::test]
-    async fn test_output_file_exists() {
-        let storage = setup_test_storage().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_output_file_exists(pool: PgPool) {
+        let storage = test_storage(pool);
         let workflow_id = Uuid::now_v7();
         let activity_key = "test_activity".to_string();
 
@@ -495,9 +487,9 @@ mod tests {
         tokio::fs::remove_dir_all(&temp_dir).await.unwrap();
     }
 
-    #[tokio::test]
-    async fn test_upload_file_not_found() {
-        let storage = setup_test_storage().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_upload_file_not_found(pool: PgPool) {
+        let storage = test_storage(pool);
         let workflow_id = Uuid::now_v7();
         let activity_key = "test_activity".to_string();
 
@@ -512,9 +504,9 @@ mod tests {
         executor.cleanup().await.expect("Failed to cleanup");
     }
 
-    #[tokio::test]
-    async fn test_cleanup_nonexistent_dir() {
-        let storage = setup_test_storage().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_cleanup_nonexistent_dir(pool: PgPool) {
+        let storage = test_storage(pool);
         let workflow_id = Uuid::now_v7();
         let activity_key = "test_cleanup".to_string();
 
@@ -532,9 +524,9 @@ mod tests {
             .expect("Cleanup should succeed even if dir is gone");
     }
 
-    #[tokio::test]
-    async fn test_process_file_outputs_value_missing_key() {
-        let storage = setup_test_storage().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_process_file_outputs_value_missing_key(pool: PgPool) {
+        let storage = test_storage(pool);
         let workflow_id = Uuid::now_v7();
         let activity_key = "test_activity".to_string();
 

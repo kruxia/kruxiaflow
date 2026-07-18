@@ -415,14 +415,7 @@ mod tests {
         })
     }
 
-    async fn setup_test_state() -> AppState {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-        let pool = PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database");
-
+    fn setup_test_state(pool: PgPool) -> AppState {
         AppState::new(
             pool,
             Arc::new(MockAuthService),
@@ -435,9 +428,9 @@ mod tests {
         )
     }
 
-    #[tokio::test]
-    async fn test_get_activity_output_workflow_not_found() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_get_activity_output_workflow_not_found(pool: PgPool) {
+        let state = setup_test_state(pool);
         let workflow_id = Uuid::now_v7();
 
         let result = get_activity_output(
@@ -450,9 +443,9 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_get_workflow_output_workflow_not_found() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_get_workflow_output_workflow_not_found(pool: PgPool) {
+        let state = setup_test_state(pool);
         let workflow_id = Uuid::now_v7();
 
         let result =
@@ -461,11 +454,11 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_download_activity_file_not_found() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_download_activity_file_not_found(pool: PgPool) {
         // MockWorkflowStorage.get_file_metadata returns Ok with dummy data,
         // so this will succeed at metadata but the download stream is empty.
-        let state = setup_test_state().await;
+        let state = setup_test_state(pool);
         let workflow_id = Uuid::now_v7();
 
         let result = download_activity_file(
@@ -481,9 +474,9 @@ mod tests {
         assert_eq!(response.status(), StatusCode::OK);
     }
 
-    #[tokio::test]
-    async fn test_upload_activity_file() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_upload_activity_file(pool: PgPool) {
+        let state = setup_test_state(pool);
         let workflow_id = Uuid::now_v7();
 
         let mut headers = HeaderMap::new();
@@ -505,9 +498,9 @@ mod tests {
         assert_eq!(response.status(), StatusCode::CREATED);
     }
 
-    #[tokio::test]
-    async fn test_upload_activity_file_no_content_type() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_upload_activity_file_no_content_type(pool: PgPool) {
+        let state = setup_test_state(pool);
         let workflow_id = Uuid::now_v7();
 
         let headers = HeaderMap::new();
@@ -608,14 +601,7 @@ mod tests {
         }
     }
 
-    async fn setup_error_storage_state() -> AppState {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-        let pool = PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database");
-
+    fn setup_error_storage_state(pool: PgPool) -> AppState {
         AppState::new(
             pool,
             Arc::new(MockAuthService),
@@ -628,9 +614,9 @@ mod tests {
         )
     }
 
-    #[tokio::test]
-    async fn test_download_file_storage_error() {
-        let state = setup_error_storage_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_download_file_storage_error(pool: PgPool) {
+        let state = setup_error_storage_state(pool);
         let workflow_id = Uuid::now_v7();
 
         let result = download_activity_file(
@@ -643,9 +629,9 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_upload_file_storage_error() {
-        let state = setup_error_storage_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_upload_file_storage_error(pool: PgPool) {
+        let state = setup_error_storage_state(pool);
         let workflow_id = Uuid::now_v7();
 
         let headers = HeaderMap::new();

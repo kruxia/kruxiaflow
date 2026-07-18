@@ -1,40 +1,10 @@
 use kruxiaflow_core::workflow::{
     ActivityDefinition, ActivityRelationship, WorkflowDefinition, WorkflowDefinitionRepository,
 };
-use serial_test::serial;
 use sqlx::PgPool;
 
-async fn setup_test_db() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    // Run migrations
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
-
-async fn clean_test_data(pool: &PgPool) {
-    sqlx::query!("TRUNCATE workflow_definitions CASCADE")
-        .execute(pool)
-        .await
-        .expect("Failed to clean test data");
-}
-
-#[tokio::test]
-#[serial]
-async fn test_store_and_get_workflow_definition() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_store_and_get_workflow_definition(pool: PgPool) {
     let repo = WorkflowDefinitionRepository::new(pool.clone());
 
     let definition = WorkflowDefinition {
@@ -74,16 +44,10 @@ async fn test_store_and_get_workflow_definition() {
     assert_eq!(retrieved.version, stored.version);
     assert_eq!(retrieved.name, definition.name);
     assert_eq!(retrieved.activities.len(), 1);
-
-    clean_test_data(&pool).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_latest_workflow_definition() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_latest_workflow_definition(pool: PgPool) {
     let repo = WorkflowDefinitionRepository::new(pool.clone());
 
     let definition1 = WorkflowDefinition {
@@ -155,16 +119,10 @@ async fn test_get_latest_workflow_definition() {
     assert_eq!(latest.version, stored2.version);
     assert!(latest.version > stored1.version);
     assert_eq!(latest.activities.len(), 2);
-
-    clean_test_data(&pool).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_list_workflow_definitions() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_list_workflow_definitions(pool: PgPool) {
     let repo = WorkflowDefinitionRepository::new(pool.clone());
 
     // Store multiple workflow definitions
@@ -214,16 +172,10 @@ async fn test_list_workflow_definitions() {
     let names: Vec<String> = definitions.iter().map(|d| d.name.clone()).collect();
     assert!(names.contains(&"workflow_a".to_string()));
     assert!(names.contains(&"workflow_b".to_string()));
-
-    clean_test_data(&pool).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_validation_error_on_invalid_definition() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_validation_error_on_invalid_definition(pool: PgPool) {
     let repo = WorkflowDefinitionRepository::new(pool.clone());
 
     // Create invalid definition (no activities)
@@ -235,16 +187,10 @@ async fn test_validation_error_on_invalid_definition() {
     // Should fail validation
     let result = repo.store(definition).await;
     assert!(result.is_err());
-
-    clean_test_data(&pool).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_nonexistent_workflow() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_nonexistent_workflow(pool: PgPool) {
     let repo = WorkflowDefinitionRepository::new(pool.clone());
 
     let result = repo
@@ -255,16 +201,10 @@ async fn test_get_nonexistent_workflow() {
 
     let result = repo.get_latest("nonexistent").await.unwrap();
     assert!(result.is_none());
-
-    clean_test_data(&pool).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_workflow_definition_with_dependencies() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_definition_with_dependencies(pool: PgPool) {
     let repo = WorkflowDefinitionRepository::new(pool.clone());
 
     let definition = WorkflowDefinition {
@@ -326,6 +266,4 @@ async fn test_workflow_definition_with_dependencies() {
             .unwrap()
             .is_empty()
     );
-
-    clean_test_data(&pool).await;
 }

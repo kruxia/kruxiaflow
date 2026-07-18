@@ -126,39 +126,26 @@ mod tests {
     use super::*;
     use sqlx::PgPool;
 
-    async fn test_pool() -> PgPool {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-        PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database")
-    }
-
-    #[tokio::test]
-    async fn test_check_database_health_success() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_check_database_health_success(pool: PgPool) {
         let result = check_database_health(&pool).await;
         assert!(result.is_ok());
     }
 
-    #[tokio::test]
-    async fn test_check_event_source_health_success() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_check_event_source_health_success(pool: PgPool) {
         let result = check_event_source_health(&pool).await;
         assert!(result.is_ok());
     }
 
-    #[tokio::test]
-    async fn test_check_activity_queue_health_success() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_check_activity_queue_health_success(pool: PgPool) {
         let result = check_activity_queue_health(&pool).await;
         assert!(result.is_ok());
     }
 
-    #[tokio::test]
-    async fn test_get_pool_metrics_returns_valid_data() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_get_pool_metrics_returns_valid_data(pool: PgPool) {
         let metrics = get_pool_metrics(&pool);
         assert!(metrics.max_connections > 0);
         assert!(metrics.utilization_percent >= 0.0);
@@ -170,9 +157,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_get_pool_metrics_size_consistency() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_get_pool_metrics_size_consistency(pool: PgPool) {
         let metrics = get_pool_metrics(&pool);
         assert_eq!(metrics.active + metrics.idle, metrics.size);
     }

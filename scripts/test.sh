@@ -207,12 +207,26 @@ echo ""
 echo -e "${YELLOW}Running tests...${NC}"
 echo "========================================"
 
+# Prefer cargo-nextest when installed: it runs tests from ALL test binaries in
+# parallel (cargo test parallelizes only within each binary). Safe because DB
+# tests use #[sqlx::test] per-test database isolation. Doc tests always run
+# via cargo test --doc (nextest does not support doctests).
+if command -v cargo-nextest &> /dev/null; then
+    USE_NEXTEST=true
+else
+    USE_NEXTEST=false
+fi
+
 # Build command based on options
 if [ "$COVERAGE" = true ]; then
     check_coverage_tool
 
-    # Base coverage command
-    CMD="cargo llvm-cov"
+    # Base coverage command (nextest integrates via cargo llvm-cov nextest)
+    if [ "$USE_NEXTEST" = true ] && [ "$TEST_TYPE" != "doc" ]; then
+        CMD="cargo llvm-cov nextest"
+    else
+        CMD="cargo llvm-cov"
+    fi
 
     # Add test type
     case $TEST_TYPE in
@@ -260,12 +274,16 @@ if [ "$COVERAGE" = true ]; then
         CMD="$CMD --lcov --output-path coverage/lcov.info"
     fi
 
-    # Test arguments (including test-threads) - must come after all cargo-llvm-cov flags
-    TEST_ARGS="--test-threads=1"
+    # Output-capture flag - must come after all cargo-llvm-cov flags. Tests
+    # run at default parallelism: DB tests get isolated per-test databases via
+    # #[sqlx::test], so no serialization is needed.
     if [ -n "$NOCAPTURE" ]; then
-        TEST_ARGS="$TEST_ARGS --nocapture"
+        if [ "$USE_NEXTEST" = true ] && [ "$TEST_TYPE" != "doc" ]; then
+            CMD="$CMD --no-capture"
+        else
+            CMD="$CMD -- --nocapture"
+        fi
     fi
-    CMD="$CMD -- $TEST_ARGS"
 
     # Execute the command
     eval "$CMD"
@@ -311,15 +329,22 @@ else
         COMMON_FLAGS="$COMMON_FLAGS --verbose"
     fi
 
-    # Test arguments
-    TEST_ARGS="--test-threads=1"
-    if [ -n "$NOCAPTURE" ]; then
-        TEST_ARGS="$TEST_ARGS --nocapture"
+    # Test runner and output-capture flag. Tests run at default parallelism:
+    # DB tests get isolated per-test databases via #[sqlx::test], so no
+    # serialization is needed.
+    if [ "$USE_NEXTEST" = true ]; then
+        TEST_CMD="cargo nextest run"
+        TEST_ARGS=""
+        [ -n "$NOCAPTURE" ] && TEST_ARGS="--no-capture"
+    else
+        TEST_CMD="cargo test"
+        TEST_ARGS=""
+        [ -n "$NOCAPTURE" ] && TEST_ARGS="-- --nocapture"
     fi
 
     case $TEST_TYPE in
         unit)
-            CMD="cargo test --lib $COMMON_FLAGS -- $TEST_ARGS"
+            CMD="$TEST_CMD --lib $COMMON_FLAGS $TEST_ARGS"
             if eval "$CMD"; then
                 echo ""
                 echo -e "${GREEN}✅ All tests passed!${NC}"
@@ -331,7 +356,7 @@ else
             fi
             ;;
         integration)
-            CMD="cargo test --tests $COMMON_FLAGS -- $TEST_ARGS"
+            CMD="$TEST_CMD --tests $COMMON_FLAGS $TEST_ARGS"
             if eval "$CMD"; then
                 echo ""
                 echo -e "${GREEN}✅ All tests passed!${NC}"
@@ -343,7 +368,7 @@ else
             fi
             ;;
         doc)
-            CMD="cargo test --doc $COMMON_FLAGS -- $TEST_ARGS"
+            CMD="cargo test --doc $COMMON_FLAGS"
             if eval "$CMD"; then
                 echo ""
                 echo -e "${GREEN}✅ All tests passed!${NC}"
@@ -357,7 +382,7 @@ else
         all)
             # Run lib/bins/tests first (excludes benchmarks which don't accept --test-threads)
             echo -e "${BLUE}Running unit and integration tests...${NC}"
-            CMD="cargo test --workspace --lib --bins --tests $COMMON_FLAGS -- $TEST_ARGS"
+            CMD="$TEST_CMD --workspace --lib --bins --tests $COMMON_FLAGS $TEST_ARGS"
             if ! eval "$CMD"; then
                 echo ""
                 echo -e "${RED}❌ Tests failed${NC}"
@@ -367,7 +392,7 @@ else
             # Run doc tests separately (--doc cannot be combined with other target flags)
             echo ""
             echo -e "${BLUE}Running documentation tests...${NC}"
-            CMD="cargo test --workspace --doc $COMMON_FLAGS -- $TEST_ARGS"
+            CMD="cargo test --workspace --doc $COMMON_FLAGS"
             if ! eval "$CMD"; then
                 echo ""
                 echo -e "${RED}❌ Documentation tests failed${NC}"
