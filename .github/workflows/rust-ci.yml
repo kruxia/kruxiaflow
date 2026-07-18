@@ -44,6 +44,9 @@ jobs:
 
   test:
     name: Test with Coverage
+    # Don't spend the expensive test/coverage job on commits that fail the
+    # fast lint checks
+    needs: [clippy, fmt]
     runs-on: ubuntu-latest
     services:
       postgres:
