@@ -17,6 +17,9 @@ resolver = "2"
 publish = false
 shared-version = true
 tag-name = "v{{version}}"
+# The "release:" prefix lets CI skip the redundant branch-push run — the tag
+# run (same SHA) executes the full pipeline (see .github/workflows/main-ci.yml)
+pre-release-commit-message = "release: v{{version}}"
 
 [workspace.package]
 version = "0.4.1"

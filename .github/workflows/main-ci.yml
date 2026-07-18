@@ -1,8 +1,21 @@
 name: Main CI
 
+# Single pipeline for branch CI and releases, with ordered dependencies.
+#
+# - Pull requests / pushes to main: rust checks; main pushes also refresh the
+#   rolling Docker image (:latest + date tag).
+# - Tag pushes (v*): the FULL release pipeline on one run — rust checks →
+#   binaries + versioned multi-arch Docker → GitHub Release. Nothing publishes
+#   unless the checks pass.
+#
+# `cargo release` pushes a version-bump commit AND a tag for the same SHA.
+# The branch-push run is skipped for those commits (message "release: ...",
+# configured in [workspace.metadata.release]) — the tag run covers everything.
+
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
     branches: [main]
 
@@ -10,8 +23,188 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+  SQLX_OFFLINE: "true"
+
 jobs:
   rust:
     name: Rust CI
+    # Skip the redundant branch-push run for release commits: the tag run
+    # (same SHA) performs these checks as part of the release pipeline.
+    if: github.ref_type == 'tag' || !startsWith(github.event.head_commit.message, 'release:')
     uses: ./.github/workflows/rust-ci.yml
     secrets: inherit
+
+  # ---- main branch: rolling image -------------------------------------------
+
+  docker-latest:
+    name: Push rolling Docker image
+    needs: rust
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute image tag
+        id: tag
+        run: echo "tag=$(date -u +%Y%m%d)-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: deploy
+          platforms: linux/amd64
+          push: true
+          tags: |
+            kruxia/kruxiaflow:latest
+            kruxia/kruxiaflow:${{ steps.tag.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---- tags: release pipeline -----------------------------------------------
+
+  preflight:
+    name: Verify tag matches workspace version
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag against Cargo.toml
+        run: |
+          CARGO_VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag v${TAG_VERSION} != workspace version ${CARGO_VERSION}. Use: cargo release ${TAG_VERSION}"
+            exit 1
+          fi
+
+  binaries:
+    name: Binary ${{ matrix.target }}
+    needs: [rust, preflight]
+    if: github.ref_type == 'tag'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # musl (fully static) targets are deferred: kruxiaflow does not
+        # currently build against musl. gnu builds are dynamically linked
+        # against glibc — x86_64 builds on ubuntu-22.04 to keep the glibc
+        # floor at 2.35; aarch64 runs through cross (older container baseline).
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+            use-cross: false
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04
+            use-cross: true
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            use-cross: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+          cache-on-failure: true
+
+      - name: Install cross
+        if: matrix.use-cross == true
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+
+      # --features redis-cache matches the Docker image build (Dockerfile
+      # build stage) so released binaries and images have identical features.
+      - name: Build
+        run: |
+          if [ "${{ matrix.use-cross }}" = "true" ]; then
+            cross build --release --locked --target ${{ matrix.target }} -p kruxiaflow --features redis-cache
+          else
+            cargo build --release --locked --target ${{ matrix.target }} -p kruxiaflow --features redis-cache
+          fi
+
+      - name: Package with checksum
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARCHIVE="kruxiaflow-${VERSION}-${{ matrix.target }}.tar.gz"
+          tar -C "target/${{ matrix.target }}/release" -czf "$ARCHIVE" kruxiaflow
+          shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: |
+            kruxiaflow-*.tar.gz
+            kruxiaflow-*.tar.gz.sha256
+          if-no-files-found: error
+
+  docker-release:
+    name: Versioned Docker multi-arch
+    needs: [rust, preflight]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: kruxia/kruxiaflow
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: deploy
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  release:
+    name: GitHub Release
+    needs: [binaries, docker-release]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binaries-*
+          merge-multiple: true
+          path: dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
