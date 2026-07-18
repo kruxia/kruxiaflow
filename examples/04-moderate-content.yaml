@@ -9,7 +9,7 @@ activities:
       model:
         - anthropic/claude-haiku-4-5-20251001  # Try first (fast & cheap)
         - openai/gpt-4o-mini                   # Fallback if Haiku unavailable
-        - google/gemini-2.0-flash-lite         # Last resort (very cheap)
+        - google/gemini-2.5-flash-lite         # Last resort (very cheap)
       prompt: |
         You are a content moderation assistant. Analyze the following text and determine
         if it violates community guidelines.
