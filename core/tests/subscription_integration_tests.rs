@@ -3,32 +3,8 @@ use kruxiaflow_core::subscription::{
 };
 use kruxiaflow_core::workflow::OnTimeout;
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use uuid::Uuid;
-
-async fn setup_test_db() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://localhost/kruxiaflow_test".to_string());
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
-
-async fn clean_subscriptions(pool: &PgPool) {
-    sqlx::query("TRUNCATE activity_event_subscriptions CASCADE")
-        .execute(pool)
-        .await
-        .expect("Failed to clean subscriptions");
-}
 
 // Also need a workflow in the DB for foreign key constraints
 async fn insert_test_workflow(pool: &PgPool) -> Uuid {
@@ -59,11 +35,8 @@ async fn insert_test_workflow(pool: &PgPool) -> Uuid {
     workflow_id
 }
 
-#[tokio::test]
-#[serial]
-async fn test_create_subscription() {
-    let pool = setup_test_db().await;
-    clean_subscriptions(&pool).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_create_subscription(pool: PgPool) {
     let workflow_id = insert_test_workflow(&pool).await;
 
     let service = PostgresSubscriptionService::new(pool.clone());
@@ -80,11 +53,8 @@ async fn test_create_subscription() {
     assert_ne!(id, Uuid::nil());
 }
 
-#[tokio::test]
-#[serial]
-async fn test_create_duplicate_subscription_fails() {
-    let pool = setup_test_db().await;
-    clean_subscriptions(&pool).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_create_duplicate_subscription_fails(pool: PgPool) {
     let workflow_id = insert_test_workflow(&pool).await;
 
     let service = PostgresSubscriptionService::new(pool.clone());
@@ -112,11 +82,8 @@ async fn test_create_duplicate_subscription_fails() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_signal_activity_found() {
-    let pool = setup_test_db().await;
-    clean_subscriptions(&pool).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_signal_activity_found(pool: PgPool) {
     let workflow_id = insert_test_workflow(&pool).await;
 
     let service = PostgresSubscriptionService::new(pool.clone());
@@ -150,12 +117,8 @@ async fn test_signal_activity_found() {
     assert!(matches!(subscription.on_timeout, OnTimeout::Continue));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_signal_activity_not_found() {
-    let pool = setup_test_db().await;
-    clean_subscriptions(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_signal_activity_not_found(pool: PgPool) {
     let service = PostgresSubscriptionService::new(pool.clone());
 
     let signal = kruxiaflow_core::subscription::SignalRequest {
@@ -169,11 +132,8 @@ async fn test_signal_activity_not_found() {
     assert!(result.is_none());
 }
 
-#[tokio::test]
-#[serial]
-async fn test_signal_activity_already_signaled() {
-    let pool = setup_test_db().await;
-    clean_subscriptions(&pool).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_signal_activity_already_signaled(pool: PgPool) {
     let workflow_id = insert_test_workflow(&pool).await;
 
     let service = PostgresSubscriptionService::new(pool.clone());
@@ -208,11 +168,8 @@ async fn test_signal_activity_already_signaled() {
     assert!(result2.is_none());
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_signal_data() {
-    let pool = setup_test_db().await;
-    clean_subscriptions(&pool).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_signal_data(pool: PgPool) {
     let workflow_id = insert_test_workflow(&pool).await;
 
     let service = PostgresSubscriptionService::new(pool.clone());
@@ -243,12 +200,8 @@ async fn test_get_signal_data() {
     assert_eq!(data, Some(json!({"key": "value"})));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_signal_data_not_found() {
-    let pool = setup_test_db().await;
-    clean_subscriptions(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_signal_data_not_found(pool: PgPool) {
     let service = PostgresSubscriptionService::new(pool.clone());
 
     let data = service
@@ -258,11 +211,8 @@ async fn test_get_signal_data_not_found() {
     assert!(data.is_none());
 }
 
-#[tokio::test]
-#[serial]
-async fn test_delete_subscription() {
-    let pool = setup_test_db().await;
-    clean_subscriptions(&pool).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_delete_subscription(pool: PgPool) {
     let workflow_id = insert_test_workflow(&pool).await;
 
     let service = PostgresSubscriptionService::new(pool.clone());
@@ -293,11 +243,8 @@ async fn test_delete_subscription() {
     assert!(result.is_none());
 }
 
-#[tokio::test]
-#[serial]
-async fn test_expire_subscriptions() {
-    let pool = setup_test_db().await;
-    clean_subscriptions(&pool).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_expire_subscriptions(pool: PgPool) {
     let workflow_id = insert_test_workflow(&pool).await;
 
     let service = PostgresSubscriptionService::new(pool.clone());
@@ -323,11 +270,8 @@ async fn test_expire_subscriptions() {
     assert!(matches!(expired[0].on_timeout, OnTimeout::Fail));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_expire_subscriptions_none_expired() {
-    let pool = setup_test_db().await;
-    clean_subscriptions(&pool).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_expire_subscriptions_none_expired(pool: PgPool) {
     let workflow_id = insert_test_workflow(&pool).await;
 
     let service = PostgresSubscriptionService::new(pool.clone());
@@ -347,11 +291,8 @@ async fn test_expire_subscriptions_none_expired() {
     assert!(expired.is_empty());
 }
 
-#[tokio::test]
-#[serial]
-async fn test_recover_expired() {
-    let pool = setup_test_db().await;
-    clean_subscriptions(&pool).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_recover_expired(pool: PgPool) {
     let workflow_id = insert_test_workflow(&pool).await;
 
     let service = PostgresSubscriptionService::new(pool.clone());
@@ -383,11 +324,8 @@ async fn test_recover_expired() {
     assert!(matches!(recovered[0].on_timeout, OnTimeout::Skip));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_on_timeout_variants() {
-    let pool = setup_test_db().await;
-    clean_subscriptions(&pool).await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_on_timeout_variants(pool: PgPool) {
     let workflow_id = insert_test_workflow(&pool).await;
 
     let service = PostgresSubscriptionService::new(pool.clone());

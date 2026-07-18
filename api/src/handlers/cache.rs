@@ -188,21 +188,9 @@ mod tests {
     use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
     use kruxiaflow_core::storage::PostgresStorage;
     use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
-    use serial_test::serial;
     use sqlx::PgPool;
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
-
-    /// Helper to create test database pool
-    async fn setup_test_pool() -> PgPool {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-
-        PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database")
-    }
 
     /// Generate test RSA private key
     fn test_rsa_private_key() -> String {
@@ -216,7 +204,7 @@ mod tests {
 
     /// Create OAuth client for testing
     async fn create_test_oauth_client(pool: &PgPool, client_id: &str, client_secret: &str) {
-        let secret_hash = bcrypt::hash(client_secret, bcrypt::DEFAULT_COST).unwrap();
+        let secret_hash = bcrypt::hash(client_secret, 4).unwrap(); // min cost: real hashing strength is not under test
         sqlx::query(
             "INSERT INTO oauth_clients (client_id, client_secret_hash, name, created_at)
              VALUES ($1, $2, $3, NOW())
@@ -231,9 +219,7 @@ mod tests {
     }
 
     /// Helper to create authenticated test client
-    async fn setup_auth_client() -> (TestServer, String) {
-        let pool = setup_test_pool().await;
-
+    async fn setup_auth_client(pool: PgPool) -> (TestServer, String) {
         // Create OAuth client in database
         create_test_oauth_client(&pool, "test_client", "test_secret").await;
 
@@ -287,20 +273,18 @@ mod tests {
         (server, access_token)
     }
 
-    #[tokio::test]
-    #[serial]
-    async fn test_invalidate_cache_key_requires_auth() {
-        let (server, _token) = setup_auth_client().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_invalidate_cache_key_requires_auth(pool: PgPool) {
+        let (server, _token) = setup_auth_client(pool).await;
 
         // Request without auth should fail
         let response = server.delete("/api/v1/cache/test_key_123").await;
         assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
     }
 
-    #[tokio::test]
-    #[serial]
-    async fn test_invalidate_cache_pattern_requires_auth() {
-        let (server, _token) = setup_auth_client().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_invalidate_cache_pattern_requires_auth(pool: PgPool) {
+        let (server, _token) = setup_auth_client(pool).await;
 
         // Request without auth should fail
         let response = server
@@ -313,10 +297,9 @@ mod tests {
         assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
     }
 
-    #[tokio::test]
-    #[serial]
-    async fn test_invalidate_cache_key_with_auth() {
-        let (server, token) = setup_auth_client().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_invalidate_cache_key_with_auth(pool: PgPool) {
+        let (server, token) = setup_auth_client(pool).await;
 
         // Request with auth should succeed (NoOpCache always succeeds)
         let response = server
@@ -334,10 +317,9 @@ mod tests {
         assert_eq!(body.count, 1);
     }
 
-    #[tokio::test]
-    #[serial]
-    async fn test_invalidate_cache_pattern_with_auth() {
-        let (server, token) = setup_auth_client().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_invalidate_cache_pattern_with_auth(pool: PgPool) {
+        let (server, token) = setup_auth_client(pool).await;
 
         // Request with auth should succeed (NoOpCache returns 0 invalidated)
         let response = server

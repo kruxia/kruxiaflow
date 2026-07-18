@@ -12,37 +12,10 @@ use kruxiaflow_core::workflow::{
 };
 use kruxiaflow_core::{PostgresSubscriptionService, SubscriptionService};
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
-
-async fn setup_test_db() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://localhost/kruxiaflow_test".to_string());
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    // Run migrations
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
-
-async fn clean_test_data(pool: &PgPool) {
-    sqlx::query!(
-        "TRUNCATE workflow_events, workflow_event_consumers, workflows, workflow_definitions, activity_queue, activity_costs CASCADE"
-    )
-    .execute(pool)
-    .await
-    .expect("Failed to clean test data");
-}
 
 async fn insert_workflow_definition(pool: &PgPool, definition: &WorkflowDefinition) -> Uuid {
     let activities_json =
@@ -64,12 +37,8 @@ async fn insert_workflow_definition(pool: &PgPool, definition: &WorkflowDefiniti
 
 /// Test simple loop workflow with iteration tracking
 /// Pattern: process -> check -> loop back if not done
-#[tokio::test]
-#[serial]
-async fn test_simple_loop_workflow() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_simple_loop_workflow(pool: PgPool) {
     // Create a loop workflow definition (manually validated with metadata set)
     let definition = WorkflowDefinition {
         name: "simple_loop".to_string(),
@@ -280,12 +249,8 @@ async fn test_simple_loop_workflow() {
 }
 
 /// Test iteration limit enforcement
-#[tokio::test]
-#[serial]
-async fn test_loop_max_iterations_enforced() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_loop_max_iterations_enforced(pool: PgPool) {
     // Create a loop workflow with iteration_limit = 2
     let definition = WorkflowDefinition {
         name: "limited_loop".to_string(),
@@ -453,12 +418,8 @@ async fn test_loop_max_iterations_enforced() {
 }
 
 /// Test iteration counter for non-iteration_scoped loops
-#[tokio::test]
-#[serial]
-async fn test_iteration_counter_without_scoping() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_iteration_counter_without_scoping(pool: PgPool) {
     // Create a loop workflow without iteration_scoped
     let definition = WorkflowDefinition {
         name: "non_scoped_loop".to_string(),
@@ -585,12 +546,8 @@ async fn test_iteration_counter_without_scoping() {
 }
 
 /// Test budget accumulation across iterations
-#[tokio::test]
-#[serial]
-async fn test_iteration_budget_accumulation() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_iteration_budget_accumulation(pool: PgPool) {
     // Create a loop workflow with budget limit that spans multiple iterations
     let definition = WorkflowDefinition {
         name: "budget_loop".to_string(),
@@ -791,12 +748,8 @@ async fn test_iteration_budget_accumulation() {
 }
 
 /// Test Pattern 1: Fixed iterations only (no condition)
-#[tokio::test]
-#[serial]
-async fn test_loop_pattern_1_fixed_iterations() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_loop_pattern_1_fixed_iterations(pool: PgPool) {
     // Create a loop with only iteration_limit (no condition on back-edge)
     let definition = WorkflowDefinition {
         name: "fixed_iterations".to_string(),
@@ -936,12 +889,8 @@ async fn test_loop_pattern_1_fixed_iterations() {
 }
 
 /// Test Pattern 2: Condition only (with default limit)
-#[tokio::test]
-#[serial]
-async fn test_loop_pattern_2_condition_only() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_loop_pattern_2_condition_only(pool: PgPool) {
     // Create a loop with only condition (no explicit iteration_limit)
     // Should use DEFAULT_MAX_ITERATIONS = 100
     let definition = WorkflowDefinition {

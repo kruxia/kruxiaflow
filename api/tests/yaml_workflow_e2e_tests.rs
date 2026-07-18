@@ -18,22 +18,42 @@ use kruxiaflow_worker::{
 /// 4. Orchestrator completes workflow
 ///
 /// Uses only local healthcheck endpoints (no external network calls).
-use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
+/// Derive the URL of this test's isolated database from the harness pool
+fn test_db_url(pool: &PgPool) -> String {
+    let base =
+        std::env::var("DATABASE_URL").expect("DATABASE_URL must be set for #[sqlx::test] tests");
+    let db_name = pool
+        .connect_options()
+        .get_database()
+        .expect("test pool should have a database name")
+        .to_string();
+    let scheme_end = base.find("://").map(|i| i + 3).unwrap_or(0);
+    let path_start = base[scheme_end..]
+        .find('/')
+        .map(|i| scheme_end + i)
+        .unwrap_or(base.len());
+    format!("{}/{}", &base[..path_start], db_name)
+}
 
-    PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database")
+/// Wait until the API server responds to /health (poll every 10ms, panic after 10s)
+async fn wait_for_api_ready(api_url: &str) {
+    let client = reqwest::Client::new();
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_secs(10) {
+        if let Ok(resp) = client.get(format!("{}/health", api_url)).send().await
+            && resp.status().is_success()
+        {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("API server did not become ready within 10s");
 }
 
 /// Generate test RSA private key
@@ -83,12 +103,8 @@ async fn get_test_token(api_url: &str, client_id: &str, client_secret: &str) -> 
     result["access_token"].as_str().unwrap().to_string()
 }
 
-#[tokio::test]
-#[serial]
-async fn test_yaml_workflow_end_to_end_with_healthcheck() {
-    // Setup: Create database pool
-    let pool = setup_test_pool().await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_yaml_workflow_end_to_end_with_healthcheck(pool: PgPool) {
     // Create auth service
     let auth_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
@@ -105,8 +121,12 @@ async fn test_yaml_workflow_end_to_end_with_healthcheck() {
     create_test_oauth_client(&pool, "test_worker", "test_worker_secret").await;
 
     // Create shared services
+    let queue_config = QueueConfig {
+        poll_interval: Duration::from_millis(10),
+        ..QueueConfig::default()
+    };
     let activity_queue: Arc<dyn ActivityQueue> =
-        Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+        Arc::new(PostgresQueue::new(pool.clone(), queue_config));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
     let workflow_storage = Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone()));
     let shutdown_token = CancellationToken::new();
@@ -138,8 +158,8 @@ async fn test_yaml_workflow_end_to_end_with_healthcheck() {
             .expect("Server failed to start");
     });
 
-    // Give server time to start
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Wait for the API server to accept requests
+    wait_for_api_ready(&api_url).await;
 
     // Get token for API calls
     let token = get_test_token(&api_url, "test_client", "test_secret").await;
@@ -153,7 +173,8 @@ async fn test_yaml_workflow_end_to_end_with_healthcheck() {
         Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let orchestrator_subscription = subscription_service.clone();
     tokio::spawn(async move {
-        let config = OrchestratorConfig::new(orchestrator_pool);
+        let config = OrchestratorConfig::new(orchestrator_pool)
+            .with_poll_interval(Duration::from_millis(1), Duration::from_millis(10));
         run_orchestrator(
             orchestrator_event_source,
             orchestrator_queue,
@@ -165,8 +186,8 @@ async fn test_yaml_workflow_end_to_end_with_healthcheck() {
         .expect("Orchestrator failed");
     });
 
-    // Give orchestrator time to start
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // No startup wait needed: event delivery is durable (polling), so the
+    // orchestrator picks up any events published before it starts polling.
 
     // Start worker with HTTP activity
     let mut registry = ActivityRegistry::new(Arc::new(kruxiaflow_core::NoOpCache::new()));
@@ -178,7 +199,7 @@ async fn test_yaml_workflow_end_to_end_with_healthcheck() {
         worker_id: format!("test_worker_{}", Uuid::now_v7()),
         worker: "std".to_string(),
         poll_max_activities: 10,
-        poll_interval: Duration::from_millis(100),
+        poll_interval: Duration::from_millis(10),
         max_concurrent_activities: 16,
         concurrency: 1,
         activity_timeout: Duration::from_secs(30),
@@ -190,8 +211,8 @@ async fn test_yaml_workflow_end_to_end_with_healthcheck() {
     let manager = WorkerManager::new(worker_config, registry, workflow_storage.clone());
     let worker_handles = manager.start().await.expect("Failed to start worker");
 
-    // Give worker time to start and authenticate
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // No startup wait needed: the activity queue is durable, so the worker
+    // picks up any activities enqueued before its first successful poll.
 
     // Create YAML workflow that calls local healthcheck endpoints
     let workflow_yaml = format!(
@@ -313,7 +334,7 @@ activities:
             }
         }
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
     // Verify workflow completed successfully
@@ -386,12 +407,8 @@ activities:
     shutdown_token.cancel();
 }
 
-#[tokio::test]
-#[serial]
-async fn test_conditional_branching_workflow() {
-    // Setup: Create database pool
-    let pool = setup_test_pool().await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_conditional_branching_workflow(pool: PgPool) {
     // Create test tables for the workflow (clean up first to avoid stale data)
     sqlx::query("DROP TABLE IF EXISTS valid_users")
         .execute(&pool)
@@ -439,8 +456,12 @@ async fn test_conditional_branching_workflow() {
     create_test_oauth_client(&pool, "test_worker", "test_worker_secret").await;
 
     // Create shared services
+    let queue_config = QueueConfig {
+        poll_interval: Duration::from_millis(10),
+        ..QueueConfig::default()
+    };
     let activity_queue: Arc<dyn ActivityQueue> =
-        Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+        Arc::new(PostgresQueue::new(pool.clone(), queue_config));
     let event_source = Arc::new(PostgresEventSource::new(pool.clone()));
     let workflow_storage = Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone()));
     let shutdown_token = CancellationToken::new();
@@ -472,8 +493,8 @@ async fn test_conditional_branching_workflow() {
             .expect("Server failed to start");
     });
 
-    // Give server time to start
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // Wait for the API server to accept requests
+    wait_for_api_ready(&api_url).await;
 
     // Get token for API calls
     let token = get_test_token(&api_url, "test_client", "test_secret").await;
@@ -487,7 +508,8 @@ async fn test_conditional_branching_workflow() {
         Arc::new(PostgresSubscriptionService::new(pool.clone()));
     let orchestrator_subscription = subscription_service.clone();
     tokio::spawn(async move {
-        let config = OrchestratorConfig::new(orchestrator_pool);
+        let config = OrchestratorConfig::new(orchestrator_pool)
+            .with_poll_interval(Duration::from_millis(1), Duration::from_millis(10));
         run_orchestrator(
             orchestrator_event_source,
             orchestrator_queue,
@@ -499,8 +521,8 @@ async fn test_conditional_branching_workflow() {
         .expect("Orchestrator failed");
     });
 
-    // Give orchestrator time to start
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // No startup wait needed: event delivery is durable (polling), so the
+    // orchestrator picks up any events published before it starts polling.
 
     // Start worker with HTTP and PostgreSQL activities
     let mut registry = ActivityRegistry::new(Arc::new(kruxiaflow_core::NoOpCache::new()));
@@ -513,7 +535,7 @@ async fn test_conditional_branching_workflow() {
         worker_id: format!("test_worker_{}", Uuid::now_v7()),
         worker: "std".to_string(),
         poll_max_activities: 10,
-        poll_interval: Duration::from_millis(100),
+        poll_interval: Duration::from_millis(10),
         max_concurrent_activities: 16,
         concurrency: 1,
         activity_timeout: Duration::from_secs(30),
@@ -525,13 +547,11 @@ async fn test_conditional_branching_workflow() {
     let manager = WorkerManager::new(worker_config, registry, workflow_storage.clone());
     let worker_handles = manager.start().await.expect("Failed to start worker");
 
-    // Give worker time to start and authenticate
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // No startup wait needed: the activity queue is durable, so the worker
+    // picks up any activities enqueued before its first successful poll.
 
-    // Get database URL for workflow
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
+    // Point workflow activities at this test's isolated database
+    let db_url = test_db_url(&pool);
 
     // Create YAML workflow with one conditional dependency
     let workflow_yaml = format!(
@@ -654,7 +674,7 @@ activities:
             }
         }
 
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
     // Verify workflow completed successfully

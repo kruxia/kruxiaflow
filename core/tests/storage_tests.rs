@@ -2,7 +2,6 @@ use bytes::Bytes;
 use futures::Stream;
 use futures::stream::{self, StreamExt};
 use kruxiaflow_core::storage::{PostgresStorage, StorageError, WorkflowStorage};
-use serial_test::serial;
 use sqlx::PgPool;
 use std::pin::Pin;
 use uuid::Uuid;
@@ -31,54 +30,8 @@ fn create_chunked_stream(
     Box::pin(stream::iter(ok_chunks))
 }
 
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-    });
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    // Run migrations from workspace root
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
-
-/// Helper to clean up test data
-async fn cleanup_files(pool: &PgPool, workflow_id: Uuid) {
-    // First delete all Large Objects
-    let oids: Vec<i32> =
-        sqlx::query_scalar("SELECT oid::int4 FROM workflow_files WHERE workflow_id = $1")
-            .bind(workflow_id)
-            .fetch_all(pool)
-            .await
-            .expect("Failed to fetch OIDs");
-
-    for oid in oids {
-        let _ = sqlx::query("SELECT lo_unlink($1)")
-            .bind(oid)
-            .execute(pool)
-            .await;
-    }
-
-    // Then delete metadata
-    sqlx::query("DELETE FROM workflow_files WHERE workflow_id = $1")
-        .bind(workflow_id)
-        .execute(pool)
-        .await
-        .expect("Failed to cleanup test data");
-}
-
-#[tokio::test]
-#[serial]
-async fn test_upload_small_file() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_upload_small_file(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let workflow_id = Uuid::now_v7();
     let activity_key = "test_activity";
@@ -106,13 +59,10 @@ async fn test_upload_small_file() {
     assert_eq!(metadata.content_type, Some("text/plain".to_string()));
 
     // Cleanup
-    cleanup_files(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_upload_and_download_file() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_upload_and_download_file(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let workflow_id = Uuid::now_v7();
     let activity_key = "test_activity";
@@ -148,13 +98,10 @@ async fn test_upload_and_download_file() {
     assert_eq!(downloaded, content);
 
     // Cleanup
-    cleanup_files(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_upload_large_file_streaming() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_upload_large_file_streaming(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let workflow_id = Uuid::now_v7();
     let activity_key = "test_activity";
@@ -216,13 +163,10 @@ async fn test_upload_large_file_streaming() {
     }
 
     // Cleanup
-    cleanup_files(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_file_metadata() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_file_metadata(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let workflow_id = Uuid::now_v7();
     let activity_key = "test_activity";
@@ -256,13 +200,10 @@ async fn test_get_file_metadata() {
     assert_eq!(metadata.content_type, Some("text/plain".to_string()));
 
     // Cleanup
-    cleanup_files(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_list_files_for_activity() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_list_files_for_activity(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let workflow_id = Uuid::now_v7();
     let activity_key = "test_activity";
@@ -299,13 +240,10 @@ async fn test_list_files_for_activity() {
     }
 
     // Cleanup
-    cleanup_files(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_list_files_empty() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_list_files_empty(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let workflow_id = Uuid::now_v7();
     let activity_key = "empty_activity";
@@ -319,10 +257,8 @@ async fn test_list_files_empty() {
     assert_eq!(files.len(), 0);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_delete_file() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_delete_file(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let workflow_id = Uuid::now_v7();
     let activity_key = "test_activity";
@@ -357,13 +293,10 @@ async fn test_delete_file() {
     assert!(matches!(result, Err(StorageError::FileNotFound(_))));
 
     // Cleanup
-    cleanup_files(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_delete_nonexistent_file() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_delete_nonexistent_file(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let workflow_id = Uuid::now_v7();
     let activity_key = "test_activity";
@@ -376,10 +309,8 @@ async fn test_delete_nonexistent_file() {
         .expect("Failed to delete non-existent file");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_delete_workflow_files() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_delete_workflow_files(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let workflow_id = Uuid::now_v7();
 
@@ -428,10 +359,8 @@ async fn test_delete_workflow_files() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_duplicate_upload_upsert_behavior() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_duplicate_upload_upsert_behavior(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let workflow_id = Uuid::now_v7();
     let activity_key = "test_activity";
@@ -487,13 +416,10 @@ async fn test_duplicate_upload_upsert_behavior() {
     assert_eq!(downloaded, content2);
 
     // Cleanup
-    cleanup_files(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_file_reference() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_file_reference(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let workflow_id = Uuid::now_v7();
     let activity_key = "test_activity";
@@ -524,13 +450,10 @@ async fn test_get_file_reference() {
     assert_eq!(reference, expected);
 
     // Cleanup
-    cleanup_files(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_reference_for_nonexistent_file() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_reference_for_nonexistent_file(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let workflow_id = Uuid::now_v7();
     let activity_key = "test_activity";
@@ -544,10 +467,8 @@ async fn test_get_reference_for_nonexistent_file() {
     assert!(matches!(result, Err(StorageError::FileNotFound(_))));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_download_nonexistent_file() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_download_nonexistent_file(pool: PgPool) {
     let storage = PostgresStorage::new(pool.clone());
     let workflow_id = Uuid::now_v7();
     let activity_key = "test_activity";

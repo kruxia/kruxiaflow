@@ -5,7 +5,6 @@ use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use kruxiaflow_worker::{ActivityImpl, HttpRequestActivity};
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use std::io::Write;
 use std::sync::Arc;
@@ -13,17 +12,6 @@ use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 use wiremock::matchers::{header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
-
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database")
-}
 
 /// Generate test RSA private key
 fn test_rsa_private_key() -> String {
@@ -36,9 +24,7 @@ fn test_rsa_public_key() -> String {
 }
 
 /// Create and start a real API server on a random port
-async fn create_real_server() -> (String, PgPool, tokio::task::JoinHandle<()>) {
-    let pool = setup_test_pool().await;
-
+async fn create_real_server(pool: PgPool) -> (String, PgPool, tokio::task::JoinHandle<()>) {
     let auth_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
         rsa_public_key_pem: Some(test_rsa_public_key()),
@@ -56,7 +42,7 @@ async fn create_real_server() -> (String, PgPool, tokio::task::JoinHandle<()>) {
          VALUES ($1, $2, $3, NOW())
          ON CONFLICT (client_id) DO NOTHING",
         "test_http_client",
-        bcrypt::hash("test_http_secret", bcrypt::DEFAULT_COST).unwrap(),
+        bcrypt::hash("test_http_secret", 4).unwrap(), // min cost: real hashing strength is not under test
         "Test HTTP Client"
     )
     .execute(&pool)
@@ -102,10 +88,9 @@ async fn create_real_server() -> (String, PgPool, tokio::task::JoinHandle<()>) {
     (server_url, pool, handle)
 }
 
-#[tokio::test]
-#[serial]
-async fn test_http_get_request() {
-    let (server_url, _pool, server_handle) = create_real_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_http_get_request(pool: PgPool) {
+    let (server_url, _pool, server_handle) = create_real_server(pool).await;
     let activity = HttpRequestActivity::new();
 
     let params = json!({
@@ -124,10 +109,9 @@ async fn test_http_get_request() {
     server_handle.abort();
 }
 
-#[tokio::test]
-#[serial]
-async fn test_http_get_with_query_params() {
-    let (server_url, _pool, server_handle) = create_real_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_http_get_with_query_params(pool: PgPool) {
+    let (server_url, _pool, server_handle) = create_real_server(pool).await;
     let activity = HttpRequestActivity::new();
 
     let params = json!({
@@ -149,10 +133,9 @@ async fn test_http_get_with_query_params() {
     server_handle.abort();
 }
 
-#[tokio::test]
-#[serial]
-async fn test_http_post_request_with_json_body() {
-    let (server_url, _pool, server_handle) = create_real_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_http_post_request_with_json_body(pool: PgPool) {
+    let (server_url, _pool, server_handle) = create_real_server(pool).await;
     let activity = HttpRequestActivity::new();
 
     let params = json!({
@@ -183,10 +166,9 @@ async fn test_http_post_request_with_json_body() {
     server_handle.abort();
 }
 
-#[tokio::test]
-#[serial]
-async fn test_http_request_with_custom_headers() {
-    let (server_url, _pool, server_handle) = create_real_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_http_request_with_custom_headers(pool: PgPool) {
+    let (server_url, _pool, server_handle) = create_real_server(pool).await;
     let activity = HttpRequestActivity::new();
 
     let params = json!({
@@ -209,10 +191,9 @@ async fn test_http_request_with_custom_headers() {
     server_handle.abort();
 }
 
-#[tokio::test]
-#[serial]
-async fn test_http_head_request_excludes_body() {
-    let (server_url, _pool, server_handle) = create_real_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_http_head_request_excludes_body(pool: PgPool) {
+    let (server_url, _pool, server_handle) = create_real_server(pool).await;
     let activity = HttpRequestActivity::new();
 
     let params = json!({
@@ -233,10 +214,9 @@ async fn test_http_head_request_excludes_body() {
     server_handle.abort();
 }
 
-#[tokio::test]
-#[serial]
-async fn test_http_request_include_body_false() {
-    let (server_url, _pool, server_handle) = create_real_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_http_request_include_body_false(pool: PgPool) {
+    let (server_url, _pool, server_handle) = create_real_server(pool).await;
     let activity = HttpRequestActivity::new();
 
     let params = json!({
@@ -258,10 +238,9 @@ async fn test_http_request_include_body_false() {
     server_handle.abort();
 }
 
-#[tokio::test]
-#[serial]
-async fn test_http_request_include_body_true() {
-    let (server_url, _pool, server_handle) = create_real_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_http_request_include_body_true(pool: PgPool) {
+    let (server_url, _pool, server_handle) = create_real_server(pool).await;
     let activity = HttpRequestActivity::new();
 
     let params = json!({
@@ -283,10 +262,9 @@ async fn test_http_request_include_body_true() {
     server_handle.abort();
 }
 
-#[tokio::test]
-#[serial]
-async fn test_http_request_default_user_agent() {
-    let (server_url, _pool, server_handle) = create_real_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_http_request_default_user_agent(pool: PgPool) {
+    let (server_url, _pool, server_handle) = create_real_server(pool).await;
     let activity = HttpRequestActivity::new();
 
     let params = json!({
@@ -308,10 +286,9 @@ async fn test_http_request_default_user_agent() {
     server_handle.abort();
 }
 
-#[tokio::test]
-#[serial]
-async fn test_http_request_404_not_found() {
-    let (server_url, _pool, server_handle) = create_real_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_http_request_404_not_found(pool: PgPool) {
+    let (server_url, _pool, server_handle) = create_real_server(pool).await;
     let activity = HttpRequestActivity::new();
 
     let params = json!({
@@ -330,10 +307,9 @@ async fn test_http_request_404_not_found() {
     server_handle.abort();
 }
 
-#[tokio::test]
-#[serial]
-async fn test_http_request_with_timeout() {
-    let (server_url, _pool, server_handle) = create_real_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_http_request_with_timeout(pool: PgPool) {
+    let (server_url, _pool, server_handle) = create_real_server(pool).await;
     let activity = HttpRequestActivity::new();
 
     let params = json!({

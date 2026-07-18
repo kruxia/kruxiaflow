@@ -4,53 +4,13 @@ use kruxiaflow_core::queue::{
 };
 use kruxiaflow_core::workflow::{BackoffStrategy, RetryPolicy};
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tokio::time::{Duration, sleep};
 use uuid::Uuid;
 
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    // Run migrations from workspace root
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    // Truncate activity_queue table to ensure clean state for tests
-    // Safe because tests run serially with #[serial]
-    sqlx::query!("TRUNCATE TABLE activity_queue")
-        .execute(&pool)
-        .await
-        .expect("Failed to truncate activity_queue");
-
-    pool
-}
-
-/// Helper to clean up test data
-async fn cleanup_queue(pool: &PgPool, workflow_id: Uuid) {
-    sqlx::query!(
-        "DELETE FROM activity_queue WHERE workflow_id = $1",
-        workflow_id
-    )
-    .execute(pool)
-    .await
-    .expect("Failed to cleanup test data");
-}
-
-#[tokio::test]
-#[serial]
-async fn test_idempotent_scheduling() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_idempotent_scheduling(pool: PgPool) {
     let config = QueueConfig::default();
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -89,14 +49,10 @@ async fn test_idempotent_scheduling() {
     .expect("Failed to count rows");
 
     assert_eq!(count, Some(1), "Should have exactly one activity in queue");
-
-    cleanup_queue(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_concurrent_claiming() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_concurrent_claiming(pool: PgPool) {
     let config = QueueConfig::default();
     let workflow_id = Uuid::now_v7();
 
@@ -153,21 +109,10 @@ async fn test_concurrent_claiming() {
     assert_ne!(id1, id2, "Workers should claim different activities");
     assert_ne!(id1, id3, "Workers should claim different activities");
     assert_ne!(id2, id3, "Workers should claim different activities");
-
-    cleanup_queue(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_stale_activity_recovery() {
-    let pool = setup_test_pool().await;
-
-    // Clean all test data before starting
-    sqlx::query!("TRUNCATE activity_queue CASCADE")
-        .execute(&pool)
-        .await
-        .expect("Failed to clean test data");
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_stale_activity_recovery(pool: PgPool) {
     let config = QueueConfig {
         default_timeout: Duration::from_secs(1), // Very short timeout for testing
         ..Default::default()
@@ -244,14 +189,10 @@ async fn test_stale_activity_recovery() {
         claimed2.retry_count, 1,
         "Reclaimed activity should have retry_count = 1"
     );
-
-    cleanup_queue(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_heartbeat_conflict_detection() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_heartbeat_conflict_detection(pool: PgPool) {
     let config = QueueConfig {
         default_timeout: Duration::from_secs(1),
         ..Default::default()
@@ -334,14 +275,10 @@ async fn test_heartbeat_conflict_detection() {
         }
         _ => panic!("Expected ActivityReclaimed error"),
     }
-
-    cleanup_queue(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_max_retries_exhaustion() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_max_retries_exhaustion(pool: PgPool) {
     let config = QueueConfig {
         default_timeout: Duration::from_secs(1),
         ..Default::default()
@@ -460,14 +397,10 @@ async fn test_max_retries_exhaustion() {
         failed_activity.retry_count >= failed_activity.max_retries,
         "Activity should have exhausted retries"
     );
-
-    cleanup_queue(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_completion_idempotency() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_completion_idempotency(pool: PgPool) {
     let config = QueueConfig::default();
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -540,14 +473,10 @@ async fn test_completion_idempotency() {
         Some("completed".to_string()),
         "Activity should be marked as completed"
     );
-
-    cleanup_queue(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_sequential_ordering() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_sequential_ordering(pool: PgPool) {
     let config = QueueConfig::default();
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -625,14 +554,10 @@ async fn test_sequential_ordering() {
     let claimed2 = &claimed2[0];
 
     assert_eq!(claimed2.activity_key, "step2");
-
-    cleanup_queue(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_parallel_execution() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_parallel_execution(pool: PgPool) {
     let config = QueueConfig::default();
     let queue = PostgresQueue::new(pool.clone(), config);
     let workflow_id = Uuid::now_v7();
@@ -695,20 +620,15 @@ async fn test_parallel_execution() {
         !claimed3.unwrap().is_empty(),
         "Worker 3 should claim activity"
     );
-
-    cleanup_queue(&pool, workflow_id).await;
 }
 
 // ===========================================================================
 // reclaim_stale_activities tests
 // ===========================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_reclaim_stale_activities_resets_to_pending() {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_reclaim_stale_activities_resets_to_pending(pool: PgPool) {
     use kruxiaflow_core::queue::StaleActivityAction;
-
-    let pool = setup_test_pool().await;
     let config = QueueConfig {
         default_timeout: Duration::from_secs(1),
         ..Default::default()
@@ -807,16 +727,11 @@ async fn test_reclaim_stale_activities_resets_to_pending() {
 
     assert_eq!(reclaimed_claimed.id, claimed.id);
     assert_eq!(reclaimed_claimed.retry_count, 1);
-
-    cleanup_queue(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_reclaim_stale_activities_marks_failed_when_retries_exhausted() {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_reclaim_stale_activities_marks_failed_when_retries_exhausted(pool: PgPool) {
     use kruxiaflow_core::queue::StaleActivityAction;
-
-    let pool = setup_test_pool().await;
     let config = QueueConfig {
         default_timeout: Duration::from_secs(1),
         ..Default::default()
@@ -909,14 +824,10 @@ async fn test_reclaim_stale_activities_marks_failed_when_retries_exhausted() {
         .expect("Claim call should succeed");
 
     assert!(no_claim.is_empty(), "Should not claim failed activity");
-
-    cleanup_queue(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_reclaim_stale_activities_does_not_affect_non_stale() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_reclaim_stale_activities_does_not_affect_non_stale(pool: PgPool) {
     let config = QueueConfig {
         default_timeout: Duration::from_secs(60), // Long timeout
         ..Default::default()
@@ -1004,16 +915,11 @@ async fn test_reclaim_stale_activities_does_not_affect_non_stale() {
     .expect("Failed to get claimed_by");
 
     assert_eq!(claimed_by, Some(worker_id.to_string()));
-
-    cleanup_queue(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_reclaim_stale_activities_multiple_activities() {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_reclaim_stale_activities_multiple_activities(pool: PgPool) {
     use kruxiaflow_core::queue::StaleActivityAction;
-
-    let pool = setup_test_pool().await;
     let config = QueueConfig {
         default_timeout: Duration::from_secs(1),
         ..Default::default()
@@ -1181,6 +1087,4 @@ async fn test_reclaim_stale_activities_multiple_activities() {
         "One activity should still be running (non_stale)"
     );
     assert_eq!(failed_count_db, Some(1), "One activity should be failed");
-
-    cleanup_queue(&pool, workflow_id).await;
 }

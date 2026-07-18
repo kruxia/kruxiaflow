@@ -13,22 +13,10 @@ use kruxiaflow_core::storage::{PostgresStorage, WorkflowStorage};
 use kruxiaflow_worker::activity_result::ActivityResult;
 use kruxiaflow_worker::registry::{ActivityContext, ActivityImpl};
 use serde_json::{Value, json};
-use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
 use uuid::Uuid;
-
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database")
-}
 
 /// Mock embedding activity that simulates the streaming fix behavior.
 ///
@@ -203,10 +191,8 @@ impl ActivityImpl for MockStreamingEmbeddingActivity {
 ///
 /// Verifies that when storage is available, embeddings are streamed to storage
 /// and the result contains embeddings_file (not inline embeddings).
-#[tokio::test]
-#[serial]
-async fn test_streaming_embeddings_returns_file_reference() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_streaming_embeddings_returns_file_reference(pool: PgPool) {
     let storage: Arc<dyn WorkflowStorage> = Arc::new(PostgresStorage::new(pool.clone()));
 
     let activity = MockStreamingEmbeddingActivity::new();
@@ -267,11 +253,6 @@ async fn test_streaming_embeddings_returns_file_reference() {
     let files = files.unwrap();
     assert_eq!(files.len(), 1, "Should have one file");
     assert_eq!(files[0].filename, "embeddings.jsonl");
-
-    // Cleanup
-    let _ = storage
-        .delete_file(workflow_id, &activity_key, "embeddings.jsonl")
-        .await;
 }
 
 /// Test: Inline embeddings returned when no storage available
@@ -279,7 +260,6 @@ async fn test_streaming_embeddings_returns_file_reference() {
 /// Verifies fallback behavior - when storage is not available,
 /// embeddings are returned inline.
 #[tokio::test]
-#[serial]
 async fn test_inline_embeddings_without_storage() {
     let activity = MockStreamingEmbeddingActivity::new();
     let workflow_id = Uuid::now_v7();
@@ -329,10 +309,8 @@ async fn test_inline_embeddings_without_storage() {
 ///
 /// Verifies that large inputs are processed in batches and streamed
 /// incrementally to storage.
-#[tokio::test]
-#[serial]
-async fn test_batch_processing_streams_incrementally() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_batch_processing_streams_incrementally(pool: PgPool) {
     let storage: Arc<dyn WorkflowStorage> = Arc::new(PostgresStorage::new(pool.clone()));
 
     let activity = MockStreamingEmbeddingActivity::new();
@@ -406,21 +384,14 @@ async fn test_batch_processing_streams_incrementally() {
             "Each embedding should have 4 dimensions"
         );
     }
-
-    // Cleanup
-    let _ = storage
-        .delete_file(workflow_id, &activity_key, "embeddings.jsonl")
-        .await;
 }
 
 /// Test: Output structure has both keys for template compatibility
 ///
 /// The fix ensures both embeddings and embeddings_file keys are always present
 /// (one null, one with value) so templates can reference either.
-#[tokio::test]
-#[serial]
-async fn test_output_structure_has_both_keys() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_output_structure_has_both_keys(pool: PgPool) {
     let storage: Arc<dyn WorkflowStorage> = Arc::new(PostgresStorage::new(pool.clone()));
 
     let activity = MockStreamingEmbeddingActivity::new();
@@ -453,10 +424,6 @@ async fn test_output_structure_has_both_keys() {
             result_obj.get("embedding_count").is_some(),
             "embedding_count key must exist"
         );
-
-        let _ = storage
-            .delete_file(workflow_id, &activity_key, "embeddings.jsonl")
-            .await;
     }
 
     // Test without storage (inline)
@@ -556,10 +523,8 @@ async fn test_usage_metrics_reported() {
 ///
 /// Verifies that the batch_size parameter correctly controls how many
 /// embeddings are processed per batch.
-#[tokio::test]
-#[serial]
-async fn test_batching_splits_large_inputs() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_batching_splits_large_inputs(pool: PgPool) {
     let storage: Arc<dyn WorkflowStorage> = Arc::new(PostgresStorage::new(pool.clone()));
 
     let activity = MockStreamingEmbeddingActivity::new();
@@ -611,20 +576,13 @@ async fn test_batching_splits_large_inputs() {
     let lines: Vec<&str> = content_str.lines().collect();
 
     assert_eq!(lines.len(), 100, "File should contain 100 embedding lines");
-
-    // Cleanup
-    let _ = storage
-        .delete_file(workflow_id, &activity_key, "embeddings.jsonl")
-        .await;
 }
 
 /// Test: Single batch for small inputs
 ///
 /// Verifies that inputs smaller than batch_size are processed in a single batch.
-#[tokio::test]
-#[serial]
-async fn test_single_batch_for_small_inputs() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_single_batch_for_small_inputs(pool: PgPool) {
     let storage: Arc<dyn WorkflowStorage> = Arc::new(PostgresStorage::new(pool.clone()));
 
     let activity = MockStreamingEmbeddingActivity::new();
@@ -658,20 +616,13 @@ async fn test_single_batch_for_small_inputs() {
         10,
         "All 10 embeddings should be processed in one batch"
     );
-
-    // Cleanup
-    let _ = storage
-        .delete_file(workflow_id, &activity_key, "embeddings.jsonl")
-        .await;
 }
 
 /// Test: Default batch size is applied
 ///
 /// Verifies that when batch_size is not specified, a sensible default is used.
-#[tokio::test]
-#[serial]
-async fn test_default_batch_size() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_default_batch_size(pool: PgPool) {
     let storage: Arc<dyn WorkflowStorage> = Arc::new(PostgresStorage::new(pool.clone()));
 
     let activity = MockStreamingEmbeddingActivity::new();
@@ -708,11 +659,6 @@ async fn test_default_batch_size() {
         150,
         "All 150 embeddings should be processed with default batch size"
     );
-
-    // Cleanup
-    let _ = storage
-        .delete_file(workflow_id, &activity_key, "embeddings.jsonl")
-        .await;
 }
 
 // ============================================================================
@@ -807,10 +753,8 @@ impl ActivityImpl for FailingStreamActivity {
 /// Test: Streaming failure returns error
 ///
 /// Verifies that when streaming fails mid-batch, an error is returned.
-#[tokio::test]
-#[serial]
-async fn test_streaming_failure_returns_error() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_streaming_failure_returns_error(pool: PgPool) {
     let storage: Arc<dyn WorkflowStorage> = Arc::new(PostgresStorage::new(pool.clone()));
 
     // Activity fails after 5 embeddings
@@ -845,10 +789,8 @@ async fn test_streaming_failure_returns_error() {
 ///
 /// Verifies that even if streaming fails, partial data may have been written,
 /// and the system handles this gracefully.
-#[tokio::test]
-#[serial]
-async fn test_partial_write_on_failure() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_partial_write_on_failure(pool: PgPool) {
     let storage: Arc<dyn WorkflowStorage> = Arc::new(PostgresStorage::new(pool.clone()));
 
     // Activity fails after 3 embeddings
@@ -871,27 +813,16 @@ async fn test_partial_write_on_failure() {
     assert!(result.is_err(), "Activity should fail");
 
     // Check if partial file exists (it may or may not depending on timing)
-    let files = storage.list_files(workflow_id, &activity_key).await;
+    let _files = storage.list_files(workflow_id, &activity_key).await;
     // Don't assert on file existence - it depends on race conditions
     // The important thing is the activity returned an error
-
-    // Cleanup any partial files
-    if let Ok(files) = files {
-        for file in files {
-            let _ = storage
-                .delete_file(workflow_id, &activity_key, &file.filename)
-                .await;
-        }
-    }
 }
 
 /// Test: Empty input handled correctly
 ///
 /// Verifies that empty input arrays are handled without errors.
-#[tokio::test]
-#[serial]
-async fn test_empty_input_handled() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_empty_input_handled(pool: PgPool) {
     let storage: Arc<dyn WorkflowStorage> = Arc::new(PostgresStorage::new(pool.clone()));
 
     let activity = MockStreamingEmbeddingActivity::new();
@@ -922,21 +853,14 @@ async fn test_empty_input_handled() {
         0,
         "embedding_count should be 0 for empty input"
     );
-
-    // Cleanup
-    let _ = storage
-        .delete_file(workflow_id, &activity_key, "embeddings.jsonl")
-        .await;
 }
 
 /// Test: Large batch maintains data integrity
 ///
 /// Verifies that processing a large number of embeddings maintains
 /// the correct order and values.
-#[tokio::test]
-#[serial]
-async fn test_large_batch_data_integrity() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_large_batch_data_integrity(pool: PgPool) {
     let storage: Arc<dyn WorkflowStorage> = Arc::new(PostgresStorage::new(pool.clone()));
 
     let activity = MockStreamingEmbeddingActivity::new();
@@ -998,9 +922,4 @@ async fn test_large_batch_data_integrity() {
             dimensions
         );
     }
-
-    // Cleanup
-    let _ = storage
-        .delete_file(workflow_id, &activity_key, "embeddings.jsonl")
-        .await;
 }

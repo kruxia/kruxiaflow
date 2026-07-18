@@ -204,18 +204,8 @@ mod tests {
         })
     }
 
-    async fn test_pool() -> PgPool {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-        PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database")
-    }
-
-    #[tokio::test]
-    async fn test_deploy_workflow_definition_valid_yaml() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_deploy_workflow_definition_valid_yaml(pool: PgPool) {
         let repo = WorkflowDefinitionRepository::new(pool);
 
         let yaml = r#"
@@ -236,9 +226,8 @@ activities:
         assert_eq!(response.name, "test-deploy-handler");
     }
 
-    #[tokio::test]
-    async fn test_deploy_workflow_definition_invalid_yaml() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_deploy_workflow_definition_invalid_yaml(pool: PgPool) {
         let repo = WorkflowDefinitionRepository::new(pool);
 
         let yaml = "this is not valid yaml: [[[";
@@ -249,9 +238,8 @@ activities:
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_deploy_workflow_definition_missing_name() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_deploy_workflow_definition_missing_name(pool: PgPool) {
         let repo = WorkflowDefinitionRepository::new(pool);
 
         let yaml = r#"
@@ -268,9 +256,8 @@ activities:
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_deploy_workflow_definition_idempotent() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_deploy_workflow_definition_idempotent(pool: PgPool) {
         let repo = WorkflowDefinitionRepository::new(pool.clone());
 
         let yaml = r#"
@@ -297,9 +284,8 @@ activities:
         assert_eq!(response.unchanged, Some(true));
     }
 
-    #[tokio::test]
-    async fn test_list_workflow_definitions_handler() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_list_workflow_definitions_handler(pool: PgPool) {
         let repo = WorkflowDefinitionRepository::new(pool);
 
         let result = list_workflow_definitions(repo, Extension(test_claims())).await;
@@ -309,10 +295,8 @@ activities:
         assert_eq!(response.total, response.definitions.len());
     }
 
-    #[tokio::test]
-    async fn test_get_workflow_definition_latest() {
-        let pool = test_pool().await;
-
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_get_workflow_definition_latest(pool: PgPool) {
         // First deploy a definition
         let repo = WorkflowDefinitionRepository::new(pool.clone());
         let yaml = r#"
@@ -343,9 +327,8 @@ activities:
         assert_eq!(response.activities.len(), 1);
     }
 
-    #[tokio::test]
-    async fn test_get_workflow_definition_not_found() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_get_workflow_definition_not_found(pool: PgPool) {
         let repo = WorkflowDefinitionRepository::new(pool);
 
         let result = get_workflow_definition(
@@ -359,9 +342,8 @@ activities:
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_get_workflow_definition_specific_version_not_found() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_get_workflow_definition_specific_version_not_found(pool: PgPool) {
         let repo = WorkflowDefinitionRepository::new(pool);
 
         let result = get_workflow_definition(
@@ -377,9 +359,8 @@ activities:
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_get_workflow_definition_invalid_version_format() {
-        let pool = test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_get_workflow_definition_invalid_version_format(pool: PgPool) {
         let repo = WorkflowDefinitionRepository::new(pool);
 
         let result = get_workflow_definition(

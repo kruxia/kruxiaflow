@@ -557,18 +557,8 @@ pub mod tests {
         }
     }
 
-    async fn mock_pool() -> PgPool {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-        PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database")
-    }
-
-    #[tokio::test]
-    async fn test_app_state_new_creates_with_defaults() {
-        let pool = mock_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_app_state_new_creates_with_defaults(pool: PgPool) {
         let auth_service = Arc::new(MockAuthService);
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
@@ -596,9 +586,8 @@ pub mod tests {
         assert!(state.features.contains(&"authentication".to_string()));
     }
 
-    #[tokio::test]
-    async fn test_app_state_with_metadata_uses_custom_values() {
-        let pool = mock_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_app_state_with_metadata_uses_custom_values(pool: PgPool) {
         let auth_service = Arc::new(MockAuthService);
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
@@ -633,9 +622,8 @@ pub mod tests {
         assert_eq!(state.features, features);
     }
 
-    #[tokio::test]
-    async fn test_app_state_clone() {
-        let pool = mock_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_app_state_clone(pool: PgPool) {
         let auth_service = Arc::new(MockAuthService);
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
@@ -675,9 +663,8 @@ pub mod tests {
         assert_eq!(build1.git_hash, build2.git_hash);
     }
 
-    #[tokio::test]
-    async fn test_app_state_new_captures_build_metadata() {
-        let pool = mock_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_app_state_new_captures_build_metadata(pool: PgPool) {
         let auth_service = Arc::new(MockAuthService);
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
@@ -701,9 +688,8 @@ pub mod tests {
         assert!(!state.build.git_hash.is_empty());
     }
 
-    #[tokio::test]
-    async fn test_app_state_with_empty_features() {
-        let pool = mock_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_app_state_with_empty_features(pool: PgPool) {
         let auth_service = Arc::new(MockAuthService);
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
@@ -733,9 +719,8 @@ pub mod tests {
         assert_eq!(state.features.len(), 0);
     }
 
-    #[tokio::test]
-    async fn test_app_state_auth_service_accessible() {
-        let pool = mock_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_app_state_auth_service_accessible(pool: PgPool) {
         let auth_service = Arc::new(MockAuthService);
         let activity_queue = Arc::new(MockActivityQueue);
         let event_source = Arc::new(MockEventSource);
@@ -797,9 +782,8 @@ pub mod tests {
         assert_eq!(result.unwrap().len(), 0);
     }
 
-    #[tokio::test]
-    async fn test_is_shutting_down_initially_false() {
-        let pool = mock_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_is_shutting_down_initially_false(pool: PgPool) {
         let state = AppState::new(
             pool,
             Arc::new(MockAuthService),
@@ -813,9 +797,8 @@ pub mod tests {
         assert!(!state.is_shutting_down());
     }
 
-    #[tokio::test]
-    async fn test_is_shutting_down_after_cancel() {
-        let pool = mock_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_is_shutting_down_after_cancel(pool: PgPool) {
         let shutdown_token = CancellationToken::new();
         let state = AppState::new(
             pool,
@@ -833,8 +816,12 @@ pub mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn test_mock_pool_uses_default_database_url() {
-        // Test that mock_pool falls back to default when DATABASE_URL is not set
+        // Test the fallback to the default URL when DATABASE_URL is not set.
+        // Save and restore DATABASE_URL so parallel #[sqlx::test] tests (which
+        // read it to create their per-test databases) are not affected.
+        let saved = std::env::var("DATABASE_URL").ok();
         unsafe {
             std::env::remove_var("DATABASE_URL");
         }
@@ -843,6 +830,13 @@ pub mod tests {
         let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
             "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
         });
+
+        unsafe {
+            if let Some(value) = saved {
+                std::env::set_var("DATABASE_URL", value);
+            }
+        }
+
         assert_eq!(
             database_url,
             "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow"

@@ -219,21 +219,13 @@ mod tests {
         assert_eq!(json["status"], "ok");
     }
 
-    #[tokio::test]
-    async fn test_service_info_handler_returns_version_and_features() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_service_info_handler_returns_version_and_features(pool: sqlx::PgPool) {
         use crate::state::tests::*;
         use crate::state::{AppState, AppStateBuild};
         use kruxiaflow_core::cache::NoOpCache;
-        use sqlx::PgPool;
         use std::sync::Arc;
         use tokio_util::sync::CancellationToken;
-
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-        let pool = PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database");
 
         let build = AppStateBuild {
             timestamp: "2025-11-15T10:00:00Z".to_string(),
@@ -268,21 +260,13 @@ mod tests {
         assert_eq!(json["features"].as_array().unwrap().len(), 2);
     }
 
-    #[tokio::test]
-    async fn test_pool_metrics_handler_returns_200() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_pool_metrics_handler_returns_200(pool: sqlx::PgPool) {
         use crate::state::AppState;
         use crate::state::tests::*;
         use kruxiaflow_core::cache::NoOpCache;
-        use sqlx::PgPool;
         use std::sync::Arc;
         use tokio_util::sync::CancellationToken;
-
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-        let pool = PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database");
 
         let state = AppState::new(
             pool,

@@ -2,40 +2,11 @@ use kruxiaflow_core::events::{
     EventSource, NewWorkflowEvent, PostgresEventSource, WorkflowEventType,
 };
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-async fn setup_test_db() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://localhost/kruxiaflow_test".to_string());
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    // Run migrations
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
-
-async fn clean_test_data(pool: &PgPool) {
-    sqlx::query!("TRUNCATE workflow_events, workflow_event_consumers, workflows, workflow_definitions CASCADE")
-        .execute(pool)
-        .await
-        .expect("Failed to clean test data");
-}
-
-#[tokio::test]
-#[serial]
-async fn test_publish_event() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_publish_event(pool: PgPool) {
     let event_source = PostgresEventSource::new(pool.clone());
     let workflow_id = Uuid::now_v7();
 
@@ -69,12 +40,8 @@ async fn test_publish_event() {
     assert_eq!(stored_event.activity_key, None);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_publish_event_idempotency() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_publish_event_idempotency(pool: PgPool) {
     let event_source = PostgresEventSource::new(pool.clone());
     let workflow_id = Uuid::now_v7();
 
@@ -109,12 +76,8 @@ async fn test_publish_event_idempotency() {
     assert_eq!(count, 1, "Idempotency violated - duplicate event created");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_poll_no_events() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_poll_no_events(pool: PgPool) {
     let event_source = PostgresEventSource::new(pool.clone());
 
     // Poll with no events
@@ -126,12 +89,8 @@ async fn test_poll_no_events() {
     assert!(events.is_empty());
 }
 
-#[tokio::test]
-#[serial]
-async fn test_poll_with_events() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_poll_with_events(pool: PgPool) {
     let event_source = PostgresEventSource::new(pool.clone());
     let workflow_id = Uuid::now_v7();
 
@@ -169,12 +128,8 @@ async fn test_poll_with_events() {
     assert_eq!(events[1].event_type, WorkflowEventType::ActivityScheduled);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_position_tracking() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_position_tracking(pool: PgPool) {
     let event_source = PostgresEventSource::new(pool.clone());
     let workflow_id = Uuid::now_v7();
 
@@ -261,12 +216,8 @@ async fn test_position_tracking() {
     assert_eq!(events.len(), 0);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_multiple_consumers() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_multiple_consumers(pool: PgPool) {
     let event_source = PostgresEventSource::new(pool.clone());
     let workflow_id = Uuid::now_v7();
 

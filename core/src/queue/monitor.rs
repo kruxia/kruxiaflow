@@ -126,27 +126,8 @@ impl QueueMonitor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
     use std::time::Duration;
     use uuid::Uuid;
-
-    /// Helper to setup test pool
-    async fn setup_test_pool() -> PgPool {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-        });
-
-        let pool = PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database");
-
-        sqlx::migrate!("../migrations")
-            .run(&pool)
-            .await
-            .expect("Failed to run migrations");
-
-        pool
-    }
 
     /// Helper to insert a failed activity
     async fn insert_failed_activity(pool: &PgPool, workflow_id: Uuid, activity_key: &str) {
@@ -180,24 +161,15 @@ mod tests {
         .expect("Failed to cleanup test data");
     }
 
-    #[tokio::test]
-    async fn test_monitor_construction() {
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_monitor_construction(pool: PgPool) {
         let config = QueueConfig::default();
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@localhost:5432/kruxiaflow".to_string()
-        });
-
-        // Only run if database is available
-        if let Ok(pool) = PgPool::connect(&database_url).await {
-            let _monitor = QueueMonitor::new(pool, config);
-            // Just verify it constructs successfully
-        }
+        let _monitor = QueueMonitor::new(pool, config);
+        // Just verify it constructs successfully
     }
 
-    #[tokio::test]
-    #[serial]
-    async fn test_cleanup_failed_activities_with_failures() {
-        let pool = setup_test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_cleanup_failed_activities_with_failures(pool: PgPool) {
         let workflow_id = Uuid::now_v7();
 
         // Insert 3 failed activities
@@ -228,10 +200,8 @@ mod tests {
         cleanup_queue(&pool, workflow_id).await;
     }
 
-    #[tokio::test]
-    #[serial]
-    async fn test_cleanup_failed_activities_with_no_failures() {
-        let pool = setup_test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_cleanup_failed_activities_with_no_failures(pool: PgPool) {
         let workflow_id = Uuid::now_v7();
 
         // Insert only pending activities (won't be cleaned up)
@@ -275,10 +245,8 @@ mod tests {
         cleanup_queue(&pool, workflow_id).await;
     }
 
-    #[tokio::test]
-    #[serial]
-    async fn test_vacuum_queue_table() {
-        let pool = setup_test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_vacuum_queue_table(pool: PgPool) {
         let config = QueueConfig::default();
         let monitor = QueueMonitor::new(pool.clone(), config);
 
@@ -289,10 +257,8 @@ mod tests {
             .expect("Vacuum should succeed");
     }
 
-    #[tokio::test]
-    #[serial]
-    async fn test_run_cleanup_loop_executes() {
-        let pool = setup_test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_run_cleanup_loop_executes(pool: PgPool) {
         let workflow_id = Uuid::now_v7();
 
         // Insert a failed activity
@@ -312,31 +278,36 @@ mod tests {
             monitor_clone.run_cleanup_loop().await;
         });
 
-        // Let it run for a bit
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        // Wait for the loop to clean up the failed activity. Bounded poll
+        // rather than a fixed sleep: the 100ms cleanup interval is
+        // load-sensitive when the whole suite runs in parallel.
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let count = sqlx::query_scalar!(
+                "SELECT COUNT(*) FROM activity_queue WHERE workflow_id = $1",
+                workflow_id
+            )
+            .fetch_one(&pool)
+            .await
+            .expect("Failed to count rows");
+            if count == Some(0) {
+                break;
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "Failed activity should be cleaned up within 5s"
+            );
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
 
         // Stop the loop
         cleanup_handle.abort();
 
-        // Verify cleanup ran
-        let count = sqlx::query_scalar!(
-            "SELECT COUNT(*) FROM activity_queue WHERE workflow_id = $1",
-            workflow_id
-        )
-        .fetch_one(&pool)
-        .await
-        .expect("Failed to count rows");
-
-        assert_eq!(count, Some(0), "Failed activity should be cleaned up");
-
         cleanup_queue(&pool, workflow_id).await;
     }
 
-    #[tokio::test]
-    #[serial]
-    async fn test_run_vacuum_loop_executes() {
-        let pool = setup_test_pool().await;
-
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_run_vacuum_loop_executes(pool: PgPool) {
         let config = QueueConfig {
             vacuum_interval: Duration::from_millis(100),
             ..Default::default()
@@ -360,10 +331,8 @@ mod tests {
         // If we get here without error, vacuum loop executed successfully
     }
 
-    #[tokio::test]
-    #[serial]
-    async fn test_run_both_loops() {
-        let pool = setup_test_pool().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_run_both_loops(pool: PgPool) {
         let workflow_id = Uuid::now_v7();
 
         // Insert a failed activity

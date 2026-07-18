@@ -6,37 +6,10 @@ use kruxiaflow_core::orchestrator::OrchestratorConfig;
 use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
 use kruxiaflow_core::{PostgresSubscriptionService, SubscriptionService};
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
-
-async fn setup_test_db() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://localhost/kruxiaflow_test".to_string());
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    // Run migrations
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
-
-async fn clean_test_data(pool: &PgPool) {
-    sqlx::query!(
-        "TRUNCATE workflow_events, workflow_event_consumers, workflows, workflow_definitions, activity_queue CASCADE"
-    )
-    .execute(pool)
-    .await
-    .expect("Failed to clean test data");
-}
 
 async fn insert_workflow_definition(pool: &PgPool, definition: &WorkflowDefinition) -> Uuid {
     // Store only the activities array (not the full definition)
@@ -76,12 +49,8 @@ async fn insert_workflow(
     .expect("Failed to insert workflow");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_sequential_workflow_integration() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_sequential_workflow_integration(pool: PgPool) {
     // Create workflow definition
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -230,12 +199,8 @@ async fn test_sequential_workflow_integration() {
     assert!(queued.iter().any(|a| a.activity_key == "activity2"));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_parallel_workflow_integration() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_parallel_workflow_integration(pool: PgPool) {
     // Create workflow definition with fan-out/fan-in
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -468,12 +433,8 @@ async fn test_parallel_workflow_integration() {
     assert!(queued.iter().any(|a| a.activity_key == "join"));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_conditional_workflow_integration() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_conditional_workflow_integration(pool: PgPool) {
     // Create workflow with conditional branching
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -607,12 +568,8 @@ async fn test_conditional_workflow_integration() {
     assert!(!queued.iter().any(|a| a.activity_key == "reject"));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_workflow_completion_success() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_completion_success(pool: PgPool) {
     // Create simple workflow with just one activity
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -737,12 +694,8 @@ async fn test_workflow_completion_success() {
     assert_eq!(workflow.status, WorkflowStatus::Completed);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_workflow_failure() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_failure(pool: PgPool) {
     // Create workflow with one activity that will fail
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -871,12 +824,8 @@ async fn test_workflow_failure() {
     assert_eq!(workflow.status, WorkflowStatus::Failed);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_workflow_completion_with_multiple_activities() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_completion_with_multiple_activities(pool: PgPool) {
     // Create workflow with 3 sequential activities
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -1004,12 +953,8 @@ async fn test_workflow_completion_with_multiple_activities() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_activity_scheduled_events_published() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_activity_scheduled_events_published(pool: PgPool) {
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
         name: "event_tracking".to_string(),
@@ -1081,12 +1026,8 @@ async fn test_activity_scheduled_events_published() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_run_orchestrator_loop() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_run_orchestrator_loop(pool: PgPool) {
     // Create simple workflow
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -1190,12 +1131,8 @@ async fn test_run_orchestrator_loop() {
     orchestrator_handle.abort();
 }
 
-#[tokio::test]
-#[serial]
-async fn test_orchestrator_backoff_when_no_events() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_orchestrator_backoff_when_no_events(pool: PgPool) {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
@@ -1247,12 +1184,8 @@ async fn test_orchestrator_backoff_when_no_events() {
 /// 4. Template error crashes processing, workflow stays stuck
 ///
 /// Expected behavior after fix: workflow gracefully transitions to Failed status.
-#[tokio::test]
-#[serial]
-async fn test_workflow_failed_with_incomplete_template_dependencies() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_failed_with_incomplete_template_dependencies(pool: PgPool) {
     // Create workflow with template conditions that reference activity outputs
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -1407,12 +1340,8 @@ async fn test_workflow_failed_with_incomplete_template_dependencies() {
 ///
 /// Tests a more complex scenario where multiple activities have template
 /// conditions that depend on incomplete activities.
-#[tokio::test]
-#[serial]
-async fn test_workflow_failed_with_multiple_incomplete_dependencies() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_failed_with_multiple_incomplete_dependencies(pool: PgPool) {
     // Create workflow with multiple activities that have complex conditions
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -1565,12 +1494,8 @@ async fn test_workflow_failed_with_multiple_incomplete_dependencies() {
 ///
 /// Ensures that fixing the template error doesn't break normal workflow
 /// completion where activities complete successfully.
-#[tokio::test]
-#[serial]
-async fn test_normal_workflow_with_conditions_still_completes() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_normal_workflow_with_conditions_still_completes(pool: PgPool) {
     // Same structure as template timeout test, but we complete activities properly
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -1763,12 +1688,8 @@ async fn test_normal_workflow_with_conditions_still_completes() {
 ///
 /// Expected behavior after fix: WorkflowFailed event should immediately persist
 /// the Failed status without attempting to schedule more activities.
-#[tokio::test]
-#[serial]
-async fn test_workflow_failed_event_persists_status_immediately() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_failed_event_persists_status_immediately(pool: PgPool) {
     // Create a workflow that will be timed out
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -1908,12 +1829,8 @@ async fn test_workflow_failed_event_persists_status_immediately() {
 ///
 /// Verifies that after a workflow transitions to Failed status,
 /// no new activities are scheduled (the early exit works correctly).
-#[tokio::test]
-#[serial]
-async fn test_failed_workflow_does_not_schedule_activities() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_failed_workflow_does_not_schedule_activities(pool: PgPool) {
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
         name: "no_schedule_after_fail".to_string(),
@@ -2041,12 +1958,8 @@ async fn test_failed_workflow_does_not_schedule_activities() {
 ///
 /// Verifies that if events arrive for a workflow that's already Failed,
 /// they are processed without error and the Failed status is preserved.
-#[tokio::test]
-#[serial]
-async fn test_events_on_already_failed_workflow_handled_gracefully() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_events_on_already_failed_workflow_handled_gracefully(pool: PgPool) {
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
         name: "events_after_fail".to_string(),
@@ -2197,12 +2110,8 @@ async fn test_events_on_already_failed_workflow_handled_gracefully() {
 ///
 /// Verifies that the early exit also works for completed workflows,
 /// preventing any scheduling logic from running on terminal states.
-#[tokio::test]
-#[serial]
-async fn test_completed_workflow_early_exit() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_completed_workflow_early_exit(pool: PgPool) {
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
         name: "completed_early_exit".to_string(),
@@ -2364,12 +2273,8 @@ async fn test_completed_workflow_early_exit() {
 
 /// Test that check_and_timeout_stuck_workflows detects old running workflows
 /// and publishes WorkflowFailed events for them.
-#[tokio::test]
-#[serial]
-async fn test_check_and_timeout_stuck_workflows() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_check_and_timeout_stuck_workflows(pool: PgPool) {
     // Create a simple workflow definition
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -2432,12 +2337,8 @@ async fn test_check_and_timeout_stuck_workflows() {
 }
 
 /// Test that check_and_timeout_stuck_workflows does nothing when no workflows are stuck
-#[tokio::test]
-#[serial]
-async fn test_check_and_timeout_no_stuck_workflows() {
-    let pool = setup_test_db().await;
-    clean_test_data(&pool).await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_check_and_timeout_no_stuck_workflows(pool: PgPool) {
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
 
     let config = OrchestratorConfig::new(pool.clone());

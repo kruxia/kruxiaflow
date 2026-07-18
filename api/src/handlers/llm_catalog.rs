@@ -190,20 +190,9 @@ mod tests {
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
 
-    async fn setup_test_pool() -> PgPool {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-        });
-
-        PgPool::connect(&database_url)
-            .await
-            .expect("Failed to connect to test database")
-    }
-
-    async fn setup_test_state() -> AppState {
+    fn setup_test_state(pool: PgPool) -> AppState {
         use kruxiaflow_core::cache::NoOpCache;
 
-        let pool = setup_test_pool().await;
         let auth_service = Arc::new(crate::state::tests::MockAuthService);
         let activity_queue = Arc::new(crate::state::tests::MockActivityQueue);
         let event_source = Arc::new(crate::state::tests::MockEventSource);
@@ -224,9 +213,9 @@ mod tests {
         )
     }
 
-    #[tokio::test]
-    async fn test_list_providers() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_list_providers(pool: PgPool) {
+        let state = setup_test_state(pool);
 
         // Should not panic even if table is empty
         let result = list_providers(State(state)).await;
@@ -234,9 +223,9 @@ mod tests {
         assert!(result.is_ok(), "list_providers should not fail");
     }
 
-    #[tokio::test]
-    async fn test_search_models_empty() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_search_models_empty(pool: PgPool) {
+        let state = setup_test_state(pool);
 
         let request = ModelSearchRequest { models: vec![] };
 
@@ -246,9 +235,9 @@ mod tests {
         assert_eq!(result.unwrap().0.models.len(), 0);
     }
 
-    #[tokio::test]
-    async fn test_search_models_by_provider() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_search_models_by_provider(pool: PgPool) {
+        let state = setup_test_state(pool);
 
         let request = ModelSearchRequest {
             models: vec![ModelSearchCriterion {
@@ -262,9 +251,9 @@ mod tests {
         assert!(result.is_ok(), "search_models should not fail");
     }
 
-    #[tokio::test]
-    async fn test_search_models_by_model_name() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_search_models_by_model_name(pool: PgPool) {
+        let state = setup_test_state(pool);
 
         let request = ModelSearchRequest {
             models: vec![ModelSearchCriterion {
@@ -278,9 +267,9 @@ mod tests {
         assert!(result.is_ok(), "search_models should not fail");
     }
 
-    #[tokio::test]
-    async fn test_search_models_batch() {
-        let state = setup_test_state().await;
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_search_models_batch(pool: PgPool) {
+        let state = setup_test_state(pool);
 
         let request = ModelSearchRequest {
             models: vec![

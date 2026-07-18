@@ -6,22 +6,10 @@ use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{Activity, ActivityQueue, PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
-
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database")
-}
 
 /// Generate test RSA private key
 fn test_rsa_private_key() -> String {
@@ -34,9 +22,7 @@ fn test_rsa_public_key() -> String {
 }
 
 /// Create test server with authentication
-async fn create_test_server() -> (TestServer, PgPool) {
-    let pool = setup_test_pool().await;
-
+async fn create_test_server(pool: PgPool) -> TestServer {
     let auth_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
         rsa_public_key_pem: Some(test_rsa_public_key()),
@@ -54,7 +40,7 @@ async fn create_test_server() -> (TestServer, PgPool) {
          VALUES ($1, $2, $3, NOW())
          ON CONFLICT (client_id) DO NOTHING",
         "test_client",
-        bcrypt::hash("test_secret", bcrypt::DEFAULT_COST).unwrap(),
+        bcrypt::hash("test_secret", 4).unwrap(), // min cost: real hashing strength is not under test
         "Test Client"
     )
     .execute(&pool)
@@ -79,9 +65,7 @@ async fn create_test_server() -> (TestServer, PgPool) {
         shutdown_token,
     );
     let app = app_router(state);
-    let server = TestServer::new(app).expect("Failed to create test server");
-
-    (server, pool)
+    TestServer::new(app).expect("Failed to create test server")
 }
 
 /// Get test access token
@@ -122,36 +106,9 @@ async fn schedule_test_activities(pool: &PgPool, workflow_id: Uuid, count: usize
         .expect("Failed to schedule activities");
 }
 
-/// Helper to cleanup test data
-async fn drain_worker_queue(pool: &PgPool, worker: &str) {
-    sqlx::query!("DELETE FROM activity_queue WHERE worker = $1", worker)
-        .execute(pool)
-        .await
-        .ok();
-}
-
-async fn cleanup_test_data(pool: &PgPool, workflow_id: Uuid) {
-    sqlx::query!(
-        "DELETE FROM activity_queue WHERE workflow_id = $1",
-        workflow_id
-    )
-    .execute(pool)
-    .await
-    .ok();
-
-    sqlx::query!(
-        "DELETE FROM workflow_events WHERE workflow_id = $1",
-        workflow_id
-    )
-    .execute(pool)
-    .await
-    .ok();
-}
-
-#[tokio::test]
-#[serial]
-async fn test_poll_activities_success() {
-    let (server, pool) = create_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_poll_activities_success(pool: PgPool) {
+    let server = create_test_server(pool.clone()).await;
     let token = get_test_token(&server).await;
     let workflow_id = Uuid::now_v7();
 
@@ -177,14 +134,11 @@ async fn test_poll_activities_success() {
     let body: serde_json::Value = response.json();
     assert_eq!(body["count"], 3);
     assert_eq!(body["activities"].as_array().unwrap().len(), 3);
-
-    cleanup_test_data(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_poll_activities_empty() {
-    let (server, _pool) = create_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_poll_activities_empty(pool: PgPool) {
+    let server = create_test_server(pool).await;
     let token = get_test_token(&server).await;
 
     // Poll for non-existent activity type
@@ -208,10 +162,9 @@ async fn test_poll_activities_empty() {
     assert!(body["activities"].as_array().unwrap().is_empty());
 }
 
-#[tokio::test]
-#[serial]
-async fn test_poll_activities_validation_error() {
-    let (server, _pool) = create_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_poll_activities_validation_error(pool: PgPool) {
+    let server = create_test_server(pool).await;
     let token = get_test_token(&server).await;
 
     // Missing required field (no worker)
@@ -230,10 +183,9 @@ async fn test_poll_activities_validation_error() {
     assert_eq!(response.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_poll_activities_unauthorized() {
-    let (server, _pool) = create_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_poll_activities_unauthorized(pool: PgPool) {
+    let server = create_test_server(pool).await;
 
     // No authentication token
     let response = server
@@ -248,10 +200,9 @@ async fn test_poll_activities_unauthorized() {
     assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_heartbeat_activity_success() {
-    let (server, pool) = create_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_heartbeat_activity_success(pool: PgPool) {
+    let server = create_test_server(pool.clone()).await;
     let token = get_test_token(&server).await;
     let workflow_id = Uuid::now_v7();
 
@@ -291,14 +242,11 @@ async fn test_heartbeat_activity_success() {
     let body: serde_json::Value = response.json();
     assert_eq!(body["acknowledged"], true);
     assert_eq!(body["next_heartbeat_seconds"], 30);
-
-    cleanup_test_data(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_heartbeat_activity_not_found() {
-    let (server, _pool) = create_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_heartbeat_activity_not_found(pool: PgPool) {
+    let server = create_test_server(pool).await;
     let token = get_test_token(&server).await;
 
     let activity_id = Uuid::now_v7();
@@ -317,10 +265,9 @@ async fn test_heartbeat_activity_not_found() {
     assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_heartbeat_wrong_worker() {
-    let (server, pool) = create_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_heartbeat_wrong_worker(pool: PgPool) {
+    let server = create_test_server(pool.clone()).await;
     let token = get_test_token(&server).await;
     let workflow_id = Uuid::now_v7();
 
@@ -356,14 +303,11 @@ async fn test_heartbeat_wrong_worker() {
         .await;
 
     assert_eq!(response.status_code(), StatusCode::CONFLICT);
-
-    cleanup_test_data(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_complete_activity_success() {
-    let (server, pool) = create_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_complete_activity_success(pool: PgPool) {
+    let server = create_test_server(pool.clone()).await;
     let token = get_test_token(&server).await;
     let workflow_id = Uuid::now_v7();
 
@@ -404,14 +348,11 @@ async fn test_complete_activity_success() {
 
     let body: serde_json::Value = response.json();
     assert_eq!(body["acknowledged"], true);
-
-    cleanup_test_data(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_complete_activity_idempotency() {
-    let (server, pool) = create_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_complete_activity_idempotency(pool: PgPool) {
+    let server = create_test_server(pool.clone()).await;
     let token = get_test_token(&server).await;
     let workflow_id = Uuid::now_v7();
 
@@ -463,14 +404,11 @@ async fn test_complete_activity_idempotency() {
         .await;
 
     assert_eq!(response2.status_code(), StatusCode::OK);
-
-    cleanup_test_data(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_complete_activity_validation_error() {
-    let (server, pool) = create_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_complete_activity_validation_error(pool: PgPool) {
+    let server = create_test_server(pool.clone()).await;
     let token = get_test_token(&server).await;
     let workflow_id = Uuid::now_v7();
 
@@ -507,14 +445,11 @@ async fn test_complete_activity_validation_error() {
         .await;
 
     assert_eq!(response.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
-
-    cleanup_test_data(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_fail_activity_success() {
-    let (server, pool) = create_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_fail_activity_success(pool: PgPool) {
+    let server = create_test_server(pool.clone()).await;
     let token = get_test_token(&server).await;
     let workflow_id = Uuid::now_v7();
 
@@ -559,14 +494,11 @@ async fn test_fail_activity_success() {
     let body: serde_json::Value = response.json();
     assert_eq!(body["acknowledged"], true);
     assert_eq!(body["will_retry"], false);
-
-    cleanup_test_data(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_fail_activity_validation_error() {
-    let (server, pool) = create_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_fail_activity_validation_error(pool: PgPool) {
+    let server = create_test_server(pool.clone()).await;
     let token = get_test_token(&server).await;
     let workflow_id = Uuid::now_v7();
 
@@ -607,14 +539,11 @@ async fn test_fail_activity_validation_error() {
         .await;
 
     assert_eq!(response.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
-
-    cleanup_test_data(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_complete_workflow_end_to_end() {
-    let (server, pool) = create_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_complete_workflow_end_to_end(pool: PgPool) {
+    let server = create_test_server(pool.clone()).await;
     let token = get_test_token(&server).await;
     let workflow_id = Uuid::now_v7();
 
@@ -689,8 +618,6 @@ async fn test_complete_workflow_end_to_end() {
     .unwrap();
 
     assert_eq!(event_count, Some(3));
-
-    cleanup_test_data(&pool, workflow_id).await;
 }
 
 // ============================================================================
@@ -743,12 +670,10 @@ async fn schedule_activity_with_timeout(
 /// Verifies fix for bug where timeout_seconds in activity settings was not
 /// being extracted and returned to the worker because the code looked for
 /// the wrong field name ("timeout" instead of "timeout_seconds").
-#[tokio::test]
-#[serial]
-async fn test_poll_returns_timeout_seconds_from_settings() {
-    let (server, pool) = create_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_poll_returns_timeout_seconds_from_settings(pool: PgPool) {
+    let server = create_test_server(pool.clone()).await;
     let token = get_test_token(&server).await;
-    drain_worker_queue(&pool, "std").await;
     let workflow_id = Uuid::now_v7();
 
     // Schedule activity with 5-second timeout (short for testing)
@@ -793,20 +718,16 @@ async fn test_poll_returns_timeout_seconds_from_settings() {
         Some(5),
         "settings should contain original timeout_seconds value"
     );
-
-    cleanup_test_data(&pool, workflow_id).await;
 }
 
 /// Test: Different timeout values are correctly passed (regression test)
 ///
 /// Tests various timeout values to ensure the extraction works correctly
 /// for different durations.
-#[tokio::test]
-#[serial]
-async fn test_poll_returns_various_timeout_values() {
-    let (server, pool) = create_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_poll_returns_various_timeout_values(pool: PgPool) {
+    let server = create_test_server(pool.clone()).await;
     let token = get_test_token(&server).await;
-    drain_worker_queue(&pool, "std").await;
 
     // Test different timeout values (using short values for fast tests)
     let test_cases = vec![
@@ -817,9 +738,6 @@ async fn test_poll_returns_various_timeout_values() {
     ];
 
     for (timeout, description) in test_cases {
-        // Drain before each iteration to ensure no stale activities
-        drain_worker_queue(&pool, "std").await;
-
         let workflow_id = Uuid::now_v7();
         schedule_activity_with_timeout(&pool, workflow_id, timeout).await;
 
@@ -853,8 +771,6 @@ async fn test_poll_returns_various_timeout_values() {
             description,
             timeout
         );
-
-        cleanup_test_data(&pool, workflow_id).await;
     }
 }
 
@@ -862,10 +778,9 @@ async fn test_poll_returns_various_timeout_values() {
 ///
 /// Ensures that when no timeout is configured, the timeout_seconds field
 /// is null (allowing worker to use its default).
-#[tokio::test]
-#[serial]
-async fn test_poll_returns_null_timeout_when_not_configured() {
-    let (server, pool) = create_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_poll_returns_null_timeout_when_not_configured(pool: PgPool) {
+    let server = create_test_server(pool.clone()).await;
     let token = get_test_token(&server).await;
     let workflow_id = Uuid::now_v7();
 
@@ -895,19 +810,15 @@ async fn test_poll_returns_null_timeout_when_not_configured() {
         activity["timeout_seconds"].is_null(),
         "timeout_seconds should be null when not configured in settings"
     );
-
-    cleanup_test_data(&pool, workflow_id).await;
 }
 
 /// Test: Activity with settings but no timeout_seconds returns null
 ///
 /// Tests the case where settings exist but timeout_seconds is not set.
-#[tokio::test]
-#[serial]
-async fn test_poll_returns_null_timeout_when_settings_has_no_timeout() {
-    let (server, pool) = create_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_poll_returns_null_timeout_when_settings_has_no_timeout(pool: PgPool) {
+    let server = create_test_server(pool.clone()).await;
     let token = get_test_token(&server).await;
-    drain_worker_queue(&pool, "std").await;
     let workflow_id = Uuid::now_v7();
 
     // Schedule activity with settings but no timeout_seconds
@@ -967,6 +878,4 @@ async fn test_poll_returns_null_timeout_when_settings_has_no_timeout() {
     // But other settings should be present
     assert_eq!(activity["settings"]["cache"], true);
     assert_eq!(activity["settings"]["cache_ttl"], 60);
-
-    cleanup_test_data(&pool, workflow_id).await;
 }

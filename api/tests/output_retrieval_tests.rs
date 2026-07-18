@@ -16,29 +16,10 @@ use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
-
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5432/kruxiaflow".to_string()
-    });
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
 
 /// Load test RSA keys
 fn test_rsa_private_key() -> String {
@@ -50,9 +31,7 @@ fn test_rsa_public_key() -> String {
 }
 
 /// Helper to create test AppState
-async fn setup_test_state() -> AppState {
-    let pool = setup_test_pool().await;
-
+async fn setup_test_state(pool: PgPool) -> AppState {
     let auth_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
         rsa_public_key_pem: Some(test_rsa_public_key()),
@@ -71,7 +50,7 @@ async fn setup_test_state() -> AppState {
          ON CONFLICT (client_id) DO NOTHING",
     )
     .bind("test-client")
-    .bind(hash("test-secret", bcrypt::DEFAULT_COST).unwrap())
+    .bind(hash("test-secret", 4).unwrap()) // min cost: real hashing strength is not under test
     .bind("Test Client")
     .execute(&pool)
     .await
@@ -102,8 +81,8 @@ async fn setup_test_state() -> AppState {
 }
 
 /// Helper to create test server
-async fn setup_test_server() -> TestServer {
-    let state = setup_test_state().await;
+async fn setup_test_server(pool: PgPool) -> TestServer {
+    let state = setup_test_state(pool).await;
     let app = app_router(state);
     TestServer::new(app).expect("Failed to create test server")
 }
@@ -281,12 +260,9 @@ async fn add_pending_activity(
 // Activity Output Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_get_activity_output_success() {
-    let state = setup_test_state().await;
-    let pool = state.db_pool.clone();
-    let server = TestServer::new(app_router(state)).expect("Failed to create test server");
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_activity_output_success(pool: PgPool) {
+    let server = setup_test_server(pool.clone()).await;
     let token = get_test_token(&server).await;
 
     // Deploy and submit workflow
@@ -318,12 +294,9 @@ async fn test_get_activity_output_success() {
     assert_eq!(body.output.as_ref().unwrap()["result"], "step1 output");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_activity_output_not_completed() {
-    let state = setup_test_state().await;
-    let pool = state.db_pool.clone();
-    let server = TestServer::new(app_router(state)).expect("Failed to create test server");
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_activity_output_not_completed(pool: PgPool) {
+    let server = setup_test_server(pool.clone()).await;
     let token = get_test_token(&server).await;
 
     // Deploy and submit workflow
@@ -357,10 +330,9 @@ async fn test_get_activity_output_not_completed() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_activity_output_workflow_not_found() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_activity_output_workflow_not_found(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_test_token(&server).await;
 
     let nonexistent_id = Uuid::now_v7();
@@ -387,10 +359,9 @@ async fn test_get_activity_output_workflow_not_found() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_activity_output_activity_not_found() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_activity_output_activity_not_found(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_test_token(&server).await;
 
     // Deploy and submit workflow
@@ -421,10 +392,9 @@ async fn test_get_activity_output_activity_not_found() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_activity_output_requires_authentication() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_activity_output_requires_authentication(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let workflow_id = Uuid::now_v7();
 
@@ -442,12 +412,9 @@ async fn test_get_activity_output_requires_authentication() {
 // Workflow Output Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_get_workflow_output_success() {
-    let state = setup_test_state().await;
-    let pool = state.db_pool.clone();
-    let server = TestServer::new(app_router(state)).expect("Failed to create test server");
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_workflow_output_success(pool: PgPool) {
+    let server = setup_test_server(pool.clone()).await;
     let token = get_test_token(&server).await;
 
     // Deploy and submit workflow
@@ -480,10 +447,9 @@ async fn test_get_workflow_output_success() {
     assert!(!body.terminal_outputs.contains(&"step1".to_string()));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_workflow_output_not_completed() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_workflow_output_not_completed(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_test_token(&server).await;
 
     // Deploy and submit workflow (not completed)
@@ -511,10 +477,9 @@ async fn test_get_workflow_output_not_completed() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_workflow_output_not_found() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_workflow_output_not_found(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_test_token(&server).await;
 
     let nonexistent_id = Uuid::now_v7();
@@ -530,10 +495,9 @@ async fn test_get_workflow_output_not_found() {
     assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_workflow_output_requires_authentication() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_workflow_output_requires_authentication(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let workflow_id = Uuid::now_v7();
 
@@ -548,10 +512,9 @@ async fn test_get_workflow_output_requires_authentication() {
 // File Download Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_download_file_not_found() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_download_file_not_found(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_test_token(&server).await;
 
     // Deploy and submit workflow
@@ -582,10 +545,9 @@ async fn test_download_file_not_found() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_download_file_requires_authentication() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_download_file_requires_authentication(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let workflow_id = Uuid::now_v7();
 
@@ -603,12 +565,9 @@ async fn test_download_file_requires_authentication() {
 // End-to-End Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_output_retrieval_end_to_end() {
-    let state = setup_test_state().await;
-    let pool = state.db_pool.clone();
-    let server = TestServer::new(app_router(state)).expect("Failed to create test server");
+#[sqlx::test(migrations = "../migrations")]
+async fn test_output_retrieval_end_to_end(pool: PgPool) {
+    let server = setup_test_server(pool.clone()).await;
     let token = get_test_token(&server).await;
 
     // Deploy workflow definition
@@ -683,10 +642,9 @@ async fn test_output_retrieval_end_to_end() {
 // File Upload Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_upload_file_success() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_upload_file_success(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_test_token(&server).await;
 
     // Deploy and submit workflow
@@ -722,10 +680,9 @@ async fn test_upload_file_success() {
     assert_eq!(body.content_type, Some("text/plain".to_string()));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_upload_and_download_file_roundtrip() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_upload_and_download_file_roundtrip(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_test_token(&server).await;
 
     // Deploy and submit workflow
@@ -788,10 +745,9 @@ async fn test_upload_and_download_file_roundtrip() {
     assert_eq!(download_response.as_bytes().as_ref(), file_content);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_upload_file_requires_authentication() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_upload_file_requires_authentication(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let workflow_id = Uuid::now_v7();
 
@@ -806,10 +762,9 @@ async fn test_upload_file_requires_authentication() {
     assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_upload_file_binary_content() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_upload_file_binary_content(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_test_token(&server).await;
 
     // Deploy and submit workflow
@@ -860,10 +815,9 @@ async fn test_upload_file_binary_content() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_upload_file_overwrite_existing() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_upload_file_overwrite_existing(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_test_token(&server).await;
 
     // Deploy and submit workflow

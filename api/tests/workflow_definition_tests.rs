@@ -17,28 +17,9 @@ use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_core::storage::PostgresStorage;
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
 
 /// Load test RSA keys
 fn test_rsa_private_key() -> String {
@@ -50,9 +31,7 @@ fn test_rsa_public_key() -> String {
 }
 
 /// Helper to create test AppState
-async fn setup_test_state() -> AppState {
-    let pool = setup_test_pool().await;
-
+async fn setup_test_state(pool: PgPool) -> AppState {
     let auth_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
         rsa_public_key_pem: Some(test_rsa_public_key()),
@@ -70,7 +49,7 @@ async fn setup_test_state() -> AppState {
          VALUES ($1, $2, $3, NOW())
          ON CONFLICT (client_id) DO NOTHING",
         "test-client",
-        hash("test-secret", bcrypt::DEFAULT_COST).unwrap(),
+        hash("test-secret", 4).unwrap(), // min cost: real hashing strength is not under test
         "Test Client"
     )
     .execute(&pool)
@@ -102,8 +81,8 @@ async fn setup_test_state() -> AppState {
 }
 
 /// Helper to create test server
-async fn setup_test_server() -> TestServer {
-    let state = setup_test_state().await;
+async fn setup_test_server(pool: PgPool) -> TestServer {
+    let state = setup_test_state(pool).await;
     let router = app_router(state);
     TestServer::new(router).expect("Failed to create test server")
 }
@@ -128,10 +107,9 @@ async fn get_valid_token(server: &TestServer) -> String {
 // Workflow Definition Deployment Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_deploy_workflow_definition() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_deploy_workflow_definition(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_valid_token(&server).await;
 
     let definition = json!({
@@ -163,10 +141,9 @@ async fn test_deploy_workflow_definition() {
     assert!(body.version.contains('.')); // Should have dot separator
 }
 
-#[tokio::test]
-#[serial]
-async fn test_deploy_multiple_versions() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_deploy_multiple_versions(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_valid_token(&server).await;
 
     // Deploy first version with one activity
@@ -234,10 +211,9 @@ async fn test_deploy_multiple_versions() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_deploy_invalid_workflow() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_deploy_invalid_workflow(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_valid_token(&server).await;
 
     // Invalid workflow: references non-existent activity
@@ -275,10 +251,9 @@ async fn test_deploy_invalid_workflow() {
     assert!(details_str.contains("not found") || details_str.contains("step2"));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_deploy_workflow_with_cycle() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_deploy_workflow_with_cycle(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_valid_token(&server).await;
 
     // Invalid workflow: contains cycle
@@ -323,10 +298,9 @@ async fn test_deploy_workflow_with_cycle() {
     assert!(details_str.contains("cycle"));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_deploy_workflow_with_no_activities() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_deploy_workflow_with_no_activities(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_valid_token(&server).await;
 
     // Invalid workflow: no activities
@@ -347,10 +321,9 @@ async fn test_deploy_workflow_with_no_activities() {
     assert_eq!(response.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_deploy_workflow_with_duplicate_activity_keys() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_deploy_workflow_with_duplicate_activity_keys(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_valid_token(&server).await;
 
     // Invalid workflow: duplicate activity keys
@@ -389,10 +362,9 @@ async fn test_deploy_workflow_with_duplicate_activity_keys() {
 // Workflow Definition Retrieval Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_list_workflow_definitions() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_list_workflow_definitions(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_valid_token(&server).await;
 
     // Deploy a few definitions
@@ -448,10 +420,9 @@ async fn test_list_workflow_definitions() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_workflow_definition_by_version() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_workflow_definition_by_version(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_valid_token(&server).await;
 
     // Deploy workflow
@@ -499,10 +470,9 @@ async fn test_get_workflow_definition_by_version() {
     assert_eq!(body.activities[0].key, "step1");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_latest_workflow_definition() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_latest_workflow_definition(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_valid_token(&server).await;
 
     // Deploy multiple versions with different parameters to ensure new versions are created
@@ -558,10 +528,9 @@ async fn test_get_latest_workflow_definition() {
     assert!(!body.version.is_empty());
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_nonexistent_workflow() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_nonexistent_workflow(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_valid_token(&server).await;
 
     let response = server
@@ -583,10 +552,9 @@ async fn test_get_nonexistent_workflow() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_nonexistent_version() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_nonexistent_version(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_valid_token(&server).await;
 
     // Deploy a workflow
@@ -625,10 +593,9 @@ async fn test_get_nonexistent_version() {
 // Authentication Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_deploy_requires_authentication() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_deploy_requires_authentication(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let definition = json!({
         "name": "test_workflow_auth",
@@ -649,10 +616,9 @@ async fn test_deploy_requires_authentication() {
     assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_list_requires_authentication() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_list_requires_authentication(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     // No Authorization header
     let response = server.get("/api/v1/workflow_definitions").await;
@@ -660,10 +626,9 @@ async fn test_list_requires_authentication() {
     assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_get_requires_authentication() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_get_requires_authentication(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     // No Authorization header
     let response = server
@@ -677,10 +642,9 @@ async fn test_get_requires_authentication() {
 // Complex Workflow Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_deploy_complex_workflow_with_dependencies() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_deploy_complex_workflow_with_dependencies(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_valid_token(&server).await;
 
     let definition = json!({

@@ -12,29 +12,9 @@ use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    // Run migrations
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
 
 /// Load test RSA private key
 fn test_rsa_private_key() -> String {
@@ -47,9 +27,7 @@ fn test_rsa_public_key() -> String {
 }
 
 /// Helper to create test AppState
-async fn setup_test_state() -> AppState {
-    let pool = setup_test_pool().await;
-
+async fn setup_test_state(pool: PgPool) -> AppState {
     let auth_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
         rsa_public_key_pem: Some(test_rsa_public_key()),
@@ -67,7 +45,7 @@ async fn setup_test_state() -> AppState {
          VALUES ($1, $2, $3, NOW())
          ON CONFLICT (client_id) DO NOTHING",
         "test-client-users",
-        hash("test-secret", bcrypt::DEFAULT_COST).unwrap(),
+        hash("test-secret", 4).unwrap(), // min cost: real hashing strength is not under test
         "Test Client for User Tests"
     )
     .execute(&pool)
@@ -99,8 +77,8 @@ async fn setup_test_state() -> AppState {
 }
 
 /// Helper to create test server
-async fn setup_test_server() -> TestServer {
-    let state = setup_test_state().await;
+async fn setup_test_server(pool: PgPool) -> TestServer {
+    let state = setup_test_state(pool).await;
     let router = app_router(state);
     TestServer::new(router).expect("Failed to create test server")
 }
@@ -121,27 +99,13 @@ async fn get_auth_token(server: &TestServer) -> String {
     body["access_token"].as_str().unwrap().to_string()
 }
 
-/// Cleanup test user
-async fn cleanup_test_user(username: &str) {
-    let pool = setup_test_pool().await;
-    sqlx::query!("DELETE FROM oauth_refresh_tokens WHERE user_id IN (SELECT id FROM oauth_users WHERE username = $1)", username)
-        .execute(&pool)
-        .await
-        .ok();
-    sqlx::query!("DELETE FROM oauth_users WHERE username = $1", username)
-        .execute(&pool)
-        .await
-        .ok();
-}
-
 // ============================================================================
 // Authentication requirement tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_create_user_requires_auth() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_create_user_requires_auth(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .post("/api/v1/oauth/users")
@@ -159,15 +123,11 @@ async fn test_create_user_requires_auth() {
 // Successful creation tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_create_user_success() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_create_user_success(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_auth_token(&server).await;
     let username = "test-create-user-success";
-
-    // Pre-cleanup
-    cleanup_test_user(username).await;
 
     let response = server
         .post("/api/v1/oauth/users")
@@ -187,19 +147,13 @@ async fn test_create_user_success() {
     assert_eq!(body["is_active"], true);
     assert!(body["id"].is_string());
     assert!(body["created_at"].is_string());
-
-    cleanup_test_user(username).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_created_user_can_login() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_created_user_can_login(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_auth_token(&server).await;
     let username = "test-created-can-login";
-
-    // Pre-cleanup
-    cleanup_test_user(username).await;
 
     // Create user via API
     let create_response = server
@@ -230,23 +184,17 @@ async fn test_created_user_can_login() {
     assert!(login_body["access_token"].is_string());
     assert_eq!(login_body["token_type"], "Bearer");
     assert!(login_body["refresh_token"].is_string());
-
-    cleanup_test_user(username).await;
 }
 
 // ============================================================================
 // Idempotent creation tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_create_user_idempotent() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_create_user_idempotent(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_auth_token(&server).await;
     let username = "test-idempotent-user";
-
-    // Pre-cleanup
-    cleanup_test_user(username).await;
 
     // First creation
     let response1 = server
@@ -290,18 +238,15 @@ async fn test_create_user_idempotent() {
         .await;
 
     assert_eq!(login_response.status_code(), StatusCode::OK);
-
-    cleanup_test_user(username).await;
 }
 
 // ============================================================================
 // Validation error tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_create_user_empty_username() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_create_user_empty_username(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_auth_token(&server).await;
 
     let response = server
@@ -319,10 +264,9 @@ async fn test_create_user_empty_username() {
     assert!(body.contains("username is required"));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_create_user_empty_email() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_create_user_empty_email(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_auth_token(&server).await;
 
     let response = server
@@ -340,10 +284,9 @@ async fn test_create_user_empty_email() {
     assert!(body.contains("email is required"));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_create_user_empty_password() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_create_user_empty_password(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_auth_token(&server).await;
 
     let response = server
@@ -361,10 +304,9 @@ async fn test_create_user_empty_password() {
     assert!(body.contains("password is required"));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_create_user_whitespace_username() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_create_user_whitespace_username(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let token = get_auth_token(&server).await;
 
     let response = server

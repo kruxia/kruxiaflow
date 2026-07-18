@@ -3,49 +3,10 @@ use kruxiaflow_core::events::{EventSource, PostgresEventSource};
 use kruxiaflow_core::queue::{Activity, ActivityQueue, PostgresQueue, QueueConfig};
 use rust_decimal::Decimal;
 use serde_json::json;
-use serial_test::serial;
 use sqlx::PgPool;
 use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
-
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    // Run migrations
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
-
-/// Helper to clean up test data
-async fn cleanup_activities(pool: &PgPool, workflow_id: Uuid) {
-    sqlx::query!(
-        "DELETE FROM activity_queue WHERE workflow_id = $1",
-        workflow_id
-    )
-    .execute(pool)
-    .await
-    .expect("Failed to cleanup test data");
-
-    sqlx::query!(
-        "DELETE FROM workflow_events WHERE workflow_id = $1",
-        workflow_id
-    )
-    .execute(pool)
-    .await
-    .expect("Failed to cleanup events");
-}
 
 /// Helper to schedule a test activity
 async fn schedule_test_activity(
@@ -74,10 +35,8 @@ async fn schedule_test_activity(
         .expect("Failed to schedule test activity");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_poll_activities_success() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_poll_activities_success(pool: PgPool) {
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
     let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
@@ -95,14 +54,10 @@ async fn test_poll_activities_success() {
     let activities = result.unwrap();
     assert_eq!(activities.len(), 2);
     assert_eq!(activities[0].worker, "payments");
-
-    cleanup_activities(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_poll_activities_empty() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_poll_activities_empty(pool: PgPool) {
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
     let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
@@ -118,10 +73,8 @@ async fn test_poll_activities_empty() {
     assert_eq!(activities.len(), 0);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_poll_activities_concurrent_workers() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_poll_activities_concurrent_workers(pool: PgPool) {
     let queue1 = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
     let event_source1 = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
@@ -164,14 +117,10 @@ async fn test_poll_activities_concurrent_workers() {
     ids.sort();
     ids.dedup();
     assert_eq!(ids.len(), 10);
-
-    cleanup_activities(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_poll_activities_max_limit() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_poll_activities_max_limit(pool: PgPool) {
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
     let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
@@ -196,14 +145,10 @@ async fn test_poll_activities_max_limit() {
     assert!(result.is_ok());
     let activities = result.unwrap();
     assert_eq!(activities.len(), 5);
-
-    cleanup_activities(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_heartbeat_activity_success() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_heartbeat_activity_success(pool: PgPool) {
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
     let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
@@ -227,14 +172,10 @@ async fn test_heartbeat_activity_success() {
 
     assert!(result.is_ok());
     assert_eq!(result.unwrap(), 30);
-
-    cleanup_activities(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_heartbeat_wrong_worker() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_heartbeat_wrong_worker(pool: PgPool) {
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
     let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
@@ -261,14 +202,10 @@ async fn test_heartbeat_wrong_worker() {
         result.unwrap_err(),
         kruxiaflow_core::activity::ActivityWorkerError::WrongWorker
     ));
-
-    cleanup_activities(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_heartbeat_activity_not_found() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_heartbeat_activity_not_found(pool: PgPool) {
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
     let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
@@ -285,10 +222,8 @@ async fn test_heartbeat_activity_not_found() {
     ));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_complete_activity_success() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_complete_activity_success(pool: PgPool) {
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
     let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
@@ -347,14 +282,10 @@ async fn test_complete_activity_success() {
     assert_eq!(event.event_type, "ActivityCompleted");
     assert_eq!(event.payload["outputs"], output);
     assert_eq!(event.payload["cost_usd"], "0.05");
-
-    cleanup_activities(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_complete_activity_idempotency() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_complete_activity_idempotency(pool: PgPool) {
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
     let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
@@ -384,14 +315,10 @@ async fn test_complete_activity_idempotency() {
         .await;
 
     assert!(result.is_ok());
-
-    cleanup_activities(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_complete_activity_wrong_worker() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_complete_activity_wrong_worker(pool: PgPool) {
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
     let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
@@ -419,14 +346,10 @@ async fn test_complete_activity_wrong_worker() {
         result.unwrap_err(),
         kruxiaflow_core::activity::ActivityWorkerError::WrongWorker
     ));
-
-    cleanup_activities(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_fail_activity_success() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_fail_activity_success(pool: PgPool) {
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
     let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
@@ -487,14 +410,10 @@ async fn test_fail_activity_success() {
     assert_eq!(event.payload["error_code"], "PAYMENT_DECLINED");
     assert_eq!(event.payload["retryable"], false);
     assert_eq!(event.payload["will_retry"], false);
-
-    cleanup_activities(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_fail_activity_wrong_worker() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_fail_activity_wrong_worker(pool: PgPool) {
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
     let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;
@@ -527,14 +446,10 @@ async fn test_fail_activity_wrong_worker() {
         result.unwrap_err(),
         kruxiaflow_core::activity::ActivityWorkerError::WrongWorker
     ));
-
-    cleanup_activities(&pool, workflow_id).await;
 }
 
-#[tokio::test]
-#[serial]
-async fn test_fail_activity_not_found() {
-    let pool = setup_test_pool().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_fail_activity_not_found(pool: PgPool) {
     let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
         as Arc<dyn ActivityQueue>;
     let event_source = Arc::new(PostgresEventSource::new(pool.clone())) as Arc<dyn EventSource>;

@@ -5,29 +5,9 @@ use kruxiaflow_core::PostgresSubscriptionService;
 use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
-use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
-
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    // Run migrations from workspace root
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
 
 /// Generate test RSA private key
 fn test_rsa_private_key() -> String {
@@ -41,9 +21,7 @@ fn test_rsa_public_key() -> String {
 }
 
 /// Helper to create test AppState
-async fn setup_test_state() -> AppState {
-    let pool = setup_test_pool().await;
-
+async fn setup_test_state(pool: PgPool) -> AppState {
     // Create auth service for testing
     let auth_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
@@ -85,16 +63,15 @@ async fn setup_test_state() -> AppState {
 }
 
 /// Helper to create test server
-async fn setup_test_server() -> TestServer {
-    let state = setup_test_state().await;
+async fn setup_test_server(pool: PgPool) -> TestServer {
+    let state = setup_test_state(pool).await;
     let router = app_router(state);
     TestServer::new(router).expect("Failed to create test server")
 }
 
-#[tokio::test]
-#[serial]
-async fn test_liveness_endpoint() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_liveness_endpoint(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server.get("/health").await;
 
@@ -104,10 +81,9 @@ async fn test_liveness_endpoint() {
     assert_eq!(body["status"], "ok");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_liveness_endpoint_multiple_calls() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_liveness_endpoint_multiple_calls(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     // Simulate repeated health checks (like Kubernetes)
     for _ in 0..10 {
@@ -116,10 +92,9 @@ async fn test_liveness_endpoint_multiple_calls() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_readiness_endpoint_healthy() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_readiness_endpoint_healthy(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server.get("/health/ready").await;
 
@@ -134,10 +109,9 @@ async fn test_readiness_endpoint_healthy() {
     assert_eq!(body["checks"]["queue"], "ok");
 }
 
-#[tokio::test]
-#[serial]
-async fn test_readiness_endpoint_multiple_calls() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_readiness_endpoint_multiple_calls(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     // Simulate repeated readiness checks
     for _ in 0..10 {
@@ -149,10 +123,9 @@ async fn test_readiness_endpoint_multiple_calls() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_service_info_endpoint() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_service_info_endpoint(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server.get("/api/v1/info").await;
 
@@ -176,20 +149,27 @@ async fn test_service_info_endpoint() {
     assert!(features.iter().any(|f| f == "websockets"));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_service_info_no_auth_required() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_service_info_no_auth_required(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     // Verify endpoint doesn't require authentication
     let response = server.get("/api/v1/info").await;
     assert_eq!(response.status_code(), StatusCode::OK);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_health_checks_run_in_parallel() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_health_checks_run_in_parallel(pool: PgPool) {
+    let server = setup_test_server(pool).await;
+
+    // Warm up the pool first: with per-test isolated databases running in
+    // parallel, early requests pay cold connection-establishment costs and
+    // contend with the other tests' concurrent database creation/migration,
+    // which is unrelated to whether the checks run in parallel.
+    for _ in 0..10 {
+        let warmup = server.get("/health/ready").await;
+        assert_eq!(warmup.status_code(), StatusCode::OK);
+    }
 
     // Measure readiness check latency
     let start = std::time::Instant::now();
@@ -208,10 +188,9 @@ async fn test_health_checks_run_in_parallel() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_liveness_latency() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_liveness_latency(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     // Measure liveness check latency
     let start = std::time::Instant::now();
@@ -229,10 +208,9 @@ async fn test_liveness_latency() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_all_health_endpoints_available() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_all_health_endpoints_available(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     // Test that all health endpoints are registered and accessible
     let endpoints = vec!["/health", "/health/ready", "/api/v1/info"];
@@ -248,10 +226,9 @@ async fn test_all_health_endpoints_available() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_readiness_includes_all_checks() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_readiness_includes_all_checks(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server.get("/health/ready").await;
     let body: serde_json::Value = response.json();
@@ -271,10 +248,9 @@ async fn test_readiness_includes_all_checks() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_kubernetes_simulation() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_kubernetes_simulation(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     // Simulate Kubernetes probes running sequentially (since TestServer can't be cloned)
     // In production, these would run on separate threads/pods
@@ -295,11 +271,8 @@ async fn test_kubernetes_simulation() {
 // Tests for individual health check functions
 // These test the health check functions directly, not through HTTP endpoints
 
-#[tokio::test]
-#[serial]
-async fn test_check_database_health_success() {
-    let pool = setup_test_pool().await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_check_database_health_success(pool: PgPool) {
     // Test that database health check passes with a working database
     let result = kruxiaflow_api::health::check_database_health(&pool).await;
     assert!(
@@ -308,11 +281,8 @@ async fn test_check_database_health_success() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_check_event_source_health_success() {
-    let pool = setup_test_pool().await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_check_event_source_health_success(pool: PgPool) {
     // Test that event source health check passes
     // Event source is PostgreSQL-based, so this tests the event_source_commands table
     let result = kruxiaflow_api::health::check_event_source_health(&pool).await;
@@ -322,11 +292,8 @@ async fn test_check_event_source_health_success() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_check_activity_queue_health_success() {
-    let pool = setup_test_pool().await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_check_activity_queue_health_success(pool: PgPool) {
     // Test that activity queue health check passes
     // Activity queue is PostgreSQL-based, so this tests the activity_tasks table
     let result = kruxiaflow_api::health::check_activity_queue_health(&pool).await;
@@ -341,7 +308,6 @@ async fn test_check_activity_queue_health_success() {
 // ============================================================================
 
 #[tokio::test]
-#[serial]
 async fn test_database_health_with_invalid_connection() {
     // Create a pool with an invalid connection string
     let invalid_pool_result =
@@ -358,7 +324,6 @@ async fn test_database_health_with_invalid_connection() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_event_source_health_maps_errors_correctly() {
     // Test that event source health check properly maps database errors
     // Create a pool with an invalid connection
@@ -385,7 +350,6 @@ async fn test_event_source_health_maps_errors_correctly() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_activity_queue_health_with_invalid_connection() {
     // Test activity queue health check with invalid connection
     let invalid_pool_result =
@@ -410,11 +374,8 @@ async fn test_activity_queue_health_with_invalid_connection() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_health_checks_with_closed_pool() {
-    let pool = setup_test_pool().await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_health_checks_with_closed_pool(pool: PgPool) {
     // Close the pool
     pool.close().await;
 
@@ -438,11 +399,8 @@ async fn test_health_checks_with_closed_pool() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_multiple_concurrent_health_checks() {
-    let pool = setup_test_pool().await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_multiple_concurrent_health_checks(pool: PgPool) {
     // Run multiple health checks concurrently to test thread safety
     let handles: Vec<_> = (0..10)
         .map(|_| {
@@ -460,11 +418,8 @@ async fn test_multiple_concurrent_health_checks() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_health_check_response_time() {
-    let pool = setup_test_pool().await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_health_check_response_time(pool: PgPool) {
     // Measure response time for database health check
     let start = std::time::Instant::now();
     let result = kruxiaflow_api::health::check_database_health(&pool).await;
@@ -481,11 +436,8 @@ async fn test_health_check_response_time() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_all_health_checks_return_consistent_results() {
-    let pool = setup_test_pool().await;
-
+#[sqlx::test(migrations = "../migrations")]
+async fn test_all_health_checks_return_consistent_results(pool: PgPool) {
     // Run all health checks multiple times and verify consistent results
     for _ in 0..5 {
         let db_result = kruxiaflow_api::health::check_database_health(&pool).await;
@@ -501,12 +453,9 @@ async fn test_all_health_checks_return_consistent_results() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_health_check_error_types() {
+#[sqlx::test(migrations = "../migrations")]
+async fn test_health_check_error_types(pool: PgPool) {
     use kruxiaflow_api::health::HealthCheckError;
-
-    let pool = setup_test_pool().await;
 
     // Close the pool to trigger errors
     pool.close().await;
@@ -538,25 +487,15 @@ async fn test_health_check_error_types() {
     }
 }
 
-#[tokio::test]
-#[serial]
-async fn test_health_check_with_minimal_pool() {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    // Create a minimal pool with just 1 connection
+#[sqlx::test(migrations = "../migrations")]
+async fn test_health_check_with_minimal_pool(pool: PgPool) {
+    // Create a minimal pool with just 1 connection to the same isolated test database
+    let options = (*pool.connect_options()).clone();
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(1)
-        .connect(&database_url)
+        .connect_with(options)
         .await
         .expect("Failed to connect with minimal pool");
-
-    // Run migrations
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
 
     // Health checks should still work with minimal pool
     let db_result = kruxiaflow_api::health::check_database_health(&pool).await;

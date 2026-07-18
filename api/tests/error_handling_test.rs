@@ -5,30 +5,10 @@ use kruxiaflow_core::PostgresSubscriptionService;
 use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
-use serial_test::serial;
 use sqlx::PgPool;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
-
-/// Helper to create test database pool
-async fn setup_test_pool() -> PgPool {
-    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-        "postgres://kruxiaflow:kruxiaflow_dev@127.0.0.1:5433/kruxiaflow".to_string()
-    });
-
-    let pool = PgPool::connect(&database_url)
-        .await
-        .expect("Failed to connect to test database");
-
-    // Run migrations from workspace root
-    sqlx::migrate!("../migrations")
-        .run(&pool)
-        .await
-        .expect("Failed to run migrations");
-
-    pool
-}
 
 /// Generate test RSA private key
 fn test_rsa_private_key() -> String {
@@ -42,9 +22,7 @@ fn test_rsa_public_key() -> String {
 }
 
 /// Helper to create test AppState
-async fn setup_test_state() -> AppState {
-    let pool = setup_test_pool().await;
-
+async fn setup_test_state(pool: PgPool) -> AppState {
     // Create auth service for testing
     let auth_config = AuthConfig {
         rsa_private_key_pem: test_rsa_private_key(),
@@ -86,8 +64,8 @@ async fn setup_test_state() -> AppState {
 }
 
 /// Helper to create test server
-async fn setup_test_server() -> TestServer {
-    let state = setup_test_state().await;
+async fn setup_test_server(pool: PgPool) -> TestServer {
+    let state = setup_test_state(pool).await;
     let router = app_router(state);
     TestServer::new(router).expect("Failed to create test server")
 }
@@ -96,10 +74,9 @@ async fn setup_test_server() -> TestServer {
 // Request ID Middleware Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_request_id_generated() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_request_id_generated(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let response = server.get("/health").await;
 
     assert!(response.headers().contains_key("x-request-id"));
@@ -117,10 +94,9 @@ async fn test_request_id_generated() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_request_id_preserved_from_client() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_request_id_preserved_from_client(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let client_request_id = Uuid::now_v7().to_string();
 
     let response = server
@@ -141,10 +117,9 @@ async fn test_request_id_preserved_from_client() {
     assert_eq!(response_request_id, client_request_id);
 }
 
-#[tokio::test]
-#[serial]
-async fn test_request_id_on_all_endpoints() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_request_id_on_all_endpoints(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let endpoints = vec!["/health", "/health/ready", "/api/v1/info"];
 
@@ -162,10 +137,9 @@ async fn test_request_id_on_all_endpoints() {
 // CORS Headers Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_cors_headers_present() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_cors_headers_present(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .method(Method::OPTIONS, "/api/v1/info")
@@ -189,10 +163,9 @@ async fn test_cors_headers_present() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_cors_allows_all_origins() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_cors_allows_all_origins(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .get("/health")
@@ -207,10 +180,9 @@ async fn test_cors_allows_all_origins() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_cors_exposes_request_id_header() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_cors_exposes_request_id_header(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response = server
         .method(Method::OPTIONS, "/health")
@@ -239,10 +211,9 @@ async fn test_cors_exposes_request_id_header() {
 // Error Response Format Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_404_error_format() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_404_error_format(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let response = server.get("/api/v1/nonexistent").await;
 
     assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
@@ -254,10 +225,9 @@ async fn test_404_error_format() {
     assert!(!body.error.message.is_empty());
 }
 
-#[tokio::test]
-#[serial]
-async fn test_error_code_serialization_format() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_error_code_serialization_format(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let response = server.get("/api/v1/nonexistent").await;
 
     // Get raw JSON text to verify serialization format
@@ -274,10 +244,9 @@ async fn test_error_code_serialization_format() {
 // OpenAPI Endpoint Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_openapi_spec_accessible() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_openapi_spec_accessible(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let response = server.get("/api/v1/openapi.json").await;
 
     assert_eq!(response.status_code(), StatusCode::OK);
@@ -288,10 +257,9 @@ async fn test_openapi_spec_accessible() {
     assert!(spec["components"].is_object());
 }
 
-#[tokio::test]
-#[serial]
-async fn test_openapi_spec_includes_health_endpoints() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_openapi_spec_includes_health_endpoints(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let response = server.get("/api/v1/openapi.json").await;
 
     let spec: serde_json::Value = response.json();
@@ -309,10 +277,9 @@ async fn test_openapi_spec_includes_health_endpoints() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_openapi_spec_includes_error_schemas() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_openapi_spec_includes_error_schemas(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let response = server.get("/api/v1/openapi.json").await;
 
     let spec: serde_json::Value = response.json();
@@ -333,10 +300,9 @@ async fn test_openapi_spec_includes_error_schemas() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_redoc_ui_accessible() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_redoc_ui_accessible(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let response = server.get("/api/v1/docs").await;
 
     assert_eq!(response.status_code(), StatusCode::OK);
@@ -350,10 +316,9 @@ async fn test_redoc_ui_accessible() {
     assert!(content_type.contains("text/html"));
 }
 
-#[tokio::test]
-#[serial]
-async fn test_redoc_ui_contains_api_title() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_redoc_ui_contains_api_title(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let response = server.get("/api/v1/docs").await;
 
     let body = response.text();
@@ -369,10 +334,9 @@ async fn test_redoc_ui_contains_api_title() {
 // Middleware Stack Integration Tests
 // ============================================================================
 
-#[tokio::test]
-#[serial]
-async fn test_middleware_stack_applied_correctly() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_middleware_stack_applied_correctly(pool: PgPool) {
+    let server = setup_test_server(pool).await;
     let response = server
         .get("/health")
         .add_header(HeaderName::from_static("origin"), "https://example.com")
@@ -391,10 +355,9 @@ async fn test_middleware_stack_applied_correctly() {
     );
 }
 
-#[tokio::test]
-#[serial]
-async fn test_request_id_different_on_each_request() {
-    let server = setup_test_server().await;
+#[sqlx::test(migrations = "../migrations")]
+async fn test_request_id_different_on_each_request(pool: PgPool) {
+    let server = setup_test_server(pool).await;
 
     let response1 = server.get("/health").await;
     let response2 = server.get("/health").await;
