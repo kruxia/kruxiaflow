@@ -23,6 +23,12 @@ set -eu
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# The script runs the full stack: enable the redis cache profile and provider
+# (the base compose file defaults to no cache so the curl-able quickstart stays
+# lean). Explicit env values still win.
+export COMPOSE_PROFILES="${COMPOSE_PROFILES:-cache}"
+export KRUXIAFLOW_CACHE_PROVIDER="${KRUXIAFLOW_CACHE_PROVIDER:-redis}"
+
 # Colors for output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -120,7 +126,7 @@ main() {
             case "$mode" in
                 develop)
                     log_info "Starting development environment"
-                    exec docker compose -f docker-compose.yml -f docker-compose.develop.yml up $other_args
+                    exec docker compose -f docker-compose.yml -f docker-compose.override.yml up $other_args
                     ;;
                 examples)
                     log_info "Starting examples environment (Mailpit + examples database)"

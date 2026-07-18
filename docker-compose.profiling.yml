@@ -9,11 +9,13 @@
 services:
   kruxiaflow:
     build:
+      context: .
+      dockerfile: Dockerfile
       target: profiling
     environment:
       # Separate database for profiling
-      DATABASE_URL: postgres://${POSTGRES_USER:-kruxiaflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/kruxiaflow_profiling
-      DATABASE_ADMIN_URL: postgres://${POSTGRES_USER:-kruxiaflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-kruxiaflow}
+      DATABASE_URL: postgres://${POSTGRES_USER:-kruxiaflow}:${POSTGRES_PASSWORD:-kruxiaflow-local}@postgres:5432/kruxiaflow_profiling
+      DATABASE_ADMIN_URL: postgres://${POSTGRES_USER:-kruxiaflow}:${POSTGRES_PASSWORD:-kruxiaflow-local}@postgres:5432/${POSTGRES_DB:-kruxiaflow}
       CARGO_HOME: /opt/.cargo
       CARGO_TARGET_DIR: /opt/target
       # Profiling uses minimal workers

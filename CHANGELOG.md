@@ -37,6 +37,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   match the workspace version.
 - CI caching: prebuilt tool binaries (cargo-llvm-cov, sqlx-cli, cross) instead
   of source installs, cache-on-failure for cargo caches, Docker layer caching.
+- **Compose unification**: the root `docker-compose.yml` is now the published
+  quickstart file — pull-only (the `build:` section moved to
+  `docker-compose.override.yml`, which Compose auto-loads for plain
+  `docker compose up` in a checkout; `./docker` passes explicit `-f` lists and
+  is unaffected), self-initializing (keygen + LLM-catalog one-shot containers
+  with named volumes replace the bind-mounted `docker-keys/` and `config/`
+  prerequisite), secure by default (`KRUXIAFLOW_INSECURE_DEV=true` opts in;
+  fixed local OAuth client defaults otherwise, guarded by the new default
+  127.0.0.1 API port binding). Redis now sits behind the `cache` compose
+  profile with `KRUXIAFLOW_CACHE_PROVIDER` defaulting to `noop` (`./docker`
+  enables both automatically; standalone users opt in via `COMPOSE_PROFILES`).
+  Postgres/redis host ports moved to the override file and bind loopback only;
+  the `platform: linux/amd64` pins are gone (images are multi-arch);
+  `docker-compose.develop.yml` was renamed to `docker-compose.override.yml`
+  and `quickstart/docker-compose.yml` removed.
 
 - **License changed from AGPL-3.0 to Apache-2.0** (2026-07-15). All current and
   future releases are Apache-2.0; releases prior to this change remain AGPL-3.0.
@@ -55,11 +70,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Startup refuses non-loopback binds without a second explicit override, warns
   loudly, and surfaces the flag in `/health` and `/api/v1/info`. Production
   behavior with the flag absent is unchanged.
-- **Quickstart** (`quickstart/docker-compose.yml`, published at
-  kruxiaflow.com/quickstart/): one curl + `docker compose up` runs Kruxia Flow
-  + PostgreSQL in insecure dev mode on 127.0.0.1, with generated local keys
-  and the LLM pricing catalog seeded — first budgeted workflow with zero auth
-  steps. README Getting Started rewritten around this flow.
+- **Quickstart** (the root `docker-compose.yml`, published at
+  kruxiaflow.com/quickstart/): one curl + `KRUXIAFLOW_INSECURE_DEV=true docker
+  compose up -d` runs Kruxia Flow + PostgreSQL on 127.0.0.1, with generated
+  local keys and the LLM pricing catalog seeded — first budgeted workflow with
+  zero auth steps. README Getting Started rewritten around this flow.
 - Release CI (`.github/workflows/release.yml`): tagged releases build binaries
   (x86_64-linux-gnu, aarch64-linux-gnu, aarch64-macos) with SHA-256 checksums,
   publish multi-arch Docker images (`kruxia/kruxiaflow`), and create a GitHub

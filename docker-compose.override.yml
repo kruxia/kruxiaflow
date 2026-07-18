@@ -1,17 +1,26 @@
-# Development overrides
+# Development overrides — auto-loaded by plain `docker compose up` in a checkout.
 #
-# Usage:
+# The `./docker` script passes explicit -f file lists, which suppresses this
+# file — so `./docker up` (production, pull-only) is unaffected. To use it
+# explicitly:
 #   ./docker up --develop
-#   docker compose -f docker-compose.yml -f docker-compose.develop.yml up
+#   docker compose -f docker-compose.yml -f docker-compose.override.yml up
+#
+# Enable the redis cache alongside: docker compose --profile cache up
+# (`./docker` enables the cache profile automatically.)
 
 services:
-  # Expose postgres and redis on frontend network for local access
+  # Expose postgres and redis to the host for local tooling (loopback only)
   postgres:
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     networks:
       - backend
       - frontend
 
   redis:
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     networks:
       - backend
       - frontend
@@ -43,9 +52,13 @@ services:
       com.kruxiaflow.service: "email"
       com.kruxiaflow.component: "mailpit"
 
-  # Override kruxiaflow for development: source mounting, cargo caches, no healthcheck
+  # Override kruxiaflow for development: build from source, source mounting,
+  # cargo caches, no healthcheck. The base file is pull-only; the build
+  # definition lives here.
   kruxiaflow:
     build:
+      context: .
+      dockerfile: Dockerfile
       target: develop
     # No health check for develop - Rust build during startup takes several minutes
     # Use ./docker logs -f to monitor startup progress
@@ -67,6 +80,8 @@ services:
       - cargo_cache:/opt/.cargo/registry
       - cargo_git_cache:/opt/.cargo/git
       - cargo_target_cache:/opt/target
+      # Local catalog instead of the fetched copy in the kruxiaflow_config volume
+      - ./config:/config:ro
 
 volumes:
   cargo_cache:
