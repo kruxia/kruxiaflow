@@ -52,3 +52,4 @@ var/
 py/.coverage
 py/coverage.xml
 py/examples/.coverage
+*.env
