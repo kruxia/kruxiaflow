@@ -1,16 +1,30 @@
-# Kruxia Flow Docker Compose - Production Base
+# Kruxia Flow Docker Compose — quickstart and production base
 #
-# This file defines the production-ready configuration.
+# Quickstart (no clone required) — budgeted workflows in one command:
+#   curl -fsSL https://kruxiaflow.com/quickstart/docker-compose.yml -o docker-compose.yml
+#   KRUXIAFLOW_INSECURE_DEV=true ANTHROPIC_API_KEY=sk-... docker compose up -d
 #
-# Usage:
-#   ./docker up                                      # Production (default)
-#   ./docker up --develop                            # Development
-#   ./docker up --profiling                          # Profiling
+# Then submit your first budgeted workflow — no tokens, no auth setup:
+# see https://github.com/kruxia/kruxiaflow#getting-started
 #
-# Required environment variables (see .env.example):
-#   - POSTGRES_PASSWORD: Database password
-#   - KRUXIAFLOW_CLIENT_ID: OAuth client ID
-#   - KRUXIAFLOW_CLIENT_SECRET: OAuth client secret
+# In a repo checkout:
+#   docker compose up      # development: auto-loads docker-compose.override.yml (builds from source)
+#   ./docker up            # production mode: explicit -f suppresses the override (pulls images)
+#
+# SECURITY: secure by default — API requests require OAuth2 client credentials.
+# KRUXIAFLOW_INSECURE_DEV=true accepts unauthenticated requests and is for
+# LOCAL EVALUATION ONLY. The API port is published on 127.0.0.1 by default so
+# nothing is reachable from your network. Before deploying anywhere real, set
+# real secrets (see scripts/init.sh or your secret manager) and leave
+# KRUXIAFLOW_INSECURE_DEV unset.
+#
+# LLM provider (pick any, or none):
+#   ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY — passed through below
+#   OLLAMA_BASE_URL — for fully local models, e.g. http://host.docker.internal:11434
+#
+# Optional semantic cache (redis) sits behind the "cache" profile:
+#   COMPOSE_PROFILES=cache KRUXIAFLOW_CACHE_PROVIDER=redis docker compose up -d
+# (`./docker` enables it automatically; the server runs without it by default.)
 
 x-logging: &default-logging
   driver: "json-file"
@@ -32,13 +46,55 @@ networks:
     internal: true
 
 services:
+  # One-shot: generate a local RSA keypair for JWT signing (kept in a volume;
+  # regenerated only if missing). Uses the postgres image so nothing extra is
+  # pulled. For production, replace the volume contents with managed keys.
+  keygen:
+    image: postgres:17-bookworm
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ ! -f /keys/private.pem ]; then
+          openssl genrsa -out /keys/private.pem 2048 &&
+          openssl rsa -in /keys/private.pem -pubout -out /keys/public.pem &&
+          echo "Generated local RSA keypair for JWT signing"
+        else
+          echo "Keypair exists"
+        fi
+    volumes:
+      - kruxiaflow_keys:/keys
+    networks:
+      - frontend
+    labels:
+      com.kruxiaflow.service: "init"
+      com.kruxiaflow.component: "keygen"
+
+  # One-shot: fetch the LLM pricing catalog (used for cost estimation and
+  # budget enforcement). The distroless server image expects it mounted at
+  # /config/llm_models.yaml.
+  catalog:
+    image: curlimages/curl:latest
+    command:
+      [
+        "-fsSL",
+        "https://raw.githubusercontent.com/kruxia/kruxiaflow/main/config/llm_models.yaml",
+        "-o",
+        "/config/llm_models.yaml",
+      ]
+    volumes:
+      - kruxiaflow_config:/config
+    networks:
+      - frontend
+    labels:
+      com.kruxiaflow.service: "init"
+      com.kruxiaflow.component: "catalog"
+
   postgres:
-    platform: linux/amd64
     image: postgres:17-bookworm
     container_name: kruxiaflow-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-kruxiaflow}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kruxiaflow-local}
       POSTGRES_DB: ${POSTGRES_DB:-kruxiaflow}
     command:
       - "postgres"
@@ -52,8 +108,6 @@ services:
       - "pg_stat_statements.max=10000"
       - "-c"
       - "log_min_duration_statement=100"
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
     networks:
@@ -82,12 +136,11 @@ services:
         soft: 65536
         hard: 65536
 
+  # Optional semantic cache — enable with the "cache" profile (see header).
   redis:
-    platform: linux/amd64
+    profiles: ["cache"]
     image: redis:7.4-alpine
     container_name: kruxiaflow-redis
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     networks:
@@ -114,45 +167,50 @@ services:
       - no-new-privileges:true
 
   kruxiaflow:
-    platform: linux/amd64
     image: kruxia/kruxiaflow:latest
     container_name: kruxiaflow-server
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: deploy
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
-        condition: service_healthy
+      keygen:
+        condition: service_completed_successfully
+      catalog:
+        condition: service_completed_successfully
     ports:
-      - "${KRUXIAFLOW_PORT:-8080}:8080"
+      - "${KRUXIAFLOW_BIND:-127.0.0.1}:${KRUXIAFLOW_PORT:-8080}:8080"
     networks:
       - frontend
       - backend
     init: true
     stop_grace_period: 30s
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-kruxiaflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:-kruxiaflow}
-      # OAuth configuration (required)
-      KRUXIAFLOW_CLIENT_ID: ${KRUXIAFLOW_CLIENT_ID:-}
-      KRUXIAFLOW_CLIENT_SECRET: ${KRUXIAFLOW_CLIENT_SECRET:-}
+      DATABASE_URL: postgres://${POSTGRES_USER:-kruxiaflow}:${POSTGRES_PASSWORD:-kruxiaflow-local}@postgres:5432/${POSTGRES_DB:-kruxiaflow}
+      # OAuth client credentials. The defaults are fixed local-development
+      # values (safe only because the port binds 127.0.0.1 by default) —
+      # set real secrets for any deployment (scripts/init.sh generates them).
+      KRUXIAFLOW_CLIENT_ID: ${KRUXIAFLOW_CLIENT_ID:-kruxiaflow-local}
+      KRUXIAFLOW_CLIENT_SECRET: ${KRUXIAFLOW_CLIENT_SECRET:-kruxiaflow-local-dev-secret}
       KRUXIAFLOW_OAUTH_TOKEN_ISSUER: ${KRUXIAFLOW_OAUTH_TOKEN_ISSUER:-http://localhost:8080}
       KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE: ${KRUXIAFLOW_OAUTH_TOKEN_AUDIENCE:-kruxiaflow-api}
-      # OAuth RSA keys (loaded from mounted secrets via _FILE pattern)
+      # OAuth RSA keys (generated by the keygen one-shot, mounted via _FILE pattern)
       KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM_FILE: /secrets/private.pem
       KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM_FILE: /secrets/public.pem
+      # INSECURE DEV MODE — local evaluation only (see header). The container
+      # binds 0.0.0.0 internally, hence the mirrored ALLOW_NONLOOPBACK; the
+      # port mapping above publishes it to 127.0.0.1 only.
+      KRUXIAFLOW_INSECURE_DEV: ${KRUXIAFLOW_INSECURE_DEV:-false}
+      KRUXIAFLOW_INSECURE_DEV_ALLOW_NONLOOPBACK: ${KRUXIAFLOW_INSECURE_DEV:-false}
       # Worker configuration
       KRUXIAFLOW_WORKER_COUNT: ${KRUXIAFLOW_WORKER_COUNT:-20}
       KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES: ${KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES:-1}
-      # Cache configuration
-      KRUXIAFLOW_CACHE_PROVIDER: ${KRUXIAFLOW_CACHE_PROVIDER:-redis}
+      # Cache configuration (noop unless the redis "cache" profile is enabled)
+      KRUXIAFLOW_CACHE_PROVIDER: ${KRUXIAFLOW_CACHE_PROVIDER:-noop}
       KRUXIAFLOW_REDIS_URL: redis://redis:6379
-      # LLM API keys
+      # LLM providers (set any of these in your shell before `up`)
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
       # Logging configuration
       KRUXIAFLOW_LOG_LEVEL: ${KRUXIAFLOW_LOG_LEVEL:-info}
     healthcheck:
@@ -180,8 +238,8 @@ services:
         soft: 65536
         hard: 65536
     volumes:
-      - ./docker-keys:/secrets:ro
-      - ./config:/config:ro
+      - kruxiaflow_keys:/secrets:ro
+      - kruxiaflow_config:/config:ro
 
 volumes:
   postgres_data:
@@ -192,3 +250,11 @@ volumes:
     name: kruxiaflow-redis-data
     labels:
       com.kruxiaflow.volume: "cache"
+  kruxiaflow_keys:
+    name: kruxiaflow-keys
+    labels:
+      com.kruxiaflow.volume: "secrets"
+  kruxiaflow_config:
+    name: kruxiaflow-config
+    labels:
+      com.kruxiaflow.volume: "config"

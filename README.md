@@ -64,7 +64,7 @@ API key — or [Ollama](https://ollama.com/) for a fully local run.
 
 ```bash
 curl -fsSL https://kruxiaflow.com/quickstart/docker-compose.yml -o docker-compose.yml
-ANTHROPIC_API_KEY=your-key-here docker compose up -d
+KRUXIAFLOW_INSECURE_DEV=true ANTHROPIC_API_KEY=your-key-here docker compose up -d
 ```
 
 That's it — Kruxia Flow is running locally in insecure dev mode (no tokens needed; local

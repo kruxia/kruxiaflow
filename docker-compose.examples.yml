@@ -24,7 +24,7 @@ services:
   # Inject secrets so example workflows can resolve {{SECRET.*}} templates.
   kruxiaflow:
     environment:
-      KRUXIAFLOW_SECRET_DB_URL: postgres://${POSTGRES_USER:-kruxiaflow}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/kruxiaflow_examples
+      KRUXIAFLOW_SECRET_DB_URL: postgres://${POSTGRES_USER:-kruxiaflow}:${POSTGRES_PASSWORD:-kruxiaflow-local}@postgres:5432/kruxiaflow_examples
       KRUXIAFLOW_SECRET_SMTP_URL: smtp://mailpit:1025
       # 10 minutes for example workflows (workflow 10 is long-running)
       KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS: "600"

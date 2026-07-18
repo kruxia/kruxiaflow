@@ -1,104 +1,112 @@
 # Quick Start
 
-Get Kruxia Flow running in 2 minutes.
+Run your first **budgeted workflow** in under 5 minutes. You need Docker and
+(optionally) an LLM API key — or [Ollama](https://ollama.com/) for a fully
+local run.
 
-## Prerequisites
+## 1. Start Kruxia Flow
 
-- Docker and Docker Compose
-
-## 1. Clone and Start
+No clone required — fetch the compose file (it is the same `docker-compose.yml`
+at the top of the repository) and start it in insecure dev mode:
 
 ```bash
-git clone https://github.com/kruxia/kruxiaflow.git
-cd kruxiaflow
-./docker up --examples
-
-# Wait for "listening on 0.0.0.0:8080" then verify in another terminal:
-./docker exec kruxiaflow /kruxiaflow health
+curl -fsSL https://kruxiaflow.com/quickstart/docker-compose.yml -o docker-compose.yml
+KRUXIAFLOW_INSECURE_DEV=true ANTHROPIC_API_KEY=your-key-here docker compose up -d
 ```
 
-## 2. Get an Access Token
+`OPENAI_API_KEY`, `GOOGLE_API_KEY`, and `OLLAMA_BASE_URL` work the same way —
+set any of them, or none.
 
-Kruxia Flow always runs with OAuth2 security, so you need client authentication to
-run workflows. Use the generated client credentials to get an access token:
+This runs Kruxia Flow (API + orchestrator + worker) and PostgreSQL. Two
+one-shot init containers generate a local RSA keypair and fetch the LLM
+pricing catalog used for budget enforcement.
+
+> **Local evaluation only.** `KRUXIAFLOW_INSECURE_DEV=true` accepts
+> unauthenticated requests. The API port is published on `127.0.0.1`, so
+> nothing is reachable from your network. Before deploying anywhere real,
+> leave the flag unset and configure real credentials — see the comments in
+> the compose file.
 
 ```bash
-# Read the generated client secret from .env
-CLIENT_SECRET=$(grep KRUXIAFLOW_CLIENT_SECRET .env | cut -d= -f2)
-
-TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/oauth/token \
-  -d "grant_type=client_credentials" \
-  -d "client_id=kruxiaflow-docker-client" \
-  -d "client_secret=$CLIENT_SECRET" | jq -r '.access_token')
+# Verify it's up
+curl -s http://localhost:8080/health
 ```
 
-## 3. Deploy and Run a Workflow
+## 2. Run a Budgeted Workflow
+
+Deploy a workflow with a **hard budget** — the engine estimates each LLM call
+against published pricing and refuses to exceed the limit. No auth headers
+needed in dev mode:
 
 ```bash
-# Deploy the workflow definition
 curl -s -X POST http://localhost:8080/api/v1/workflow_definitions \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: text/yaml" \
-  --data-binary @examples/04-moderate-content.yaml | jq .
-
-# Submit a workflow instance
-WORKFLOW_ID=$(curl -s -X POST http://localhost:8080/api/v1/workflows \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "definition_name": "moderate_content",
-    "input": {
-      "user_content": "Check out this amazing product!",
-      "content_id": "test-001"
-    }
-  }' | jq -r '.workflow_id'); echo $WORKFLOW_ID
+  -H "Content-Type: text/yaml" --data-binary @- <<'YAML'
+name: quickstart_research
+activities:
+  - key: research
+    worker: std
+    activity_name: llm_prompt
+    parameters:
+      model:
+        - anthropic/claude-sonnet-5      # preferred
+        - openai/gpt-5.4-mini            # if budget is tight
+      prompt: "In three concise bullet points: {{INPUT.topic}}"
+      max_tokens: 500
+    settings:
+      budget:
+        limit_usd: 0.25
+        action: abort
+YAML
 ```
 
-Note: The content moderation example requires an LLM API key. Set `ANTHROPIC_API_KEY`
-in your environment and restart with `./docker down && ./docker up --examples`.
-For a non-LLM example, use `examples/01-weather-report.yaml` with
-`definition_name: weather_report`.
-
-## 4. Track Costs
+Submit it:
 
 ```bash
-# Check workflow status
-curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID \
-  -H "Authorization: Bearer $TOKEN" | jq .
-
-# View cost summary
-curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/cost \
-  -H "Authorization: Bearer $TOKEN" | jq .
-
-# View cost breakdown per activity
-curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/cost/history \
-  -H "Authorization: Bearer $TOKEN" | jq .
+WORKFLOW_ID=$(curl -s -X POST http://localhost:8080/api/v1/workflows \
+  -H "Content-Type: application/json" \
+  -d '{"definition_name": "quickstart_research",
+       "input": {"topic": "why do LLM agent costs spiral?"}}' \
+  | jq -r .workflow_id); echo $WORKFLOW_ID
 ```
 
-## Example Workflows
+## 3. See What It Cost
 
-Kruxia Flow includes 15+ production-ready examples in `examples/` (YAML) and the
-[Python SDK repo](https://github.com/kruxia/kruxiaflow-python/tree/main/examples):
+```bash
+# Status and result
+curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID | jq .
 
-| Example                     | Concepts                                    |
-|-----------------------------|---------------------------------------------|
-| 01-weather-report.yaml      | Sequential workflow, HTTP requests          |
-| 02-user-validation.yaml     | Conditional branching, PostgreSQL           |
-| 03-document-processing.yaml | Parallel execution, fan-out/fan-in          |
-| 04-moderate-content.yaml    | LLM with cost tracking, retry              |
-| 05-research-assistant.yaml  | Multi-model fallback, budget-aware         |
-| 06a-faq-bot-caching.yaml    | Semantic caching, vector search            |
-| 12_sales_etl_pipeline.py    | Python SDK, pandas, DuckDB SQL             |
-| 13_customer_churn_prediction.py | Python SDK, parallel ML training        |
+# Cost summary — the payoff of that budget line
+curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/cost | jq .
 
-See the full list in [examples/README.md](../examples/README.md) and the
-[Python SDK examples](https://github.com/kruxia/kruxiaflow-python/tree/main/examples).
-API docs at http://localhost:8080/api/v1/docs.
+# Token-level breakdown per activity (provider/model actually used, cached tokens)
+curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/cost/history | jq .
+```
+
+Using Ollama instead? Point `OLLAMA_BASE_URL` at your Ollama server (from
+Docker: `http://host.docker.internal:11434`) and use an `ollama/...` model id
+from `config/llm_models.yaml` — the whole pipeline runs locally.
+
+## Working from a checkout
+
+The quickstart file is the repo's root `docker-compose.yml`. In a checkout:
+
+```bash
+git clone https://github.com/kruxia/kruxiaflow.git && cd kruxiaflow
+
+./docker up              # full stack, pulled images, generated secrets
+./docker up --examples   # + example workers, Mailpit, examples database
+docker compose up        # development: builds from source via docker-compose.override.yml
+```
+
+The `./docker` script generates real random secrets into `.env` on first run
+and enables the redis cache profile; see the compose file comments for the
+knobs (`KRUXIAFLOW_PORT`, `COMPOSE_PROFILES=cache`, and friends).
 
 ## Stop Kruxia Flow
 
 ```bash
-./docker down
+docker compose down        # keep data
+docker compose down -v     # delete data volumes too
 ```
 
 ## Next Steps

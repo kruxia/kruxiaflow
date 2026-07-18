@@ -9,7 +9,7 @@
 #   ./scripts/init.sh
 #
 # After running:
-#   docker compose --profile deploy up
+#   ./docker up
 
 set -eu
 
@@ -74,6 +74,11 @@ POSTGRES_PASSWORD=${postgres_password}
 # OAuth client credentials
 KRUXIAFLOW_CLIENT_ID=kruxiaflow-docker-client
 KRUXIAFLOW_CLIENT_SECRET=${client_secret}
+
+# Full local stack: redis cache on (the base compose defaults to no cache
+# so the standalone quickstart stays lean)
+COMPOSE_PROFILES=cache
+KRUXIAFLOW_CACHE_PROVIDER=redis
 
 # Logging (info default, use debug for profiling)
 KRUXIAFLOW_LOG_LEVEL=info
