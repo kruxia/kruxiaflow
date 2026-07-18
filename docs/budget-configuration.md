@@ -23,7 +23,7 @@ description: Multi-step content analysis with budget control
 
 settings:
   budget:
-    limit_usd: 5.00
+    limit: 5.00
     on_exceeded: abort  # or "alert"
 
 activities:
@@ -34,7 +34,7 @@ activities:
 
 | Field         | Type   | Required | Description                                    |
 |---------------|--------|----------|------------------------------------------------|
-| `limit_usd`   | number | Yes      | Maximum spend in USD for the workflow          |
+| `limit`   | number | Yes      | Maximum spend in USD for the workflow          |
 | `on_exceeded` | string | Yes      | Action when budget exceeded: `abort` or `alert` |
 
 **Actions**:
@@ -60,7 +60,7 @@ activities:
         strategy: exponential
         base_seconds: 2
       budget:
-        limit_usd: 0.50
+        limit: 0.50
         on_exceeded: abort
 ```
 
@@ -75,7 +75,7 @@ activities:
 Before executing an activity, the orchestrator:
 
 1. Queries current workflow cost from database
-2. Compares against `budget.limit_usd`
+2. Compares against `budget.limit`
 3. If budget exceeded:
    - `abort`: Fail the activity with `BudgetExceeded` error
    - `alert`: Log warning and proceed
@@ -143,7 +143,7 @@ description: Single LLM analysis with budget
 
 settings:
   budget:
-    limit_usd: 1.00
+    limit: 1.00
     on_exceeded: abort
 
 activities:
@@ -184,7 +184,7 @@ activities:
         strategy: exponential
         base_seconds: 1
       budget:
-        limit_usd: 0.25  # Max $0.25 for all retry attempts
+        limit: 0.25  # Max $0.25 for all retry attempts
         on_exceeded: abort
 ```
 
@@ -205,7 +205,7 @@ description: Multi-step content processing with global budget
 
 settings:
   budget:
-    limit_usd: 2.00
+    limit: 2.00
     on_exceeded: abort
 
 activities:
@@ -255,7 +255,7 @@ description: Track costs but don't enforce limits
 
 settings:
   budget:
-    limit_usd: 10.00
+    limit: 10.00
     on_exceeded: alert  # Log warning, don't abort
 
 activities:
@@ -285,7 +285,7 @@ description: Try cheap models first, fallback to expensive
 
 settings:
   budget:
-    limit_usd: 1.00
+    limit: 1.00
     on_exceeded: abort
 
 activities:
@@ -382,7 +382,7 @@ Start with conservative budgets and increase based on observed costs:
 ```yaml
 settings:
   budget:
-    limit_usd: 0.10  # Start low, increase after testing
+    limit: 0.10  # Start low, increase after testing
     on_exceeded: abort
 ```
 
@@ -395,7 +395,7 @@ settings:
   retry:
     max_attempts: 10
   budget:
-    limit_usd: 0.25  # Cap total retry cost
+    limit: 0.25  # Cap total retry cost
     on_exceeded: abort
 ```
 
@@ -407,13 +407,13 @@ Use `alert` mode to establish baselines:
 # Development/staging
 settings:
   budget:
-    limit_usd: 5.00
+    limit: 5.00
     on_exceeded: alert  # Monitor, don't abort
 
 # Production
 settings:
   budget:
-    limit_usd: 5.00
+    limit: 5.00
     on_exceeded: abort  # Enforce limits
 ```
 
@@ -441,7 +441,7 @@ parameters:
   max_tokens: 1000  # Limit output tokens
 settings:
   budget:
-    limit_usd: 0.50  # Limit total cost
+    limit: 0.50  # Limit total cost
 ```
 
 ---
@@ -503,7 +503,7 @@ cost = (1000 × 3.00 / 1,000,000) + (500 × 15.00 / 1,000,000)
 3. Large prompt with expensive model
 
 **Solutions**:
-- Increase `budget.limit_usd`
+- Increase `budget.limit`
 - Use cheaper model (Haiku instead of Sonnet)
 - Reduce `max_tokens`
 - Check cost estimate before running

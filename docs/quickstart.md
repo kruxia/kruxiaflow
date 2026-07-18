@@ -10,7 +10,7 @@ No clone required — fetch the compose file (it is the same `docker-compose.yml
 at the top of the repository) and start it in insecure dev mode:
 
 ```bash
-curl -fsSL https://kruxiaflow.com/quickstart/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/kruxia/kruxiaflow/main/docker-compose.yml -o docker-compose.yml
 KRUXIAFLOW_INSECURE_DEV=true ANTHROPIC_API_KEY=your-key-here docker compose up -d
 ```
 
@@ -54,7 +54,7 @@ activities:
       max_tokens: 500
     settings:
       budget:
-        limit_usd: 0.25
+        limit: 0.25
         action: abort
 YAML
 ```

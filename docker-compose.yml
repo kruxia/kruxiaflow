@@ -1,7 +1,7 @@
 # Kruxia Flow Docker Compose — quickstart and production base
 #
-# Quickstart (no clone required) — budgeted workflows in one command:
-#   curl -fsSL https://kruxiaflow.com/quickstart/docker-compose.yml -o docker-compose.yml
+# Quickstart (no clone required) — budgeted workflows in two commands:
+#   curl -fsSL https://raw.githubusercontent.com/kruxia/kruxiaflow/main/docker-compose.yml -o docker-compose.yml
 #   KRUXIAFLOW_INSECURE_DEV=true ANTHROPIC_API_KEY=sk-... docker compose up -d
 #
 # Then submit your first budgeted workflow — no tokens, no auth setup:
@@ -78,13 +78,21 @@ services:
     # The image's default user (uid 100) cannot write to a fresh root-owned
     # volume; run as root so the fetch can land (file is 644, world-readable).
     user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    # Refresh the catalog on every up, but a failed fetch only aborts the
+    # stack when no previously fetched copy exists (first run needs network).
     command:
-      [
-        "-fsSL",
-        "https://raw.githubusercontent.com/kruxia/kruxiaflow/main/config/llm_models.yaml",
-        "-o",
-        "/config/llm_models.yaml",
-      ]
+      - |
+        url=https://raw.githubusercontent.com/kruxia/kruxiaflow/main/config/llm_models.yaml
+        if curl -fsSL "$$url" -o /config/llm_models.yaml.new; then
+          mv /config/llm_models.yaml.new /config/llm_models.yaml
+          echo "Fetched LLM pricing catalog"
+        elif [ -f /config/llm_models.yaml ]; then
+          echo "Catalog fetch failed; using previously fetched copy"
+        else
+          echo "ERROR: could not fetch the LLM pricing catalog and no copy exists" >&2
+          exit 1
+        fi
     volumes:
       - kruxiaflow_config:/config
     networks:
