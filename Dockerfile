@@ -24,9 +24,26 @@ ENTRYPOINT [ "/opt/docker-entrypoint-develop.sh" ]
 # The entrypoint script will always run: target/profiling/kruxiaflow serve "$@"
 EXPOSE 8080
 
+# == CHEF ==
+# cargo-chef puts the dependency build in its own cacheable layer: `prepare`
+# derives a recipe from the manifests alone, so `cook` stays cache-valid across
+# source changes and dependencies rebuild only when Cargo.toml/Cargo.lock
+# change. Workspace crate versions are masked in the recipe, so `cargo release`
+# version bumps do not invalidate the dependency cache. Pinned like sqlx-cli
+# to avoid drift.
+FROM develop AS chef
+RUN cargo install cargo-chef@0.1.77 --locked
+
+FROM chef AS planner
+COPY ./ ./
+RUN cargo chef prepare --recipe-path recipe.json
+
 # == BUILD ==
-FROM develop AS build
+FROM chef AS build
 ARG SQLX_OFFLINE=true
+COPY --from=planner /opt/recipe.json recipe.json
+# Dependencies only — same flags as the real build so features/profile match
+RUN cargo chef cook --release --features redis-cache --recipe-path recipe.json
 COPY ./ ./
 RUN cargo build --release --features redis-cache
 
