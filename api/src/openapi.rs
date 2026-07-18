@@ -13,6 +13,7 @@ use crate::handlers::streaming::{
     PublishResponse, StreamCompletePayload, StreamErrorPayload, StreamTokenPayload,
     SubscriberCountResponse,
 };
+use crate::handlers::users::{CreateUserRequest, CreateUserResponse};
 use crate::handlers::workers::{
     ActivityError, ActivityHeartbeatRequest, ActivityHeartbeatResponse, CompleteActivityRequest,
     CompleteActivityResponse, FailActivityRequest, FailActivityResponse, PendingActivity,
@@ -58,6 +59,7 @@ use utoipa::OpenApi;
 
         // OAuth 2.0 endpoints
         crate::handlers::oauth::token_handler,
+        crate::handlers::users::create_user,
 
         // Workflow Definition Management
         crate::handlers::workflow_definitions::deploy_workflow_definition,
@@ -113,6 +115,8 @@ use utoipa::OpenApi;
             TokenRequest,
             TokenResponse,
             GrantType,
+            CreateUserRequest,
+            CreateUserResponse,
 
             // Workflow Definition Management schemas
             DeployWorkflowDefinitionRequest,

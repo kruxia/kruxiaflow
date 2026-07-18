@@ -403,11 +403,12 @@ async fn test_websocket_multiple_connections_same_activity() {
 
     // All should receive the message
     for (i, ws) in [&mut ws1, &mut ws2, &mut ws3].iter_mut().enumerate() {
-        let received = timeout(Duration::from_secs(2), ws.next())
-            .await
-            .unwrap_or_else(|_| panic!("ws{} should not timeout", i + 1))
-            .unwrap_or_else(|| panic!("ws{} should receive message", i + 1))
-            .unwrap_or_else(|_| panic!("ws{} message should be valid", i + 1));
+        let received = match timeout(Duration::from_secs(2), ws.next()).await {
+            Err(_) => panic!("ws{} should not timeout", i + 1),
+            Ok(None) => panic!("ws{} should receive message", i + 1),
+            Ok(Some(Err(_))) => panic!("ws{} message should be valid", i + 1),
+            Ok(Some(Ok(msg))) => msg,
+        };
 
         match received {
             Message::Text(text) => {
@@ -1027,4 +1028,148 @@ async fn test_websocket_message_ordering() {
             _ => panic!("Expected text message"),
         }
     }
+}
+
+// ============================================================================
+// Activity Stream By Key Tests
+// ============================================================================
+
+#[tokio::test]
+#[serial]
+async fn test_websocket_by_key_rejects_missing_token() {
+    let state = setup_test_state().await;
+    let addr = start_test_server(state).await;
+
+    let workflow_id = Uuid::now_v7();
+    let url = format!(
+        "ws://{}/api/v1/workflows/{}/activities/my_activity/ws",
+        addr, workflow_id
+    );
+
+    let result = connect_async(&url).await;
+    assert!(result.is_err(), "Connection should fail without token");
+}
+
+#[tokio::test]
+#[serial]
+async fn test_websocket_by_key_rejects_invalid_token() {
+    let state = setup_test_state().await;
+    let addr = start_test_server(state).await;
+
+    let workflow_id = Uuid::now_v7();
+    let url = format!(
+        "ws://{}/api/v1/workflows/{}/activities/my_activity/ws?token=bad_token",
+        addr, workflow_id
+    );
+
+    let result = connect_async(&url).await;
+    assert!(result.is_err(), "Connection should fail with invalid token");
+}
+
+#[tokio::test]
+#[serial]
+async fn test_websocket_by_key_not_found_returns_error() {
+    let state = setup_test_state().await;
+    let addr = start_test_server(state).await;
+    let token = get_valid_token(addr).await;
+
+    // Use a workflow_id that doesn't exist in activity_queue
+    let workflow_id = Uuid::now_v7();
+    let url = format!(
+        "ws://{}/api/v1/workflows/{}/activities/nonexistent/ws?token={}",
+        addr, workflow_id, token
+    );
+
+    // Should fail because the activity doesn't exist (after retries timeout)
+    // The handler retries 5 times with 200ms sleep, so this takes ~1s
+    let result = timeout(Duration::from_secs(5), connect_async(&url)).await;
+
+    assert!(result.is_ok(), "Should not timeout");
+    // The HTTP response should be an error (404), not a WebSocket upgrade
+    assert!(
+        result.unwrap().is_err(),
+        "Should fail when activity not found"
+    );
+}
+
+#[tokio::test]
+#[serial]
+async fn test_websocket_by_key_connects_when_activity_exists() {
+    let state = setup_test_state().await;
+    let pool = state.db_pool.clone();
+    let addr = start_test_server(state).await;
+    let token = get_valid_token(addr).await;
+
+    let workflow_id = Uuid::now_v7();
+    let activity_key = "test_stream_activity";
+
+    // Insert a test workflow definition and workflow first
+    let def_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO workflow_definitions (name, activities)
+             VALUES ('ws_key_test', '[]'::jsonb)
+             RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "INSERT INTO workflows (id, definition_name, workflow_definition_id, input, status, activities, state_data)
+         VALUES ($1, 'ws_key_test', $2, '{}'::jsonb, 'running', '{}'::jsonb, '{}'::jsonb)
+         ON CONFLICT (id) DO NOTHING",
+    )
+    .bind(workflow_id)
+    .bind(def_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Insert a test activity into the queue
+    sqlx::query(
+        "INSERT INTO activity_queue (workflow_id, activity_key, worker, name, parameters, status, timeout_duration)
+         VALUES ($1, $2, 'std', 'echo', '{}'::jsonb, 'pending', '5 minutes'::interval)",
+    )
+    .bind(workflow_id)
+    .bind(activity_key)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let url = format!(
+        "ws://{}/api/v1/workflows/{}/activities/{}/ws?token={}",
+        addr, workflow_id, activity_key, token
+    );
+
+    // Should connect successfully since the activity exists in the queue
+    let result = timeout(Duration::from_secs(5), connect_async(&url)).await;
+    assert!(result.is_ok(), "Should not timeout");
+
+    let (ws_stream, response) = result
+        .unwrap()
+        .expect("Should connect when activity exists");
+
+    assert_eq!(
+        response.status().as_u16(),
+        101,
+        "Should upgrade to WebSocket"
+    );
+
+    drop(ws_stream);
+
+    // Cleanup test data
+    sqlx::query("DELETE FROM activity_queue WHERE workflow_id = $1")
+        .bind(workflow_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM workflows WHERE id = $1")
+        .bind(workflow_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM workflow_definitions WHERE id = $1")
+        .bind(def_id)
+        .execute(&pool)
+        .await
+        .unwrap();
 }

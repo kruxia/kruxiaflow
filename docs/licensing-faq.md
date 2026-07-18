@@ -2,36 +2,39 @@
 
 ## Overview
 
-Kruxia Flow is licensed under the **GNU Affero General Public License v3 (AGPLv3)**, an OSI-approved open source license. We also offer commercial licenses for organizations that prefer not to comply with the AGPL's requirements.
-
-This FAQ explains our licensing philosophy, clarifies common questions about AGPL compliance, and helps you determine which license is right for your use case.
+Kruxia Flow — the engine and the client SDKs alike — is licensed under the
+**Apache License, Version 2.0**, an OSI-approved permissive open source license.
+(Rust crates published to crates.io are dual-licensed **MIT OR Apache-2.0**,
+following the Rust ecosystem convention.) There is no copyleft, no
+source-disclosure requirement, and no dual-license gate: you can use, modify,
+embed, and redistribute Kruxia Flow in commercial and proprietary systems.
 
 ---
 
-## Why We Chose AGPL
+## Why Apache 2.0
 
-### Our Philosophy
+1. **Zero adoption friction.** You should never need a legal review to run a
+   workflow engine. Apache 2.0 is one of the most widely approved licenses in
+   enterprise policy lists.
 
-We believe in building sustainable open source software. The AGPL allows us to:
+2. **An explicit patent grant.** Apache 2.0 grants every user a patent license
+   from every contributor and terminates it for anyone who initiates patent
+   litigation over the project. MIT is silent on patents; Apache 2.0 is not.
 
-1. **Keep Kruxia Flow fully open source** — The AGPL is approved by the Open Source Initiative (OSI) and the Free Software Foundation (FSF). Kruxia Flow is not "source available" — it's genuinely open source with all the freedoms that entails.
+3. **Genuinely open source.** Apache 2.0 is approved by the Open Source
+   Initiative and the Free Software Foundation. Kruxia Flow is not
+   "source-available" — it is open source with all the freedoms that entails.
 
-2. **Ensure improvements benefit everyone** — If someone modifies Kruxia Flow itself and offers it as a service, those improvements should flow back to the community. This is the core principle of copyleft.
+4. **A sustainable business without a license gate.** Kruxia plans to offer
+   commercial services around Kruxia Flow — hosted/managed offerings, support,
+   and SLAs — rather than selling exceptions to a copyleft license.
 
-3. **Build a sustainable business** — Revenue from commercial licenses helps fund continued development, ensuring Kruxia Flow remains actively maintained and improved.
+### A note on history
 
-4. **Prevent exploitation without contribution** — The AGPL ensures that companies building competing workflow orchestration services based on Kruxia Flow contribute their improvements back, while still allowing broad use in applications.
-
-### What We're NOT Trying to Do
-
-We are **not** trying to:
-
-- Force you to open source your applications that use Kruxia Flow
-- Create legal uncertainty to pressure commercial license sales
-- Restrict legitimate use of Kruxia Flow in proprietary software
-- Interpret the AGPL more broadly than its text supports
-
-We want Kruxia Flow to be widely adopted. The AGPL exists to protect the project, not to create barriers for users.
+Kruxia Flow releases prior to July 2026 were licensed under the GNU Affero
+General Public License v3.0 (AGPL-3.0). In July 2026 the project was relicensed
+to Apache 2.0 to remove adoption friction. Old releases remain available under
+their original license; all current and future releases are Apache 2.0.
 
 ---
 
@@ -39,127 +42,92 @@ We want Kruxia Flow to be widely adopted. The AGPL exists to protect the project
 
 ### Can I use Kruxia Flow in my proprietary application?
 
-**Yes.** If your application communicates with Kruxia Flow through its APIs (HTTP REST, WebSocket, gRPC), your application is **not** a derivative work and does not need to be licensed under the AGPL.
+**Yes.** No conditions beyond the standard Apache 2.0 requirements (preserve
+copyright/NOTICE attributions when you redistribute the software itself).
 
-Kruxia Flow is a service that your application talks to — like a database. Just as using PostgreSQL doesn't make your application GPL-licensed, using Kruxia Flow doesn't make your application AGPL-licensed.
+### Can I modify Kruxia Flow and keep my changes private?
 
-### Does using the Kruxia Flow client libraries require me to open source my code?
+**Yes.** Apache 2.0 has no copyleft. You may modify Kruxia Flow and deploy it —
+internally or as a customer-facing service — without disclosing your changes.
+We'd love to receive improvements as pull requests, but that's an invitation,
+not an obligation.
 
-**No.** Our official client libraries and SDKs are licensed under the **MIT License**, not AGPL. You can use them in proprietary applications without any copyleft obligations.
+### Can I offer Kruxia Flow as a hosted service?
 
-This is an intentional design choice. We want integration with Kruxia Flow to be frictionless.
+**Yes.** Apache 2.0 permits it. Note that the license does not grant rights to
+the **Kruxia** or **Kruxia Flow** trademarks (see below) — a hosted offering
+must not present itself as an official Kruxia service.
 
-### What if I deploy Kruxia Flow as part of my infrastructure?
+### Can I embed Kruxia Flow's Rust crates directly in my application?
 
-**That's fine.** Running unmodified Kruxia Flow as part of your internal or customer-facing infrastructure does not trigger any source code disclosure requirements.
+**Yes.** Linking, embedding, and static compilation are all fine. Retain the
+LICENSE and NOTICE files when you redistribute.
 
-The AGPL's network clause (Section 13) only applies when you **modify** Kruxia Flow and make it available over a network. Using Kruxia Flow as-is — even in a commercial SaaS product — requires nothing beyond what any AGPL software requires: preserving copyright notices and providing access to Kruxia Flow's source code (which is already publicly available).
+### What about the client SDKs?
 
-### What counts as "modifying" Kruxia Flow?
+The official client libraries and SDKs (e.g.,
+[kruxiaflow-python](https://github.com/kruxia/kruxiaflow-python)) are licensed
+under **Apache-2.0**, same as the engine (SDK versions released before July 2026
+were MIT). Rust crates on crates.io are dual-licensed **MIT OR Apache-2.0** per
+Rust ecosystem convention — pick whichever suits your project. Use them all in
+proprietary applications freely.
 
-Modification means changing Kruxia Flow's own source code. This includes:
+### What do I have to do if I redistribute Kruxia Flow?
 
-- Forking the repository and changing the code
-- Patching the Kruxia Flow binary
-- Adding features directly to Kruxia Flow's codebase
+The standard Apache 2.0 conditions: include a copy of the license, retain
+copyright/patent/trademark/attribution notices and the NOTICE file, and state
+significant changes you made to the files you modified. Nothing else.
 
-Modification does **NOT** include:
+### Do workflow definitions have any license implications?
 
-- Calling Kruxia Flow's APIs from your application
-- Writing workflows that run on Kruxia Flow
-- Configuring Kruxia Flow through its documented configuration options
-- Building plugins or extensions that communicate with Kruxia Flow through defined interfaces
-- Deploying Kruxia Flow alongside other services in your infrastructure
+**No.** Workflow definitions (YAML, JSON, or SDK code describing your
+workflows) are your content — analogous to SQL queries run against a database.
 
-### What if I modify Kruxia Flow for internal use only?
+### Trademarks
 
-**No disclosure required.** The AGPL (like the GPL) only requires source code disclosure when you convey the software to others or make it available over a network to external users. Internal use — even with modifications — has no disclosure requirement.
-
-### What if I modify Kruxia Flow and offer it as a service to customers?
-
-In this case, you must make the source code of your modified version available to users who interact with it over the network. This is the core purpose of the AGPL — ensuring that service providers contribute improvements back to the community.
-
-Alternatively, you can purchase a commercial license that removes this requirement.
-
-### Can I run Kruxia Flow in a microservice architecture without open sourcing my other services?
-
-**Yes, absolutely.** Your other services communicate with Kruxia Flow over network protocols (HTTP, WebSocket, gRPC). They are separate programs, not derivative works.
-
-The AGPL does not propagate across network boundaries. A microservice that calls Kruxia Flow's API is no different from a web application that uses an AGPL-licensed database — the calling application is not affected by the AGPL.
-
-### Does embedding Kruxia Flow or linking to it make my application AGPL?
-
-If you're using Kruxia Flow as intended — as a standalone service that your application communicates with — then **no**.
-
-If you're doing something unusual like embedding Kruxia Flow's Rust code directly into your application binary, that would create a combined work subject to the AGPL. But this isn't a typical use case. Kruxia Flow is designed to run as a separate service.
-
-### What about plugins or workflow definitions?
-
-**Plugins**: If your plugin communicates with Kruxia Flow through its defined plugin API, it is not a derivative work. You can license your plugins however you choose.
-
-**Workflow definitions**: Workflow definitions (YAML, JSON, or code that describes your workflows) are your content, not modifications to Kruxia Flow. They're analogous to SQL queries you run against a database — they don't become GPL-licensed just because the database is GPL-licensed.
-
-### Do I need to display AGPL notices in my application?
-
-Only if you distribute Kruxia Flow itself or a modified version of it. If you're just using Kruxia Flow as a service (the normal case), you don't need to include AGPL notices in your own application.
+The Apache 2.0 license does not grant permission to use the Kruxia or
+Kruxia Flow names and logos, except as required for reasonable and customary
+use in describing the origin of the software. If you fork or offer a hosted
+version, name it in a way that doesn't imply it is an official Kruxia offering.
 
 ---
 
-## Commercial Licensing
+## Commercial Services
 
-### When should I consider a commercial license?
+You do not need to buy anything to use Kruxia Flow, at any scale, for any
+purpose. Kruxia offers optional commercial services for organizations that
+want them:
 
-A commercial license is appropriate if:
+- **Support agreements** — direct access to the engineering team, guaranteed
+  response times
+- **Managed hosting** — planned; contact us for early interest
+- **Consulting** — workflow design, migration, and cost-governance reviews
 
-1. **You want to modify Kruxia Flow** and offer it as a service without sharing your modifications
-2. **Your organization has a blanket policy** against AGPL software (some enterprises do)
-3. **You want contractual support guarantees**, SLAs, or indemnification
-4. **You prefer the simplicity** of a commercial agreement over open source license compliance
-
-### What does the commercial license include?
-
-A Kruxia Flow commercial license provides:
-
-- **No copyleft obligations** — Modify and deploy without source disclosure requirements
-- **Enterprise support** — Direct access to our engineering team
-- **SLAs** — Guaranteed response times and uptime commitments
-- **Indemnification** — Legal protection for your use of Kruxia Flow
-- **Priority features** — Input into our roadmap and priority bug fixes
-
-Contact us at **licensing@kruxia.com** to discuss commercial licensing.
+Contact **licensing@kruxia.com**.
 
 ---
 
-## Summary: Do I Need to Open Source My Code?
+## Summary
 
-| Scenario                                          | Open Source Required?                    |
-|---------------------------------------------------|------------------------------------------|
-| Using Kruxia Flow as a service via its APIs       | **No**                                   |
-| Using our MIT-licensed client libraries            | **No**                                   |
-| Running unmodified Kruxia Flow in production       | **No**                                   |
-| Writing workflows that run on Kruxia Flow          | **No**                                   |
-| Building plugins that use Kruxia Flow's plugin API | **No**                                   |
-| Modifying Kruxia Flow for internal use only        | **No**                                   |
-| Modifying Kruxia Flow and distributing it          | **Yes** (or get commercial license)      |
-| Modifying Kruxia Flow and offering it as a service | **Yes** (or get commercial license)      |
-
----
-
-## Our Commitment
-
-We commit to interpreting the AGPL in good faith and in accordance with its text. We will not pursue aggressive or novel legal theories to expand the scope of the AGPL beyond what it plainly requires.
-
-If you have questions about whether your use case requires a commercial license, please contact us at **licensing@kruxia.com**. We're happy to provide guidance — our goal is to make Kruxia Flow easy to adopt, not to create legal uncertainty.
+| Scenario                                            | Allowed? | Conditions                                  |
+|-----------------------------------------------------|----------|----------------------------------------------|
+| Use Kruxia Flow in a proprietary application        | **Yes**  | None                                         |
+| Run unmodified Kruxia Flow in production/SaaS       | **Yes**  | None                                         |
+| Modify Kruxia Flow and keep changes private         | **Yes**  | None                                         |
+| Embed/link the Rust crates in your binary           | **Yes**  | Retain LICENSE + NOTICE on redistribution    |
+| Redistribute Kruxia Flow (modified or not)          | **Yes**  | Standard Apache 2.0 attribution conditions   |
+| Offer a hosted Kruxia Flow service                  | **Yes**  | Don't use Kruxia trademarks as your own      |
+| Use the client SDKs anywhere                        | **Yes**  | Standard Apache 2.0 attribution conditions   |
 
 ---
 
 ## Additional Resources
 
-- [Full AGPL v3 License Text](https://www.gnu.org/licenses/agpl-3.0.html)
-- [FSF's GPL FAQ](https://www.gnu.org/licenses/gpl-faq.html) (much of which applies to AGPL)
+- [Full Apache License 2.0 Text](https://www.apache.org/licenses/LICENSE-2.0)
+- [Kruxia Flow LICENSE file](../LICENSE) and [NOTICE file](../NOTICE)
 - [Kruxia Flow Documentation](https://kruxiaflow.com/docs)
-- [Commercial Licensing Inquiries](mailto:licensing@kruxia.com)
+- [Commercial Services Inquiries](mailto:licensing@kruxia.com)
 
 ---
 
-*Last updated: February 2026*
+*Last updated: July 2026*

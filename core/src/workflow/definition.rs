@@ -799,6 +799,10 @@ pub struct ActivitySettings {
     /// When set, the activity enters 'waiting' state until signaled or timeout
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wait_for_signal: Option<WaitForSignalSettings>,
+
+    /// Token streaming configuration, copied from ActivityDefinition at scheduling time
+    #[serde(default, skip_serializing_if = "StreamingConfig::is_disabled")]
+    pub streaming: StreamingConfig,
 }
 
 /// Settings for activities that wait for external signals
@@ -3395,6 +3399,7 @@ activities:
                     cache_ttl: None,
                     iteration_limit: None,
                     wait_for_signal: None,
+                    ..Default::default()
                 }),
                 output_definitions: None,
                 iteration_scoped: false,
@@ -3465,5 +3470,85 @@ activities:
         let result = parse_scheduled_for("1970-01-01T00:00:00Z");
         assert!(result.is_ok());
         assert_eq!(result.unwrap().timestamp(), 0);
+    }
+
+    // =========================================================================
+    // ActivitySettings streaming field tests
+    // =========================================================================
+
+    #[test]
+    fn test_activity_settings_default_streaming_is_disabled() {
+        let settings = ActivitySettings::default();
+        assert!(settings.streaming.is_disabled());
+        assert!(!settings.streaming.is_enabled());
+    }
+
+    #[test]
+    fn test_activity_settings_with_streaming_enabled() {
+        let settings = ActivitySettings {
+            streaming: StreamingConfig::Simple(true),
+            ..Default::default()
+        };
+        assert!(settings.streaming.is_enabled());
+    }
+
+    #[test]
+    fn test_activity_settings_streaming_serialization_skips_disabled() {
+        let settings = ActivitySettings::default();
+        let json = serde_json::to_value(&settings).unwrap();
+        // Disabled streaming should be skipped via skip_serializing_if
+        assert!(json.get("streaming").is_none());
+    }
+
+    #[test]
+    fn test_activity_settings_streaming_serialization_includes_enabled() {
+        let settings = ActivitySettings {
+            streaming: StreamingConfig::Simple(true),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&settings).unwrap();
+        assert_eq!(json.get("streaming"), Some(&serde_json::json!(true)));
+    }
+
+    #[test]
+    fn test_activity_settings_streaming_deserialization_missing() {
+        // Missing streaming field should default to Disabled
+        let json = serde_json::json!({"cache": false});
+        let settings: ActivitySettings = serde_json::from_value(json).unwrap();
+        assert!(settings.streaming.is_disabled());
+    }
+
+    #[test]
+    fn test_activity_settings_streaming_deserialization_true() {
+        let json = serde_json::json!({"streaming": true});
+        let settings: ActivitySettings = serde_json::from_value(json).unwrap();
+        assert!(settings.streaming.is_enabled());
+    }
+
+    #[test]
+    fn test_activity_settings_streaming_deserialization_false() {
+        let json = serde_json::json!({"streaming": false});
+        let settings: ActivitySettings = serde_json::from_value(json).unwrap();
+        assert!(!settings.streaming.is_enabled());
+    }
+
+    #[test]
+    fn test_activity_settings_streaming_deserialization_detailed() {
+        let json = serde_json::json!({"streaming": {"enabled": true}});
+        let settings: ActivitySettings = serde_json::from_value(json).unwrap();
+        assert!(settings.streaming.is_enabled());
+    }
+
+    #[test]
+    fn test_activity_settings_streaming_roundtrip() {
+        let original = ActivitySettings {
+            timeout_seconds: Some(30),
+            streaming: StreamingConfig::Simple(true),
+            ..Default::default()
+        };
+        let json = serde_json::to_value(&original).unwrap();
+        let deserialized: ActivitySettings = serde_json::from_value(json).unwrap();
+        assert!(deserialized.streaming.is_enabled());
+        assert_eq!(deserialized.timeout_seconds, Some(30));
     }
 }

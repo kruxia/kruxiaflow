@@ -69,7 +69,7 @@ impl WorkerApiClient {
     }
 
     /// Get current token or obtain new one
-    async fn get_token(&self) -> Result<String> {
+    pub async fn get_token(&self) -> Result<String> {
         let token_lock = self.token.read().await;
         if let Some(token) = token_lock.as_ref() {
             return Ok(token.clone());

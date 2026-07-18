@@ -75,6 +75,66 @@ impl EventSource for PostgresEventSource {
         Ok(events)
     }
 
+    /// Get events after a specific event ID, optionally filtered by workflow IDs.
+    ///
+    /// Used for WebSocket reconnection replay. Returns events with `id > from_event_id`,
+    /// ordered by id ASC, limited to `limit` rows.
+    ///
+    /// - When workflow_ids is Some and non-empty, filters to those workflows
+    /// - When workflow_ids is None or empty, returns all events
+    #[tracing::instrument(skip(self), level = "debug")]
+    async fn get_events_from_id(
+        &self,
+        from_event_id: Uuid,
+        workflow_ids: Option<&[Uuid]>,
+        limit: i64,
+    ) -> Result<Vec<WorkflowEvent>> {
+        let events = match workflow_ids {
+            Some(ids) if !ids.is_empty() => {
+                sqlx::query_as!(
+                    WorkflowEvent,
+                    r#"
+                    SELECT id, workflow_id, event_type as "event_type: WorkflowEventType",
+                           activity_key, payload, timestamp, iteration
+                    FROM workflow_events
+                    WHERE id > $1 AND workflow_id = ANY($2)
+                    ORDER BY id ASC
+                    LIMIT $3
+                    "#,
+                    from_event_id,
+                    ids,
+                    limit
+                )
+                .fetch_all(&self.pool)
+                .await?
+            }
+            _ => {
+                sqlx::query_as!(
+                    WorkflowEvent,
+                    r#"
+                    SELECT id, workflow_id, event_type as "event_type: WorkflowEventType",
+                           activity_key, payload, timestamp, iteration
+                    FROM workflow_events
+                    WHERE id > $1
+                    ORDER BY id ASC
+                    LIMIT $2
+                    "#,
+                    from_event_id,
+                    limit
+                )
+                .fetch_all(&self.pool)
+                .await?
+            }
+        };
+
+        tracing::debug!(
+            event_count = events.len(),
+            "Fetched events from checkpoint ID"
+        );
+
+        Ok(events)
+    }
+
     /// Update consumer position after successfully processing events
     /// - Upserts consumer position
     /// - Only moves position forward (prevents backwards movement)

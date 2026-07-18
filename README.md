@@ -2,52 +2,58 @@
 
 [![CI](https://github.com/kruxia/kruxiaflow/actions/workflows/main-ci.yml/badge.svg)](https://github.com/kruxia/kruxiaflow/actions/workflows/main-ci.yml)
 [![Docker Image](https://img.shields.io/docker/image-size/kruxia/kruxiaflow/latest?label=docker%20image)](https://hub.docker.com/r/kruxia/kruxiaflow)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Discord](https://img.shields.io/discord/1457098705214640333?logo=discord&label=Discord)](https://discord.gg/ZJAzygCq)
 
-**AI-native durable workflows with built-in cost controls**
+**Budgeted workflows: durable execution with hard cost limits built in.**
 
-The only durable workflow engine built for AI. Workflows survive crashes, budgets control AI spend, and costs are tracked per token. Ships as a 7.5 MB binary that runs anywhere.
+Put a spending limit on your agents. Kruxia Flow runs durable workflows that **stop, downgrade, or ask a human** when the budget runs out — with every token's cost tracked in your own PostgreSQL. One 7.5 MB binary, one database, no other infrastructure.
 
+```yaml
+activities:
+  - key: research
+    activity_name: llm_prompt
+    parameters:
+      model:
+        - anthropic/claude-sonnet-4-5-20250929  # preferred
+        - openai/gpt-4o-mini                    # if budget is tight
+      prompt: "Research and summarize: {{INPUT.topic}}"
+      max_tokens: 1000
+    settings:
+      budget:
+        limit_usd: 0.25   # hard ceiling, enforced before the call
+        action: abort
 ```
-Single Binary Deployment | AI Cost Tracking Built-in | Runs Anywhere
-```
+
+That budget is not a metric or an alert — the engine **enforces it before spending**, falls back to cheaper models under pressure, and records what every activity actually cost.
 
 ## Why Kruxia Flow?
 
-Kruxia Flow is a **durable execution engine** — in the same category as Temporal and Inngest, not batch schedulers like Airflow. We're built for AI from the ground up.
+Agents make 3–10× more LLM calls than chatbots, and a retry loop at 2am can spend your month's budget before breakfast. The standard fix today is a gateway that caps API keys. But a key-level cap can't tell a runaway loop from a busy day, can't pause *one workflow* to ask a human, and can't tell you what a particular job cost.
 
-### Built For
+Kruxia Flow is **cost-governed orchestration**: a durable execution engine — the same category as Temporal and Inngest, not a batch scheduler like Airflow — where budgets, per-token cost tracking, model fallback, and human approval gates are engine primitives, enforced per workflow:
 
-- **AI startups** — Ship AI agents to production with built-in cost tracking and budget control. Survive crashes, stop runaway spend.
-- **Small businesses** — Define workflows with no code, deploy one binary and one database. No cluster, no DevOps team. Production reliability for tens of dollars a month.
-- **Data teams** — Combine batch pipelines and AI agents in one platform. [Python SDK](https://github.com/kruxia/kruxiaflow-python) with pandas and DuckDB, without a 4GB footprint or a $1K/month vendor lock-in.
+- **Hard budgets, enforced in the engine.** Set `limit_usd` per activity or per workflow. Activities that would exceed it don't run.
+- **Budget-aware model fallback.** Declare an ordered model list; the engine downgrades to cheaper models as budget tightens instead of failing.
+- **Ask a human.** Workflows suspend on `wait_for_signal` — for budget approvals, review gates, or any human-in-the-loop step — and resume days later, surviving restarts while they wait.
+- **Costs in your database.** Token-level splits (input / output / cache) per activity, per attempt, queryable via the cost API. Your spend data lives in your Postgres, not a vendor dashboard.
+- **Durable by construction.** Event-sourced execution over PostgreSQL: crashes resume where they left off, with exactly-once semantics.
 
-### The Problem
+Built for teams that run LLM pipelines on their own infrastructure — including fully local with [Ollama](https://ollama.com/) — and want the spend governed as carefully as the data.
 
-LLM costs spiral out of control, and existing tools can't help:
+### How it compares
 
-- **Invisible AI spend**: No workflow engine tracks LLM costs natively. Teams with cost observability report 30-50% savings, but you're left stitching together external tools with no budget control to stop a runaway agent.
-- **Temporal's operational tax**: 7+ components to self-host, and teams report 8 engineering-months per year on maintenance. Zero LLM awareness.
-- **LangGraph isn't a workflow engine**: Python-only, no native scheduling, and requires the proprietary LangSmith platform for production at ~$1,000 per million executions.
+| Capability                        | Kruxia Flow        | Temporal      | Inngest       | LangGraph        | LLM gateways    |
+|-----------------------------------|:------------------:|:-------------:|:-------------:|:----------------:|:----------------:|
+| Hard budget enforcement           | **Per workflow**   | —             | —             | —                | Per API key      |
+| LLM cost tracking                 | **Per token**      | —             | Partial       | via LangSmith    | Per request      |
+| Budget-aware model fallback       | **Yes**            | —             | **Yes**       | Partial          | Some             |
+| Suspend for human approval        | **Yes**            | **Yes**       | **Yes**       | **Yes**          | —                |
+| Durable execution                 | **Yes**            | **Yes**       | **Yes**       | Partial          | —                |
+| Token streaming                   | **Yes**            | —             | —             | **Yes**          | **Yes**          |
+| Self-host footprint               | **1 binary + PG**  | 7+ components | 1 binary + PG | Proprietary SaaS | varies           |
 
-### The Solution
-
-Kruxia Flow combines durable execution with AI-native features:
-
-| Feature              | Kruxia Flow        | Temporal      | Inngest       | LangGraph        |
-|----------------------|:------------------:|:-------------:|:-------------:|:----------------:|
-| Durable execution    | **Yes**            | **Yes**       | **Yes**       | Partial          |
-| LLM cost tracking    | **Yes**            | —             | Partial       | via LangSmith    |
-| Budget control       | **Yes**            | —             | —             | —                |
-| Model fallback       | **Yes**            | —             | **Yes**       | Partial          |
-| Token streaming      | **Yes**            | —             | —             | **Yes**          |
-| Self-host complexity | **1 binary + PG**  | 7+ components | 1 binary + PG | Proprietary      |
-| Throughput           | **93 wf/s**        | 66 wf/s       | Not tested    | N/A              |
-| Binary size          | **7.5 MB**         | ~200 MB       | Not tested    | N/A              |
-| Docker image         | **63 MB**          | ~500 MB       | Not tested    | N/A              |
-| Peak memory          | **328 MB**         | ~425 MB       | Not tested    | N/A              |
-| Open source          | **AGPL-3.0 + MIT** | MIT           | SSPL          | MIT              |
+Gateways cap keys; engines should cap workflows. Kruxia Flow is the only durable execution engine where the budget is a first-class primitive of the workflow itself.
 
 ## Getting Started
 
@@ -80,40 +86,9 @@ TOKEN=$(curl -s -X POST http://localhost:8080/api/v1/oauth/token \
   -d "client_secret=$CLIENT_SECRET" | jq -r '.access_token')
 ```
 
-### 3. Run a Workflow
+### 3. Run a Budgeted Workflow
 
-Deploy the weather report example and run it:
-
-```bash
-# Deploy the workflow definition
-curl -s -X POST http://localhost:8080/api/v1/workflow_definitions \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: text/yaml" \
-  --data-binary @examples/01-weather-report.yaml | jq .
-
-# Submit a workflow instance
-WORKFLOW_ID=$(curl -s -X POST http://localhost:8080/api/v1/workflows \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "definition_name": "weather_report",
-    "input": {"webhook_url": "https://httpbin.org/post"}
-  }' | jq .workflow_id | tr -d '"'); echo $WORKFLOW_ID
-```
-
-This fetches a weather forecast from the National Weather Service API and POSTs
-the result to a webhook. Copy the `workflow_id` from the response to check status:
-
-```bash
-curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID \
-  -H "Authorization: Bearer $TOKEN" | jq .
-```
-
-If it succeeded, you've got mail! Check the weather report at http://localhost:8025/ 
-
-### 4. Run an LLM Workflow
-
-For AI workflows, set your provider API key in your shell environment and restart:
+Set your provider API key and start the server (skip the key to use only non-LLM examples):
 
 ```bash
 # Set your Anthropic API key (add to ~/.bashrc or ~/.zshrc to persist)
@@ -123,16 +98,16 @@ export ANTHROPIC_API_KEY=your-key-here
 ./docker down && ./docker up -d
 ```
 
-Then deploy and run the content moderation example:
+Deploy and run the content moderation example — an LLM workflow with cost tracking:
 
 ```bash
-# Deploy the moderation workflow
+# Deploy the workflow definition
 curl -s -X POST http://localhost:8080/api/v1/workflow_definitions \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: text/yaml" \
   --data-binary @examples/04-moderate-content.yaml | jq .
 
-# Submit a moderation request
+# Submit a workflow instance
 WORKFLOW_ID=$(curl -s -X POST http://localhost:8080/api/v1/workflows \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
@@ -145,20 +120,24 @@ WORKFLOW_ID=$(curl -s -X POST http://localhost:8080/api/v1/workflows \
   }' | jq .workflow_id | tr -d '"'); echo $WORKFLOW_ID
 ```
 
-Check workflow result and cost tracking with the `workflow_id` from the response:
+### 4. See What It Cost
 
 ```bash
+# Workflow status and result
 curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID \
   -H "Authorization: Bearer $TOKEN" | jq .
 
-# View cost summary for the workflow
+# Cost summary for the workflow
 curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/cost \
   -H "Authorization: Bearer $TOKEN" | jq .
 
-# View cost breakdown for the workflow activities
+# Token-level cost breakdown per activity
 curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/cost/history \
   -H "Authorization: Bearer $TOKEN" | jq .
 ```
+
+Prefer a non-LLM first run? Deploy `examples/01-weather-report.yaml` the same way — it
+fetches a forecast and POSTs it to a webhook, no API key needed.
 
 See `examples/` for 15+ example workflows covering parallel execution, model fallback,
 caching, loops, scheduling, and RAG patterns. API docs at
@@ -166,9 +145,12 @@ http://localhost:8080/api/v1/docs.
 
 ## Key Features
 
-### Built-in LLM Cost Tracking
+### Hard Budgets, Enforced Before Spending
 
-The std (built-in) `llm_prompt` and `embedding` activities help you control costs: They estimate costs in advance using the published cost data for LLM models (stored in [config/llm_models.yaml](config/llm_models.yaml)) and will only run activities that won't exceed the budget, if provided. Then when the LLM activity is run, the costs and token counts are recorded so that cost metrics can be analyzed and workflows optimized.
+The built-in `llm_prompt` and `embedding` activities estimate cost in advance from
+published model pricing ([config/llm_models.yaml](config/llm_models.yaml)) and refuse to
+run activities that would exceed the budget. When an activity runs, actual costs and
+token counts are recorded per attempt.
 
 ```yaml
 activities:
@@ -207,6 +189,25 @@ activities:
         action: abort
 ```
 
+### Human-in-the-Loop Approval Gates
+
+Workflows can suspend and wait — for a budget sign-off, a content review, or any human
+decision — then resume when signaled, even days later, surviving restarts in between:
+
+```yaml
+activities:
+  - key: await_approval
+    settings:
+      wait_for_signal: approval
+```
+
+```bash
+# Resume the waiting workflow
+curl -X POST http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/signal \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"signal_name": "approval", "data": {"approved": true}}'
+```
+
 ### Result Caching
 
 Save on LLM costs by caching repeated queries:
@@ -233,7 +234,9 @@ Identical queries hit cache instead of the LLM. (NOTE: Semantic caching is plann
 
 ### Durable Execution
 
-Workflows survive crashes and restart from where they left off.
+Workflows survive crashes and restart from where they left off. Execution is
+event-sourced over PostgreSQL with exactly-once semantics — the full history of every
+run, including costs and approvals, is queryable after the fact.
 
 ### Multi-Provider LLM Support
 
@@ -242,28 +245,28 @@ Native support for all major providers:
 - **Anthropic**: Claude 4.5 Sonnet, Claude 4.5 Haiku
 - **OpenAI**: GPT-5.1, GPT-4o, GPT-4o-mini, GPT-3.5 Turbo
 - **Google**: Gemini Pro, Gemini Flash
-- **Ollama**: Self-hosted open models
+- **Ollama**: Self-hosted open models — run the whole pipeline, models included, on your own hardware
 
 ## Examples
 
 Kruxia Flow includes 15+ production-ready example workflows in YAML and Python:
 
-| #  | Example                         | Concepts Demonstrated                              |
-|----|---------------------------------|----------------------------------------------------|
-| 1  | [Weather Report][ex1]           | Sequential workflow, HTTP requests, templates      |
-| 2  | [User Validation][ex2]          | Conditional branching, PostgreSQL queries          |
-| 3  | [Document Processing][ex3]      | Parallel execution, fan-out/fan-in, file storage   |
-| 4  | [Content Moderation][ex4]       | LLM with cost tracking, retry with backoff         |
-| 5  | [Research Assistant][ex5]       | Multi-model fallback, budget-aware selection       |
-| 6  | [FAQ Bot / RAG][ex6]            | Semantic caching, vector search, embeddings        |
-| 7  | [Agentic Research][ex7]         | Iterative loops, agent patterns                    |
-| 8  | [Scheduled Tasks][ex8]          | Delays, rate limiting, scheduled execution         |
-| 9  | [Token Streaming][ex9]          | Real-time LLM streaming via WebSocket              |
-| 10 | [Order Processing][ex10]        | HTTP, database transactions, email notifications   |
-| 11 | [GitHub Health Check][ex11]     | Python SDK, HTTP API integration                   |
-| 12 | [Sales ETL Pipeline][ex12]      | Python SDK, pandas, DuckDB SQL on DataFrames       |
+| #  | Example                           | Concepts Demonstrated                              |
+|----|-----------------------------------|----------------------------------------------------|
+| 1  | [Weather Report][ex1]             | Sequential workflow, HTTP requests, templates      |
+| 2  | [User Validation][ex2]            | Conditional branching, PostgreSQL queries          |
+| 3  | [Document Processing][ex3]        | Parallel execution, fan-out/fan-in, file storage   |
+| 4  | [Content Moderation][ex4]         | LLM with cost tracking, retry with backoff         |
+| 5  | [Research Assistant][ex5]         | Multi-model fallback, budget-aware selection       |
+| 6  | [FAQ Bot / RAG][ex6]              | Semantic caching, vector search, embeddings        |
+| 7  | [Agentic Research][ex7]           | Iterative loops, agent patterns                    |
+| 8  | [Scheduled Tasks][ex8]            | Delays, rate limiting, scheduled execution         |
+| 9  | [Token Streaming][ex9]            | Real-time LLM streaming via WebSocket              |
+| 10 | [Order Processing][ex10]          | HTTP, database transactions, email notifications   |
+| 11 | [GitHub Health Check][ex11]       | Python SDK, HTTP API integration                   |
+| 12 | [Sales ETL Pipeline][ex12]        | Python SDK, pandas, DuckDB SQL on DataFrames       |
 | 13 | [Customer Churn Prediction][ex13] | Python SDK, parallel ML training, LLM explanations |
-| 14 | [Document Intelligence][ex14]   | Python SDK, AI-powered document analysis           |
+| 14 | [Document Intelligence][ex14]     | Python SDK, AI-powered document analysis           |
 | 15 | [Content Moderation System][ex15] | Python SDK, multi-stage moderation pipeline        |
 
 [ex1]: examples/README.md#example-1-weather-report-pipeline
@@ -284,7 +287,8 @@ Kruxia Flow includes 15+ production-ready example workflows in YAML and Python:
 
 ## Architecture
 
-Kruxia Flow is a single Rust binary with PostgreSQL as the only required dependency. Runs anywhere: on cloud VMs, on-premise computers, or edge devices like Raspberry Pi Zero.
+Kruxia Flow is a single Rust binary with PostgreSQL as the only required dependency.
+Run it on a cloud VM, on-premise, or entirely air-gapped alongside local models.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -303,7 +307,7 @@ Kruxia Flow is a single Rust binary with PostgreSQL as the only required depende
 
 - **Event-driven**: Publish-subscribe architecture with exactly-once semantics
 - **PostgreSQL-only**: No Kafka, Cassandra, or Elasticsearch required
-- **Pluggable**: Include Redis for activity results caching 
+- **Pluggable**: Include Redis for activity results caching
 - **Planned**: Swap in Kafka for events, S3 for storage when you need scale [POST-MVP]
 
 ## Performance
@@ -380,24 +384,26 @@ cargo build --release
 
 ### Now (Complete)
 - Durable workflow execution
-- 15+ example workflows
-- LLM cost tracking and budgets
-- Multi-provider LLM support
+- Hard budgets, per-token cost tracking, budget-aware model fallback
+- Human-in-the-loop workflows (`wait_for_signal` + signals API)
+- Multi-provider LLM support (Anthropic, OpenAI, Google, Ollama)
 - Token streaming
-- Human-in-the-loop workflows
-- [Python SDK](https://github.com/kruxia/kruxiaflow-python) (install from GitHub)
+- 15+ example workflows
+- [Python SDK](https://github.com/kruxia/kruxiaflow-python) — `pip install kruxiaflow`
 
 ### Next
+- Frictionless local dev mode (no token setup)
+- Rust worker SDK on crates.io
+- CLI cost reports and a cost dashboard
+- MCP server: agents author, run, and monitor budgeted workflows
 - Semantic caching
-- Web dashboard for cost visualization
-- Airflow migration guide
-- Kubernetes Helm chart
 
 ### Later
 - TypeScript SDK
 - RBAC and multi-tenancy
 - Kafka protocol event backend
 - S3-compatible workflow storage backend
+- Kubernetes Helm chart
 
 See [Post-MVP Roadmap](docs/post-mvp.md) for details.
 
@@ -430,8 +436,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed development setup and guidel
 
 ## License
 
-AGPL-3.0 License - See [LICENSE](LICENSE) for details.
+Apache-2.0 — the engine and client SDKs alike. See [LICENSE](LICENSE) and
+[docs/licensing-faq.md](docs/licensing-faq.md) for details.
 
 ---
 
-**Kruxia Flow** - AI-native durable workflows that run everywhere, with built-in LLM cost controls and streaming.
+**Kruxia Flow** — budgeted workflows: cost-governed orchestration for teams running LLM pipelines on their own infrastructure.

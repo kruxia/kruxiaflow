@@ -4,7 +4,10 @@
 //! These tests use the test keys in oauth/tests/*.pem and do not require a database.
 
 use chrono::{Duration, Utc};
-use kruxiaflow_oauth::{AuthConfig, AuthError, AuthenticationService, Claims, PostgresAuthService};
+use kruxiaflow_oauth::{
+    AuthConfig, AuthError, AuthenticationService, Claims, PostgresAuthService, RegisterUserRequest,
+    RegisterUserResponse,
+};
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -634,4 +637,71 @@ fn test_hash_refresh_token_produces_hex_string() {
         hash.chars().all(|c| c.is_ascii_hexdigit()),
         "Hash should contain only hex digits"
     );
+}
+
+// ============================================================================
+// RegisterUserRequest / RegisterUserResponse type tests
+// ============================================================================
+
+#[test]
+fn test_register_user_request_deserialization() {
+    let json = r#"{
+        "username": "demo",
+        "email": "demo@example.com",
+        "password": "secret"
+    }"#;
+
+    let request: RegisterUserRequest = serde_json::from_str(json).unwrap();
+    assert_eq!(request.username, "demo");
+    assert_eq!(request.email, "demo@example.com");
+    assert_eq!(request.password, "secret");
+}
+
+#[test]
+fn test_register_user_request_clone() {
+    let request1 = RegisterUserRequest {
+        username: "user1".to_string(),
+        email: "user1@example.com".to_string(),
+        password: "pass".to_string(),
+    };
+
+    let request2 = request1.clone();
+    assert_eq!(request1.username, request2.username);
+    assert_eq!(request1.email, request2.email);
+    assert_eq!(request1.password, request2.password);
+}
+
+#[test]
+fn test_register_user_response_serialization() {
+    let response = RegisterUserResponse {
+        id: Uuid::nil(),
+        username: "demo".to_string(),
+        email: "demo@example.com".to_string(),
+        is_active: true,
+        created_at: chrono::Utc::now(),
+    };
+
+    let json = serde_json::to_value(&response).unwrap();
+    assert_eq!(json["username"], "demo");
+    assert_eq!(json["email"], "demo@example.com");
+    assert_eq!(json["is_active"], true);
+    assert!(json["id"].is_string());
+    assert!(json["created_at"].is_string());
+}
+
+#[test]
+fn test_register_user_response_clone() {
+    let response1 = RegisterUserResponse {
+        id: Uuid::nil(),
+        username: "user1".to_string(),
+        email: "user1@example.com".to_string(),
+        is_active: true,
+        created_at: chrono::Utc::now(),
+    };
+
+    let response2 = response1.clone();
+    assert_eq!(response1.id, response2.id);
+    assert_eq!(response1.username, response2.username);
+    assert_eq!(response1.email, response2.email);
+    assert_eq!(response1.is_active, response2.is_active);
 }

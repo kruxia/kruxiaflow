@@ -3,9 +3,10 @@
 
 use crate::{
     AuthConfig, AuthError, AuthResponse, AuthResult, AuthenticationService, Claims, JwtKey,
+    RegisterUserRequest, RegisterUserResponse,
 };
 use async_trait::async_trait;
-use bcrypt::verify;
+use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use sha2::{Digest, Sha256};
@@ -313,6 +314,36 @@ impl AuthenticationService for PostgresAuthService {
 
     async fn validate_token(&self, token: &str) -> AuthResult<Claims> {
         self.verify_jwt(token)
+    }
+
+    async fn register_user(
+        &self,
+        request: RegisterUserRequest,
+    ) -> AuthResult<RegisterUserResponse> {
+        let password_hash = hash(&request.password, DEFAULT_COST)
+            .map_err(|e| AuthError::InternalError(format!("Failed to hash password: {}", e)))?;
+
+        let row = sqlx::query!(
+            r#"
+            INSERT INTO oauth_users (username, email, password_hash)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (username) DO UPDATE SET updated_at = NOW()
+            RETURNING id, username, email, is_active, created_at
+            "#,
+            request.username,
+            request.email,
+            password_hash,
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(RegisterUserResponse {
+            id: row.id,
+            username: row.username,
+            email: row.email,
+            is_active: row.is_active,
+            created_at: row.created_at,
+        })
     }
 
     async fn get_signing_keys(&self) -> AuthResult<Vec<JwtKey>> {

@@ -142,6 +142,22 @@ cargo test -p kruxiaflow-core
 - Use meaningful test names that describe the scenario
 - Tests should not depend on external services (only local Docker services)
 
+### Database Queries (sqlx offline cache)
+
+CI compiles with `SQLX_OFFLINE=true` and `--all-targets`, so every
+`sqlx::query!` macro — **including those in test files** — needs an entry in
+the checked-in `.sqlx/` cache. Whenever you add or change a query, regenerate
+the cache and commit the changed files:
+
+```bash
+./scripts/sqlx-prepare.sh
+```
+
+The script runs migrations and `cargo sqlx prepare --workspace -- --all-targets`
+against a throwaway postgres container (plain `cargo sqlx prepare` silently
+skips test targets — don't use it directly). Pass `--verify` to also run the
+same offline check CI runs.
+
 ## Documentation
 
 ### Code Documentation
@@ -174,5 +190,11 @@ cargo test -p kruxiaflow-core
 Contributors are recognized in:
 - Release notes for significant contributions
 - The project README for major features
+
+## License
+
+Kruxia Flow is licensed under the [Apache License 2.0](LICENSE). By submitting a
+contribution, you agree that it is licensed under the same terms (per Section 5
+of the Apache License). No CLA is required.
 
 Thank you for contributing to Kruxia Flow!

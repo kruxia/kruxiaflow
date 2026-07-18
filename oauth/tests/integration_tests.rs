@@ -7,7 +7,8 @@
 use bcrypt::hash;
 use chrono::{Duration, Utc};
 use kruxiaflow_oauth::{
-    AuthConfig, AuthError, AuthenticationService, PostgresAuthService, hash_refresh_token,
+    AuthConfig, AuthError, AuthenticationService, PostgresAuthService, RegisterUserRequest,
+    hash_refresh_token,
 };
 use serial_test::serial;
 use sqlx::PgPool;
@@ -672,4 +673,138 @@ async fn test_user_and_client_tokens_are_distinct() {
     );
 
     cleanup_test_data(&pool, Some(client_id), Some(username)).await;
+}
+
+// ============================================================================
+// Register User Tests
+// ============================================================================
+
+#[tokio::test]
+#[serial]
+async fn test_register_user_success() {
+    let pool = setup_test_pool().await;
+    let service = setup_auth_service(pool.clone()).await;
+
+    let username = "testuser-register";
+
+    // Pre-cleanup
+    pre_cleanup_test_data(&pool, None, Some(username)).await;
+
+    let request = RegisterUserRequest {
+        username: username.to_string(),
+        email: "register@example.com".to_string(),
+        password: "secure-password".to_string(),
+    };
+
+    let result = service.register_user(request).await;
+    assert!(
+        result.is_ok(),
+        "register_user should succeed: {:?}",
+        result.err()
+    );
+
+    let response = result.unwrap();
+    assert_eq!(response.username, username);
+    assert_eq!(response.email, "register@example.com");
+    assert!(response.is_active);
+
+    // Verify the user can now authenticate with the registered password
+    let auth_result = service
+        .authenticate_password(username, "secure-password")
+        .await;
+    assert!(
+        auth_result.is_ok(),
+        "Should be able to login with registered password"
+    );
+
+    cleanup_test_data(&pool, None, Some(username)).await;
+}
+
+#[tokio::test]
+#[serial]
+async fn test_register_user_idempotent() {
+    let pool = setup_test_pool().await;
+    let service = setup_auth_service(pool.clone()).await;
+
+    let username = "testuser-idempotent";
+
+    // Pre-cleanup
+    pre_cleanup_test_data(&pool, None, Some(username)).await;
+
+    let request = RegisterUserRequest {
+        username: username.to_string(),
+        email: "idempotent@example.com".to_string(),
+        password: "password-1".to_string(),
+    };
+
+    // First registration
+    let result1 = service.register_user(request).await;
+    assert!(result1.is_ok());
+    let user1 = result1.unwrap();
+
+    // Second registration with same username but different email/password
+    let request2 = RegisterUserRequest {
+        username: username.to_string(),
+        email: "different@example.com".to_string(),
+        password: "password-2".to_string(),
+    };
+
+    let result2 = service.register_user(request2).await;
+    assert!(result2.is_ok(), "Idempotent register should succeed");
+    let user2 = result2.unwrap();
+
+    // Should return the same user ID (upsert)
+    assert_eq!(user1.id, user2.id, "Should return same user on conflict");
+
+    // Password should NOT have been updated (safe for idempotent seeding)
+    let auth_result = service.authenticate_password(username, "password-1").await;
+    assert!(
+        auth_result.is_ok(),
+        "Original password should still work after idempotent upsert"
+    );
+
+    cleanup_test_data(&pool, None, Some(username)).await;
+}
+
+#[tokio::test]
+#[serial]
+async fn test_register_user_then_password_login() {
+    let pool = setup_test_pool().await;
+    let service = setup_auth_service(pool.clone()).await;
+
+    let username = "testuser-reg-login";
+
+    // Pre-cleanup
+    pre_cleanup_test_data(&pool, None, Some(username)).await;
+
+    // Register user
+    let request = RegisterUserRequest {
+        username: username.to_string(),
+        email: "reglogin@example.com".to_string(),
+        password: "login-password".to_string(),
+    };
+
+    service
+        .register_user(request)
+        .await
+        .expect("register should succeed");
+
+    // Login with password flow
+    let auth_response = service
+        .authenticate_password(username, "login-password")
+        .await
+        .expect("password login should succeed after register");
+
+    assert_eq!(auth_response.token_type, "Bearer");
+    assert!(auth_response.refresh_token.is_some());
+
+    // Validate the issued token
+    let claims = service
+        .validate_token(&auth_response.access_token)
+        .await
+        .expect("token should be valid");
+
+    assert!(!claims.sub.is_empty());
+
+    cleanup_test_data(&pool, None, Some(username)).await;
 }

@@ -6,9 +6,11 @@ pub mod oauth;
 pub mod outputs;
 pub mod signals;
 pub mod streaming;
+pub mod users;
 pub mod websocket;
 pub mod workers;
 pub mod workflow_definitions;
+pub mod workflow_events;
 pub mod workflows;
 
 pub use cache::{invalidate_cache_key, invalidate_cache_pattern};
@@ -23,9 +25,11 @@ pub use signals::signal_activity;
 pub use streaming::{
     get_subscriber_count, publish_stream_complete, publish_stream_error, publish_stream_token,
 };
-pub use websocket::activity_stream_handler;
+pub use users::create_user;
+pub use websocket::{activity_stream_by_key_handler, activity_stream_handler};
 pub use workers::{complete_activity, fail_activity, heartbeat_activity, poll_activities};
 pub use workflow_definitions::{
     deploy_workflow_definition, get_workflow_definition, list_workflow_definitions,
 };
+pub use workflow_events::workflow_events_ws_handler;
 pub use workflows::{get_workflow, list_workflows, submit_workflow};

@@ -310,6 +310,10 @@ pub struct ActivitySettings {
     /// When set, the activity enters 'waiting' state until signaled or timeout
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait_for_signal: Option<WaitForSignalSettings>,
+
+    /// Token streaming configuration
+    #[serde(default, skip_serializing_if = "StreamingConfig::is_disabled")]
+    pub streaming: StreamingConfig,
 }
 
 /// Settings for activities that wait for external signals
@@ -450,6 +454,7 @@ impl From<kruxiaflow_core::workflow::ActivitySettings> for ActivitySettings {
             delay: settings.delay,
             scheduled_for: settings.scheduled_for,
             wait_for_signal: settings.wait_for_signal.map(Into::into),
+            streaming: settings.streaming.into(),
         }
     }
 }
@@ -466,6 +471,7 @@ impl From<ActivitySettings> for kruxiaflow_core::workflow::ActivitySettings {
             delay: settings.delay,
             scheduled_for: settings.scheduled_for,
             wait_for_signal: settings.wait_for_signal.map(Into::into),
+            streaming: settings.streaming.into(),
         }
     }
 }
@@ -1010,6 +1016,7 @@ mod tests {
                 timeout_seconds: 120,
                 on_timeout: OnTimeout::Continue,
             }),
+            ..Default::default()
         };
         let core: kruxiaflow_core::workflow::ActivitySettings = api.into();
         let back: ActivitySettings = core.into();

@@ -367,6 +367,7 @@ mod tests {
             delay: None,
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         };
 
         let _result = registry
@@ -402,6 +403,7 @@ mod tests {
             delay: None,
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         };
 
         let result = registry
@@ -443,6 +445,7 @@ mod tests {
             delay: None,
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         };
 
         let params = json!({"input": "cached_test"});
@@ -502,6 +505,7 @@ mod tests {
             delay: None,
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         };
 
         // First call with params A
@@ -553,6 +557,7 @@ mod tests {
             delay: None,
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         };
 
         // Execute twice with same params
@@ -604,6 +609,7 @@ mod tests {
             delay: None,
             scheduled_for: None,
             wait_for_signal: None,
+            ..Default::default()
         };
 
         let _result = registry
@@ -675,5 +681,72 @@ mod tests {
         let output = result.unwrap();
         // The TestActivity echoes back the parameters
         assert_eq!(output.to_json_value().get("result"), Some(&complex_params));
+    }
+
+    // =========================================================================
+    // Streaming registration tests
+    // =========================================================================
+
+    /// Mock streaming activity for testing
+    struct MockStreamingActivity;
+
+    #[async_trait]
+    impl crate::streaming::StreamingActivity for MockStreamingActivity {
+        async fn execute_streaming(
+            &self,
+            _activity_id: uuid::Uuid,
+            parameters: Value,
+            _sender: Box<dyn crate::streaming::StreamSender>,
+        ) -> Result<ActivityResult> {
+            Ok(ActivityResult::value("result", parameters))
+        }
+    }
+
+    #[test]
+    fn test_register_streaming_activity() {
+        let cache = Arc::new(NoOpCache::new());
+        let mut registry = ActivityRegistry::new(cache);
+
+        let streaming_impl = Arc::new(MockStreamingActivity);
+        registry.register_streaming("test", "stream", streaming_impl);
+
+        assert!(registry.get_streaming("test", "stream").is_some());
+    }
+
+    #[test]
+    fn test_get_streaming_not_found() {
+        let cache = Arc::new(NoOpCache::new());
+        let registry = ActivityRegistry::new(cache);
+
+        assert!(registry.get_streaming("test", "nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_register_streaming_does_not_affect_normal_registry() {
+        let cache = Arc::new(NoOpCache::new());
+        let mut registry = ActivityRegistry::new(cache);
+
+        let streaming_impl = Arc::new(MockStreamingActivity);
+        registry.register_streaming("test", "stream", streaming_impl);
+
+        // Streaming registration should not appear in activity_types()
+        assert_eq!(registry.activity_types().len(), 0);
+
+        // Normal registration should not appear in get_streaming()
+        registry.register(Arc::new(TestActivity::new("test", "echo")));
+        assert!(registry.get_streaming("test", "echo").is_none());
+        assert_eq!(registry.activity_types().len(), 1);
+    }
+
+    #[test]
+    fn test_register_both_normal_and_streaming() {
+        let cache = Arc::new(NoOpCache::new());
+        let mut registry = ActivityRegistry::new(cache);
+
+        registry.register(Arc::new(TestActivity::new("test", "dual")));
+        registry.register_streaming("test", "dual", Arc::new(MockStreamingActivity));
+
+        assert_eq!(registry.activity_types().len(), 1);
+        assert!(registry.get_streaming("test", "dual").is_some());
     }
 }

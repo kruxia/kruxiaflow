@@ -1,4 +1,5 @@
 use crate::websocket::ConnectionManager;
+use crate::workflow_events::WorkflowEventManager;
 use kruxiaflow_core::cache::CacheService;
 use kruxiaflow_core::events::EventSource;
 use kruxiaflow_core::queue::ActivityQueue;
@@ -60,6 +61,10 @@ pub struct AppState {
     /// Manages active WebSocket connections per activity for real-time token streaming
     pub connection_manager: ConnectionManager,
 
+    /// WebSocket subscription manager for workflow event streaming
+    /// Manages filtered subscriptions for real-time workflow event broadcast
+    pub workflow_event_manager: WorkflowEventManager,
+
     /// Shutdown coordination token for graceful shutdown
     pub shutdown_token: CancellationToken,
 
@@ -111,6 +116,7 @@ impl AppState {
             cache_service,
             subscription_service,
             connection_manager: ConnectionManager::new(),
+            workflow_event_manager: WorkflowEventManager::new(),
             shutdown_token,
             version: env!("CARGO_PKG_VERSION").to_string(),
             build: AppStateBuild {
@@ -125,6 +131,7 @@ impl AppState {
                 "workflows".to_string(),
                 "workers".to_string(),
                 "websockets".to_string(),
+                "workflow_events".to_string(),
                 "authentication".to_string(),
             ],
         }
@@ -169,6 +176,7 @@ impl AppState {
             cache_service,
             subscription_service,
             connection_manager: ConnectionManager::new(),
+            workflow_event_manager: WorkflowEventManager::new(),
             shutdown_token,
             version,
             build,
@@ -191,7 +199,10 @@ pub mod tests {
     use kruxiaflow_core::events::{EventError, NewWorkflowEvent, WorkflowEvent};
     use kruxiaflow_core::queue::{Activity, ActivityResult, QueuedActivity};
     use kruxiaflow_core::storage::{FileMetadata, StorageError};
-    use kruxiaflow_oauth::{AuthResponse, AuthResult, AuthenticationService, Claims, JwtKey};
+    use kruxiaflow_oauth::{
+        AuthResponse, AuthResult, AuthenticationService, Claims, JwtKey, RegisterUserRequest,
+        RegisterUserResponse,
+    };
     use sqlx::PgPool;
     use std::pin::Pin;
     use tokio_util::bytes::Bytes;
@@ -510,6 +521,19 @@ pub mod tests {
             })
         }
 
+        async fn register_user(
+            &self,
+            request: RegisterUserRequest,
+        ) -> AuthResult<RegisterUserResponse> {
+            Ok(RegisterUserResponse {
+                id: Uuid::now_v7(),
+                username: request.username,
+                email: request.email,
+                is_active: true,
+                created_at: chrono::Utc::now(),
+            })
+        }
+
         async fn get_signing_keys(&self) -> AuthResult<Vec<JwtKey>> {
             Ok(vec![])
         }
@@ -546,10 +570,11 @@ pub mod tests {
         );
 
         assert_eq!(state.version, env!("CARGO_PKG_VERSION"));
-        assert_eq!(state.features.len(), 4);
+        assert_eq!(state.features.len(), 5);
         assert!(state.features.contains(&"workflows".to_string()));
         assert!(state.features.contains(&"workers".to_string()));
         assert!(state.features.contains(&"websockets".to_string()));
+        assert!(state.features.contains(&"workflow_events".to_string()));
         assert!(state.features.contains(&"authentication".to_string()));
     }
 

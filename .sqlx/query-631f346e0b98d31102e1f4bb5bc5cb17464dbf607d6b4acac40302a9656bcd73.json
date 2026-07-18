@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id as \"id!\" FROM activity_queue\n               WHERE workflow_id = $1 AND activity_key = $2\n               ORDER BY iteration DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "631f346e0b98d31102e1f4bb5bc5cb17464dbf607d6b4acac40302a9656bcd73"
+}

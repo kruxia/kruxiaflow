@@ -205,6 +205,7 @@ async fn test_activity_retry_with_exponential_backoff() {
                 delay: None,
                 scheduled_for: None,
                 wait_for_signal: None,
+                ..Default::default()
             }),
             depends_on: None,
             dependency_of: None,
@@ -395,6 +396,7 @@ async fn test_activity_retry_max_attempts_reached() {
                 delay: None,
                 scheduled_for: None,
                 wait_for_signal: None,
+                ..Default::default()
             }),
             depends_on: None,
             dependency_of: None,
@@ -554,6 +556,7 @@ async fn test_activity_retry_with_fixed_backoff() {
                 delay: None,
                 scheduled_for: None,
                 wait_for_signal: None,
+                ..Default::default()
             }),
             depends_on: None,
             dependency_of: None,
@@ -811,6 +814,7 @@ async fn test_retry_state_tracking_with_cost_accumulation() {
                 delay: None,
                 scheduled_for: None,
                 wait_for_signal: None,
+                ..Default::default()
             }),
             depends_on: None,
             dependency_of: None,
