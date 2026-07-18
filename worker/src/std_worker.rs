@@ -53,7 +53,9 @@ pub fn register_std_activities(cache_service: Arc<dyn CacheService>) -> Activity
     registry.register(Arc::new(PostgresTransactionActivity::new(pg_pool_cache)));
 
     // Register LLM activities
-    registry.register(Arc::new(LLMPromptActivity::new()));
+    let llm_activity = Arc::new(LLMPromptActivity::new());
+    registry.register(llm_activity.clone());
+    registry.register_streaming("std", "llm_prompt", llm_activity);
     registry.register(Arc::new(EmbeddingActivity::new()));
 
     // Register email activity
@@ -87,5 +89,29 @@ mod tests {
 
         // Should have exactly 7 activities
         assert_eq!(activity_types.len(), 7);
+    }
+
+    #[test]
+    fn test_llm_prompt_registered_as_streaming() {
+        let cache_service = Arc::new(NoOpCache::new());
+        let registry = register_std_activities(cache_service);
+
+        // LLM prompt should be registered as a streaming activity
+        let streaming = registry.get_streaming("std", "llm_prompt");
+        assert!(
+            streaming.is_some(),
+            "LLMPromptActivity should be registered as a streaming activity"
+        );
+    }
+
+    #[test]
+    fn test_non_streaming_activities_not_registered_as_streaming() {
+        let cache_service = Arc::new(NoOpCache::new());
+        let registry = register_std_activities(cache_service);
+
+        // Other activities should NOT be registered as streaming
+        assert!(registry.get_streaming("std", "echo").is_none());
+        assert!(registry.get_streaming("std", "http_request").is_none());
+        assert!(registry.get_streaming("std", "embedding").is_none());
     }
 }

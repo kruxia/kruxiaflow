@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                    SELECT id, workflow_id, event_type as \"event_type: WorkflowEventType\",\n                           activity_key, payload, timestamp, iteration\n                    FROM workflow_events\n                    WHERE id > $1\n                    ORDER BY id ASC\n                    LIMIT $2\n                    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "workflow_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "event_type: WorkflowEventType",
+        "type_info": {
+          "Custom": {
+            "name": "workflow_event_type",
+            "kind": {
+              "Enum": [
+                "WorkflowCreated",
+                "WorkflowUpdated",
+                "ActivityScheduled",
+                "ActivityCompleted",
+                "ActivityFailed",
+                "WorkflowCompleted",
+                "WorkflowFailed",
+                "ActivityWaiting",
+                "ActivitySignaled"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "activity_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "timestamp",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "iteration",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "a4b8695a8f823de21821e9313159cf52afdcbd022d074c06b5bb49a3c6dabe19"
+}

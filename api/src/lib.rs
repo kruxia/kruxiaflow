@@ -8,6 +8,7 @@ pub mod openapi;
 pub mod routes;
 pub mod state;
 pub mod websocket;
+pub mod workflow_events;
 
 // Re-export commonly used items
 pub use error::{ApiError, ApiErrorResponse, ApiResult, AppError, ErrorCode, ValidationErrors};

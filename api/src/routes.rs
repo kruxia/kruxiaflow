@@ -25,15 +25,17 @@ async fn fallback_404() -> impl IntoResponse {
 /// - GET /api/v1/info - Service information
 /// - POST /api/v1/oauth/token - OAuth 2.0 token issuance
 /// - GET /api/v1/activities/{id}/ws - WebSocket for activity streaming (auth via query param)
+/// - GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/ws - WebSocket for activity
+///   streaming by key
+/// - GET /api/v1/workflow_events/ws - WebSocket for workflow event streaming (auth via query param)
 ///
 /// These routes are accessible without HTTP header authentication.
 ///
-/// Note: The token endpoint accepts both application/json and
-/// application/x-www-form-urlencoded per OAuth 2.0 spec using
-/// Axum's Either extractor to handle both content types.
+/// Note: The token endpoint accepts both application/json and application/x-www-form-urlencoded per
+/// OAuth 2.0 spec using Axum's Either extractor to handle both content types.
 ///
-/// Note: The WebSocket endpoint handles authentication via query parameter
-/// (?token=<jwt>) since WebSocket upgrade bypasses HTTP middleware.
+/// Note: The WebSocket endpoint handles authentication via query parameter (?token=<jwt>) since
+/// WebSocket upgrade bypasses HTTP middleware.
 pub fn public_routes() -> Router<AppState> {
     Router::new()
         .route("/health", get(handlers::liveness_handler))
@@ -41,10 +43,18 @@ pub fn public_routes() -> Router<AppState> {
         .route("/health/pool", get(handlers::pool_metrics_handler))
         .route("/api/v1/info", get(handlers::service_info_handler))
         .route("/api/v1/oauth/token", post(handlers::token_handler))
-        // WebSocket endpoint - auth handled in handler via query param
+        // WebSocket endpoints - auth handled in handlers via query param
         .route(
             "/api/v1/activities/:activity_id/ws",
             get(handlers::activity_stream_handler),
+        )
+        .route(
+            "/api/v1/workflows/:workflow_id/activities/:activity_key/ws",
+            get(handlers::activity_stream_by_key_handler),
+        )
+        .route(
+            "/api/v1/workflow_events/ws",
+            get(handlers::workflow_events_ws_handler),
         )
 }
 
@@ -78,6 +88,8 @@ pub fn public_routes() -> Router<AppState> {
 /// Authentication middleware is applied in app_router() after with_state().
 pub fn protected_routes() -> Router<AppState> {
     Router::new()
+        // User Management
+        .route("/api/v1/oauth/users", post(handlers::create_user))
         // Workflow Definition Management
         .route(
             "/api/v1/workflow_definitions",

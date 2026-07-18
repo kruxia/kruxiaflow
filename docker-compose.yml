@@ -33,6 +33,7 @@ networks:
 
 services:
   postgres:
+    platform: linux/amd64
     image: postgres:17-bookworm
     container_name: kruxiaflow-postgres
     environment:
@@ -56,8 +57,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql
     networks:
-      - backend
       - frontend
+      - backend
     healthcheck:
       <<: *healthcheck-defaults
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kruxiaflow}"]
@@ -82,6 +83,7 @@ services:
         hard: 65536
 
   redis:
+    platform: linux/amd64
     image: redis:7.4-alpine
     container_name: kruxiaflow-redis
     ports:
@@ -112,6 +114,7 @@ services:
       - no-new-privileges:true
 
   kruxiaflow:
+    platform: linux/amd64
     image: kruxia/kruxiaflow:latest
     container_name: kruxiaflow-server
     build:

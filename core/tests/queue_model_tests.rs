@@ -107,6 +107,7 @@ fn test_activity_with_settings() {
         delay: None,
         scheduled_for: None,
         wait_for_signal: None,
+        ..Default::default()
     };
 
     let activity = Activity {
@@ -181,6 +182,7 @@ fn test_activity_settings_default_values() {
         delay: None,
         scheduled_for: None,
         wait_for_signal: None,
+        ..Default::default()
     };
 
     let json = serde_json::to_string(&settings).unwrap();
@@ -210,6 +212,7 @@ fn test_activity_settings_with_all_options() {
         delay: None,
         scheduled_for: None,
         wait_for_signal: None,
+        ..Default::default()
     };
 
     let json = serde_json::to_string(&settings).unwrap();
@@ -231,6 +234,7 @@ fn test_activity_settings_serialization_skips_none() {
         delay: None,
         scheduled_for: None,
         wait_for_signal: None,
+        ..Default::default()
     };
 
     let json = serde_json::to_string(&settings).unwrap();
@@ -260,6 +264,7 @@ fn test_activity_settings_clone() {
         delay: None,
         scheduled_for: None,
         wait_for_signal: None,
+        ..Default::default()
     };
 
     let settings2 = settings1.clone();
@@ -416,6 +421,7 @@ fn test_queued_activity_with_settings() {
         delay: None,
         scheduled_for: None,
         wait_for_signal: None,
+        ..Default::default()
     };
 
     let activity = QueuedActivity {

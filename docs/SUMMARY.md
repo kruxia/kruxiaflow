@@ -8,6 +8,7 @@
 - [API Reference](api-reference.md)
 - [Architecture](architecture.md)
 - [Workflow Loops](loops-guide.md)
+- [Conditional Branching](conditional-branching.md)
 
 # Python SDK
 

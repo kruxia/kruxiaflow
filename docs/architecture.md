@@ -114,7 +114,9 @@ flowchart TB
 - `POST /api/v1/activities/{id}/complete` - Report activity completion
 - `POST /api/v1/activities/{id}/fail` - Report activity failure
 - `POST /api/v1/activities/{id}/heartbeat` - Long-running activity heartbeat
-- `GET /api/v1/activities/{id}/ws` - WebSocket token streaming for LLM activities
+- `GET /api/v1/activities/{id}/ws` - WebSocket token streaming for LLM activities (by ID)
+- `GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/ws` - WebSocket token streaming (by key)
+- `GET /api/v1/workflow_events/ws` - WebSocket streaming for workflow execution events
 
 *File Management*:
 - `GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/output` - Get activity output with file list
@@ -126,9 +128,10 @@ LLM activities with `streaming: true` support real-time token delivery via WebSo
 
 ```
 GET /api/v1/activities/{activity_id}/ws?token=<jwt>
+GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/ws?token=<jwt>
 ```
 
-(WebSocket upgrade request)
+The by-key endpoint is preferred for frontends that know `workflow_id` + `activity_key` but not the internal `activity_id`.
 
 **Client Connection Flow**:
 1. Submit workflow via `POST /api/v1/workflows`
@@ -153,6 +156,48 @@ GET /api/v1/activities/{activity_id}/ws?token=<jwt>
 2. Client must connect to WebSocket before activity executes
 
 If no WebSocket subscribers are connected, the activity falls back to efficient non-streaming mode (single API call, returns complete response).
+
+**Workflow Event Streaming**:
+
+Real-time workflow execution events (WorkflowCreated, ActivityCompleted, WorkflowFailed, etc.)
+are streamed to clients via WebSocket with optional filtering and reconnection replay:
+
+```
+GET /api/v1/workflow_events/ws?token=<jwt>&workflow_id=<csv>&event_type=<csv>&event_id=<replay>
+```
+
+A shared poller task polls the EventSource and broadcasts events to all registered
+subscriptions via in-memory filtering. Each API server instance tracks its own consumer
+position independently, ensuring multi-instance deployments deliver all events to all
+local subscribers. See [US-1A.9b](../kruxiaflow-internal/docs/implementation/US-1A.9b-websocket-workflow-events.md) for implementation details.
+
+**Streaming Protocol: WebSocket vs Server-Sent Events (SSE)**:
+
+Both streaming endpoints currently use WebSocket. SSE was evaluated as an alternative.
+
+| Dimension             | WebSocket                                   | SSE                                            |
+|-----------------------|---------------------------------------------|------------------------------------------------|
+| Direction             | Bidirectional                               | Server → Client only                           |
+| Wire overhead         | ~4 bytes/frame                              | ~48 bytes/frame (text framing + event ID)      |
+| Memory per subscriber | ~30–40KB (3 tokio tasks: send + recv + ping) | ~12–16KB (1 tokio task, no recv/ping needed)  |
+| CPU per subscriber    | Higher (3 tasks, scheduler overhead)        | ~30% less (1 task)                             |
+| Latency               | ~5–8μs server-side                          | ~5–8μs server-side (same)                      |
+| Throughput             | Same (DB poll is the bottleneck)            | Same                                           |
+| Reconnection          | Manual (client tracks event ID)             | Built-in (`EventSource` API sends `Last-Event-ID`) |
+| Auth                  | Query param only (browser WS API can't set headers) | Standard `Authorization` header        |
+| Proxy/CDN compat      | Requires WebSocket support                  | Plain HTTP, works everywhere                   |
+| Future bidirectional   | Native                                     | Separate REST calls                            |
+
+**Decision**: Start with WebSocket for MVP. Both endpoints use the same protocol, simplifying
+client libraries and sharing infrastructure (connection ID generation, auth pattern).
+
+**Rationale for future revisit**: SSE is the better fit for the workflow events use case
+(unidirectional, long-lived, reconnection replay is critical, ~60% less memory per subscriber).
+For activity token streaming, the protocol choice is closer to neutral (short-lived connections,
+no replay needed, low subscriber count per stream). Post-MVP, we may:
+- Add SSE as an alternative transport for workflow events (`GET /api/v1/workflow_events/sse`)
+- Make the protocol configurable (compile-time feature flag and/or runtime configuration)
+- Evaluate whether activity token streaming benefits from SSE's simpler lifecycle
 
 **Authentication Flow**:
 
@@ -569,7 +614,7 @@ LLM completions with multi-model fallback, budget awareness, and optional stream
 **Features**:
 - Multi-model fallback chains (tries each model in order until success)
 - Budget-aware model selection (skips expensive models when cost exceeds budget)
-- Token streaming via WebSocket (`GET /api/v1/activities/{id}/ws`)
+- Token streaming via WebSocket (by ID or by `workflow_id`/`activity_key`)
 - Cost tracking per request (`result.cost_usd`, `result.usage.total_tokens`)
 - Provider metadata (`result.provider`, `result.model`)
 - Supported providers: Anthropic, OpenAI, Google

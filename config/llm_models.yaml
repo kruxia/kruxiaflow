@@ -160,7 +160,50 @@ providers:
     supports_streaming: true
     requires_api_key: true
     models:
-      # Claude 4.5 Sonnet (latest)
+      # Claude 4.6 (latest; priced identically to 4.5)
+      - name: claude-opus-4-6
+        display_name: Claude 4.6 Opus
+        input_price_per_million: 5.00
+        output_price_per_million: 25.00
+        cached_input_price_per_million: 0.50
+        supports_completion: true
+        context_window: 200000
+        max_output_tokens: 64000
+        notes: "Pricing increases for >200K tokens"
+
+      - name: claude-sonnet-4-6
+        display_name: Claude 4.6 Sonnet
+        input_price_per_million: 3.00
+        output_price_per_million: 15.00
+        cached_input_price_per_million: 0.30
+        supports_completion: true
+        context_window: 200000
+        max_output_tokens: 8192
+        notes: "Pricing increases for >200K tokens: $6 input, $22.50 output, $0.60 cached"
+
+      - name: claude-haiku-4-6
+        display_name: Claude 4.6 Haiku
+        input_price_per_million: 1.00
+        output_price_per_million: 5.00
+        cached_input_price_per_million: 0.10
+        supports_completion: true
+        context_window: 200000
+        max_output_tokens: 8192
+
+      # Claude 4.5 — dated names plus unversioned aliases. The unversioned
+      # form (claude-sonnet-4-5, etc.) is what Anthropic exposes as the
+      # latest-pointing alias and what most workflow YAMLs reference; the
+      # catalog needs both so cost tracking resolves either form.
+      - name: claude-opus-4-5
+        display_name: Claude 4.5 Opus
+        input_price_per_million: 5.00
+        output_price_per_million: 25.00
+        cached_input_price_per_million: 0.50
+        supports_completion: true
+        context_window: 200000
+        max_output_tokens: 64000
+        notes: "Unversioned alias for claude-opus-4-5-20251101"
+
       - name: claude-opus-4-5-20251101
         display_name: Claude 4.5 Opus
         input_price_per_million: 5.00
@@ -170,6 +213,16 @@ providers:
         context_window: 200000
         max_output_tokens: 64000
         notes: "Pricing increases for >200K tokens"
+
+      - name: claude-sonnet-4-5
+        display_name: Claude 4.5 Sonnet
+        input_price_per_million: 3.00
+        output_price_per_million: 15.00
+        cached_input_price_per_million: 0.30
+        supports_completion: true
+        context_window: 200000
+        max_output_tokens: 8192
+        notes: "Unversioned alias for claude-sonnet-4-5-20250929"
 
       - name: claude-sonnet-4-5-20250929
         display_name: Claude 4.5 Sonnet
@@ -181,7 +234,16 @@ providers:
         max_output_tokens: 8192
         notes: "Pricing increases for >200K tokens: $6 input, $22.50 output, $0.60 cached"
 
-      # Claude 4.5 Haiku
+      - name: claude-haiku-4-5
+        display_name: Claude 4.5 Haiku
+        input_price_per_million: 1.00
+        output_price_per_million: 5.00
+        cached_input_price_per_million: 0.10
+        supports_completion: true
+        context_window: 200000
+        max_output_tokens: 8192
+        notes: "Unversioned alias for claude-haiku-4-5-20251001"
+
       - name: claude-haiku-4-5-20251001
         display_name: Claude 4.5 Haiku
         input_price_per_million: 1.00

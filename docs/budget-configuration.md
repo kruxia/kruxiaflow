@@ -90,6 +90,34 @@ After activity completion:
 4. Cost is recorded in `activity_costs` table
 5. Database trigger updates `workflows.total_cost_usd`
 
+### Model catalog must be seeded for budget enforcement to bite
+
+Pre- and post-execution cost calculations both query the `llm_models`
+table. **If the model your workflow references is not in that table,
+budget enforcement is silently skipped** — the orchestrator logs `Cost
+tracking failed: Model not found: <provider>/<name>` and the activity
+runs unconstrained. This is a fail-open behavior so a missing-pricing
+row doesn't break legitimate workflows, but it means a budget cap on
+an unseeded model gives no protection.
+
+Seeding the catalog:
+
+```bash
+# At server startup, pass --seed-llm pointing at a YAML file:
+kruxiaflow serve --seed-llm /config/llm_models.yaml
+```
+
+The file format is documented in the example
+[`config/llm_models.yaml`](https://github.com/kruxia/kruxiaflow/blob/main/config/llm_models.yaml).
+Models can also be inserted/updated directly into `llm_models` and
+`llm_providers` tables; the orchestrator reads them on every cost
+calculation, so changes apply immediately without a restart.
+
+When using model aliases like `claude-sonnet-4-5` (Anthropic's
+unversioned alias that points to the latest dated release), seed
+**both** the alias and the dated form — kruxiaflow looks up the exact
+string the workflow specifies, with no alias resolution.
+
 ### Cost Calculation
 
 **Formula**:

@@ -12,6 +12,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use crate::activity_result::ActivityResult;
+use crate::streaming::StreamingActivity;
 
 /// Context available to activities during execution
 ///
@@ -95,6 +96,7 @@ pub trait ActivityImpl: Send + Sync {
 /// Includes caching support for all activity types.
 pub struct ActivityRegistry {
     implementations: HashMap<String, Arc<dyn ActivityImpl>>,
+    streaming_implementations: HashMap<String, Arc<dyn StreamingActivity>>,
     cache_service: Arc<dyn CacheService>,
 }
 
@@ -103,6 +105,7 @@ impl ActivityRegistry {
     pub fn new(cache_service: Arc<dyn CacheService>) -> Self {
         Self {
             implementations: HashMap::new(),
+            streaming_implementations: HashMap::new(),
             cache_service,
         }
     }
@@ -112,6 +115,24 @@ impl ActivityRegistry {
         let key = format!("{}.{}", implementation.worker(), implementation.name());
         tracing::info!("Registering activity: {}", key);
         self.implementations.insert(key, implementation);
+    }
+
+    /// Register a streaming activity implementation
+    pub fn register_streaming(
+        &mut self,
+        worker: &str,
+        name: &str,
+        implementation: Arc<dyn StreamingActivity>,
+    ) {
+        let key = format!("{}.{}", worker, name);
+        tracing::info!("Registering streaming activity: {}", key);
+        self.streaming_implementations.insert(key, implementation);
+    }
+
+    /// Get a streaming activity implementation by worker and name
+    pub fn get_streaming(&self, worker: &str, name: &str) -> Option<&Arc<dyn StreamingActivity>> {
+        let key = format!("{}.{}", worker, name);
+        self.streaming_implementations.get(&key)
     }
 
     /// Get all registered activity types

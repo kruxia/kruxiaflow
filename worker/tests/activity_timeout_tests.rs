@@ -107,6 +107,7 @@ async fn test_custom_timeout_allows_longer_execution() {
         delay: None,
         scheduled_for: None,
         wait_for_signal: None,
+        ..Default::default()
     };
 
     let params = json!({"sleep_ms": 800});
