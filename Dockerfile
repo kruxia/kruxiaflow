@@ -1,5 +1,5 @@
 # == DEVELOP ==
-FROM rust:1.90-bookworm AS develop
+FROM rust:1.97-bookworm AS develop
 
 # Install dependencies for profiling
 RUN apt-get update && apt-get install -y \
@@ -12,8 +12,10 @@ RUN apt-get update && apt-get install -y \
 # Set working environment
 WORKDIR /opt
 
-# Install sqlx-cli for migrations
-RUN cargo install sqlx-cli --no-default-features --features postgres,rustls
+# Install sqlx-cli for migrations — pinned to match the workspace's sqlx
+# version; unpinned installs drift (sqlx-cli 0.9.0 requires a newer rustc
+# than older base images and can mismatch the workspace's sqlx 0.8 metadata)
+RUN cargo install sqlx-cli@0.8.6 --locked --no-default-features --features postgres,rustls
 
 COPY ./docker-entrypoint-develop.sh /opt/docker-entrypoint-develop.sh
 ENTRYPOINT [ "/opt/docker-entrypoint-develop.sh" ]
@@ -49,7 +51,7 @@ CMD ["serve", "--migrate", "--seed-client", "--seed-llm", "/config/llm_models.ya
 # == PROFILING ==
 # Profiling environment for Kruxia Flow
 # This provides a Linux environment where jemalloc profiling works correctly
-FROM rust:1.90-bookworm AS profiling
+FROM rust:1.97-bookworm AS profiling
 
 # Install dependencies for profiling
 RUN apt-get update && apt-get install -y \
@@ -64,8 +66,10 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install sqlx-cli for migrations
-RUN cargo install sqlx-cli --no-default-features --features postgres,rustls
+# Install sqlx-cli for migrations — pinned to match the workspace's sqlx
+# version; unpinned installs drift (sqlx-cli 0.9.0 requires a newer rustc
+# than older base images and can mismatch the workspace's sqlx 0.8 metadata)
+RUN cargo install sqlx-cli@0.8.6 --locked --no-default-features --features postgres,rustls
 
 # Set working directory
 WORKDIR /opt

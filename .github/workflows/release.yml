@@ -20,8 +20,27 @@ permissions:
   contents: write
 
 jobs:
+  # Cargo.toml must contain a literal version, so tag/metadata sync is checked
+  # rather than derived. Use `cargo release <version>` to bump+commit+tag+push
+  # in one step (config: [workspace.metadata.release] in Cargo.toml).
+  preflight:
+    name: Verify tag matches workspace version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag against Cargo.toml
+        run: |
+          CARGO_VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag v${TAG_VERSION} != workspace version ${CARGO_VERSION}. Use: cargo release ${TAG_VERSION}"
+            exit 1
+          fi
+
   binaries:
     name: Binary ${{ matrix.target }}
+    needs: preflight
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -59,12 +78,14 @@ jobs:
         with:
           tool: cross
 
+      # --features redis-cache matches the Docker image build (Dockerfile
+      # build stage) so released binaries and images have identical features.
       - name: Build
         run: |
           if [ "${{ matrix.use-cross }}" = "true" ]; then
-            cross build --release --locked --target ${{ matrix.target }} -p kruxiaflow
+            cross build --release --locked --target ${{ matrix.target }} -p kruxiaflow --features redis-cache
           else
-            cargo build --release --locked --target ${{ matrix.target }} -p kruxiaflow
+            cargo build --release --locked --target ${{ matrix.target }} -p kruxiaflow --features redis-cache
           fi
 
       - name: Package with checksum
@@ -84,6 +105,7 @@ jobs:
 
   docker:
     name: Docker multi-arch
+    needs: preflight
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
