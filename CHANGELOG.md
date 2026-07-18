@@ -18,9 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Release binaries now build with `--features redis-cache`, matching the
   Docker image's feature set.
-- Releases are cut with `cargo release <version>` (config in `Cargo.toml`
-  under `[workspace.metadata.release]`); the release workflow's preflight job
-  fails fast if a tag doesn't match the workspace version.
+- CI and releases unified into one pipeline (`main-ci.yml`): tag pushes run
+  checks → binaries + versioned multi-arch Docker → GitHub Release, so nothing
+  publishes unless clippy/fmt/tests pass; the redundant branch-push run for
+  release commits is skipped (same SHA runs once, on the tag). Releases are
+  cut with `cargo release <version>` (config under
+  `[workspace.metadata.release]`); a preflight job fails fast if a tag doesn't
+  match the workspace version.
 - CI caching: prebuilt tool binaries (cargo-llvm-cov, sqlx-cli, cross) instead
   of source installs, cache-on-failure for cargo caches, Docker layer caching.
 
