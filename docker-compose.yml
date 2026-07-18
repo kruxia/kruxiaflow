@@ -57,6 +57,7 @@ services:
         if [ ! -f /keys/private.pem ]; then
           openssl genrsa -out /keys/private.pem 2048 &&
           openssl rsa -in /keys/private.pem -pubout -out /keys/public.pem &&
+          chmod 644 /keys/private.pem /keys/public.pem &&
           echo "Generated local RSA keypair for JWT signing"
         else
           echo "Keypair exists"
@@ -74,6 +75,9 @@ services:
   # /config/llm_models.yaml.
   catalog:
     image: curlimages/curl:latest
+    # The image's default user (uid 100) cannot write to a fresh root-owned
+    # volume; run as root so the fetch can land (file is 644, world-readable).
+    user: "0:0"
     command:
       [
         "-fsSL",
