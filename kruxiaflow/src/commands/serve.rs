@@ -558,21 +558,11 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     cmd.validate()?;
 
     if cmd.insecure_dev {
-        tracing::warn!(
-            "==============================================================="
-        );
-        tracing::warn!(
-            "INSECURE DEV MODE ENABLED — unauthenticated requests are"
-        );
-        tracing::warn!(
-            "accepted and execute as the synthetic 'insecure-dev' principal."
-        );
-        tracing::warn!(
-            "Local development only. NEVER enable this in production."
-        );
-        tracing::warn!(
-            "==============================================================="
-        );
+        tracing::warn!("===============================================================");
+        tracing::warn!("INSECURE DEV MODE ENABLED — unauthenticated requests are");
+        tracing::warn!("accepted and execute as the synthetic 'insecure-dev' principal.");
+        tracing::warn!("Local development only. NEVER enable this in production.");
+        tracing::warn!("===============================================================");
     }
 
     tracing::info!(

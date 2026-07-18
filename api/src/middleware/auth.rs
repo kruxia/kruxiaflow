@@ -59,14 +59,10 @@ pub async fn authenticate_optional_token(
     missing_credential_msg: &str,
 ) -> Result<Claims, AppError> {
     match token {
-        Some(token) => state
-            .auth_service
-            .validate_token(token)
-            .await
-            .map_err(|e| {
-                tracing::warn!("Token validation failed: {:?}", e);
-                AppError::Unauthorized(format!("Invalid token: {}", e))
-            }),
+        Some(token) => state.auth_service.validate_token(token).await.map_err(|e| {
+            tracing::warn!("Token validation failed: {:?}", e);
+            AppError::Unauthorized(format!("Invalid token: {}", e))
+        }),
         None if state.insecure_dev => Ok(insecure_dev_claims()),
         None => Err(AppError::Unauthorized(missing_credential_msg.to_string())),
     }
