@@ -5,7 +5,7 @@ use kruxiaflow_core::{
     OrchestratorConfig, PostgresSubscriptionService, SubscriptionService, run_orchestrator,
 };
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
-use kruxiaflow_worker::{ActivityRegistry, HttpRequestActivity, WorkerConfig, WorkerManager};
+use kruxiaflow_std_worker::{ActivityRegistry, HttpRequestActivity, WorkerConfig, WorkerManager};
 /// End-to-end test for Example 3: Parallel File Processing
 ///
 /// This test verifies:
@@ -175,8 +175,6 @@ async fn test_example_03_parallel_document_processing(pool: PgPool) {
     // Start worker with HTTP activity
     let mut registry = ActivityRegistry::new(Arc::new(kruxiaflow_core::NoOpCache::new()));
     registry.register(Arc::new(HttpRequestActivity::new()));
-
-    #[allow(deprecated)]
     let worker_config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("test_worker_{}", Uuid::now_v7()),
@@ -184,11 +182,11 @@ async fn test_example_03_parallel_document_processing(pool: PgPool) {
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(10),
         max_concurrent_activities: 20, // Allow parallel execution
-        concurrency: 5,
         activity_timeout: Duration::from_secs(30),
         heartbeat_interval: Duration::from_secs(30),
-        client_id: "test_worker".to_string(),
-        client_secret: "test_worker_secret".to_string(),
+        client_id: Some("test_worker".to_string()),
+        client_secret: Some("test_worker_secret".to_string()),
+        shutdown_timeout: Duration::from_secs(30),
     };
 
     let manager = WorkerManager::new(worker_config, registry, workflow_storage.clone());

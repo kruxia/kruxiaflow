@@ -1580,7 +1580,7 @@ dependencies = [
  "kruxiaflow-api",
  "kruxiaflow-core",
  "kruxiaflow-oauth",
- "kruxiaflow-worker",
+ "kruxiaflow-std-worker",
  "reqwest",
  "rust_decimal",
  "serde",
@@ -1615,7 +1615,7 @@ dependencies = [
  "jsonwebtoken",
  "kruxiaflow-core",
  "kruxiaflow-oauth",
- "kruxiaflow-worker",
+ "kruxiaflow-std-worker",
  "reqwest",
  "rust_decimal",
  "serde",
@@ -1717,7 +1717,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kruxiaflow-worker"
+name = "kruxiaflow-std-worker"
 version = "0.4.3"
 dependencies = [
  "anyhow",
@@ -1732,6 +1732,7 @@ dependencies = [
  "kruxiaflow-api",
  "kruxiaflow-core",
  "kruxiaflow-oauth",
+ "kruxiaflow-worker",
  "lettre",
  "mockall",
  "reqwest",
@@ -1749,6 +1750,27 @@ dependencies = [
  "tracing",
  "url",
  "urlencoding",
+ "uuid",
+ "wiremock",
+]
+
+[[package]]
+name = "kruxiaflow-worker"
+version = "0.4.3"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "reqwest",
+ "rust_decimal",
+ "rust_decimal_macros",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tokio-test",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
  "uuid",
  "wiremock",
 ]

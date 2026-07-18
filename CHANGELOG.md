@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Automated crates.io releases**: the tag pipeline (`main-ci.yml`) now
+  publishes `kruxiaflow-worker` via crates.io Trusted Publishing (OIDC, no
+  token secret) after checks pass, alongside binaries and Docker images; the
+  GitHub Release is created only when all three channels succeed. Re-running
+  a tag run is idempotent (already-published versions are skipped).
+  Server-internal crates are marked `publish = false`.
+- **Rust worker SDK (`kruxiaflow-worker` on crates.io)**: new `worker-sdk`
+  workspace crate — the complete external-worker loop for Rust applications:
+  activity registration (trait, typed-params trait, and closure forms),
+  semaphore-bounded polling, heartbeats with cancel-on-conflict, timeout and
+  panic containment, retryable/terminal failure semantics, per-LLM-call usage
+  reporting (`UsageEntry` on results *and* failures), OAuth2
+  client-credentials auth with automatic refresh (credentials optional
+  against a dev-mode server), and graceful drain on shutdown (in-flight
+  activities finish or are re-queued as retryable — nothing lost or
+  double-completed). Dual-licensed MIT OR Apache-2.0. The built-in std worker
+  now runs on this SDK's poll loop (internal crate renamed
+  `kruxiaflow-std-worker`; `kruxiaflow serve` / `kruxiaflow worker` behavior
+  unchanged), so every deployment exercises the published code path.
 - **External activity usage reporting**: `POST /api/v1/activities/{id}/complete`
   and `/fail` accept an optional `usage` list — one entry per LLM call made
   inside the activity (`provider`, `model`, `input_tokens`, `output_tokens`,

@@ -429,6 +429,14 @@ LIMIT 1
 FOR UPDATE SKIP LOCKED;
 ```
 
+**Official worker SDKs**: the poll/heartbeat/complete/fail loop below ships
+as supported SDKs — [`kruxiaflow-worker` on crates.io](https://crates.io/crates/kruxiaflow-worker)
+for Rust (the built-in std worker runs on the same crate, so the SDK code
+path is exercised by every deployment) and the
+[Python SDK](https://github.com/kruxia/kruxiaflow-python) (`kruxiaflow.worker`).
+Both support reporting per-LLM-call usage on completion and failure, so
+external activities count against workflow budgets with full fidelity.
+
 **External Worker Implementation Example**:
 
 Any language can implement an external worker by following this pattern:

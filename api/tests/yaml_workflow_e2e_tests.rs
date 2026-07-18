@@ -5,7 +5,7 @@ use kruxiaflow_core::{
     OrchestratorConfig, PostgresSubscriptionService, SubscriptionService, run_orchestrator,
 };
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
-use kruxiaflow_worker::{
+use kruxiaflow_std_worker::{
     ActivityRegistry, HttpRequestActivity, PostgresQueryActivity, WorkerConfig, WorkerManager,
     new_pool_cache,
 };
@@ -192,8 +192,6 @@ async fn test_yaml_workflow_end_to_end_with_healthcheck(pool: PgPool) {
     // Start worker with HTTP activity
     let mut registry = ActivityRegistry::new(Arc::new(kruxiaflow_core::NoOpCache::new()));
     registry.register(Arc::new(HttpRequestActivity::new()));
-
-    #[allow(deprecated)]
     let worker_config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("test_worker_{}", Uuid::now_v7()),
@@ -201,11 +199,11 @@ async fn test_yaml_workflow_end_to_end_with_healthcheck(pool: PgPool) {
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(10),
         max_concurrent_activities: 16,
-        concurrency: 1,
         activity_timeout: Duration::from_secs(30),
         heartbeat_interval: Duration::from_secs(30),
-        client_id: "test_worker".to_string(),
-        client_secret: "test_worker_secret".to_string(),
+        client_id: Some("test_worker".to_string()),
+        client_secret: Some("test_worker_secret".to_string()),
+        shutdown_timeout: Duration::from_secs(30),
     };
 
     let manager = WorkerManager::new(worker_config, registry, workflow_storage.clone());
@@ -528,8 +526,6 @@ async fn test_conditional_branching_workflow(pool: PgPool) {
     let mut registry = ActivityRegistry::new(Arc::new(kruxiaflow_core::NoOpCache::new()));
     registry.register(Arc::new(HttpRequestActivity::new()));
     registry.register(Arc::new(PostgresQueryActivity::new(new_pool_cache())));
-
-    #[allow(deprecated)]
     let worker_config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("test_worker_{}", Uuid::now_v7()),
@@ -537,11 +533,11 @@ async fn test_conditional_branching_workflow(pool: PgPool) {
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(10),
         max_concurrent_activities: 16,
-        concurrency: 1,
         activity_timeout: Duration::from_secs(30),
         heartbeat_interval: Duration::from_secs(30),
-        client_id: "test_worker".to_string(),
-        client_secret: "test_worker_secret".to_string(),
+        client_id: Some("test_worker".to_string()),
+        client_secret: Some("test_worker_secret".to_string()),
+        shutdown_timeout: Duration::from_secs(30),
     };
 
     let manager = WorkerManager::new(worker_config, registry, workflow_storage.clone());

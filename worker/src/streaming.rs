@@ -44,7 +44,7 @@ use serde_json::Value;
 use std::fmt::Debug;
 use uuid::Uuid;
 
-use crate::activity_result::ActivityResult;
+use kruxiaflow_worker::ActivityResult;
 
 /// A token emitted during streaming activity execution.
 ///

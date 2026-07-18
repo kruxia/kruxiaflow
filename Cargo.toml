@@ -6,6 +6,7 @@ members = [
     "dashboard",
     "kruxiaflow",
     "worker",
+    "worker-sdk",
     "profiling",
 ]
 resolver = "2"

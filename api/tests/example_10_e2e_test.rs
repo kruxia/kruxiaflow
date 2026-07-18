@@ -5,7 +5,7 @@ use kruxiaflow_core::{
     OrchestratorConfig, PostgresSubscriptionService, SubscriptionService, run_orchestrator,
 };
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
-use kruxiaflow_worker::{
+use kruxiaflow_std_worker::{
     ActivityRegistry, EmailSendActivity, HttpRequestActivity, PostgresQueryActivity, WorkerConfig,
     WorkerManager, activities::PostgresTransactionActivity, new_pool_cache,
 };
@@ -348,8 +348,6 @@ async fn test_example_10_order_processing_with_email(pool: PgPool) {
         postgres_pool_cache,
     )));
     registry.register(Arc::new(EmailSendActivity::new()));
-
-    #[allow(deprecated)]
     let worker_config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("test_worker_ex10_{}", Uuid::now_v7()),
@@ -357,11 +355,11 @@ async fn test_example_10_order_processing_with_email(pool: PgPool) {
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(10),
         max_concurrent_activities: 20,
-        concurrency: 5,
         activity_timeout: Duration::from_secs(30),
         heartbeat_interval: Duration::from_secs(30),
-        client_id: "test_worker_ex10".to_string(),
-        client_secret: "test_worker_secret_ex10".to_string(),
+        client_id: Some("test_worker_ex10".to_string()),
+        client_secret: Some("test_worker_secret_ex10".to_string()),
+        shutdown_timeout: Duration::from_secs(30),
     };
 
     let manager = WorkerManager::new(worker_config, registry, workflow_storage.clone());

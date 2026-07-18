@@ -3,7 +3,7 @@ use kruxiaflow_core::PostgresSubscriptionService;
 use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{Activity, ActivityQueue as _, PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
-use kruxiaflow_worker::{ActivityRegistry, EchoActivity, WorkerConfig, WorkerManager};
+use kruxiaflow_std_worker::{ActivityRegistry, EchoActivity, WorkerConfig, WorkerManager};
 use serde_json::json;
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -128,7 +128,6 @@ async fn test_worker_poll_and_execute_echo(pool: PgPool) {
     println!("Activities scheduled: {}", count_after_schedule.0);
 
     // Configure worker
-    #[allow(deprecated)]
     let config = WorkerConfig {
         api_url: server_url,
         worker_id: "test_worker".to_string(),
@@ -136,11 +135,11 @@ async fn test_worker_poll_and_execute_echo(pool: PgPool) {
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities: 16,
-        concurrency: 1,
         activity_timeout: Duration::from_secs(30),
         heartbeat_interval: Duration::from_secs(30),
-        client_id: "test_worker_client".to_string(),
-        client_secret: "test_worker_secret".to_string(),
+        client_id: Some("test_worker_client".to_string()),
+        client_secret: Some("test_worker_secret".to_string()),
+        shutdown_timeout: Duration::from_secs(30),
     };
 
     // Create worker with EchoActivity
@@ -198,7 +197,6 @@ async fn test_worker_concurrency(pool: PgPool) {
     schedule_test_activities(&pool, workflow_id, 10).await;
 
     // Configure worker with max_concurrent_activities=16
-    #[allow(deprecated)]
     let config = WorkerConfig {
         api_url: server_url,
         worker_id: "test_worker_concurrent".to_string(),
@@ -206,11 +204,11 @@ async fn test_worker_concurrency(pool: PgPool) {
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities: 16,
-        concurrency: 4,
         activity_timeout: Duration::from_secs(30),
         heartbeat_interval: Duration::from_secs(30),
-        client_id: "test_worker_client".to_string(),
-        client_secret: "test_worker_secret".to_string(),
+        client_id: Some("test_worker_client".to_string()),
+        client_secret: Some("test_worker_secret".to_string()),
+        shutdown_timeout: Duration::from_secs(30),
     };
 
     // Create worker with EchoActivity
@@ -253,7 +251,6 @@ async fn test_worker_authentication_failure(pool: PgPool) {
     let (server_url, pool, server_handle) = create_real_server(pool).await;
 
     // Configure worker with invalid credentials
-    #[allow(deprecated)]
     let config = WorkerConfig {
         api_url: server_url,
         worker_id: "test_worker_badauth".to_string(),
@@ -261,11 +258,11 @@ async fn test_worker_authentication_failure(pool: PgPool) {
         poll_max_activities: 10,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities: 16,
-        concurrency: 1,
         activity_timeout: Duration::from_secs(30),
         heartbeat_interval: Duration::from_secs(30),
-        client_id: "test_worker_client".to_string(),
-        client_secret: "wrong_secret".to_string(),
+        client_id: Some("test_worker_client".to_string()),
+        client_secret: Some("wrong_secret".to_string()),
+        shutdown_timeout: Duration::from_secs(30),
     };
 
     // Create worker with EchoActivity

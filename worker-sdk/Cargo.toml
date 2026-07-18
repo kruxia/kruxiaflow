@@ -1,0 +1,35 @@
+[package]
+name = "kruxiaflow-worker"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+# Dual-licensed (unlike the Apache-2.0 workspace default) per crates.io
+# ecosystem convention, so downstream users can pick either grant.
+license = "MIT OR Apache-2.0"
+description = "Worker SDK for Kruxia Flow — run Rust activities in budgeted workflows with engine-enforced cost limits"
+repository = "https://github.com/kruxia/kruxiaflow"
+homepage = "https://kruxiaflow.com"
+documentation = "https://docs.rs/kruxiaflow-worker"
+readme = "README.md"
+keywords = ["workflow", "orchestration", "durable-execution", "llm", "worker"]
+categories = ["asynchronous", "api-bindings", "development-tools"]
+rust-version = "1.85"
+
+[dependencies]
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rust_decimal = { version = "1.36", features = ["serde"] }
+uuid = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
+wiremock = "0.6"
+rust_decimal_macros = "1.36"
+tracing-subscriber = { workspace = true }

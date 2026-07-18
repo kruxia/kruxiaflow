@@ -3,7 +3,8 @@ use async_trait::async_trait;
 use chrono::Utc;
 use kruxiaflow_core::cache::{CacheService, CachedResult, key_generator};
 use kruxiaflow_core::storage::WorkflowStorage;
-use kruxiaflow_core::workflow::{ActivityOutput, ActivitySettings};
+use kruxiaflow_core::workflow::ActivitySettings;
+use kruxiaflow_worker::{ActivityOutput, ActivityResult};
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -11,7 +12,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
-use crate::activity_result::ActivityResult;
 use crate::streaming::StreamingActivity;
 
 /// Context available to activities during execution
@@ -210,16 +210,14 @@ impl ActivityRegistry {
                 };
 
                 // Return cached result with cost_usd = 0.0
-                return Ok(ActivityResult {
-                    outputs,
-                    cost_usd: Some(Decimal::ZERO), // Cache hit = zero cost
-                    metadata: Some(json!({
+                return Ok(ActivityResult::values(outputs)
+                    .with_cost(Decimal::ZERO) // Cache hit = zero cost
+                    .with_metadata(json!({
                         "cached": true,
                         "cache_key": cache_key,
                         "cached_at": cached.cached_at,
                         "original_cost_usd": cached.original_cost_usd,
-                    })),
-                });
+                    })));
             }
 
             tracing::debug!(

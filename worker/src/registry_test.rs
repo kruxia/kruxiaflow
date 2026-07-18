@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::activity_result::ActivityResult;
+    use kruxiaflow_worker::ActivityResult;
     use crate::registry::*;
     use anyhow::Result;
     use async_trait::async_trait;
@@ -306,13 +306,10 @@ mod tests {
     impl ActivityImpl for CountingActivity {
         async fn execute(&self, parameters: Value) -> Result<ActivityResult> {
             self.execution_count.fetch_add(1, Ordering::SeqCst);
-            Ok(ActivityResult {
-                outputs: vec![kruxiaflow_core::workflow::ActivityOutput::value(
-                    "result", parameters,
-                )],
-                cost_usd: Some(Decimal::new(10, 2)), // $0.10
-                metadata: None,
-            })
+            Ok(ActivityResult::values(vec![
+                kruxiaflow_worker::ActivityOutput::value("result", parameters),
+            ])
+            .with_cost(Decimal::new(10, 2))) // $0.10
         }
 
         fn name(&self) -> &str {

@@ -28,7 +28,7 @@ use std::sync::Arc;
 /// # Example
 ///
 /// ```rust,no_run
-/// use kruxiaflow_worker::register_std_activities;
+/// use kruxiaflow_std_worker::register_std_activities;
 /// use kruxiaflow_core::cache::NoOpCache;
 /// use std::sync::Arc;
 ///

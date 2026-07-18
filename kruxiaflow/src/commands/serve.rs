@@ -7,7 +7,7 @@ use kruxiaflow_core::{
     orchestrator::OrchestratorError, run_orchestrator,
 };
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
-use kruxiaflow_worker::{WorkerConfig, WorkerManager};
+use kruxiaflow_std_worker::{WorkerConfig, WorkerManager};
 use sqlx::PgPool;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -405,9 +405,8 @@ async fn spawn_workers(
     let cache_service = cache_config.create_cache_service().await;
 
     // Create activity registry with all built-in activities pre-registered
-    let registry = kruxiaflow_worker::register_std_activities(cache_service);
+    let registry = kruxiaflow_std_worker::register_std_activities(cache_service);
 
-    #[allow(deprecated)]
     let config = WorkerConfig {
         api_url: api_url.clone(),
         worker_id: format!("internal_worker_{}", Uuid::now_v7()),
@@ -415,11 +414,11 @@ async fn spawn_workers(
         poll_max_activities,
         poll_interval: Duration::from_millis(100),
         max_concurrent_activities,
-        concurrency: 1, // Deprecated, set to 1 (single poller with semaphore)
         activity_timeout: Duration::from_secs(activity_timeout),
         heartbeat_interval: Duration::from_secs(30),
-        client_id,
-        client_secret,
+        client_id: Some(client_id),
+        client_secret: Some(client_secret),
+        ..WorkerConfig::default()
     };
 
     let manager = WorkerManager::new(config, registry, workflow_storage);
