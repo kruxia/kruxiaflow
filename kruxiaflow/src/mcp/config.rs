@@ -15,10 +15,9 @@
 /// - MCP stdio transport requires CLEAN stdin/stdout (no logging output)
 /// - Running stdio MCP alongside logging services would corrupt the MCP protocol
 ///
-/// **For stdio MCP support:**
-/// Use a separate process that runs ONLY the MCP server:
-/// - Python MCP server: `kruxiaflow-mcp/` (already available)
-/// - Standalone Rust MCP server: Create a dedicated binary with no logging to stdout
+/// **For stdio-only MCP clients:**
+/// Use a thin stdio→HTTP proxy (e.g. `mcp-remote`) pointed at the HTTP endpoint.
+/// Modern clients (Claude Code, Cursor) speak HTTP MCP natively.
 ///
 /// **This HTTP-only MCP server is ideal for:**
 /// - Production deployments with monitoring/logging
@@ -31,7 +30,7 @@ use super::error::{McpError, Result};
 /// This MCP server uses Streamable HTTP transport exclusively.
 /// Stdio transport is not supported because the `serve` command runs multiple
 /// services that log to stdout/stderr, which would corrupt the MCP protocol.
-/// For stdio MCP, use a separate process (e.g., the Python MCP server).
+/// For stdio-only clients, use a stdio→HTTP proxy.
 #[derive(Debug, Clone)]
 pub struct McpConfig {
     /// Enable MCP server
@@ -72,8 +71,8 @@ impl McpConfig {
             return Err(McpError::UnsupportedTransport(
                 "The 'serve' command runs multiple services with logging to stdout/stderr, \
                 which corrupts the MCP stdio protocol (requires clean stdin/stdout). \
-                For stdio MCP support, use a separate process: \
-                Python MCP server (kruxiaflow-mcp/) or a standalone Rust binary."
+                Connect over Streamable HTTP instead (default: http://localhost:8081/mcp), \
+                or use a stdio→HTTP proxy for stdio-only clients."
                     .to_string(),
             ));
         }
@@ -223,7 +222,7 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(err.contains("stdio"));
-        assert!(err.contains("separate process"));
+        assert!(err.contains("Streamable HTTP"));
     }
 
     #[test]

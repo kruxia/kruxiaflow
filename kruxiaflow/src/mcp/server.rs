@@ -10,10 +10,9 @@
 /// - MCP stdio transport requires CLEAN stdin/stdout with no logging output
 /// - Running stdio MCP alongside logging services would corrupt the MCP protocol
 ///
-/// **For stdio MCP support:**
-/// Use a separate process that runs ONLY the MCP server with no stdout logging:
-/// - Python MCP server: `kruxiaflow-mcp/` (already available)
-/// - Standalone Rust MCP server: Create a dedicated binary with logging to file/syslog
+/// **For stdio-only MCP clients:**
+/// Use a thin stdio→HTTP proxy (e.g. `mcp-remote`) pointed at the HTTP endpoint.
+/// Modern clients (Claude Code, Cursor) speak HTTP MCP natively.
 ///
 /// **This HTTP-only MCP server is designed for:**
 /// - Production deployments with full observability
@@ -46,6 +45,7 @@ use super::config::McpConfig;
 pub struct McpServer {
     config: Arc<McpConfig>,
     pool: PgPool,
+    cache_service: Arc<dyn kruxiaflow_core::CacheService>,
     auth_service: Option<Arc<dyn kruxiaflow_oauth::AuthenticationService>>,
 }
 
@@ -54,11 +54,13 @@ impl McpServer {
     pub fn new(
         config: Arc<McpConfig>,
         pool: PgPool,
+        cache_service: Arc<dyn kruxiaflow_core::CacheService>,
         auth_service: Option<Arc<dyn kruxiaflow_oauth::AuthenticationService>>,
     ) -> Self {
         Self {
             config,
             pool,
+            cache_service,
             auth_service,
         }
     }
@@ -100,9 +102,12 @@ impl McpServer {
             meta: None,
         };
 
-        let handler =
-            super::handler::KruxiaFlowMcpHandler::new(self.config.clone(), self.pool.clone())
-                .to_mcp_server_handler();
+        let handler = super::handler::KruxiaFlowMcpHandler::new(
+            self.config.clone(),
+            self.pool.clone(),
+            self.cache_service.clone(),
+        )
+        .to_mcp_server_handler();
 
         let auth: Option<Arc<dyn AuthProvider>> = self
             .auth_service
@@ -136,22 +141,25 @@ impl McpServer {
 pub fn create_mcp_server(
     config: Arc<McpConfig>,
     pool: PgPool,
+    cache_service: Arc<dyn kruxiaflow_core::CacheService>,
     auth_service: Option<Arc<dyn kruxiaflow_oauth::AuthenticationService>>,
 ) -> McpServer {
-    McpServer::new(config, pool, auth_service)
+    McpServer::new(config, pool, cache_service, auth_service)
 }
 
 /// Spawn MCP server in a background task
 ///
 /// This is the recommended way to run the MCP server alongside other services.
 /// Pass the same `AuthenticationService` used by the REST API so that a single
-/// token (RS256, issued via `/oauth/token`) works across both protocols.
+/// token (RS256, issued via `/oauth/token`) works across both protocols, and the
+/// same `CacheService` so cache management tools act on the live cache.
 pub fn spawn_mcp_server(
     config: Arc<McpConfig>,
     pool: PgPool,
+    cache_service: Arc<dyn kruxiaflow_core::CacheService>,
     auth_service: Option<Arc<dyn kruxiaflow_oauth::AuthenticationService>>,
 ) -> JoinHandle<Result<()>> {
-    let server = create_mcp_server(config, pool, auth_service);
+    let server = create_mcp_server(config, pool, cache_service, auth_service);
     tokio::spawn(async move { server.start().await })
 }
 

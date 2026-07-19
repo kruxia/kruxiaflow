@@ -190,6 +190,7 @@ services:
         condition: service_completed_successfully
     ports:
       - "${KRUXIAFLOW_BIND:-127.0.0.1}:${KRUXIAFLOW_PORT:-8080}:8080"
+      - "${KRUXIAFLOW_BIND:-127.0.0.1}:${KRUXIAFLOW_MCP_HTTP_PORT:-8081}:8081"
     networks:
       - frontend
       - backend
@@ -212,6 +213,10 @@ services:
       # port mapping above publishes it to 127.0.0.1 only.
       KRUXIAFLOW_INSECURE_DEV: ${KRUXIAFLOW_INSECURE_DEV:-false}
       KRUXIAFLOW_INSECURE_DEV_ALLOW_NONLOOPBACK: ${KRUXIAFLOW_INSECURE_DEV:-false}
+      # MCP server for AI agents (Claude Code, Cursor, ...). Same RS256 tokens
+      # as the REST API; in insecure dev mode no token is needed. Published on
+      # 127.0.0.1 by the port mapping above.
+      KRUXIAFLOW_MCP_ENABLED: ${KRUXIAFLOW_MCP_ENABLED:-true}
       # Worker configuration
       KRUXIAFLOW_WORKER_COUNT: ${KRUXIAFLOW_WORKER_COUNT:-20}
       KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES: ${KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES:-1}

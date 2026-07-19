@@ -3,7 +3,7 @@
 /// Routes incoming MCP requests to the appropriate tool functions.
 /// Tool modules are added incrementally as they are implemented:
 ///   - Discovery tools: list/get workflow definitions, activity catalog, authoring guide
-///   - Execution tools: validate, deploy, submit, cancel
+///   - Execution tools: validate, deploy, submit
 ///   - Observability tools: status, list, outputs, cost, estimate
 ///   - Visualization & Control tools: diagrams, signals (future)
 use std::sync::Arc;
@@ -31,11 +31,20 @@ pub struct KruxiaFlowMcpHandler {
     #[allow(dead_code)]
     pub config: Arc<McpConfig>,
     pub pool: PgPool,
+    pub cache: Arc<dyn kruxiaflow_core::CacheService>,
 }
 
 impl KruxiaFlowMcpHandler {
-    pub fn new(config: Arc<McpConfig>, pool: PgPool) -> Self {
-        Self { config, pool }
+    pub fn new(
+        config: Arc<McpConfig>,
+        pool: PgPool,
+        cache: Arc<dyn kruxiaflow_core::CacheService>,
+    ) -> Self {
+        Self {
+            config,
+            pool,
+            cache,
+        }
     }
 }
 
@@ -76,7 +85,10 @@ impl ServerHandler for KruxiaFlowMcpHandler {
             "list_workflow_definitions"
             | "get_workflow_definition"
             | "list_activities"
-            | "get_workflow_authoring_guide" => {
+            | "get_workflow_authoring_guide"
+            | "search_llm_models"
+            | "list_llm_providers"
+            | "check_system_health" => {
                 let tool = DiscoveryTools::try_from(params).map_err(CallToolError::new)?;
                 match tool {
                     DiscoveryTools::ListWorkflowDefinitions(ref p) => {
@@ -89,11 +101,20 @@ impl ServerHandler for KruxiaFlowMcpHandler {
                     DiscoveryTools::GetWorkflowAuthoringGuide(ref p) => {
                         discovery::run_get_workflow_authoring_guide(p)
                     }
+                    DiscoveryTools::SearchLlmModels(ref p) => {
+                        discovery::run_search_llm_models(&self.pool, p).await
+                    }
+                    DiscoveryTools::ListLlmProviders(ref p) => {
+                        discovery::run_list_llm_providers(&self.pool, p).await
+                    }
+                    DiscoveryTools::CheckSystemHealth(ref p) => {
+                        discovery::run_check_system_health(&self.pool, p).await
+                    }
                 }
             }
 
             // --- Execution tools ---
-            "validate_workflow" | "deploy_workflow" | "submit_workflow" | "cancel_workflow" => {
+            "validate_workflow" | "deploy_workflow" | "submit_workflow" => {
                 let tool = ExecutionTools::try_from(params).map_err(CallToolError::new)?;
                 match tool {
                     ExecutionTools::ValidateWorkflow(ref p) => execution::run_validate_workflow(p),
@@ -103,9 +124,6 @@ impl ServerHandler for KruxiaFlowMcpHandler {
                     ExecutionTools::SubmitWorkflow(ref p) => {
                         execution::run_submit_workflow(&self.pool, p).await
                     }
-                    ExecutionTools::CancelWorkflow(ref p) => {
-                        execution::run_cancel_workflow(&self.pool, p).await
-                    }
                 }
             }
 
@@ -113,7 +131,10 @@ impl ServerHandler for KruxiaFlowMcpHandler {
             "get_workflow_status"
             | "list_workflows"
             | "get_activity_output"
+            | "get_workflow_output"
             | "get_workflow_cost"
+            | "get_workflow_cost_history"
+            | "get_cost_analytics"
             | "estimate_workflow_cost" => {
                 let tool = ObservabilityTools::try_from(params).map_err(CallToolError::new)?;
                 match tool {
@@ -126,8 +147,17 @@ impl ServerHandler for KruxiaFlowMcpHandler {
                     ObservabilityTools::GetActivityOutput(ref p) => {
                         observability::run_get_activity_output(&self.pool, p).await
                     }
+                    ObservabilityTools::GetWorkflowOutput(ref p) => {
+                        observability::run_get_workflow_output(&self.pool, p).await
+                    }
                     ObservabilityTools::GetWorkflowCost(ref p) => {
                         observability::run_get_workflow_cost(&self.pool, p).await
+                    }
+                    ObservabilityTools::GetWorkflowCostHistory(ref p) => {
+                        observability::run_get_workflow_cost_history(&self.pool, p).await
+                    }
+                    ObservabilityTools::GetCostAnalytics(ref p) => {
+                        observability::run_get_cost_analytics(&self.pool, p).await
                     }
                     ObservabilityTools::EstimateWorkflowCost(ref p) => {
                         observability::run_estimate_workflow_cost(&self.pool, p).await
@@ -149,7 +179,7 @@ impl ServerHandler for KruxiaFlowMcpHandler {
             }
 
             // --- Control tools ---
-            "send_workflow_signal" | "list_waiting_workflows" => {
+            "send_workflow_signal" | "list_waiting_workflows" | "invalidate_cache" => {
                 let tool = ControlTools::try_from(params).map_err(CallToolError::new)?;
                 match tool {
                     ControlTools::SendWorkflowSignal(ref p) => {
@@ -157,6 +187,9 @@ impl ServerHandler for KruxiaFlowMcpHandler {
                     }
                     ControlTools::ListWaitingWorkflows(ref p) => {
                         control::run_list_waiting_workflows(&self.pool, p).await
+                    }
+                    ControlTools::InvalidateCache(ref p) => {
+                        control::run_invalidate_cache(self.cache.as_ref(), p).await
                     }
                 }
             }

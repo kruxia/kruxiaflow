@@ -1,10 +1,13 @@
 /// MCP Observability Tools
 ///
-/// Five read-only tools for monitoring workflow executions and analysing costs:
+/// Eight read-only tools for monitoring workflow executions and analysing costs:
 /// - get_workflow_status: current status + optional activity details
 /// - list_workflows: paginated list with status filter
 /// - get_activity_output: output + cost for a specific activity
+/// - get_workflow_output: aggregated outputs from all activities in one call
 /// - get_workflow_cost: cost breakdown with per-activity and per-provider aggregation
+/// - get_workflow_cost_history: per-attempt token-level cost detail
+/// - get_cost_analytics: portfolio-level cost analytics across all workflows
 /// - estimate_workflow_cost: pre-execution cost estimate for a definition
 use rust_decimal::prelude::*;
 use rust_mcp_sdk::macros::{JsonSchema, mcp_tool};
@@ -13,7 +16,7 @@ use rust_mcp_sdk::tool_box;
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 
-use super::{AnyJson, error_response, parse_uuid, text_response};
+use super::{ObjectJson, error_response, parse_uuid, text_response};
 
 // ============================================================================
 // Tool: get_workflow_status
@@ -156,7 +159,92 @@ pub struct EstimateWorkflowCost {
 
     /// Sample input payload — keys should match what the workflow's
     /// {{INPUT.key}} expressions reference. Used to approximate prompt lengths.
-    pub input_sample: AnyJson,
+    pub input_sample: ObjectJson,
+}
+
+// ============================================================================
+// Tool: get_workflow_output
+// ============================================================================
+
+#[mcp_tool(
+    name = "get_workflow_output",
+    description = "Get the aggregated output from all activities in a completed workflow.\n\
+        \n\
+        Returns every activity's output in one call, with terminal activities (those \
+        no other activity depends on) marked — usually the workflow's final results. \
+        Includes per-activity cost and the total workflow cost.\n\
+        \n\
+        When to use: After a workflow completes, to collect its results in a single \
+        round-trip instead of calling get_activity_output per activity. The workflow \
+        must be in 'completed' status.",
+    read_only_hint = true,
+    idempotent_hint = true
+)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct GetWorkflowOutput {
+    /// UUID of the workflow execution
+    pub workflow_id: String,
+}
+
+// ============================================================================
+// Tool: get_workflow_cost_history
+// ============================================================================
+
+#[mcp_tool(
+    name = "get_workflow_cost_history",
+    description = "Get detailed cost history for a workflow with per-activity, \
+        token-level breakdown.\n\
+        \n\
+        Shows every cost line item: which provider/model was actually used (after \
+        any fallback), prompt/output/cached token counts, per-attempt costs, and \
+        budget enforcement events (aborts and downgrades). This is the data for \
+        debugging cost issues and verifying budget behaviour.\n\
+        \n\
+        When to use: When get_workflow_cost's summary isn't enough — e.g. to see \
+        whether a fallback model ran, how much of the prompt was served from cache, \
+        or which activity hit the budget.",
+    read_only_hint = true,
+    idempotent_hint = true
+)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct GetWorkflowCostHistory {
+    /// UUID of the workflow execution
+    pub workflow_id: String,
+}
+
+// ============================================================================
+// Tool: get_cost_analytics
+// ============================================================================
+
+#[mcp_tool(
+    name = "get_cost_analytics",
+    description = "Get aggregated cost analytics across all workflows.\n\
+        \n\
+        Portfolio-level spend visibility: total cost, per-workflow and per-activity \
+        averages, token counts, cache hit rate, budget enforcement counts (aborts \
+        and downgrades), the most expensive workflows and definitions, and recent \
+        budget events. Optionally group totals by provider, model, definition, or \
+        day.\n\
+        \n\
+        When to use: To answer questions like 'how much did we spend this week?', \
+        'which workflow types are most expensive?', or 'is the budget enforcement \
+        firing?'. Use get_workflow_cost for a single workflow instead.",
+    read_only_hint = true,
+    idempotent_hint = true
+)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct GetCostAnalytics {
+    /// Start of the date range (ISO 8601, e.g. "2026-07-01T00:00:00Z"). Default: 30 days ago.
+    pub start_date: Option<String>,
+
+    /// End of the date range (ISO 8601). Default: now.
+    pub end_date: Option<String>,
+
+    /// Group cost totals by one dimension: "provider", "model", "definition", or "day"
+    pub group_by: Option<String>,
+
+    /// Row limit for top_workflows / top_definitions (default: 10)
+    pub limit: Option<i64>,
 }
 
 // ============================================================================
@@ -169,7 +257,10 @@ tool_box!(
         GetWorkflowStatus,
         ListWorkflows,
         GetActivityOutput,
+        GetWorkflowOutput,
         GetWorkflowCost,
+        GetWorkflowCostHistory,
+        GetCostAnalytics,
         EstimateWorkflowCost
     ]
 );
@@ -352,6 +443,152 @@ pub async fn run_get_activity_output(
     }
 }
 
+/// Get aggregated outputs from all activities in a completed workflow.
+pub async fn run_get_workflow_output(
+    pool: &PgPool,
+    params: &GetWorkflowOutput,
+) -> Result<CallToolResult, CallToolError> {
+    let workflow_id = parse_uuid(&params.workflow_id)?;
+    let svc = kruxiaflow_core::workflow::OutputQueryService::new(pool.clone());
+
+    match svc.get_workflow_output(workflow_id).await {
+        Ok(result) => {
+            let outputs: serde_json::Map<String, serde_json::Value> = result
+                .outputs
+                .iter()
+                .map(|(key, summary)| {
+                    (
+                        key.clone(),
+                        serde_json::json!({
+                            "status": summary.status,
+                            "output": summary.output,
+                            "cost_usd": summary.cost_usd.to_f64().unwrap_or(0.0),
+                            "completed_at": summary.completed_at.map(|t| t.to_rfc3339()),
+                            "is_terminal": summary.is_terminal,
+                        }),
+                    )
+                })
+                .collect();
+
+            text_response(&serde_json::json!({
+                "workflow_id": result.workflow_id.to_string(),
+                "status": result.status,
+                "total_cost_usd": result.total_cost_usd.to_f64().unwrap_or(0.0),
+                "completed_at": result.completed_at.map(|t| t.to_rfc3339()),
+                "outputs": outputs,
+                "terminal_outputs": result.terminal_outputs,
+            }))
+        }
+        Err(kruxiaflow_core::workflow::OutputQueryError::WorkflowNotFound(_)) => {
+            error_response(&serde_json::json!({
+                "error": format!("Workflow '{}' not found", params.workflow_id),
+                "workflow_id": params.workflow_id,
+            }))
+        }
+        Err(kruxiaflow_core::workflow::OutputQueryError::WorkflowNotCompleted) => {
+            error_response(&serde_json::json!({
+                "error": "Workflow is not completed — aggregated output is only \
+                          available for completed workflows. Monitor with \
+                          get_workflow_status, or read individual finished activities \
+                          with get_activity_output.",
+                "workflow_id": params.workflow_id,
+            }))
+        }
+        Err(e) => {
+            tracing::error!("get_workflow_output error: {e:?}");
+            Err(CallToolError::from_message(format!(
+                "Error retrieving output for workflow '{}': {e}",
+                params.workflow_id
+            )))
+        }
+    }
+}
+
+/// Get per-activity token-level cost history for a workflow.
+pub async fn run_get_workflow_cost_history(
+    pool: &PgPool,
+    params: &GetWorkflowCostHistory,
+) -> Result<CallToolResult, CallToolError> {
+    let workflow_id = parse_uuid(&params.workflow_id)?;
+
+    let history = kruxiaflow_api::handlers::cost::fetch_workflow_cost_history(pool, workflow_id)
+        .await
+        .map_err(|e| {
+            CallToolError::from_message(format!(
+                "Database error fetching cost history for workflow '{}': {e}",
+                params.workflow_id
+            ))
+        })?;
+
+    let activities =
+        serde_json::to_value(&history).map_err(|e| CallToolError::from_message(e.to_string()))?;
+
+    text_response(&serde_json::json!({
+        "workflow_id": params.workflow_id,
+        "total_line_items": history.len(),
+        "activities": activities,
+    }))
+}
+
+/// Get portfolio-level cost analytics across all workflows.
+pub async fn run_get_cost_analytics(
+    pool: &PgPool,
+    params: &GetCostAnalytics,
+) -> Result<CallToolResult, CallToolError> {
+    use kruxiaflow_api::handlers::cost::{CostAnalyticsError, CostAnalyticsParams};
+
+    // Build CostAnalyticsParams through serde so the REST endpoint's date
+    // defaults (30 days ago .. now) apply identically here.
+    let mut raw = serde_json::Map::new();
+    if let Some(s) = &params.start_date {
+        raw.insert("start_date".into(), serde_json::json!(s));
+    }
+    if let Some(s) = &params.end_date {
+        raw.insert("end_date".into(), serde_json::json!(s));
+    }
+    if let Some(g) = &params.group_by {
+        raw.insert("group_by".into(), serde_json::json!(g));
+    }
+    if let Some(l) = params.limit {
+        raw.insert("limit".into(), serde_json::json!(l));
+    }
+
+    let analytics_params: CostAnalyticsParams =
+        match serde_json::from_value(serde_json::Value::Object(raw)) {
+            Ok(p) => p,
+            Err(e) => {
+                return error_response(&serde_json::json!({
+                    "error": format!(
+                        "Invalid date format: {e}. Use ISO 8601, e.g. \"2026-07-01T00:00:00Z\"."
+                    ),
+                    "start_date": params.start_date,
+                    "end_date": params.end_date,
+                }));
+            }
+        };
+
+    match kruxiaflow_api::handlers::cost::fetch_cost_analytics(pool, &analytics_params).await {
+        Ok(analytics) => {
+            let value = serde_json::to_value(&analytics)
+                .map_err(|e| CallToolError::from_message(e.to_string()))?;
+            text_response(&value)
+        }
+        Err(CostAnalyticsError::InvalidGroupBy(dim)) => error_response(&serde_json::json!({
+            "error": format!(
+                "Invalid group_by '{dim}' — expected \"provider\", \"model\", \
+                 \"definition\", or \"day\"."
+            ),
+            "group_by": dim,
+        })),
+        Err(CostAnalyticsError::Database(e)) => {
+            tracing::error!("get_cost_analytics error: {e:?}");
+            Err(CallToolError::from_message(format!(
+                "Database error fetching cost analytics: {e}"
+            )))
+        }
+    }
+}
+
 /// Get cost breakdown for a workflow.
 pub async fn run_get_workflow_cost(
     pool: &PgPool,
@@ -519,11 +756,29 @@ pub async fn run_estimate_workflow_cost(
         if activity_name == "llm_prompt" {
             let p = activity.parameters.as_ref();
 
-            let explicit_provider = p.and_then(|m| m.get("provider").and_then(|v| v.as_str()));
-            let explicit_model = p.and_then(|m| m.get("model").and_then(|v| v.as_str()));
+            // `model` may be "name", "provider/name", or an array of those
+            // (fallback chain — the first entry is the preferred model).
+            let raw_model = p.and_then(|m| m.get("model")).and_then(|v| match v {
+                serde_json::Value::String(s) => Some(s.clone()),
+                serde_json::Value::Array(arr) => {
+                    arr.first().and_then(|x| x.as_str()).map(str::to_string)
+                }
+                _ => None,
+            });
+            let (model_provider, explicit_model) = match raw_model {
+                Some(m) => match m.split_once('/') {
+                    Some((prov, name)) => (Some(prov.to_string()), Some(name.to_string())),
+                    None => (None, Some(m)),
+                },
+                None => (None, None),
+            };
+            let explicit_provider = p
+                .and_then(|m| m.get("provider").and_then(|v| v.as_str()))
+                .map(str::to_string)
+                .or(model_provider);
 
-            let provider = explicit_provider.unwrap_or("anthropic");
-            let model = explicit_model.unwrap_or("claude-sonnet-4-5-20250929");
+            let provider = explicit_provider.as_deref().unwrap_or("anthropic");
+            let model = explicit_model.as_deref().unwrap_or("claude-sonnet-5");
 
             if explicit_provider.is_none() || explicit_model.is_none() {
                 warnings.push(format!(

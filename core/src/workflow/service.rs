@@ -1,6 +1,7 @@
 use crate::events::models::{WorkflowEventType, WorkflowStatus};
 use crate::workflow::repository::{RepositoryError, WorkflowDefinitionRepository};
 use chrono::{DateTime, Utc};
+use rust_decimal::Decimal;
 use serde_json::Value;
 use sqlx::PgPool;
 use thiserror::Error;
@@ -77,6 +78,7 @@ impl WorkflowService {
         version: Option<&str>,
         input: Value,
         unique_key: Option<String>,
+        budget_limit_usd: Option<Decimal>,
     ) -> WorkflowServiceResult<CreatedWorkflow> {
         // Create repository for definition lookup
         let repo = WorkflowDefinitionRepository::new(self.pool.clone());
@@ -133,13 +135,16 @@ impl WorkflowService {
         let initial_activities = serde_json::json!({});
         let initial_state_data = serde_json::json!({});
 
-        // Persist the workflow-level budget limit from the definition's settings
-        // so budget checks and cost endpoints see it
-        let budget_limit_usd = definition
-            .settings
-            .as_ref()
-            .and_then(|s| s.budget.as_ref())
-            .map(|b| b.limit);
+        // Persist the workflow-level budget limit so budget checks and cost
+        // endpoints see it. An explicit per-submission limit overrides the
+        // definition's settings.budget default.
+        let budget_limit_usd = budget_limit_usd.or_else(|| {
+            definition
+                .settings
+                .as_ref()
+                .and_then(|s| s.budget.as_ref())
+                .map(|b| b.limit)
+        });
 
         let row = sqlx::query!(
             r#"

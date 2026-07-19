@@ -53,3 +53,7 @@ py/.coverage
 py/coverage.xml
 py/examples/.coverage
 *.env
+
+# Screen recordings (demo raw footage stays local)
+*.mov
+*.mp4

@@ -6,6 +6,8 @@
 
 - [Quick Start](quickstart.md)
 - [API Reference](api-reference.md)
+- [MCP Server (AI Agents)](mcp-server.md)
+  - [Demo: Budget-Capped Q&A over MCP](20260719-051243-mcp-demo.md)
 - [Architecture](architecture.md)
 - [Workflow Loops](loops-guide.md)
 - [Conditional Branching](conditional-branching.md)

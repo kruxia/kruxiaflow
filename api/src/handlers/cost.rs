@@ -141,7 +141,23 @@ pub async fn get_workflow_cost_history(
     State(state): State<AppState>,
     Path(workflow_id): Path<Uuid>,
 ) -> Result<Json<Vec<ActivityCostDetail>>, StatusCode> {
-    let history = sqlx::query_as!(
+    let history = fetch_workflow_cost_history(&state.db_pool, workflow_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to fetch cost history: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    Ok(Json(history))
+}
+
+/// Shared implementation behind the REST endpoint and the MCP
+/// `get_workflow_cost_history` tool.
+pub async fn fetch_workflow_cost_history(
+    pool: &sqlx::PgPool,
+    workflow_id: Uuid,
+) -> Result<Vec<ActivityCostDetail>, sqlx::Error> {
+    sqlx::query_as!(
         ActivityCostDetail,
         r#"
         SELECT
@@ -164,14 +180,8 @@ pub async fn get_workflow_cost_history(
         "#,
         workflow_id
     )
-    .fetch_all(&state.db_pool)
+    .fetch_all(pool)
     .await
-    .map_err(|e| {
-        tracing::error!("Failed to fetch cost history: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
-
-    Ok(Json(history))
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -311,13 +321,40 @@ pub async fn get_cost_analytics(
     State(state): State<AppState>,
     Query(params): Query<CostAnalyticsParams>,
 ) -> Result<Json<CostAnalytics>, StatusCode> {
-    // Validate group_by before touching the database
-    match params.group_by.as_deref() {
-        None | Some("provider") | Some("model") | Some("definition") | Some("day") => {}
-        Some(other) => {
-            tracing::debug!("Invalid group_by value: {}", other);
-            return Err(StatusCode::BAD_REQUEST);
-        }
+    let analytics = fetch_cost_analytics(&state.db_pool, &params)
+        .await
+        .map_err(|e| match e {
+            CostAnalyticsError::InvalidGroupBy(other) => {
+                tracing::debug!("Invalid group_by value: {}", other);
+                StatusCode::BAD_REQUEST
+            }
+            CostAnalyticsError::Database(e) => {
+                tracing::error!("Failed to fetch cost analytics: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
+        })?;
+    Ok(Json(analytics))
+}
+
+/// Errors from `fetch_cost_analytics` / `fetch_cost_groups`.
+#[derive(Debug, thiserror::Error)]
+pub enum CostAnalyticsError {
+    #[error("invalid group_by dimension '{0}' (expected provider, model, definition, or day)")]
+    InvalidGroupBy(String),
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
+}
+
+/// Shared implementation behind the REST endpoint and the MCP
+/// `get_cost_analytics` tool, so both surfaces report identical analytics.
+pub async fn fetch_cost_analytics(
+    pool: &sqlx::PgPool,
+    params: &CostAnalyticsParams,
+) -> Result<CostAnalytics, CostAnalyticsError> {
+    if let Some(other) = params.group_by.as_deref()
+        && !matches!(other, "provider" | "model" | "definition" | "day")
+    {
+        return Err(CostAnalyticsError::InvalidGroupBy(other.to_string()));
     }
     let limit = params.limit.unwrap_or(10).clamp(1, 10_000);
 
@@ -339,16 +376,12 @@ pub async fn get_cost_analytics(
         params.start_date,
         params.end_date
     )
-    .fetch_one(&state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to fetch cost analytics: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .fetch_one(pool)
+    .await?;
 
     let groups = match params.group_by.as_deref() {
         Some(dimension) => {
-            Some(fetch_cost_groups(&state, dimension, params.start_date, params.end_date).await?)
+            Some(fetch_cost_groups(pool, dimension, params.start_date, params.end_date).await?)
         }
         None => None,
     };
@@ -375,12 +408,8 @@ pub async fn get_cost_analytics(
         params.end_date,
         limit
     )
-    .fetch_all(&state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to fetch top workflows: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .fetch_all(pool)
+    .await?;
 
     let top_definitions = sqlx::query!(
         r#"
@@ -399,12 +428,8 @@ pub async fn get_cost_analytics(
         params.end_date,
         limit
     )
-    .fetch_all(&state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to fetch top definitions: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?
+    .fetch_all(pool)
+    .await?
     .into_iter()
     .map(|row| {
         let avg = if row.workflows > 0 {
@@ -442,12 +467,8 @@ pub async fn get_cost_analytics(
         params.start_date,
         params.end_date
     )
-    .fetch_all(&state.db_pool)
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to fetch budget events: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .fetch_all(pool)
+    .await?;
 
     let avg_cost_per_workflow = if summary.total_workflows > 0 {
         summary.total_cost / Decimal::from(summary.total_workflows)
@@ -460,7 +481,7 @@ pub async fn get_cost_analytics(
         None
     };
 
-    Ok(Json(CostAnalytics {
+    Ok(CostAnalytics {
         total_workflows: summary.total_workflows,
         total_cost_usd: summary.total_cost,
         avg_cost_per_activity: summary.avg_cost,
@@ -478,7 +499,7 @@ pub async fn get_cost_analytics(
         top_workflows,
         top_definitions,
         budget_events,
-    }))
+    })
 }
 
 /// Server-side aggregation for `group_by` — one static query per dimension so
@@ -486,11 +507,11 @@ pub async fn get_cost_analytics(
 /// are excluded (zero-cost enforcement markers, not spend), buckets are
 /// ordered by cost descending except `day`, which is chronological.
 async fn fetch_cost_groups(
-    state: &AppState,
+    pool: &sqlx::PgPool,
     dimension: &str,
     start_date: DateTime<Utc>,
     end_date: DateTime<Utc>,
-) -> Result<Vec<CostGroup>, StatusCode> {
+) -> Result<Vec<CostGroup>, CostAnalyticsError> {
     let result = match dimension {
         "provider" => {
             sqlx::query_as!(
@@ -511,7 +532,7 @@ async fn fetch_cost_groups(
                 start_date,
                 end_date
             )
-            .fetch_all(&state.db_pool)
+            .fetch_all(pool)
             .await
         }
         "model" => {
@@ -535,7 +556,7 @@ async fn fetch_cost_groups(
                 start_date,
                 end_date
             )
-            .fetch_all(&state.db_pool)
+            .fetch_all(pool)
             .await
         }
         "definition" => {
@@ -558,7 +579,7 @@ async fn fetch_cost_groups(
                 start_date,
                 end_date
             )
-            .fetch_all(&state.db_pool)
+            .fetch_all(pool)
             .await
         }
         "day" => {
@@ -580,17 +601,14 @@ async fn fetch_cost_groups(
                 start_date,
                 end_date
             )
-            .fetch_all(&state.db_pool)
+            .fetch_all(pool)
             .await
         }
-        // Validated by the caller
-        _ => return Err(StatusCode::BAD_REQUEST),
+        // Validated by fetch_cost_analytics before any query runs
+        _ => return Err(CostAnalyticsError::InvalidGroupBy(dimension.to_string())),
     };
 
-    result.map_err(|e| {
-        tracing::error!("Failed to fetch cost groups by {}: {}", dimension, e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })
+    Ok(result?)
 }
 
 #[cfg(test)]
