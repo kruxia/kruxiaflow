@@ -242,6 +242,58 @@ host (e.g. \"127.0.0.1:8080:8080\") so the server is not reachable from\n\
 the network."
     )]
     pub insecure_dev_allow_nonloopback: bool,
+
+    // ========================================================================
+    // MCP Server Configuration (requires compile-time --features mcp-server)
+    // ========================================================================
+    /// Enable MCP server (requires mcp-server feature at compile time)
+    #[cfg(feature = "mcp-server")]
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_MCP_ENABLED",
+        help = "Enable MCP server for AI agent integration",
+        long_help = "Enable MCP (Model Context Protocol) server.\n\
+Allows AI agents like Claude to interact with Kruxia Flow.\n\n\
+NOTE: Requires building with --features mcp-server\n\n\
+Example: kruxiaflow serve --mcp-enabled"
+    )]
+    pub mcp_enabled: Option<bool>,
+
+    /// MCP HTTP port
+    #[cfg(feature = "mcp-server")]
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_MCP_HTTP_PORT",
+        help = "MCP HTTP server port",
+        long_help = "Port for the MCP Streamable HTTP server.\n\n\
+Default: 8081\n\
+Example: --mcp-http-port 9091"
+    )]
+    pub mcp_http_port: Option<u16>,
+
+    /// MCP HTTP bind address
+    #[cfg(feature = "mcp-server")]
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_MCP_HTTP_BIND",
+        help = "MCP HTTP bind address",
+        long_help = "Address to bind the MCP Streamable HTTP server.\n\n\
+Default: 0.0.0.0\n\
+Example: --mcp-http-bind 127.0.0.1"
+    )]
+    pub mcp_http_bind: Option<String>,
+
+    /// Disable MCP authentication (for local development/testing)
+    #[cfg(feature = "mcp-server")]
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_MCP_NO_AUTH",
+        help = "Disable MCP server authentication (dev only)",
+        long_help = "Start the MCP server without requiring authentication.\n\
+WARNING: Only use for local development and testing.\n\n\
+Example: --mcp-no-auth"
+    )]
+    pub mcp_no_auth: bool,
 }
 
 impl ServeCommand {
@@ -632,7 +684,7 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     // Create API state with shutdown token
     let state = AppState::new(
         pool.clone(),
-        auth_service,
+        auth_service.clone(),
         activity_queue.clone(),
         event_source.clone(),
         workflow_storage.clone(),
@@ -675,6 +727,47 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         )
         .await?
     };
+
+    // 6. Spawn MCP server if enabled and feature is compiled in
+    #[cfg(feature = "mcp-server")]
+    let mcp_handle = {
+        let mcp_config =
+            crate::mcp::McpConfig::new(cmd.mcp_enabled, cmd.mcp_http_port, cmd.mcp_http_bind)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        if mcp_config.enabled {
+            mcp_config.log_config();
+            let mcp_auth: Option<Arc<dyn kruxiaflow_oauth::AuthenticationService>> =
+                if cmd.mcp_no_auth {
+                    tracing::warn!("MCP server authentication DISABLED (--mcp-no-auth)");
+                    None
+                } else {
+                    Some(auth_service.clone())
+                };
+            Some(crate::mcp::spawn_mcp_server(
+                Arc::new(mcp_config),
+                pool.clone(),
+                mcp_auth,
+            ))
+        } else {
+            None
+        }
+    };
+
+    // Log if someone tries to use MCP without the feature
+    #[cfg(not(feature = "mcp-server"))]
+    {
+        if std::env::var("KRUXIAFLOW_MCP_ENABLED")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(false)
+        {
+            tracing::warn!(
+                "MCP server requested but not compiled in. \
+                Rebuild with --features mcp-server to enable MCP support."
+            );
+        }
+    }
 
     tracing::info!("All services started successfully");
     tracing::info!(
@@ -754,6 +847,18 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         Err(_) => tracing::warn!("Orchestrator shutdown timeout, forcing stop"),
     }
 
+    // Stop MCP server (if running) — graceful with timeout, then abort
+    #[cfg(feature = "mcp-server")]
+    if let Some(handle) = mcp_handle {
+        tracing::info!("Stopping MCP server...");
+        match tokio::time::timeout(Duration::from_secs(5), handle).await {
+            Ok(Ok(Ok(()))) => tracing::info!("MCP server stopped gracefully"),
+            Ok(Ok(Err(e))) => tracing::warn!("MCP server error during shutdown: {}", e),
+            Ok(Err(e)) => tracing::warn!("MCP server task error: {}", e),
+            Err(_) => tracing::warn!("MCP server shutdown timeout, forcing stop"),
+        }
+    }
+
     // Stop pool monitor (only in profiling mode)
     #[cfg(feature = "profiling")]
     {
@@ -800,6 +905,14 @@ mod tests {
             no_worker: false,
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
+            #[cfg(feature = "mcp-server")]
+            mcp_enabled: None,
+            #[cfg(feature = "mcp-server")]
+            mcp_http_port: None,
+            #[cfg(feature = "mcp-server")]
+            mcp_http_bind: None,
+            #[cfg(feature = "mcp-server")]
+            mcp_no_auth: false,
         }
     }
 
@@ -1000,6 +1113,14 @@ mod tests {
             no_worker: false,
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
+            #[cfg(feature = "mcp-server")]
+            mcp_enabled: Some(true),
+            #[cfg(feature = "mcp-server")]
+            mcp_http_port: Some(8081),
+            #[cfg(feature = "mcp-server")]
+            mcp_http_bind: Some("127.0.0.1".to_string()),
+            #[cfg(feature = "mcp-server")]
+            mcp_no_auth: false,
         };
 
         assert!(cmd.validate().is_ok());

@@ -11,6 +11,10 @@ mod llm_catalog;
 mod logging;
 mod signals;
 
+// MCP server module (optional - only compiled with mcp-server feature)
+#[cfg(feature = "mcp-server")]
+mod mcp;
+
 #[cfg(all(feature = "profiling", not(target_env = "msvc")))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
