@@ -1,5 +1,13 @@
 # Kruxia Flow MCP Server
 
+> **FROZEN — reference only (2026-07-18).** This Python MCP server is not
+> maintained, not merged, and not published. The canonical MCP server is the
+> Rust implementation embedded in the `kruxiaflow` binary (`kruxiaflow serve
+> --mcp-enabled`, feature `mcp-server`, Streamable HTTP at `:8081/mcp`) — it
+> shares the engine's RS256 auth and dev mode, and its tool catalog has
+> superseded this one. See `docs/mcp-server.md` on `main`/`develop`. This
+> branch is preserved as a design reference.
+
 Model Context Protocol (MCP) server for Kruxia Flow workflow orchestration.
 
 ## Overview
