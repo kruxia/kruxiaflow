@@ -46,6 +46,39 @@ impl From<AnyJson> for serde_json::Value {
     }
 }
 
+/// Like [`AnyJson`] but advertises `{"type": "object"}` in the tool schema, for
+/// parameters that must be JSON objects (e.g. workflow input).
+///
+/// Some MCP clients serialize object arguments as JSON-encoded *strings*
+/// (observed with Claude Code when the schema lacks a type hint), so
+/// [`ObjectJson::as_object`] also accepts a string containing a JSON object.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+#[serde(transparent)]
+pub(crate) struct ObjectJson(pub serde_json::Value);
+
+impl ObjectJson {
+    /// Returns `{"type": "object"}`. Called by the `#[derive(JsonSchema)]`
+    /// macro for fields typed `ObjectJson`.
+    pub fn json_schema() -> serde_json::Map<String, serde_json::Value> {
+        let mut schema = serde_json::Map::new();
+        schema.insert("type".to_string(), serde_json::json!("object"));
+        schema
+    }
+
+    /// The value as a JSON object, coercing a JSON-encoded object string.
+    /// Returns `None` if the value is neither.
+    pub fn as_object(&self) -> Option<serde_json::Value> {
+        match &self.0 {
+            value @ serde_json::Value::Object(_) => Some(value.clone()),
+            serde_json::Value::String(s) => match serde_json::from_str::<serde_json::Value>(s) {
+                Ok(value @ serde_json::Value::Object(_)) => Some(value),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
 /// Wrap a JSON value as a pretty-printed text response.
 pub(crate) fn text_response(value: &serde_json::Value) -> Result<CallToolResult, CallToolError> {
     Ok(CallToolResult::text_content(vec![TextContent::from(

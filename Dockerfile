@@ -43,9 +43,9 @@ FROM chef AS build
 ARG SQLX_OFFLINE=true
 COPY --from=planner /opt/recipe.json recipe.json
 # Dependencies only — same flags as the real build so features/profile match
-RUN cargo chef cook --release --features redis-cache --recipe-path recipe.json
+RUN cargo chef cook --release --features redis-cache,mcp-server --recipe-path recipe.json
 COPY ./ ./
-RUN cargo build --release --features redis-cache
+RUN cargo build --release --features redis-cache,mcp-server
 
 # == DEPLOY ==
 # Minimal production image - distroless with single binary

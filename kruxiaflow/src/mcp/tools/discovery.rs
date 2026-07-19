@@ -1,16 +1,20 @@
 /// MCP Discovery Tools
 ///
-/// Four read-only tools that let AI agents discover what's available in Kruxia Flow:
+/// Seven read-only tools that let AI agents discover what's available in Kruxia Flow:
 /// - list_workflow_definitions: what workflows are deployed
 /// - get_workflow_definition: full structure of a specific workflow
 /// - list_activities: what activity types exist
 /// - get_workflow_authoring_guide: how to write workflows
+/// - search_llm_models: model catalog with live pricing
+/// - list_llm_providers: configured providers and capabilities
+/// - check_system_health: readiness of database, event source, and queue
+use rust_decimal::prelude::*;
 use rust_mcp_sdk::macros::{JsonSchema, mcp_tool};
 use rust_mcp_sdk::schema::{CallToolResult, TextContent, schema_utils::CallToolError};
 
-use super::error_response;
+use super::{error_response, text_response};
 use rust_mcp_sdk::tool_box;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 
 // ============================================================================
 // Tool: list_workflow_definitions
@@ -276,11 +280,15 @@ impl GetWorkflowAuthoringGuide {
     /// Update examples when new models are released.
     pub fn call_tool(&self) -> Result<CallToolResult, CallToolError> {
         let guide = serde_json::json!({
+            "note": "Model identifiers in the examples below may be outdated. Call \
+                     search_llm_models for the current model catalog with live pricing \
+                     before choosing a model, and estimate_workflow_cost before \
+                     submitting with a budget.",
             "yaml_structure": {
                 "description": "Top-level structure of a workflow definition file",
                 "required_fields": {
                     "name": "Unique workflow identifier (lowercase letters, digits, hyphens, underscores)",
-                    "activities": "Map of activity key → activity definition (at least one required)"
+                    "activities": "LIST of activity definitions (at least one required). Each entry carries its unique identifier in the 'key' field — a map keyed by activity name is NOT accepted."
                 },
                 "activity_fields": {
                     "worker": "(required) Worker type that executes this activity — std, python, py-std, py-data, py-ml, py-nlp",
@@ -294,7 +302,7 @@ impl GetWorkflowAuthoringGuide {
                     "iteration_limit": "Max loop iterations before failing (prevents infinite loops)",
                     "streaming": "Enable token-level streaming for LLM activities"
                 },
-                "example": "name: fetch-and-summarise\nactivities:\n  fetch:\n    worker: std\n    activity_name: http_request\n    parameters:\n      method: GET\n      url: \"{{INPUT.url}}\"\n  summarise:\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-4-5-20250929\n      prompt: \"Summarise this text: {{fetch.response}}\"\n    depends_on: [fetch]"
+                "example": "name: fetch-and-summarise\nactivities:\n  - key: fetch\n    worker: std\n    activity_name: http_request\n    parameters:\n      method: GET\n      url: \"{{INPUT.url}}\"\n  - key: summarise\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-5\n      prompt: \"Summarise this text: {{fetch.response}}\"\n    depends_on: [fetch]"
             },
             "template_expressions": {
                 "description": "Dynamic values resolved at runtime using {{source.path}} syntax",
@@ -316,19 +324,19 @@ impl GetWorkflowAuthoringGuide {
                 "description": "How to control execution order and data flow between activities",
                 "sequential": {
                     "description": "A → B → C. Each step waits for the previous to complete.",
-                    "example": "activities:\n  a:\n    worker: std\n    activity_name: echo\n    parameters: {message: step-a}\n  b:\n    worker: std\n    activity_name: echo\n    parameters: {message: step-b}\n    depends_on: [a]\n  c:\n    worker: std\n    activity_name: echo\n    parameters: {message: step-c}\n    depends_on: [b]"
+                    "example": "activities:\n  - key: a\n    worker: std\n    activity_name: echo\n    parameters: {message: step-a}\n  - key: b\n    worker: std\n    activity_name: echo\n    parameters: {message: step-b}\n    depends_on: [a]\n  - key: c\n    worker: std\n    activity_name: echo\n    parameters: {message: step-c}\n    depends_on: [b]"
                 },
                 "parallel": {
                     "description": "Activities with no shared dependency run concurrently.",
-                    "example": "activities:\n  fetch_weather:\n    worker: std\n    activity_name: http_request\n    parameters: {method: GET, url: \"{{INPUT.weather_url}}\"}\n  fetch_stocks:\n    worker: std\n    activity_name: http_request\n    parameters: {method: GET, url: \"{{INPUT.stocks_url}}\"}\n  # Both run in parallel — neither depends on the other"
+                    "example": "activities:\n  - key: fetch_weather\n    worker: std\n    activity_name: http_request\n    parameters: {method: GET, url: \"{{INPUT.weather_url}}\"}\n  - key: fetch_stocks\n    worker: std\n    activity_name: http_request\n    parameters: {method: GET, url: \"{{INPUT.stocks_url}}\"}\n  # Both run in parallel — neither depends on the other"
                 },
                 "fan_in": {
                     "description": "Multiple activities feed into one (fan-in). The downstream activity waits for ALL upstream activities.",
-                    "example": "activities:\n  fetch_a: { worker: std, activity_name: http_request, parameters: {method: GET, url: \"{{INPUT.url_a}}\"} }\n  fetch_b: { worker: std, activity_name: http_request, parameters: {method: GET, url: \"{{INPUT.url_b}}\"} }\n  combine:\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-4-5-20250929\n      prompt: \"Combine: {{fetch_a.response}} and {{fetch_b.response}}\"\n    depends_on: [fetch_a, fetch_b]"
+                    "example": "activities:\n  - { key: fetch_a, worker: std, activity_name: http_request, parameters: {method: GET, url: \"{{INPUT.url_a}}\"} }\n  - { key: fetch_b, worker: std, activity_name: http_request, parameters: {method: GET, url: \"{{INPUT.url_b}}\"} }\n  - key: combine\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-5\n      prompt: \"Combine: {{fetch_a.response}} and {{fetch_b.response}}\"\n    depends_on: [fetch_a, fetch_b]"
                 },
                 "conditional": {
                     "description": "An activity only runs if a condition on an upstream output is met.",
-                    "example": "activities:\n  check:\n    worker: std\n    activity_name: http_request\n    parameters: {method: GET, url: \"{{INPUT.status_url}}\"}\n  on_success:\n    worker: std\n    activity_name: llm_prompt\n    parameters: {model: anthropic/claude-sonnet-4-5-20250929, prompt: \"Process success\"}\n    depends_on:\n      - activity_key: check\n        conditions: [\"check.status_code == 200\"]"
+                    "example": "activities:\n  - key: check\n    worker: std\n    activity_name: http_request\n    parameters: {method: GET, url: \"{{INPUT.status_url}}\"}\n  - key: on_success\n    worker: std\n    activity_name: llm_prompt\n    parameters: {model: anthropic/claude-sonnet-5, prompt: \"Process success\"}\n    depends_on:\n      - activity_key: check\n        conditions: [\"check.status_code == 200\"]"
                 }
             },
             "settings_configuration": {
@@ -349,10 +357,10 @@ impl GetWorkflowAuthoringGuide {
                 "budget": {
                     "description": "Per-activity cost cap (useful for LLM activities)",
                     "fields": {
-                        "limit_usd": "Maximum spend in USD",
+                        "limit": "Maximum spend in USD (field name is 'limit', not 'limit_usd')",
                         "action": "abort (fail the activity) or skip (return empty result)"
                     },
-                    "example": "settings:\n  budget:\n    limit_usd: 0.50\n    action: abort"
+                    "example": "settings:\n  budget:\n    limit: 0.50\n    action: abort"
                 },
                 "scheduling": {
                     "description": "Delay activity start by a fixed amount after its dependencies complete",
@@ -366,15 +374,15 @@ impl GetWorkflowAuthoringGuide {
             "complete_examples": {
                 "simple_sequential": {
                     "description": "Fetch a URL, then summarise the response with an LLM",
-                    "yaml": "name: fetch-and-summarise\nactivities:\n  fetch:\n    worker: std\n    activity_name: http_request\n    parameters:\n      method: GET\n      url: \"{{INPUT.url}}\"\n    settings:\n      timeout: 30\n      retry:\n        max_attempts: 3\n  summarise:\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-4-5-20250929\n      system: You are a concise summariser.\n      prompt: \"Summarise: {{fetch.response}}\"\n      max_tokens: 256\n    depends_on: [fetch]\n    settings:\n      budget:\n        limit_usd: 0.10\n        action: abort"
+                    "yaml": "name: fetch-and-summarise\nactivities:\n  - key: fetch\n    worker: std\n    activity_name: http_request\n    parameters:\n      method: GET\n      url: \"{{INPUT.url}}\"\n    settings:\n      timeout: 30\n      retry:\n        max_attempts: 3\n  - key: summarise\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-5\n      system: You are a concise summariser.\n      prompt: \"Summarise: {{fetch.response}}\"\n      max_tokens: 256\n    depends_on: [fetch]\n    settings:\n      budget:\n        limit: 0.10\n        action: abort"
                 },
                 "parallel_fan_in": {
                     "description": "Query two databases in parallel, then merge results",
-                    "yaml": "name: parallel-merge\nactivities:\n  query_users:\n    worker: std\n    activity_name: postgres_query\n    parameters:\n      query: \"SELECT * FROM users WHERE active = $1\"\n      params: [true]\n  query_orders:\n    worker: std\n    activity_name: postgres_query\n    parameters:\n      query: \"SELECT * FROM orders WHERE status = $1\"\n      params: [pending]\n  merge:\n    worker: python\n    activity_name: script\n    parameters:\n      code: |\n        users = INPUT[\"query_users_rows\"]\n        orders = INPUT[\"query_orders_rows\"]\n        result = {\"users\": users, \"orders\": orders, \"total\": len(users) + len(orders)}\n    depends_on: [query_users, query_orders]"
+                    "yaml": "name: parallel-merge\nactivities:\n  - key: query_users\n    worker: std\n    activity_name: postgres_query\n    parameters:\n      query: \"SELECT * FROM users WHERE active = $1\"\n      params: [true]\n  - key: query_orders\n    worker: std\n    activity_name: postgres_query\n    parameters:\n      query: \"SELECT * FROM orders WHERE status = $1\"\n      params: [pending]\n  - key: merge\n    worker: python\n    activity_name: script\n    parameters:\n      code: |\n        users = INPUT[\"query_users_rows\"]\n        orders = INPUT[\"query_orders_rows\"]\n        result = {\"users\": users, \"orders\": orders, \"total\": len(users) + len(orders)}\n    depends_on: [query_users, query_orders]"
                 },
                 "conditional_with_signal": {
                     "description": "Classify input, route to approval if high-value, then process",
-                    "yaml": "name: approval-flow\nactivities:\n  classify:\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-4-5-20250929\n      prompt: \"Classify this request as high or low value: {{INPUT.request}}\"\n      max_tokens: 16\n  await_approval:\n    worker: std\n    activity_name: echo\n    parameters:\n      message: Waiting for approval\n    depends_on:\n      - activity_key: classify\n        conditions: [\"classify.result == high\"]\n    settings:\n      wait_for_signal:\n        signal_name: approval\n        timeout: 86400\n  process:\n    worker: std\n    activity_name: http_request\n    parameters:\n      method: POST\n      url: \"{{INPUT.callback_url}}\"\n      body: \"{\\\"status\\\": \\\"approved\\\"}\"\n    depends_on: [await_approval]"
+                    "yaml": "name: approval-flow\nactivities:\n  - key: classify\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-5\n      prompt: \"Classify this request as high or low value: {{INPUT.request}}\"\n      max_tokens: 16\n  - key: await_approval\n    worker: std\n    activity_name: echo\n    parameters:\n      message: Waiting for approval\n    depends_on:\n      - activity_key: classify\n        conditions: [\"classify.result == high\"]\n    settings:\n      wait_for_signal:\n        signal_name: approval\n        timeout: 86400\n  - key: process\n    worker: std\n    activity_name: http_request\n    parameters:\n      method: POST\n      url: \"{{INPUT.callback_url}}\"\n      body: \"{\\\"status\\\": \\\"approved\\\"}\"\n    depends_on: [await_approval]"
                 }
             },
             "best_practices": {
@@ -412,6 +420,77 @@ impl GetWorkflowAuthoringGuide {
 }
 
 // ============================================================================
+// Tool: search_llm_models
+// ============================================================================
+
+#[mcp_tool(
+    name = "search_llm_models",
+    description = "Search the LLM model catalog with live pricing data.\n\
+        \n\
+        Returns models with input/output/cached pricing per million tokens, context \
+        window sizes, and capabilities — straight from the engine's model catalog, the \
+        same pricing the engine uses to meter costs and enforce budgets. Filter by \
+        provider, name substring, and/or maximum input price.\n\
+        \n\
+        When to use: To make budget-aware model selections before authoring or \
+        submitting a workflow. Typical flow: search pricing here, pick a model, \
+        estimate with estimate_workflow_cost, then submit_workflow with \
+        budget_limit_usd.",
+    read_only_hint = true,
+    idempotent_hint = true
+)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct SearchLlmModels {
+    /// Filter by provider (e.g. "anthropic", "openai", "google", "ollama")
+    pub provider: Option<String>,
+
+    /// Case-insensitive substring match on the model name (e.g. "claude", "gpt")
+    pub name: Option<String>,
+
+    /// Only return models costing at most this much (USD) per million input tokens
+    pub max_input_price_per_million: Option<f64>,
+}
+
+// ============================================================================
+// Tool: list_llm_providers
+// ============================================================================
+
+#[mcp_tool(
+    name = "list_llm_providers",
+    description = "List all configured LLM providers with their capabilities.\n\
+        \n\
+        Returns each provider's supported features (completion, embeddings, \
+        streaming), whether it requires an API key, and how many models it has in \
+        the catalog. Includes self-hosted options like Ollama when configured.\n\
+        \n\
+        When to use: To discover what providers are available before searching for \
+        specific models with search_llm_models.",
+    read_only_hint = true,
+    idempotent_hint = true
+)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct ListLlmProviders {}
+
+// ============================================================================
+// Tool: check_system_health
+// ============================================================================
+
+#[mcp_tool(
+    name = "check_system_health",
+    description = "Check whether Kruxia Flow is healthy and ready to accept workflows.\n\
+        \n\
+        Verifies database connectivity, the event source, and the activity queue — \
+        the same checks as the REST /health/ready endpoint.\n\
+        \n\
+        When to use: Before submitting workflows if you want to handle downtime \
+        gracefully, or to diagnose why submissions are failing.",
+    read_only_hint = true,
+    idempotent_hint = true
+)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct CheckSystemHealth {}
+
+// ============================================================================
 // Enum + routing glue (generated by tool_box! macro)
 // ============================================================================
 
@@ -421,7 +500,10 @@ tool_box!(
         ListWorkflowDefinitions,
         GetWorkflowDefinition,
         ListActivities,
-        GetWorkflowAuthoringGuide
+        GetWorkflowAuthoringGuide,
+        SearchLlmModels,
+        ListLlmProviders,
+        CheckSystemHealth
     ]
 );
 
@@ -552,6 +634,165 @@ pub fn run_get_workflow_authoring_guide(
     params: &GetWorkflowAuthoringGuide,
 ) -> Result<CallToolResult, CallToolError> {
     params.call_tool()
+}
+
+/// Search llm_models with live pricing, filtered by provider, name substring,
+/// and/or maximum input price.
+pub async fn run_search_llm_models(
+    pool: &PgPool,
+    params: &SearchLlmModels,
+) -> Result<CallToolResult, CallToolError> {
+    let max_input_price = match params.max_input_price_per_million {
+        Some(p) => {
+            let decimal = Decimal::from_f64_retain(p).filter(|d| d.is_sign_positive());
+            if decimal.is_none() {
+                return error_response(&serde_json::json!({
+                    "error": "max_input_price_per_million must be a non-negative number",
+                    "max_input_price_per_million": p,
+                }));
+            }
+            decimal
+        }
+        None => None,
+    };
+
+    // TODO(#9): Runtime query for now; migrate to a stored proc with
+    // compile-time validation per project conventions.
+    let rows = sqlx::query(
+        "SELECT provider, name, display_name, \
+         input_price_per_million, output_price_per_million, \
+         cached_input_price_per_million, cache_write_price_per_million, \
+         supports_completion, supports_embeddings, \
+         context_window, max_output_tokens \
+         FROM llm_models \
+         WHERE ($1::text IS NULL OR provider = $1) \
+           AND ($2::text IS NULL OR name ILIKE '%' || $2 || '%') \
+           AND ($3::numeric IS NULL OR input_price_per_million <= $3) \
+         ORDER BY provider, name",
+    )
+    .bind(&params.provider)
+    .bind(&params.name)
+    .bind(max_input_price)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| CallToolError::from_message(format!("Database error searching models: {e}")))?;
+
+    let models: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|row| {
+            let mut capabilities: Vec<&str> = Vec::new();
+            if row.get::<bool, _>("supports_completion") {
+                capabilities.push("completion");
+            }
+            if row.get::<bool, _>("supports_embeddings") {
+                capabilities.push("embeddings");
+            }
+            serde_json::json!({
+                "provider": row.get::<String, _>("provider"),
+                "name": row.get::<String, _>("name"),
+                "display_name": row.get::<String, _>("display_name"),
+                "input_price_per_million": row.get::<Decimal, _>("input_price_per_million").to_f64(),
+                "output_price_per_million": row.get::<Decimal, _>("output_price_per_million").to_f64(),
+                "cached_input_price_per_million": row
+                    .get::<Option<Decimal>, _>("cached_input_price_per_million")
+                    .and_then(|d| d.to_f64()),
+                "cache_write_price_per_million": row
+                    .get::<Option<Decimal>, _>("cache_write_price_per_million")
+                    .and_then(|d| d.to_f64()),
+                "capabilities": capabilities,
+                "context_window": row.get::<Option<i32>, _>("context_window"),
+                "max_output_tokens": row.get::<Option<i32>, _>("max_output_tokens"),
+            })
+        })
+        .collect();
+
+    text_response(&serde_json::json!({
+        "models": models,
+        "total": models.len(),
+    }))
+}
+
+/// List llm_providers with capabilities and model counts.
+pub async fn run_list_llm_providers(
+    pool: &PgPool,
+    _params: &ListLlmProviders,
+) -> Result<CallToolResult, CallToolError> {
+    // TODO(#9): Runtime query for now; migrate to a stored proc with
+    // compile-time validation per project conventions.
+    let rows = sqlx::query(
+        "SELECT p.name, p.display_name, \
+         p.supports_completion, p.supports_embeddings, p.supports_streaming, \
+         p.requires_api_key, \
+         (SELECT COUNT(*) FROM llm_models m WHERE m.provider = p.name) AS model_count \
+         FROM llm_providers p \
+         ORDER BY p.name",
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| CallToolError::from_message(format!("Database error listing providers: {e}")))?;
+
+    let providers: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|row| {
+            let mut capabilities: Vec<&str> = Vec::new();
+            if row.get::<bool, _>("supports_completion") {
+                capabilities.push("completion");
+            }
+            if row.get::<bool, _>("supports_embeddings") {
+                capabilities.push("embeddings");
+            }
+            if row.get::<bool, _>("supports_streaming") {
+                capabilities.push("streaming");
+            }
+            serde_json::json!({
+                "name": row.get::<String, _>("name"),
+                "display_name": row.get::<String, _>("display_name"),
+                "capabilities": capabilities,
+                "requires_api_key": row.get::<bool, _>("requires_api_key"),
+                "model_count": row.get::<i64, _>("model_count"),
+            })
+        })
+        .collect();
+
+    text_response(&serde_json::json!({
+        "providers": providers,
+        "total": providers.len(),
+    }))
+}
+
+/// Run the same readiness checks as the REST /health/ready endpoint.
+pub async fn run_check_system_health(
+    pool: &PgPool,
+    _params: &CheckSystemHealth,
+) -> Result<CallToolResult, CallToolError> {
+    use kruxiaflow_api::health::{
+        check_activity_queue_health, check_database_health, check_event_source_health,
+    };
+
+    let (db_result, event_source_result, queue_result) = tokio::join!(
+        check_database_health(pool),
+        check_event_source_health(pool),
+        check_activity_queue_health(pool)
+    );
+
+    let describe = |result: &Result<(), kruxiaflow_api::health::HealthCheckError>| match result {
+        Ok(()) => "ok".to_string(),
+        Err(e) => format!("error: {e}"),
+    };
+
+    let database = describe(&db_result);
+    let event_source = describe(&event_source_result);
+    let activity_queue = describe(&queue_result);
+    let ready = db_result.is_ok() && event_source_result.is_ok() && queue_result.is_ok();
+
+    text_response(&serde_json::json!({
+        "status": if ready { "ready" } else { "not_ready" },
+        "checks": {
+            "database": database,
+            "event_source": event_source,
+            "activity_queue": activity_queue,
+        },
+    }))
 }
 
 #[cfg(test)]

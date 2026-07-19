@@ -1,13 +1,8 @@
 {
   "mcpServers": {
-    "kruxiaflow-mcp": {
-      "type": "stdio",
-      "command": "/Users/frank/projects/kruxiaflow/kruxiaflow-mcp/.venv/bin/kruxiaflow-mcp",
-      "args": [],
-      "env": {
-        "KRUXIAFLOW_URL": "http://localhost:8080",
-        "KRUXIAFLOW_TOKEN": "dummy-token-for-testing"
-      }
+    "kruxiaflow": {
+      "type": "http",
+      "url": "http://localhost:8081/mcp"
     }
   }
 }

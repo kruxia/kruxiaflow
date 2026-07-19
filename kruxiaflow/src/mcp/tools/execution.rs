@@ -4,17 +4,20 @@
 
 /// MCP Execution Tools
 ///
-/// Four tools that create or modify workflow state:
+/// Three tools that create or modify workflow state:
 /// - validate_workflow: parse + validate YAML/JSON in-process (no DB)
 /// - deploy_workflow: validate + persist a workflow definition to the database
-/// - submit_workflow: submit a workflow instance for execution (definition must be deployed)
-/// - cancel_workflow: cancel a running workflow (stub — endpoint not yet implemented)
+/// - submit_workflow: submit a workflow instance for execution, optionally with a
+///   budget limit (definition must be deployed)
+///
+/// `cancel_workflow` is intentionally absent: the backend has no cancel endpoint
+/// yet. Re-add the tool when workflow cancellation lands in the engine.
 use rust_mcp_sdk::macros::{JsonSchema, mcp_tool};
 use rust_mcp_sdk::schema::{CallToolResult, schema_utils::CallToolError};
 use rust_mcp_sdk::tool_box;
 use sqlx::PgPool;
 
-use super::{AnyJson, error_response, parse_uuid, text_response};
+use super::{ObjectJson, error_response, text_response};
 
 // ============================================================================
 // Tool: validate_workflow
@@ -64,7 +67,7 @@ impl ValidateWorkflow {
                 let response = serde_json::json!({
                     "valid": true,
                     "errors": [],
-                    "warnings": [],
+                    "warnings": authoring_warnings(&definition, &self.workflow_yaml),
                     "activities": definition.activities.len(),
                     "dependencies": deps,
                 });
@@ -132,11 +135,17 @@ pub struct DeployWorkflow {
 
 #[mcp_tool(
     name = "submit_workflow",
-    description = "Submit a workflow for execution.\n\
+    description = "Submit a workflow for execution, optionally with a hard budget limit.\n\
         \n\
         The workflow definition must already be deployed (use validate_workflow to check \
         it first, then deploy_workflow to persist it). Provide the definition name, an \
         input object, and optionally a version and unique_key for idempotent submission.\n\
+        \n\
+        Set budget_limit_usd to cap total spend for this run: the engine enforces the \
+        limit during execution (activities are aborted or downgraded to cheaper models \
+        once the budget is exhausted). It overrides any budget in the definition's \
+        settings. Use estimate_workflow_cost first to pick a sensible limit, and \
+        get_workflow_cost afterwards to see actual spend against it.\n\
         \n\
         Returns immediately with a workflow_id — execution happens asynchronously. \
         Use get_workflow_status to monitor progress.\n\
@@ -156,38 +165,14 @@ pub struct SubmitWorkflow {
     pub version: Option<String>,
 
     /// Input payload — must be a JSON object. Values are available as {{INPUT.key}} in the workflow.
-    pub input: AnyJson,
+    pub input: ObjectJson,
 
     /// Optional idempotency key. A second submission with the same key is rejected with a conflict error.
     pub unique_key: Option<String>,
-}
 
-// ============================================================================
-// Tool: cancel_workflow
-// ============================================================================
-
-#[mcp_tool(
-    name = "cancel_workflow",
-    description = "Cancel a running workflow by its ID.\n\
-        \n\
-        NOTE: Workflow cancellation is not yet fully implemented in the Kruxia Flow \
-        backend. This tool will return the workflow's current status so you can \
-        assess its state, but the actual cancellation action is not yet available. \
-        Monitor with get_workflow_status in the meantime.\n\
-        \n\
-        When to use: When a running workflow needs to be stopped. Check back when \
-        the cancellation endpoint is available.",
-    destructive_hint = true,
-    read_only_hint = false,
-    idempotent_hint = true
-)]
-#[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
-pub struct CancelWorkflow {
-    /// UUID of the workflow to cancel
-    pub workflow_id: String,
-
-    /// Optional reason for cancellation (for audit logging when cancellation is supported)
-    pub reason: Option<String>,
+    /// Optional hard budget limit in USD for this run, enforced by the engine during
+    /// execution. Overrides the definition's settings.budget default.
+    pub budget_limit_usd: Option<f64>,
 }
 
 // ============================================================================
@@ -196,12 +181,7 @@ pub struct CancelWorkflow {
 
 tool_box!(
     ExecutionTools,
-    [
-        ValidateWorkflow,
-        DeployWorkflow,
-        SubmitWorkflow,
-        CancelWorkflow
-    ]
+    [ValidateWorkflow, DeployWorkflow, SubmitWorkflow]
 );
 
 // ============================================================================
@@ -231,6 +211,8 @@ pub async fn run_deploy_workflow(
 
     let repo = kruxiaflow_core::workflow::WorkflowDefinitionRepository::new(pool.clone());
 
+    let warnings = authoring_warnings(&definition, &params.workflow_yaml);
+
     match repo.store(definition).await {
         Ok(result) => {
             let response = serde_json::json!({
@@ -240,6 +222,7 @@ pub async fn run_deploy_workflow(
                 "created_at": result.definition.created_at.to_rfc3339(),
                 "is_new": result.is_new,
                 "unchanged": !result.is_new,
+                "warnings": warnings,
             });
             text_response(&response)
         }
@@ -277,14 +260,31 @@ pub async fn run_submit_workflow(
     pool: &PgPool,
     params: &SubmitWorkflow,
 ) -> Result<CallToolResult, CallToolError> {
-    // Basic input validation before hitting the service
-    if !params.input.0.is_object() {
+    // Basic input validation before hitting the service. as_object also
+    // coerces clients that pass the object as a JSON-encoded string.
+    let Some(input) = params.input.as_object() else {
         let response = serde_json::json!({
             "error": "Input must be a JSON object, not a scalar or array",
             "definition_name": params.definition_name,
         });
         return error_response(&response);
-    }
+    };
+
+    let budget_limit_usd = match params.budget_limit_usd {
+        Some(limit) => {
+            let decimal = rust_decimal::Decimal::from_f64_retain(limit)
+                .filter(|d| d.is_sign_positive() && !d.is_zero());
+            if decimal.is_none() {
+                return error_response(&serde_json::json!({
+                    "error": "budget_limit_usd must be a positive number",
+                    "budget_limit_usd": limit,
+                    "definition_name": params.definition_name,
+                }));
+            }
+            decimal
+        }
+        None => None,
+    };
 
     let service = kruxiaflow_core::workflow::WorkflowService::new(pool.clone());
 
@@ -292,8 +292,9 @@ pub async fn run_submit_workflow(
         .submit_workflow(
             &params.definition_name,
             params.version.as_deref(),
-            params.input.0.clone(),
+            input,
             params.unique_key.clone(),
+            budget_limit_usd,
         )
         .await;
 
@@ -304,6 +305,7 @@ pub async fn run_submit_workflow(
                 "status": created.status,
                 "definition_name": created.definition_name,
                 "definition_version": created.definition_version,
+                "budget_limit_usd": params.budget_limit_usd,
                 "submitted_at": created.created_at.to_rfc3339(),
             });
             text_response(&response)
@@ -356,51 +358,72 @@ pub async fn run_submit_workflow(
     }
 }
 
-/// Cancel workflow — stub that returns current status.
-///
-/// The cancel endpoint is not yet implemented in the Kruxia Flow API.
-/// This queries the workflow status and returns it alongside the limitation notice.
-pub async fn run_cancel_workflow(
-    pool: &PgPool,
-    params: &CancelWorkflow,
-) -> Result<CallToolResult, CallToolError> {
-    let workflow_id = parse_uuid(&params.workflow_id)?;
-
-    let query_svc = kruxiaflow_core::workflow::WorkflowQueryService::new(pool.clone());
-
-    match query_svc.get_workflow(workflow_id).await {
-        Ok(workflow) => {
-            let response = serde_json::json!({
-                "error": "Workflow cancellation is not yet supported in this version of Kruxia Flow. \
-                          The cancel endpoint is pending implementation. \
-                          Monitor with get_workflow_status and wait for completion or failure.",
-                "workflow_id": workflow.id.to_string(),
-                "definition_name": workflow.definition_name,
-                "current_status": workflow.status,
-                "reason_provided": params.reason,
-            });
-            error_response(&response)
-        }
-        Err(kruxiaflow_core::workflow::WorkflowQueryError::WorkflowNotFound(_)) => {
-            let response = serde_json::json!({
-                "error": format!("Workflow '{}' not found", params.workflow_id),
-                "workflow_id": params.workflow_id,
-            });
-            error_response(&response)
-        }
-        Err(e) => {
-            tracing::error!("cancel_workflow query error: {e:?}");
-            Err(CallToolError::from_message(format!(
-                "Database error looking up workflow '{}': {e}",
-                params.workflow_id
-            )))
-        }
-    }
-}
-
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/// Warnings for authoring mistakes that pass validation but fail or surprise
+/// at runtime. The definition parser ignores unknown fields, so an agent that
+/// writes `type:`/`config:` instead of `activity_name:`/`parameters:` gets a
+/// "valid" definition whose activities cannot execute — caught here instead.
+fn authoring_warnings(
+    definition: &kruxiaflow_core::WorkflowDefinition,
+    raw_yaml: &str,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+
+    // Unknown-field detection on the raw document (the typed parse has already
+    // dropped them). Activities may be a map or a list of {key, ...} objects.
+    let mut misnamed: Vec<(String, &'static str, &'static str)> = Vec::new();
+    if let Ok(doc) = serde_yaml::from_str::<serde_json::Value>(raw_yaml)
+        && let Some(activities) = doc.get("activities")
+    {
+        let entries: Vec<(String, &serde_json::Value)> = match activities {
+            serde_json::Value::Object(map) => map.iter().map(|(k, v)| (k.clone(), v)).collect(),
+            serde_json::Value::Array(arr) => arr
+                .iter()
+                .map(|v| {
+                    let key = v
+                        .get("key")
+                        .and_then(|k| k.as_str())
+                        .unwrap_or("?")
+                        .to_string();
+                    (key, v)
+                })
+                .collect(),
+            _ => vec![],
+        };
+        for (key, entry) in entries {
+            if entry.get("type").is_some() {
+                misnamed.push((key.clone(), "type", "activity_name"));
+            }
+            if entry.get("config").is_some() {
+                misnamed.push((key, "config", "parameters"));
+            }
+        }
+    }
+    for (key, wrong, right) in misnamed {
+        warnings.push(format!(
+            "Activity '{key}' uses unrecognised field '{wrong}', which is ignored by \
+             the parser — the correct field is '{right}'. See \
+             get_workflow_authoring_guide for the schema."
+        ));
+    }
+
+    for activity in &definition.activities {
+        if activity.activity_name.is_none() {
+            warnings.push(format!(
+                "Activity '{}' has no activity_name — workers dispatch on \
+                 activity_name, so this activity will fail at runtime with \
+                 'Activity implementation not found'. Set activity_name (e.g. \
+                 llm_prompt, http_request) and put its arguments under parameters.",
+                activity.key
+            ));
+        }
+    }
+
+    warnings
+}
 
 /// Flatten a ValidationError into a Vec of human-readable strings.
 fn extract_validation_errors(err: &kruxiaflow_core::ValidationError) -> Vec<String> {
@@ -427,34 +450,49 @@ fn extract_validation_errors(err: &kruxiaflow_core::ValidationError) -> Vec<Stri
 /// the raw document.
 fn extract_partial_info(yaml: &str) -> (usize, serde_json::Value) {
     // Try to parse as YAML and extract activities — even if validation failed
-    // the structure might be readable
-    if let Ok(doc) = serde_yaml::from_str::<serde_json::Value>(yaml)
-        && let Some(activities) = doc.get("activities").and_then(|a| a.as_object())
-    {
-        let count = activities.len();
-        let deps: serde_json::Map<String, serde_json::Value> = activities
+    // the structure might be readable. The schema requires a list, but accept
+    // a map here too so the partial report still helps someone who wrote one.
+    let Ok(doc) = serde_yaml::from_str::<serde_json::Value>(yaml) else {
+        return (0, serde_json::json!({}));
+    };
+    let entries: Vec<(String, &serde_json::Value)> = match doc.get("activities") {
+        Some(serde_json::Value::Object(map)) => map.iter().map(|(k, v)| (k.clone(), v)).collect(),
+        Some(serde_json::Value::Array(arr)) => arr
             .iter()
-            .map(|(key, val)| {
-                let dep_keys: Vec<String> = val
-                    .get("depends_on")
-                    .and_then(|d| d.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|item| {
-                                // depends_on entries can be plain strings or objects with activity_key
-                                item.as_str()
-                                    .or_else(|| item.get("activity_key").and_then(|v| v.as_str()))
-                                    .map(|s| s.to_string())
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                (key.clone(), serde_json::json!(dep_keys))
+            .map(|v| {
+                let key = v
+                    .get("key")
+                    .and_then(|k| k.as_str())
+                    .unwrap_or("?")
+                    .to_string();
+                (key, v)
             })
-            .collect();
-        return (count, serde_json::Value::Object(deps));
-    }
-    (0, serde_json::json!({}))
+            .collect(),
+        _ => return (0, serde_json::json!({})),
+    };
+
+    let count = entries.len();
+    let deps: serde_json::Map<String, serde_json::Value> = entries
+        .into_iter()
+        .map(|(key, val)| {
+            let dep_keys: Vec<String> = val
+                .get("depends_on")
+                .and_then(|d| d.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|item| {
+                            // depends_on entries can be plain strings or objects with activity_key
+                            item.as_str()
+                                .or_else(|| item.get("activity_key").and_then(|v| v.as_str()))
+                                .map(|s| s.to_string())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            (key, serde_json::json!(dep_keys))
+        })
+        .collect();
+    (count, serde_json::Value::Object(deps))
 }
 
 #[cfg(test)]
