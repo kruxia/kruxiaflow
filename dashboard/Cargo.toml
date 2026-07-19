@@ -6,18 +6,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 
+# Leaf assets crate: serves the embedded dashboard pages. Depended on by
+# kruxiaflow-api (which mounts the router) — must not depend on api/core.
 [dependencies]
-# Workspace dependencies
-kruxiaflow-core = { path = "../core" }
-kruxiaflow-api = { path = "../api" }
-tokio.workspace = true
 axum.workspace = true
-tower.workspace = true
-tower-http.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-anyhow.workspace = true
-tracing.workspace = true
-
-[dev-dependencies]
-tokio = { workspace = true, features = ["test-util"] }

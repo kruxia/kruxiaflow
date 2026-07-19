@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            w.definition_name as \"definition_name!\",\n            COUNT(DISTINCT ac.workflow_id) as \"workflows!\",\n            COALESCE(SUM(ac.cost_usd), 0.0) as \"total_cost_usd!\"\n        FROM activity_costs ac\n        JOIN workflows w ON w.id = ac.workflow_id\n        WHERE ac.created_at >= $1 AND ac.created_at <= $2\n        GROUP BY w.definition_name\n        ORDER BY COALESCE(SUM(ac.cost_usd), 0.0) DESC\n        LIMIT $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "definition_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "workflows!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "total_cost_usd!",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "2e89f7ba67ce4f0372e87c17aacf022d062a2a4b455ccd07e1467c7f850c8777"
+}

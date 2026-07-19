@@ -224,6 +224,8 @@ pub fn app_router(state: AppState) -> Router {
                     }
                 })),
         )
+        // Built-in cost dashboard (public page; its API calls carry auth)
+        .merge(kruxiaflow_dashboard::router())
         // Serve ReDoc documentation UI at /api/v1/docs
         .merge(Redoc::with_url("/api/v1/docs", openapi.clone()))
         // Serve OpenAPI JSON spec at /api/v1/openapi.json

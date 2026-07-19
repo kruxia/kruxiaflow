@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            activity_key,\n            attempt,\n            cost_usd,\n            prompt_tokens,\n            output_tokens,\n            total_tokens,\n            cached_tokens,\n            provider,\n            model,\n            activity_budget_limit_usd as budget_limit_usd,\n            budget_exceeded,\n            created_at\n        FROM activity_costs\n        WHERE workflow_id = $1\n        ORDER BY created_at ASC\n        ",
+  "query": "\n        SELECT\n            activity_key,\n            attempt,\n            cost_usd,\n            prompt_tokens,\n            output_tokens,\n            total_tokens,\n            cached_tokens,\n            provider,\n            model,\n            activity_budget_limit_usd as budget_limit_usd,\n            budget_exceeded,\n            budget_event,\n            created_at\n        FROM activity_costs\n        WHERE workflow_id = $1\n        ORDER BY created_at ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -60,6 +60,11 @@
       },
       {
         "ordinal": 11,
+        "name": "budget_event",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -81,8 +86,9 @@
       true,
       true,
       true,
+      true,
       false
     ]
   },
-  "hash": "4f3c3421d58c7857bc1b7ca5da251f02feae254273b6443e7dafc3021000b51f"
+  "hash": "2eeacf45a780e46a2a934d1f0053d37501e85d4b84a30eec11e00077838e929b"
 }

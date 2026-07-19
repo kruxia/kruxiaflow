@@ -9,6 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Cost CLI (`kruxiaflow cost`)**: terminal cost reporting against the REST
+  API — `cost workflow <id> [--detailed]` (summary, tokens, budget %,
+  per-activity/attempt breakdown with the model actually used after
+  fallback), `cost analytics [--since 7d] [--group-by
+  provider|model|definition|day]`, `cost top [--by
+  workflows|definitions]`, and `cost export` (CSV). All commands support
+  `--format table|json|csv`, authenticate via OAuth2 client credentials
+  (`KRUXIAFLOW_CLIENT_ID`/`KRUXIAFLOW_CLIENT_SECRET`), and work
+  credential-free against a `--insecure-dev` server.
+- **Built-in cost analytics dashboard** at `/dashboard`: a self-contained
+  page embedded in the binary (no Node build, no CDN assets, nothing added
+  to the distroless image) served by the API server — spend over time,
+  spend by provider and model, top workflows/definitions, cache hit rate,
+  and budget enforcement events, with light/dark themes and 10s polling
+  (differential: the page re-renders only when the data changed, so a
+  refresh never disturbs scroll position or tooltips).
+  The page is public; its data calls carry API auth (credential-free under
+  dev mode). Sign-in exchanges client credentials for a token kept in
+  `sessionStorage`.
+- **Cost analytics API extension**: `GET /api/v1/cost/analytics` now accepts
+  `group_by=provider|model|definition|day` and `limit`, and additionally
+  returns `total_activities`, `avg_cost_per_workflow`, token totals and
+  `cache_hit_rate`, `top_workflows`, `top_definitions`, budget-event counts,
+  and recent `budget_events` — one server-side aggregation shared by the
+  CLI, dashboard, and MCP tools. Existing response fields are unchanged
+  (additive).
+- **Budget enforcement events are now recorded, not just logged**: a new
+  `activity_costs.budget_event` column ('abort' | 'downgrade'). The
+  orchestrator's pre-execution abort writes a zero-cost line item
+  (`budget_exceeded = true`, with the estimate that tripped the limit), and
+  an `llm_prompt` fallback chain that skips models for budget reasons marks
+  the completed row as a downgrade (the worker reports
+  `budget_skipped_models` in the activity output). `/cost/history` rows now
+  include `budget_event`.
+
+### Fixed
+
+- The `activity_costs` total-cost trigger no longer fires for zero-cost
+  rows, which would deadlock orchestration when a budget-abort marker was
+  recorded while the event-processing transaction held the workflow row
+  lock.
+
 - **Automated crates.io releases**: the tag pipeline (`main-ci.yml`) now
   publishes `kruxiaflow-worker` via crates.io Trusted Publishing (OIDC, no
   token secret) after checks pass, alongside binaries and Docker images; the

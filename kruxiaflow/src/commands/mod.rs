@@ -1,4 +1,5 @@
 pub mod api;
+pub mod cost;
 pub mod health;
 pub mod migrate;
 pub mod orchestrator;

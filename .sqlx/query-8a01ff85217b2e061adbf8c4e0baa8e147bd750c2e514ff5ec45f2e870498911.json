@@ -1,0 +1,60 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            ac.workflow_id as \"workflow_id!\",\n            w.definition_name as \"definition_name!\",\n            w.status::TEXT as \"status!\",\n            w.created_at as \"created_at!\",\n            COALESCE(SUM(ac.cost_usd), 0.0) as \"total_cost_usd!\",\n            COUNT(*) FILTER (WHERE ac.budget_event IS DISTINCT FROM 'abort') as \"activities!\",\n            w.budget_limit_usd\n        FROM activity_costs ac\n        JOIN workflows w ON w.id = ac.workflow_id\n        WHERE ac.created_at >= $1 AND ac.created_at <= $2\n        GROUP BY ac.workflow_id, w.definition_name, w.status, w.created_at, w.budget_limit_usd\n        ORDER BY COALESCE(SUM(ac.cost_usd), 0.0) DESC\n        LIMIT $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "workflow_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "definition_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "total_cost_usd!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 5,
+        "name": "activities!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "budget_limit_usd",
+        "type_info": "Numeric"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      false,
+      null,
+      null,
+      true
+    ]
+  },
+  "hash": "8a01ff85217b2e061adbf8c4e0baa8e147bd750c2e514ff5ec45f2e870498911"
+}

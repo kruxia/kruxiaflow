@@ -182,6 +182,7 @@ async fn test_cost_tracker_record_and_retrieve(pool: PgPool) {
             workflow_budget_limit_usd: None,
             budget_exceeded: false,
             budget_action: None,
+            budget_event: None,
         })
         .await
         .expect("Failed to record cost");
@@ -220,6 +221,7 @@ async fn test_cost_tracker_record_and_retrieve(pool: PgPool) {
             workflow_budget_limit_usd: None,
             budget_exceeded: false,
             budget_action: None,
+            budget_event: None,
         })
         .await
         .expect("Failed to record second cost");
@@ -318,6 +320,7 @@ async fn test_budget_check_before_execution(pool: PgPool) {
             workflow_budget_limit_usd: Some(dec!(0.10)),
             budget_exceeded: false,
             budget_action: None,
+            budget_event: None,
         })
         .await
         .expect("Failed to record cost");

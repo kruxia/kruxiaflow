@@ -3140,7 +3140,12 @@ spec:
 - `core` - Core orchestration engine (activity queue, event sourcing, workflow execution)
 - `api` - API server (HTTP/WebSocket endpoints, authentication, routing)
 - `activity` - Built-in activities and built-in activity worker
-- `dashboard` - Built-in dashboard UI (web interface for monitoring and management)
+- `dashboard` - Built-in dashboard UI: a leaf assets crate whose self-contained
+  HTML pages are embedded in the binary (`include_str!`, no Node build, no CDN
+  assets) and mounted by `api` at `/dashboard` as a public route; the page's
+  data calls use the normal API auth (credential-free under dev mode). First
+  page: cost analytics. Dependency direction is `api → dashboard` so the same
+  routes are served by `kruxiaflow serve`, `kruxiaflow api`, and tests.
 - Additional crates added as needed for distinct functionality
 
 **Web Framework**: Axum (async HTTP/WebSocket server)
