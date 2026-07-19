@@ -110,6 +110,7 @@ impl FallbackChain {
             .map(|bp| bp.cumulative_cost_usd)
             .unwrap_or(Decimal::ZERO);
         let mut calculated_cost: Option<Decimal> = None;
+        let mut budget_skipped_models: Vec<String> = Vec::new();
 
         for (provider_name, model_name) in &self.provider_models {
             // Budget check before attempting this provider
@@ -148,6 +149,7 @@ impl FallbackChain {
                             cumulative_cost,
                             budget.budget_limit_usd
                         );
+                        budget_skipped_models.push(format!("{}/{}", provider_name, model_name));
                         continue; // Skip to next provider
                     }
                 }
@@ -199,6 +201,7 @@ impl FallbackChain {
                                 usage: response.usage,
                                 finish_reason: response.finish_reason,
                                 cost_usd: calculated_cost,
+                                budget_skipped_models,
                             });
                         }
                         Err(e) => {
@@ -247,6 +250,7 @@ impl FallbackChain {
             .map(|bp| bp.cumulative_cost_usd)
             .unwrap_or(Decimal::ZERO);
         let mut calculated_cost: Option<Decimal> = None;
+        let mut budget_skipped_models: Vec<String> = Vec::new();
 
         for (provider_name, model_name) in &self.provider_models {
             // Budget check before attempting this provider (same as non-streaming)
@@ -277,6 +281,7 @@ impl FallbackChain {
                             model_name,
                             estimated_cost
                         );
+                        budget_skipped_models.push(format!("{}/{}", provider_name, model_name));
                         continue;
                     }
                 }
@@ -367,6 +372,7 @@ impl FallbackChain {
                                     },
                                     finish_reason,
                                     cost_usd: calculated_cost,
+                                    budget_skipped_models,
                                 });
                             }
                         }
@@ -463,6 +469,10 @@ pub struct PromptResponse {
     pub usage: crate::llm::TokenUsage,
     pub finish_reason: crate::llm::FinishReason,
     pub cost_usd: Option<Decimal>,
+    /// Models ("provider/model") the fallback chain skipped for budget reasons
+    /// before this response's model succeeded. Non-empty = budget downgrade.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub budget_skipped_models: Vec<String>,
 }
 
 /// Embedding response with provider information
@@ -649,6 +659,7 @@ impl ActivityImpl for LLMPromptActivity {
             "provider": response.provider,
             "finish_reason": response.finish_reason,
             "cost_usd": response.cost_usd,
+            "budget_skipped_models": response.budget_skipped_models,
             "usage": {
                 "prompt_tokens": response.usage.prompt_tokens,
                 "output_tokens": response.usage.output_tokens,
@@ -733,6 +744,7 @@ impl StreamingActivity for LLMPromptActivity {
             "provider": response.provider,
             "finish_reason": response.finish_reason,
             "cost_usd": response.cost_usd,
+            "budget_skipped_models": response.budget_skipped_models,
             "usage": {
                 "prompt_tokens": response.usage.prompt_tokens,
                 "output_tokens": response.usage.output_tokens,
@@ -1509,6 +1521,7 @@ mod tests {
             },
             finish_reason: crate::llm::FinishReason::Stop,
             cost_usd: None, // No pricing available
+            budget_skipped_models: vec![],
         };
 
         // Verify cost is None when pricing not available
@@ -1534,6 +1547,7 @@ mod tests {
             },
             finish_reason: crate::llm::FinishReason::Stop,
             cost_usd: Some(dec!(0.0153)),
+            budget_skipped_models: vec![],
         };
 
         // Simulate what the activity does when creating output JSON
@@ -2192,6 +2206,7 @@ mod tests {
             },
             finish_reason: crate::llm::FinishReason::Stop,
             cost_usd: Some(dec!(0.001)),
+            budget_skipped_models: vec![],
         };
 
         let json = serde_json::to_value(&response).unwrap();
@@ -2219,6 +2234,7 @@ mod tests {
             },
             finish_reason: crate::llm::FinishReason::MaxTokens,
             cost_usd: None,
+            budget_skipped_models: vec![],
         };
 
         let json = serde_json::to_value(&response).unwrap();
@@ -2582,6 +2598,7 @@ mod tests {
             },
             finish_reason: crate::llm::FinishReason::Stop,
             cost_usd: Some(dec!(0.003)),
+            budget_skipped_models: vec![],
         };
 
         // Match what execute() produces

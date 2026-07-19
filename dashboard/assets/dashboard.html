@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kruxia Flow — Cost Analytics</title>
+<style>
+  /* Palette roles (light), swapped wholesale in dark mode */
+  :root {
+    color-scheme: light;
+    --page:           #f9f9f7;
+    --surface:        #fcfcfb;
+    --ink:            #0b0b0b;
+    --ink-secondary:  #52514e;
+    --ink-muted:      #898781;
+    --grid:           #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11, 11, 11, 0.10);
+    --series:         #2a78d6;   /* sequential blue 450 */
+    --series-soft:    #cde2fb;   /* blue 100 — meter track */
+    --status-good:    #0ca30c;
+    --status-warning: #fab219;
+    --status-serious: #ec835a;
+    --status-critical:#d03b3b;
+    --delta-good:     #006300;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page:           #0d0d0d;
+      --surface:        #1a1a19;
+      --ink:            #ffffff;
+      --ink-secondary:  #c3c2b7;
+      --ink-muted:      #898781;
+      --grid:           #2c2c2a;
+      --baseline:       #383835;
+      --border:         rgba(255, 255, 255, 0.10);
+      --series:         #3987e5;  /* blue 400 for the dark surface */
+      --series-soft:    #184f95;  /* blue 600 */
+      --delta-good:     #0ca30c;
+    }
+  }
+
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 24px 20px 48px; }
+
+  header.page { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; margin-bottom: 20px; }
+  header.page h1 { font-size: 20px; font-weight: 650; letter-spacing: -0.01em; }
+  header.page .sub { color: var(--ink-secondary); font-size: 13px; }
+  .spacer { flex: 1; }
+  .badge {
+    font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--ink-secondary);
+  }
+  .badge.dev { color: var(--status-serious); border-color: currentColor; }
+
+  /* Date-range presets: one row above the charts */
+  .filters { display: flex; align-items: center; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+  .filters .label { color: var(--ink-muted); font-size: 12px; margin-right: 4px; }
+  .range-btn {
+    font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 6px;
+    border: 1px solid transparent; background: none; color: var(--ink-secondary); cursor: pointer;
+  }
+  .range-btn:hover { background: var(--surface); border-color: var(--border); }
+  .range-btn[aria-pressed="true"] { background: var(--surface); border-color: var(--border); color: var(--ink); font-weight: 600; }
+  .refreshed { margin-left: auto; color: var(--ink-muted); font-size: 12px; }
+
+  .grid { display: grid; gap: 14px; }
+  .tiles { grid-template-columns: repeat(4, 1fr); }
+  .halves { grid-template-columns: 1fr 1fr; }
+  @media (max-width: 860px) { .tiles { grid-template-columns: repeat(2, 1fr); } .halves { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 18px; min-width: 0;
+  }
+  .card h2 { font-size: 13px; font-weight: 600; color: var(--ink-secondary); margin-bottom: 12px; }
+  section { margin-bottom: 14px; }
+
+  /* Stat tiles */
+  .tile .label { font-size: 12px; color: var(--ink-secondary); }
+  .tile .value { font-size: 26px; font-weight: 650; margin-top: 2px; }
+  .tile .sublabel { font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--ink-muted); font-size: 11px; font-weight: 600;
+       text-transform: uppercase; letter-spacing: 0.04em; padding: 6px 8px; border-bottom: 1px solid var(--grid); }
+  td { padding: 7px 8px; border-bottom: 1px solid var(--grid); color: var(--ink); }
+  tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.muted { color: var(--ink-muted); }
+  td.id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--ink-secondary); }
+  .scroll-x { overflow-x: auto; }
+
+  /* Budget meter (utilization) */
+  .meter { display: inline-block; width: 88px; height: 6px; border-radius: 3px; background: var(--series-soft); vertical-align: middle; overflow: hidden; }
+  .meter > i { display: block; height: 100%; }
+
+  /* Status chips: color + label, never color alone */
+  .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; }
+  .chip .dot { width: 8px; height: 8px; border-radius: 50%; }
+
+  .empty { color: var(--ink-muted); font-size: 13px; padding: 22px 0; text-align: center; }
+
+  /* Charts */
+  .chart { position: relative; }
+  .chart svg { display: block; width: 100%; }
+  .chart text { font-family: inherit; font-size: 11px; fill: var(--ink-muted); }
+  .chart .gridline { stroke: var(--grid); stroke-width: 1; }
+  .chart .baseline { stroke: var(--baseline); stroke-width: 1; }
+  .chart .bar-label { fill: var(--ink-secondary); font-variant-numeric: tabular-nums; }
+  .chart .cat-label { fill: var(--ink-secondary); }
+
+  #tooltip {
+    position: fixed; pointer-events: none; z-index: 10; display: none;
+    background: var(--surface); color: var(--ink); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 10px; font-size: 12px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  }
+  #tooltip .t-label { color: var(--ink-muted); }
+  #tooltip .t-value { font-weight: 650; font-variant-numeric: tabular-nums; }
+
+  /* Auth panel */
+  #auth { max-width: 420px; margin: 60px auto; }
+  #auth p { color: var(--ink-secondary); font-size: 13px; margin-bottom: 14px; }
+  #auth label { display: block; font-size: 12px; color: var(--ink-secondary); margin: 10px 0 4px; }
+  #auth input {
+    width: 100%; font: inherit; padding: 7px 10px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--page); color: var(--ink);
+  }
+  #auth .actions { margin-top: 16px; display: flex; gap: 10px; align-items: center; }
+  #auth button {
+    font: inherit; font-weight: 600; padding: 7px 16px; border-radius: 6px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--series); color: #fff;
+  }
+  #auth .error { color: var(--status-critical); font-size: 12px; margin-top: 10px; min-height: 16px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="page">
+    <h1>Kruxia Flow — Cost Analytics</h1>
+    <span class="sub">budgeted workflows, observed</span>
+    <span class="spacer"></span>
+    <span id="dev-badge" class="badge dev hidden">insecure dev mode</span>
+    <span id="version-badge" class="badge hidden"></span>
+  </header>
+
+  <!-- Sign-in: shown only when the API answers 401 -->
+  <div id="auth" class="card hidden">
+    <h2>Sign in</h2>
+    <p>This dashboard reads the cost API, which requires OAuth2 client credentials.
+       Servers started with <code>--insecure-dev</code> need no sign-in.</p>
+    <label for="auth-id">Client ID</label>
+    <input id="auth-id" autocomplete="username" placeholder="kruxiaflow_worker">
+    <label for="auth-secret">Client secret</label>
+    <input id="auth-secret" type="password" autocomplete="current-password">
+    <div class="actions">
+      <button id="auth-submit">Sign in</button>
+      <span class="sub" style="font-size:12px">token is kept in this tab only</span>
+    </div>
+    <div class="error" id="auth-error"></div>
+  </div>
+
+  <div id="dash" class="hidden">
+    <div class="filters" role="group" aria-label="Date range">
+      <span class="label">Period</span>
+      <button class="range-btn" data-days="1">24h</button>
+      <button class="range-btn" data-days="7">7d</button>
+      <button class="range-btn" data-days="30" aria-pressed="true">30d</button>
+      <button class="range-btn" data-days="90">90d</button>
+      <span class="refreshed" id="refreshed"></span>
+    </div>
+
+    <section class="grid tiles">
+      <div class="card tile"><div class="label">Total spend</div><div class="value" id="t-spend">—</div><div class="sublabel" id="t-spend-sub"></div></div>
+      <div class="card tile"><div class="label">Workflows</div><div class="value" id="t-workflows">—</div><div class="sublabel" id="t-workflows-sub"></div></div>
+      <div class="card tile"><div class="label">Avg cost per workflow</div><div class="value" id="t-avg">—</div><div class="sublabel" id="t-avg-sub"></div></div>
+      <div class="card tile"><div class="label">Cache hit rate</div><div class="value" id="t-cache">—</div><div class="sublabel" id="t-cache-sub"></div></div>
+    </section>
+
+    <section class="card">
+      <h2>Spend over time</h2>
+      <div class="chart" id="chart-days"></div>
+    </section>
+
+    <section class="grid halves">
+      <div class="card"><h2>Spend by provider</h2><div class="chart" id="chart-providers"></div></div>
+      <div class="card"><h2>Spend by model</h2><div class="chart" id="chart-models"></div></div>
+    </section>
+
+    <section class="card">
+      <h2>Budget events</h2>
+      <div class="scroll-x" id="budget-events"></div>
+    </section>
+
+    <section class="grid halves">
+      <div class="card"><h2>Top workflows by cost</h2><div class="scroll-x" id="top-workflows"></div></div>
+      <div class="card"><h2>Top definitions by cost</h2><div class="scroll-x" id="top-definitions"></div></div>
+    </section>
+  </div>
+</div>
+<div id="tooltip"></div>
+
+<script>
+"use strict";
+
+// ------------------------------------------------------------------ state
+const TOKEN_KEY = "kruxiaflow-dashboard-token";
+const REFRESH_MS = 10_000;
+let rangeDays = 30;
+let refreshTimer = null;
+let lastData = null; // {day, provider, model} analytics responses
+let lastSnapshot = null; // stable serialization of lastData, for change detection
+
+const $ = (id) => document.getElementById(id);
+const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+// ------------------------------------------------------------------ formatting
+function fmtUsd(x) {
+  const v = Number(x);
+  if (!isFinite(v)) return "—";
+  if (v === 0) return "$0";
+  if (v >= 1000) return "$" + (v / 1000).toFixed(1) + "k";
+  if (v >= 1) return "$" + v.toFixed(2);
+  if (v >= 0.01) return "$" + v.toFixed(4);
+  return "$" + v.toFixed(6);
+}
+function fmtCount(v) {
+  if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + "M";
+  if (v >= 10_000) return (v / 1000).toFixed(1) + "K";
+  return String(v);
+}
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// ------------------------------------------------------------------ api
+async function api(path, params) {
+  const url = new URL(path, window.location.origin);
+  for (const [k, v] of Object.entries(params || {})) url.searchParams.set(k, v);
+  const headers = {};
+  const token = sessionStorage.getItem(TOKEN_KEY);
+  if (token) headers["Authorization"] = "Bearer " + token;
+  const res = await fetch(url, { headers });
+  if (res.status === 401) throw { unauthorized: true };
+  if (!res.ok) throw new Error("API " + res.status + " for " + path);
+  return res.json();
+}
+
+async function signIn(clientId, clientSecret) {
+  const res = await fetch("/api/v1/oauth/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ grant_type: "client_credentials", client_id: clientId, client_secret: clientSecret }),
+  });
+  if (!res.ok) throw new Error("Sign-in failed (" + res.status + ")");
+  const body = await res.json();
+  sessionStorage.setItem(TOKEN_KEY, body.access_token);
+}
+
+async function loadInfo() {
+  try {
+    const info = await api("/api/v1/info");
+    if (info.version) { $("version-badge").textContent = "v" + info.version; $("version-badge").classList.remove("hidden"); }
+    if (info.insecure_dev) $("dev-badge").classList.remove("hidden");
+  } catch (_) { /* informational only */ }
+}
+
+async function loadAnalytics() {
+  const start = new Date(Date.now() - rangeDays * 86_400_000).toISOString();
+  const base = { start_date: start, limit: "10" };
+  const [day, provider, model] = await Promise.all([
+    api("/api/v1/cost/analytics", { ...base, group_by: "day" }),
+    api("/api/v1/cost/analytics", { ...base, group_by: "provider" }),
+    api("/api/v1/cost/analytics", { ...base, group_by: "model" }),
+  ]);
+  return { day, provider, model };
+}
+
+// ------------------------------------------------------------------ tooltip
+const tooltip = $("tooltip");
+function showTooltip(evt, html) {
+  tooltip.innerHTML = html;
+  tooltip.style.display = "block";
+  const pad = 12;
+  let x = evt.clientX + pad, y = evt.clientY + pad;
+  const r = tooltip.getBoundingClientRect();
+  if (x + r.width > window.innerWidth - 8) x = evt.clientX - r.width - pad;
+  if (y + r.height > window.innerHeight - 8) y = evt.clientY - r.height - pad;
+  tooltip.style.left = x + "px";
+  tooltip.style.top = y + "px";
+}
+function hideTooltip() { tooltip.style.display = "none"; }
+
+// ------------------------------------------------------------------ charts (inline SVG)
+const SVG = "http://www.w3.org/2000/svg";
+function el(name, attrs, parent) {
+  const node = document.createElementNS(SVG, name);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  if (parent) parent.appendChild(node);
+  return node;
+}
+function niceTicks(max) {
+  if (max <= 0) return [0];
+  const raw = max / 3;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= raw) || mag * 10;
+  const ticks = [];
+  for (let v = 0; v <= max * 1.0001; v += step) ticks.push(v);
+  return ticks;
+}
+
+// Column chart: one series (spend by UTC day), zero-filled across the period.
+// Measures the container BEFORE touching its content and swaps atomically at
+// the end — clearing first and then reading clientWidth forces a layout with
+// the page momentarily shorter, which clamps (jumps) the scroll position.
+function renderDayChart(container, buckets) {
+  const width = Math.max(container.clientWidth || 640, 320);
+  const byDay = new Map(buckets.map((b) => [b.key, Number(b.total_cost_usd)]));
+  const days = [];
+  for (let i = rangeDays - 1; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86_400_000);
+    days.push(d.toISOString().slice(0, 10));
+  }
+  const values = days.map((d) => byDay.get(d) || 0);
+  const max = Math.max(...values, 0);
+  if (max === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "Cost data will appear here as workflows run.";
+    container.replaceChildren(empty);
+    return;
+  }
+
+  const W = width, H = 220;
+  const m = { top: 8, right: 8, bottom: 22, left: 68 };
+  const iw = W - m.left - m.right, ih = H - m.top - m.bottom;
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Daily spend in US dollars" });
+
+  const ticks = niceTicks(max);
+  const yMax = ticks[ticks.length - 1] || max;
+  const y = (v) => m.top + ih - (v / yMax) * ih;
+  for (const t of ticks) {
+    if (t > 0) el("line", { x1: m.left, x2: m.left + iw, y1: y(t), y2: y(t), class: "gridline" }, svg);
+    const label = el("text", { x: m.left - 8, y: y(t) + 3, "text-anchor": "end" }, svg);
+    label.textContent = fmtUsd(t);
+  }
+  el("line", { x1: m.left, x2: m.left + iw, y1: y(0), y2: y(0), class: "baseline" }, svg);
+
+  const band = iw / days.length;
+  const barW = Math.min(24, Math.max(2, band - 2)); // ≤24px thick, 2px surface gap
+  const color = cssVar("--series");
+  days.forEach((dayKey, i) => {
+    const v = values[i];
+    const cx = m.left + band * i + band / 2;
+    if (v > 0) {
+      const top = y(v), h = y(0) - top;
+      const r = Math.min(4, barW / 2, h); // rounded data-end, square baseline
+      el("path", {
+        d: `M ${cx - barW / 2} ${y(0)} V ${top + r} Q ${cx - barW / 2} ${top} ${cx - barW / 2 + r} ${top} H ${cx + barW / 2 - r} Q ${cx + barW / 2} ${top} ${cx + barW / 2} ${top + r} V ${y(0)} Z`,
+        fill: color,
+      }, svg);
+    }
+    // Full-band hover target (bigger than the mark)
+    const hit = el("rect", { x: m.left + band * i, y: m.top, width: band, height: ih, fill: "transparent" }, svg);
+    hit.addEventListener("mousemove", (evt) =>
+      showTooltip(evt, `<div class="t-label">${esc(dayKey)}</div><div class="t-value">${fmtUsd(v)}</div>`));
+    hit.addEventListener("mouseleave", hideTooltip);
+  });
+
+  // Sparse x labels: first, last, and ~4 in between
+  const every = Math.max(1, Math.ceil(days.length / 6));
+  days.forEach((dayKey, i) => {
+    if (i % every !== 0 && i !== days.length - 1) return;
+    const t = el("text", { x: m.left + band * i + band / 2, y: H - 6, "text-anchor": "middle" }, svg);
+    t.textContent = dayKey.slice(5); // MM-DD
+  });
+
+  container.replaceChildren(svg);
+}
+
+// Horizontal ranked bars: magnitude of one measure across named categories → one hue.
+// Same measure-then-swap discipline as renderDayChart (see comment there).
+function renderBarChart(container, buckets, tooltipOf) {
+  const width = Math.max(container.clientWidth || 480, 300);
+  const rows = buckets.filter((b) => Number(b.total_cost_usd) > 0).slice(0, 8);
+  if (rows.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "empty";
+    empty.textContent = "No spend in this period.";
+    container.replaceChildren(empty);
+    return;
+  }
+
+  const W = width;
+  const rowH = 30, labelW = Math.min(190, W * 0.4), valueW = 64;
+  const H = rows.length * rowH + 4;
+  const iw = W - labelW - valueW - 12;
+  const max = Math.max(...rows.map((r) => Number(r.total_cost_usd)));
+  const color = cssVar("--series");
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Spend by category in US dollars" });
+
+  rows.forEach((row, i) => {
+    const yMid = i * rowH + rowH / 2;
+    const v = Number(row.total_cost_usd);
+    const w = Math.max((v / max) * iw, 2);
+    const name = row.key === null ? "(external / lump-sum)" : row.key;
+
+    const label = el("text", { x: labelW, y: yMid + 4, "text-anchor": "end", class: "cat-label" }, svg);
+    label.textContent = name.length > 26 ? name.slice(0, 25) + "…" : name;
+
+    const barH = 14, r = 4; // thin mark, rounded data-end, square at baseline
+    el("path", {
+      d: `M ${labelW + 8} ${yMid - barH / 2} H ${labelW + 8 + w - r} Q ${labelW + 8 + w} ${yMid - barH / 2} ${labelW + 8 + w} ${yMid - barH / 2 + r} V ${yMid + barH / 2 - r} Q ${labelW + 8 + w} ${yMid + barH / 2} ${labelW + 8 + w - r} ${yMid + barH / 2} H ${labelW + 8} Z`,
+      fill: color,
+    }, svg);
+
+    const value = el("text", { x: labelW + 8 + w + 8, y: yMid + 4, class: "bar-label" }, svg);
+    value.textContent = fmtUsd(v);
+
+    const hit = el("rect", { x: 0, y: i * rowH, width: W, height: rowH, fill: "transparent" }, svg);
+    hit.addEventListener("mousemove", (evt) => showTooltip(evt, tooltipOf(row, name)));
+    hit.addEventListener("mouseleave", hideTooltip);
+  });
+
+  container.replaceChildren(svg);
+}
+
+// ------------------------------------------------------------------ tables
+function meterColor(pct) {
+  if (pct > 90) return cssVar("--status-critical");
+  if (pct > 70) return cssVar("--status-warning");
+  return cssVar("--status-good");
+}
+
+function renderTopWorkflows(container, workflows) {
+  if (!workflows.length) { container.innerHTML = '<div class="empty">No workflows in this period.</div>'; return; }
+  const body = workflows.map((w) => {
+    const limit = w.budget_limit_usd === null ? null : Number(w.budget_limit_usd);
+    const cost = Number(w.total_cost_usd);
+    let budget = '<td class="muted">—</td>';
+    if (limit !== null && limit > 0) {
+      const pct = Math.min((cost / limit) * 100, 100);
+      budget = `<td><span class="meter"><i style="width:${pct.toFixed(0)}%;background:${meterColor(pct)}"></i></span>
+        <span class="muted" style="font-size:12px"> ${fmtUsd(limit)}</span></td>`;
+    }
+    return `<tr>
+      <td class="id" title="${esc(w.workflow_id)}">${esc(String(w.workflow_id).slice(0, 8))}…</td>
+      <td>${esc(w.definition_name)}</td>
+      <td class="muted">${esc(w.status)}</td>
+      <td class="num">${fmtUsd(cost)}</td>
+      ${budget}
+    </tr>`;
+  }).join("");
+  container.innerHTML = `<table>
+    <thead><tr><th>Workflow</th><th>Definition</th><th>Status</th><th class="num">Cost</th><th>Budget</th></tr></thead>
+    <tbody>${body}</tbody></table>`;
+}
+
+function renderTopDefinitions(container, defs) {
+  if (!defs.length) { container.innerHTML = '<div class="empty">No definitions in this period.</div>'; return; }
+  const body = defs.map((d) => `<tr>
+      <td>${esc(d.definition_name)}</td>
+      <td class="num">${d.workflows}</td>
+      <td class="num">${fmtUsd(d.total_cost_usd)}</td>
+      <td class="num">${fmtUsd(d.avg_cost_per_workflow)}</td>
+    </tr>`).join("");
+  container.innerHTML = `<table>
+    <thead><tr><th>Definition</th><th class="num">Workflows</th><th class="num">Total</th><th class="num">Avg / workflow</th></tr></thead>
+    <tbody>${body}</tbody></table>`;
+}
+
+function renderBudgetEvents(container, analytics) {
+  const events = analytics.budget_events || [];
+  if (!events.length) {
+    container.innerHTML = `<div class="empty">No budget enforcement events in this period —
+      nothing was aborted or downgraded.</div>`;
+    return;
+  }
+  const chip = (kind) => kind === "abort"
+    ? `<span class="chip"><span class="dot" style="background:var(--status-critical)"></span>abort</span>`
+    : `<span class="chip"><span class="dot" style="background:var(--status-warning)"></span>downgrade</span>`;
+  const body = events.map((e) => `<tr>
+      <td>${chip(e.event)}</td>
+      <td>${esc(e.definition_name)}</td>
+      <td class="muted">${esc(e.activity_key)}</td>
+      <td class="num">${e.estimated_cost_usd === null ? "—" : fmtUsd(e.estimated_cost_usd)}</td>
+      <td class="num">${e.budget_limit_usd === null ? "—" : fmtUsd(e.budget_limit_usd)}</td>
+      <td class="muted">${esc(String(e.created_at).replace("T", " ").slice(0, 16))}</td>
+    </tr>`).join("");
+  container.innerHTML = `<table>
+    <thead><tr><th>Event</th><th>Definition</th><th>Activity</th><th class="num">Est. cost</th><th class="num">Budget</th><th>When</th></tr></thead>
+    <tbody>${body}</tbody></table>`;
+}
+
+// ------------------------------------------------------------------ render
+function render(data) {
+  lastData = data;
+  const a = data.day; // summary/top/budget fields are identical across the three calls
+
+  $("t-spend").textContent = fmtUsd(a.total_cost_usd);
+  $("t-spend-sub").textContent = `last ${rangeDays === 1 ? "24 hours" : rangeDays + " days"}`;
+  $("t-workflows").textContent = fmtCount(a.total_workflows);
+  $("t-workflows-sub").textContent = `${fmtCount(a.total_activities)} cost-tracked activities`;
+  $("t-avg").textContent = fmtUsd(a.avg_cost_per_workflow);
+  $("t-avg-sub").textContent = `${fmtUsd(a.avg_cost_per_activity)} per activity`;
+  $("t-cache").textContent = a.cache_hit_rate === null ? "—" : (a.cache_hit_rate * 100).toFixed(1) + "%";
+  $("t-cache-sub").textContent = `${fmtCount(a.cached_tokens)} of ${fmtCount(a.total_tokens)} tokens cached`;
+
+  renderDayChart($("chart-days"), a.groups || []);
+  renderBarChart($("chart-providers"), data.provider.groups || [], (row, name) =>
+    `<div class="t-label">${esc(name)}</div>
+     <div class="t-value">${fmtUsd(row.total_cost_usd)}</div>
+     <div class="t-label">${row.activities} activities · ${row.workflows} workflows · ${fmtCount(row.total_tokens)} tokens</div>`);
+  renderBarChart($("chart-models"), data.model.groups || [], (row, name) =>
+    `<div class="t-label">${esc(name)}</div>
+     <div class="t-value">${fmtUsd(row.total_cost_usd)}</div>
+     <div class="t-label">${row.activities} activities · ${fmtCount(row.total_tokens)} tokens</div>`);
+  renderBudgetEvents($("budget-events"), a);
+  renderTopWorkflows($("top-workflows"), a.top_workflows || []);
+  renderTopDefinitions($("top-definitions"), a.top_definitions || []);
+}
+
+// ------------------------------------------------------------------ refresh loop
+async function refresh() {
+  try {
+    const data = await loadAnalytics();
+    $("auth").classList.add("hidden");
+    $("dash").classList.remove("hidden");
+    // Re-render only when the data actually changed — a no-op poll must not
+    // disturb the page (scroll, tooltips, text selection). start/end dates are
+    // stripped: they move with every request; rangeDays is included so a
+    // period switch re-renders even when the totals are identical.
+    const snapshot = JSON.stringify([rangeDays, data], (key, value) =>
+      key === "start_date" || key === "end_date" ? undefined : value);
+    if (snapshot !== lastSnapshot) {
+      lastSnapshot = snapshot;
+      render(data);
+    }
+    $("refreshed").textContent = "updated " + new Date().toLocaleTimeString();
+  } catch (err) {
+    if (err && err.unauthorized) {
+      sessionStorage.removeItem(TOKEN_KEY);
+      stopPolling();
+      $("dash").classList.add("hidden");
+      $("auth").classList.remove("hidden");
+    } else {
+      // Show the shell (with empty states) rather than a blank page when the
+      // API is temporarily unreachable
+      $("dash").classList.remove("hidden");
+      $("refreshed").textContent = "refresh failed — retrying";
+    }
+  }
+}
+function startPolling() {
+  stopPolling();
+  refreshTimer = setInterval(() => { if (!document.hidden) refresh(); }, REFRESH_MS);
+}
+function stopPolling() { if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; } }
+
+document.addEventListener("visibilitychange", () => { if (!document.hidden && refreshTimer) refresh(); });
+window.addEventListener("resize", () => { if (lastData) render(lastData); });
+
+document.querySelectorAll(".range-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".range-btn").forEach((b) => b.setAttribute("aria-pressed", "false"));
+    btn.setAttribute("aria-pressed", "true");
+    rangeDays = Number(btn.dataset.days);
+    refresh();
+  });
+});
+
+$("auth-submit").addEventListener("click", async () => {
+  $("auth-error").textContent = "";
+  try {
+    await signIn($("auth-id").value.trim(), $("auth-secret").value);
+    await refresh();
+    startPolling();
+  } catch (err) {
+    $("auth-error").textContent = err.message || "Sign-in failed";
+  }
+});
+$("auth-secret").addEventListener("keydown", (e) => { if (e.key === "Enter") $("auth-submit").click(); });
+
+loadInfo();
+refresh().then(startPolling);
+</script>
+</body>
+</html>

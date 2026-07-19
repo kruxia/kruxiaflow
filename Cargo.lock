@@ -1614,6 +1614,7 @@ dependencies = [
  "futures",
  "jsonwebtoken",
  "kruxiaflow-core",
+ "kruxiaflow-dashboard",
  "kruxiaflow-oauth",
  "kruxiaflow-std-worker",
  "reqwest",
@@ -1668,16 +1669,7 @@ dependencies = [
 name = "kruxiaflow-dashboard"
 version = "0.5.0"
 dependencies = [
- "anyhow",
  "axum",
- "kruxiaflow-api",
- "kruxiaflow-core",
- "serde",
- "serde_json",
- "tokio",
- "tower",
- "tower-http",
- "tracing",
 ]
 
 [[package]]

@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            COUNT(DISTINCT workflow_id) FILTER (WHERE budget_event IS DISTINCT FROM 'abort') as \"total_workflows!\",\n            COUNT(*) FILTER (WHERE budget_event IS DISTINCT FROM 'abort') as \"total_activities!\",\n            COALESCE(SUM(cost_usd), 0.0) as \"total_cost!\",\n            COALESCE(AVG(cost_usd) FILTER (WHERE budget_event IS DISTINCT FROM 'abort'), 0.0) as \"avg_cost!\",\n            COALESCE(SUM(total_tokens), 0)::BIGINT as \"total_tokens!\",\n            COALESCE(SUM(cached_tokens), 0)::BIGINT as \"cached_tokens!\",\n            COALESCE(SUM(prompt_tokens), 0)::BIGINT as \"prompt_tokens!\",\n            COUNT(*) FILTER (WHERE budget_event = 'abort') as \"budget_aborts!\",\n            COUNT(*) FILTER (WHERE budget_event = 'downgrade') as \"budget_downgrades!\"\n        FROM activity_costs\n        WHERE created_at >= $1 AND created_at <= $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "total_workflows!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "total_activities!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "total_cost!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 3,
+        "name": "avg_cost!",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 4,
+        "name": "total_tokens!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "cached_tokens!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "prompt_tokens!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "budget_aborts!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "budget_downgrades!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "6304bd0c7f09e85ad09f7705dc48a5dd999ad055d299691b241d2587b83a0061"
+}

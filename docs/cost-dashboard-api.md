@@ -13,6 +13,13 @@ Kruxia Flow provides real-time cost tracking and analytics for workflows that us
 
 All costs are tracked in USD with Decimal precision to prevent floating-point errors.
 
+A **built-in cost analytics dashboard** backed by these endpoints is served by
+the API server at `/dashboard` — spend over time, spend by provider/model, top
+workflows/definitions, cache hit rate, and budget enforcement events. The page
+itself is public; its data calls use the same bearer auth as the API
+(credential-free against a `--insecure-dev` server). The `kruxiaflow cost`
+CLI subcommands wrap the same endpoints for the terminal.
+
 ---
 
 ## Authentication
@@ -324,7 +331,12 @@ Get detailed cost history for all activities in a workflow, including token usag
 - `cached_tokens` (int|null): Number of cached tokens (Anthropic only)
 - `provider` (string|null): LLM provider used (null for lump-sum and non-LLM cost line items)
 - `model` (string|null): Model name used (null for lump-sum and non-LLM cost line items)
-- `budget_exceeded` (bool|null): Whether this execution exceeded activity budget
+- `budget_exceeded` (bool|null): Whether budget enforcement fired for this row
+- `budget_event` (string|null): Budget enforcement outcome — `"abort"` (activity
+  aborted before execution; zero-cost row whose `estimated_cost_usd` holds the
+  estimate that tripped the limit) or `"downgrade"` (the fallback chain skipped
+  models for budget reasons before a cheaper model succeeded). Null for
+  ordinary cost rows.
 - `created_at` (DateTime): Timestamp when cost was recorded (ISO 8601)
 
 **Notes**:
@@ -348,13 +360,20 @@ curl -X GET http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/cost/history \
 
 ### Get Cost Analytics
 
-Get aggregated cost analytics across all workflows within a date range.
+Get aggregated cost analytics across all workflows within a date range,
+optionally grouped by one dimension, with top-N rankings and budget
+enforcement events. This is the single server-side aggregation shared by the
+`kruxiaflow cost` CLI, the built-in dashboard, and MCP tools.
 
 **Endpoint**: `GET /api/v1/cost/analytics`
 
 **Query Parameters**:
 - `start_date` (ISO 8601 DateTime, optional): Start date for analytics (default: 30 days ago)
 - `end_date` (ISO 8601 DateTime, optional): End date for analytics (default: now)
+- `group_by` (string, optional): Group costs by `provider`, `model`,
+  `definition`, or `day` (UTC). Invalid values return `400 Bad Request`.
+- `limit` (int, optional): Row limit for `top_workflows` / `top_definitions`
+  (default 10, max 10000)
 
 **Response**: `200 OK`
 
@@ -364,7 +383,54 @@ Get aggregated cost analytics across all workflows within a date range.
   "total_cost_usd": "127.45",
   "avg_cost_per_activity": "0.3542",
   "start_date": "2025-10-19T00:00:00Z",
-  "end_date": "2025-11-18T23:59:59Z"
+  "end_date": "2025-11-18T23:59:59Z",
+  "total_activities": 360,
+  "avg_cost_per_workflow": "3.0345",
+  "total_tokens": 2450000,
+  "cached_tokens": 320000,
+  "cache_hit_rate": 0.16,
+  "budget_aborts": 2,
+  "budget_downgrades": 5,
+  "group_by": "provider",
+  "groups": [
+    {
+      "key": "anthropic",
+      "total_cost_usd": "98.20",
+      "activities": 290,
+      "workflows": 40,
+      "total_tokens": 2100000
+    }
+  ],
+  "top_workflows": [
+    {
+      "workflow_id": "550e8400-e29b-41d4-a716-446655440000",
+      "definition_name": "research_assistant",
+      "status": "completed",
+      "created_at": "2025-11-18T10:00:00Z",
+      "total_cost_usd": "18.30",
+      "activities": 45,
+      "budget_limit_usd": "25.00"
+    }
+  ],
+  "top_definitions": [
+    {
+      "definition_name": "research_assistant",
+      "workflows": 12,
+      "total_cost_usd": "41.10",
+      "avg_cost_per_workflow": "3.425"
+    }
+  ],
+  "budget_events": [
+    {
+      "workflow_id": "550e8400-e29b-41d4-a716-446655440001",
+      "definition_name": "research_assistant",
+      "activity_key": "deep_analysis",
+      "event": "abort",
+      "estimated_cost_usd": "0.42",
+      "budget_limit_usd": "0.25",
+      "created_at": "2025-11-18T09:55:00Z"
+    }
+  ]
 }
 ```
 
@@ -372,8 +438,23 @@ Get aggregated cost analytics across all workflows within a date range.
 - `total_workflows` (int): Number of unique workflows with costs in date range
 - `total_cost_usd` (Decimal): Sum of all activity costs (USD)
 - `avg_cost_per_activity` (Decimal): Average cost per activity execution (USD)
-- `start_date` (DateTime): Start of analytics period (ISO 8601)
-- `end_date` (DateTime): End of analytics period (ISO 8601)
+- `start_date` / `end_date` (DateTime): Analytics period (ISO 8601)
+- `total_activities` (int): Cost line items in the period (budget-abort
+  markers excluded)
+- `avg_cost_per_workflow` (Decimal): `total_cost_usd / total_workflows`
+- `total_tokens` / `cached_tokens` (int): Token totals in the period
+- `cache_hit_rate` (float|null): `cached_tokens / prompt_tokens`; null when no
+  prompt tokens were recorded
+- `budget_aborts` / `budget_downgrades` (int): Budget enforcement event counts
+- `group_by` (string|null): Echo of the requested dimension
+- `groups` (array, present when `group_by` given): Buckets ordered by cost
+  descending (`day` is chronological). A null `key` groups lump-sum line
+  items with no provider/model; for `group_by=model` the key is
+  `"provider/model"`.
+- `top_workflows` / `top_definitions` (array): Most expensive workflows /
+  definitions, cost descending, capped by `limit`
+- `budget_events` (array): Recent enforcement events (newest first, max 50);
+  `event` is `"abort"` or `"downgrade"`
 
 **Performance**: Target <100ms P99 latency (aggregation query)
 

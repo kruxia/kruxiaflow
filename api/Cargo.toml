@@ -10,6 +10,7 @@ description.workspace = true
 [dependencies]
 # Workspace dependencies
 kruxiaflow-core = { path = "../core" }
+kruxiaflow-dashboard = { path = "../dashboard" }
 kruxiaflow-oauth = { path = "../oauth" }
 tokio.workspace = true
 tokio-util.workspace = true

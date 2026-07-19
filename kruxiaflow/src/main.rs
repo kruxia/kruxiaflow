@@ -200,6 +200,27 @@ EXAMPLES:\n  \
     )]
     Status(commands::status::StatusCommand),
 
+    /// Cost reporting and analytics
+    #[command(
+        about = "Cost reporting and analytics (wraps the REST cost API)",
+        long_about = "Cost reporting and analytics via the REST API\n\n\
+Answers: what did we spend, on which providers/models/definitions, which\n\
+workflows were most expensive, and did anything hit its budget?\n\n\
+Authenticates with OAuth2 client credentials; no credentials are needed\n\
+against a server running with --insecure-dev.\n\n\
+EXAMPLES:\n  \
+  kruxiaflow cost workflow <workflow_id>\n  \
+  kruxiaflow cost workflow <workflow_id> --detailed\n  \
+  kruxiaflow cost analytics --since 7d --group-by provider\n  \
+  kruxiaflow cost top --limit 10 --since 30d\n  \
+  kruxiaflow cost export --since 30d --output costs.csv\n\n\
+REQUIRES:\n  \
+  - KRUXIAFLOW_API_URL: API server URL (default http://127.0.0.1:8080)\n  \
+  - KRUXIAFLOW_CLIENT_ID / KRUXIAFLOW_CLIENT_SECRET: OAuth2 credentials\n    \
+(omit both against --insecure-dev servers)"
+    )]
+    Cost(commands::cost::CostCommand),
+
     /// Launch orchestrator only (for distributed deployment)
     #[command(
         about = "Launch orchestrator service for distributed deployment",
@@ -253,15 +274,18 @@ REQUIRES:\n  \
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Initialize logging (skip for version command)
-    if !matches!(cli.command, Commands::Version(_)) {
+    // Initialize logging (skip for client commands whose stdout is the
+    // deliverable — version info, cost tables/JSON/CSV)
+    if !matches!(cli.command, Commands::Version(_) | Commands::Cost(_)) {
         logging::init(&cli.log_level, &cli.log_format)?;
     }
 
     // Validate database_url for commands that need it
     // Health and Status only use the API server (no direct database access)
     let database_url = match &cli.command {
-        Commands::Version(_) | Commands::Health(_) | Commands::Status(_) => None,
+        Commands::Version(_) | Commands::Health(_) | Commands::Status(_) | Commands::Cost(_) => {
+            None
+        }
         _ => {
             let url = cli.database_url.ok_or_else(|| {
                 anyhow::anyhow!(
@@ -287,6 +311,7 @@ async fn main() -> Result<()> {
         }
         Commands::Health(cmd) => commands::health::execute(cmd).await,
         Commands::Status(cmd) => commands::status::execute(cmd).await,
+        Commands::Cost(cmd) => commands::cost::execute(cmd).await,
         Commands::Orchestrator(cmd) => {
             commands::orchestrator::execute(cmd, database_url.unwrap()).await
         }

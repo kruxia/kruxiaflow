@@ -26,6 +26,10 @@ pub struct ActivityCostRecord {
     pub workflow_budget_limit_usd: Option<Decimal>,
     pub budget_exceeded: bool,
     pub budget_action: Option<String>,
+    /// Enforcement outcome: `"abort"` (pre-execution abort, zero-cost row) or
+    /// `"downgrade"` (fallback chain skipped models for budget reasons before
+    /// a cheaper model succeeded). None for ordinary cost rows.
+    pub budget_event: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -72,8 +76,8 @@ impl CostTracker {
                 (workflow_id, activity_key, attempt, cost_usd, estimated_cost_usd,
                  prompt_tokens, output_tokens, total_tokens, cached_tokens,
                  provider, model, activity_budget_limit_usd, workflow_budget_limit_usd,
-                 budget_exceeded, budget_action)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                 budget_exceeded, budget_action, budget_event)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             "#,
             record.workflow_id,
             record.activity_key,
@@ -90,6 +94,7 @@ impl CostTracker {
             record.workflow_budget_limit_usd,
             record.budget_exceeded,
             record.budget_action,
+            record.budget_event,
         )
         .execute(&self.pool)
         .await?;
@@ -223,6 +228,7 @@ mod tests {
             workflow_budget_limit_usd: None,
             budget_exceeded: false,
             budget_action: None,
+            budget_event: None,
         };
 
         let result = tracker.record_cost(record).await;
@@ -250,6 +256,7 @@ mod tests {
             workflow_budget_limit_usd: Some(dec!(1.00)),
             budget_exceeded: false,
             budget_action: Some("abort".to_string()),
+            budget_event: None,
         };
 
         let result = tracker.record_cost(record).await;
@@ -301,6 +308,7 @@ mod tests {
             workflow_budget_limit_usd: None,
             budget_exceeded: false,
             budget_action: None,
+            budget_event: None,
         };
 
         let record2 = ActivityCostRecord {
@@ -347,6 +355,7 @@ mod tests {
             workflow_budget_limit_usd: None,
             budget_exceeded: true,
             budget_action: Some("abort".to_string()),
+            budget_event: None,
         };
 
         tracker.record_cost(record).await.unwrap();
@@ -413,6 +422,7 @@ mod tests {
             workflow_budget_limit_usd: None,
             budget_exceeded: false,
             budget_action: None,
+            budget_event: None,
         };
 
         tracker.record_cost(record).await.unwrap();
@@ -457,6 +467,7 @@ mod tests {
             workflow_budget_limit_usd: Some(dec!(1.00)),
             budget_exceeded: false,
             budget_action: None,
+            budget_event: None,
         };
 
         tracker.record_cost(record1).await.unwrap();

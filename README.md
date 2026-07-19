@@ -387,10 +387,11 @@ cargo build --release
 - [Python SDK](https://github.com/kruxia/kruxiaflow-python) — `pip install kruxiaflow`
 - [Rust worker SDK](https://crates.io/crates/kruxiaflow-worker) — `cargo add kruxiaflow-worker`
 - Frictionless local dev mode (`kruxiaflow serve --insecure-dev`, no token setup)
+- CLI cost reports (`kruxiaflow cost workflow|analytics|top|export`) and a built-in cost analytics dashboard at `/dashboard`
 
 ### Next
-- CLI cost reports and a cost dashboard
 - MCP server: agents author, run, and monitor budgeted workflows
+- Dashboard workflow list and detail pages
 - Semantic caching
 
 ### Later

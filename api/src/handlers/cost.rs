@@ -102,6 +102,10 @@ pub struct ActivityCostDetail {
     pub model: Option<String>,
     pub budget_limit_usd: Option<Decimal>,
     pub budget_exceeded: Option<bool>,
+    /// Budget enforcement outcome: "abort" (activity aborted before execution,
+    /// zero-cost row) or "downgrade" (fallback chain skipped models for budget
+    /// reasons). None for ordinary cost rows.
+    pub budget_event: Option<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -152,6 +156,7 @@ pub async fn get_workflow_cost_history(
             model,
             activity_budget_limit_usd as budget_limit_usd,
             budget_exceeded,
+            budget_event,
             created_at
         FROM activity_costs
         WHERE workflow_id = $1
@@ -177,10 +182,63 @@ pub struct CostAnalyticsParams {
     /// End date for analytics (ISO 8601). Defaults to now.
     #[serde(default = "Utc::now")]
     pub end_date: DateTime<Utc>,
+    /// Group costs by one dimension: provider | model | definition | day.
+    #[serde(default)]
+    pub group_by: Option<String>,
+    /// Row limit for top_workflows / top_definitions (default 10, max 10000).
+    #[serde(default)]
+    pub limit: Option<i64>,
 }
 
 fn default_start_date() -> DateTime<Utc> {
     Utc::now() - chrono::Duration::days(30)
+}
+
+/// One bucket of a `group_by` aggregation.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CostGroup {
+    /// Group key: provider name, "provider/model", definition name, or
+    /// "YYYY-MM-DD" (UTC). None groups lump-sum line items with no
+    /// provider/model.
+    pub key: Option<String>,
+    pub total_cost_usd: Decimal,
+    pub activities: i64,
+    pub workflows: i64,
+    pub total_tokens: i64,
+}
+
+/// One of the most expensive workflows in the period.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TopWorkflow {
+    pub workflow_id: Uuid,
+    pub definition_name: String,
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+    pub total_cost_usd: Decimal,
+    pub activities: i64,
+    pub budget_limit_usd: Option<Decimal>,
+}
+
+/// One of the most expensive workflow definitions in the period.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TopDefinition {
+    pub definition_name: String,
+    pub workflows: i64,
+    pub total_cost_usd: Decimal,
+    pub avg_cost_per_workflow: Decimal,
+}
+
+/// A budget enforcement event (abort or downgrade) recorded in the period.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BudgetEvent {
+    pub workflow_id: Uuid,
+    pub definition_name: String,
+    pub activity_key: String,
+    /// "abort" or "downgrade"
+    pub event: String,
+    pub estimated_cost_usd: Option<Decimal>,
+    pub budget_limit_usd: Option<Decimal>,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -190,6 +248,32 @@ pub struct CostAnalytics {
     pub avg_cost_per_activity: Decimal,
     pub start_date: DateTime<Utc>,
     pub end_date: DateTime<Utc>,
+    /// Cost line items in the period (budget aborts excluded).
+    pub total_activities: i64,
+    pub avg_cost_per_workflow: Decimal,
+    pub total_tokens: i64,
+    pub cached_tokens: i64,
+    /// Share of prompt tokens served from provider prompt caches
+    /// (cached_tokens / prompt_tokens). None when no prompt tokens recorded.
+    pub cache_hit_rate: Option<f64>,
+    /// Activities aborted before execution by budget enforcement.
+    pub budget_aborts: i64,
+    /// Completed activities whose fallback chain skipped models for budget
+    /// reasons (ran on a cheaper model).
+    pub budget_downgrades: i64,
+    /// Dimension used for `groups` (echoed from the request). None when no
+    /// group_by was requested.
+    pub group_by: Option<String>,
+    /// Aggregation buckets, present when `group_by` was requested. Ordered by
+    /// cost descending (chronological for group_by=day).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub groups: Option<Vec<CostGroup>>,
+    /// Most expensive workflows in the period, cost descending.
+    pub top_workflows: Vec<TopWorkflow>,
+    /// Most expensive definitions in the period, cost descending.
+    pub top_definitions: Vec<TopDefinition>,
+    /// Recent budget enforcement events in the period, newest first (max 50).
+    pub budget_events: Vec<BudgetEvent>,
 }
 
 /// GET /api/v1/cost/analytics
@@ -227,12 +311,28 @@ pub async fn get_cost_analytics(
     State(state): State<AppState>,
     Query(params): Query<CostAnalyticsParams>,
 ) -> Result<Json<CostAnalytics>, StatusCode> {
-    let analytics = sqlx::query!(
+    // Validate group_by before touching the database
+    match params.group_by.as_deref() {
+        None | Some("provider") | Some("model") | Some("definition") | Some("day") => {}
+        Some(other) => {
+            tracing::debug!("Invalid group_by value: {}", other);
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    }
+    let limit = params.limit.unwrap_or(10).clamp(1, 10_000);
+
+    let summary = sqlx::query!(
         r#"
         SELECT
-            COUNT(DISTINCT workflow_id) as "total_workflows!",
+            COUNT(DISTINCT workflow_id) FILTER (WHERE budget_event IS DISTINCT FROM 'abort') as "total_workflows!",
+            COUNT(*) FILTER (WHERE budget_event IS DISTINCT FROM 'abort') as "total_activities!",
             COALESCE(SUM(cost_usd), 0.0) as "total_cost!",
-            COALESCE(AVG(cost_usd), 0.0) as "avg_cost!"
+            COALESCE(AVG(cost_usd) FILTER (WHERE budget_event IS DISTINCT FROM 'abort'), 0.0) as "avg_cost!",
+            COALESCE(SUM(total_tokens), 0)::BIGINT as "total_tokens!",
+            COALESCE(SUM(cached_tokens), 0)::BIGINT as "cached_tokens!",
+            COALESCE(SUM(prompt_tokens), 0)::BIGINT as "prompt_tokens!",
+            COUNT(*) FILTER (WHERE budget_event = 'abort') as "budget_aborts!",
+            COUNT(*) FILTER (WHERE budget_event = 'downgrade') as "budget_downgrades!"
         FROM activity_costs
         WHERE created_at >= $1 AND created_at <= $2
         "#,
@@ -246,13 +346,251 @@ pub async fn get_cost_analytics(
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    let groups = match params.group_by.as_deref() {
+        Some(dimension) => {
+            Some(fetch_cost_groups(&state, dimension, params.start_date, params.end_date).await?)
+        }
+        None => None,
+    };
+
+    let top_workflows = sqlx::query_as!(
+        TopWorkflow,
+        r#"
+        SELECT
+            ac.workflow_id as "workflow_id!",
+            w.definition_name as "definition_name!",
+            w.status::TEXT as "status!",
+            w.created_at as "created_at!",
+            COALESCE(SUM(ac.cost_usd), 0.0) as "total_cost_usd!",
+            COUNT(*) FILTER (WHERE ac.budget_event IS DISTINCT FROM 'abort') as "activities!",
+            w.budget_limit_usd
+        FROM activity_costs ac
+        JOIN workflows w ON w.id = ac.workflow_id
+        WHERE ac.created_at >= $1 AND ac.created_at <= $2
+        GROUP BY ac.workflow_id, w.definition_name, w.status, w.created_at, w.budget_limit_usd
+        ORDER BY COALESCE(SUM(ac.cost_usd), 0.0) DESC
+        LIMIT $3
+        "#,
+        params.start_date,
+        params.end_date,
+        limit
+    )
+    .fetch_all(&state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to fetch top workflows: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let top_definitions = sqlx::query!(
+        r#"
+        SELECT
+            w.definition_name as "definition_name!",
+            COUNT(DISTINCT ac.workflow_id) as "workflows!",
+            COALESCE(SUM(ac.cost_usd), 0.0) as "total_cost_usd!"
+        FROM activity_costs ac
+        JOIN workflows w ON w.id = ac.workflow_id
+        WHERE ac.created_at >= $1 AND ac.created_at <= $2
+        GROUP BY w.definition_name
+        ORDER BY COALESCE(SUM(ac.cost_usd), 0.0) DESC
+        LIMIT $3
+        "#,
+        params.start_date,
+        params.end_date,
+        limit
+    )
+    .fetch_all(&state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to fetch top definitions: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?
+    .into_iter()
+    .map(|row| {
+        let avg = if row.workflows > 0 {
+            row.total_cost_usd / Decimal::from(row.workflows)
+        } else {
+            Decimal::ZERO
+        };
+        TopDefinition {
+            definition_name: row.definition_name,
+            workflows: row.workflows,
+            total_cost_usd: row.total_cost_usd,
+            avg_cost_per_workflow: avg,
+        }
+    })
+    .collect();
+
+    let budget_events = sqlx::query_as!(
+        BudgetEvent,
+        r#"
+        SELECT
+            ac.workflow_id as "workflow_id!",
+            w.definition_name as "definition_name!",
+            ac.activity_key as "activity_key!",
+            ac.budget_event as "event!",
+            ac.estimated_cost_usd,
+            COALESCE(ac.activity_budget_limit_usd, ac.workflow_budget_limit_usd) as budget_limit_usd,
+            ac.created_at as "created_at!"
+        FROM activity_costs ac
+        JOIN workflows w ON w.id = ac.workflow_id
+        WHERE ac.budget_event IS NOT NULL
+          AND ac.created_at >= $1 AND ac.created_at <= $2
+        ORDER BY ac.created_at DESC
+        LIMIT 50
+        "#,
+        params.start_date,
+        params.end_date
+    )
+    .fetch_all(&state.db_pool)
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to fetch budget events: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let avg_cost_per_workflow = if summary.total_workflows > 0 {
+        summary.total_cost / Decimal::from(summary.total_workflows)
+    } else {
+        Decimal::ZERO
+    };
+    let cache_hit_rate = if summary.prompt_tokens > 0 {
+        Some(summary.cached_tokens as f64 / summary.prompt_tokens as f64)
+    } else {
+        None
+    };
+
     Ok(Json(CostAnalytics {
-        total_workflows: analytics.total_workflows,
-        total_cost_usd: analytics.total_cost,
-        avg_cost_per_activity: analytics.avg_cost,
+        total_workflows: summary.total_workflows,
+        total_cost_usd: summary.total_cost,
+        avg_cost_per_activity: summary.avg_cost,
         start_date: params.start_date,
         end_date: params.end_date,
+        total_activities: summary.total_activities,
+        avg_cost_per_workflow,
+        total_tokens: summary.total_tokens,
+        cached_tokens: summary.cached_tokens,
+        cache_hit_rate,
+        budget_aborts: summary.budget_aborts,
+        budget_downgrades: summary.budget_downgrades,
+        group_by: params.group_by.clone(),
+        groups,
+        top_workflows,
+        top_definitions,
+        budget_events,
     }))
+}
+
+/// Server-side aggregation for `group_by` — one static query per dimension so
+/// sqlx can verify each at compile time. Shared semantics: budget-abort rows
+/// are excluded (zero-cost enforcement markers, not spend), buckets are
+/// ordered by cost descending except `day`, which is chronological.
+async fn fetch_cost_groups(
+    state: &AppState,
+    dimension: &str,
+    start_date: DateTime<Utc>,
+    end_date: DateTime<Utc>,
+) -> Result<Vec<CostGroup>, StatusCode> {
+    let result = match dimension {
+        "provider" => {
+            sqlx::query_as!(
+                CostGroup,
+                r#"
+                SELECT
+                    provider as key,
+                    COALESCE(SUM(cost_usd), 0.0) as "total_cost_usd!",
+                    COUNT(*) as "activities!",
+                    COUNT(DISTINCT workflow_id) as "workflows!",
+                    COALESCE(SUM(total_tokens), 0)::BIGINT as "total_tokens!"
+                FROM activity_costs
+                WHERE created_at >= $1 AND created_at <= $2
+                  AND budget_event IS DISTINCT FROM 'abort'
+                GROUP BY provider
+                ORDER BY COALESCE(SUM(cost_usd), 0.0) DESC
+                "#,
+                start_date,
+                end_date
+            )
+            .fetch_all(&state.db_pool)
+            .await
+        }
+        "model" => {
+            sqlx::query_as!(
+                CostGroup,
+                r#"
+                SELECT
+                    CASE WHEN model IS NULL THEN NULL
+                         ELSE COALESCE(provider || '/', '') || model
+                    END as key,
+                    COALESCE(SUM(cost_usd), 0.0) as "total_cost_usd!",
+                    COUNT(*) as "activities!",
+                    COUNT(DISTINCT workflow_id) as "workflows!",
+                    COALESCE(SUM(total_tokens), 0)::BIGINT as "total_tokens!"
+                FROM activity_costs
+                WHERE created_at >= $1 AND created_at <= $2
+                  AND budget_event IS DISTINCT FROM 'abort'
+                GROUP BY 1
+                ORDER BY COALESCE(SUM(cost_usd), 0.0) DESC
+                "#,
+                start_date,
+                end_date
+            )
+            .fetch_all(&state.db_pool)
+            .await
+        }
+        "definition" => {
+            sqlx::query_as!(
+                CostGroup,
+                r#"
+                SELECT
+                    w.definition_name as "key?",
+                    COALESCE(SUM(ac.cost_usd), 0.0) as "total_cost_usd!",
+                    COUNT(*) as "activities!",
+                    COUNT(DISTINCT ac.workflow_id) as "workflows!",
+                    COALESCE(SUM(ac.total_tokens), 0)::BIGINT as "total_tokens!"
+                FROM activity_costs ac
+                JOIN workflows w ON w.id = ac.workflow_id
+                WHERE ac.created_at >= $1 AND ac.created_at <= $2
+                  AND ac.budget_event IS DISTINCT FROM 'abort'
+                GROUP BY w.definition_name
+                ORDER BY COALESCE(SUM(ac.cost_usd), 0.0) DESC
+                "#,
+                start_date,
+                end_date
+            )
+            .fetch_all(&state.db_pool)
+            .await
+        }
+        "day" => {
+            sqlx::query_as!(
+                CostGroup,
+                r#"
+                SELECT
+                    TO_CHAR(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD') as key,
+                    COALESCE(SUM(cost_usd), 0.0) as "total_cost_usd!",
+                    COUNT(*) as "activities!",
+                    COUNT(DISTINCT workflow_id) as "workflows!",
+                    COALESCE(SUM(total_tokens), 0)::BIGINT as "total_tokens!"
+                FROM activity_costs
+                WHERE created_at >= $1 AND created_at <= $2
+                  AND budget_event IS DISTINCT FROM 'abort'
+                GROUP BY 1
+                ORDER BY 1 ASC
+                "#,
+                start_date,
+                end_date
+            )
+            .fetch_all(&state.db_pool)
+            .await
+        }
+        // Validated by the caller
+        _ => return Err(StatusCode::BAD_REQUEST),
+    };
+
+    result.map_err(|e| {
+        tracing::error!("Failed to fetch cost groups by {}: {}", dimension, e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })
 }
 
 #[cfg(test)]
@@ -323,6 +661,8 @@ mod tests {
         let params = CostAnalyticsParams {
             start_date: now - chrono::Duration::days(30),
             end_date: now,
+            group_by: None,
+            limit: None,
         };
 
         let result = get_cost_analytics(State(state), Query(params)).await;
@@ -342,6 +682,8 @@ mod tests {
         let params = CostAnalyticsParams {
             start_date: default_start_date(),
             end_date: Utc::now(),
+            group_by: None,
+            limit: None,
         };
 
         let result = get_cost_analytics(State(state), Query(params)).await;
@@ -387,6 +729,7 @@ mod tests {
             model: Some("claude-3-sonnet".to_string()),
             budget_limit_usd: Some(Decimal::from_str("1.00").unwrap()),
             budget_exceeded: Some(false),
+            budget_event: None,
             created_at: Utc::now(),
         };
         let json = serde_json::to_value(&detail).unwrap();
@@ -403,9 +746,23 @@ mod tests {
             avg_cost_per_activity: Decimal::from_str("0.0255").unwrap(),
             start_date: Utc::now() - chrono::Duration::days(30),
             end_date: Utc::now(),
+            total_activities: 1000,
+            avg_cost_per_workflow: Decimal::from_str("2.55").unwrap(),
+            total_tokens: 500_000,
+            cached_tokens: 100_000,
+            cache_hit_rate: Some(0.25),
+            budget_aborts: 2,
+            budget_downgrades: 3,
+            group_by: None,
+            groups: None,
+            top_workflows: vec![],
+            top_definitions: vec![],
+            budget_events: vec![],
         };
         let json = serde_json::to_value(&analytics).unwrap();
         assert_eq!(json["total_workflows"], 10);
+        assert_eq!(json["budget_aborts"], 2);
+        assert!(json.get("groups").is_none());
     }
 
     #[test]

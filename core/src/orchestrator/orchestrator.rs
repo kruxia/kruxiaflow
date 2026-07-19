@@ -455,6 +455,7 @@ async fn handle_activity_failed(
 
     // Increment attempt count
     activity_state.increment_attempt();
+    let attempt = activity_state.attempt;
 
     // Reset status to Pending for retry
     activity_state.status = WorkflowActivityStatus::Pending;
@@ -494,6 +495,7 @@ async fn handle_activity_failed(
         definition,
         activity_key,
         state.workflow_id,
+        attempt,
         pool,
     )
     .await?;
@@ -1350,6 +1352,7 @@ pub async fn process_workflow_event(
                     &definition,
                     &a.key,
                     event.workflow_id,
+                    state.activities.get(&a.key).map(|s| s.attempt).unwrap_or(1),
                     &config.pool,
                 )
                 .await?;
@@ -1699,6 +1702,7 @@ pub async fn process_workflow_event(
 
 /// Enrich LLM activity parameters with budget information before scheduling
 /// Returns enriched parameters and whether to proceed with scheduling
+#[allow(clippy::too_many_arguments)]
 async fn enrich_llm_activity_params_w_budget(
     activity_name: &str,
     mut params: serde_json::Value,
@@ -1706,6 +1710,7 @@ async fn enrich_llm_activity_params_w_budget(
     workflow_def: &crate::workflow::WorkflowDefinition,
     activity_key: &str,
     workflow_id: uuid::Uuid,
+    attempt: u32,
     pool: &sqlx::PgPool,
 ) -> Result<(serde_json::Value, bool)> {
     // Only process LLM activities
@@ -1867,6 +1872,39 @@ async fn enrich_llm_activity_params_w_budget(
                     activity_budget_limit,
                     workflow_budget_limit
                 );
+
+                // Record the enforcement event as a zero-cost line item so the
+                // abort is visible to cost endpoints and analytics, not only
+                // logs. Never fail orchestration over event recording.
+                if let Err(e) = cost_tracker
+                    .record_cost(ActivityCostRecord {
+                        workflow_id,
+                        activity_key: activity_key.to_string(),
+                        attempt,
+                        cost_usd: Decimal::ZERO,
+                        estimated_cost_usd: Some(estimate),
+                        prompt_tokens: None,
+                        output_tokens: None,
+                        total_tokens: None,
+                        cached_tokens: None,
+                        provider: None,
+                        model: None,
+                        activity_budget_limit_usd: activity_budget_limit,
+                        workflow_budget_limit_usd: workflow_budget_limit,
+                        budget_exceeded: true,
+                        budget_action: Some("abort".to_string()),
+                        budget_event: Some("abort".to_string()),
+                    })
+                    .await
+                {
+                    tracing::error!(
+                        workflow_id = %workflow_id,
+                        activity_key = %activity_key,
+                        "Failed to record budget abort event: {}",
+                        e
+                    );
+                }
+
                 return Ok((params, false)); // Don't schedule
             }
         }
@@ -2015,6 +2053,16 @@ async fn record_llm_activity_cost(
             BudgetAction::Continue => "continue",
         });
 
+    // Fallback-chain downgrade marker: the worker reports the models it
+    // skipped for budget reasons before a cheaper model succeeded.
+    let budget_downgraded = event
+        .payload
+        .get("outputs")
+        .and_then(|o| o.get("result"))
+        .and_then(|r| r.get("budget_skipped_models"))
+        .and_then(|v| v.as_array())
+        .is_some_and(|models| !models.is_empty());
+
     // Record the cost
     let cost_tracker = CostTracker::new(config.pool.clone());
     let record = ActivityCostRecord {
@@ -2033,6 +2081,7 @@ async fn record_llm_activity_cost(
         workflow_budget_limit_usd: workflow_limit,
         budget_exceeded: false, // Always false for completed activities
         budget_action: budget_action.map(String::from),
+        budget_event: budget_downgraded.then(|| "downgrade".to_string()),
     };
 
     cost_tracker
@@ -2240,6 +2289,7 @@ async fn record_reported_activity_cost(
                 workflow_budget_limit_usd: workflow_limit,
                 budget_exceeded: false,
                 budget_action: budget_action.clone(),
+                budget_event: None,
             })
             .await
             .map_err(|e| super::OrchestratorError::CostTrackingFailed(e.to_string()))?;
@@ -2265,6 +2315,7 @@ async fn record_reported_activity_cost(
                 workflow_budget_limit_usd: workflow_limit,
                 budget_exceeded: false,
                 budget_action: budget_action.clone(),
+                budget_event: None,
             })
             .await
             .map_err(|e| super::OrchestratorError::CostTrackingFailed(e.to_string()))?;

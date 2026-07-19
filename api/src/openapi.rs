@@ -157,6 +157,10 @@ use utoipa::OpenApi;
             WorkflowCostSummary,
             ActivityCostDetail,
             CostAnalytics,
+            crate::handlers::cost::CostGroup,
+            crate::handlers::cost::TopWorkflow,
+            crate::handlers::cost::TopDefinition,
+            crate::handlers::cost::BudgetEvent,
 
             // LLM Catalog schemas
             ProviderResponse,
