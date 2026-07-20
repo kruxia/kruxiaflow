@@ -110,14 +110,20 @@ pub struct PollActivitiesResponse {
 ///
 /// When `cost_usd` is omitted the server computes the cost from its
 /// `llm_models` pricing catalog (cache reads at the cached-input price, cache
-/// creation at the cache-write price). An unknown provider/model records the
+/// creation at the cache-write price, cache storage at the cache-storage
+/// price per million token-hours). An unknown provider/model records the
 /// entry at cost 0 with a warning — completion never fails because of usage
 /// metadata.
 ///
-/// Time-based costs (e.g., Gemini explicit-cache *storage*, billed per
-/// token-hour) cannot be expressed as a per-call entry yet: report that spend
-/// via this entry's explicit `cost_usd` or the completion-level `cost_usd`
-/// remainder. Both are recorded and budget-counted.
+/// Time-based cache *storage* (e.g., Gemini explicit caching, billed per
+/// token-hour) is reported via `cache_storage_token_hours` (engine 0.8+;
+/// models without a catalog storage price record that component at 0 with a
+/// warning). Reporting the spend via explicit `cost_usd` instead remains
+/// fully supported.
+///
+/// Double-reporting rule: an entry's `cost_usd`, when set, is used verbatim
+/// and REPLACES all server-side computation for that entry — never report the
+/// same spend both ways.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UsageEntry {
     /// LLM provider name (matches the server's `llm_models` catalog, e.g. "anthropic")
@@ -143,6 +149,12 @@ pub struct UsageEntry {
     #[serde(default)]
     pub cache_creation_tokens: u32,
 
+    /// Context-cache storage consumed, in token-hours (tokens held x hours
+    /// held; fractional). Billed at the catalog's cache-storage price; models
+    /// without one record the component at 0 with a warning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_storage_token_hours: Option<Decimal>,
+
     /// Explicit cost for this call; overrides server-side computation
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<Decimal>,
@@ -158,6 +170,7 @@ impl UsageEntry {
             output_tokens: 0,
             cache_read_tokens: 0,
             cache_creation_tokens: 0,
+            cache_storage_token_hours: None,
             cost_usd: None,
         }
     }
@@ -183,6 +196,13 @@ impl UsageEntry {
     /// Set tokens written to cache.
     pub fn cache_creation_tokens(mut self, tokens: u32) -> Self {
         self.cache_creation_tokens = tokens;
+        self
+    }
+
+    /// Set context-cache storage consumed, in token-hours (tokens held x
+    /// hours held; fractional).
+    pub fn cache_storage_token_hours(mut self, token_hours: Decimal) -> Self {
+        self.cache_storage_token_hours = Some(token_hours);
         self
     }
 

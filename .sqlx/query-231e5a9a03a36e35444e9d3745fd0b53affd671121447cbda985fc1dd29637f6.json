@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        WITH search_criteria AS (\n            SELECT\n                UNNEST($1::text[]) as provider_filter,\n                UNNEST($2::text[]) as model_filter\n        )\n        SELECT DISTINCT\n            id, provider, name, display_name,\n            input_price_per_million, output_price_per_million,\n            cached_input_price_per_million, cache_write_price_per_million,\n            supports_completion, supports_embeddings,\n            context_window, max_output_tokens\n        FROM llm_models\n        WHERE EXISTS (\n            SELECT 1 FROM search_criteria c\n            WHERE (c.provider_filter IS NULL OR provider = c.provider_filter)\n              AND (c.model_filter IS NULL OR name = c.model_filter)\n        )\n        ORDER BY provider, name\n        ",
+  "query": "\n        WITH search_criteria AS (\n            SELECT\n                UNNEST($1::text[]) as provider_filter,\n                UNNEST($2::text[]) as model_filter\n        )\n        SELECT DISTINCT\n            id, provider, name, display_name,\n            input_price_per_million, output_price_per_million,\n            cached_input_price_per_million, cache_write_price_per_million,\n            cache_storage_price_per_million_token_hours,\n            supports_completion, supports_embeddings,\n            context_window, max_output_tokens\n        FROM llm_models\n        WHERE EXISTS (\n            SELECT 1 FROM search_criteria c\n            WHERE (c.provider_filter IS NULL OR provider = c.provider_filter)\n              AND (c.model_filter IS NULL OR name = c.model_filter)\n        )\n        ORDER BY provider, name\n        ",
   "describe": {
     "columns": [
       {
@@ -45,21 +45,26 @@
       },
       {
         "ordinal": 8,
+        "name": "cache_storage_price_per_million_token_hours",
+        "type_info": "Numeric"
+      },
+      {
+        "ordinal": 9,
         "name": "supports_completion",
         "type_info": "Bool"
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "supports_embeddings",
         "type_info": "Bool"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "context_window",
         "type_info": "Int4"
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "max_output_tokens",
         "type_info": "Int4"
       }
@@ -79,11 +84,12 @@
       false,
       true,
       true,
+      true,
       false,
       false,
       true,
       true
     ]
   },
-  "hash": "0a7e1c7ff1101f8c70374205fa691e2c422890714b38234dd7e63b954035f57a"
+  "hash": "231e5a9a03a36e35444e9d3745fd0b53affd671121447cbda985fc1dd29637f6"
 }

@@ -1,0 +1,94 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, name, definition_name, definition_version, input,\n               cron, timezone, interval_seconds, overlap_policy,\n               enabled, next_run_at, last_run_at, last_workflow_id\n        FROM workflow_schedules\n        WHERE enabled AND next_run_at <= NOW()\n        ORDER BY next_run_at\n        LIMIT $1\n        FOR UPDATE SKIP LOCKED\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "definition_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "definition_version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "input",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "cron",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "timezone",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "interval_seconds",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "overlap_policy",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "next_run_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "last_run_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "last_workflow_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "44fe1f2263a287201f44a6cac93a9929cc66ad0a2ed07e63282d76acc85c0d76"
+}

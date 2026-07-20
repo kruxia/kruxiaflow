@@ -4,6 +4,7 @@ pub mod cost;
 pub mod events;
 pub mod orchestrator;
 pub mod queue;
+pub mod scheduler;
 pub mod storage;
 pub mod subscription;
 pub mod workflow;
@@ -37,6 +38,11 @@ pub use orchestrator::{
 pub use queue::{
     Activity, ActivityQueue, ActivityResult, ActivitySettings, ActivityStatus, PostgresQueue,
     QueueConfig, QueueMonitor, QueuedActivity,
+};
+
+pub use scheduler::{
+    NewSchedule, OverlapPolicy, ScheduleError, ScheduleService, ScheduleUpdate, SchedulerConfig,
+    WorkflowSchedule, run_scheduler,
 };
 
 pub use storage::{FileMetadata, FileReference, PostgresStorage, StorageError, WorkflowStorage};

@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE workflow_schedules\n            SET input = $2, cron = $3, timezone = $4, interval_seconds = $5,\n                overlap_policy = $6, enabled = $7, next_run_at = $8\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Jsonb",
+        "Text",
+        "Text",
+        "Int8",
+        "Text",
+        "Bool",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7625e7b923f6849a843418130468a5475b3229ba0b5b6d80b1817f72e2e91b02"
+}

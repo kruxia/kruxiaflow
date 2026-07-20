@@ -1,0 +1,2 @@
+ALTER TABLE llm_models
+DROP COLUMN cache_storage_price_per_million_token_hours;

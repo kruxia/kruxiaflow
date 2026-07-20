@@ -80,6 +80,17 @@ impl Worker {
         self.poller.run().await;
     }
 
+    /// Poll once, execute whatever was claimed to completion, and return the
+    /// number of activities executed (0 = no work was available).
+    ///
+    /// Intended for smoke tests and one-shot invocations (`--once` flags in
+    /// worker binaries): no polling loop, no signal handling. Activities
+    /// still running after the configured `shutdown_timeout` are aborted and
+    /// failed as retryable, exactly like a graceful drain.
+    pub async fn run_once(&self) -> usize {
+        self.poller.run_once().await
+    }
+
     /// Run until SIGINT/SIGTERM (or the shutdown handle), then drain
     /// gracefully. Convenience for standalone worker binaries.
     pub async fn run_until_shutdown(&self) {

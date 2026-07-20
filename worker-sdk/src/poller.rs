@@ -100,6 +100,29 @@ impl WorkerPoller {
         self.drain().await;
     }
 
+    /// Poll once, run whatever was claimed to completion, and return the
+    /// number of activities executed (0 = no work was available).
+    ///
+    /// Activities still running after the configured `shutdown_timeout` are
+    /// aborted and failed as retryable, exactly like a graceful drain.
+    pub async fn run_once(&self) -> usize {
+        let permit = match Arc::clone(&self.semaphore).acquire_owned().await {
+            Ok(permit) => permit,
+            Err(_) => return 0,
+        };
+
+        let count = match self.poll_and_spawn(permit).await {
+            Ok(count) => count,
+            Err(err) => {
+                tracing::error!(error = %err, "Poll failed");
+                0
+            }
+        };
+
+        self.drain().await;
+        count
+    }
+
     async fn sleep_or_shutdown(&self, duration: Duration) {
         tokio::select! {
             _ = self.shutdown.cancelled() => {}

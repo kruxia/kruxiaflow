@@ -361,8 +361,18 @@ fn build_template_context(
     context
 }
 
-/// Handle ActivityFailed event with retry logic.
-/// Returns true if activity will be retried, false if it should fail permanently
+/// Handle ActivityFailed event.
+///
+/// The queue is the single retry authority: it decided retry-vs-terminal from
+/// its own `retry_count`/`max_retries` columns and already requeued the row
+/// (with backoff, original parameters) before this event was published — the
+/// decision arrives in the payload's `will_retry`. This function follows that
+/// decision instead of re-deriving it from workflow state: on retry it updates
+/// state bookkeeping (attempt, error, status) and re-checks the budget for LLM
+/// activities, cancelling the queued attempt if the budget is exhausted; on
+/// terminal failure it returns false so the caller applies the failure to state
+/// and the workflow can complete as failed without any restart.
+/// Returns true if the activity will be retried, false if it fails permanently.
 async fn handle_activity_failed(
     state: &mut super::workflow_state::WorkflowState,
     definition: &crate::workflow::WorkflowDefinition,
@@ -389,15 +399,22 @@ async fn handle_activity_failed(
             ))
         })?;
 
-    // Get error message from event payload
+    // Worker-reported failures carry `error_message`; orchestrator-internal
+    // publishers (poison, timeout, signal expiry) carry `error`.
     let error_message = event
         .payload
-        .get("error")
+        .get("error_message")
+        .or_else(|| event.payload.get("error"))
         .and_then(|e| e.as_str())
         .unwrap_or("Unknown error");
 
-    // Get activity settings (use default if not specified)
-    let settings = activity_def.settings.as_ref();
+    // Absent means terminal: every internal publisher is terminal by
+    // construction; only the queue's decision can grant a retry.
+    let will_retry = event
+        .payload
+        .get("will_retry")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     // Get current attempt number (before mutable borrow)
     let current_attempt = state
@@ -406,43 +423,21 @@ async fn handle_activity_failed(
         .map(|a| a.attempt)
         .unwrap_or(1);
 
-    // Check if should retry
-    let should_retry = if let Some(settings) = settings {
-        settings.should_retry(current_attempt)
-    } else {
-        false
-    };
-
-    if !should_retry {
+    if !will_retry {
         tracing::error!(
             workflow_id = %state.workflow_id,
             activity_key = %activity_key,
             attempt = current_attempt,
             error = %error_message,
-            "Activity failed permanently (no retry configured or max attempts reached)"
+            "Activity failed permanently (not retryable or max attempts reached)"
         );
         return Ok(false); // Don't retry - let it fail permanently
     }
 
-    // Calculate backoff delay
-    let backoff_seconds = settings
-        .unwrap()
-        .calculate_backoff(current_attempt)
-        .unwrap_or(0);
-
-    tracing::info!(
-        workflow_id = %state.workflow_id,
-        activity_key = %activity_key,
-        attempt = current_attempt,
-        backoff_seconds = backoff_seconds,
-        max_attempts = settings.and_then(|s| s.retry.as_ref().map(|r| r.max_attempts)),
-        "Retrying activity after failure"
-    );
-
     // Build template context for resolving parameters (before mutating state)
     let template_context = build_template_context(state, state.workflow_id, secrets);
 
-    // Now update activity state (mutable borrow)
+    // Bookkeeping: mirror in state what the queue already did to its row.
     let activity_state = state.activities.get_mut(activity_key).ok_or_else(|| {
         super::OrchestratorError::ActivityNotFound(format!(
             "Activity state not found: {}",
@@ -450,110 +445,94 @@ async fn handle_activity_failed(
         ))
     })?;
 
-    // Update error state
     activity_state.set_error(error_message.to_string());
-
-    // Increment attempt count
     activity_state.increment_attempt();
     let attempt = activity_state.attempt;
 
-    // Reset status to Pending for retry
+    // Reset status to Pending so the retried attempt's completion/failure
+    // events pass the duplicate guard.
     activity_state.status = WorkflowActivityStatus::Pending;
 
-    // Resolve template expressions in parameters
-    let params_value = serde_json::to_value(
-        activity_def
-            .parameters
-            .as_ref()
-            .unwrap_or(&Default::default()),
-    )
-    .map_err(|e| {
-        super::OrchestratorError::TemplateFailed(format!("Failed to serialize parameters: {}", e))
-    })?;
-
-    let resolved_params = match resolve_template_value(&params_value, &template_context) {
-        Ok(resolved) => resolved,
-        Err(e) => {
-            tracing::error!(
-                "Template resolution failed for activity retry {}: {}",
-                activity_key,
-                e
-            );
-            return Err(super::OrchestratorError::TemplateFailed(format!(
-                "Failed to resolve templates in activity {}: {}",
-                activity_key, e
-            )));
-        }
-    };
-
-    // Enrich LLM activity parameters with budget information
+    // Budget gate: a retry that would exceed a budget must not run. Only LLM
+    // activities are budget-gated, and only they need resolved parameters (the
+    // queued row keeps its original parameters — resolution here feeds the
+    // budget estimator, nothing else).
     let activity_name_str = activity_def.activity_name.as_deref().unwrap_or("");
-    let (params_w_budget, should_schedule) = enrich_llm_activity_params_w_budget(
-        activity_name_str,
-        resolved_params,
-        activity_def,
-        definition,
-        activity_key,
-        state.workflow_id,
-        attempt,
-        pool,
-    )
-    .await?;
+    if activity_name_str == "llm_prompt" || activity_name_str == "embedding" {
+        let params_value = serde_json::to_value(
+            activity_def
+                .parameters
+                .as_ref()
+                .unwrap_or(&Default::default()),
+        )
+        .map_err(|e| {
+            super::OrchestratorError::TemplateFailed(format!(
+                "Failed to serialize parameters: {}",
+                e
+            ))
+        })?;
 
-    // Don't retry if budget check failed
-    if !should_schedule {
-        tracing::warn!(
-            "Skipping LLM activity retry {} due to budget constraint",
-            activity_key
-        );
-        return Ok(false); // Don't retry, let it fail permanently
+        let resolved_params = match resolve_template_value(&params_value, &template_context) {
+            Ok(resolved) => resolved,
+            Err(e) => {
+                tracing::error!(
+                    "Template resolution failed for activity retry {}: {}",
+                    activity_key,
+                    e
+                );
+                return Err(super::OrchestratorError::TemplateFailed(format!(
+                    "Failed to resolve templates in activity {}: {}",
+                    activity_key, e
+                )));
+            }
+        };
+
+        let (_params_w_budget, should_schedule) = enrich_llm_activity_params_w_budget(
+            activity_name_str,
+            resolved_params,
+            activity_def,
+            definition,
+            activity_key,
+            state.workflow_id,
+            attempt,
+            pool,
+        )
+        .await?;
+
+        if !should_schedule {
+            // The queue already requeued the row; cancel that pending attempt
+            // so the exhausted budget is enforced, then fail permanently.
+            let cancelled = activity_queue
+                .cancel_pending(state.workflow_id, activity_key, event.iteration)
+                .await?;
+
+            if cancelled {
+                tracing::warn!(
+                    workflow_id = %state.workflow_id,
+                    activity_key = %activity_key,
+                    "Cancelled queued retry due to budget constraint"
+                );
+                return Ok(false); // Don't retry, let it fail permanently
+            }
+
+            // A worker claimed the retry before the cancel landed — let the
+            // in-flight attempt run; the next decision point enforces the budget.
+            tracing::warn!(
+                workflow_id = %state.workflow_id,
+                activity_key = %activity_key,
+                "Budget exhausted but retry already claimed; allowing in-flight attempt"
+            );
+        }
     }
 
-    // Schedule retry with delay
-    let scheduled_for = if backoff_seconds > 0 {
-        Some(chrono::Utc::now() + chrono::Duration::seconds(backoff_seconds as i64))
-    } else {
-        None
-    };
-
-    // Copy streaming config from activity definition into settings
-    let settings = {
-        let mut s = activity_def.settings.clone().unwrap_or_default();
-        s.streaming = activity_def.streaming.clone();
-        Some(s)
-    };
-
-    let activity_to_schedule = Activity {
-        key: activity_key.clone(),
-        worker: activity_def.worker.clone(),
-        activity_name: activity_def.activity_name.clone().unwrap_or_default(),
-        parameters: params_w_budget,
-        settings,
-        scheduled_for,
-        output_definitions: activity_def.output_definitions.clone(),
-        iteration: if activity_def.is_loop_activity {
-            Some(activity_state.iteration as i32)
-        } else {
-            None
-        },
-        signal_data: activity_state.signal_data.clone(),
-    };
-
-    // Log info when retry activity is started
     tracing::info!(
         workflow_id = %state.workflow_id,
-        activity_key = %activity_to_schedule.key,
-        worker = %activity_to_schedule.worker,
-        activity_name = %activity_to_schedule.activity_name,
-        iteration = ?activity_to_schedule.iteration,
-        attempt = current_attempt + 1,
-        scheduled_for = ?scheduled_for,
-        "Activity started (retry)"
+        activity_key = %activity_key,
+        worker = %activity_def.worker,
+        attempt = attempt,
+        error = %error_message,
+        "Activity retry requeued by queue with backoff"
     );
-
-    activity_queue
-        .schedule(state.workflow_id, vec![activity_to_schedule])
-        .await?;
 
     // Publish ActivityScheduled event for observability
     // For looping activities, include iteration to avoid unique constraint violation
@@ -571,13 +550,12 @@ async fn handle_activity_failed(
             "worker": activity_def.worker,
             "activity_name": activity_def.activity_name,
             "attempt": activity_state.attempt,
-            "scheduled_for": scheduled_for,
         }),
         iteration,
     };
     event_source.publish(scheduled_event).await?;
 
-    Ok(true) // Retry scheduled
+    Ok(true) // Retry already requeued by the queue
 }
 
 /// Process a workflow event and advance workflow execution.
@@ -2380,6 +2358,7 @@ async fn publish_failure_for_poison_event(
             "error_code": "ORCHESTRATOR_PROCESSING_ERROR",
             "poison_event_id": event.id,
             "original_event_type": format!("{:?}", event.event_type),
+            "will_retry": false,
         }),
         iteration: event.iteration,
     };
@@ -2550,6 +2529,8 @@ async fn check_and_reclaim_stale_activities(
                         "error_code": "ACTIVITY_TIMEOUT",
                         "retry_count": activity.retry_count,
                         "max_retries": activity.max_retries,
+                        "will_retry": false,
+                        "attempt": activity.retry_count + 1,
                     }),
                     iteration: activity.iteration,
                 };
@@ -2688,6 +2669,7 @@ async fn process_expired_subscriptions(
                         "error_code": "SIGNAL_TIMEOUT",
                         "event_name": sub.event_name,
                         "on_timeout": "fail",
+                        "will_retry": false,
                     }),
                     iteration: None,
                 }
@@ -3207,6 +3189,7 @@ mod tests {
             async fn complete(&self, activity_id: Uuid, worker_id: &str, result: QueueActivityResult) -> std::result::Result<(), crate::queue::QueueError>;
             async fn fail(&self, activity_id: Uuid, worker_id: &str, retryable: bool, result: QueueActivityResult) -> std::result::Result<bool, crate::queue::QueueError>;
             async fn heartbeat(&self, activity_id: Uuid, worker_id: &str) -> std::result::Result<(), crate::queue::QueueError>;
+            async fn cancel_pending(&self, workflow_id: Uuid, activity_key: &str, iteration: Option<i32>) -> std::result::Result<bool, crate::queue::QueueError>;
             async fn reclaim_stale_activities(&self, limit: i64) -> std::result::Result<Vec<StaleActivityInfo>, crate::queue::QueueError>;
         }
     }

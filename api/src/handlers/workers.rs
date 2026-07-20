@@ -196,6 +196,14 @@ pub struct UsageEntry {
     #[schema(example = 0)]
     pub cache_creation_tokens: u32,
 
+    /// Context-cache storage consumed, in token-hours (tokens held x hours
+    /// held; fractional). Billed at the catalog's cache-storage price (e.g.,
+    /// Gemini explicit-caching storage); models without one record the
+    /// component at 0 with a warning.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = 3.33)]
+    pub cache_storage_token_hours: Option<Decimal>,
+
     /// Explicit cost for this call; overrides server-side computation
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(example = 0.015)]
@@ -221,6 +229,14 @@ impl UsageEntry {
                 "Cost must be non-negative",
             );
         }
+        if let Some(token_hours) = self.cache_storage_token_hours
+            && token_hours < Decimal::ZERO
+        {
+            errors.add(
+                format!("usage[{}].cache_storage_token_hours", index),
+                "Cache storage token-hours must be non-negative",
+            );
+        }
     }
 }
 
@@ -233,6 +249,7 @@ impl From<UsageEntry> for kruxiaflow_core::cost::UsageEntry {
             output_tokens: entry.output_tokens,
             cache_read_tokens: entry.cache_read_tokens,
             cache_creation_tokens: entry.cache_creation_tokens,
+            cache_storage_token_hours: entry.cache_storage_token_hours,
             cost_usd: entry.cost_usd,
         }
     }
@@ -944,6 +961,7 @@ mod tests {
                 output_tokens: 10,
                 cache_read_tokens: 0,
                 cache_creation_tokens: 0,
+                cache_storage_token_hours: None,
                 cost_usd: None,
             }]),
         };
@@ -1254,7 +1272,10 @@ pub async fn complete_activity(
 }
 
 /// Check reported usage entries that need server-side cost computation against
-/// the llm_models catalog, returning a warning per unknown (provider, model).
+/// the llm_models catalog, returning a warning per unknown (provider, model)
+/// and per model that reports cache-storage token-hours without a catalog
+/// storage price (that component is recorded at 0 — no fallback exists for a
+/// time-based dimension).
 ///
 /// Read-only and best-effort: a lookup failure yields no warnings rather than
 /// failing the request — the orchestrator's recording step performs the same
@@ -1280,24 +1301,60 @@ async fn unknown_model_warnings(
         .batch_get_pricing(&to_price)
         .await
     {
-        Ok(pricing) => to_price
-            .iter()
-            .filter(|(provider, model)| !pricing.contains_key(&format!("{}/{}", provider, model)))
-            .map(|(provider, model)| {
+        Ok(pricing) => {
+            let mut warnings: Vec<String> = to_price
+                .iter()
+                .filter(|(provider, model)| {
+                    !pricing.contains_key(&format!("{}/{}", provider, model))
+                })
+                .map(|(provider, model)| {
+                    tracing::warn!(
+                        activity_id = %activity_id,
+                        provider = %provider,
+                        model = %model,
+                        "Unknown provider/model in reported usage; cost will be recorded as 0"
+                    );
+                    format!(
+                        "unknown model '{}/{}': not in the llm_models catalog; \
+                         its usage will be recorded with cost 0 — supply cost_usd \
+                         per entry or update the catalog",
+                        provider, model
+                    )
+                })
+                .collect();
+
+            let storage_unpriced: std::collections::BTreeSet<(String, String)> = usage
+                .iter()
+                .filter(|e| {
+                    e.cost_usd.is_none()
+                        && e.cache_storage_token_hours
+                            .is_some_and(|h| h > Decimal::ZERO)
+                        && pricing
+                            .get(&format!("{}/{}", e.provider, e.model))
+                            .is_some_and(|p| {
+                                p.cache_storage_price_per_million_token_hours.is_none()
+                            })
+                })
+                .map(|e| (e.provider.clone(), e.model.clone()))
+                .collect();
+
+            warnings.extend(storage_unpriced.iter().map(|(provider, model)| {
                 tracing::warn!(
                     activity_id = %activity_id,
                     provider = %provider,
                     model = %model,
-                    "Unknown provider/model in reported usage; cost will be recorded as 0"
+                    "Model has no cache-storage price; reported token-hours will cost 0"
                 );
                 format!(
-                    "unknown model '{}/{}': not in the llm_models catalog; \
-                     its usage will be recorded with cost 0 — supply cost_usd \
-                     per entry or update the catalog",
+                    "model '{}/{}' has no cache-storage price in the llm_models \
+                     catalog; reported cache_storage_token_hours will be recorded \
+                     with cost 0 — supply cost_usd per entry or update the catalog",
                     provider, model
                 )
-            })
-            .collect(),
+            }));
+
+            warnings
+        }
         Err(e) => {
             tracing::error!(
                 activity_id = %activity_id,

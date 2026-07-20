@@ -694,6 +694,22 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     )
     .await?;
 
+    // 3.5. Spawn recurring-schedule loop (env-gated; multiple instances are
+    // safe — due schedules are claimed with SKIP LOCKED and submissions are
+    // idempotent via unique_key)
+    let scheduler_handle = {
+        let pool = pool.clone();
+        let token = shutdown_token.clone();
+        tokio::spawn(async move {
+            kruxiaflow_core::run_scheduler(
+                pool,
+                kruxiaflow_core::SchedulerConfig::from_env(),
+                Some(token),
+            )
+            .await;
+        })
+    };
+
     // 4. Spawn API server with shutdown token
     let api_url = format!("http://{}:{}", cmd.bind, cmd.port);
     let (api_handle, _) =
@@ -857,6 +873,13 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         Ok(Ok(Err(e))) => tracing::warn!("Orchestrator error during shutdown: {}", e),
         Ok(Err(e)) => tracing::warn!("Orchestrator task error: {}", e),
         Err(_) => tracing::warn!("Orchestrator shutdown timeout, forcing stop"),
+    }
+
+    // Stop scheduler (exits via shutdown token)
+    match tokio::time::timeout(Duration::from_secs(5), scheduler_handle).await {
+        Ok(Ok(())) => tracing::info!("Scheduler stopped gracefully"),
+        Ok(Err(e)) => tracing::warn!("Scheduler task error: {}", e),
+        Err(_) => tracing::warn!("Scheduler shutdown timeout, forcing stop"),
     }
 
     // Stop MCP server (if running) — graceful with timeout, then abort

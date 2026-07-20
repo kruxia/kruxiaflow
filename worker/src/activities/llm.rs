@@ -1195,6 +1195,7 @@ mod tests {
                 output_price_per_million: dec!(15.00),
                 cached_input_price_per_million: Some(dec!(0.30)),
                 cache_write_price_per_million: None,
+                cache_storage_price_per_million_token_hours: None,
             },
         );
 
@@ -1206,6 +1207,7 @@ mod tests {
                 output_price_per_million: dec!(4.00),
                 cached_input_price_per_million: Some(dec!(0.08)),
                 cache_write_price_per_million: None,
+                cache_storage_price_per_million_token_hours: None,
             },
         );
 
@@ -1217,6 +1219,7 @@ mod tests {
                 output_price_per_million: dec!(0.00),
                 cached_input_price_per_million: None,
                 cache_write_price_per_million: None,
+                cache_storage_price_per_million_token_hours: None,
             },
         );
 

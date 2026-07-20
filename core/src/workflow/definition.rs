@@ -851,15 +851,7 @@ impl ActivitySettings {
             return None; // Max attempts reached
         }
 
-        let delay = match retry.strategy {
-            BackoffStrategy::Fixed => retry.base_seconds,
-            BackoffStrategy::Exponential => {
-                let exponential = retry.base_seconds as f64 * retry.factor.powi(attempt as i32 - 1);
-                exponential.min(retry.max_seconds as f64) as u64
-            }
-        };
-
-        Some(delay.min(retry.max_seconds))
+        Some(retry.backoff_seconds(attempt))
     }
 
     /// Check if activity should be retried
@@ -930,6 +922,23 @@ impl Default for RetryPolicy {
             factor: default_factor(),
             max_seconds: default_max_seconds(),
         }
+    }
+}
+
+impl RetryPolicy {
+    /// Backoff delay in seconds before the retry that follows the given
+    /// 1-indexed failed attempt. Pure formula — callers gate on `max_attempts`.
+    pub fn backoff_seconds(&self, attempt: u32) -> u64 {
+        let delay = match self.strategy {
+            BackoffStrategy::Fixed => self.base_seconds,
+            BackoffStrategy::Exponential => {
+                let exponential =
+                    self.base_seconds as f64 * self.factor.powi(attempt.saturating_sub(1) as i32);
+                exponential.min(self.max_seconds as f64) as u64
+            }
+        };
+
+        delay.min(self.max_seconds)
     }
 }
 

@@ -87,6 +87,11 @@ Using Ollama instead? Point `OLLAMA_BASE_URL` at your Ollama server (from
 Docker: `http://host.docker.internal:11434`) and use an `ollama/...` model id
 from `config/llm_models.yaml` — the whole pipeline runs locally.
 
+> **Image tags**: `kruxia/kruxiaflow:latest` always equals the newest release —
+> CI moves it only when a release is tagged, never for in-between `main`
+> builds. For production deployments, pin an explicit version
+> (e.g. `kruxia/kruxiaflow:0.7.0`) so upgrades happen on your schedule.
+
 ## Working from a checkout
 
 The quickstart file is the repo's root `docker-compose.yml`. In a checkout:

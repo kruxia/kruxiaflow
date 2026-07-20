@@ -19,6 +19,8 @@ pub struct ActivitySummary {
     pub workflow_id: Uuid,
     pub activity_key: String,
     pub iteration: Option<i32>,
+    /// Current attempt (1-indexed: retry_count + 1 at read time)
+    pub attempt: i32,
 }
 
 /// Activity Queue interface for scheduling and claiming activities
@@ -63,6 +65,19 @@ pub trait ActivityQueue: Send + Sync {
 
     /// Send heartbeat for long-running activity (extends timeout deadline)
     async fn heartbeat(&self, activity_id: Uuid, worker_id: &str) -> Result<()>;
+
+    /// Cancel a pending (not yet claimed) activity, marking it failed.
+    ///
+    /// Used by the orchestrator to withdraw a retry the queue has already
+    /// requeued when a post-failure check (e.g. budget exhaustion) determines
+    /// the retry must not run. Returns true if a pending row was cancelled;
+    /// false if there was nothing to cancel (already claimed or terminal).
+    async fn cancel_pending(
+        &self,
+        workflow_id: Uuid,
+        activity_key: &str,
+        iteration: Option<i32>,
+    ) -> Result<bool>;
 
     /// Reclaim stale running activities that have exceeded their timeout.
     ///

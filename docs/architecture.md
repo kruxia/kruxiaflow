@@ -1839,6 +1839,58 @@ Activities can be scheduled for future execution using delays or absolute timest
 
 **Delay Format**: Supports human-readable durations: `"5s"`, `"30m"`, `"2h"`, `"1d"`
 
+### Recurring Schedules
+
+A **schedule** is a first-class resource (`/api/v1/schedules`, table
+`workflow_schedules`) that submits a workflow definition on a cadence —
+standard 5-field crontab (optional IANA `timezone`, default UTC) or a fixed
+`interval_seconds`. The scheduler loop runs inside `serve` and the
+distributed `orchestrator` service (env-gated via
+`KRUXIAFLOW_SCHEDULER_ENABLED`, tick `KRUXIAFLOW_SCHEDULER_TICK_INTERVAL_MS`,
+batch `KRUXIAFLOW_SCHEDULER_BATCH_LIMIT`) and submits through
+`WorkflowService` in-process — recurrence carries no client credentials, so
+nothing can stale mid-chain and schedule death is impossible short of engine
+death.
+
+Semantics:
+- **Fire-once misfire policy**: `next_run_at` always advances to the next
+  occurrence strictly in the future; scheduler downtime collapses any backlog
+  into at most one catch-up run. Interval schedules keep their phase.
+- **Idempotent runs**: each occurrence is submitted with
+  `unique_key = schedule:<name>:<occurrence epoch>` — multiple engine
+  instances (SKIP LOCKED claims) or a crash between submit and advance cannot
+  duplicate a run.
+- **Overlap policy**: `skip` (default) suppresses submission while the
+  previous run is non-terminal; `allow` always submits.
+- Re-enabling a disabled schedule recomputes `next_run_at` (a stale past-due
+  time does not fire immediately).
+
+### Activity Retry (Single Authority)
+
+The **queue is the sole retry decision-maker** for failed activities. On
+`POST /activities/{id}/fail`, `PostgresQueue::fail` decides
+retry-vs-terminal from its own columns (`retry_count` vs `max_retries`,
+where `retry.max_attempts` means total attempts) and requeues with real
+backoff: `scheduled_for = NOW() + backoff` computed from the definition's
+`retry` policy (default shape when absent: exponential, base 2s, factor 2,
+cap 300s). The decision is published in the `ActivityFailed` payload as
+`will_retry`, and the orchestrator **follows** it — bookkeeping only on
+retry; on terminal failure the activity fails in workflow state, skips
+propagate, and `WorkflowFailed` publishes within one poll interval with no
+restart required. Orchestrator-internal `ActivityFailed` publishers (poison
+events, stale-activity timeout, signal expiry, budget aborts) are terminal
+by construction (`will_retry: false`; absent also means false). A retry that
+would exceed an LLM budget is withdrawn via `ActivityQueue::cancel_pending`
+and fails permanently, preserving budget enforcement on the retry path.
+
+Event dedup is **attempt-aware**: the `workflow_events` unique index includes
+the payload's `attempt`, so each attempt's `ActivityFailed` (and retry
+`ActivityScheduled`) is a distinct event while replays of the same attempt
+still dedupe. Event types that carry no attempt keep one-slot idempotency
+(`NULLS NOT DISTINCT`). Without this, the first retryable failure would
+occupy the activity's only `ActivityFailed` slot and the terminal failure
+event would be silently dropped — the workflow could never fail live.
+
 ### Workflow State Management
 
 **Materialized State Approach**: Current workflow state is stored in `workflows.state_data` JSONB column for O(1) access:

@@ -315,7 +315,8 @@ Authorization: Bearer <token>
       "status": "running",
       "definition_name": "payment_processing",
       "created_at": "2025-11-06T10:00:00Z",
-      "updated_at": "2025-11-06T10:00:05Z"
+      "updated_at": "2025-11-06T10:00:05Z",
+      "error_message": null
     }
   ],
   "total": 150,
@@ -324,6 +325,10 @@ Authorization: Bearer <token>
   "offset": 0
 }
 ```
+
+`error_message` carries a failed activity's error text (dead-letter
+visibility): `GET /api/v1/workflows?definition_name=X&status=failed` lists
+dead-letters with their errors, no SQL required.
 
 ### Get Workflow
 
@@ -345,15 +350,142 @@ Authorization: Bearer <token>
       "activity_key": "validate_payment",
       "status": "completed",
       "outputs": {"valid": true},
+      "error": null,
       "started_at": "2025-11-06T10:00:00Z",
       "completed_at": "2025-11-06T10:00:01Z"
     }
   ],
+  "error_message": null,
   "state_data": {"custom_field": "value"}
 }
 ```
 
 **Activity Status Values**: `not_scheduled`, `pending`, `running`, `completed`, `failed`
+
+Each activity's `error` holds the message from its most recent failure; the
+workflow-level `error_message` surfaces a failed activity's error directly.
+
+---
+
+## Recurring Schedules
+
+A schedule submits a workflow definition on a cadence, server-side — no
+client credentials ride the recurrence. Runs are idempotent
+(`unique_key = schedule:<name>:<occurrence epoch>`); missed occurrences
+during downtime collapse into at most one catch-up run; a stale past-due
+schedule does not fire immediately on re-enable.
+
+### Create Schedule
+
+```http
+POST /api/v1/schedules
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+**Request Body**:
+```json
+{
+  "name": "cache-flush-sweep",
+  "definition_name": "cache_flush_sweep",
+  "input": {},
+  "interval_seconds": 120,
+  "overlap_policy": "skip"
+}
+```
+
+- `name` - Required, unique
+- `definition_name` - Required; must exist (`definition_version` pins a
+  version, default: latest at fire time)
+- Exactly one of `cron` / `interval_seconds` - Required. `cron` is standard
+  5-field crontab (minute granularity) or 6-field with leading seconds;
+  `timezone` (IANA name, default UTC) applies to cron only
+- `overlap_policy` - `skip` (default: don't submit while the previous run is
+  still active) or `allow`
+- `enabled` - Default true
+
+**Response** (201 Created):
+```json
+{
+  "id": "0198c0de-1234-7abc-9def-0123456789ab",
+  "name": "cache-flush-sweep",
+  "definition_name": "cache_flush_sweep",
+  "definition_version": null,
+  "input": {},
+  "cron": null,
+  "timezone": null,
+  "interval_seconds": 120,
+  "overlap_policy": "skip",
+  "enabled": true,
+  "next_run_at": "2025-11-06T10:02:00Z",
+  "last_run_at": null,
+  "last_workflow_id": null,
+  "created_by": "my_client_id",
+  "created_at": "2025-11-06T10:00:00Z",
+  "updated_at": "2025-11-06T10:00:00Z"
+}
+```
+
+**Errors**: 400 (invalid cadence, unknown definition), 409 (name exists)
+
+### List Schedules
+
+```http
+GET /api/v1/schedules
+Authorization: Bearer <token>
+```
+
+**Response** (200 OK): `{"schedules": [ ...schedule objects... ], "count": 1}`
+
+### Get Schedule
+
+```http
+GET /api/v1/schedules/:schedule_id
+Authorization: Bearer <token>
+```
+
+### Update Schedule
+
+```http
+PATCH /api/v1/schedules/:schedule_id
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+PATCH semantics — absent fields are unchanged. Providing `cron` or
+`interval_seconds` replaces the cadence wholesale and recomputes
+`next_run_at`; re-enabling also recomputes it.
+
+**Request Body** (any subset):
+```json
+{
+  "enabled": false,
+  "input": {"mode": "full"},
+  "cron": "0 9 * * 1",
+  "timezone": "America/Chicago",
+  "interval_seconds": 300,
+  "overlap_policy": "allow"
+}
+```
+
+**Response** (200 OK): the updated schedule object.
+
+### Delete Schedule
+
+```http
+DELETE /api/v1/schedules/:schedule_id
+Authorization: Bearer <token>
+```
+
+**Response** (204 No Content)
+
+**Scheduler configuration** (environment):
+- `KRUXIAFLOW_SCHEDULER_ENABLED` - default `true`
+- `KRUXIAFLOW_SCHEDULER_TICK_INTERVAL_MS` - default `1000`
+- `KRUXIAFLOW_SCHEDULER_BATCH_LIMIT` - default `100`
+
+The loop runs inside `kruxiaflow serve` and `kruxiaflow orchestrator`;
+multiple instances are safe (SKIP LOCKED claims + idempotent unique keys).
 
 ---
 
@@ -749,6 +881,7 @@ Content-Type: application/json
       "output_tokens": 512,
       "cache_read_tokens": 9800,
       "cache_creation_tokens": 0,
+      "cache_storage_token_hours": null,
       "cost_usd": null
     }
   ]
@@ -770,6 +903,12 @@ Content-Type: application/json
   - `cache_creation_tokens` - Tokens written to cache (billed at the catalog's
     `cache_write_price_per_million` — e.g., 1.25x input for Anthropic — falling
     back to the input price for models without one)
+  - `cache_storage_token_hours` - Optional; context-cache storage consumed, in
+    token-hours (tokens held x hours held, fractional — e.g., 100k tokens held
+    for 120s = 3.33). Billed at the catalog's
+    `cache_storage_price_per_million_token_hours` (e.g., Gemini explicit
+    caching); a model without a storage price records this component at 0 and
+    returns a warning — there is no fallback price for a time-based dimension
   - `cost_usd` - Optional explicit cost for this call; overrides server-side
     computation
 

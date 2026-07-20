@@ -18,6 +18,12 @@ pub struct ModelPricing {
     /// serde default keeps older serialized pricing maps deserializable.
     #[serde(default)]
     pub cache_write_price_per_million: Option<Decimal>,
+    /// Price for context-cache STORAGE per million token-hours (e.g., Gemini
+    /// explicit caching bills storage for the cache's lifetime). None means no
+    /// storage charge is modeled — reported token-hours cost 0 (no fallback).
+    /// serde default keeps older serialized pricing maps deserializable.
+    #[serde(default)]
+    pub cache_storage_price_per_million_token_hours: Option<Decimal>,
 }
 
 impl CostCalculator {
@@ -78,7 +84,8 @@ impl CostCalculator {
                 input_price_per_million,
                 output_price_per_million,
                 cached_input_price_per_million,
-                cache_write_price_per_million
+                cache_write_price_per_million,
+                cache_storage_price_per_million_token_hours
             FROM llm_models
             WHERE provider = $1 AND name = $2
             "#,
@@ -121,7 +128,8 @@ impl CostCalculator {
                 input_price_per_million,
                 output_price_per_million,
                 cached_input_price_per_million,
-                cache_write_price_per_million
+                cache_write_price_per_million,
+                cache_storage_price_per_million_token_hours
             FROM llm_models
             WHERE provider = $1 AND name = $2
             "#,
@@ -163,7 +171,8 @@ impl CostCalculator {
                 input_price_per_million,
                 output_price_per_million,
                 cached_input_price_per_million,
-                cache_write_price_per_million
+                cache_write_price_per_million,
+                cache_storage_price_per_million_token_hours
             FROM llm_models
             WHERE (provider, name) IN (
                 SELECT UNNEST($1::text[]), UNNEST($2::text[])
@@ -186,6 +195,8 @@ impl CostCalculator {
                     output_price_per_million: row.output_price_per_million,
                     cached_input_price_per_million: row.cached_input_price_per_million,
                     cache_write_price_per_million: row.cache_write_price_per_million,
+                    cache_storage_price_per_million_token_hours: row
+                        .cache_storage_price_per_million_token_hours,
                 },
             );
         }
@@ -200,6 +211,10 @@ impl CostCalculator {
     /// the catalog's cache-write price when present (e.g., 1.25x input for
     /// Anthropic's 5-minute TTL), falling back to the input-token price when
     /// the catalog has no cache-write price for the model.
+    /// `cache_storage_token_hours` are billed at the catalog's cache-storage
+    /// price (e.g., Gemini explicit-caching storage); with no storage price the
+    /// component is 0 — callers surface a warning (a time-based dimension has
+    /// no sensible fallback price).
     pub fn calculate_usage_entry_cost(
         pricing: &ModelPricing,
         entry: &crate::cost::UsageEntry,
@@ -215,7 +230,14 @@ impl CostCalculator {
             .unwrap_or(pricing.input_price_per_million);
         let cache_creation_cost = Decimal::from(entry.cache_creation_tokens) * cache_write_price
             / Decimal::from(1_000_000);
-        base + cache_creation_cost
+        let cache_storage_cost = match (
+            entry.cache_storage_token_hours,
+            pricing.cache_storage_price_per_million_token_hours,
+        ) {
+            (Some(token_hours), Some(price)) => token_hours * price / Decimal::from(1_000_000),
+            _ => Decimal::ZERO,
+        };
+        base + cache_creation_cost + cache_storage_cost
     }
 
     /// Calculate cost from pricing data
@@ -323,6 +345,7 @@ mod tests {
             output_price_per_million: dec!(15.00),
             cached_input_price_per_million: None,
             cache_write_price_per_million: None,
+            cache_storage_price_per_million_token_hours: None,
         };
 
         // 1000 prompt tokens, 500 completion tokens
@@ -340,6 +363,7 @@ mod tests {
             output_price_per_million: dec!(15.00),
             cached_input_price_per_million: Some(dec!(0.30)),
             cache_write_price_per_million: None,
+            cache_storage_price_per_million_token_hours: None,
         };
 
         // 1000 prompt tokens (600 cached), 500 completion tokens
@@ -357,6 +381,7 @@ mod tests {
             output_price_per_million: dec!(15.00),
             cached_input_price_per_million: None,
             cache_write_price_per_million: None,
+            cache_storage_price_per_million_token_hours: None,
         };
 
         let cost = CostCalculator::calculate_cost_from_pricing(&pricing, 0, 0, None);
@@ -370,6 +395,7 @@ mod tests {
             output_price_per_million: dec!(15.00),
             cached_input_price_per_million: None,
             cache_write_price_per_million: None,
+            cache_storage_price_per_million_token_hours: None,
         };
 
         // 100,000 prompt tokens, 50,000 completion tokens
@@ -387,6 +413,7 @@ mod tests {
             output_price_per_million: dec!(15.00),
             cached_input_price_per_million: Some(dec!(0.30)),
             cache_write_price_per_million: None,
+            cache_storage_price_per_million_token_hours: None,
         };
 
         // All 1000 prompt tokens are cached
@@ -410,6 +437,7 @@ mod tests {
             output_price_per_million: dec!(15.00),
             cached_input_price_per_million: Some(dec!(0.30)),
             cache_write_price_per_million: None,
+            cache_storage_price_per_million_token_hours: None,
         };
 
         let json = serde_json::to_value(&pricing).expect("ModelPricing should serialize to JSON");
@@ -429,6 +457,7 @@ mod tests {
             output_price_per_million: dec!(15.00),
             cached_input_price_per_million: Some(dec!(0.30)),
             cache_write_price_per_million: None,
+            cache_storage_price_per_million_token_hours: None,
         };
 
         let json = serde_json::to_string(&pricing).expect("Should serialize");
@@ -461,6 +490,7 @@ mod tests {
                 output_price_per_million: dec!(15.00),
                 cached_input_price_per_million: Some(dec!(0.30)),
                 cache_write_price_per_million: None,
+                cache_storage_price_per_million_token_hours: None,
             },
         );
         pricing_map.insert(
@@ -470,6 +500,7 @@ mod tests {
                 output_price_per_million: dec!(4.00),
                 cached_input_price_per_million: Some(dec!(0.08)),
                 cache_write_price_per_million: None,
+                cache_storage_price_per_million_token_hours: None,
             },
         );
 
@@ -506,6 +537,7 @@ mod tests {
                 output_price_per_million: dec!(15.00),
                 cached_input_price_per_million: Some(dec!(0.30)),
                 cache_write_price_per_million: None,
+                cache_storage_price_per_million_token_hours: None,
             },
         );
 
@@ -536,6 +568,7 @@ mod tests {
                 output_price_per_million: dec!(15.00),
                 cached_input_price_per_million: Some(dec!(0.30)),
                 cache_write_price_per_million: None,
+                cache_storage_price_per_million_token_hours: None,
             },
         );
         pricing_map.insert(
@@ -545,6 +578,7 @@ mod tests {
                 output_price_per_million: dec!(0.00),
                 cached_input_price_per_million: None,
                 cache_write_price_per_million: None,
+                cache_storage_price_per_million_token_hours: None,
             },
         );
 

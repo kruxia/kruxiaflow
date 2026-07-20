@@ -25,10 +25,12 @@ impl PostgresQueue {
     }
 
     fn extract_max_retries(&self, settings: &Option<ActivitySettings>) -> i32 {
+        // max_attempts means total attempts; the max_retries column counts the
+        // retries allowed after the first attempt.
         settings
             .as_ref()
             .and_then(|s| s.retry.as_ref())
-            .map(|rc| rc.max_attempts as i32)
+            .map(|rc| rc.max_attempts.saturating_sub(1) as i32)
             .unwrap_or(self.config.default_max_retries as i32)
     }
 }
@@ -230,7 +232,7 @@ impl ActivityQueue for PostgresQueue {
     async fn get_activity_summary(&self, activity_id: Uuid) -> Result<ActivitySummary> {
         let details = sqlx::query!(
             r#"
-            SELECT workflow_id, activity_key, iteration
+            SELECT workflow_id, activity_key, iteration, retry_count
             FROM activity_queue
             WHERE id = $1
             "#,
@@ -244,6 +246,7 @@ impl ActivityQueue for PostgresQueue {
             workflow_id: details.workflow_id,
             activity_key: details.activity_key,
             iteration: details.iteration,
+            attempt: details.retry_count + 1,
         })
     }
 
@@ -468,19 +471,31 @@ impl ActivityQueue for PostgresQueue {
         let will_retry = retryable && (activity.retry_count < activity.max_retries);
 
         if will_retry {
-            // Requeue for retry (immediate, but behind other pending work)
-            // TODO(post-MVP): Implement exponential backoff based on retry_count and activity settings
+            // Requeue with backoff. The retry policy's backoff shape lives only
+            // in the settings JSONB (max_attempts was projected into max_retries
+            // at schedule time); activities without a retry policy get the
+            // default shape (exponential, base 2s, factor 2, cap 300s).
+            let retry_policy = activity
+                .settings
+                .as_ref()
+                .and_then(|v| serde_json::from_value::<ActivitySettings>(v.clone()).ok())
+                .and_then(|s| s.retry)
+                .unwrap_or_default();
+            let failed_attempt = (activity.retry_count + 1).max(1) as u32;
+            let backoff_seconds = retry_policy.backoff_seconds(failed_attempt);
+
             sqlx::query!(
                 r#"
                 UPDATE activity_queue
                 SET status = 'pending'::activity_status,
                     claimed_by = NULL,
                     claimed_at = NULL,
-                    scheduled_for = NOW(),
+                    scheduled_for = NOW() + make_interval(secs => $2),
                     retry_count = retry_count + 1
                 WHERE id = $1
                 "#,
-                activity_id
+                activity_id,
+                backoff_seconds as f64
             )
             .execute(&mut *tx)
             .await?;
@@ -490,7 +505,8 @@ impl ActivityQueue for PostgresQueue {
                 workflow_id = %activity.workflow_id,
                 retry_count = activity.retry_count + 1,
                 max_retries = activity.max_retries,
-                "Activity requeued for retry"
+                backoff_seconds = backoff_seconds,
+                "Activity requeued for retry with backoff"
             );
         } else {
             // Permanent failure - mark as failed (soft-delete)
@@ -519,6 +535,42 @@ impl ActivityQueue for PostgresQueue {
         tx.commit().await?;
 
         Ok(will_retry)
+    }
+
+    async fn cancel_pending(
+        &self,
+        workflow_id: Uuid,
+        activity_key: &str,
+        iteration: Option<i32>,
+    ) -> Result<bool> {
+        let result = sqlx::query!(
+            r#"
+            UPDATE activity_queue
+            SET status = 'failed'::activity_status,
+                completed_at = NOW()
+            WHERE workflow_id = $1
+              AND activity_key = $2
+              AND iteration IS NOT DISTINCT FROM $3
+              AND status = 'pending'::activity_status
+            "#,
+            workflow_id,
+            activity_key,
+            iteration
+        )
+        .execute(&self.pool)
+        .await?;
+
+        let cancelled = result.rows_affected() > 0;
+        if cancelled {
+            debug!(
+                workflow_id = %workflow_id,
+                activity_key = %activity_key,
+                iteration = ?iteration,
+                "Pending activity cancelled"
+            );
+        }
+
+        Ok(cancelled)
     }
 
     async fn reclaim_stale_activities(&self, limit: i64) -> Result<Vec<StaleActivityInfo>> {

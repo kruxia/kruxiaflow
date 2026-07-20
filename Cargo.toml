@@ -47,6 +47,8 @@ sqlx = { version = "0.8", features = [
 # UUID and time
 uuid = { version = "1.10", features = ["v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+chrono-tz = "0.10"
+cron = "0.15"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

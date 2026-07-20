@@ -259,12 +259,18 @@ impl ActivityWorkerService {
         // Service-layer responsibility: Publish ActivityFailed event via EventSource
         // A failed activity may still have spent money before erroring; carry the
         // reported cost/usage so the orchestrator records it under this attempt.
+        // `attempt` (the 1-indexed attempt that just failed, read before
+        // queue.fail incremented retry_count) makes each attempt's failure
+        // event distinct under the per-attempt event dedup — without it, the
+        // terminal failure would be deduped against the first retryable one
+        // and the workflow would hang.
         let mut event_payload = serde_json::json!({
             "activity_key": activity.activity_key,
             "error_code": error_code,
             "error_message": error_message,
             "retryable": retryable,
             "will_retry": will_retry,
+            "attempt": activity.attempt,
             "cost_usd": cost_usd
         });
         if let Some(usage) = &usage

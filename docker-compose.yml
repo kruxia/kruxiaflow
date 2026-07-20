@@ -179,6 +179,9 @@ services:
       - no-new-privileges:true
 
   kruxiaflow:
+    # :latest always equals the newest release (CI moves it only on release
+    # tags, never on main builds). For production, pin a version instead,
+    # e.g. kruxia/kruxiaflow:0.7.0 — see https://hub.docker.com/r/kruxia/kruxiaflow/tags
     image: kruxia/kruxiaflow:latest
     container_name: kruxiaflow-server
     depends_on:
