@@ -12,6 +12,8 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -31,6 +33,8 @@ jobs:
   fmt:
     name: Format
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -48,6 +52,11 @@ jobs:
     # fast lint checks
     needs: [clippy, fmt]
     runs-on: ubuntu-latest
+    # id-token enables the Codecov OIDC upload (also requires the same grant
+    # on the caller job — reusable workflows only get what the caller allows)
+    permissions:
+      id-token: write
+      contents: read
     services:
       postgres:
         image: postgres:17-bookworm
@@ -99,8 +108,13 @@ jobs:
           DATABASE_URL: postgres://kruxiaflow:kruxiaflow_test@localhost:5432/kruxiaflow_test
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           files: coverage/lcov.info
-          token: ${{ secrets.CODECOV_TOKEN }}
+          # OIDC instead of a CODECOV_TOKEN secret: nothing to rotate. Needs
+          # id-token: write here AND on the caller job (main-ci.yml `rust:`),
+          # plus the Codecov GitHub App installed on the repo.
+          use_oidc: true
+          # Flip to true once the first upload succeeds, so upload regressions
+          # are visible instead of silently green.
           fail_ci_if_error: false

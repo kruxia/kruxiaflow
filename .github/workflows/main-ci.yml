@@ -43,6 +43,11 @@ jobs:
     if: github.ref_type == 'tag' || !startsWith(github.event.head_commit.message, 'release:')
     uses: ./.github/workflows/rust-ci.yml
     secrets: inherit
+    # id-token: the Codecov OIDC upload in the reusable workflow's test job
+    # can only use permissions this caller grants
+    permissions:
+      id-token: write
+      contents: read
 
   # ---- tags: release pipeline -----------------------------------------------
 
