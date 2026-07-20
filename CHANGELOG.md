@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-07-20
+
 ### Fixed
 
 - **Event delivery could silently drop events under concurrent load — the
