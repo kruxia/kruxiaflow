@@ -113,6 +113,17 @@ pub fn protected_routes() -> Router<AppState> {
             "/api/v1/workflows/:workflow_id/signal",
             post(handlers::signal_activity),
         )
+        // Recurring Schedules
+        .route(
+            "/api/v1/schedules",
+            post(handlers::create_schedule).get(handlers::list_schedules),
+        )
+        .route(
+            "/api/v1/schedules/:schedule_id",
+            get(handlers::get_schedule)
+                .patch(handlers::update_schedule)
+                .delete(handlers::delete_schedule),
+        )
         // Workflow Cost Tracking
         .route(
             "/api/v1/workflows/:workflow_id/cost",

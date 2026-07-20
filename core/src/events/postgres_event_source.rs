@@ -17,7 +17,12 @@ impl PostgresEventSource {
 #[async_trait]
 impl EventSource for PostgresEventSource {
     /// Publish a workflow event to the event stream
-    /// - Idempotent via UNIQUE(workflow_id, event_type, activity_key)
+    /// - Idempotent via the workflow_events_dedup_idx unique index
+    ///   (workflow_id, event_type, activity_key, iteration, payload->>'attempt'):
+    ///   per-attempt publishers (worker failures, retry scheduling, timeout
+    ///   failures) set 'attempt' in the payload so each attempt's events are
+    ///   distinct; every other event type carries no attempt and keeps
+    ///   one-slot idempotency (NULLS NOT DISTINCT)
     /// - Database auto-generates id (UUIDv7) and timestamp
     #[tracing::instrument(skip(self), level = "debug")]
     async fn publish(&self, event: NewWorkflowEvent) -> Result<()> {
@@ -25,7 +30,7 @@ impl EventSource for PostgresEventSource {
             r#"
             INSERT INTO workflow_events (workflow_id, event_type, activity_key, payload, iteration)
             VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (workflow_id, event_type, activity_key, iteration) DO NOTHING
+            ON CONFLICT (workflow_id, event_type, activity_key, iteration, ((payload->>'attempt'))) DO NOTHING
             "#,
             event.workflow_id,
             event.event_type as WorkflowEventType,

@@ -9,6 +9,9 @@ use crate::handlers::llm_catalog::{
     ModelResponse, ModelSearchCriterion, ModelSearchRequest, ModelSearchResponse, ProviderResponse,
 };
 use crate::handlers::oauth::{GrantType, TokenRequest, TokenResponse};
+use crate::handlers::schedules::{
+    CreateScheduleRequest, ListSchedulesResponse, ScheduleResponse, UpdateScheduleRequest,
+};
 use crate::handlers::streaming::{
     PublishResponse, StreamCompletePayload, StreamErrorPayload, StreamTokenPayload,
     SubscriberCountResponse,
@@ -71,6 +74,13 @@ use utoipa::OpenApi;
         crate::handlers::workflows::get_workflow,
         crate::handlers::workflows::list_workflows,
 
+        // Recurring Schedules
+        crate::handlers::schedules::create_schedule,
+        crate::handlers::schedules::list_schedules,
+        crate::handlers::schedules::get_schedule,
+        crate::handlers::schedules::update_schedule,
+        crate::handlers::schedules::delete_schedule,
+
         // Output Retrieval APIs
         crate::handlers::outputs::get_activity_output,
         crate::handlers::outputs::get_workflow_output,
@@ -132,6 +142,12 @@ use utoipa::OpenApi;
             ActivityState,
             ListWorkflowsResponse,
             WorkflowSummary,
+
+            // Recurring Schedule schemas
+            CreateScheduleRequest,
+            UpdateScheduleRequest,
+            ScheduleResponse,
+            ListSchedulesResponse,
 
             // Output Retrieval schemas
             GetActivityOutputResponse,

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                SELECT id, definition_name, created_at\n                FROM workflows\n                WHERE unique_key = $1\n                ",
+  "query": "\n                SELECT id, definition_name, created_at\n                FROM workflows\n                WHERE unique_key = $1 AND status <> 'failed'\n                ",
   "describe": {
     "columns": [
       {
@@ -30,5 +30,5 @@
       false
     ]
   },
-  "hash": "9c58c62d67a299b6e510d561e768561779747aade8186af1258b8d33a8a93bfb"
+  "hash": "7bce391a631f145c0ba08200231319293ddfe60b2e2ce70e37ec4b23877367bf"
 }

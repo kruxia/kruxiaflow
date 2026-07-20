@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO workflow_events (workflow_id, event_type, activity_key, payload, iteration)\n            VALUES ($1, $2, $3, $4, $5)\n            ON CONFLICT (workflow_id, event_type, activity_key, iteration) DO NOTHING\n            ",
+  "query": "\n            INSERT INTO workflow_events (workflow_id, event_type, activity_key, payload, iteration)\n            VALUES ($1, $2, $3, $4, $5)\n            ON CONFLICT (workflow_id, event_type, activity_key, iteration, ((payload->>'attempt'))) DO NOTHING\n            ",
   "describe": {
     "columns": [],
     "parameters": {
@@ -31,5 +31,5 @@
     },
     "nullable": []
   },
-  "hash": "2b190f918ea9cb1385f757638aef433ddaa4c3c59b739aecd024fdb4565bae66"
+  "hash": "81d83d9419c5f01349c3f1f3a019fdce4bcb15d69935d91ebd3f8e05e546b5e3"
 }

@@ -160,9 +160,14 @@ Anthropic models in the shipped catalog), falling back to the input-token
 price for models without a cache-write price.
 
 Google's explicit Gemini caching bills cache **storage** per token-hour rather
-than a write premium; the catalog does not model time-based storage charges
-yet. Report that spend exactly via a per-entry explicit `cost_usd` or the
-completion's lump `cost_usd` (the remainder line item).
+than a write premium. External `usage` entries report it via the optional
+`cache_storage_token_hours` field (tokens held × hours held, fractional),
+billed at the model's `cache_storage_price_per_million_token_hours` (seeded
+for Gemini models: $1.00/1M token-hours for Flash tiers, $4.50 for Pro).
+A model without a storage price records that component at 0 with a warning —
+there is no fallback price for a time-based dimension. Reporting the spend
+via a per-entry explicit `cost_usd` or the completion's lump `cost_usd`
+remains fully supported.
 
 **Pricing source**: PostgreSQL `llm_models` table, loaded via `kruxiaflow seed-llm` command.
 

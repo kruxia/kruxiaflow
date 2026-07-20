@@ -13,9 +13,14 @@
 # cache_creation_tokens. Anthropic charges 1.25x input for cache writes
 # (5-minute TTL). Models without this field bill cache writes at the
 # input-token price. OpenAI has no separate cache-write charge. Google has
-# no write premium either, but explicit Gemini caching bills STORAGE per
-# token-hour — not modeled by the catalog yet; workers report it via an
-# explicit per-entry cost_usd or the completion's lump cost_usd.
+# no write premium either.
+#
+# NOTE (cache_storage_price_per_million_token_hours): billed for reported
+# cache_storage_token_hours (explicit Gemini context caching bills STORAGE
+# per token-hour for the cache's lifetime; verified 2026-07-19 from
+# https://ai.google.dev/gemini-api/docs/pricing). Models without this field
+# record reported token-hours at cost 0 with a warning — there is no
+# sensible fallback price for a time-based dimension.
 
 providers:
   # OpenAI Provider
@@ -343,6 +348,7 @@ providers:
         input_price_per_million: 1.50
         output_price_per_million: 9.00
         cached_input_price_per_million: 0.15
+        cache_storage_price_per_million_token_hours: 1.00
         supports_completion: true
         context_window: 1000000
         max_output_tokens: 65536
@@ -352,6 +358,7 @@ providers:
         input_price_per_million: 2.00
         output_price_per_million: 12.00
         cached_input_price_per_million: 0.20
+        cache_storage_price_per_million_token_hours: 4.50
         supports_completion: true
         context_window: 1000000
         max_output_tokens: 65536
@@ -361,6 +368,7 @@ providers:
         display_name: Gemini 3.1 Flash-Lite
         input_price_per_million: 0.25
         output_price_per_million: 1.50
+        cache_storage_price_per_million_token_hours: 1.00
         supports_completion: true
         context_window: 1000000
         max_output_tokens: 65536
@@ -371,6 +379,7 @@ providers:
         input_price_per_million: 1.25
         output_price_per_million: 10.00
         cached_input_price_per_million: 0.125
+        cache_storage_price_per_million_token_hours: 4.50
         supports_completion: true
         context_window: 1000000
         max_output_tokens: 65536
@@ -381,6 +390,7 @@ providers:
         input_price_per_million: 0.30
         output_price_per_million: 2.50
         cached_input_price_per_million: 0.03
+        cache_storage_price_per_million_token_hours: 1.00
         supports_completion: true
         context_window: 1000000
         max_output_tokens: 65536
@@ -390,6 +400,7 @@ providers:
         input_price_per_million: 0.10
         output_price_per_million: 0.40
         cached_input_price_per_million: 0.01
+        cache_storage_price_per_million_token_hours: 1.00
         supports_completion: true
         context_window: 1000000
         max_output_tokens: 65536

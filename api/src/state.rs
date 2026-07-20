@@ -268,6 +268,7 @@ pub mod tests {
                 workflow_id: Uuid::now_v7(),
                 activity_key: "mock_activity".to_string(),
                 iteration: None,
+                attempt: 1,
             })
         }
 
@@ -296,6 +297,15 @@ pub mod tests {
             _worker_id: &str,
         ) -> kruxiaflow_core::queue::Result<()> {
             Ok(())
+        }
+
+        async fn cancel_pending(
+            &self,
+            _workflow_id: Uuid,
+            _activity_key: &str,
+            _iteration: Option<i32>,
+        ) -> kruxiaflow_core::queue::Result<bool> {
+            Ok(false)
         }
 
         async fn reclaim_stale_activities(

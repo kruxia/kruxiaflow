@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                        UPDATE workflow_schedules\n                        SET next_run_at = $2, last_run_at = $3, last_workflow_id = $4\n                        WHERE id = $1\n                        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a73f4c2e056ccc301379606808100f5d8e6b3731ce8cdb4ff5c16f63cd0e76b3"
+}

@@ -287,9 +287,9 @@ async fn test_max_retries_exhaustion(pool: PgPool) {
     let queue = PostgresQueue::new(pool.clone(), config.clone());
     let workflow_id = Uuid::now_v7();
 
-    // Schedule activity with max_attempts = 2
-    // This allows: initial claim (retry_count 0) + 1 retry (retry_count 1) = 2 total claims
-    // Then retry_count becomes 2, and 2 < 2 is false, so no more claims
+    // Schedule activity with max_attempts = 2 (total attempts): initial claim
+    // (retry_count 0) + 1 retry (retry_count 1) = 2 total claims, then
+    // retry_count=1 == max_retries=1 blocks further claims
     let activity = Activity {
         key: "test_activity".to_string(),
         worker: "test".to_string(),
@@ -298,7 +298,7 @@ async fn test_max_retries_exhaustion(pool: PgPool) {
         settings: Some(ActivitySettings {
             timeout_seconds: Some(1), // Very short timeout
             retry: Some(RetryPolicy {
-                max_attempts: 2, // 2 allows: initial + 1 retry = 2 claims, then retry_count=2 blocks further claims
+                max_attempts: 2, // 2 total attempts = initial + 1 retry
                 strategy: BackoffStrategy::Fixed,
                 base_seconds: 2,
                 factor: 2.0,
@@ -324,9 +324,9 @@ async fn test_max_retries_exhaustion(pool: PgPool) {
         .await
         .expect("Failed to schedule activity");
 
-    // Claim and timeout: initial claim + max_retries attempts
-    // With max_retries=2, we should be able to claim 3 times total (initial + 2 retries)
-    for i in 0..3 {
+    // Claim and timeout: max_attempts=2 means 2 total claims (initial + 1
+    // timeout-reclaim)
+    for i in 0..2 {
         let worker_id = format!("worker_test_{:02}", i);
         let claimed = queue
             .claim_next(&worker_id, "test", 1)

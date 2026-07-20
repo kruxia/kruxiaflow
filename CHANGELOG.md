@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **First-class recurring schedules**: a schedule is a new resource that
+  submits a workflow definition on a cadence — standard 5-field crontab
+  (or 6-field with leading seconds) with IANA timezone support, or a fixed
+  interval in seconds. CRUD at `POST/GET /api/v1/schedules` and
+  `GET/PATCH/DELETE /api/v1/schedules/{id}`. The scheduler loop runs inside
+  `serve` and the distributed `orchestrator` command (env-gated:
+  `KRUXIAFLOW_SCHEDULER_ENABLED`, `KRUXIAFLOW_SCHEDULER_TICK_INTERVAL_MS`,
+  `KRUXIAFLOW_SCHEDULER_BATCH_LIMIT`) and submits server-side — no client
+  credentials ride the recurrence. Fire-once misfire policy (downtime
+  collapses into at most one catch-up run), `overlap_policy: skip|allow`,
+  and idempotent runs via `unique_key = schedule:<name>:<occurrence epoch>`;
+  multiple engine instances are safe (SKIP LOCKED + unique_key).
+- **Gemini cache-storage cost modeling**: new nullable
+  `llm_models.cache_storage_price_per_million_token_hours` catalog column
+  (seeded for Google Gemini models from the published storage prices),
+  optional `cache_storage_token_hours` field on usage entries
+  (completion/fail; additive under the worker-API contract-freeze
+  discipline), priced server-side alongside cache writes. Token-hours
+  reported for a model with no storage price record that component at 0
+  with a warning. Exposed in `POST /api/v1/llm/models/search` and the
+  `kruxiaflow-worker` SDK (`UsageEntry::cache_storage_token_hours`).
+- **Dead-letter visibility over the API**: `GET /api/v1/workflows` rows and
+  `GET /api/v1/workflows/{id}` now carry `error_message` (a failed
+  activity's error), and each activity in the detail response exposes its
+  `error`. Combined with the existing `status`/`definition_name` filters,
+  failed workflows are fully diagnosable without SQL.
+- **Worker SDK `Worker::run_once()`**: poll once, execute whatever was
+  claimed to completion, and return the count — for smoke tests and
+  `--once`-style worker binaries.
 - **Cost CLI (`kruxiaflow cost`)**: terminal cost reporting against the REST
   API — `cost workflow <id> [--detailed]` (summary, tokens, budget %,
   per-activity/attempt breakdown with the model actually used after
@@ -46,6 +75,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Worker-activity retry backoff** (load-bearing for production LLM
+  workloads): a failed activity's requeue now honors the definition's
+  `retry` policy — exponential/fixed backoff computed by the queue
+  (`scheduled_for = NOW() + backoff`) instead of the previous immediate
+  requeue that burned all retries in milliseconds. Activities without a
+  `retry` block get the default shape (exponential, base 2s, factor 2,
+  cap 300s).
+- **Event dedup is now attempt-aware — terminal failures can no longer be
+  silently dropped** (the root cause of workflows stuck `running` after
+  retries exhausted): `workflow_events`' unique constraint allowed only ONE
+  `ActivityFailed` event per activity ever, so the first retryable failure
+  occupied the slot and publish's `ON CONFLICT DO NOTHING` discarded every
+  later failure event — including the terminal one. The dedup index now
+  includes the payload's `attempt` (set by worker-reported failures, retry
+  scheduling, and timeout failures); all other event types carry no attempt
+  and keep their exact one-slot idempotency semantics.
+- **Single retry authority — no more queue/orchestrator disagreement**: the
+  queue decides retry-vs-terminal (it owns `retry_count`/`max_retries`) and
+  the orchestrator now follows the `will_retry` in the `ActivityFailed`
+  event instead of re-deciding from a different counter. This fixes both
+  halves of the old mismatch: workflows stuck `running` after a terminal
+  worker failure until a restart/timeout (dead-letters invisible to the
+  status API), and zombie re-executions whose completions were discarded.
+  Terminal failures now propagate to `WorkflowFailed` live, within one
+  orchestrator poll interval. A retry that would exceed an LLM budget is
+  cancelled in the queue (new `ActivityQueue::cancel_pending`) and fails
+  permanently, preserving budget enforcement on the retry path.
+- **`max_attempts` off-by-one**: `retry.max_attempts` now means total
+  attempts. Previously it was projected into the queue's `max_retries`
+  column unchanged, granting one extra attempt.
+- **Failed workflows no longer hold their `unique_key` forever**: dedup now
+  excludes `failed` workflows (partial unique index replaces the
+  unconditional constraint), so a dead-lettered submission can be
+  resubmitted under the same key. Concurrent duplicate submissions of the
+  same key now both surface as 409 (the loser previously hit the raw
+  constraint and got a 500).
+- **Worker-reported failure messages were dropped**: the orchestrator read
+  only the `error` payload key, but worker-reported failures publish
+  `error_message` — failed activities recorded "Unknown error" (or
+  nothing). Both keys are read now, so real error text lands in workflow
+  state and the API.
+- **Docker `latest` tag policy**: `latest` now moves only on release tags —
+  rolling `main` builds publish only the date-sha tag, so `latest` always
+  equals the newest release. `docker-compose.yml` and the quickstart
+  document version pinning for production.
 - The `activity_costs` total-cost trigger no longer fires for zero-cost
   rows, which would deadlock orchestration when a budget-abort marker was
   recorded while the event-processing transaction held the workflow row
@@ -102,8 +176,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   this price; models without one fall back to the input-token price. Exposed
   in `POST /api/v1/llm/models/search` responses and the `model_pricing`
   parameter enrichment. Google's Gemini explicit caching bills cache storage
-  per token-hour instead of a write premium — not yet modeled in the catalog;
-  report it via per-entry `cost_usd` or the lump remainder.
+  per token-hour instead of a write premium — modeled by the cache-storage
+  price + `cache_storage_token_hours` entry field (see Added above).
 
 ### Changed
 

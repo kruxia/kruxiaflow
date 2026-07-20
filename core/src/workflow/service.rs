@@ -107,13 +107,15 @@ impl WorkflowService {
         // Start transaction for atomic workflow + event creation
         let mut tx = self.pool.begin().await?;
 
-        // Check for duplicate unique_key (idempotency)
+        // Check for duplicate unique_key (idempotency). Failed workflows are
+        // excluded: a dead-lettered submission releases its key so it can be
+        // resubmitted (the partial unique index enforces the same rule).
         if let Some(ref key) = unique_key {
             let existing = sqlx::query!(
                 r#"
                 SELECT id, definition_name, created_at
                 FROM workflows
-                WHERE unique_key = $1
+                WHERE unique_key = $1 AND status <> 'failed'
                 "#,
                 key
             )
@@ -168,7 +170,19 @@ impl WorkflowService {
             budget_limit_usd
         )
         .fetch_one(&mut *tx)
-        .await?;
+        .await
+        .map_err(|e| {
+            // Two concurrent submissions of the same key can both pass the
+            // SELECT above; the loser hits the partial unique index here and
+            // must surface as the same 409, not a 500.
+            if let sqlx::Error::Database(ref db_err) = e
+                && db_err.constraint() == Some("idx_workflows_unique_key_active")
+                && let Some(ref key) = unique_key
+            {
+                return WorkflowServiceError::DuplicateSubmission(key.clone());
+            }
+            WorkflowServiceError::DatabaseError(e)
+        })?;
 
         // Publish WorkflowCreated event
         let event_id = Uuid::now_v7();

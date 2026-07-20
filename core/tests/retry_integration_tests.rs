@@ -562,13 +562,15 @@ async fn test_activity_retry_with_fixed_backoff(pool: PgPool) {
         .unwrap();
     }
 
-    // Fail the activity
+    // Fail the activity. The queue is the retry authority: will_retry in the
+    // payload is its decision (published by the worker service after
+    // queue.fail requeued the row with backoff); the orchestrator follows it.
     event_source
         .publish(NewWorkflowEvent {
             workflow_id,
             event_type: WorkflowEventType::ActivityFailed,
             activity_key: Some("task_with_fixed_retry".to_string()),
-            payload: json!({"error": "Temporary failure"}),
+            payload: json!({"error": "Temporary failure", "will_retry": true}),
             iteration: None,
         })
         .await
@@ -812,13 +814,13 @@ async fn test_retry_state_tracking_with_cost_accumulation(pool: PgPool) {
         .unwrap();
     }
 
-    // First attempt fails
+    // First attempt fails; will_retry carries the queue's retry decision
     event_source
         .publish(NewWorkflowEvent {
             workflow_id,
             event_type: WorkflowEventType::ActivityFailed,
             activity_key: Some("expensive_task".to_string()),
-            payload: json!({"error": "Rate limited"}),
+            payload: json!({"error": "Rate limited", "will_retry": true}),
             iteration: None,
         })
         .await

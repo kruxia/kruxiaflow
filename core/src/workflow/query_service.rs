@@ -39,6 +39,8 @@ pub struct WorkflowSummaryRecord {
     pub status: crate::WorkflowStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// A failed activity's error message (dead-letter visibility for list views)
+    pub error_message: Option<String>,
 }
 
 /// Workflow query filters
@@ -105,7 +107,12 @@ impl WorkflowQueryService {
         let rows = sqlx::query!(
             r#"
             SELECT id, definition_name, status AS "status: crate::WorkflowStatus",
-                   created_at, updated_at
+                   created_at, updated_at,
+                   (SELECT a.value->>'error'
+                      FROM jsonb_each(activities) AS a
+                     WHERE a.value->>'status' = 'failed'
+                       AND a.value->>'error' IS NOT NULL
+                     LIMIT 1) AS "error_message?"
             FROM workflows
             WHERE ($1::TEXT IS NULL OR status::TEXT = $1)
               AND ($2::TEXT IS NULL OR definition_name = $2)
@@ -151,6 +158,7 @@ impl WorkflowQueryService {
                 status: row.status,
                 created_at: row.created_at,
                 updated_at: row.updated_at,
+                error_message: row.error_message,
             })
             .collect();
 

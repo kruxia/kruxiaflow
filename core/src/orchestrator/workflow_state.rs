@@ -425,9 +425,12 @@ pub fn apply_event_to_state(state: &mut WorkflowState, event: &WorkflowEvent) ->
                         | WorkflowActivityStatus::Pending
                 ) {
                     activity.status = WorkflowActivityStatus::Failed;
+                    // Worker-reported failures carry `error_message`;
+                    // orchestrator-internal publishers carry `error`.
                     activity.error = event
                         .payload
-                        .get("error")
+                        .get("error_message")
+                        .or_else(|| event.payload.get("error"))
                         .and_then(|e| e.as_str())
                         .map(String::from);
                     activity.completed_at = Some(Utc::now());

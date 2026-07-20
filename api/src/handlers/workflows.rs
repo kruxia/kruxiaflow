@@ -266,6 +266,10 @@ pub struct GetWorkflowResponse {
     /// Activity states
     pub activities: Vec<ActivityState>,
 
+    /// A failed activity's error message (null unless an activity failed)
+    #[schema(example = "Connection timeout after 30s")]
+    pub error_message: Option<String>,
+
     /// Custom workflow state data (from workflows.state_data column)
     #[schema(example = json!({
         "custom_field": "value"
@@ -287,6 +291,10 @@ pub struct ActivityState {
     /// Activity outputs (null if not completed)
     #[schema(example = json!({"valid": true}))]
     pub outputs: Option<serde_json::Value>,
+
+    /// Error message from the most recent failure (null if never failed)
+    #[schema(example = "Connection timeout after 30s")]
+    pub error: Option<String>,
 
     /// When the activity started (null if not started)
     #[schema(example = "2025-11-06T10:00:00Z")]
@@ -409,6 +417,11 @@ pub struct WorkflowSummary {
     /// When the workflow was last updated
     #[schema(example = "2025-11-06T10:00:05Z")]
     pub updated_at: DateTime<Utc>,
+
+    /// A failed activity's error message (dead-letter visibility; null unless
+    /// an activity failed)
+    #[schema(example = "Connection timeout after 30s")]
+    pub error_message: Option<String>,
 }
 
 /// Get workflow by ID
@@ -476,6 +489,11 @@ pub async fn get_workflow(
         "Workflow retrieved"
     );
 
+    let error_message = activities
+        .iter()
+        .find(|a| a.status == WorkflowActivityStatus::Failed && a.error.is_some())
+        .and_then(|a| a.error.clone());
+
     Ok(Json(GetWorkflowResponse {
         id: workflow.id,
         status: workflow.status,
@@ -483,6 +501,7 @@ pub async fn get_workflow(
         created_at: workflow.created_at,
         updated_at: workflow.updated_at,
         activities,
+        error_message,
         state_data: workflow.state_data,
     }))
 }
@@ -504,6 +523,11 @@ fn parse_activities(activities_json: &serde_json::Value) -> Result<Vec<ActivityS
 
         let outputs = activity_state.get("outputs").cloned();
 
+        let error = activity_state
+            .get("error")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+
         let started_at = activity_state
             .get("started_at")
             .and_then(|v| v.as_str())
@@ -520,6 +544,7 @@ fn parse_activities(activities_json: &serde_json::Value) -> Result<Vec<ActivityS
             activity_key: activity_key.clone(),
             status,
             outputs,
+            error,
             started_at,
             completed_at,
         });
@@ -605,6 +630,7 @@ pub async fn list_workflows(
                 definition_name: w.definition_name,
                 created_at: w.created_at,
                 updated_at: w.updated_at,
+                error_message: w.error_message,
             })
             .collect(),
         total,
@@ -1008,9 +1034,11 @@ mod tests {
                 activity_key: "step1".to_string(),
                 status: WorkflowActivityStatus::Completed,
                 outputs: Some(json!({"result": "success"})),
+                error: None,
                 started_at: Some(Utc::now()),
                 completed_at: Some(Utc::now()),
             }],
+            error_message: None,
             state_data: json!({}),
         };
 
@@ -1028,6 +1056,7 @@ mod tests {
                 definition_name: "test".to_string(),
                 created_at: Utc::now(),
                 updated_at: Utc::now(),
+                error_message: None,
             }],
             total: 1,
             count: 1,

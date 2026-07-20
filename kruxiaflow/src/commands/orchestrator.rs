@@ -165,6 +165,22 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
         .await
     });
 
+    // Spawn recurring-schedule loop alongside the orchestrator (env-gated;
+    // multiple instances are safe — SKIP LOCKED claims + idempotent
+    // unique_key submissions)
+    let scheduler_handle = {
+        let pool = pool.clone();
+        let token = shutdown_token.clone();
+        tokio::spawn(async move {
+            kruxiaflow_core::run_scheduler(
+                pool,
+                kruxiaflow_core::SchedulerConfig::from_env(),
+                Some(token),
+            )
+            .await;
+        })
+    };
+
     // Wait for shutdown signal
     let shutdown_signal = crate::signals::wait_for_shutdown();
     shutdown_signal.await;
@@ -179,6 +195,13 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
         Ok(Ok(Err(e))) => tracing::warn!("Orchestrator error during shutdown: {}", e),
         Ok(Err(e)) => tracing::warn!("Orchestrator task error: {}", e),
         Err(_) => tracing::warn!("Orchestrator shutdown timeout, forcing stop"),
+    }
+
+    // Wait for scheduler to stop (exits via shutdown token)
+    match tokio::time::timeout(Duration::from_secs(5), scheduler_handle).await {
+        Ok(Ok(())) => tracing::info!("Scheduler stopped gracefully"),
+        Ok(Err(e)) => tracing::warn!("Scheduler task error: {}", e),
+        Err(_) => tracing::warn!("Scheduler shutdown timeout, forcing stop"),
     }
 
     // Close database pool

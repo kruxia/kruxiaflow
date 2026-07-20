@@ -3,18 +3,18 @@ name: Main CI
 # Single pipeline for branch CI and releases, with ordered dependencies.
 #
 # - Pull requests / pushes to main: rust checks; main pushes also refresh the
-#   rolling Docker image (:latest + date tag).
+#   rolling Docker image (date-sha tag only — never :latest).
 # - Tag pushes (v*): the FULL release pipeline on one run — rust checks →
 #   binaries + versioned multi-arch Docker + crates.io (kruxiaflow-worker) →
 #   GitHub Release. Nothing publishes unless the checks pass.
 #
-# A single docker job serves main pushes (:latest + date tag) and tag pushes
+# A single docker job serves main pushes (date-sha tag) and tag pushes
 # (semver + :latest) through the reusable docker-build.yml workflow: one
 # native runner per platform (no QEMU), then a manifest-list merge.
-# metadata-action emits only the tags that apply to the triggering event. The
-# rolling build is multi-arch too, so :latest never flips to amd64-only
-# between releases and main keeps both platforms' GHA layer caches warm for
-# the release builds.
+# metadata-action emits only the tags that apply to the triggering event.
+# :latest moves ONLY on releases, so it always equals the newest release.
+# The rolling build is multi-arch too, so main keeps both platforms' GHA
+# layer caches warm for the release builds.
 #
 # `cargo release` pushes a version-bump commit AND a tag for the same SHA.
 # The branch-push run is skipped for those commits (message "release: ...",
@@ -131,7 +131,10 @@ jobs:
   # ---- docker images: main pushes AND release tags --------------------------
 
   # One job for both triggers (they never occur in the same run): main pushes
-  # publish :latest + a date-sha tag, tag pushes publish semver + :latest.
+  # publish only a date-sha tag, tag pushes publish semver + :latest.
+  # :latest is release-only so it always equals the most recent release —
+  # rolling main builds must never move it (users' docker-compose.yml pulls
+  # :latest, and an unreleased build there bypasses release verification).
   # metadata-action emits only the tag types that apply to the event.
   docker:
     name: Docker multi-arch
@@ -149,7 +152,7 @@ jobs:
       tags: |
         type=semver,pattern={{version}}
         type=semver,pattern={{major}}.{{minor}}
-        type=raw,value=latest
+        type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
         type=raw,value={{date 'YYYYMMDD'}}-{{sha}},enable={{is_default_branch}}
 
   # ---- crates.io: the public worker SDK crate --------------------------------

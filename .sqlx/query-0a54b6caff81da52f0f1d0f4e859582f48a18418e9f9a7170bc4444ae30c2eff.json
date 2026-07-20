@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT status AS \"status: WorkflowStatus\" FROM workflows WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status: WorkflowStatus",
+        "type_info": {
+          "Custom": {
+            "name": "workflow_status",
+            "kind": {
+              "Enum": [
+                "created",
+                "running",
+                "completed",
+                "failed",
+                "paused"
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0a54b6caff81da52f0f1d0f4e859582f48a18418e9f9a7170bc4444ae30c2eff"
+}

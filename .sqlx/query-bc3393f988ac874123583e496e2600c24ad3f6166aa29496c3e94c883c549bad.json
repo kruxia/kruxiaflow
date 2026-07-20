@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT workflow_id, activity_key, iteration\n            FROM activity_queue\n            WHERE id = $1\n            ",
+  "query": "\n            SELECT workflow_id, activity_key, iteration, retry_count\n            FROM activity_queue\n            WHERE id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -17,6 +17,11 @@
         "ordinal": 2,
         "name": "iteration",
         "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "retry_count",
+        "type_info": "Int4"
       }
     ],
     "parameters": {
@@ -27,8 +32,9 @@
     "nullable": [
       false,
       false,
-      true
+      true,
+      false
     ]
   },
-  "hash": "954596c298630b3c68d083352ab898c5576144d692012fa537d80c2a30990195"
+  "hash": "bc3393f988ac874123583e496e2600c24ad3f6166aa29496c3e94c883c549bad"
 }
