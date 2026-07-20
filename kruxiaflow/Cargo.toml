@@ -69,6 +69,7 @@ http = { version = "1", optional = true }
 [dev-dependencies]
 serial_test = { workspace = true }
 wiremock = "0.6"
+rust_decimal_macros = "1.36"
 
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { version = "0.6", optional=true, features=["profiling"] }
