@@ -118,6 +118,8 @@ use utoipa::OpenApi;
             // Health check schemas
             LivenessResponse,
             ReadinessResponse,
+            crate::health::HealthCheckStatus,
+            crate::health::ComponentHealth,
             PoolMetricsResponse,
             ServiceInfo,
 

@@ -82,6 +82,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   requeue that burned all retries in milliseconds. Activities without a
   `retry` block get the default shape (exponential, base 2s, factor 2,
   cap 300s).
+- **`kruxiaflow health` no longer reports DEGRADED against a healthy
+  server**: the CLI has always parsed readiness checks as component objects
+  (`{"status": ..., "message": ...}`) with an `orchestrator` entry, but the
+  server returned flat strings and never reported the orchestrator — so
+  `database` parsed as unknown, `orchestrator` was missing, and the overall
+  verdict was DEGRADED (exit 1) on every version, failing container
+  healthchecks while the engine served fine. `/health/ready` now returns the
+  component-object shape the CLI expects and adds a real `orchestrator`
+  check: event-consumption freshness from the orchestrator's durable
+  consumer position (unhealthy when events sit unprocessed past a 30s grace
+  period — the dead-orchestrator state). The orchestrator component is
+  informational for the HTTP status (a distributed API server is not taken
+  out of rotation by a separate orchestrator deployment), while the CLI
+  folds it into its exit code — the right verdict for the all-in-one
+  container, whose bundled-compose healthcheck already runs this CLI (and
+  therefore reported the engine unhealthy on every prior version).
 - **Event dedup is now attempt-aware — terminal failures can no longer be
   silently dropped** (the root cause of workflows stuck `running` after
   retries exhausted): `workflow_events`' unique constraint allowed only ONE

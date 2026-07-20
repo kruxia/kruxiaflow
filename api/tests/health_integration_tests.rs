@@ -103,10 +103,14 @@ async fn test_readiness_endpoint_healthy(pool: PgPool) {
     let body: serde_json::Value = response.json();
     assert_eq!(body["status"], "ready");
 
-    // Verify all checks passed
-    assert_eq!(body["checks"]["database"], "ok");
-    assert_eq!(body["checks"]["event_source"], "ok");
-    assert_eq!(body["checks"]["queue"], "ok");
+    // Verify all checks passed (component-object shape: the contract the
+    // `kruxiaflow health` CLI parses)
+    assert_eq!(body["checks"]["database"]["status"], "healthy");
+    assert_eq!(body["checks"]["event_source"]["status"], "healthy");
+    assert_eq!(body["checks"]["queue"]["status"], "healthy");
+    // Fresh database: no events yet, so the orchestrator is caught up
+    assert_eq!(body["checks"]["orchestrator"]["status"], "healthy");
+    assert_eq!(body["checks"]["orchestrator"]["message"], "caught up");
 }
 
 #[sqlx::test(migrations = "../migrations")]
@@ -233,18 +237,22 @@ async fn test_readiness_includes_all_checks(pool: PgPool) {
     let response = server.get("/health/ready").await;
     let body: serde_json::Value = response.json();
 
-    // Verify all three health checks are included
+    // Verify all four health checks are included as component objects
     assert!(
-        body["checks"]["database"].is_string(),
+        body["checks"]["database"]["status"].is_string(),
         "database check should be present"
     );
     assert!(
-        body["checks"]["event_source"].is_string(),
+        body["checks"]["event_source"]["status"].is_string(),
         "event_source check should be present"
     );
     assert!(
-        body["checks"]["queue"].is_string(),
+        body["checks"]["queue"]["status"].is_string(),
         "queue check should be present"
+    );
+    assert!(
+        body["checks"]["orchestrator"]["status"].is_string(),
+        "orchestrator check should be present"
     );
 }
 

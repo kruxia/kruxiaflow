@@ -290,8 +290,11 @@ if [ "$COVERAGE" = true ]; then
 
     # Post-execution handling
     if [ "$COVERAGE_HTML" = true ]; then
-        # Try to open the HTML report
-        HTML_REPORT="target/llvm-cov/html/index.html"
+        # Try to open the HTML report (in the resolved cargo target dir, which
+        # honors CARGO_TARGET_DIR / build.target-dir)
+        CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$(cargo metadata --format-version=1 --no-deps 2>/dev/null | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')}"
+        CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}"
+        HTML_REPORT="${CARGO_TARGET_DIR}/llvm-cov/html/index.html"
         if [ -f "$HTML_REPORT" ]; then
             echo ""
             echo -e "${GREEN}✓ Coverage report generated${NC}"

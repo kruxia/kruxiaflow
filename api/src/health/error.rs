@@ -15,6 +15,10 @@ pub enum HealthCheckError {
     #[error("Activity queue error: {0}")]
     QueueError(String),
 
+    /// Orchestrator not consuming events
+    #[error("Orchestrator error: {0}")]
+    OrchestratorError(String),
+
     /// Health check timed out
     #[error("Health check timeout")]
     Timeout,

@@ -235,7 +235,10 @@ services:
       KRUXIAFLOW_LOG_LEVEL: ${KRUXIAFLOW_LOG_LEVEL:-info}
     healthcheck:
       <<: *healthcheck-defaults
-      # Use built-in health command (no shell/curl needed in distroless)
+      # Use built-in health command (no shell/curl needed in distroless).
+      # Its verdict folds in orchestrator event-consumption freshness, so a
+      # dead orchestrator loop marks the all-in-one container unhealthy even
+      # while the API still serves.
       test: ["CMD", "/kruxiaflow", "health", "--timeout", "5"]
       start_period: 30s
     restart: unless-stopped

@@ -1,7 +1,7 @@
 use crate::health::{
-    HealthCheckStatus, LivenessResponse, PoolMetricsResponse, ReadinessResponse, ServiceInfo,
-    check_activity_queue_health, check_database_health, check_event_source_health,
-    get_pool_metrics,
+    ComponentHealth, HealthCheckStatus, LivenessResponse, PoolMetricsResponse, ReadinessResponse,
+    ServiceInfo, check_activity_queue_health, check_database_health, check_event_source_health,
+    check_orchestrator_health, get_pool_metrics,
 };
 use crate::state::AppState;
 use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
@@ -44,20 +44,30 @@ fn liveness_response(insecure_dev: bool) -> (StatusCode, Json<LivenessResponse>)
 /// Readiness probe handler
 ///
 /// Returns 200 OK if the server can handle requests and all dependencies are healthy.
-/// Checks database, event source, and activity queue in parallel using tokio::join!
+/// Checks database, event source, activity queue, and orchestrator freshness in
+/// parallel using tokio::join!
 ///
 /// # Response
-/// - 200 OK: All dependencies are healthy
-/// - 503 Service Unavailable: One or more dependencies are unhealthy
+/// - 200 OK: The API server's own dependencies (database, event source, queue)
+///   are healthy
+/// - 503 Service Unavailable: One or more of those dependencies are unhealthy
 ///
-/// Response body includes detailed status for each check:
+/// The `orchestrator` component is reported for visibility but does not gate
+/// the HTTP status: in distributed deployments the API server must not leave
+/// rotation because a separate orchestrator deployment is down. The
+/// `kruxiaflow health` CLI folds it into its overall verdict, which is the
+/// right behavior for the all-in-one container.
+///
+/// Response body includes a component object per check (the shape the
+/// `kruxiaflow health` CLI parses):
 /// ```json
 /// {
 ///   "status": "ready",
 ///   "checks": {
-///     "database": "ok",
-///     "event_source": "ok",
-///     "queue": "ok"
+///     "database": {"status": "healthy"},
+///     "event_source": {"status": "healthy"},
+///     "queue": {"status": "healthy"},
+///     "orchestrator": {"status": "healthy", "message": "caught up"}
 ///   }
 /// }
 /// ```
@@ -76,39 +86,47 @@ fn liveness_response(insecure_dev: bool) -> (StatusCode, Json<LivenessResponse>)
 )]
 pub async fn readiness_handler(State(app_state): State<AppState>) -> impl IntoResponse {
     // Run all health checks in parallel for optimal performance
-    let (db_result, event_source_result, queue_result) = tokio::join!(
+    let (db_result, event_source_result, queue_result, orchestrator_result) = tokio::join!(
         check_database_health(&app_state.db_pool),
         check_event_source_health(&app_state.db_pool),
-        check_activity_queue_health(&app_state.db_pool)
+        check_activity_queue_health(&app_state.db_pool),
+        check_orchestrator_health(&app_state.db_pool)
     );
 
-    // Use static strings to avoid allocations
-    let database_status = match db_result {
-        Ok(_) => "ok",
+    let database = match db_result {
+        Ok(_) => ComponentHealth::healthy(None),
         Err(e) => {
             tracing::warn!("Database health check failed: {}", e);
-            "unhealthy"
+            ComponentHealth::unhealthy(e.to_string())
         }
     };
 
-    let event_source_status = match event_source_result {
-        Ok(_) => "ok",
+    let event_source = match event_source_result {
+        Ok(_) => ComponentHealth::healthy(None),
         Err(e) => {
             tracing::warn!("Event source health check failed: {}", e);
-            "unhealthy"
+            ComponentHealth::unhealthy(e.to_string())
         }
     };
 
-    let queue_status = match queue_result {
-        Ok(_) => "ok",
+    let queue = match queue_result {
+        Ok(_) => ComponentHealth::healthy(None),
         Err(e) => {
             tracing::warn!("Activity queue health check failed: {}", e);
-            "unhealthy"
+            ComponentHealth::unhealthy(e.to_string())
         }
     };
 
-    let all_healthy =
-        database_status == "ok" && event_source_status == "ok" && queue_status == "ok";
+    let orchestrator = match orchestrator_result {
+        Ok(message) => ComponentHealth::healthy(Some(message)),
+        Err(e) => {
+            tracing::warn!("Orchestrator health check failed: {}", e);
+            ComponentHealth::unhealthy(e.to_string())
+        }
+    };
+
+    // The API server's own readiness: orchestrator is reported, not gating
+    let all_healthy = database.is_healthy() && event_source.is_healthy() && queue.is_healthy();
 
     let status_code = if all_healthy {
         StatusCode::OK
@@ -121,9 +139,10 @@ pub async fn readiness_handler(State(app_state): State<AppState>) -> impl IntoRe
         Json(ReadinessResponse {
             status: if all_healthy { "ready" } else { "not_ready" },
             checks: HealthCheckStatus {
-                database: database_status,
-                event_source: event_source_status,
-                queue: queue_status,
+                database,
+                event_source,
+                queue,
+                orchestrator,
             },
         }),
     )
