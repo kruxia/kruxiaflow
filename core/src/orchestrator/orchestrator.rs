@@ -44,6 +44,49 @@ macro_rules! profile_span {
     };
 }
 
+/// How long a freshly assigned event id may remain invisible to readers.
+///
+/// Event ids are UUIDv7, assigned when the INSERT executes — but readers see
+/// rows in COMMIT order. Under load, an event can commit a few milliseconds
+/// after a poll has already read past its id; a cursor advanced beyond it
+/// would strand it forever (a lost completion = a workflow hung until the
+/// workflow timeout — observed live in the benchmark suite at 100-way
+/// concurrency). The durable cursor therefore never advances past
+/// `now - EVENT_VISIBILITY_GRACE`; events younger than the grace window are
+/// re-polled until the window passes them (an in-memory seen-set keeps them
+/// from being reprocessed in this process, and event processing is
+/// idempotent at-least-once for replays from elsewhere).
+///
+/// Sizing: the value must exceed the worst-case lag between an event INSERT
+/// starting to execute (id assigned) and its commit becoming visible —
+/// normally single-digit milliseconds for an autocommit single-row INSERT;
+/// 500ms covers checkpoint/fsync stalls with a wide margin. The trade-off is
+/// a throughput knee: sustained event rates above poll-LIMIT-per-grace
+/// (1000 per 0.5s = 2000 events/sec, roughly 2x the MVP target) would delay
+/// processing of new events by up to the grace period, because the
+/// LIMIT-bounded fetch window trails the pinned cursor. Post-MVP, an
+/// xid-ordered cursor column can remove the window entirely.
+const EVENT_VISIBILITY_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Smallest UUIDv7 whose embedded timestamp is `ts_ms`: every real UUIDv7
+/// generated at or after that millisecond compares greater.
+fn uuidv7_lower_bound(ts_ms: u64) -> Uuid {
+    let mut bytes = [0u8; 16];
+    bytes[0..6].copy_from_slice(&ts_ms.to_be_bytes()[2..8]);
+    bytes[6] = 0x70; // version 7, zero rand_a
+    bytes[8] = 0x80; // RFC 4122 variant, zero rand_b
+    Uuid::from_bytes(bytes)
+}
+
+/// The highest event id the durable cursor may advance to right now
+fn cursor_horizon() -> Uuid {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    uuidv7_lower_bound(now_ms.saturating_sub(EVENT_VISIBILITY_GRACE.as_millis() as u64))
+}
+
 /// Run the orchestrator main loop
 /// Polls for events, evaluates dependencies, schedules activities
 ///
@@ -74,6 +117,11 @@ pub async fn run_orchestrator(
 
     // Track event processing failures to detect poison messages
     let mut event_failures: HashMap<Uuid, u32> = HashMap::new();
+
+    // Events already processed by this loop whose ids are still inside the
+    // visibility-grace window (the durable cursor hasn't passed them yet, so
+    // polls keep returning them). Pruned once the horizon moves past them.
+    let mut processed_recent: std::collections::BTreeSet<Uuid> = std::collections::BTreeSet::new();
 
     tracing::info!(
         "Orchestrator starting with consumer_id={}, workflow_timeout={}s, max_event_retries={}",
@@ -120,7 +168,24 @@ pub async fn run_orchestrator(
             continue;
         }
 
-        tracing::trace!("Polled {} events, resetting backoff", events.len());
+        tracing::trace!("Polled {} events", events.len());
+
+        // The durable cursor never advances past this horizon (see
+        // EVENT_VISIBILITY_GRACE); ids at or below it can be pruned from the
+        // seen-set because polls can no longer return them.
+        let horizon = cursor_horizon();
+        processed_recent = processed_recent.split_off(&horizon);
+
+        // Any event actually processed this batch (vs. re-polled seen tail)?
+        let mut any_new = false;
+        // Highest id of the CONTIGUOUS resolved prefix of this id-ordered
+        // batch. The durable cursor only advances through this prefix: a
+        // failed event pins it (so the retry-on-next-poll actually happens —
+        // previously a later success in the same batch advanced the cursor
+        // past the failure, silently dropping it), and the horizon caps it
+        // (so a late-committing event can never be stranded behind it).
+        let mut resolved_prefix: Option<Uuid> = None;
+        let mut prefix_intact = true;
 
         // Process each event
         for event in &events {
@@ -131,6 +196,16 @@ pub async fn run_orchestrator(
                 tracing::info!("Shutdown requested during event processing, stopping");
                 return Ok(());
             }
+
+            // Already processed in this loop; still re-polled only because the
+            // cursor is pinned behind the visibility-grace horizon
+            if processed_recent.contains(&event.id) {
+                if prefix_intact {
+                    resolved_prefix = Some(event.id);
+                }
+                continue;
+            }
+            any_new = true;
 
             if let Err(e) = process_workflow_event(
                 event,
@@ -166,27 +241,48 @@ pub async fn run_orchestrator(
                         MAX_EVENT_PROCESSING_RETRIES
                     );
 
-                    // Publish a failure event for this poison message
+                    // Publish a failure event for this poison message; the
+                    // poison event itself counts as resolved (skipped). The
+                    // failure event will be processed normally.
                     let _ = publish_failure_for_poison_event(event, &event_source, &e.to_string())
                         .await;
 
-                    // Update position to skip this poison event
-                    // The failure event will be processed normally by the orchestrator
-                    event_source.update_position(CONSUMER_ID, event.id).await?;
+                    processed_recent.insert(event.id);
+                    if prefix_intact {
+                        resolved_prefix = Some(event.id);
+                    }
                     event_failures.remove(&event.id);
                 } else {
-                    // Will be retried on next poll
-                    continue;
+                    // Unresolved: pin the cursor here so the next poll
+                    // returns this event again for retry
+                    prefix_intact = false;
                 }
             } else {
-                // Success - clear failure count and update position
+                // Success - clear failure count and mark resolved
                 event_failures.remove(&event.id);
-                event_source.update_position(CONSUMER_ID, event.id).await?;
+                processed_recent.insert(event.id);
+                if prefix_intact {
+                    resolved_prefix = Some(event.id);
+                }
             }
         }
 
-        // Got events - reset backoff
-        backoff.reset();
+        // One durable cursor write per batch, through the resolved prefix,
+        // capped at the (re-computed — time has passed) visibility horizon.
+        // The SQL update is forward-only, so a capped value never regresses.
+        if let Some(id) = resolved_prefix {
+            event_source
+                .update_position(CONSUMER_ID, id.min(cursor_horizon()))
+                .await?;
+        }
+
+        // Reset backoff only on real progress: a batch that is entirely the
+        // already-seen tail inside the grace window is idle, not work
+        if any_new {
+            backoff.reset();
+        } else {
+            backoff.increase();
+        }
 
         // Always sleep for at least minimum interval to avoid spinning
         // This caps polling rate at ~1000/sec (with 1ms min) even under heavy load
@@ -911,6 +1007,24 @@ pub async fn process_workflow_event(
     let mut state = {
         let _enter = state_span.enter();
         if event.event_type == WorkflowEventType::WorkflowCreated {
+            // Replay guard: WorkflowCreated initializes state, and re-running
+            // it would WIPE activity progress back to not_scheduled (event
+            // delivery is at-least-once: crash replay, the cursor's
+            // visibility-grace window, multiple orchestrators sharing a
+            // consumer). If state is already initialized, this event was
+            // fully processed — its queue inserts autocommit before the
+            // state save, so nothing is lost by skipping.
+            if let Ok(existing) = load_materialized_state(&mut tx, event.workflow_id).await
+                && !existing.activities.is_empty()
+            {
+                tracing::debug!(
+                    workflow_id = %event.workflow_id,
+                    "Ignoring duplicate WorkflowCreated event, state already initialized"
+                );
+                tx.commit().await?;
+                return Ok(());
+            }
+
             // Initialize new workflow state
             let initial_state_data = event.payload.get("state_data").cloned();
 
@@ -1037,6 +1151,32 @@ pub async fn process_workflow_event(
             return Ok(());
         }
         // Otherwise, fall through to mark as permanently failed
+    }
+
+    // 2.5. Duplicate/replay guard for completions (mirrors the ActivityFailed
+    // guard above). Event delivery is at-least-once — crash replay, the
+    // cursor's visibility-grace window, and multiple orchestrators sharing a
+    // consumer position can all deliver a completion twice — and the
+    // iteration management and cost recording below must run exactly once.
+    // apply_event_to_state has its own internal guard, but it cannot protect
+    // these two side effects.
+    if event.event_type == WorkflowEventType::ActivityCompleted
+        && let Some(activity_key) = event.activity_key.as_ref()
+        && let Some(current) = state.activities.get(activity_key)
+        && !matches!(
+            current.status,
+            WorkflowActivityStatus::Running
+                | WorkflowActivityStatus::Waiting
+                | WorkflowActivityStatus::Pending
+        )
+    {
+        tracing::debug!(
+            activity_key = %activity_key,
+            status = ?current.status,
+            "Ignoring duplicate ActivityCompleted event, activity is not running or waiting"
+        );
+        tx.commit().await?;
+        return Ok(());
     }
 
     // 3. Apply THIS event to update state incrementally (just 1 event, not n events)

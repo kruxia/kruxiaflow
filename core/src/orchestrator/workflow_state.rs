@@ -460,8 +460,22 @@ pub fn apply_event_to_state(state: &mut WorkflowState, event: &WorkflowEvent) ->
                 .ok_or(OrchestratorError::MissingActivityKey)?;
 
             if let Some(activity) = state.activities.get_mut(activity_key) {
-                activity.status = WorkflowActivityStatus::Waiting;
-                activity.started_at = Some(Utc::now());
+                // Only forward transitions — a replayed event (at-least-once
+                // delivery) must not drag an activity that already ran back
+                // to Waiting.
+                if matches!(
+                    activity.status,
+                    WorkflowActivityStatus::NotScheduled | WorkflowActivityStatus::Pending
+                ) {
+                    activity.status = WorkflowActivityStatus::Waiting;
+                    activity.started_at = Some(Utc::now());
+                } else {
+                    tracing::debug!(
+                        activity_key = %activity_key,
+                        status = ?activity.status,
+                        "Ignoring duplicate ActivityWaiting event"
+                    );
+                }
             }
         }
         WorkflowEventType::ActivitySignaled => {

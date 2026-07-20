@@ -307,17 +307,19 @@ Run it on a cloud VM, on-premise, or entirely air-gapped alongside local models.
 
 ## Performance
 
-Kruxia Flow is benchmarked favorably against industry-standard workflow engines (January 2026):
+Kruxia Flow is benchmarked favorably against industry-standard workflow engines (July 2026, engine 0.8.0; high-concurrency scenario, 300 workflows at 100 concurrent, 100% success):
 
-| Metric              | Kruxia Flow  | Temporal | Airflow |
-|---------------------|--------------|----------|---------|
-| Throughput (wf/sec) | **93**       | 66       | 8       |
-| P99 Latency         | **0.9–1.5s** | 0.5–2.7s | 6–22s   |
-| Peak Memory         | **328MB**    | 425MB    | 7.2GB   |
-| Binary Size         | **7.5MB**    | ~200MB   | ~500MB+ |
-| Docker Image        | **63MB**     | ~500MB   | ~1GB+   |
+| Metric              | Kruxia Flow  | Temporal | Airflow  |
+|---------------------|--------------|----------|----------|
+| Throughput (wf/sec) | **87**       | 46       | 7        |
+| P99 Latency         | **0.6–1.6s** | 2.3–4.5s | 7.2–28s  |
+| Peak Memory         | **370MB**    | 444MB    | 7.4GB    |
+| Binary Size         | **13MB**     | ~200MB   | ~500MB+  |
+| Docker Image        | **68MB**     | ~500MB   | ~1GB+    |
 
-Benchmark methodology: Identical echo workflows (sequential, parallel, high-concurrency), Docker Compose environment, same hardware. See [`benchmarks/`](benchmarks/) for reproducible tests.
+Latency ranges span all three scenarios (sequential, parallel, high-concurrency). With the Python `py-std` worker instead of the built-in worker, high-concurrency throughput reaches 103 wf/sec.
+
+Benchmark methodology: Identical echo workflows (sequential, parallel, high-concurrency), Docker Compose environment, same hardware, one platform at a time. See [`benchmarks/`](benchmarks/) for reproducible tests and dated result history.
 
 ## Documentation
 
