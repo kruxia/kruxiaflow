@@ -473,7 +473,10 @@ echo -e "${YELLOW}Running database performance profiling...${NC}"
 
 # Build the kruxiaflow binary if needed (use release for accuracy)
 if cargo build --package kruxiaflow --release 2>/dev/null; then
-    KRUXIAFLOW_BIN="${PROJECT_DIR}/target/release/kruxiaflow"
+    # Resolve the cargo target dir (honors CARGO_TARGET_DIR / build.target-dir)
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$(cd "$PROJECT_DIR" && cargo metadata --format-version=1 --no-deps 2>/dev/null | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')}"
+    CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-${PROJECT_DIR}/target}"
+    KRUXIAFLOW_BIN="${CARGO_TARGET_DIR}/release/kruxiaflow"
 
     # Generate JSON profile with EXPLAIN ANALYZE
     # Note: stderr goes to log file, only stdout (JSON) goes to output file

@@ -3,7 +3,11 @@
 
 set -e
 
-BINARY_PATH="${1:-target/release/kruxiaflow}"
+# Resolve the cargo target dir (honors CARGO_TARGET_DIR / build.target-dir)
+CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$(cargo metadata --format-version=1 --no-deps 2>/dev/null | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')}"
+CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target}"
+
+BINARY_PATH="${1:-${CARGO_TARGET_DIR}/release/kruxiaflow}"
 TARGET_SIZE_MB=15
 
 if [ ! -f "$BINARY_PATH" ]; then

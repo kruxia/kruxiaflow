@@ -88,14 +88,25 @@ Returns `200 OK` if the service is ready to accept requests (database connected,
 **Response**:
 ```json
 {
-  "status": "ok",
+  "status": "ready",
   "checks": {
-    "database": "ok",
-    "event_source": "ok",
-    "queue": "ok"
+    "database": {"status": "healthy"},
+    "event_source": {"status": "healthy"},
+    "queue": {"status": "healthy"},
+    "orchestrator": {"status": "healthy", "message": "caught up"}
   }
 }
 ```
+
+Each check is a component object (`status`: `healthy` | `unhealthy`, plus an
+optional `message`) — the shape the `kruxiaflow health` CLI parses, so it
+works as a container healthcheck. `orchestrator` reports event-consumption
+freshness (unhealthy when events sit unprocessed past a 30s grace period —
+i.e., no orchestrator is consuming); it is informational and does not gate
+the HTTP status, so a distributed API server is not taken out of rotation by
+a separate orchestrator deployment being down. The `kruxiaflow health` CLI
+does fold it into its exit code, which is the right verdict for the
+all-in-one container.
 
 ### Connection Pool Metrics
 

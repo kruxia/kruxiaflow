@@ -13,20 +13,61 @@ pub struct LivenessResponse {
     pub insecure_dev: bool,
 }
 
+/// Health of one readiness component
+///
+/// This object shape (`status` + optional `message`) is the contract the
+/// `kruxiaflow health` CLI parses — container healthchecks depend on it.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct ComponentHealth {
+    /// Component status: "healthy" or "unhealthy"
+    #[schema(example = "healthy")]
+    pub status: String,
+
+    /// Human-readable detail (e.g., the failure reason or lag)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(example = "caught up")]
+    pub message: Option<String>,
+}
+
+impl ComponentHealth {
+    pub fn healthy(message: Option<String>) -> Self {
+        Self {
+            status: "healthy".to_string(),
+            message,
+        }
+    }
+
+    pub fn unhealthy(message: String) -> Self {
+        Self {
+            status: "unhealthy".to_string(),
+            message: Some(message),
+        }
+    }
+
+    pub fn is_healthy(&self) -> bool {
+        self.status == "healthy"
+    }
+}
+
 /// Individual health check status
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct HealthCheckStatus {
     /// Database health status
-    #[schema(example = "ok")]
-    pub database: &'static str,
+    pub database: ComponentHealth,
 
     /// Event source health status
-    #[schema(example = "ok")]
-    pub event_source: &'static str,
+    pub event_source: ComponentHealth,
 
     /// Activity queue health status
-    #[schema(example = "ok")]
-    pub queue: &'static str,
+    pub queue: ComponentHealth,
+
+    /// Orchestrator health status (event-consumption freshness). Reported for
+    /// visibility but does NOT gate the HTTP readiness status: in distributed
+    /// deployments the API server must not leave rotation because a separate
+    /// orchestrator deployment is down. The `kruxiaflow health` CLI folds it
+    /// into its overall verdict, which is the right behavior for the
+    /// all-in-one container.
+    pub orchestrator: ComponentHealth,
 }
 
 /// Readiness probe response

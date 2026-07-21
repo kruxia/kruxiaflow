@@ -80,6 +80,59 @@ pub async fn check_activity_queue_health(pool: &PgPool) -> Result<()> {
     }
 }
 
+/// Grace period before unprocessed events count as an orchestrator failure.
+/// The orchestrator polls at most every few seconds; a backlog older than
+/// this means it is absent or stuck, not merely busy.
+const ORCHESTRATOR_LAG_THRESHOLD_SECS: i64 = 30;
+
+/// Check orchestrator health via event-consumption freshness.
+///
+/// The orchestrator's durable consumer position (`workflow_event_consumers`,
+/// consumer_id 'orchestrator' — the id `run_orchestrator` always polls with)
+/// is the only signal the API server has in distributed deployments. Other
+/// consumers (e.g., websocket replay's `ws-*` rows) are ignored. The check
+/// measures the age of the oldest event beyond the orchestrator's position:
+/// - no events, or none beyond the position: healthy (idle / caught up)
+/// - unprocessed events younger than the grace period: healthy (processing)
+/// - unprocessed events older than the grace period: unhealthy (nothing is
+///   consuming — a dead or absent orchestrator, exactly the state that used
+///   to leave workflows stuck `running`)
+///
+/// # Returns
+/// * `Ok(message)` if the orchestrator is healthy (message describes the state)
+/// * `Err(HealthCheckError)` if unprocessed events exceed the grace period
+pub async fn check_orchestrator_health(pool: &PgPool) -> Result<String> {
+    let result = timeout(
+        Duration::from_secs(5),
+        sqlx::query_scalar::<_, Option<f64>>(
+            r#"
+            SELECT EXTRACT(EPOCH FROM NOW() - MIN(timestamp))::float8
+            FROM workflow_events
+            WHERE id > COALESCE(
+                (SELECT last_event_id FROM workflow_event_consumers
+                  WHERE consumer_id = 'orchestrator'),
+                '00000000-0000-0000-0000-000000000000'::uuid
+            )
+            "#,
+        )
+        .fetch_one(pool),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(None)) => Ok("caught up".to_string()),
+        Ok(Ok(Some(lag_secs))) if lag_secs <= ORCHESTRATOR_LAG_THRESHOLD_SECS as f64 => Ok(
+            format!("processing (oldest unprocessed event {:.0}s)", lag_secs),
+        ),
+        Ok(Ok(Some(lag_secs))) => Err(HealthCheckError::OrchestratorError(format!(
+            "events unprocessed for {:.0}s (threshold {}s) — no orchestrator is consuming",
+            lag_secs, ORCHESTRATOR_LAG_THRESHOLD_SECS
+        ))),
+        Ok(Err(e)) => Err(HealthCheckError::OrchestratorError(e.to_string())),
+        Err(_) => Err(HealthCheckError::OrchestratorError("timeout".to_string())),
+    }
+}
+
 /// Get connection pool metrics
 ///
 /// Returns current connection pool statistics including size, active/idle connections,
