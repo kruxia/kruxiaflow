@@ -573,6 +573,32 @@ impl ActivityQueue for PostgresQueue {
         Ok(cancelled)
     }
 
+    async fn cancel_workflow_pending(&self, workflow_id: Uuid) -> Result<u64> {
+        let result = sqlx::query!(
+            r#"
+            UPDATE activity_queue
+            SET status = 'failed'::activity_status,
+                completed_at = NOW()
+            WHERE workflow_id = $1
+              AND status IN ('pending'::activity_status, 'waiting'::activity_status)
+            "#,
+            workflow_id
+        )
+        .execute(&self.pool)
+        .await?;
+
+        let cancelled = result.rows_affected();
+        if cancelled > 0 {
+            debug!(
+                workflow_id = %workflow_id,
+                cancelled = cancelled,
+                "Cancelled unclaimed queue rows for terminal workflow"
+            );
+        }
+
+        Ok(cancelled)
+    }
+
     async fn reclaim_stale_activities(&self, limit: i64) -> Result<Vec<StaleActivityInfo>> {
         // Use a transaction to ensure consistent handling of all stale activities
         let mut tx = self.pool.begin().await?;

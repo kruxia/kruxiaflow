@@ -29,6 +29,9 @@ pub struct WorkflowRecord {
     pub state_data: Value,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Workflow-LEVEL failure reason (e.g. timeout with nothing claimed);
+    /// activity-level errors live inside `activities`
+    pub error_message: Option<String>,
 }
 
 /// Workflow summary for list view
@@ -73,7 +76,7 @@ impl WorkflowQueryService {
         let row = sqlx::query!(
             r#"
             SELECT id, definition_name, status AS "status: String",
-                   activities, state_data, created_at, updated_at
+                   activities, state_data, created_at, updated_at, error_message
             FROM workflows
             WHERE id = $1
             "#,
@@ -91,6 +94,7 @@ impl WorkflowQueryService {
             state_data: row.state_data,
             created_at: row.created_at,
             updated_at: row.updated_at,
+            error_message: row.error_message,
         })
     }
 
@@ -108,11 +112,14 @@ impl WorkflowQueryService {
             r#"
             SELECT id, definition_name, status AS "status: crate::WorkflowStatus",
                    created_at, updated_at,
-                   (SELECT a.value->>'error'
-                      FROM jsonb_each(activities) AS a
-                     WHERE a.value->>'status' = 'failed'
-                       AND a.value->>'error' IS NOT NULL
-                     LIMIT 1) AS "error_message?"
+                   COALESCE(
+                       (SELECT a.value->>'error'
+                          FROM jsonb_each(activities) AS a
+                         WHERE a.value->>'status' = 'failed'
+                           AND a.value->>'error' IS NOT NULL
+                         LIMIT 1),
+                       error_message
+                   ) AS "error_message?"
             FROM workflows
             WHERE ($1::TEXT IS NULL OR status::TEXT = $1)
               AND ($2::TEXT IS NULL OR definition_name = $2)

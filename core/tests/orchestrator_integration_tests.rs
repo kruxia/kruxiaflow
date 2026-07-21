@@ -2331,9 +2331,15 @@ async fn test_check_and_timeout_stuck_workflows(pool: PgPool) {
         "Should have published a WorkflowFailed event for stuck workflow"
     );
 
-    // Check the payload contains timeout reason
+    // Check the payload contains a self-explaining timeout reason (the exact
+    // text diagnoses whether queued work was never claimed — see
+    // nukumori-support-needs item 12)
     let payload = &timeout_events[0].payload;
-    assert_eq!(payload["reason"], "Workflow timeout");
+    let reason = payload["reason"].as_str().unwrap_or_default();
+    assert!(
+        reason.starts_with("Workflow timeout after"),
+        "unexpected reason: {reason}"
+    );
 }
 
 /// Test that check_and_timeout_stuck_workflows does nothing when no workflows are stuck

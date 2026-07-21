@@ -1304,6 +1304,31 @@ pub async fn process_workflow_event(
             "Workflow in terminal state, skipping activity scheduling"
         );
 
+        // A workflow failed from outside the activity flow (e.g. the workflow
+        // timeout with nothing claimed) may still have unclaimed queue rows;
+        // cancel them so a worker that comes back later doesn't execute (and
+        // spend) work for a dead workflow. Gated on the WorkflowFailed event
+        // itself so replays of other events don't re-run the sweep; the
+        // sweep itself is idempotent. Best-effort: never blocks persistence.
+        if event.event_type == WorkflowEventType::WorkflowFailed {
+            match activity_queue
+                .cancel_workflow_pending(event.workflow_id)
+                .await
+            {
+                Ok(0) => {}
+                Ok(cancelled) => tracing::info!(
+                    workflow_id = %event.workflow_id,
+                    cancelled = cancelled,
+                    "Cancelled unclaimed queue rows for failed workflow"
+                ),
+                Err(e) => tracing::error!(
+                    workflow_id = %event.workflow_id,
+                    error = %e,
+                    "Failed to cancel queue rows for failed workflow"
+                ),
+            }
+        }
+
         // Save the terminal state and return early
         save_materialized_state(&mut tx, event.workflow_id, &state).await?;
         tx.commit().await?;
@@ -2598,13 +2623,43 @@ pub async fn check_and_timeout_stuck_workflows(
             workflow.definition_name
         );
 
+        // Diagnose WHY it hung so the dead-letter is self-explaining: queued
+        // work nobody ever claimed almost always means no worker was polling
+        let unclaimed: i64 = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) AS "count!"
+            FROM activity_queue
+            WHERE workflow_id = $1
+              AND status = 'pending'::activity_status
+              AND claimed_by IS NULL
+            "#,
+            workflow.id
+        )
+        .fetch_one(&config.pool)
+        .await
+        .unwrap_or(0);
+
+        let reason = if unclaimed > 0 {
+            format!(
+                "Workflow timeout after {}s: {} queued activit{} never claimed by any worker — is a worker for this queue running?",
+                timeout_secs as u64,
+                unclaimed,
+                if unclaimed == 1 { "y was" } else { "ies were" }
+            )
+        } else {
+            format!(
+                "Workflow timeout after {}s: activities stopped making progress",
+                timeout_secs as u64
+            )
+        };
+
         // Publish WorkflowFailed event with timeout reason
         let timeout_event = NewWorkflowEvent {
             workflow_id: workflow.id,
             event_type: WorkflowEventType::WorkflowFailed,
             activity_key: None,
             payload: json!({
-                "reason": "Workflow timeout",
+                "reason": reason,
                 "timeout_seconds": timeout_secs,
             }),
             iteration: None,
@@ -2904,6 +2959,7 @@ mod tests {
             activities: activities_map,
             state_data: json!({}),
             input,
+            error_message: None,
         }
     }
 
@@ -3265,6 +3321,7 @@ mod tests {
             activities: activities_map,
             state_data: json!({}),
             input: json!({}),
+            error_message: None,
         };
         let workflow_id = state.workflow_id;
         let secrets = HashMap::new();
@@ -3330,6 +3387,7 @@ mod tests {
             async fn fail(&self, activity_id: Uuid, worker_id: &str, retryable: bool, result: QueueActivityResult) -> std::result::Result<bool, crate::queue::QueueError>;
             async fn heartbeat(&self, activity_id: Uuid, worker_id: &str) -> std::result::Result<(), crate::queue::QueueError>;
             async fn cancel_pending(&self, workflow_id: Uuid, activity_key: &str, iteration: Option<i32>) -> std::result::Result<bool, crate::queue::QueueError>;
+            async fn cancel_workflow_pending(&self, workflow_id: Uuid) -> std::result::Result<u64, crate::queue::QueueError>;
             async fn reclaim_stale_activities(&self, limit: i64) -> std::result::Result<Vec<StaleActivityInfo>, crate::queue::QueueError>;
         }
     }
@@ -3978,6 +4036,7 @@ mod tests {
             activities: activities_map,
             state_data: json!({}),
             input: json!({}),
+            error_message: None,
         };
         let workflow_id = state.workflow_id;
         let secrets = HashMap::new();

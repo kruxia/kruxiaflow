@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(*) AS \"count!\"\n            FROM activity_queue\n            WHERE workflow_id = $1\n              AND status = 'pending'::activity_status\n              AND claimed_by IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d2aea4e3406ab9773f5be6ed6e55ca89939fa8c9087b7d48c848236599521aab"
+}

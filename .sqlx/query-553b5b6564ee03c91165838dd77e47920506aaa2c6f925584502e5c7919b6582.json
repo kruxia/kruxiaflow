@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE activity_queue\n            SET status = 'failed'::activity_status,\n                completed_at = NOW()\n            WHERE workflow_id = $1\n              AND status IN ('pending'::activity_status, 'waiting'::activity_status)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "553b5b6564ee03c91165838dd77e47920506aaa2c6f925584502e5c7919b6582"
+}

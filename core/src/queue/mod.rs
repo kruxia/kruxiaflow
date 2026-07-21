@@ -79,6 +79,18 @@ pub trait ActivityQueue: Send + Sync {
         iteration: Option<i32>,
     ) -> Result<bool>;
 
+    /// Cancel ALL of a workflow's unclaimed queue rows (pending or waiting),
+    /// marking them failed. Returns the number of rows cancelled.
+    ///
+    /// Used when a workflow goes terminal (e.g. failed by the workflow
+    /// timeout with nothing claimed): without this, its queued rows stay
+    /// claimable and a worker that comes back later executes work for a dead
+    /// workflow — the replay guards discard the results, but the work (and
+    /// any LLM spend) is wasted. Claimed (`running`) rows are left alone:
+    /// in-flight work drains normally and its completion events are ignored
+    /// by the terminal-state guards.
+    async fn cancel_workflow_pending(&self, workflow_id: Uuid) -> Result<u64>;
+
     /// Reclaim stale running activities that have exceeded their timeout.
     ///
     /// This is a background maintenance operation that:

@@ -266,7 +266,8 @@ pub struct GetWorkflowResponse {
     /// Activity states
     pub activities: Vec<ActivityState>,
 
-    /// A failed activity's error message (null unless an activity failed)
+    /// Most specific failure reason: a failed activity's error, else the
+    /// workflow-level reason (e.g. timeout with nothing claimed)
     #[schema(example = "Connection timeout after 30s")]
     pub error_message: Option<String>,
 
@@ -418,8 +419,9 @@ pub struct WorkflowSummary {
     #[schema(example = "2025-11-06T10:00:05Z")]
     pub updated_at: DateTime<Utc>,
 
-    /// A failed activity's error message (dead-letter visibility; null unless
-    /// an activity failed)
+    /// Most specific failure reason (dead-letter visibility): a failed
+    /// activity's error, else the workflow-level reason (e.g. timeout with
+    /// nothing claimed)
     #[schema(example = "Connection timeout after 30s")]
     pub error_message: Option<String>,
 }
@@ -489,10 +491,14 @@ pub async fn get_workflow(
         "Workflow retrieved"
     );
 
+    // A failed activity's error is the most specific reason; the workflow-level
+    // error_message covers failures where no activity ever ran (e.g. timeout
+    // with nothing claimed — nukumori-support-needs item 12)
     let error_message = activities
         .iter()
         .find(|a| a.status == WorkflowActivityStatus::Failed && a.error.is_some())
-        .and_then(|a| a.error.clone());
+        .and_then(|a| a.error.clone())
+        .or_else(|| workflow.error_message.clone());
 
     Ok(Json(GetWorkflowResponse {
         id: workflow.id,
