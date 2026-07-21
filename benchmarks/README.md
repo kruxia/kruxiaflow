@@ -73,10 +73,16 @@ docker-compose down
 
 ## Expected Results
 
-- **Kruxia Flow**: >100 workflows/sec average
-- **Temporal**: 35-100 workflows/sec (based on published benchmarks)
-- **Airflow**: 10-50 workflows/sec (batch-oriented, not optimized for throughput)
-- **Speedup**: 10x+ vs Temporal, 20x+ vs Airflow
+Measured on the reference hardware (Apple Silicon, Docker Desktop; July 2026):
+
+- **Kruxia Flow**: ~85-105 wf/sec high-concurrency; ~15-19 wf/sec on the
+  latency-bound sequential/parallel scenarios (dominated by per-step
+  round-trips, not engine capacity)
+- **Temporal**: ~13-66 wf/sec (high run-to-run variance on this host)
+- **Airflow**: ~2-11 wf/sec (batch-oriented, not optimized for throughput)
+- **Speedup**: ~1.5-2x vs Temporal average, ~10x vs Airflow average
+- **Success rate**: 100% on every scenario is part of the pass criteria — a
+  single hung workflow is an engine bug, not noise (see 2026-07-20 notes)
 
 ## Architecture
 
@@ -115,22 +121,55 @@ benchmarks/
 ├── docker-compose.yml           # All platforms in one file
 ├── Dockerfile.benchmark         # Benchmark runner container
 ├── kruxiaflow/
-│   ├── benchmark.py            # Kruxia Flow HTTP client benchmark
+│   ├── benchmark.py            # Kruxia Flow HTTP client benchmark (std + py-std)
 │   └── workflows.py            # Workflow definitions (Python dicts)
 ├── temporal/
 │   ├── benchmark.py            # Temporal SDK benchmark
 │   ├── workflows.py            # Temporal workflow classes
 │   └── activities.py           # Temporal echo activity
-├── airflow/
+├── airflow_bench/
 │   ├── benchmark.py            # Airflow API client benchmark
-│   ├── dags.py                 # Airflow DAG definitions
-│   └── operators.py            # Custom echo operator
+│   └── dags.py                 # Airflow DAG definitions (dir mounted as the DAGs folder)
 ├── shared/
-│   └── report.py               # HTML report generator
+│   ├── report.py               # HTML report generator
+│   └── resource_monitor.py     # Per-platform container CPU/memory sampling
 └── results/                     # Output directory (gitignored)
 ```
 
+Note for Apple Silicon: `kruxia/kruxiaflow-py-std` on Docker Hub is
+amd64-only — build it locally before running
+(`docker build -t kruxia/kruxiaflow-py-std:latest ../../kruxiaflow-python`)
+or the py-std services fail to start.
+
 ## Results
+
+### 2026-07-20 (engine 0.8.0 + event-delivery fix)
+
+Run `results-20260720-185807.json`. **All 900 workflows across all platforms
+completed, 100% success on every scenario.**
+
+| Platform             | Sequential-5 | Parallel-10 | High-Concurrency-3 |
+|----------------------|--------------|-------------|---------------------|
+| Kruxia Flow          | 15.4 wf/s    | 18.7 wf/s   | 86.6 wf/s           |
+| Kruxia Flow (py-std) | 15.2 wf/s    | 16.4 wf/s   | 102.9 wf/s          |
+| Temporal             | 13.4 wf/s    | 12.7 wf/s   | 46.0 wf/s           |
+| Airflow              | 2.2 wf/s     | 1.9 wf/s    | 7.1 wf/s            |
+
+Compared to 2026-03-01 (five engine releases earlier: worker SDK rewrite,
+budget integrity, per-attempt event dedup, retry authority, scheduler),
+Kruxia Flow throughput is flat-to-better with tighter tail latencies
+(Sequential-5 P95 1239→832 ms, Parallel-10 P95 800→584 ms). Temporal
+shows large run-to-run variance on this host (46-68 wf/s high-concurrency
+across runs); compare within a run, not across runs.
+
+**The first 2026-07-20 run caught a real durability bug**: at 100-way
+concurrency, 2 of 900 workflows hung — their activities completed, but the
+completion events committed milliseconds after the consumer cursor had
+already read past their UUIDv7 ids, stranding them forever (id order ≠
+commit order). The fix (visibility-grace cursor + fully replay-idempotent
+event handlers) shipped before these numbers were recorded; the
+100%-success criterion above exists because of this find. Details:
+`docs/architecture.md` § "Visibility-grace cursor" and CHANGELOG.
 
 ### 2026-03-01 (commit 86e9ac7)
 

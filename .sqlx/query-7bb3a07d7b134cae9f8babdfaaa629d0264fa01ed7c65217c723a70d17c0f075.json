@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, workflow_id, event_type as \"event_type: WorkflowEventType\",\n                   activity_key, payload, timestamp, iteration\n            FROM workflow_events\n            WHERE id > COALESCE(\n                (SELECT last_event_id FROM workflow_event_consumers WHERE consumer_id = $1),\n                '00000000-0000-0000-0000-000000000000'::uuid\n            )\n            ORDER BY id ASC\n            LIMIT 100\n            ",
+  "query": "\n            SELECT id, workflow_id, event_type as \"event_type: WorkflowEventType\",\n                   activity_key, payload, timestamp, iteration\n            FROM workflow_events\n            WHERE id > COALESCE(\n                (SELECT last_event_id FROM workflow_event_consumers WHERE consumer_id = $1),\n                '00000000-0000-0000-0000-000000000000'::uuid\n            )\n            ORDER BY id ASC\n            LIMIT 1000\n            ",
   "describe": {
     "columns": [
       {
@@ -71,5 +71,5 @@
       true
     ]
   },
-  "hash": "9f27668e245ab2e59be91dcdc266b3c78b770b66791302415ab9198fd547807f"
+  "hash": "7bb3a07d7b134cae9f8babdfaaa629d0264fa01ed7c65217c723a70d17c0f075"
 }

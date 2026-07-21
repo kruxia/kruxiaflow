@@ -45,7 +45,12 @@ impl EventSource for PostgresEventSource {
     }
 
     /// Poll for new events since last consumed position
-    /// - Returns up to 100 events per poll
+    /// - Returns up to 1000 events per poll (must stay comfortably above the
+    ///   orchestrator's visibility-grace event backlog — see
+    ///   EVENT_VISIBILITY_GRACE in the orchestrator: the durable cursor
+    ///   deliberately trails real time, so a poll re-reads the recent tail;
+    ///   the LIMIT must leave room for new events beyond that tail or
+    ///   processing latency degrades at high event rates)
     /// - Uses scalar subquery for consumer position (enables Index Range Scan)
     /// - If no checkpoint exists (first poll), returns events from beginning
     ///
@@ -68,7 +73,7 @@ impl EventSource for PostgresEventSource {
                 '00000000-0000-0000-0000-000000000000'::uuid
             )
             ORDER BY id ASC
-            LIMIT 100
+            LIMIT 1000
             "#,
             consumer_id
         )

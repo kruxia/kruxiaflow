@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Event delivery could silently drop events under concurrent load — the
+  exact failure the polling EventSource exists to prevent** (caught by the
+  benchmark suite at 100-way concurrency: 2 of 900 workflows hung with
+  their work completed but the completion events stranded). Event ids are
+  UUIDv7 assigned when the INSERT executes, but readers see commit order:
+  an event committing milliseconds late could land behind an
+  already-advanced consumer cursor and never be read. The orchestrator's
+  durable cursor now trails a 500ms visibility-grace horizon (an in-memory
+  seen-set keeps re-polled tail events from being reprocessed; the poll
+  batch limit rose 100 → 1000 so the trailing window doesn't throttle
+  high event rates). Event processing is now fully replay-idempotent, as
+  at-least-once delivery requires — closing latent bugs that crash
+  recovery or multiple orchestrators sharing a consumer could always
+  trigger: a replayed `WorkflowCreated` re-initialized workflow state,
+  WIPING activity progress and wedging the workflow; a replayed
+  `ActivityCompleted` re-ran iteration management and cost recording (it
+  now has the same duplicate guard as `ActivityFailed`); a replayed
+  `ActivityWaiting` dragged a finished activity back to waiting; and a
+  failed event's promised retry-on-next-poll never happened if a later
+  event in the same batch succeeded (the cursor now only advances through
+  the contiguous prefix of resolved events).
+
+## [0.8.0] - 2026-07-20
+
 ### Added
 
 - **First-class recurring schedules**: a schedule is a new resource that

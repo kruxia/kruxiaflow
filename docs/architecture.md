@@ -24,10 +24,10 @@ Kruxia Flow is a lightweight, high-performance workflow orchestration platform d
 
 ### Core Value Proposition
 
-- **Single Binary**: Complete orchestration stack in one 7.5 MB executable
+- **Single Binary**: Complete orchestration stack in one 13 MB executable
 - **PostgreSQL-First**: All persistence (queues, events, state) using PostgreSQL 17+
-- **High Performance**: 93 wf/sec benchmarked (target >100 wf/sec with query optimization)
-- **Edge-Ready**: Lightweight footprint (328 MB peak under load)
+- **High Performance**: 87 wf/sec benchmarked at 100-way concurrency, 103 wf/sec via the Python std worker (July 2026; target >100 wf/sec with query optimization)
+- **Edge-Ready**: Lightweight footprint (370 MB peak under load)
 - **AI-Native**: Built-in cost tracking, streaming, and non-deterministic activity handling
 
 ### System Boundaries
@@ -2753,6 +2753,24 @@ PostgreSQL's LISTEN/NOTIFY is **not suitable for reliable event delivery** becau
 - ✅ **Database-agnostic** - Works with any PostgreSQL version/config
 
 **Guaranteed Delivery is Critical**: Workflow orchestration cannot tolerate missed events. A single missed "activity completed" event would cause a workflow to hang indefinitely. Polling ensures this cannot happen.
+
+**Visibility-grace cursor (required for the guarantee to actually hold)**:
+event ids are UUIDv7, assigned when the INSERT executes, but readers observe
+rows in *commit* order — under concurrent load an event can become visible a
+few milliseconds after a poll has already read past its id. A cursor advanced
+beyond it would strand it forever. The orchestrator therefore never advances
+its durable consumer position past `now - 500ms` (the visibility grace); the
+recent tail is re-polled until the grace window passes it, an in-memory
+seen-set prevents reprocessing within the process, and every event handler is
+replay-idempotent for at-least-once delivery (crash recovery, multiple
+orchestrators sharing a consumer): duplicate `WorkflowCreated` /
+`ActivityCompleted` / `ActivityFailed` / `ActivityWaiting` / `ActivitySignaled`
+events are guarded no-ops. The cursor also advances only through the
+contiguous prefix of successfully processed events, so a transiently failing
+event is genuinely retried on the next poll rather than skipped. Trade-off: sustained
+event rates above the poll batch limit per grace window (1000 per 0.5s =
+2,000 events/sec) degrade processing latency toward the grace period;
+post-MVP, an xid-ordered cursor column removes that ceiling entirely.
 
 **Performance Characteristics**:
 
