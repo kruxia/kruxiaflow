@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Dead-letters are now always self-explaining**: workflows failed by the
+  engine itself (workflow timeout — e.g. queued work that no worker ever
+  claimed because the worker was down) previously exposed
+  `error_message: null` on the workflow list/detail APIs; the only reason
+  lived in the unpersisted `WorkflowFailed` event payload, and no activity
+  had failed for the API's activity-error extraction to find. The
+  `WorkflowFailed` reason is now persisted to a new `workflows.error_message`
+  column, the timeout reason diagnoses the cause ("N queued activities were
+  never claimed by any worker — is a worker for this queue running?"), and
+  the APIs return the most specific reason available: a failed activity's
+  error first, the workflow-level reason as fallback.
+  (nukumori-support-needs item 12, from the prod cutover day.)
+- **Dead workflows no longer leave claimable work behind**: a workflow
+  failed from outside the activity flow (workflow timeout) left its
+  unclaimed queue rows `pending` — a worker coming back later would execute
+  (and pay for) work whose results the terminal-state guards then discarded.
+  Processing a `WorkflowFailed` event now cancels the workflow's unclaimed
+  rows (pending and waiting); in-flight claimed work still drains normally.
+
 ## [0.8.1] - 2026-07-20
 
 ### Fixed

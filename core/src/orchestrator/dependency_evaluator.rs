@@ -636,6 +636,7 @@ mod tests {
             activities: activities.into_iter().collect(),
             state_data: serde_json::json!({}),
             input: serde_json::json!({}),
+            error_message: None,
         }
     }
 

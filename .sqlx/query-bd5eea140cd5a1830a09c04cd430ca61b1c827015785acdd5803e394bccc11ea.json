@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "UPDATE workflows\n           SET activities = $1, state_data = $2, status = $3, updated_at = NOW()\n           WHERE id = $4",
+  "query": "UPDATE workflows\n           SET activities = $1, state_data = $2, status = $3, error_message = $4, updated_at = NOW()\n           WHERE id = $5",
   "describe": {
     "columns": [],
     "parameters": {
@@ -21,10 +21,11 @@
             }
           }
         },
+        "Text",
         "Uuid"
       ]
     },
     "nullable": []
   },
-  "hash": "12cb52bf7c816b712176fe8a22226560d623b4bec21f8665c9e473ded01595f0"
+  "hash": "bd5eea140cd5a1830a09c04cd430ca61b1c827015785acdd5803e394bccc11ea"
 }

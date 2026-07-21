@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id, definition_name, status AS \"status: WorkflowStatus\", activities, state_data, input\n           FROM workflows WHERE id = $1",
+  "query": "SELECT id, definition_name, status AS \"status: WorkflowStatus\", activities, state_data, input, error_message\n           FROM workflows WHERE id = $1",
   "describe": {
     "columns": [
       {
@@ -45,6 +45,11 @@
         "ordinal": 5,
         "name": "input",
         "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "error_message",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -58,8 +63,9 @@
       false,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "22bdd1a6f84ed89256520652d727823f04473fb95098c07ac6e431708af38daa"
+  "hash": "2a72b71a7a4984110c77b663029d73cfb5aa28856dd3bc7c830faf7edd3c391c"
 }

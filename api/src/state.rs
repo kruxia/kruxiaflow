@@ -308,6 +308,13 @@ pub mod tests {
             Ok(false)
         }
 
+        async fn cancel_workflow_pending(
+            &self,
+            _workflow_id: Uuid,
+        ) -> kruxiaflow_core::queue::Result<u64> {
+            Ok(0)
+        }
+
         async fn reclaim_stale_activities(
             &self,
             _limit: i64,

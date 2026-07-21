@@ -50,6 +50,7 @@ fn create_test_state_with_activities(
         activities: activities_map,
         state_data: json!({}),
         input: json!({}),
+        error_message: None,
     }
 }
 
@@ -1331,6 +1332,7 @@ fn test_is_workflow_complete_with_running_activity() {
         activities: activities_map,
         state_data: json!({}),
         input: json!({}),
+        error_message: None,
     };
 
     assert!(!is_workflow_complete(&state));
@@ -1393,6 +1395,7 @@ fn test_loop_activity_not_ready_when_max_iterations_exceeded() {
         activities: activities_map,
         state_data: json!({}),
         input: json!({}),
+        error_message: None,
     };
 
     let ready =
@@ -1457,6 +1460,7 @@ fn test_back_edge_first_iteration_auto_satisfied() {
         activities: activities_map,
         state_data: json!({}),
         input: json!({}),
+        error_message: None,
     };
 
     let ready =

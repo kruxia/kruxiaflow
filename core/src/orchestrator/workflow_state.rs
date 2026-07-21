@@ -18,6 +18,12 @@ pub struct WorkflowState {
     pub activities: HashMap<String, ActivityState>,
     pub state_data: serde_json::Value,
     pub input: serde_json::Value,
+    /// Why the workflow failed, for workflow-LEVEL failures (e.g. timeout with
+    /// nothing claimed). Activity-level failures carry their reason on the
+    /// activity's `error`; API read paths prefer that and fall back to this,
+    /// so a dead-letter always has a why.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
 }
 
 /// State of individual activity
@@ -194,7 +200,7 @@ pub async fn load_materialized_state(
     workflow_id: Uuid,
 ) -> Result<WorkflowState> {
     let row = sqlx::query!(
-        r#"SELECT id, definition_name, status AS "status: WorkflowStatus", activities, state_data, input
+        r#"SELECT id, definition_name, status AS "status: WorkflowStatus", activities, state_data, input, error_message
            FROM workflows WHERE id = $1"#,
         workflow_id
     )
@@ -213,6 +219,7 @@ pub async fn load_materialized_state(
         activities,
         state_data: row.state_data,
         input: row.input,
+        error_message: row.error_message,
     })
 }
 
@@ -229,11 +236,12 @@ pub async fn save_materialized_state(
 
     sqlx::query!(
         r#"UPDATE workflows
-           SET activities = $1, state_data = $2, status = $3, updated_at = NOW()
-           WHERE id = $4"#,
+           SET activities = $1, state_data = $2, status = $3, error_message = $4, updated_at = NOW()
+           WHERE id = $5"#,
         activities_json,
         state.state_data,
         state.status as WorkflowStatus,
+        state.error_message,
         workflow_id
     )
     .execute(&mut *tx)
@@ -286,6 +294,7 @@ pub async fn initialize_workflow_state(
         activities: activities.clone(),
         state_data: initial_state_data.unwrap_or_else(|| json!({})),
         input: input.clone().unwrap_or_else(|| json!({})),
+        error_message: None,
     };
 
     // Serialize activities and state_data for storage
@@ -448,6 +457,19 @@ pub fn apply_event_to_state(state: &mut WorkflowState, event: &WorkflowEvent) ->
         }
         WorkflowEventType::WorkflowFailed => {
             state.status = WorkflowStatus::Failed;
+            // Persist the workflow-level reason so dead-letters are
+            // self-explaining even when no activity ever ran (e.g. timeout
+            // with nothing claimed). First reason wins; replays don't
+            // overwrite it.
+            if state.error_message.is_none() {
+                state.error_message = event
+                    .payload
+                    .get("reason")
+                    .or_else(|| event.payload.get("error_message"))
+                    .or_else(|| event.payload.get("error"))
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+            }
         }
         WorkflowEventType::WorkflowUpdated => {
             // WorkflowUpdated doesn't modify state directly
@@ -699,6 +721,7 @@ mod tests {
             )]),
             state_data: json!({}),
             input: json!({}),
+            error_message: None,
         };
 
         let event = WorkflowEvent {
@@ -742,6 +765,7 @@ mod tests {
             )]),
             state_data: json!({}),
             input: json!({}),
+            error_message: None,
         };
 
         let event = WorkflowEvent {
@@ -785,6 +809,7 @@ mod tests {
             )]),
             state_data: json!({}),
             input: json!({}),
+            error_message: None,
         };
 
         let event = WorkflowEvent {
@@ -827,6 +852,7 @@ mod tests {
             )]),
             state_data: json!({}),
             input: json!({}),
+            error_message: None,
         };
 
         let event = WorkflowEvent {
@@ -871,6 +897,7 @@ mod tests {
             )]),
             state_data: json!({}),
             input: json!({}),
+            error_message: None,
         };
 
         let event = WorkflowEvent {
@@ -914,6 +941,7 @@ mod tests {
             )]),
             state_data: json!({}),
             input: json!({}),
+            error_message: None,
         };
 
         let event = WorkflowEvent {
@@ -961,6 +989,7 @@ mod tests {
             )]),
             state_data: json!({}),
             input: json!({}),
+            error_message: None,
         };
 
         let event = WorkflowEvent {
@@ -1006,6 +1035,7 @@ mod tests {
             )]),
             state_data: json!({}),
             input: json!({}),
+            error_message: None,
         };
 
         let event = WorkflowEvent {
@@ -1037,6 +1067,7 @@ mod tests {
             activities: HashMap::new(),
             state_data: json!({}),
             input: json!({}),
+            error_message: None,
         };
 
         let event = WorkflowEvent {
@@ -1062,6 +1093,7 @@ mod tests {
             activities: HashMap::new(),
             state_data: json!({}),
             input: json!({}),
+            error_message: None,
         };
 
         let event = WorkflowEvent {
@@ -1087,6 +1119,7 @@ mod tests {
             activities: HashMap::new(),
             state_data: json!({}),
             input: json!({}),
+            error_message: None,
         };
 
         let event = WorkflowEvent {
@@ -1113,6 +1146,7 @@ mod tests {
             activities: HashMap::new(),
             state_data: json!({}),
             input: json!({}),
+            error_message: None,
         };
 
         let event = WorkflowEvent {
@@ -1154,6 +1188,7 @@ mod tests {
             )]),
             state_data: json!({}),
             input: json!({}),
+            error_message: None,
         };
 
         let event = WorkflowEvent {
@@ -1181,6 +1216,7 @@ mod tests {
             activities: HashMap::new(),
             state_data: json!({}),
             input: json!({}),
+            error_message: None,
         };
 
         let event = WorkflowEvent {
