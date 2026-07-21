@@ -1,0 +1,17 @@
+# Codecov status checks (https://docs.codecov.com/docs/codecovyml-reference)
+#
+# project: guards overall repo coverage — fails only if a commit drops total
+# coverage more than the threshold below the base.
+# patch: reports diff coverage but NEVER blocks (informational) — its default
+# auto-target ("new code must beat the repo average") flags trait-mandated
+# mock stubs and defensive error branches that are covered by live E2E runs
+# rather than the unit suite.
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        informational: true
