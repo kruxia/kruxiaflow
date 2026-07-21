@@ -1789,7 +1789,7 @@ dependencies = [
 
 [[package]]
 name = "kruxiaflow"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1826,7 +1826,7 @@ dependencies = [
 
 [[package]]
 name = "kruxiaflow-api"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1860,7 +1860,7 @@ dependencies = [
 
 [[package]]
 name = "kruxiaflow-core"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -1892,14 +1892,14 @@ dependencies = [
 
 [[package]]
 name = "kruxiaflow-dashboard"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "axum 0.7.9",
 ]
 
 [[package]]
 name = "kruxiaflow-oauth"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1919,7 +1919,7 @@ dependencies = [
 
 [[package]]
 name = "kruxiaflow-profiling"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "chrono",
  "clap",
@@ -1935,7 +1935,7 @@ dependencies = [
 
 [[package]]
 name = "kruxiaflow-std-worker"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1973,7 +1973,7 @@ dependencies = [
 
 [[package]]
 name = "kruxiaflow-worker"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "anyhow",
  "async-trait",
