@@ -957,3 +957,550 @@ async fn export_csv(client: &ApiClient, args: &ExportArgs) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal_macros::dec;
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    // =========================================================================
+    // Pure helpers
+    // =========================================================================
+
+    #[test]
+    fn parse_since_units() {
+        assert_eq!(parse_since("7d").unwrap(), chrono::Duration::days(7));
+        assert_eq!(parse_since("24h").unwrap(), chrono::Duration::hours(24));
+        assert_eq!(parse_since("4w").unwrap(), chrono::Duration::weeks(4));
+    }
+
+    #[test]
+    fn parse_since_rejects_bad_input() {
+        assert!(parse_since("7x").is_err());
+        assert!(parse_since("d").is_err());
+        assert!(parse_since("").is_err());
+        assert!(parse_since("abc").is_err());
+    }
+
+    #[test]
+    fn parse_date_forms() {
+        let start = parse_date("2026-07-01", false).unwrap();
+        assert_eq!(start.to_rfc3339(), "2026-07-01T00:00:00+00:00");
+
+        let end = parse_date("2026-07-01", true).unwrap();
+        assert_eq!(end.to_rfc3339(), "2026-07-01T23:59:59+00:00");
+
+        let rfc = parse_date("2026-07-01T12:30:00-05:00", false).unwrap();
+        assert_eq!(rfc.to_rfc3339(), "2026-07-01T17:30:00+00:00");
+
+        assert!(parse_date("July 1", false).is_err());
+    }
+
+    #[test]
+    fn period_query_since_wins() {
+        let period = PeriodArgs {
+            since: Some("7d".to_string()),
+            start_date: None,
+            end_date: None,
+        };
+        let query = period_query(&period).unwrap();
+        assert_eq!(query.len(), 1);
+        assert_eq!(query[0].0, "start_date");
+    }
+
+    #[test]
+    fn period_query_explicit_dates() {
+        let period = PeriodArgs {
+            since: None,
+            start_date: Some("2026-07-01".to_string()),
+            end_date: Some("2026-07-18".to_string()),
+        };
+        let query = period_query(&period).unwrap();
+        assert_eq!(query.len(), 2);
+        assert_eq!(query[0].0, "start_date");
+        assert_eq!(query[1].0, "end_date");
+
+        let empty = PeriodArgs {
+            since: None,
+            start_date: None,
+            end_date: None,
+        };
+        assert!(period_query(&empty).unwrap().is_empty());
+    }
+
+    #[test]
+    fn fmt_usd_normalizes() {
+        assert_eq!(fmt_usd(dec!(0.0100000)), "$0.01");
+        assert_eq!(fmt_usd(dec!(1.2345678)), "$1.234568");
+        assert_eq!(fmt_usd(dec!(0)), "$0");
+        assert_eq!(fmt_opt_usd(Some(dec!(2.50))), "$2.5");
+        assert_eq!(fmt_opt_usd(None), "—");
+    }
+
+    #[test]
+    fn truncate_handles_unicode() {
+        assert_eq!(truncate("short", 10), "short");
+        assert_eq!(truncate("exactly-10", 10), "exactly-10");
+        assert_eq!(truncate("a-very-long-name", 8), "a-very-…");
+        assert_eq!(truncate("日本語のテキスト", 4), "日本語…");
+    }
+
+    #[test]
+    fn csv_field_quotes_when_needed() {
+        assert_eq!(csv_field("plain"), "plain");
+        assert_eq!(csv_field("has,comma"), "\"has,comma\"");
+        assert_eq!(csv_field("has\"quote"), "\"has\"\"quote\"");
+        assert_eq!(csv_field("has\nnewline"), "\"has\nnewline\"");
+    }
+
+    #[test]
+    fn print_json_pretty_validates() {
+        assert!(print_json_pretty("{\"a\": 1}").is_ok());
+        assert!(print_json_pretty("not json").is_err());
+    }
+
+    #[test]
+    fn print_group_and_workflow_csv_helpers() {
+        // Smoke: exercise the println-based CSV helpers directly
+        print_groups_csv(
+            "provider",
+            &[CostGroup {
+                key: Some("anthropic".to_string()),
+                total_cost_usd: dec!(1.25),
+                activities: 10,
+                workflows: 5,
+                total_tokens: 1000,
+            }],
+        );
+        print_workflows_csv(&[TopWorkflow {
+            workflow_id: Uuid::nil(),
+            definition_name: "def,with,commas".to_string(),
+            status: "completed".to_string(),
+            created_at: Utc::now(),
+            total_cost_usd: dec!(0.10),
+            activities: 3,
+            budget_limit_usd: None,
+        }]);
+    }
+
+    // =========================================================================
+    // Fixtures + command construction
+    // =========================================================================
+
+    fn cost_cmd(api_url: &str, format: &str, sub: CostSubcommand) -> CostCommand {
+        CostCommand {
+            command: sub,
+            api_url: api_url.to_string(),
+            client_id: None,
+            client_secret: None,
+            format: format.to_string(),
+            timeout: 5,
+        }
+    }
+
+    fn summary_json(with_budget: bool) -> serde_json::Value {
+        serde_json::json!({
+            "workflow_id": "00000000-0000-0000-0000-000000000001",
+            "workflow_name": "bench_flow",
+            "total_cost_usd": "0.047",
+            "budget_limit_usd": if with_budget { serde_json::json!("0.10") } else { serde_json::Value::Null },
+            "budget_remaining_usd": if with_budget { serde_json::json!("0.053") } else { serde_json::Value::Null },
+            "total_activities": 3
+        })
+    }
+
+    fn history_json() -> serde_json::Value {
+        serde_json::json!([
+            {
+                "activity_key": "summarize",
+                "attempt": 1,
+                "cost_usd": "0.042",
+                "prompt_tokens": 20000,
+                "output_tokens": 1000,
+                "total_tokens": 21000,
+                "cached_tokens": 10000,
+                "provider": "anthropic",
+                "model": "claude-sonnet-5",
+                "budget_exceeded": false,
+                "budget_event": null,
+                "created_at": "2026-07-20T12:00:00Z"
+            },
+            {
+                "activity_key": "fallback-step-with-a-very-long-key",
+                "attempt": 2,
+                "cost_usd": "0.005",
+                "prompt_tokens": null,
+                "output_tokens": null,
+                "total_tokens": null,
+                "cached_tokens": null,
+                "provider": null,
+                "model": null,
+                "budget_exceeded": true,
+                "budget_event": "downgrade",
+                "created_at": "2026-07-20T12:01:00Z"
+            },
+            {
+                "activity_key": "aborted",
+                "attempt": 1,
+                "cost_usd": "0",
+                "prompt_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "cached_tokens": 0,
+                "provider": null,
+                "model": "gpt-5.4-mini",
+                "budget_exceeded": true,
+                "budget_event": "abort",
+                "created_at": "2026-07-20T12:02:00Z"
+            }
+        ])
+    }
+
+    fn analytics_json(with_groups: bool) -> serde_json::Value {
+        let mut value = serde_json::json!({
+            "total_workflows": 12,
+            "total_cost_usd": "1.234",
+            "avg_cost_per_activity": "0.01",
+            "start_date": "2026-06-20T00:00:00Z",
+            "end_date": "2026-07-20T00:00:00Z",
+            "total_activities": 120,
+            "avg_cost_per_workflow": "0.1028",
+            "total_tokens": 500000,
+            "cached_tokens": 100000,
+            "cache_hit_rate": 0.2,
+            "budget_aborts": 1,
+            "budget_downgrades": 2,
+            "top_workflows": [{
+                "workflow_id": "00000000-0000-0000-0000-000000000002",
+                "definition_name": "reflect",
+                "status": "completed",
+                "created_at": "2026-07-19T10:00:00Z",
+                "total_cost_usd": "0.50",
+                "activities": 9,
+                "budget_limit_usd": "1.00"
+            }],
+            "top_definitions": [{
+                "definition_name": "reflect",
+                "workflows": 12,
+                "total_cost_usd": "1.234",
+                "avg_cost_per_workflow": "0.1028"
+            }],
+            "budget_events": [{
+                "definition_name": "reflect",
+                "activity_key": "summarize",
+                "event": "abort",
+                "estimated_cost_usd": "0.02",
+                "budget_limit_usd": "0.01",
+                "created_at": "2026-07-19T11:00:00Z"
+            }]
+        });
+        if with_groups {
+            value["groups"] = serde_json::json!([
+                {"key": "anthropic", "total_cost_usd": "1.0", "activities": 100, "workflows": 10, "total_tokens": 400000},
+                {"key": null, "total_cost_usd": "0.234", "activities": 20, "workflows": 2, "total_tokens": 100000}
+            ]);
+        }
+        value
+    }
+
+    async fn mock_workflow_endpoints(server: &MockServer, with_budget: bool) {
+        let id = "00000000-0000-0000-0000-000000000001";
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/workflows/{}/cost", id)))
+            .respond_with(ResponseTemplate::new(200).set_body_json(summary_json(with_budget)))
+            .mount(server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/workflows/{}/cost/history", id)))
+            .respond_with(ResponseTemplate::new(200).set_body_json(history_json()))
+            .mount(server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/workflows/{}", id)))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"status": "completed"})),
+            )
+            .mount(server)
+            .await;
+    }
+
+    fn workflow_sub(detailed: bool) -> CostSubcommand {
+        CostSubcommand::Workflow(WorkflowArgs {
+            workflow_id: Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+            detailed,
+        })
+    }
+
+    fn no_period() -> PeriodArgs {
+        PeriodArgs {
+            since: None,
+            start_date: None,
+            end_date: None,
+        }
+    }
+
+    // =========================================================================
+    // ApiClient / auth
+    // =========================================================================
+
+    #[tokio::test]
+    async fn connect_rejects_partial_credentials() {
+        let cmd = CostCommand {
+            command: workflow_sub(false),
+            api_url: "http://127.0.0.1:1".to_string(),
+            client_id: Some("id-only".to_string()),
+            client_secret: None,
+            format: "table".to_string(),
+            timeout: 1,
+        };
+        let err = match ApiClient::connect(&cmd).await {
+            Ok(_) => panic!("expected partial credentials to be rejected"),
+            Err(e) => e,
+        };
+        assert!(err.to_string().contains("must be provided together"));
+    }
+
+    #[tokio::test]
+    async fn connect_obtains_token_with_credentials() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/oauth/token"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"access_token": "tok-123"})),
+            )
+            .mount(&server)
+            .await;
+
+        let cmd = CostCommand {
+            command: workflow_sub(false),
+            api_url: format!("{}/", server.uri()), // trailing slash is trimmed
+            client_id: Some("benchmark".to_string()),
+            client_secret: Some("secret".to_string()),
+            format: "table".to_string(),
+            timeout: 5,
+        };
+        let client = ApiClient::connect(&cmd).await.unwrap();
+        assert_eq!(client.token.as_deref(), Some("tok-123"));
+        assert!(!client.api_url.ends_with('/'));
+    }
+
+    #[tokio::test]
+    async fn obtain_token_surfaces_failure_body() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/oauth/token"))
+            .respond_with(ResponseTemplate::new(401).set_body_string("bad client"))
+            .mount(&server)
+            .await;
+
+        let http = Client::new();
+        let err = obtain_token(&http, &server.uri(), "id", "nope")
+            .await
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("401"), "unexpected error: {msg}");
+        assert!(msg.contains("bad client"), "unexpected error: {msg}");
+    }
+
+    #[tokio::test]
+    async fn get_raw_maps_status_codes() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/unauthorized"))
+            .respond_with(ResponseTemplate::new(401))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/missing"))
+            .respond_with(ResponseTemplate::new(404))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/broken"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("boom"))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/ok"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{\"n\": 1}"))
+            .mount(&server)
+            .await;
+
+        let client = ApiClient {
+            http: Client::new(),
+            api_url: server.uri(),
+            token: Some("tok".to_string()),
+        };
+
+        let unauthorized = client.get_raw("/unauthorized", &[]).await.unwrap_err();
+        assert!(unauthorized.to_string().contains("Authentication required"));
+
+        let missing = client.get_raw("/missing", &[]).await.unwrap_err();
+        assert!(missing.to_string().contains("Not found"));
+
+        let broken = client.get_raw("/broken", &[]).await.unwrap_err();
+        assert!(broken.to_string().contains("boom"));
+
+        assert_eq!(client.get_raw("/ok", &[]).await.unwrap(), "{\"n\": 1}");
+
+        // get_json: success and shape mismatch
+        #[derive(Deserialize)]
+        struct N {
+            n: i64,
+        }
+        assert_eq!(client.get_json::<N>("/ok", &[]).await.unwrap().n, 1);
+        let shape_err = client
+            .get_json::<Vec<String>>("/ok", &[])
+            .await
+            .unwrap_err();
+        assert!(shape_err.to_string().contains("Unexpected response shape"));
+    }
+
+    // =========================================================================
+    // execute() end-to-end against a mock server (dev-mode: no credentials)
+    // =========================================================================
+
+    #[tokio::test]
+    async fn workflow_report_table_json_csv() {
+        let server = MockServer::start().await;
+        mock_workflow_endpoints(&server, true).await;
+
+        for format in ["table", "json", "csv"] {
+            let cmd = cost_cmd(&server.uri(), format, workflow_sub(true));
+            execute(cmd)
+                .await
+                .unwrap_or_else(|e| panic!("workflow report failed for format {format}: {e:#}"));
+        }
+    }
+
+    #[tokio::test]
+    async fn workflow_report_without_budget_or_status() {
+        let server = MockServer::start().await;
+        mock_workflow_endpoints(&server, false).await;
+        // Status endpoint 500s for one workflow id variant: informational only.
+        // (mock_workflow_endpoints already mounted a healthy one; verify the
+        // plain table path with no budget set instead.)
+        let cmd = cost_cmd(&server.uri(), "table", workflow_sub(false));
+        execute(cmd).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn analytics_report_all_formats_and_groups() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/cost/analytics"))
+            .and(query_param("group_by", "provider"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(analytics_json(true)))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/cost/analytics"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(analytics_json(false)))
+            .mount(&server)
+            .await;
+
+        for (format, group_by) in [
+            ("table", None),
+            ("table", Some("provider")),
+            ("json", None),
+            ("csv", None),
+            ("csv", Some("provider")),
+        ] {
+            let sub = CostSubcommand::Analytics(AnalyticsArgs {
+                period: PeriodArgs {
+                    since: Some("7d".to_string()),
+                    start_date: None,
+                    end_date: None,
+                },
+                group_by: group_by.map(String::from),
+            });
+            let cmd = cost_cmd(&server.uri(), format, sub);
+            execute(cmd).await.unwrap_or_else(|e| {
+                panic!("analytics failed for format {format} group_by {group_by:?}: {e:#}")
+            });
+        }
+    }
+
+    #[tokio::test]
+    async fn top_report_workflows_and_definitions() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/cost/analytics"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(analytics_json(false)))
+            .mount(&server)
+            .await;
+
+        for (by, format) in [
+            ("workflows", "table"),
+            ("workflows", "csv"),
+            ("definitions", "table"),
+            ("definitions", "csv"),
+            ("workflows", "json"),
+        ] {
+            let sub = CostSubcommand::Top(TopArgs {
+                period: no_period(),
+                limit: 5,
+                by: by.to_string(),
+            });
+            let cmd = cost_cmd(&server.uri(), format, sub);
+            execute(cmd)
+                .await
+                .unwrap_or_else(|e| panic!("top failed for {by}/{format}: {e:#}"));
+        }
+    }
+
+    #[tokio::test]
+    async fn export_csv_to_stdout_and_file() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/cost/analytics"))
+            .and(query_param("group_by", "day"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(analytics_json(true)))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/cost/analytics"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(analytics_json(false)))
+            .mount(&server)
+            .await;
+
+        // Per-workflow rows to stdout
+        let sub = CostSubcommand::Export(ExportArgs {
+            period: no_period(),
+            output: None,
+            group_by: None,
+        });
+        execute(cost_cmd(&server.uri(), "csv", sub)).await.unwrap();
+
+        // Grouped rows to a file
+        let out_path =
+            std::env::temp_dir().join(format!("kruxiaflow-cost-export-{}.csv", Uuid::now_v7()));
+        let sub = CostSubcommand::Export(ExportArgs {
+            period: no_period(),
+            output: Some(out_path.clone()),
+            group_by: Some("day".to_string()),
+        });
+        execute(cost_cmd(&server.uri(), "csv", sub)).await.unwrap();
+
+        let written = std::fs::read_to_string(&out_path).unwrap();
+        assert!(written.starts_with("day,total_cost_usd"));
+        assert_eq!(written.lines().count(), 3); // header + 2 groups
+        std::fs::remove_file(&out_path).ok();
+    }
+
+    #[tokio::test]
+    async fn execute_fails_cleanly_on_unreachable_server() {
+        let sub = CostSubcommand::Analytics(AnalyticsArgs {
+            period: no_period(),
+            group_by: None,
+        });
+        let mut cmd = cost_cmd("http://127.0.0.1:1", "table", sub);
+        cmd.timeout = 1;
+        let err = execute(cmd).await.unwrap_err();
+        assert!(err.to_string().contains("Failed to reach API server"));
+    }
+}
