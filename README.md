@@ -16,7 +16,8 @@ activities:
     parameters:
       model:
         - anthropic/claude-sonnet-5      # preferred
-        - openai/gpt-5.4-mini            # if budget is tight
+        - google/gemini-3.6-flash        # cheaper
+        - google/gemini-3.5-flash-lite   # if budget is tight
       prompt: "Research and summarize: {{INPUT.topic}}"
       max_tokens: 1000
     settings:
@@ -92,7 +93,8 @@ activities:
     parameters:
       model:
         - anthropic/claude-sonnet-5      # preferred
-        - openai/gpt-5.4-mini            # if budget is tight
+        - google/gemini-3.6-flash        # cheaper
+        - google/gemini-3.5-flash-lite   # if budget is tight
       prompt: "In three concise bullet points: {{INPUT.topic}}"
       max_tokens: 500
     settings:
@@ -173,9 +175,9 @@ activities:
     activity_name: llm_prompt
     parameters:
       model:
-        - anthropic/claude-sonnet-5    # Try first
-        - openai/gpt-5.4-mini          # If budget constrained
-        - anthropic/claude-haiku-4-5   # Last resort
+        - anthropic/claude-sonnet-5      # Try first
+        - google/gemini-3.6-flash        # If budget constrained
+        - google/gemini-3.5-flash-lite   # Much cheaper, still good
       prompt: "Generate a summary..."
       max_tokens: 500
     settings:
