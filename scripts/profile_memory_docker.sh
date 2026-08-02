@@ -79,13 +79,13 @@ if [ "$BUILD" = true ] || ! docker images | grep -q kruxiaflow-profiling; then
 fi
 
 # Start PostgreSQL if not already running
-if ! docker ps | grep -q kruxiaflow-postgres; then
+if ! [ -n "$(docker compose ps -q postgres 2>/dev/null)" ]; then
     echo -e "${YELLOW}Starting PostgreSQL...${NC}"
     docker-compose up -d postgres
 
     # Wait for postgres to be healthy
     echo "Waiting for PostgreSQL to be ready..."
-    timeout 30 sh -c 'until docker exec kruxiaflow-postgres pg_isready -U kruxiaflow > /dev/null 2>&1; do sleep 1; done' || {
+    timeout 30 sh -c 'until docker compose exec -T postgres pg_isready -U kruxiaflow > /dev/null 2>&1; do sleep 1; done' || {
         echo -e "${RED}Error: PostgreSQL failed to start${NC}"
         exit 1
     }
@@ -97,8 +97,8 @@ fi
 echo -e "${YELLOW}Setting up profiling database...${NC}"
 
 # Create benchmark database
-docker exec kruxiaflow-postgres psql -U kruxiaflow -c "DROP DATABASE IF EXISTS kruxiaflow_profiling;" 2>/dev/null || true
-docker exec kruxiaflow-postgres psql -U kruxiaflow -c "CREATE DATABASE kruxiaflow_profiling;" 2>/dev/null || true
+docker compose exec -T postgres psql -U kruxiaflow -c "DROP DATABASE IF EXISTS kruxiaflow_profiling;" 2>/dev/null || true
+docker compose exec -T postgres psql -U kruxiaflow -c "CREATE DATABASE kruxiaflow_profiling;" 2>/dev/null || true
 
 # Run migrations in Docker
 docker-compose run --rm profiling sh -c "cd /opt && sqlx migrate run --source migrations --database-url postgres://kruxiaflow:kruxiaflow_dev@postgres:5432/kruxiaflow_profiling"

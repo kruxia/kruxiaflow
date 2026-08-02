@@ -30,7 +30,6 @@ services:
   # - Web UI + REST API on port 8025 (http://localhost:8025)
   mailpit:
     image: axllent/mailpit:latest
-    container_name: kruxiaflow-mailpit
     ports:
       - "127.0.0.1:1025:1025"   # SMTP server
       - "127.0.0.1:8025:8025"   # Web UI + REST API

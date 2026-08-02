@@ -149,7 +149,7 @@ echo "========================================"
 # Database setup (unless skipped)
 if [ "$SKIP_DB_SETUP" = false ]; then
     # Check if PostgreSQL container is running
-    if ! docker ps | grep -q kruxiaflow-postgres; then
+    if ! [ -n "$(docker compose ps -q postgres 2>/dev/null)" ]; then
         echo -e "${YELLOW}Starting PostgreSQL container...${NC}"
         docker-compose up -d postgres
         echo "Waiting for PostgreSQL to be ready..."
@@ -157,7 +157,7 @@ if [ "$SKIP_DB_SETUP" = false ]; then
     fi
 
     # Wait for PostgreSQL to be ready
-    until docker exec kruxiaflow-postgres pg_isready -U kruxiaflow > /dev/null 2>&1; do
+    until docker compose exec -T postgres pg_isready -U kruxiaflow > /dev/null 2>&1; do
         echo "Waiting for PostgreSQL..."
         sleep 1
     done
@@ -175,14 +175,14 @@ if [ "$SKIP_DB_SETUP" = false ]; then
     echo -e "${YELLOW}Setting up test database...${NC}"
 
     # Terminate any existing connections to the test database
-    docker exec kruxiaflow-postgres psql -U ${DB_USER} -c "
+    docker compose exec -T postgres psql -U ${DB_USER} -c "
     SELECT pg_terminate_backend(pid)
     FROM pg_stat_activity
     WHERE datname = '${DB_NAME}' AND pid <> pg_backend_pid();" 2>/dev/null || true
 
     # Drop and recreate database
-    docker exec kruxiaflow-postgres psql -U ${DB_USER} -c "DROP DATABASE IF EXISTS ${DB_NAME};" 2>/dev/null || true
-    docker exec kruxiaflow-postgres psql -U ${DB_USER} -c "CREATE DATABASE ${DB_NAME};"
+    docker compose exec -T postgres psql -U ${DB_USER} -c "DROP DATABASE IF EXISTS ${DB_NAME};" 2>/dev/null || true
+    docker compose exec -T postgres psql -U ${DB_USER} -c "CREATE DATABASE ${DB_NAME};"
 
     echo -e "${GREEN}Test database created${NC}"
 

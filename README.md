@@ -72,6 +72,10 @@ That's it — Kruxia Flow is running locally in insecure dev mode (no tokens nee
 evaluation only). `OPENAI_API_KEY`, `GOOGLE_API_KEY`, and `OLLAMA_BASE_URL` work the
 same way.
 
+Each directory you run the quickstart from is its own isolated stack — separate
+containers and data volumes. Coming back later? Pull the latest release first:
+`docker compose pull`.
+
 ```bash
 # Verify it's up
 curl -s http://localhost:8080/health

@@ -4,6 +4,11 @@
 #   curl -fsSL https://raw.githubusercontent.com/kruxia/kruxiaflow/main/docker-compose.yml -o docker-compose.yml
 #   KRUXIAFLOW_INSECURE_DEV=true ANTHROPIC_API_KEY=sk-... docker compose up -d
 #
+# Each directory you run this file from is an ISOLATED compose project with its
+# own containers and data volumes. A second cluster on the same machine fails
+# fast on the port bind (default 127.0.0.1:8080) — stop the other cluster, or
+# run this one on different ports via KRUXIAFLOW_PORT / KRUXIAFLOW_MCP_HTTP_PORT.
+#
 # Then submit your first budgeted workflow — no tokens, no auth setup:
 # see https://github.com/kruxia/kruxiaflow#getting-started
 #
@@ -103,7 +108,6 @@ services:
 
   postgres:
     image: postgres:17-bookworm
-    container_name: kruxiaflow-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-kruxiaflow}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kruxiaflow-local}
@@ -152,7 +156,6 @@ services:
   redis:
     profiles: ["cache"]
     image: redis:7.4-alpine
-    container_name: kruxiaflow-redis
     volumes:
       - redis_data:/data
     networks:
@@ -183,7 +186,6 @@ services:
     # tags, never on main builds). For production, pin a version instead,
     # e.g. kruxia/kruxiaflow:0.7.0 — see https://hub.docker.com/r/kruxia/kruxiaflow/tags
     image: kruxia/kruxiaflow:latest
-    container_name: kruxiaflow-server
     depends_on:
       postgres:
         condition: service_healthy
@@ -266,18 +268,14 @@ services:
 
 volumes:
   postgres_data:
-    name: kruxiaflow-postgres-data
     labels:
       com.kruxiaflow.volume: "database"
   redis_data:
-    name: kruxiaflow-redis-data
     labels:
       com.kruxiaflow.volume: "cache"
   kruxiaflow_keys:
-    name: kruxiaflow-keys
     labels:
       com.kruxiaflow.volume: "secrets"
   kruxiaflow_config:
-    name: kruxiaflow-config
     labels:
       com.kruxiaflow.volume: "config"

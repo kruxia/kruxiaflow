@@ -32,7 +32,6 @@ services:
   # Python worker for script activities in examples
   py-std-worker:
     image: kruxia/kruxiaflow-py-std:latest
-    container_name: kruxiaflow-py-std-worker
     environment:
       KRUXIAFLOW_API_URL: http://kruxiaflow:8080
       KRUXIAFLOW_CLIENT_ID: ${KRUXIAFLOW_CLIENT_ID:-}
@@ -67,7 +66,6 @@ services:
   # - Web UI at http://localhost:8025 to view all captured messages
   mailpit:
     image: axllent/mailpit:latest
-    container_name: kruxiaflow-mailpit
     ports:
       - "127.0.0.1:1025:1025"   # SMTP server
       - "127.0.0.1:8025:8025"   # Web UI + REST API

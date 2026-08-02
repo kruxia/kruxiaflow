@@ -16,7 +16,7 @@ docker-compose up -d postgres
 
 # Wait for PostgreSQL to be ready
 echo "Waiting for PostgreSQL to be ready..."
-until docker exec kruxiaflow-postgres pg_isready -U kruxiaflow > /dev/null 2>&1; do
+until docker compose exec -T postgres pg_isready -U kruxiaflow > /dev/null 2>&1; do
   sleep 1
 done
 

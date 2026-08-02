@@ -157,12 +157,12 @@ echo -e "${YELLOW}Initializing for benchmark suite...${NC}"
 
 # Reset pg_stat_statements for clean measurement
 echo -e "${BLUE}Resetting pg_stat_statements...${NC}"
-docker exec kruxiaflow-postgres psql -U kruxiaflow -d ${DB_NAME} -c "SELECT pg_stat_statements_reset();" 2>/dev/null || true
+docker compose exec -T postgres psql -U kruxiaflow -d ${DB_NAME} -c "SELECT pg_stat_statements_reset();" 2>/dev/null || true
 
 # Truncate tables for clean state before first test
 # Note: Each test will truncate before running, and database state is preserved after each test
 echo -e "${BLUE}Truncating workflow tables for first test...${NC}"
-docker exec kruxiaflow-postgres psql -U kruxiaflow -d ${DB_NAME} -c "
+docker compose exec -T postgres psql -U kruxiaflow -d ${DB_NAME} -c "
     TRUNCATE TABLE workflow_events CASCADE;
     TRUNCATE TABLE activity_queue CASCADE;
     TRUNCATE TABLE workflows CASCADE;
@@ -243,7 +243,7 @@ for test_name in "${TESTS_TO_RUN[@]}"; do
 
     # Clean database BEFORE each test to ensure clean state
     echo -e "${BLUE}Truncating database before test...${NC}"
-    docker exec kruxiaflow-postgres psql -U kruxiaflow -d ${DB_NAME} -c "
+    docker compose exec -T postgres psql -U kruxiaflow -d ${DB_NAME} -c "
         TRUNCATE TABLE workflow_events CASCADE;
         TRUNCATE TABLE activity_queue CASCADE;
         TRUNCATE TABLE workflows CASCADE;
@@ -322,17 +322,17 @@ echo ""
 echo -e "${YELLOW}Collecting PostgreSQL query statistics...${NC}"
 
 # Ensure pg_stat_statements extension exists
-docker exec kruxiaflow-postgres psql -U kruxiaflow -d ${DB_NAME} -c "
+docker compose exec -T postgres psql -U kruxiaflow -d ${DB_NAME} -c "
     CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 " > /dev/null 2>&1
 
 # Check if extension was created successfully
-if docker exec kruxiaflow-postgres psql -U kruxiaflow -d ${DB_NAME} -c "
+if docker compose exec -T postgres psql -U kruxiaflow -d ${DB_NAME} -c "
     SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements';
 " 2>/dev/null | grep -q "1"; then
     # Get slow queries using psql inside the Docker container
     # Note: Using 0.01ms threshold to capture queries (most queries are sub-millisecond now)
-    docker exec kruxiaflow-postgres psql -U kruxiaflow -d ${DB_NAME} -c "
+    docker compose exec -T postgres psql -U kruxiaflow -d ${DB_NAME} -c "
         SELECT
             query,
             calls,
@@ -588,9 +588,9 @@ if [ "$PROFILING_SUCCESS" = true ]; then
     echo "Database State:"
     echo "  The database has NOT been cleaned after the last test."
     echo "  To inspect accumulated data:"
-    echo "    docker exec kruxiaflow-postgres psql -U kruxiaflow -d ${DB_NAME} -c 'SELECT COUNT(*) FROM workflows;'"
-    echo "    docker exec kruxiaflow-postgres psql -U kruxiaflow -d ${DB_NAME} -c 'SELECT COUNT(*) FROM workflow_events;'"
-    echo "    docker exec kruxiaflow-postgres psql -U kruxiaflow -d ${DB_NAME} -c 'SELECT COUNT(*) FROM activity_queue;'"
+    echo "    docker compose exec -T postgres psql -U kruxiaflow -d ${DB_NAME} -c 'SELECT COUNT(*) FROM workflows;'"
+    echo "    docker compose exec -T postgres psql -U kruxiaflow -d ${DB_NAME} -c 'SELECT COUNT(*) FROM workflow_events;'"
+    echo "    docker compose exec -T postgres psql -U kruxiaflow -d ${DB_NAME} -c 'SELECT COUNT(*) FROM activity_queue;'"
 
     exit 0
 else

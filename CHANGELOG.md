@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Quickstart/compose isolation**: removed fixed `container_name`s and unprefixed
+  volume names from the compose files. Each directory is now an isolated compose
+  project with its own containers and data volumes; a second cluster fails fast on
+  the port bind instead of silently replacing a running cluster, and
+  `docker compose down -v` can no longer delete another cluster's data. Repo
+  scripts use `docker compose exec` instead of fixed container names.
+
 ### Fixed
 
 - **Dead-letters are now always self-explaining**: workflows failed by the
