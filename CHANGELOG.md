@@ -16,9 +16,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connection is a PostgreSQL backend process, so small hosts such as a
   Raspberry Pi can shrink the idle pool (e.g. `serve` from 10 to 2) and keep
   the maximum below PostgreSQL's `max_connections`.
+- **Username/password sign-in for people**: the built-in dashboard signs in
+  with a username and password by default (client credentials remain
+  available behind a toggle). A password sign-in is remembered in the
+  browser and renewed with the rotating refresh token until 30 days without
+  use or **Sign out**; tabs renew one at a time so they never revoke each
+  other's refresh token.
+- **`kruxiaflow login` / `kruxiaflow logout`**: password login for client
+  commands. Tokens are saved per API server in
+  `~/.config/kruxiaflow/credentials.json` (mode 0600, `$XDG_CONFIG_HOME`
+  respected); `kruxiaflow cost` uses the saved login when
+  `KRUXIAFLOW_CLIENT_ID`/`KRUXIAFLOW_CLIENT_SECRET` are not set, reusing the
+  access token until it expires and then renewing it.
+- **`kruxiaflow seed-user`**: creates a user for password sign-in, or resets
+  an existing user's password (also revoking their refresh tokens). Writes to
+  the database directly, like `seed-client`.
 
 ### Changed
 
+- **Only OAuth clients can create users**: `POST /api/v1/oauth/users` now
+  returns 403 for tokens from the password or refresh-token grants.
+  Client-credentials tokens (and the `--insecure-dev` principal) are
+  unaffected.
 - **Quickstart/compose isolation**: removed fixed `container_name`s and unprefixed
   volume names from the compose files. Each directory is now an isolated compose
   project with its own containers and data volumes; a second cluster fails fast on
@@ -54,6 +73,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   miss across workflows for every such activity. The temp directory is now
   passed on `ActivityContext::temp_dir`, and parameters reach activities
   unmodified.
+- **Sign-ins no longer stall the server**: bcrypt checks for the client
+  credentials and password grants (and password hashing when creating users)
+  ran inline on the async runtime. On a single-core host the runtime has one
+  worker thread, so each sign-in froze the API, orchestrator, and built-in
+  worker for the length of the bcrypt check (~3.5s on a Raspberry Pi Zero).
+  bcrypt now runs on the blocking thread pool.
 
 ### Security
 

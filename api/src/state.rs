@@ -556,6 +556,10 @@ pub mod tests {
             })
         }
 
+        async fn is_active_client(&self, _subject: &str) -> AuthResult<bool> {
+            Ok(true)
+        }
+
         async fn register_user(
             &self,
             request: RegisterUserRequest,

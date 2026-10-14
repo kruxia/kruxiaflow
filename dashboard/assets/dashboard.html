@@ -64,11 +64,11 @@
   /* Date-range presets: one row above the charts */
   .filters { display: flex; align-items: center; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
   .filters .label { color: var(--ink-muted); font-size: 12px; margin-right: 4px; }
-  .range-btn {
+  .range-btn, .header-btn {
     font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 6px;
     border: 1px solid transparent; background: none; color: var(--ink-secondary); cursor: pointer;
   }
-  .range-btn:hover { background: var(--surface); border-color: var(--border); }
+  .range-btn:hover, .header-btn:hover { background: var(--surface); border-color: var(--border); }
   .range-btn[aria-pressed="true"] { background: var(--surface); border-color: var(--border); color: var(--ink); font-weight: 600; }
   .refreshed { margin-left: auto; color: var(--ink-muted); font-size: 12px; }
 
@@ -142,6 +142,11 @@
     border: 1px solid var(--border); background: var(--series); color: #fff;
   }
   #auth .error { color: var(--status-critical); font-size: 12px; margin-top: 10px; min-height: 16px; }
+  #auth button:disabled { opacity: 0.6; cursor: progress; }
+  #auth button.link {
+    font-weight: 400; font-size: 12px; padding: 0; margin-top: 14px;
+    border: none; background: none; color: var(--series);
+  }
   .hidden { display: none !important; }
 </style>
 </head>
@@ -153,21 +158,23 @@
     <span class="spacer"></span>
     <span id="dev-badge" class="badge dev hidden">insecure dev mode</span>
     <span id="version-badge" class="badge hidden"></span>
+    <button id="signout" class="header-btn hidden">Sign out</button>
   </header>
 
   <!-- Sign-in: shown only when the API answers 401 -->
   <div id="auth" class="card hidden">
     <h2>Sign in</h2>
-    <p>This dashboard reads the cost API, which requires OAuth2 client credentials.
+    <p>This dashboard reads the cost API, which requires signing in.
        Servers started with <code>--insecure-dev</code> need no sign-in.</p>
-    <label for="auth-id">Client ID</label>
-    <input id="auth-id" autocomplete="username" placeholder="kruxiaflow_worker">
-    <label for="auth-secret">Client secret</label>
+    <label for="auth-id" id="auth-id-label">Username</label>
+    <input id="auth-id" autocomplete="username">
+    <label for="auth-secret" id="auth-secret-label">Password</label>
     <input id="auth-secret" type="password" autocomplete="current-password">
     <div class="actions">
       <button id="auth-submit">Sign in</button>
-      <span class="sub" style="font-size:12px">token is kept in this tab only</span>
+      <span class="sub" id="auth-note" style="font-size:12px"></span>
     </div>
+    <button type="button" class="link" id="auth-mode"></button>
     <div class="error" id="auth-error"></div>
   </div>
 
@@ -215,8 +222,14 @@
 "use strict";
 
 // ------------------------------------------------------------------ state
-const TOKEN_KEY = "kruxiaflow-dashboard-token";
+// Password logins are remembered on this browser (localStorage) and renewed
+// with the refresh token; client-credential logins have no refresh token and
+// last for this tab only (sessionStorage).
+const TOKEN_KEY = "kruxiaflow-dashboard-token";  // client credentials, this tab
+const LOGIN_KEY = "kruxiaflow-dashboard-login";  // {access_token, expires_at, refresh_token}
+const RENEW_MARGIN_MS = 60_000;
 const REFRESH_MS = 10_000;
+let authMode = "password"; // "password" | "client"
 let rangeDays = 30;
 let refreshTimer = null;
 let lastData = null; // {day, provider, model} analytics responses
@@ -244,28 +257,98 @@ function esc(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// ------------------------------------------------------------------ auth
+function storedLogin() {
+  try { return JSON.parse(localStorage.getItem(LOGIN_KEY)); } catch (_) { return null; }
+}
+function saveLogin(body) {
+  localStorage.setItem(LOGIN_KEY, JSON.stringify({
+    access_token: body.access_token,
+    expires_at: Date.now() + body.expires_in * 1000,
+    refresh_token: body.refresh_token,
+  }));
+}
+function clearAuth() {
+  localStorage.removeItem(LOGIN_KEY);
+  sessionStorage.removeItem(TOKEN_KEY);
+}
+function isSignedIn() { return !!(storedLogin() || sessionStorage.getItem(TOKEN_KEY)); }
+
+async function requestToken(body) {
+  const res = await fetch("/api/v1/oauth/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const rejected = res.status === 400 || res.status === 401;
+    throw { status: res.status, message: rejected ? "Sign-in failed: check your credentials" : "Sign-in failed (" + res.status + ")" };
+  }
+  return res.json();
+}
+
+// Access token from the remembered login, renewed when it is about to expire
+// or was just rejected. Refresh tokens rotate (the server revokes the old one
+// on use), so tabs renew one at a time under a lock and re-read storage first:
+// another tab may already have renewed.
+async function loginToken(rejected) {
+  const renew = async () => {
+    const login = storedLogin();
+    if (!login) return null;
+    if (login.access_token !== rejected && Date.now() < login.expires_at - RENEW_MARGIN_MS) {
+      return login.access_token;
+    }
+    try {
+      const body = await requestToken({ grant_type: "refresh_token", refresh_token: login.refresh_token });
+      saveLogin(body);
+      return body.access_token;
+    } catch (err) {
+      // Expired or revoked: forget the login. Network errors keep it.
+      if (err && err.status) localStorage.removeItem(LOGIN_KEY);
+      return null;
+    }
+  };
+  return navigator.locks ? navigator.locks.request("kruxiaflow-dashboard-renew", renew) : renew();
+}
+
+async function signIn(id, secret) {
+  if (authMode === "password") {
+    saveLogin(await requestToken({ grant_type: "password", username: id, password: secret }));
+    sessionStorage.removeItem(TOKEN_KEY);
+  } else {
+    const body = await requestToken({ grant_type: "client_credentials", client_id: id, client_secret: secret });
+    sessionStorage.setItem(TOKEN_KEY, body.access_token);
+    localStorage.removeItem(LOGIN_KEY);
+  }
+}
+
+function setAuthMode(mode) {
+  authMode = mode;
+  const pw = mode === "password";
+  $("auth-id-label").textContent = pw ? "Username" : "Client ID";
+  $("auth-secret-label").textContent = pw ? "Password" : "Client secret";
+  $("auth-id").placeholder = pw ? "" : "kruxiaflow_worker";
+  $("auth-note").textContent = pw ? "stays signed in on this browser (30 days unused)" : "token is kept in this tab only";
+  $("auth-mode").textContent = pw ? "Use client credentials instead" : "Use username and password instead";
+  $("auth-error").textContent = "";
+}
+
 // ------------------------------------------------------------------ api
 async function api(path, params) {
   const url = new URL(path, window.location.origin);
   for (const [k, v] of Object.entries(params || {})) url.searchParams.set(k, v);
-  const headers = {};
-  const token = sessionStorage.getItem(TOKEN_KEY);
-  if (token) headers["Authorization"] = "Bearer " + token;
-  const res = await fetch(url, { headers });
+  const get = (token) => fetch(url, { headers: token ? { Authorization: "Bearer " + token } : {} });
+
+  let token = storedLogin() ? await loginToken(null) : sessionStorage.getItem(TOKEN_KEY);
+  let res = await get(token);
+  if (res.status === 401 && storedLogin()) {
+    // Rejected before its expiry (e.g. server keys rotated): renew once
+    token = await loginToken(token);
+    if (token) res = await get(token);
+  }
   if (res.status === 401) throw { unauthorized: true };
   if (!res.ok) throw new Error("API " + res.status + " for " + path);
   return res.json();
-}
-
-async function signIn(clientId, clientSecret) {
-  const res = await fetch("/api/v1/oauth/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ grant_type: "client_credentials", client_id: clientId, client_secret: clientSecret }),
-  });
-  if (!res.ok) throw new Error("Sign-in failed (" + res.status + ")");
-  const body = await res.json();
-  sessionStorage.setItem(TOKEN_KEY, body.access_token);
 }
 
 async function loadInfo() {
@@ -537,6 +620,7 @@ async function refresh() {
     const data = await loadAnalytics();
     $("auth").classList.add("hidden");
     $("dash").classList.remove("hidden");
+    $("signout").classList.toggle("hidden", !isSignedIn());
     // Re-render only when the data actually changed — a no-op poll must not
     // disturb the page (scroll, tooltips, text selection). start/end dates are
     // stripped: they move with every request; rangeDays is included so a
@@ -550,10 +634,7 @@ async function refresh() {
     $("refreshed").textContent = "updated " + new Date().toLocaleTimeString();
   } catch (err) {
     if (err && err.unauthorized) {
-      sessionStorage.removeItem(TOKEN_KEY);
-      stopPolling();
-      $("dash").classList.add("hidden");
-      $("auth").classList.remove("hidden");
+      showSignIn();
     } else {
       // Show the shell (with empty states) rather than a blank page when the
       // API is temporarily unreachable
@@ -561,6 +642,13 @@ async function refresh() {
       $("refreshed").textContent = "refresh failed — retrying";
     }
   }
+}
+function showSignIn() {
+  clearAuth();
+  stopPolling();
+  $("dash").classList.add("hidden");
+  $("signout").classList.add("hidden");
+  $("auth").classList.remove("hidden");
 }
 function startPolling() {
   stopPolling();
@@ -581,17 +669,29 @@ document.querySelectorAll(".range-btn").forEach((btn) => {
 });
 
 $("auth-submit").addEventListener("click", async () => {
+  const submit = $("auth-submit");
+  if (submit.disabled) return;
   $("auth-error").textContent = "";
+  // Password checks are slow on small hosts (seconds on a Raspberry Pi)
+  submit.disabled = true;
+  submit.textContent = "Signing in…";
   try {
     await signIn($("auth-id").value.trim(), $("auth-secret").value);
+    $("auth-secret").value = "";
     await refresh();
     startPolling();
   } catch (err) {
-    $("auth-error").textContent = err.message || "Sign-in failed";
+    $("auth-error").textContent = (err && err.message) || "Sign-in failed";
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "Sign in";
   }
 });
 $("auth-secret").addEventListener("keydown", (e) => { if (e.key === "Enter") $("auth-submit").click(); });
+$("auth-mode").addEventListener("click", () => setAuthMode(authMode === "password" ? "client" : "password"));
+$("signout").addEventListener("click", showSignIn);
 
+setAuthMode("password");
 loadInfo();
 refresh().then(startPolling);
 </script>

@@ -60,6 +60,35 @@ Also accepts `application/x-www-form-urlencoded` per RFC 6749.
 }
 ```
 
+Password and refresh-token grants return a refresh token valid for 30 days. Refresh tokens rotate: each use revokes the presented token and returns a new one, so clients must store the new token.
+
+### User Accounts
+
+Users sign in with the password grant (the built-in dashboard and `kruxiaflow login` use it). Create the first user, or reset a password, with the operator command, which writes to the database directly:
+
+```bash
+kruxiaflow seed-user --username sean --email sean@example.com   # prompts for the password
+kruxiaflow seed-user --username sean                            # reset the password
+```
+
+Resetting a password revokes the user's refresh tokens.
+
+Users can also be created through the API with an OAuth **client** token:
+
+```http
+POST /api/v1/oauth/users
+Authorization: Bearer <client_credentials_token>
+Content-Type: application/json
+
+{
+  "username": "sean",
+  "email": "sean@example.com",
+  "password": "..."
+}
+```
+
+Returns 201 with the user. The call is idempotent: an existing username is returned unchanged, and its password is not updated. Tokens from the password or refresh-token grants get **403 Forbidden**: users cannot create users.
+
 ---
 
 ## Health & Info

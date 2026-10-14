@@ -135,6 +135,13 @@ pub trait AuthenticationService: Send + Sync {
     /// Used by API middleware to validate Bearer tokens.
     async fn validate_token(&self, token: &str) -> AuthResult<Claims>;
 
+    /// Whether a token subject (`Claims::sub`) is an active OAuth client
+    ///
+    /// Distinguishes service accounts (client_credentials tokens) from users
+    /// (password/refresh_token tokens) for operations reserved to clients,
+    /// such as creating users. Unknown or non-client subjects return false.
+    async fn is_active_client(&self, subject: &str) -> AuthResult<bool>;
+
     /// Register a new user (idempotent upsert)
     ///
     /// Creates a user or returns the existing user if the username already exists.

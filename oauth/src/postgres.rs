@@ -32,6 +32,28 @@ pub fn hash_refresh_token(token: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// Verify a secret against a bcrypt hash on the blocking thread pool
+///
+/// bcrypt is deliberately slow (~0.25s at cost 12 on a laptop, ~3.5s on a
+/// Raspberry Pi Zero). Running it inline would stall an async runtime worker
+/// thread - on a single-core host, the whole server.
+async fn bcrypt_verify(secret: &str, hash: &str) -> AuthResult<bool> {
+    let (secret, hash) = (secret.to_owned(), hash.to_owned());
+    tokio::task::spawn_blocking(move || verify(secret, &hash))
+        .await
+        .map_err(|e| AuthError::InternalError(e.to_string()))?
+        .map_err(|e| AuthError::InternalError(e.to_string()))
+}
+
+/// Hash a secret with bcrypt on the blocking thread pool (see `bcrypt_verify`)
+async fn bcrypt_hash(secret: &str) -> AuthResult<String> {
+    let secret = secret.to_owned();
+    tokio::task::spawn_blocking(move || hash(secret, DEFAULT_COST))
+        .await
+        .map_err(|e| AuthError::InternalError(e.to_string()))?
+        .map_err(|e| AuthError::InternalError(format!("Failed to hash password: {}", e)))
+}
+
 /// PostgreSQL-backed authentication service
 ///
 /// Uses RSA256 for JWT signing with keys cached in memory for fast validation.
@@ -121,9 +143,7 @@ impl AuthenticationService for PostgresAuthService {
         .ok_or(AuthError::InvalidCredentials)?;
 
         // Verify client secret (bcrypt)
-        if !verify(client_secret, &client.client_secret_hash)
-            .map_err(|e| AuthError::InternalError(e.to_string()))?
-        {
+        if !bcrypt_verify(client_secret, &client.client_secret_hash).await? {
             return Err(AuthError::InvalidCredentials);
         }
 
@@ -169,9 +189,7 @@ impl AuthenticationService for PostgresAuthService {
         .ok_or(AuthError::InvalidCredentials)?;
 
         // Verify password (bcrypt)
-        if !verify(password, &user.password_hash)
-            .map_err(|e| AuthError::InternalError(e.to_string()))?
-        {
+        if !bcrypt_verify(password, &user.password_hash).await? {
             return Err(AuthError::InvalidCredentials);
         }
 
@@ -316,12 +334,25 @@ impl AuthenticationService for PostgresAuthService {
         self.verify_jwt(token)
     }
 
+    async fn is_active_client(&self, subject: &str) -> AuthResult<bool> {
+        // Client tokens carry oauth_clients.id as their subject
+        let Ok(id) = Uuid::parse_str(subject) else {
+            return Ok(false);
+        };
+        let is_client = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS (SELECT 1 FROM oauth_clients WHERE id = $1 AND is_active)",
+        )
+        .bind(id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(is_client)
+    }
+
     async fn register_user(
         &self,
         request: RegisterUserRequest,
     ) -> AuthResult<RegisterUserResponse> {
-        let password_hash = hash(&request.password, DEFAULT_COST)
-            .map_err(|e| AuthError::InternalError(format!("Failed to hash password: {}", e)))?;
+        let password_hash = bcrypt_hash(&request.password).await?;
 
         let row = sqlx::query!(
             r#"

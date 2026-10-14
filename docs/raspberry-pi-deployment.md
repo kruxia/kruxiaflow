@@ -431,6 +431,18 @@ curl http://localhost:8080/api/v1/docs
 curl http://localhost:8080/api/v1/info
 ```
 
+### Create a User for Sign-In
+
+The dashboard (`/dashboard`) and the `kruxiaflow login` CLI command sign in with a username and password. Create a user with the service's environment (the password is prompted for):
+
+```bash
+sudo systemd-run --pty --wait --collect -p User=kruxiaflow \
+  -p EnvironmentFile=/etc/kruxiaflow/env \
+  /usr/local/bin/kruxiaflow seed-user --username pi --email pi@example.com
+```
+
+Run the same command without `--email` to reset the password. Each password sign-in takes a few seconds on a Pi Zero because of bcrypt; after that, the dashboard and the CLI renew tokens without re-checking the password.
+
 ---
 
 ## Upgrading

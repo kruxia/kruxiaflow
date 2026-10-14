@@ -55,6 +55,9 @@ tokio-util = { workspace = true }
 # Password hashing
 bcrypt = { workspace = true }
 
+# Hidden password prompts (seed-user, login)
+rpassword = "7"
+
 # HTTP client (for health check command)
 reqwest = { workspace = true }
 

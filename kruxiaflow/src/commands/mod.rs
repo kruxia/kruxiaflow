@@ -1,11 +1,13 @@
 pub mod api;
 pub mod cost;
 pub mod health;
+pub mod login;
 pub mod migrate;
 pub mod orchestrator;
 pub mod profile;
 pub mod seed_client;
 pub mod seed_llm;
+pub mod seed_user;
 pub mod serve;
 pub mod status;
 pub mod version;

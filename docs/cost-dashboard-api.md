@@ -20,6 +20,19 @@ itself is public; its data calls use the same bearer auth as the API
 (credential-free against a `--insecure-dev` server). The `kruxiaflow cost`
 CLI subcommands wrap the same endpoints for the terminal.
 
+The dashboard signs in with a username and password (create users with
+`kruxiaflow seed-user`; see the [API reference](api-reference.md#user-accounts)).
+A password sign-in is remembered in the browser's `localStorage` and renewed
+with the refresh token, so it lasts until 30 days without use or until
+**Sign out**. Client credentials are also accepted ("Use client credentials
+instead"); they have no refresh token and last for the browser tab only.
+
+The `kruxiaflow cost` CLI uses `KRUXIAFLOW_CLIENT_ID` /
+`KRUXIAFLOW_CLIENT_SECRET` when set; otherwise it uses the login saved by
+`kruxiaflow login` for the API URL (stored in
+`~/.config/kruxiaflow/credentials.json`, mode 0600). `kruxiaflow logout`
+removes it.
+
 ---
 
 ## Authentication

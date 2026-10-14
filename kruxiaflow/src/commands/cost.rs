@@ -2,8 +2,9 @@
 //
 // Design: kruxiaflow-internal/docs/features/2026-02-07-client-cli.md §cost and
 // kruxiaflow-internal/docs/implementation/2026-07-12-cost-visibility.md Phase 1.
-// Auth is OAuth2 client-credentials (KRUXIAFLOW_CLIENT_ID/SECRET); against a
-// server running with --insecure-dev no credentials are needed.
+// Auth is OAuth2 client-credentials (KRUXIAFLOW_CLIENT_ID/SECRET) when set,
+// else the saved `kruxiaflow login` for the API URL; against a server running
+// with --insecure-dev no credentials are needed.
 
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, NaiveDate, Utc};
@@ -30,11 +31,11 @@ pub struct CostCommand {
     )]
     pub api_url: String,
 
-    /// OAuth2 client ID (not needed against --insecure-dev servers)
+    /// OAuth2 client ID (omit to use `kruxiaflow login`, or against --insecure-dev servers)
     #[arg(long, env = "KRUXIAFLOW_CLIENT_ID", global = true)]
     pub client_id: Option<String>,
 
-    /// OAuth2 client secret (not needed against --insecure-dev servers)
+    /// OAuth2 client secret (omit to use `kruxiaflow login`, or against --insecure-dev servers)
     #[arg(
         long,
         env = "KRUXIAFLOW_CLIENT_SECRET",
@@ -276,13 +277,16 @@ impl ApiClient {
             .context("Failed to build HTTP client")?;
         let api_url = cmd.api_url.trim_end_matches('/').to_string();
 
+        // Client credentials win when set; otherwise use the saved
+        // `kruxiaflow login` for this server; otherwise go unauthenticated
+        // (works against --insecure-dev servers)
         let token = match (&cmd.client_id, &cmd.client_secret) {
             (Some(id), Some(secret)) => Some(obtain_token(&http, &api_url, id, secret).await?),
-            (None, None) => None,
+            (None, None) => super::login::stored_login_token(&http, &api_url).await?,
             _ => {
                 return Err(anyhow!(
                     "--client-id and --client-secret must be provided together \
-                     (or neither, against a --insecure-dev server)"
+                     (or neither, to use `kruxiaflow login` or an --insecure-dev server)"
                 ));
             }
         };
@@ -311,8 +315,9 @@ impl ApiClient {
 
         match response.status() {
             StatusCode::UNAUTHORIZED => Err(anyhow!(
-                "Authentication required. Set KRUXIAFLOW_CLIENT_ID and \
-                 KRUXIAFLOW_CLIENT_SECRET (or run the server with --insecure-dev)."
+                "Authentication required. Run `kruxiaflow login`, or set \
+                 KRUXIAFLOW_CLIENT_ID and KRUXIAFLOW_CLIENT_SECRET \
+                 (or run the server with --insecure-dev)."
             )),
             StatusCode::NOT_FOUND => Err(anyhow!("Not found: {}", path)),
             status if !status.is_success() => {

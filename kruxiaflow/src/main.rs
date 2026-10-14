@@ -7,6 +7,7 @@ use tikv_jemallocator::Jemalloc;
 
 mod commands;
 mod config;
+mod credentials;
 mod llm_catalog;
 mod logging;
 mod signals;
@@ -175,6 +176,22 @@ EXAMPLES:\n  \
     )]
     SeedClient(commands::seed_client::SeedClientCommand),
 
+    /// Create a user for password login, or reset a user's password
+    #[command(
+        name = "seed-user",
+        about = "Create a user for password login, or reset a user's password",
+        long_about = "Create a user for password login (dashboard, `kruxiaflow login`),\n\
+or reset an existing user's password. Writes to the database directly, so\n\
+it needs DATABASE_URL rather than an API token. Resetting a password also\n\
+revokes the user's refresh tokens (signs them out everywhere).\n\n\
+The password is prompted for (with confirmation), or read from stdin.\n\n\
+EXAMPLES:\n  \
+  kruxiaflow seed-user --username sean --email sean@example.com\n  \
+  kruxiaflow seed-user --username sean                       # Reset password\n  \
+  printf '%s\\n' \"$PW\" | kruxiaflow seed-user --username sean --email sean@example.com --password-stdin"
+    )]
+    SeedUser(commands::seed_user::SeedUserCommand),
+
     /// Check service health
     #[command(
         about = "Check health of Kruxia Flow services",
@@ -210,8 +227,9 @@ EXAMPLES:\n  \
         long_about = "Cost reporting and analytics via the REST API\n\n\
 Answers: what did we spend, on which providers/models/definitions, which\n\
 workflows were most expensive, and did anything hit its budget?\n\n\
-Authenticates with OAuth2 client credentials; no credentials are needed\n\
-against a server running with --insecure-dev.\n\n\
+Authenticates with OAuth2 client credentials when set, otherwise with the\n\
+login saved by `kruxiaflow login`; no credentials are needed against a\n\
+server running with --insecure-dev.\n\n\
 EXAMPLES:\n  \
   kruxiaflow cost workflow <workflow_id>\n  \
   kruxiaflow cost workflow <workflow_id> --detailed\n  \
@@ -221,9 +239,27 @@ EXAMPLES:\n  \
 REQUIRES:\n  \
   - KRUXIAFLOW_API_URL: API server URL (default http://127.0.0.1:8080)\n  \
   - KRUXIAFLOW_CLIENT_ID / KRUXIAFLOW_CLIENT_SECRET: OAuth2 credentials\n    \
-(omit both against --insecure-dev servers)"
+(omit both to use `kruxiaflow login`, or against --insecure-dev servers)"
     )]
     Cost(commands::cost::CostCommand),
+
+    /// Log in with a username and password for client commands
+    #[command(
+        about = "Log in with a username and password (for client commands such as `cost`)",
+        long_about = "Log in to an API server with a username and password (OAuth2\n\
+password grant). The tokens are saved in ~/.config/kruxiaflow/credentials.json\n\
+(mode 0600; $XDG_CONFIG_HOME is respected), one login per API server URL.\n\
+Client commands then use the saved login when no client credentials are set,\n\
+renewing the access token automatically for up to 30 days.\n\n\
+EXAMPLES:\n  \
+  kruxiaflow login --api-url https://flow.example.com\n  \
+  kruxiaflow login --username sean --password-stdin < password.txt"
+    )]
+    Login(commands::login::LoginCommand),
+
+    /// Remove the saved login for an API server
+    #[command(about = "Remove the saved login for an API server")]
+    Logout(commands::login::LogoutCommand),
 
     /// Launch orchestrator only (for distributed deployment)
     #[command(
@@ -280,16 +316,22 @@ async fn main() -> Result<()> {
 
     // Initialize logging (skip for client commands whose stdout is the
     // deliverable — version info, cost tables/JSON/CSV)
-    if !matches!(cli.command, Commands::Version(_) | Commands::Cost(_)) {
+    if !matches!(
+        cli.command,
+        Commands::Version(_) | Commands::Cost(_) | Commands::Login(_) | Commands::Logout(_)
+    ) {
         logging::init(&cli.log_level, &cli.log_format)?;
     }
 
     // Validate database_url for commands that need it
     // Health and Status only use the API server (no direct database access)
     let database_url = match &cli.command {
-        Commands::Version(_) | Commands::Health(_) | Commands::Status(_) | Commands::Cost(_) => {
-            None
-        }
+        Commands::Version(_)
+        | Commands::Health(_)
+        | Commands::Status(_)
+        | Commands::Cost(_)
+        | Commands::Login(_)
+        | Commands::Logout(_) => None,
         _ => {
             let url = cli.database_url.ok_or_else(|| {
                 anyhow::anyhow!(
@@ -315,7 +357,10 @@ async fn main() -> Result<()> {
         }
         Commands::Health(cmd) => commands::health::execute(cmd).await,
         Commands::Status(cmd) => commands::status::execute(cmd).await,
+        Commands::SeedUser(cmd) => commands::seed_user::execute(cmd, database_url.unwrap()).await,
         Commands::Cost(cmd) => commands::cost::execute(cmd).await,
+        Commands::Login(cmd) => commands::login::execute_login(cmd).await,
+        Commands::Logout(cmd) => commands::login::execute_logout(cmd),
         Commands::Orchestrator(cmd) => {
             commands::orchestrator::execute(cmd, database_url.unwrap()).await
         }

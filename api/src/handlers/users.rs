@@ -2,8 +2,9 @@
 //! User management handlers
 
 use crate::error::{ApiResult, AppError};
+use crate::middleware::auth::ValidatedClaims;
 use crate::state::AppState;
-use axum::{Json, extract::State, http::StatusCode, response::IntoResponse};
+use axum::{Extension, Json, extract::State, http::StatusCode, response::IntoResponse};
 use chrono::{DateTime, Utc};
 use kruxiaflow_oauth::RegisterUserRequest;
 use serde::{Deserialize, Serialize};
@@ -42,6 +43,8 @@ pub struct CreateUserResponse {
 ///
 /// Creates a user or returns the existing user if the username already exists.
 /// Does NOT update the password on conflict (safe for idempotent seeding).
+///
+/// Requires a client (client_credentials) token: users cannot create users.
 #[utoipa::path(
     post,
     path = "/api/v1/oauth/users",
@@ -51,6 +54,7 @@ pub struct CreateUserResponse {
         (status = 201, description = "User created successfully", body = CreateUserResponse),
         (status = 400, description = "Validation error", body = String),
         (status = 401, description = "Unauthorized", body = String),
+        (status = 403, description = "Caller is a user, not an OAuth client", body = String),
     ),
     security(
         ("bearer_auth" = [])
@@ -58,8 +62,26 @@ pub struct CreateUserResponse {
 )]
 pub async fn create_user(
     State(state): State<AppState>,
+    Extension(claims): Extension<ValidatedClaims>,
     Json(request): Json<CreateUserRequest>,
 ) -> ApiResult<impl IntoResponse> {
+    // Only OAuth clients (service accounts) may create users. The synthetic
+    // insecure-dev principal is allowed so local development stays tokenless.
+    let is_dev_principal = state.insecure_dev && claims.subject() == "insecure-dev";
+    if !is_dev_principal
+        && !state
+            .auth_service
+            .is_active_client(claims.subject())
+            .await
+            .map_err(|e| {
+                AppError::InternalError(anyhow::anyhow!("Failed to check caller: {}", e))
+            })?
+    {
+        return Err(AppError::Forbidden(
+            "Creating users requires an OAuth client token (client_credentials grant)".to_string(),
+        ));
+    }
+
     // Validate inputs
     if request.username.trim().is_empty() {
         return Err(AppError::BadRequest("username is required".to_string()));
@@ -122,6 +144,18 @@ mod tests {
         )
     }
 
+    /// Claims for a caller that MockAuthService reports as an active client
+    fn test_claims() -> ValidatedClaims {
+        ValidatedClaims(kruxiaflow_oauth::Claims {
+            sub: "test_client".to_string(),
+            jti: "test_jti".to_string(),
+            iss: "test".to_string(),
+            aud: "test".to_string(),
+            exp: 9999999999,
+            iat: 1000000000,
+        })
+    }
+
     #[sqlx::test(migrations = "../migrations")]
     async fn test_create_user_success(pool: PgPool) {
         let state = setup_test_state(pool);
@@ -132,7 +166,7 @@ mod tests {
             password: "secret123".to_string(),
         };
 
-        let result = create_user(State(state), Json(request)).await;
+        let result = create_user(State(state), Extension(test_claims()), Json(request)).await;
         assert!(result.is_ok());
 
         let response = result.unwrap().into_response();
@@ -149,7 +183,7 @@ mod tests {
             password: "secret123".to_string(),
         };
 
-        let result = create_user(State(state), Json(request)).await;
+        let result = create_user(State(state), Extension(test_claims()), Json(request)).await;
         assert!(result.is_err());
     }
 
@@ -163,7 +197,7 @@ mod tests {
             password: "secret123".to_string(),
         };
 
-        let result = create_user(State(state), Json(request)).await;
+        let result = create_user(State(state), Extension(test_claims()), Json(request)).await;
         assert!(result.is_err());
     }
 
@@ -177,7 +211,7 @@ mod tests {
             password: "secret123".to_string(),
         };
 
-        let result = create_user(State(state), Json(request)).await;
+        let result = create_user(State(state), Extension(test_claims()), Json(request)).await;
         assert!(result.is_err());
     }
 
@@ -191,7 +225,7 @@ mod tests {
             password: "".to_string(),
         };
 
-        let result = create_user(State(state), Json(request)).await;
+        let result = create_user(State(state), Extension(test_claims()), Json(request)).await;
         assert!(result.is_err());
     }
 
