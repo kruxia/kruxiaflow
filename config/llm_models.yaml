@@ -1,13 +1,17 @@
-# LLM Model Catalog - Pricing as of July 2026
+# LLM Model Catalog - Pricing as of July 2026 (Anthropic entries verified 2026-10-03)
 # Sources:
 # - OpenAI: https://developers.openai.com/api/docs/pricing
 # - Anthropic: https://platform.claude.com/docs/en/about-claude/pricing
 # - Google: https://ai.google.dev/gemini-api/docs/pricing
 # - Ollama: Self-hosted (free)
 #
-# NOTE (Sonnet 5): introductory pricing is encoded below through 2026-08-31.
-# On 2026-09-01 update claude-sonnet-5 to input 3.00 / output 15.00 /
-# cached 0.30 / cache write 3.75.
+# NOTE (Sonnet 5): the $2 / $10 launch pricing announced as introductory
+# through 2026-08-31 is now the standard price; the scheduled increase to
+# $3 / $15 on 2026-09-01 did not happen (verified 2026-10-03 from the
+# Anthropic pricing page).
+#
+# NOTE (Anthropic cache reads): most models bill cache hits at 0.1x input.
+# Claude Opus 5.5 bills 0.05x and Claude Fable 5.1 bills 0.025x.
 #
 # NOTE (cache_write_price_per_million): billed for reported
 # cache_creation_tokens. Anthropic charges 1.25x input for cache writes
@@ -176,6 +180,39 @@ providers:
     requires_api_key: true
     models:
       # Claude 5 family (current)
+      - name: claude-fable-5-1
+        display_name: Claude Fable 5.1
+        input_price_per_million: 10.00
+        output_price_per_million: 50.00
+        cached_input_price_per_million: 0.25
+        cache_write_price_per_million: 12.50
+        supports_completion: true
+        context_window: 1000000
+        max_output_tokens: 128000
+        notes: "Most capable widely released model; cache hits at 0.025x input; full 1M context at standard pricing; requires 30-day data retention"
+
+      - name: claude-opus-5-5
+        display_name: Claude Opus 5.5
+        input_price_per_million: 4.00
+        output_price_per_million: 20.00
+        cached_input_price_per_million: 0.20
+        cache_write_price_per_million: 5.00
+        supports_completion: true
+        context_window: 1000000
+        max_output_tokens: 128000
+        notes: "Current Opus; cache hits at 0.05x input; full 1M context at standard pricing"
+
+      - name: claude-sonnet-5-5
+        display_name: Claude Sonnet 5.5
+        input_price_per_million: 2.00
+        output_price_per_million: 10.00
+        cached_input_price_per_million: 0.20
+        cache_write_price_per_million: 2.50
+        supports_completion: true
+        context_window: 1000000
+        max_output_tokens: 128000
+        notes: "Current Sonnet; full 1M context at standard pricing"
+
       - name: claude-fable-5
         display_name: Claude Fable 5
         input_price_per_million: 10.00
@@ -185,7 +222,7 @@ providers:
         supports_completion: true
         context_window: 1000000
         max_output_tokens: 128000
-        notes: "Most capable model; full 1M context at standard pricing; requires 30-day data retention"
+        notes: "Previous Fable (succeeded by Fable 5.1 at the same input/output price); full 1M context at standard pricing; requires 30-day data retention"
 
       - name: claude-opus-5
         display_name: Claude Opus 5
@@ -207,7 +244,7 @@ providers:
         supports_completion: true
         context_window: 1000000
         max_output_tokens: 128000
-        notes: "Introductory pricing through 2026-08-31; from 2026-09-01: $3 input, $15 output, $0.30 cached, $3.75 cache write. Full 1M context at standard pricing"
+        notes: "Launch pricing ($2 / $10) is now the standard price; the planned 2026-09-01 increase was cancelled. Full 1M context at standard pricing"
 
       # Claude Opus 4.x (previous generation — Anthropic lists these as legacy as of 2026-07)
       - name: claude-opus-4-8
