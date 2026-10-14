@@ -18,6 +18,11 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{migrate, seed_client};
+use crate::config::DbPoolArgs;
+
+/// Default database pool size (override with --db-max/min-connections)
+const DEFAULT_DB_MAX_CONNECTIONS: u32 = 100;
+const DEFAULT_DB_MIN_CONNECTIONS: u32 = 10;
 
 /// Serve command - Launch all services together
 #[derive(Args)]
@@ -204,6 +209,10 @@ Example: --db-connect-timeout 120"
     )]
     pub db_connect_timeout: u64,
 
+    /// Database connection pool sizing
+    #[command(flatten)]
+    pub db_pool: DbPoolArgs,
+
     /// Disable built-in worker (run API + orchestrator only)
     #[arg(
         long,
@@ -308,6 +317,9 @@ impl ServeCommand {
         if self.shutdown_timeout < 5 || self.shutdown_timeout > 300 {
             anyhow::bail!("Shutdown timeout must be between 5 and 300 seconds");
         }
+
+        self.db_pool
+            .resolve(DEFAULT_DB_MAX_CONNECTIONS, DEFAULT_DB_MIN_CONNECTIONS)?;
 
         if self.insecure_dev
             && !self.insecure_dev_allow_nonloopback
@@ -617,19 +629,13 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
 
     // 1. Test database connection
     tracing::info!("Testing database connection...");
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(100) // Increased from 20 to support high concurrency
-        .min_connections(10) // Set minimum to reduce connection overhead
+    let pool = cmd
+        .db_pool
+        .pool_options(DEFAULT_DB_MAX_CONNECTIONS, DEFAULT_DB_MIN_CONNECTIONS)?
         .acquire_timeout(std::time::Duration::from_secs(5))
         .connect(&database_url)
         .await
-        .map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to connect to database: {}\nURL: {}",
-                e,
-                database_url
-            )
-        })?;
+        .map_err(|e| anyhow::anyhow!("Failed to connect to database: {}", e))?;
 
     tracing::info!("Database connection successful");
 
@@ -936,6 +942,7 @@ mod tests {
             seed_client: false,
             seed_llm: None,
             db_connect_timeout: 60,
+            db_pool: DbPoolArgs::default(),
             activity_timeout: 300,
             no_worker: false,
             insecure_dev: false,
@@ -1142,6 +1149,7 @@ mod tests {
             seed_client: true,
             seed_llm: None,
             db_connect_timeout: 120,
+            db_pool: DbPoolArgs::default(),
             activity_timeout: 300,
             no_worker: false,
             insecure_dev: false,

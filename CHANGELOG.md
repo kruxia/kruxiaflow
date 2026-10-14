@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Configurable database pool size**: `serve`, `api`, `orchestrator`, and
+  `worker` accept `--db-max-connections` / `KRUXIAFLOW_DB_MAX_CONNECTIONS`
+  and `--db-min-connections` / `KRUXIAFLOW_DB_MIN_CONNECTIONS` (previously
+  hardcoded per command; the defaults are unchanged). Each idle pool
+  connection is a PostgreSQL backend process, so small hosts such as a
+  Raspberry Pi can shrink the idle pool (e.g. `serve` from 10 to 2) and keep
+  the maximum below PostgreSQL's `max_connections`.
+
 ### Changed
 
 - **Quickstart/compose isolation**: removed fixed `container_name`s and unprefixed
@@ -36,6 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (and pay for) work whose results the terminal-state guards then discarded.
   Processing a `WorkflowFailed` event now cancels the workflow's unclaimed
   rows (pending and waiting); in-flight claimed work still drains normally.
+
+### Security
+
+- **`serve` no longer logs the database password**: a failed database
+  connection printed the full `DATABASE_URL`, including the password, in the
+  error message (and so into journald or container logs). The error now
+  reports only the connection failure.
 
 ## [0.8.1] - 2026-07-20
 

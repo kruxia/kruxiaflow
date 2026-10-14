@@ -1,4 +1,4 @@
-use crate::config::ApiConfig;
+use crate::config::{ApiConfig, DbPoolArgs};
 use crate::signals;
 use anyhow::{Context, Result};
 use clap::Args;
@@ -7,9 +7,12 @@ use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_core::subscription::{PostgresSubscriptionService, SubscriptionService};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
-use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 use std::time::Duration;
+
+/// Default database pool size (override with --db-max/min-connections)
+const DEFAULT_DB_MAX_CONNECTIONS: u32 = 200;
+const DEFAULT_DB_MIN_CONNECTIONS: u32 = 20;
 
 #[derive(Args)]
 pub struct ApiCommand {
@@ -54,6 +57,10 @@ Example: --bind 127.0.0.1"
         help = "Allow --insecure-dev with a non-loopback bind (containers; publish ports to 127.0.0.1 on the host)"
     )]
     insecure_dev_allow_nonloopback: bool,
+
+    /// Database connection pool sizing
+    #[command(flatten)]
+    db_pool: DbPoolArgs,
 }
 
 pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Result<()> {
@@ -79,9 +86,9 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
 
     // Initialize database connection pool
     tracing::info!("Connecting to database...");
-    let db_pool = PgPoolOptions::new()
-        .max_connections(200)
-        .min_connections(20)
+    let db_pool = cmd
+        .db_pool
+        .pool_options(DEFAULT_DB_MAX_CONNECTIONS, DEFAULT_DB_MIN_CONNECTIONS)?
         .acquire_timeout(Duration::from_secs(10))
         .connect(&config.database_url)
         .await
@@ -212,6 +219,7 @@ mod tests {
             bind: Some("127.0.0.1".to_string()),
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
+            db_pool: DbPoolArgs::default(),
         };
         assert_eq!(cmd.port, Some(8080));
         assert_eq!(cmd.bind, Some("127.0.0.1".to_string()));
@@ -225,6 +233,7 @@ mod tests {
             bind: None,
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
+            db_pool: DbPoolArgs::default(),
         };
         assert_eq!(cmd.port, None);
         assert_eq!(cmd.bind, None);
@@ -239,6 +248,7 @@ mod tests {
             bind: Some("127.0.0.1".to_string()),
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
+            db_pool: DbPoolArgs::default(),
         };
 
         // Remove DATABASE_URL from environment
@@ -265,6 +275,7 @@ mod tests {
             bind: Some("127.0.0.1".to_string()),
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
+            db_pool: DbPoolArgs::default(),
         };
 
         let result = execute(cmd, Some("invalid://url".to_string())).await;
@@ -296,6 +307,7 @@ mod tests {
             bind: Some("127.0.0.1".to_string()),
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
+            db_pool: DbPoolArgs::default(),
         };
 
         let result = execute(cmd, Some(database_url)).await;
@@ -330,6 +342,7 @@ mod tests {
             bind: Some("127.0.0.1".to_string()),
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
+            db_pool: DbPoolArgs::default(),
         };
 
         let result = execute(cmd, Some(database_url)).await;
@@ -371,6 +384,7 @@ mod tests {
             bind: Some("256.256.256.256".to_string()), // Invalid IP to fail at bind
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
+            db_pool: DbPoolArgs::default(),
         };
 
         let result = execute(cmd, Some(database_url)).await;

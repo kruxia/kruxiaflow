@@ -8,6 +8,12 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
+use crate::config::DbPoolArgs;
+
+/// Default database pool size (override with --db-max/min-connections)
+const DEFAULT_DB_MAX_CONNECTIONS: u32 = 50;
+const DEFAULT_DB_MIN_CONNECTIONS: u32 = 10;
+
 /// Orchestrator command - Launch orchestrator service only
 #[derive(Args)]
 pub struct OrchestratorCommand {
@@ -73,6 +79,10 @@ Example: --backoff-multiplier 2.0"
         help = "Graceful shutdown timeout in seconds"
     )]
     pub shutdown_timeout: u64,
+
+    /// Database connection pool sizing
+    #[command(flatten)]
+    pub db_pool: DbPoolArgs,
 }
 
 impl OrchestratorCommand {
@@ -96,6 +106,9 @@ impl OrchestratorCommand {
             anyhow::bail!("Shutdown timeout must be between 5 and 300 seconds");
         }
 
+        self.db_pool
+            .resolve(DEFAULT_DB_MAX_CONNECTIONS, DEFAULT_DB_MIN_CONNECTIONS)?;
+
         Ok(())
     }
 }
@@ -117,9 +130,9 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
 
     // Connect to database
     tracing::info!("Connecting to database...");
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(50)
-        .min_connections(10)
+    let pool = cmd
+        .db_pool
+        .pool_options(DEFAULT_DB_MAX_CONNECTIONS, DEFAULT_DB_MIN_CONNECTIONS)?
         .acquire_timeout(Duration::from_secs(10))
         .connect(&database_url)
         .await
@@ -223,6 +236,7 @@ mod tests {
             poll_interval_max: 1000,
             backoff_multiplier: 1.5,
             shutdown_timeout: 30,
+            db_pool: DbPoolArgs::default(),
         }
     }
 
@@ -383,6 +397,7 @@ mod tests {
             poll_interval_max: 5000,
             backoff_multiplier: 2.0,
             shutdown_timeout: 60,
+            db_pool: DbPoolArgs::default(),
         };
 
         assert!(cmd.validate().is_ok());
@@ -397,6 +412,7 @@ mod tests {
             poll_interval_max: 500, // Equal to min
             backoff_multiplier: 1.0,
             shutdown_timeout: 30,
+            db_pool: DbPoolArgs::default(),
         };
 
         assert!(cmd.validate().is_ok());
@@ -410,6 +426,7 @@ mod tests {
             poll_interval_max: 100, // Less than min
             backoff_multiplier: 1.5,
             shutdown_timeout: 30,
+            db_pool: DbPoolArgs::default(),
         };
 
         let result = cmd.validate();

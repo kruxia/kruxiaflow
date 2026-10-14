@@ -1,5 +1,7 @@
 use anyhow::{Context, Result};
+use clap::Args;
 use kruxiaflow_core::cache::CacheService;
+use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 
 /// Cache configuration
@@ -129,6 +131,72 @@ pub fn is_loopback_bind(bind: &str) -> bool {
     bind.parse::<std::net::IpAddr>()
         .map(|ip| ip.is_loopback())
         .unwrap_or(false)
+}
+
+/// Database connection pool sizing for the long-running commands (`serve`,
+/// `api`, `orchestrator`, `worker`). Each command supplies its own defaults;
+/// these options override them, e.g. to shrink the pool on small hosts.
+#[derive(Args, Debug, Clone, Default)]
+pub struct DbPoolArgs {
+    /// Maximum database pool connections
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_DB_MAX_CONNECTIONS",
+        help = "Maximum database pool connections (default depends on command)",
+        long_help = "Maximum number of connections in the database pool.\n\
+Keep this below PostgreSQL's max_connections minus\n\
+superuser_reserved_connections.\n\n\
+Defaults: serve 100, api 200, orchestrator 50, worker 10\n\
+Example: --db-max-connections 15"
+    )]
+    pub db_max_connections: Option<u32>,
+
+    /// Minimum (idle) database pool connections
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_DB_MIN_CONNECTIONS",
+        help = "Minimum idle database pool connections (default depends on command)",
+        long_help = "Number of connections the database pool keeps open while idle.\n\
+Each idle connection is a PostgreSQL backend process (~2MB).\n\
+If only --db-max-connections is set, the default minimum is\n\
+capped to it.\n\n\
+Defaults: serve 10, api 20, orchestrator 10, worker 2\n\
+Example: --db-min-connections 2"
+    )]
+    pub db_min_connections: Option<u32>,
+}
+
+impl DbPoolArgs {
+    /// Resolve `(max, min)` pool sizes against a command's defaults.
+    pub fn resolve(&self, default_max: u32, default_min: u32) -> Result<(u32, u32)> {
+        let max = self.db_max_connections.unwrap_or(default_max);
+        if max == 0 {
+            anyhow::bail!("Database max connections must be at least 1");
+        }
+        let min = match self.db_min_connections {
+            Some(min) if min > max => anyhow::bail!(
+                "Database min connections ({}) cannot exceed max connections ({})",
+                min,
+                max
+            ),
+            Some(min) => min,
+            None => default_min.min(max),
+        };
+        Ok((max, min))
+    }
+
+    /// Build pool options sized from these args and a command's defaults.
+    pub fn pool_options(&self, default_max: u32, default_min: u32) -> Result<PgPoolOptions> {
+        let (max, min) = self.resolve(default_max, default_min)?;
+        tracing::info!(
+            max_connections = max,
+            min_connections = min,
+            "Database pool configuration"
+        );
+        Ok(PgPoolOptions::new()
+            .max_connections(max)
+            .min_connections(min))
+    }
 }
 
 /// API Server configuration

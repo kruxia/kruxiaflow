@@ -5,6 +5,12 @@ use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
+use crate::config::DbPoolArgs;
+
+/// Default database pool size (override with --db-max/min-connections)
+const DEFAULT_DB_MAX_CONNECTIONS: u32 = 10;
+const DEFAULT_DB_MIN_CONNECTIONS: u32 = 2;
+
 /// Worker command - Launch worker service only
 #[derive(Args)]
 pub struct WorkerCommand {
@@ -129,6 +135,10 @@ Example: --poll-max-activities 5"
         help = "Graceful shutdown timeout in seconds"
     )]
     pub shutdown_timeout: u64,
+
+    /// Database connection pool sizing
+    #[command(flatten)]
+    pub db_pool: DbPoolArgs,
 }
 
 impl WorkerCommand {
@@ -152,6 +162,9 @@ impl WorkerCommand {
         if self.shutdown_timeout < 5 || self.shutdown_timeout > 300 {
             anyhow::bail!("Shutdown timeout must be between 5 and 300 seconds");
         }
+
+        self.db_pool
+            .resolve(DEFAULT_DB_MAX_CONNECTIONS, DEFAULT_DB_MIN_CONNECTIONS)?;
 
         Ok(())
     }
@@ -201,9 +214,9 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
 
     // Connect to database for workflow storage access
     tracing::info!("Connecting to database...");
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(10)
-        .min_connections(2)
+    let pool = cmd
+        .db_pool
+        .pool_options(DEFAULT_DB_MAX_CONNECTIONS, DEFAULT_DB_MIN_CONNECTIONS)?
         .acquire_timeout(Duration::from_secs(5))
         .connect(&database_url)
         .await
@@ -308,6 +321,7 @@ mod tests {
             client_id: "kruxiaflow_worker".to_string(),
             client_secret: Some("secret".to_string()),
             shutdown_timeout: 30,
+            db_pool: DbPoolArgs::default(),
         }
     }
 

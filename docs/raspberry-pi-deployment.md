@@ -123,12 +123,17 @@ CREATE DATABASE kruxiaflow OWNER kruxiaflow;
 GRANT ALL PRIVILEGES ON DATABASE kruxiaflow TO kruxiaflow;
 \c kruxiaflow
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 EOF
 ```
 
+**Note**: The `pg_stat_statements` extension must be created by the `postgres` superuser. The profiling-views migration runs `CREATE EXTENSION IF NOT EXISTS pg_stat_statements`, and the `kruxiaflow` role is not allowed to create it, so migrations fail with `permission denied to create extension "pg_stat_statements"` unless it already exists. Its views only return data if `pg_stat_statements` is also added to `shared_preload_libraries`; that is only needed for `kruxiaflow profile`, so it can be skipped on a Pi.
+
 ### 3. Configure PostgreSQL for Low Memory
 
-Edit `/etc/postgresql/17/main/postgresql.conf` for Raspberry Pi's limited RAM.
+Put Raspberry Pi tuning in a drop-in file, `/etc/postgresql/17/main/conf.d/pi.conf`, so it survives package upgrades of `postgresql.conf`.
+
+**Connection limits**: Each Kruxia Flow command keeps a database connection pool, and every pooled connection is a PostgreSQL backend process. `max_connections` must leave room for Kruxia Flow's pool maximum (`KRUXIAFLOW_DB_MAX_CONNECTIONS`), plus the 3 connections PostgreSQL reserves for superusers (`superuser_reserved_connections`), plus a few for `psql` and one-off commands such as `kruxiaflow seed-llm`. With the pool settings recommended below (`serve` max 15, min 2), `max_connections = 25` leaves enough headroom. Do not go below that: with the default pool (min 10, max 100), a lower limit makes `serve` fail to connect.
 
 **For Pi Zero W (single-core, 512MB RAM)** - most aggressive settings:
 
@@ -139,10 +144,16 @@ effective_cache_size = 64MB
 work_mem = 2MB
 maintenance_work_mem = 16MB
 
-# Connection limits (keep low for single-core)
-max_connections = 10
+# Connection limits (see "Connection limits" above)
+max_connections = 25
+
+# Single core: parallel query only adds overhead
+max_worker_processes = 2
+max_parallel_workers = 0
+max_parallel_workers_per_gather = 0
 
 # Aggressive vacuuming (important for limited storage)
+autovacuum_max_workers = 1
 autovacuum_naptime = 60s
 autovacuum_vacuum_cost_limit = 100
 
@@ -163,8 +174,8 @@ effective_cache_size = 128MB
 work_mem = 4MB
 maintenance_work_mem = 32MB
 
-# Connection limits
-max_connections = 20
+# Connection limits (see "Connection limits" above)
+max_connections = 25
 
 # Aggressive vacuuming
 autovacuum_naptime = 30s
@@ -177,6 +188,8 @@ checkpoint_completion_target = 0.9
 # Logging (optional)
 log_min_duration_statement = 1000  # Log queries > 1s
 ```
+
+**Reading memory use**: `top` shows each PostgreSQL process with a large `RES` value, but most of it is `SHR` - the same `shared_buffers` memory counted once per process. The private memory of an idle backend is about 2MB. `shared_buffers` is the real ceiling, because it fills up as data is read.
 
 Restart PostgreSQL:
 
@@ -237,6 +250,10 @@ KRUXIAFLOW_API_BIND=0.0.0.0
 KRUXIAFLOW_WORKER_MAX_ACTIVITIES=2
 KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES=1
 
+# Database pool (default min 10 / max 100; keep max below PostgreSQL max_connections)
+KRUXIAFLOW_DB_MAX_CONNECTIONS=15
+KRUXIAFLOW_DB_MIN_CONNECTIONS=2
+
 # OAuth
 KRUXIAFLOW_CLIENT_ID=kruxiaflow_internal
 KRUXIAFLOW_CLIENT_SECRET=generate_a_secure_secret_here
@@ -278,7 +295,7 @@ Requires=postgresql.service
 Type=simple
 User=kruxiaflow
 Group=kruxiaflow
-EnvironmentFile=/home/kruxiaflow/.envrc
+EnvironmentFile=/etc/kruxiaflow/env
 ExecStart=/usr/local/bin/kruxiaflow serve --migrate --seed-client
 Restart=on-failure
 RestartSec=10
@@ -317,21 +334,23 @@ journalctl -u kruxiaflow -f
 
 ### Environment Variables
 
-| Variable                                    | Default                      | Description                           |
-|---------------------------------------------|------------------------------|---------------------------------------|
-| `DATABASE_URL`                              | (required)                   | PostgreSQL connection string          |
-| `KRUXIAFLOW_API_PORT`                       | `8080`                       | API server port                       |
-| `KRUXIAFLOW_API_BIND`                       | `0.0.0.0`                    | API server bind address               |
-| `KRUXIAFLOW_WORKER_MAX_ACTIVITIES`          | `16`                         | Max concurrent activities             |
-| `KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES`     | `5`                          | Activities claimed per poll           |
-| `KRUXIAFLOW_CLIENT_ID`                      | `kruxiaflow_internal_worker` | OAuth client ID                       |
-| `KRUXIAFLOW_CLIENT_SECRET`                  | (required)                   | OAuth client secret                   |
-| `KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM`      | (required)                   | RSA private key (PEM content)         |
-| `KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM_FILE` | -                            | Path to RSA private key file          |
-| `KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM_FILE`  | -                            | Path to RSA public key file           |
-| `KRUXIAFLOW_ACTIVITY_TIMEOUT`               | `300`                        | Activity timeout (seconds)            |
+| Variable                                    | Default                      | Description                             |
+|---------------------------------------------|------------------------------|-----------------------------------------|
+| `DATABASE_URL`                              | (required)                   | PostgreSQL connection string            |
+| `KRUXIAFLOW_API_PORT`                       | `8080`                       | API server port                         |
+| `KRUXIAFLOW_API_BIND`                       | `0.0.0.0`                    | API server bind address                 |
+| `KRUXIAFLOW_WORKER_MAX_ACTIVITIES`          | `16`                         | Max concurrent activities               |
+| `KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES`     | `5`                          | Activities claimed per poll             |
+| `KRUXIAFLOW_DB_MAX_CONNECTIONS`             | `100` (`serve`)              | Database pool maximum                   |
+| `KRUXIAFLOW_DB_MIN_CONNECTIONS`             | `10` (`serve`)               | Database pool idle minimum              |
+| `KRUXIAFLOW_CLIENT_ID`                      | `kruxiaflow_internal_worker` | OAuth client ID                         |
+| `KRUXIAFLOW_CLIENT_SECRET`                  | (required)                   | OAuth client secret                     |
+| `KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM`      | (required)                   | RSA private key (PEM content)           |
+| `KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM_FILE` | -                            | Path to RSA private key file            |
+| `KRUXIAFLOW_OAUTH_RSA_PUBLIC_KEY_PEM_FILE`  | -                            | Path to RSA public key file             |
+| `KRUXIAFLOW_ACTIVITY_TIMEOUT`               | `300`                        | Activity timeout (seconds)              |
 | `KRUXIAFLOW_LOG_LEVEL`                      | `info`                       | Log level (trace/debug/info/warn/error) |
-| `KRUXIAFLOW_LOG_FORMAT`                     | `text`                       | Log format (text/json)                |
+| `KRUXIAFLOW_LOG_FORMAT`                     | `text`                       | Log format (text/json)                  |
 
 **Docker Secrets Pattern**: For any secret variable, you can use a `_FILE` suffix to load the value from a file path instead of setting the content directly. The file content will be trimmed of whitespace.
 
@@ -341,8 +360,12 @@ journalctl -u kruxiaflow -f
 |--------------------------------------------|-------------------|---------------------|-------------|
 | `KRUXIAFLOW_WORKER_MAX_ACTIVITIES`         | 2                 | 4                   | 8-16        |
 | `KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES`    | 1                 | 2                   | 4-5         |
+| `KRUXIAFLOW_DB_MAX_CONNECTIONS`            | 15                | 15                  | 40          |
+| `KRUXIAFLOW_DB_MIN_CONNECTIONS`            | 2                 | 2                   | 5           |
 | PostgreSQL `shared_buffers`                | 32MB              | 64MB                | 256MB       |
-| PostgreSQL `max_connections`               | 10                | 20                  | 50          |
+| PostgreSQL `max_connections`               | 25                | 25                  | 50          |
+
+`KRUXIAFLOW_DB_MAX_CONNECTIONS` plus 3 superuser-reserved connections plus a few for admin tools must stay at or below PostgreSQL `max_connections`.
 
 **Pi Zero W Notes**: The single-core ARM11 CPU limits parallelism. Use minimal concurrency settings and expect slower activity execution. Consider running PostgreSQL on a separate host for better performance.
 
@@ -407,6 +430,34 @@ curl http://localhost:8080/api/v1/docs
 # Check version
 curl http://localhost:8080/api/v1/info
 ```
+
+---
+
+## Upgrading
+
+Release binaries are not published for ARMv6, so cross-compile the release tag (see [Cross-Compilation](#cross-compilation)) and copy the binary to the Pi. Then:
+
+```bash
+# Back up the database and the current binary
+sudo -u postgres pg_dump -Fc kruxiaflow > ~/kruxiaflow-$(date +%Y%m%d).dump
+cp /usr/local/bin/kruxiaflow ~/kruxiaflow.previous
+
+# Install the new binary and restart; --migrate in the systemd unit applies new migrations
+sudo systemctl stop kruxiaflow
+sudo install -m 755 ~/kruxiaflow /usr/local/bin/kruxiaflow
+sudo systemctl start kruxiaflow
+journalctl -u kruxiaflow -n 50
+
+# Refresh the LLM model catalog and pricing (run with the service's environment)
+sudo systemd-run --pipe --wait --collect -p User=kruxiaflow \
+  -p EnvironmentFile=/etc/kruxiaflow/env \
+  /usr/local/bin/kruxiaflow seed-llm /etc/kruxiaflow/llm_models.yaml
+
+# Verify
+curl http://localhost:8080/api/v1/info
+```
+
+Migrations only move forward. To roll back, restore both the previous binary and the database dump.
 
 ---
 
@@ -493,6 +544,9 @@ htop
 # Reduce worker concurrency
 export KRUXIAFLOW_WORKER_MAX_ACTIVITIES=2
 
+# Reduce idle database connections (one PostgreSQL backend each)
+export KRUXIAFLOW_DB_MIN_CONNECTIONS=2
+
 # Reduce PostgreSQL memory
 # Edit /etc/postgresql/17/main/postgresql.conf
 # shared_buffers = 32MB
@@ -509,6 +563,16 @@ journalctl -u kruxiaflow -n 100
 # - Missing OAuth keys
 # - PostgreSQL not ready (increase RestartSec in systemd)
 ```
+
+**`permission denied to create extension "pg_stat_statements"`**: Create the extension as the superuser, then restart the service:
+
+```bash
+sudo -u postgres psql -d kruxiaflow -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements"
+```
+
+**`migration <version> was previously applied but has been modified`**: The database was migrated by a binary whose copy of that migration differs from the new binary's, which typically happens with a build made from an uncommitted working tree. Released versions do not modify published migrations. If the database holds nothing you need, drop and recreate it (see [Install PostgreSQL 17](#2-install-postgresql-17), including both `CREATE EXTENSION` statements) and restart the service. Otherwise, compare the two versions of the migration before changing anything in `_sqlx_migrations`.
+
+**`sorry, too many clients already` / pool timeouts**: Kruxia Flow's pool maximum (`KRUXIAFLOW_DB_MAX_CONNECTIONS`, default 100 for `serve`) exceeds PostgreSQL's `max_connections`. Lower the pool maximum or raise `max_connections` (see [Configure PostgreSQL for Low Memory](#3-configure-postgresql-for-low-memory)).
 
 ---
 
@@ -531,7 +595,19 @@ CREATE DATABASE kruxiaflow OWNER kruxiaflow;
 GRANT ALL PRIVILEGES ON DATABASE kruxiaflow TO kruxiaflow;
 \c kruxiaflow
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 EOF
+sudo tee /etc/postgresql/17/main/conf.d/pi.conf > /dev/null <<EOF
+shared_buffers = 32MB
+work_mem = 2MB
+maintenance_work_mem = 16MB
+max_connections = 25
+max_worker_processes = 2
+max_parallel_workers = 0
+max_parallel_workers_per_gather = 0
+autovacuum_max_workers = 1
+EOF
+sudo systemctl restart postgresql
 
 echo "=== Generating OAuth keys ==="
 openssl genrsa -out ~/kruxiaflow-private.pem 2048
@@ -546,6 +622,8 @@ DATABASE_URL=postgres://kruxiaflow:changeme@localhost:5432/kruxiaflow
 KRUXIAFLOW_API_PORT=8080
 KRUXIAFLOW_WORKER_MAX_ACTIVITIES=2
 KRUXIAFLOW_WORKER_POLL_MAX_ACTIVITIES=1
+KRUXIAFLOW_DB_MAX_CONNECTIONS=15
+KRUXIAFLOW_DB_MIN_CONNECTIONS=2
 KRUXIAFLOW_CLIENT_ID=kruxiaflow_internal
 KRUXIAFLOW_CLIENT_SECRET=$CLIENT_SECRET
 KRUXIAFLOW_OAUTH_RSA_PRIVATE_KEY_PEM_FILE=$HOME/kruxiaflow-private.pem
