@@ -1,4 +1,4 @@
-use crate::registry::ActivityImpl;
+use crate::registry::{ActivityContext, ActivityImpl};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kruxiaflow_worker::ActivityResult;
@@ -6,6 +6,7 @@ use reqwest::{Client, Method};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::path::Path;
 use std::time::Duration;
 
 // ============================================================================
@@ -228,19 +229,14 @@ impl Default for HttpRequestActivity {
     }
 }
 
-#[async_trait]
-impl ActivityImpl for HttpRequestActivity {
-    async fn execute(&self, parameters: Value) -> Result<ActivityResult> {
+impl HttpRequestActivity {
+    /// Run the request. `download_to_file` writes into `temp_dir` (the
+    /// activity's file-output directory) or, if absent, the current directory.
+    async fn run(&self, parameters: Value, temp_dir: Option<&Path>) -> Result<ActivityResult> {
         tracing::debug!(
             "Executing http_request activity with parameters: {:?}",
             parameters
         );
-
-        // Extract temp directory if provided (internal parameter injected by worker)
-        let temp_dir = parameters
-            .get("_kruxiaflow_temp_dir")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
 
         // Parse parameters from JSON
         let params: HttpRequestParams = serde_json::from_value(parameters)
@@ -273,8 +269,8 @@ impl ActivityImpl for HttpRequestActivity {
             use tokio::io::AsyncWriteExt;
 
             // Determine output directory (use temp_dir if provided, otherwise current dir)
-            let output_path = if let Some(ref dir) = temp_dir {
-                std::path::PathBuf::from(dir).join(&filename)
+            let output_path = if let Some(dir) = temp_dir {
+                dir.join(&filename)
             } else {
                 std::path::PathBuf::from(&filename)
             };
@@ -362,6 +358,21 @@ impl ActivityImpl for HttpRequestActivity {
 
         // Return as ActivityResult
         Ok(ActivityResult::value("response", json!(http_response)))
+    }
+}
+
+#[async_trait]
+impl ActivityImpl for HttpRequestActivity {
+    async fn execute_with_context(
+        &self,
+        parameters: Value,
+        ctx: &ActivityContext,
+    ) -> Result<ActivityResult> {
+        self.run(parameters, ctx.temp_dir.as_deref()).await
+    }
+
+    async fn execute(&self, parameters: Value) -> Result<ActivityResult> {
+        self.run(parameters, None).await
     }
 
     fn name(&self) -> &str {

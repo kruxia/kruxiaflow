@@ -46,6 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (and pay for) work whose results the terminal-state guards then discarded.
   Processing a `WorkflowFailed` event now cancels the workflow's unclaimed
   rows (pending and waiting); in-flight claimed work still drains normally.
+- **Internal temp-dir parameter no longer leaks into activity inputs**: for
+  any activity that declares `outputs`, the std worker injected
+  `_kruxiaflow_temp_dir` (a per-workflow path) into the activity's
+  parameters. `echo` returned it in its output, and because the result-cache
+  key is computed from the parameters, the per-workflow path made caching
+  miss across workflows for every such activity. The temp directory is now
+  passed on `ActivityContext::temp_dir`, and parameters reach activities
+  unmodified.
 
 ### Security
 

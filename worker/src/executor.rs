@@ -73,16 +73,9 @@ impl ActivityExecutor for StdActivityExecutor {
             None
         };
 
-        // Inject temp directory into parameters for file outputs
-        let mut parameters = activity.parameters.clone();
-        if let Some(executor) = &file_executor
-            && let Some(obj) = parameters.as_object_mut()
-        {
-            obj.insert(
-                "_kruxiaflow_temp_dir".to_string(),
-                serde_json::Value::String(executor.temp_dir().display().to_string()),
-            );
-        }
+        // Parameters are passed through unmodified: they are the activity's
+        // inputs and its result-cache key, so nothing internal is injected.
+        let parameters = activity.parameters.clone();
 
         // Parse activity settings
         let settings: Option<ActivitySettings> = activity
@@ -90,13 +83,16 @@ impl ActivityExecutor for StdActivityExecutor {
             .as_ref()
             .and_then(|s| serde_json::from_value(s.clone()).ok());
 
-        // Create activity context for streaming support
-        let ctx = ActivityContext::new(
+        // Create activity context (streaming support, file output temp dir)
+        let mut ctx = ActivityContext::new(
             activity.workflow_id,
             activity.activity_id,
             activity.activity_key.clone(),
             Some(Arc::clone(&self.storage)),
         );
+        if let Some(executor) = &file_executor {
+            ctx = ctx.with_temp_dir(executor.temp_dir().to_path_buf());
+        }
 
         // Check if streaming is enabled and a streaming implementation exists
         let streaming_enabled = settings

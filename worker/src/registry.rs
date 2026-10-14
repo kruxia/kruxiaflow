@@ -8,6 +8,7 @@ use kruxiaflow_worker::{ActivityOutput, ActivityResult};
 use rust_decimal::Decimal;
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
@@ -28,6 +29,8 @@ pub struct ActivityContext {
     pub activity_key: String,
     /// Optional workflow storage for streaming large outputs
     pub storage: Option<Arc<dyn WorkflowStorage>>,
+    /// Temp directory for file outputs (set when the activity declares outputs)
+    pub temp_dir: Option<PathBuf>,
 }
 
 impl ActivityContext {
@@ -43,7 +46,14 @@ impl ActivityContext {
             activity_id,
             activity_key,
             storage,
+            temp_dir: None,
         }
+    }
+
+    /// Set the temp directory for file outputs
+    pub fn with_temp_dir(mut self, temp_dir: PathBuf) -> Self {
+        self.temp_dir = Some(temp_dir);
+        self
     }
 }
 
