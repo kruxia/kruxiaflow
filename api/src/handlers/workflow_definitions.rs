@@ -393,10 +393,12 @@ activities:
 /// - Semantic validation (activity references, no cycles)
 /// - Graph structure validation (no cycles)
 ///
-/// Content-Type headers:
+/// Content-Type headers (declared in the OpenAPI document):
+/// - application/yaml or text/yaml - YAML format
 /// - application/json - JSON format
-/// - text/yaml or application/yaml - YAML format
-/// - If not specified, parses as YAML (handles both)
+///
+/// The body is always parsed as YAML regardless of Content-Type, which handles
+/// JSON too since JSON is valid YAML.
 ///
 /// Returns 409 Conflict if a definition with the same name and timestamp already exists
 /// (virtually impossible due to microsecond precision).
@@ -404,7 +406,15 @@ activities:
     post,
     path = "/api/v1/workflow_definitions",
     tag = "Workflow Definitions",
-    request_body(content = String, description = "Workflow definition in JSON or YAML format", content_type = "application/json"),
+    request_body(
+        description = "Workflow definition in JSON or YAML format. The body is parsed as YAML \
+                       regardless of Content-Type; JSON is accepted because it is valid YAML.",
+        content(
+            (String = "application/yaml"),
+            (String = "text/yaml"),
+            (String = "application/json"),
+        )
+    ),
     responses(
         (status = 200, description = "Definition unchanged (identical to existing version)", body = DeployWorkflowDefinitionResponse),
         (status = 201, description = "Workflow definition deployed successfully", body = DeployWorkflowDefinitionResponse),

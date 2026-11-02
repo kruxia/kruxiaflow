@@ -47,6 +47,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **OpenAPI: workflow definition upload declares YAML**
+  ([#15](https://github.com/kruxia/kruxiaflow/issues/15)): the
+  `POST /api/v1/workflow_definitions` request body now lists
+  `application/yaml`, `text/yaml` and `application/json`; it previously
+  declared only `application/json` although the handler parses YAML (and
+  JSON as a subset of it), as the quickstart and README use.
 - **Dead-letters are now always self-explaining**: workflows failed by the
   engine itself (workflow timeout — e.g. queued work that no worker ever
   claimed because the worker was down) previously exposed
