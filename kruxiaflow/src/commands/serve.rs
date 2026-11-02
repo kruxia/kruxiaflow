@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{migrate, seed_client};
-use crate::config::DbPoolArgs;
+use crate::config::{DbPoolArgs, StorageArgs};
 
 /// Default database pool size (override with --db-max/min-connections)
 const DEFAULT_DB_MAX_CONNECTIONS: u32 = 100;
@@ -212,6 +212,10 @@ Example: --db-connect-timeout 120"
     /// Database connection pool sizing
     #[command(flatten)]
     pub db_pool: DbPoolArgs,
+
+    /// Workflow file storage provider
+    #[command(flatten)]
+    pub storage: StorageArgs,
 
     /// Disable built-in worker (run API + orchestrator only)
     #[arg(
@@ -662,8 +666,7 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
 
     // Create workflow storage
-    let workflow_storage: Arc<dyn kruxiaflow_core::WorkflowStorage> =
-        Arc::new(kruxiaflow_core::PostgresStorage::new(pool.clone()));
+    let workflow_storage = cmd.storage.create_storage(pool.clone())?;
 
     // Create cache service
     let cache_service: Arc<dyn CacheService> = Arc::new(
@@ -943,6 +946,7 @@ mod tests {
             seed_llm: None,
             db_connect_timeout: 60,
             db_pool: DbPoolArgs::default(),
+            storage: StorageArgs::default(),
             activity_timeout: 300,
             no_worker: false,
             insecure_dev: false,
@@ -1150,6 +1154,7 @@ mod tests {
             seed_llm: None,
             db_connect_timeout: 120,
             db_pool: DbPoolArgs::default(),
+            storage: StorageArgs::default(),
             activity_timeout: 300,
             no_worker: false,
             insecure_dev: false,

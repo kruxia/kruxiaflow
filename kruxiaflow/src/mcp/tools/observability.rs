@@ -375,7 +375,8 @@ pub async fn run_get_activity_output(
 ) -> Result<CallToolResult, CallToolError> {
     let workflow_id = parse_uuid(&params.workflow_id)?;
 
-    // PostgresStorage only holds a pool — construct locally, same as the API server does.
+    // Only file metadata is listed here, and it lives in PostgreSQL for every storage
+    // provider, so PostgresStorage serves this even when content is in S3.
     let storage = kruxiaflow_core::PostgresStorage::new(pool.clone());
     let svc = kruxiaflow_core::workflow::OutputQueryService::new(pool.clone());
 

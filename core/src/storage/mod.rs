@@ -1,10 +1,13 @@
 mod error;
+mod file_rows;
 mod models;
 mod postgres_storage;
+mod s3_storage;
 
 pub use error::{Result, StorageError};
 pub use models::{FileMetadata, FileReference};
 pub use postgres_storage::PostgresStorage;
+pub use s3_storage::{S3Config, S3Storage};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -15,9 +18,12 @@ use uuid::Uuid;
 /// WorkflowStorage interface for file management
 ///
 /// This interface abstracts storage operations to support multiple backends:
-/// - PostgreSQL Large Objects (MVP)
-/// - S3-compatible storage (Post-MVP)
+/// - PostgreSQL Large Objects (`PostgresStorage`, default)
+/// - S3-compatible object storage (`S3Storage`)
 /// - Filesystem storage (Post-MVP)
+///
+/// File metadata lives in the PostgreSQL `workflow_files` table for every
+/// backend; only the content location differs.
 #[async_trait]
 pub trait WorkflowStorage: Send + Sync {
     /// Upload a file (streaming, no full memory load)

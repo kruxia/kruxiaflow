@@ -199,6 +199,114 @@ impl DbPoolArgs {
     }
 }
 
+/// Where workflow file content is stored
+#[derive(clap::ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StorageProvider {
+    /// PostgreSQL Large Objects (no extra service needed)
+    #[default]
+    #[value(alias = "postgres")]
+    Postgresql,
+    /// S3-compatible object storage (AWS S3, MinIO, Cloudflare R2, ...)
+    S3,
+}
+
+/// Workflow file storage selection for the commands that read or write
+/// workflow files (`serve`, `api`, `worker`). File metadata always lives in
+/// PostgreSQL; the provider decides where file content goes.
+#[derive(Args, Debug, Clone, Default)]
+pub struct StorageArgs {
+    /// Storage provider for workflow file content
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_STORAGE_PROVIDER",
+        value_enum,
+        default_value_t = StorageProvider::Postgresql,
+        help = "Storage provider for workflow files: postgresql or s3",
+        long_help = "Where workflow file content is stored.\n\
+File metadata stays in PostgreSQL for every provider, and files written\n\
+by the postgresql provider stay readable after switching to s3.\n\n\
+postgresql: PostgreSQL Large Objects (default, no extra service)\n\
+s3: S3-compatible object storage; requires --storage-s3-bucket.\n    \
+Credentials come from AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY,\n    \
+web identity, ECS task roles, or EC2 instance metadata."
+    )]
+    pub storage_provider: StorageProvider,
+
+    /// S3 bucket name
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_STORAGE_S3_BUCKET",
+        help = "S3 bucket for workflow files (required with --storage-provider s3)"
+    )]
+    pub storage_s3_bucket: Option<String>,
+
+    /// S3 region
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_STORAGE_S3_REGION",
+        help = "S3 region (default: AWS_REGION, AWS_DEFAULT_REGION, then us-east-1)"
+    )]
+    pub storage_s3_region: Option<String>,
+
+    /// S3 endpoint for non-AWS services
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_STORAGE_S3_ENDPOINT",
+        help = "S3 endpoint URL for S3-compatible services, e.g. http://minio:9000",
+        long_help = "Endpoint URL for S3-compatible services such as MinIO,\n\
+Cloudflare R2, or Ceph RGW. Omit for AWS S3.\n\
+Plain http:// endpoints are allowed.\n\n\
+Example: --storage-s3-endpoint http://minio:9000"
+    )]
+    pub storage_s3_endpoint: Option<String>,
+
+    /// Key prefix for all objects
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_STORAGE_S3_PREFIX",
+        help = "Key prefix for workflow file objects, e.g. kruxiaflow/artifacts"
+    )]
+    pub storage_s3_prefix: Option<String>,
+}
+
+impl StorageArgs {
+    /// Build the configured workflow storage. Fails on missing or invalid
+    /// settings; no request is made to the storage service.
+    pub fn create_storage(
+        &self,
+        pool: sqlx::PgPool,
+    ) -> Result<Arc<dyn kruxiaflow_core::WorkflowStorage>> {
+        match self.storage_provider {
+            StorageProvider::Postgresql => {
+                tracing::info!("Workflow storage: PostgreSQL Large Objects");
+                Ok(Arc::new(kruxiaflow_core::PostgresStorage::new(pool)))
+            }
+            StorageProvider::S3 => {
+                let bucket = self.storage_s3_bucket.clone().context(
+                    "--storage-provider s3 requires --storage-s3-bucket \
+                     (or KRUXIAFLOW_STORAGE_S3_BUCKET)",
+                )?;
+                let config = kruxiaflow_core::S3Config {
+                    bucket,
+                    region: self.storage_s3_region.clone(),
+                    endpoint: self.storage_s3_endpoint.clone(),
+                    prefix: self.storage_s3_prefix.clone(),
+                };
+                let storage = kruxiaflow_core::S3Storage::new(pool, &config)
+                    .context("Failed to configure S3 workflow storage")?;
+                tracing::info!(
+                    bucket = %config.bucket,
+                    region = config.region.as_deref().unwrap_or("(from AWS environment)"),
+                    endpoint = config.endpoint.as_deref().unwrap_or("(AWS)"),
+                    prefix = config.prefix.as_deref().unwrap_or(""),
+                    "Workflow storage: S3-compatible object storage"
+                );
+                Ok(Arc::new(storage))
+            }
+        }
+    }
+}
+
 /// API Server configuration
 #[derive(Debug, Clone)]
 pub struct ApiConfig {

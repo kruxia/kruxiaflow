@@ -7,8 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-02
+
 ### Added
 
+- **S3-compatible workflow file storage**: `serve`, `api`, and `worker`
+  accept `--storage-provider s3` / `KRUXIAFLOW_STORAGE_PROVIDER=s3` with
+  `KRUXIAFLOW_STORAGE_S3_BUCKET` (required), `_REGION`, `_ENDPOINT` (MinIO,
+  Cloudflare R2, Ceph RGW; `http://` allowed) and `_PREFIX`. Credentials use
+  the standard AWS chain (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, web
+  identity, ECS task role, instance metadata). File content streams to the
+  bucket (multipart above 8 MiB, ~24 MiB memory per upload) while metadata
+  stays in PostgreSQL. Files already stored as Large Objects stay readable
+  after switching, and move to S3 when overwritten. New migration: nullable
+  `workflow_files.oid` plus a `storage_key` column. `postgresql` remains the
+  default.
 - **Configurable database pool size**: `serve`, `api`, `orchestrator`, and
   `worker` accept `--db-max-connections` / `KRUXIAFLOW_DB_MAX_CONNECTIONS`
   and `--db-min-connections` / `KRUXIAFLOW_DB_MIN_CONNECTIONS` (previously
@@ -31,6 +44,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`kruxiaflow seed-user`**: creates a user for password sign-in, or resets
   an existing user's password (also revoking their refresh tokens). Writes to
   the database directly, like `seed-client`.
+- **LLM cost catalog**: Claude Fable 5.1, Opus 5.5 and Sonnet 5.5
+  ([#14](https://github.com/kruxia/kruxiaflow/pull/14)), Claude Opus 5,
+  Gemini 3.6 Flash and Gemini 3.5 Flash-Lite. Usage of these models was
+  previously recorded at $0. README examples now fall back to the Gemini
+  models instead of `openai/gpt-5.4-mini`.
 
 ### Changed
 
@@ -47,30 +65,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Overwriting a workflow file no longer leaks its Large Object**:
+  re-uploading the same workflow/activity/filename replaced the metadata row
+  but never unlinked the previous Large Object, leaving orphaned data in
+  `pg_largeobject`. The replaced object is now unlinked in the same
+  transaction, and concurrent uploads of one file are serialized.
 - **OpenAPI: workflow definition upload declares YAML**
   ([#15](https://github.com/kruxia/kruxiaflow/issues/15)): the
   `POST /api/v1/workflow_definitions` request body now lists
   `application/yaml`, `text/yaml` and `application/json`; it previously
   declared only `application/json` although the handler parses YAML (and
   JSON as a subset of it), as the quickstart and README use.
-- **Dead-letters are now always self-explaining**: workflows failed by the
-  engine itself (workflow timeout — e.g. queued work that no worker ever
-  claimed because the worker was down) previously exposed
-  `error_message: null` on the workflow list/detail APIs; the only reason
-  lived in the unpersisted `WorkflowFailed` event payload, and no activity
-  had failed for the API's activity-error extraction to find. The
-  `WorkflowFailed` reason is now persisted to a new `workflows.error_message`
-  column, the timeout reason diagnoses the cause ("N queued activities were
-  never claimed by any worker — is a worker for this queue running?"), and
-  the APIs return the most specific reason available: a failed activity's
-  error first, the workflow-level reason as fallback.
-  (nukumori-support-needs item 12, from the prod cutover day.)
-- **Dead workflows no longer leave claimable work behind**: a workflow
-  failed from outside the activity flow (workflow timeout) left its
-  unclaimed queue rows `pending` — a worker coming back later would execute
-  (and pay for) work whose results the terminal-state guards then discarded.
-  Processing a `WorkflowFailed` event now cancels the workflow's unclaimed
-  rows (pending and waiting); in-flight claimed work still drains normally.
 - **Internal temp-dir parameter no longer leaks into activity inputs**: for
   any activity that declares `outputs`, the std worker injected
   `_kruxiaflow_temp_dir` (a per-workflow path) into the activity's
@@ -92,6 +97,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connection printed the full `DATABASE_URL`, including the password, in the
   error message (and so into journald or container logs). The error now
   reports only the connection failure.
+
+## [0.8.3] - 2026-07-21
+
+### Fixed
+
+- **Dead-letters are now always self-explaining**: workflows failed by the
+  engine itself (workflow timeout — e.g. queued work that no worker ever
+  claimed because the worker was down) previously exposed
+  `error_message: null` on the workflow list/detail APIs; the only reason
+  lived in the unpersisted `WorkflowFailed` event payload, and no activity
+  had failed for the API's activity-error extraction to find. The
+  `WorkflowFailed` reason is now persisted to a new `workflows.error_message`
+  column, the timeout reason diagnoses the cause ("N queued activities were
+  never claimed by any worker — is a worker for this queue running?"), and
+  the APIs return the most specific reason available: a failed activity's
+  error first, the workflow-level reason as fallback.
+  (nukumori-support-needs item 12, from the prod cutover day.)
+- **Dead workflows no longer leave claimable work behind**: a workflow
+  failed from outside the activity flow (workflow timeout) left its
+  unclaimed queue rows `pending` — a worker coming back later would execute
+  (and pay for) work whose results the terminal-state guards then discarded.
+  Processing a `WorkflowFailed` event now cancels the workflow's unclaimed
+  rows (pending and waiting); in-flight claimed work still drains normally.
+
+## [0.8.2] - 2026-07-21
+
+No user-facing changes (test coverage for `kruxiaflow cost` and the `serve`
+lifecycle).
 
 ## [0.8.1] - 2026-07-20
 

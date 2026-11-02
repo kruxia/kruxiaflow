@@ -77,7 +77,8 @@ flowchart TB
 
 **Architecture Notes**:
 - **MVP**: PostgreSQL is the ONLY required dependency (handles Queue, Events, Storage, and Auth)
-- **Post-MVP**: Auth can be swapped to external provider (Auth0/Okta), Storage can use S3
+- **Optional**: Workflow file content can be stored in S3-compatible object storage (`KRUXIAFLOW_STORAGE_PROVIDER=s3`); metadata stays in PostgreSQL
+- **Post-MVP**: Auth can be swapped to external provider (Auth0/Okta)
 - Redis is optional for all deployments (result caching only)
 
 ---
@@ -858,16 +859,16 @@ Each workflow has its own artifact storage for handling large files and data tha
 
 **Storage Strategy**:
 
-Artifacts are stored via the WorkflowStorage interface. The storage path format depends on the configured provider:
+Artifacts are stored via the WorkflowStorage interface. File metadata is always a row in the PostgreSQL `workflow_files` table; the row records where the content lives, which depends on the provider that wrote it:
 
 ```
-PostgreSQL Large Objects (MVP):
-  storage_path: "lo:16385"
+PostgreSQL Large Objects (default):
+  workflow_files.oid = 16385
   Actual storage: PostgreSQL large object with OID 16385
 
-S3-compatible (Post-MVP):
-  storage_path: "s3:bucket/wf_123abc/input_data.csv"
-  Actual storage: S3 object at key wf_123abc/input_data.csv
+S3-compatible:
+  workflow_files.storage_key = "{prefix}/{workflow_id}/{activity_key}/{upload_id}/input_data.csv"
+  Actual storage: object at that key in the configured bucket
 
 Filesystem (Post-MVP):
   storage_path: "fs:/var/lib/kruxiaflow/artifacts/wf_123abc/input_data.csv"
@@ -938,17 +939,20 @@ Downstream activities reference artifacts using special template syntax:
 
 See [File Management](#file-management-external-workers) for complete API documentation.
 
-**Storage Backend Configuration**:
+**Storage Backend Configuration** (`serve`, `api`, and `worker`; each also accepts the matching `--storage-*` flag):
 
 ```bash
-# MVP: PostgreSQL Large Objects (default)
+# PostgreSQL Large Objects (default)
 KRUXIAFLOW_STORAGE_PROVIDER=postgresql
 
-# Post-MVP: S3-compatible storage
+# S3-compatible storage (AWS S3, MinIO, Cloudflare R2, Ceph RGW, ...)
 KRUXIAFLOW_STORAGE_PROVIDER=s3
-KRUXIAFLOW_STORAGE_S3_BUCKET=kruxiaflow-artifacts
-KRUXIAFLOW_STORAGE_S3_ENDPOINT=https://s3.amazonaws.com
-KRUXIAFLOW_STORAGE_S3_REGION=us-east-1
+KRUXIAFLOW_STORAGE_S3_BUCKET=kruxiaflow-artifacts   # required
+KRUXIAFLOW_STORAGE_S3_REGION=us-east-1              # default: AWS_REGION / AWS_DEFAULT_REGION, then us-east-1
+KRUXIAFLOW_STORAGE_S3_ENDPOINT=http://minio:9000    # omit for AWS; http:// endpoints are allowed
+KRUXIAFLOW_STORAGE_S3_PREFIX=kruxiaflow/artifacts   # optional key prefix
+# Credentials use the standard AWS chain: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY /
+# AWS_SESSION_TOKEN, web identity (IRSA), ECS task role, or EC2 instance metadata.
 
 # Post-MVP: Local filesystem
 KRUXIAFLOW_STORAGE_PROVIDER=filesystem
@@ -960,11 +964,20 @@ KRUXIAFLOW_ARTIFACT_RETENTION_DAYS=7
 
 **Storage Backend Comparison**:
 
-| Provider        | MVP         | Use Case                           | Pros                                 | Cons                              |
-|-----------------|-------------|------------------------------------|--------------------------------------|-----------------------------------|
-| **PostgreSQL**  | ✅ Yes      | Default, single-database simplicity| No extra dependencies, transactional | Size limits (~2GB per object)     |
-| **S3**          | ❌ Post-MVP | Production scale, large files      | Unlimited size, durable, CDN-ready   | External dependency, cost         |
-| **Filesystem**  | ❌ Post-MVP | Edge deployments, air-gapped       | Simple, no network latency           | No replication, single node only  |
+| Provider       | Status         | Use Case                            | Pros                                       | Cons                             |
+|----------------|----------------|-------------------------------------|--------------------------------------------|----------------------------------|
+| **PostgreSQL** | ✅ Default     | Single-database simplicity          | No extra dependencies, transactional       | Size limits (~2GB per object)    |
+| **S3**         | ✅ Implemented | Production scale, large files       | ~78 GiB per file, durable, offloads the DB | External dependency, cost        |
+| **Filesystem** | ❌ Post-MVP    | Edge deployments, air-gapped        | Simple, no network latency                 | No replication, single node only |
+
+**S3 provider behavior**:
+- **Uploads stream**: files under 8 MiB are written with one PUT; larger files use multipart upload (8 MiB parts, 2 in flight), so memory per upload stays around 24 MiB regardless of file size. A failed upload stream aborts its multipart upload.
+- **Each upload writes a new object** (keyed by a fresh UUIDv7 `upload_id`), then the metadata row is switched to it and the replaced object is deleted. A row therefore always describes exactly the object it names, and a download that races an overwrite gets either the whole old file or the whole new one.
+- **Key segments are percent-encoded**, so an activity key or filename containing `/` cannot collide with another file.
+- **Deletes remove the row first**, then the object. If the object delete fails, the result is an unreferenced object (storage cost, logged as a warning) rather than a row pointing at a missing object.
+- **Switching providers strands nothing**: the s3 provider reads and deletes Large Object rows written by the postgresql provider, and overwriting such a file moves it to S3 and unlinks the Large Object. Going back, the postgresql provider reports files stored in S3 as `WrongProvider` errors rather than corrupting them.
+- **Recommended bucket lifecycle rule**: abort incomplete multipart uploads after a day, so a process that dies mid-upload leaves nothing behind.
+- **IAM permissions needed**: `s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`, `s3:AbortMultipartUpload` on the bucket (or prefix).
 
 **PostgreSQL Large Objects Details**:
 
@@ -991,7 +1004,7 @@ CREATE TABLE workflow_artifacts (
 
 -- Example row:
 -- storage_path = "lo:16385"  (PostgreSQL Large Object OID)
--- storage_path = "s3:bucket/wf_123/data.csv"  (S3 key, post-MVP)
+-- storage_key  = "wf_123/transform/{upload_id}/data.csv"  (S3 provider; oid is NULL)
 ```
 
 **Complete ETL Example Using Artifacts**:
@@ -1104,7 +1117,7 @@ activities:
 **File Handling Features**:
 - ✅ **Type Declaration**: Activities declare file outputs with `type: file`
 - ✅ **Template References**: Files referenced via `{{FILE.activity_key.output_name}}`
-- ✅ **Storage Backend**: Files stored in WorkflowStorage (PostgreSQL Large Objects for MVP)
+- ✅ **Storage Backend**: Files stored in WorkflowStorage (PostgreSQL Large Objects by default, or S3-compatible object storage)
 - ✅ **HTTP Integration**: HTTP activities support file download (GET) and upload (POST multipart/form-data)
 - ✅ **Streaming**: Large files handled via streaming (no full memory load)
 - ✅ **Automatic Cleanup**: Files automatically deleted when workflow completes
@@ -2917,7 +2930,7 @@ pub trait WorkflowStorage: Send + Sync {
 }
 
 pub struct PostgresStorage { /* ... */ }      // MVP: PostgreSQL Large Objects
-pub struct S3Storage { /* ... */ }            // Post-MVP: S3-compatible storage
+pub struct S3Storage { /* ... */ }            // S3-compatible storage (object_store crate)
 pub struct FilesystemStorage { /* ... */ }    // Post-MVP: Local filesystem
 
 pub struct ArtifactMetadata {
@@ -2968,14 +2981,16 @@ impl PostgresStorage {
 }
 ```
 
-**Post-MVP - S3-compatible Storage**:
+**S3-compatible Storage** (`core/src/storage/s3_storage.rs`):
 ```rust
 pub struct S3Storage {
-    client: aws_sdk_s3::Client,
-    bucket: String,
-    pool: PgPool,  // Still use PostgreSQL for metadata
+    pool: PgPool,                   // metadata stays in workflow_files
+    store: Arc<dyn ObjectStore>,    // object_store's AmazonS3 client
+    prefix: Path,                   // KRUXIAFLOW_STORAGE_S3_PREFIX
 }
 ```
+
+Both providers share the `workflow_files` row logic (`core/src/storage/file_rows.rs`). Each row holds exactly one location, a Large Object `oid` or an object `storage_key` (enforced by a CHECK constraint), so either provider can recognize rows written by the other. The `object_store` crate (0.13, on the workspace's reqwest 0.12 + ring TLS stack) provides the S3 client; its `LocalFileSystem` store is the natural basis for the post-MVP Filesystem provider (`S3Storage::with_store` already accepts any `ObjectStore`).
 
 ### Service Interface Summary
 
@@ -2987,7 +3002,7 @@ Kruxia Flow uses four pluggable service interfaces to wrap infrastructure depend
 | **AuthenticationService** | JWT token issuance and validation            | PostgresAuthService (JWT + PostgreSQL)              | Auth0, Okta, additional IdPs     |
 | **ActivityQueue**        | Activity scheduling and worker polling        | PostgresQueue                                       | AWS SQS, RabbitMQ, Redis         |
 | **EventSource**          | Workflow event publish/subscribe              | PostgresPollingEventSource (Polling with adaptive backoff) | Kafka, Redpanda, NATS, Logical Replication |
-| **WorkflowStorage**      | Large file / artifact storage                 | PostgresStorage (Large Objects)                     | S3-compatible, Filesystem        |
+| **WorkflowStorage**      | Large file / artifact storage                 | PostgresStorage (Large Objects), S3Storage          | Filesystem                       |
 
 **Design Benefits**:
 - Single database (PostgreSQL) for MVP simplicity
@@ -3021,7 +3036,7 @@ pub struct StreamFlowServices {
     auth: Box<dyn AuthenticationService>,           // → Auth0Service or OktaService
     queue: Box<dyn ActivityQueue>,                   // PostgresQueue (unchanged)
     events: Box<dyn EventSource>,                    // PostgresPollingEventSource (unchanged)
-    storage: Box<dyn WorkflowStorage>,               // → S3Storage for large files
+    storage: Box<dyn WorkflowStorage>,               // → S3Storage for large files (available now)
 }
 ```
 

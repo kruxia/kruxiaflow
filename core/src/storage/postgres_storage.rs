@@ -1,3 +1,4 @@
+use super::file_rows::{self, StoredLocation};
 use super::{FileMetadata, Result, StorageError, WorkflowStorage};
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -78,13 +79,41 @@ impl PostgresStorage {
         Ok(data)
     }
 
-    /// Helper to delete a Large Object
-    async fn delete_large_object(tx: &mut Transaction<'_, Postgres>, oid: u32) -> Result<()> {
-        sqlx::query("SELECT lo_unlink($1)")
-            .bind(oid as i32)
-            .execute(&mut **tx)
-            .await?;
-        Ok(())
+    /// Stream a Large Object's content in its own read transaction.
+    pub(super) fn large_object_stream(
+        pool: PgPool,
+        oid: u32,
+    ) -> Pin<Box<dyn Stream<Item = std::result::Result<Bytes, std::io::Error>> + Send>> {
+        let stream = async_stream::try_stream! {
+            let mut tx = pool.begin().await
+                .map_err(std::io::Error::other)?;
+
+            // Open Large Object for reading
+            let fd = Self::open_large_object(&mut tx, oid, INV_READ).await
+                .map_err(std::io::Error::other)?;
+
+            loop {
+                // Read chunk from Large Object
+                let chunk = Self::read_from_large_object(&mut tx, fd, CHUNK_SIZE as i32).await
+                    .map_err(std::io::Error::other)?;
+
+                if chunk.is_empty() {
+                    break;
+                }
+
+                // Here be macros pretending to be generators. Thanks, async-stream!
+                yield Bytes::from(chunk);
+            }
+
+            // Close Large Object
+            Self::close_large_object(&mut tx, fd).await
+                .map_err(std::io::Error::other)?;
+
+            tx.commit().await
+                .map_err(std::io::Error::other)?;
+        };
+
+        Box::pin(stream)
     }
 }
 
@@ -121,29 +150,25 @@ impl WorkflowStorage for PostgresStorage {
         // Close Large Object
         Self::close_large_object(&mut tx, fd).await?;
 
-        // Insert metadata (upsert - replace if exists)
-        let metadata = sqlx::query_as::<_, FileMetadata>(
-            r#"
-            INSERT INTO workflow_files
-                (workflow_id, activity_key, filename, oid, size, content_type)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            ON CONFLICT (workflow_id, activity_key, filename)
-            DO UPDATE SET
-                oid = EXCLUDED.oid,
-                size = EXCLUDED.size,
-                content_type = EXCLUDED.content_type,
-                created_at = NOW()
-            RETURNING workflow_id, activity_key, filename, size, content_type, created_at
-            "#,
+        // Insert metadata (replace if exists) and clean up the replaced content
+        let (metadata, previous) = file_rows::replace(
+            &mut tx,
+            workflow_id,
+            activity_key,
+            filename,
+            StoredLocation::LargeObject(oid),
+            total_size,
+            content_type,
         )
-        .bind(workflow_id)
-        .bind(activity_key)
-        .bind(filename)
-        .bind(oid as i32)
-        .bind(total_size)
-        .bind(content_type)
-        .fetch_one(&mut *tx)
         .await?;
+
+        match previous {
+            Some(StoredLocation::LargeObject(old_oid)) => {
+                file_rows::unlink_large_object(&mut tx, old_oid).await?;
+            }
+            Some(StoredLocation::Object(key)) => warn_unreachable_object(filename, &key),
+            None => {}
+        }
 
         tx.commit().await?;
 
@@ -157,50 +182,22 @@ impl WorkflowStorage for PostgresStorage {
         filename: &str,
     ) -> Result<Pin<Box<dyn Stream<Item = std::result::Result<Bytes, std::io::Error>> + Send>>>
     {
-        // Get OID from metadata
-        let oid: i32 = sqlx::query_scalar(
-            "SELECT oid::int4 FROM workflow_files
-             WHERE workflow_id = $1 AND activity_key = $2 AND filename = $3",
-        )
-        .bind(workflow_id)
-        .bind(activity_key)
-        .bind(filename)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or_else(|| StorageError::FileNotFound(filename.to_string()))?;
-
-        // Create a stream that reads from the Large Object
-        let pool = self.pool.clone();
-        let stream = async_stream::try_stream! {
-            let mut tx = pool.begin().await
-                .map_err(std::io::Error::other)?;
-
-            // Open Large Object for reading
-            let fd = Self::open_large_object(&mut tx, oid as u32, INV_READ).await
-                .map_err(std::io::Error::other)?;
-
-            loop {
-                // Read chunk from Large Object
-                let chunk = Self::read_from_large_object(&mut tx, fd, CHUNK_SIZE as i32).await
-                    .map_err(std::io::Error::other)?;
-
-                if chunk.is_empty() {
-                    break;
-                }
-
-                // Here be macros pretending to be generators. Thanks, async-stream!
-                yield Bytes::from(chunk);
+        let oid = match file_rows::location(&self.pool, workflow_id, activity_key, filename).await?
+        {
+            Some(StoredLocation::LargeObject(oid)) => oid,
+            Some(StoredLocation::Object(key)) => {
+                return Err(StorageError::WrongProvider(
+                    filename.to_string(),
+                    format!(
+                        "content is object {key} in S3-compatible storage; \
+                         set KRUXIAFLOW_STORAGE_PROVIDER=s3 to read it"
+                    ),
+                ));
             }
-
-            // Close Large Object
-            Self::close_large_object(&mut tx, fd).await
-                .map_err(std::io::Error::other)?;
-
-            tx.commit().await
-                .map_err(std::io::Error::other)?;
+            None => return Err(StorageError::FileNotFound(filename.to_string())),
         };
 
-        Ok(Box::pin(stream))
+        Ok(Self::large_object_stream(self.pool.clone(), oid))
     }
 
     async fn get_file_metadata(
@@ -209,34 +206,11 @@ impl WorkflowStorage for PostgresStorage {
         activity_key: &str,
         filename: &str,
     ) -> Result<FileMetadata> {
-        let metadata = sqlx::query_as::<_, FileMetadata>(
-            "SELECT workflow_id, activity_key, filename, size, content_type, created_at
-             FROM workflow_files
-             WHERE workflow_id = $1 AND activity_key = $2 AND filename = $3",
-        )
-        .bind(workflow_id)
-        .bind(activity_key)
-        .bind(filename)
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or_else(|| StorageError::FileNotFound(filename.to_string()))?;
-
-        Ok(metadata)
+        file_rows::metadata(&self.pool, workflow_id, activity_key, filename).await
     }
 
     async fn list_files(&self, workflow_id: Uuid, activity_key: &str) -> Result<Vec<FileMetadata>> {
-        let files = sqlx::query_as::<_, FileMetadata>(
-            "SELECT workflow_id, activity_key, filename, size, content_type, created_at
-             FROM workflow_files
-             WHERE workflow_id = $1 AND activity_key = $2
-             ORDER BY created_at",
-        )
-        .bind(workflow_id)
-        .bind(activity_key)
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(files)
+        file_rows::list(&self.pool, workflow_id, activity_key).await
     }
 
     async fn delete_file(
@@ -247,21 +221,12 @@ impl WorkflowStorage for PostgresStorage {
     ) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 
-        // Delete metadata and get OID in one query
-        let oid: Option<i32> = sqlx::query_scalar(
-            "DELETE FROM workflow_files
-             WHERE workflow_id = $1 AND activity_key = $2 AND filename = $3
-             RETURNING oid::int4",
-        )
-        .bind(workflow_id)
-        .bind(activity_key)
-        .bind(filename)
-        .fetch_optional(&mut *tx)
-        .await?;
-
-        if let Some(oid) = oid {
-            // Delete Large Object
-            Self::delete_large_object(&mut tx, oid as u32).await?;
+        match file_rows::delete(&mut tx, workflow_id, activity_key, filename).await? {
+            Some(StoredLocation::LargeObject(oid)) => {
+                file_rows::unlink_large_object(&mut tx, oid).await?;
+            }
+            Some(StoredLocation::Object(key)) => warn_unreachable_object(filename, &key),
+            None => {}
         }
 
         tx.commit().await?;
@@ -271,17 +236,15 @@ impl WorkflowStorage for PostgresStorage {
     async fn delete_workflow_files(&self, workflow_id: Uuid) -> Result<()> {
         let mut tx = self.pool.begin().await?;
 
-        // Delete metadata and get all OIDs in one query
-        let oids: Vec<i32> = sqlx::query_scalar(
-            "DELETE FROM workflow_files WHERE workflow_id = $1 RETURNING oid::int4",
-        )
-        .bind(workflow_id)
-        .fetch_all(&mut *tx)
-        .await?;
-
-        // Delete all Large Objects
-        for oid in oids {
-            Self::delete_large_object(&mut tx, oid as u32).await?;
+        for location in file_rows::delete_workflow(&mut tx, workflow_id).await? {
+            match location {
+                StoredLocation::LargeObject(oid) => {
+                    file_rows::unlink_large_object(&mut tx, oid).await?;
+                }
+                StoredLocation::Object(key) => {
+                    warn_unreachable_object(&workflow_id.to_string(), &key)
+                }
+            }
         }
 
         tx.commit().await?;
@@ -305,6 +268,17 @@ impl WorkflowStorage for PostgresStorage {
             workflow_id, activity_key, filename
         ))
     }
+}
+
+/// The postgresql provider has no object storage client, so content written by
+/// the s3 provider is left in the bucket when its row is replaced or deleted.
+fn warn_unreachable_object(file: &str, key: &str) {
+    tracing::warn!(
+        file,
+        object_key = key,
+        "Removed metadata for a file stored in S3-compatible storage; the postgresql \
+         storage provider cannot delete the object, so it remains in the bucket"
+    );
 }
 
 #[cfg(test)]

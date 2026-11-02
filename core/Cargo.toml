@@ -31,6 +31,10 @@ tracing.workspace = true
 regex = "1"
 minijinja = { version = "2.6", features = ["builtins", "json", "urlencode"] }
 sha2 = "0.10"
+# S3-compatible WorkflowStorage backend. 0.13 is the newest line that shares
+# the workspace's reqwest 0.12 + ring TLS stack (0.14 moves to reqwest 0.13
+# and aws-lc-rs, which would duplicate both).
+object_store = { version = "0.13.2", default-features = false, features = ["aws"] }
 
 # Optional dependencies
 redis = { version = "0.32", features = [

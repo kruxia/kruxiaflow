@@ -1,11 +1,10 @@
 use anyhow::Result;
 use clap::Args;
 use kruxiaflow_std_worker::{WorkerConfig, WorkerManager};
-use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
-use crate::config::DbPoolArgs;
+use crate::config::{DbPoolArgs, StorageArgs};
 
 /// Default database pool size (override with --db-max/min-connections)
 const DEFAULT_DB_MAX_CONNECTIONS: u32 = 10;
@@ -139,6 +138,10 @@ Example: --poll-max-activities 5"
     /// Database connection pool sizing
     #[command(flatten)]
     pub db_pool: DbPoolArgs,
+
+    /// Workflow file storage provider
+    #[command(flatten)]
+    pub storage: StorageArgs,
 }
 
 impl WorkerCommand {
@@ -225,8 +228,7 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
     tracing::info!("Database connection established");
 
     // Create workflow storage for artifact access
-    let workflow_storage: Arc<dyn kruxiaflow_core::WorkflowStorage> =
-        Arc::new(kruxiaflow_core::PostgresStorage::new(pool.clone()));
+    let workflow_storage = cmd.storage.create_storage(pool.clone())?;
 
     // Create cache service based on environment configuration
     let cache_config = crate::config::CacheConfig::new();
@@ -322,6 +324,7 @@ mod tests {
             client_secret: Some("secret".to_string()),
             shutdown_timeout: 30,
             db_pool: DbPoolArgs::default(),
+            storage: StorageArgs::default(),
         }
     }
 

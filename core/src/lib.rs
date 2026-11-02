@@ -45,7 +45,10 @@ pub use scheduler::{
     WorkflowSchedule, run_scheduler,
 };
 
-pub use storage::{FileMetadata, FileReference, PostgresStorage, StorageError, WorkflowStorage};
+pub use storage::{
+    FileMetadata, FileReference, PostgresStorage, S3Config, S3Storage, StorageError,
+    WorkflowStorage,
+};
 
 pub use subscription::{
     ActivitySubscription, ExpiredSubscription, NewSubscription, PostgresSubscriptionService,

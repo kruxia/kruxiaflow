@@ -21,4 +21,15 @@ pub enum StorageError {
 
     #[error("Invalid file reference: {0}")]
     InvalidFileReference(String),
+
+    #[error("Object storage error: {0}")]
+    ObjectStoreError(#[from] object_store::Error),
+
+    #[error("Storage configuration error: {0}")]
+    ConfigurationError(String),
+
+    /// The file exists but its content lives in a backend this storage
+    /// provider cannot reach (e.g. an S3 object read by the postgresql provider).
+    #[error("File {0} is stored by a different storage provider: {1}")]
+    WrongProvider(String, String),
 }

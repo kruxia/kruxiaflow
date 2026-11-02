@@ -1,4 +1,4 @@
-use crate::config::{ApiConfig, DbPoolArgs};
+use crate::config::{ApiConfig, DbPoolArgs, StorageArgs};
 use crate::signals;
 use anyhow::{Context, Result};
 use clap::Args;
@@ -61,6 +61,10 @@ Example: --bind 127.0.0.1"
     /// Database connection pool sizing
     #[command(flatten)]
     db_pool: DbPoolArgs,
+
+    /// Workflow file storage provider
+    #[command(flatten)]
+    storage: StorageArgs,
 }
 
 pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Result<()> {
@@ -143,9 +147,8 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
     let event_source = Arc::new(PostgresEventSource::new(db_pool.clone()));
     tracing::info!("Event source initialized (PostgreSQL polling)");
 
-    // Initialize workflow storage (PostgreSQL Large Objects for MVP)
-    let workflow_storage = Arc::new(kruxiaflow_core::PostgresStorage::new(db_pool.clone()));
-    tracing::info!("Workflow storage initialized (PostgreSQL Large Objects)");
+    // Initialize workflow storage (provider from --storage-provider)
+    let workflow_storage = cmd.storage.create_storage(db_pool.clone())?;
 
     // Initialize cache service (Redis for MVP)
     let redis_url = std::env::var("KRUXIAFLOW_REDIS_URL")
@@ -220,6 +223,7 @@ mod tests {
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
             db_pool: DbPoolArgs::default(),
+            storage: StorageArgs::default(),
         };
         assert_eq!(cmd.port, Some(8080));
         assert_eq!(cmd.bind, Some("127.0.0.1".to_string()));
@@ -234,6 +238,7 @@ mod tests {
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
             db_pool: DbPoolArgs::default(),
+            storage: StorageArgs::default(),
         };
         assert_eq!(cmd.port, None);
         assert_eq!(cmd.bind, None);
@@ -249,6 +254,7 @@ mod tests {
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
             db_pool: DbPoolArgs::default(),
+            storage: StorageArgs::default(),
         };
 
         // Remove DATABASE_URL from environment
@@ -276,6 +282,7 @@ mod tests {
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
             db_pool: DbPoolArgs::default(),
+            storage: StorageArgs::default(),
         };
 
         let result = execute(cmd, Some("invalid://url".to_string())).await;
@@ -308,6 +315,7 @@ mod tests {
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
             db_pool: DbPoolArgs::default(),
+            storage: StorageArgs::default(),
         };
 
         let result = execute(cmd, Some(database_url)).await;
@@ -343,6 +351,7 @@ mod tests {
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
             db_pool: DbPoolArgs::default(),
+            storage: StorageArgs::default(),
         };
 
         let result = execute(cmd, Some(database_url)).await;
@@ -385,6 +394,7 @@ mod tests {
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
             db_pool: DbPoolArgs::default(),
+            storage: StorageArgs::default(),
         };
 
         let result = execute(cmd, Some(database_url)).await;
