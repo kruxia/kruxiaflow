@@ -10,6 +10,50 @@ use std::path::Path;
 use std::time::Duration;
 
 // ============================================================================
+// Log redaction
+// ============================================================================
+
+/// Placeholder for values left out of logs and error messages.
+const REDACTED: &str = "REDACTED";
+
+/// Return `raw` with its credentials removed, for logs and error messages.
+///
+/// Drops the userinfo (`user:password@`) and the fragment, and replaces each
+/// query value with `REDACTED`, keeping the query keys for debugging. A URL
+/// that does not parse is not echoed at all.
+fn redact_url(raw: &str) -> String {
+    let Ok(mut url) = url::Url::parse(raw) else {
+        return "<unparseable URL>".to_string();
+    };
+    // These fail only for URLs that cannot have userinfo, which have none.
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.set_fragment(None);
+    if let Some(query) = url.query() {
+        let redacted = query
+            .split('&')
+            .filter(|pair| !pair.is_empty())
+            .map(|pair| {
+                let key = pair.split_once('=').map_or(pair, |(key, _)| key);
+                format!("{key}={REDACTED}")
+            })
+            .collect::<Vec<_>>()
+            .join("&");
+        url.set_query(Some(&redacted));
+    }
+    url.to_string()
+}
+
+/// Sorted keys of an optional string map, for logging names without values.
+fn sorted_keys(map: Option<&HashMap<String, String>>) -> Vec<&str> {
+    let mut keys: Vec<&str> = map
+        .map(|m| m.keys().map(String::as_str).collect())
+        .unwrap_or_default();
+    keys.sort_unstable();
+    keys
+}
+
+// ============================================================================
 // HTTP Executor (low-level HTTP client)
 // ============================================================================
 
@@ -40,7 +84,7 @@ impl HttpExecutor {
             .parse::<Method>()
             .context("Invalid HTTP method")?;
 
-        let mut request = self.client.request(method, &params.url);
+        let mut request = self.client.request(method, params.url.as_str());
 
         // Set default User-Agent if not provided (polite for API usage, required by some services like weather.gov)
         let has_user_agent = params
@@ -78,8 +122,14 @@ impl HttpExecutor {
             request = request.timeout(Duration::from_secs(timeout_secs));
         }
 
-        // Execute request and return with unconsumed body stream
-        request.send().await.context("Failed to send HTTP request")
+        // Execute request and return with unconsumed body stream. reqwest's
+        // error message includes the full URL (query string included), so
+        // strip it and name the redacted URL instead.
+        request
+            .send()
+            .await
+            .map_err(reqwest::Error::without_url)
+            .with_context(|| format!("Failed to send HTTP request to {}", redact_url(&params.url)))
     }
 }
 
@@ -90,7 +140,9 @@ impl Default for HttpExecutor {
 }
 
 /// HTTP request parameters
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// `Debug` is implemented by hand to redact credentials: see the impl below.
+#[derive(Clone, Serialize, Deserialize)]
 pub struct HttpRequestParams {
     /// HTTP method (GET, POST, PUT, DELETE, PATCH, etc.)
     pub method: String,
@@ -126,6 +178,23 @@ pub struct HttpRequestParams {
     pub download_to_file: Option<String>,
 }
 
+/// Redacts the URL and omits header values, query values and the body, which
+/// may carry credentials.
+impl std::fmt::Debug for HttpRequestParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpRequestParams")
+            .field("method", &self.method)
+            .field("url", &redact_url(&self.url))
+            .field("header_names", &sorted_keys(self.headers.as_ref()))
+            .field("query_keys", &sorted_keys(self.query.as_ref()))
+            .field("has_body", &self.body.is_some())
+            .field("timeout_seconds", &self.timeout_seconds)
+            .field("include_body", &self.include_body)
+            .field("download_to_file", &self.download_to_file)
+            .finish()
+    }
+}
+
 /// HTTP response (serializable snapshot)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HttpResponse {
@@ -153,6 +222,7 @@ impl HttpResponse {
         let body_json = response
             .json::<Value>()
             .await
+            .map_err(reqwest::Error::without_url)
             .context("Failed to parse response as JSON")?;
 
         Ok(HttpResponse {
@@ -173,6 +243,7 @@ impl HttpResponse {
         let body_text = response
             .text()
             .await
+            .map_err(reqwest::Error::without_url)
             .context("Failed to read response as text")?;
 
         Ok(HttpResponse {
@@ -233,18 +304,28 @@ impl HttpRequestActivity {
     /// Run the request. `download_to_file` writes into `temp_dir` (the
     /// activity's file-output directory) or, if absent, the current directory.
     async fn run(&self, parameters: Value, temp_dir: Option<&Path>) -> Result<ActivityResult> {
-        tracing::debug!(
-            "Executing http_request activity with parameters: {:?}",
-            parameters
-        );
-
         // Parse parameters from JSON
         let params: HttpRequestParams = serde_json::from_value(parameters)
             .context("Failed to parse HTTP request parameters")?;
 
+        // Never log the raw parameters: the URL's query string and header
+        // values may carry credentials, and the body may carry anything.
+        let safe_url = redact_url(&params.url);
+        tracing::debug!(
+            method = %params.method,
+            url = %safe_url,
+            header_names = ?sorted_keys(params.headers.as_ref()),
+            query_keys = ?sorted_keys(params.query.as_ref()),
+            has_body = params.body.is_some(),
+            timeout_seconds = ?params.timeout_seconds,
+            include_body = ?params.include_body,
+            download_to_file = ?params.download_to_file,
+            "Executing http_request activity"
+        );
+
         tracing::info!(
             method = %params.method,
-            url = %params.url,
+            url = %safe_url,
             "HTTP request starting"
         );
 
@@ -283,6 +364,7 @@ impl HttpRequestActivity {
             let bytes = response
                 .bytes()
                 .await
+                .map_err(reqwest::Error::without_url)
                 .context("Failed to read response bytes")?;
 
             let total_bytes = bytes.len() as u64;

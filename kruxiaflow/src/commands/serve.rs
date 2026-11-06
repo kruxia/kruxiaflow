@@ -691,6 +691,15 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     )
     .with_insecure_dev(cmd.insecure_dev);
 
+    // Spawn workflow event broadcast poller for WebSocket streaming (as `api`
+    // does); without it, WebSocket clients get only the initial replay.
+    tokio::spawn(kruxiaflow_api::workflow_events::run_event_broadcast_poller(
+        state.event_source.clone(),
+        state.workflow_event_manager.clone(),
+        state.shutdown_token.clone(),
+    ));
+    tracing::info!("Workflow event broadcast poller spawned");
+
     tracing::info!("Services initialized");
 
     // 3. Spawn orchestrator with shutdown token

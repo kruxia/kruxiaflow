@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`serve` streams live workflow events**: `serve` now spawns the workflow
+  event broadcast poller, as `api` does. Before, a client on the
+  workflow-events WebSocket got the replay from `from_event_id` and then only
+  pings. ([#16](https://github.com/kruxia/kruxiaflow/issues/16))
+- **`http_request` no longer logs credentials**: the `std` worker logged the
+  full request URL at INFO on every request, every parameter (headers
+  included) at DEBUG, and the URL again in error messages. Logs and errors
+  now show the URL without userinfo or fragment and with each query value
+  replaced by `REDACTED`. The DEBUG line lists header names and query keys
+  but no values, and no body. The same redaction applies to the parameters'
+  `Debug` output.
+  ([#17](https://github.com/kruxia/kruxiaflow/issues/17))
+
 ## [0.9.0] - 2026-11-02
 
 ### Added
