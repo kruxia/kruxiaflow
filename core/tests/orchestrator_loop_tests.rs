@@ -1,6 +1,6 @@
-use kruxiaflow_core::events::{
-    EventSource, NewWorkflowEvent, PostgresEventSource, WorkflowEventType,
-};
+mod common;
+
+use kruxiaflow_core::events::{EventSource, NewWorkflowEvent, WorkflowEventType};
 use kruxiaflow_core::orchestrator::{
     OrchestratorConfig,
     workflow_state::{WorkflowActivityStatus, load_materialized_state},
@@ -88,7 +88,7 @@ async fn test_simple_loop_workflow(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
 
     // Create event source and queue
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let queue_config = QueueConfig {
         poll_interval: Duration::from_millis(10),
         batch_size: 10,
@@ -122,6 +122,7 @@ async fn test_simple_loop_workflow(pool: PgPool) {
         pool: pool.clone(),
         poll_interval_min: Duration::from_millis(10),
         poll_interval_max: Duration::from_secs(1),
+        wake_poll_interval_max: Duration::from_secs(1),
         backoff_multiplier: 2.0,
         workflow_timeout: Duration::from_secs(300),
         timeout_check_interval: Duration::from_secs(60),
@@ -142,7 +143,7 @@ async fn test_simple_loop_workflow(pool: PgPool) {
         .await
         .expect("Failed to process event");
         event_source
-            .update_position("orchestrator", event.id)
+            .update_position("orchestrator", event.cursor())
             .await
             .unwrap();
     }
@@ -186,7 +187,7 @@ async fn test_simple_loop_workflow(pool: PgPool) {
         .await
         .unwrap();
         event_source
-            .update_position("orchestrator", event.id)
+            .update_position("orchestrator", event.cursor())
             .await
             .unwrap();
     }
@@ -232,7 +233,7 @@ async fn test_simple_loop_workflow(pool: PgPool) {
         .await
         .unwrap();
         event_source
-            .update_position("orchestrator", event.id)
+            .update_position("orchestrator", event.cursor())
             .await
             .unwrap();
     }
@@ -279,7 +280,7 @@ async fn test_loop_max_iterations_enforced(pool: PgPool) {
     let definition_id = insert_workflow_definition(&pool, &definition).await;
     let workflow_id = Uuid::now_v7();
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let queue_config = QueueConfig {
         poll_interval: Duration::from_millis(10),
         batch_size: 10,
@@ -312,6 +313,7 @@ async fn test_loop_max_iterations_enforced(pool: PgPool) {
         pool: pool.clone(),
         poll_interval_min: Duration::from_millis(10),
         poll_interval_max: Duration::from_secs(1),
+        wake_poll_interval_max: Duration::from_secs(1),
         backoff_multiplier: 2.0,
         workflow_timeout: Duration::from_secs(300),
         timeout_check_interval: Duration::from_secs(60),
@@ -331,7 +333,7 @@ async fn test_loop_max_iterations_enforced(pool: PgPool) {
         .await
         .unwrap();
         event_source
-            .update_position("orchestrator", event.id)
+            .update_position("orchestrator", event.cursor())
             .await
             .unwrap();
     }
@@ -362,7 +364,7 @@ async fn test_loop_max_iterations_enforced(pool: PgPool) {
         .await
         .unwrap();
         event_source
-            .update_position("orchestrator", event.id)
+            .update_position("orchestrator", event.cursor())
             .await
             .unwrap();
     }
@@ -402,7 +404,7 @@ async fn test_loop_max_iterations_enforced(pool: PgPool) {
         .await
         .unwrap();
         event_source
-            .update_position("orchestrator", event.id)
+            .update_position("orchestrator", event.cursor())
             .await
             .unwrap();
     }
@@ -449,7 +451,7 @@ async fn test_iteration_counter_without_scoping(pool: PgPool) {
     let definition_id = insert_workflow_definition(&pool, &definition).await;
     let workflow_id = Uuid::now_v7();
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let queue_config = QueueConfig {
         poll_interval: Duration::from_millis(10),
         batch_size: 10,
@@ -481,6 +483,7 @@ async fn test_iteration_counter_without_scoping(pool: PgPool) {
         pool: pool.clone(),
         poll_interval_min: Duration::from_millis(10),
         poll_interval_max: Duration::from_secs(1),
+        wake_poll_interval_max: Duration::from_secs(1),
         backoff_multiplier: 2.0,
         workflow_timeout: Duration::from_secs(300),
         timeout_check_interval: Duration::from_secs(60),
@@ -500,7 +503,7 @@ async fn test_iteration_counter_without_scoping(pool: PgPool) {
         .await
         .unwrap();
         event_source
-            .update_position("orchestrator", event.id)
+            .update_position("orchestrator", event.cursor())
             .await
             .unwrap();
     }
@@ -531,7 +534,7 @@ async fn test_iteration_counter_without_scoping(pool: PgPool) {
         .await
         .unwrap();
         event_source
-            .update_position("orchestrator", event.id)
+            .update_position("orchestrator", event.cursor())
             .await
             .unwrap();
     }
@@ -601,7 +604,7 @@ async fn test_iteration_budget_accumulation(pool: PgPool) {
     let definition_id = insert_workflow_definition(&pool, &definition).await;
     let workflow_id = Uuid::now_v7();
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let queue_config = QueueConfig {
         poll_interval: Duration::from_millis(10),
         batch_size: 10,
@@ -634,6 +637,7 @@ async fn test_iteration_budget_accumulation(pool: PgPool) {
         pool: pool.clone(),
         poll_interval_min: Duration::from_millis(10),
         poll_interval_max: Duration::from_secs(1),
+        wake_poll_interval_max: Duration::from_secs(1),
         backoff_multiplier: 2.0,
         workflow_timeout: Duration::from_secs(300),
         timeout_check_interval: Duration::from_secs(60),
@@ -653,7 +657,7 @@ async fn test_iteration_budget_accumulation(pool: PgPool) {
         .await
         .unwrap();
         event_source
-            .update_position("orchestrator", event.id)
+            .update_position("orchestrator", event.cursor())
             .await
             .unwrap();
     }
@@ -686,7 +690,7 @@ async fn test_iteration_budget_accumulation(pool: PgPool) {
         .await
         .unwrap();
         event_source
-            .update_position("orchestrator", event.id)
+            .update_position("orchestrator", event.cursor())
             .await
             .unwrap();
     }
@@ -729,7 +733,7 @@ async fn test_iteration_budget_accumulation(pool: PgPool) {
         .await
         .unwrap();
         event_source
-            .update_position("orchestrator", event.id)
+            .update_position("orchestrator", event.cursor())
             .await
             .unwrap();
     }
@@ -781,7 +785,7 @@ async fn test_loop_pattern_1_fixed_iterations(pool: PgPool) {
     let definition_id = insert_workflow_definition(&pool, &definition).await;
     let workflow_id = Uuid::now_v7();
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let queue_config = QueueConfig {
         poll_interval: Duration::from_millis(10),
         batch_size: 10,
@@ -814,6 +818,7 @@ async fn test_loop_pattern_1_fixed_iterations(pool: PgPool) {
         pool: pool.clone(),
         poll_interval_min: Duration::from_millis(10),
         poll_interval_max: Duration::from_secs(1),
+        wake_poll_interval_max: Duration::from_secs(1),
         backoff_multiplier: 2.0,
         workflow_timeout: Duration::from_secs(300),
         timeout_check_interval: Duration::from_secs(60),
@@ -833,7 +838,7 @@ async fn test_loop_pattern_1_fixed_iterations(pool: PgPool) {
         .await
         .unwrap();
         event_source
-            .update_position("orchestrator", event.id)
+            .update_position("orchestrator", event.cursor())
             .await
             .unwrap();
     }
@@ -865,7 +870,7 @@ async fn test_loop_pattern_1_fixed_iterations(pool: PgPool) {
             .await
             .unwrap();
             event_source
-                .update_position("orchestrator", event.id)
+                .update_position("orchestrator", event.cursor())
                 .await
                 .unwrap();
         }
@@ -944,7 +949,7 @@ async fn test_loop_pattern_2_condition_only(pool: PgPool) {
     let definition_id = insert_workflow_definition(&pool, &definition).await;
     let workflow_id = Uuid::now_v7();
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let queue_config = QueueConfig {
         poll_interval: Duration::from_millis(10),
         batch_size: 10,
@@ -976,6 +981,7 @@ async fn test_loop_pattern_2_condition_only(pool: PgPool) {
         pool: pool.clone(),
         poll_interval_min: Duration::from_millis(10),
         poll_interval_max: Duration::from_secs(1),
+        wake_poll_interval_max: Duration::from_secs(1),
         backoff_multiplier: 2.0,
         workflow_timeout: Duration::from_secs(300),
         timeout_check_interval: Duration::from_secs(60),
@@ -995,7 +1001,7 @@ async fn test_loop_pattern_2_condition_only(pool: PgPool) {
         .await
         .unwrap();
         event_source
-            .update_position("orchestrator", event.id)
+            .update_position("orchestrator", event.cursor())
             .await
             .unwrap();
     }
@@ -1028,7 +1034,7 @@ async fn test_loop_pattern_2_condition_only(pool: PgPool) {
             .await
             .unwrap();
             event_source
-                .update_position("orchestrator", event.id)
+                .update_position("orchestrator", event.cursor())
                 .await
                 .unwrap();
         }
@@ -1059,7 +1065,7 @@ async fn test_loop_pattern_2_condition_only(pool: PgPool) {
             .await
             .unwrap();
             event_source
-                .update_position("orchestrator", event.id)
+                .update_position("orchestrator", event.cursor())
                 .await
                 .unwrap();
         }
@@ -1091,7 +1097,7 @@ async fn test_loop_pattern_2_condition_only(pool: PgPool) {
         .await
         .unwrap();
         event_source
-            .update_position("orchestrator", event.id)
+            .update_position("orchestrator", event.cursor())
             .await
             .unwrap();
     }
@@ -1121,7 +1127,7 @@ async fn test_loop_pattern_2_condition_only(pool: PgPool) {
         .await
         .unwrap();
         event_source
-            .update_position("orchestrator", event.id)
+            .update_position("orchestrator", event.cursor())
             .await
             .unwrap();
     }

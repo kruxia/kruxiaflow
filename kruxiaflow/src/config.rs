@@ -199,6 +199,63 @@ impl DbPoolArgs {
     }
 }
 
+/// How event consumers learn that new workflow events have committed
+#[derive(clap::ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EventWake {
+    /// LISTEN for commit notifications; the poll timer stays as a safety net
+    #[default]
+    Notify,
+    /// Poll on the backoff timer alone
+    Poll,
+}
+
+/// Event wake-up selection for the commands that consume workflow events
+/// (`serve`, `api`, `orchestrator`).
+#[derive(Args, Debug, Clone, Default)]
+pub struct EventWakeArgs {
+    /// Event wake mode
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_EVENT_WAKE",
+        value_enum,
+        default_value_t = EventWake::Notify,
+        help = "How event consumers learn of new events: notify or poll",
+        long_help = "How event consumers learn that new workflow events have committed\n\n\
+notify: LISTEN on the workflow_events channel and poll as soon as a\n\
+commit notification arrives; the poll timer stays as a safety net.\n\
+Falls back to poll (with a warning) if LISTEN fails, e.g. behind a\n\
+transaction-mode connection pooler.\n\
+poll: poll on the backoff timer alone.\n\n\
+Delivery never depends on notifications: every consumer reads from its\n\
+durable cursor in both modes.\n\n\
+Default: notify\n\
+Example: --event-wake poll"
+    )]
+    pub event_wake: EventWake,
+}
+
+impl EventWakeArgs {
+    /// The core wake mode for these args
+    pub fn mode(&self) -> kruxiaflow_core::EventWakeMode {
+        match self.event_wake {
+            EventWake::Notify => kruxiaflow_core::EventWakeMode::Notify,
+            EventWake::Poll => kruxiaflow_core::EventWakeMode::Poll,
+        }
+    }
+
+    /// Build the PostgreSQL event source in this mode (logs which mode is
+    /// active). Fails if the stored event cursors cannot belong to this
+    /// database cluster; the error says how to repair them.
+    pub async fn event_source(
+        &self,
+        pool: sqlx::PgPool,
+    ) -> Result<kruxiaflow_core::PostgresEventSource> {
+        kruxiaflow_core::PostgresEventSource::connect(pool, self.mode())
+            .await
+            .context("Cannot start consuming workflow events")
+    }
+}
+
 /// Where workflow file content is stored
 #[derive(clap::ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum StorageProvider {

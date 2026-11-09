@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                    SELECT id, workflow_id, event_type as \"event_type: WorkflowEventType\",\n                           activity_key, payload, timestamp, iteration\n                    FROM workflow_events\n                    WHERE id > $1\n                    ORDER BY id ASC\n                    LIMIT $2\n                    ",
+  "query": "\n                    SELECT id, position, tx::text::bigint AS \"tx!\", workflow_id,\n                           event_type as \"event_type: WorkflowEventType\",\n                           activity_key, payload, timestamp, iteration\n                    FROM workflow_events\n                    WHERE (tx, position) > (SELECT f.tx, f.position FROM workflow_events f WHERE f.id = $1)\n                      AND tx < pg_snapshot_xmin(pg_current_snapshot())\n                      AND workflow_id = ANY($2)\n                    ORDER BY tx, position\n                    LIMIT $3\n                    ",
   "describe": {
     "columns": [
       {
@@ -10,11 +10,21 @@
       },
       {
         "ordinal": 1,
+        "name": "position",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "tx!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
         "name": "workflow_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 2,
+        "ordinal": 4,
         "name": "event_type: WorkflowEventType",
         "type_info": {
           "Custom": {
@@ -36,22 +46,22 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 5,
         "name": "activity_key",
         "type_info": "Text"
       },
       {
-        "ordinal": 4,
+        "ordinal": 6,
         "name": "payload",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 5,
+        "ordinal": 7,
         "name": "timestamp",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 8,
         "name": "iteration",
         "type_info": "Int4"
       }
@@ -59,11 +69,14 @@
     "parameters": {
       "Left": [
         "Uuid",
+        "UuidArray",
         "Int8"
       ]
     },
     "nullable": [
       false,
+      false,
+      null,
       false,
       false,
       true,
@@ -72,5 +85,5 @@
       true
     ]
   },
-  "hash": "a4b8695a8f823de21821e9313159cf52afdcbd022d074c06b5bb49a3c6dabe19"
+  "hash": "7e3bdea6991e5c1fbff54f0b3f50ccb493ed05a8a99a190595e1e6d4f16cb849"
 }

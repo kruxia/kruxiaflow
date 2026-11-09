@@ -1,7 +1,9 @@
+mod common;
+
 use chrono::{Duration as ChronoDuration, Utc};
 use kruxiaflow_core::events::{
-    ActivityDefinition, DependencyEdge, EventSource, NewWorkflowEvent, PostgresEventSource,
-    WorkflowDefinition, WorkflowEventType,
+    ActivityDefinition, DependencyEdge, EventSource, NewWorkflowEvent, WorkflowDefinition,
+    WorkflowEventType,
 };
 use kruxiaflow_core::orchestrator::OrchestratorConfig;
 use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
@@ -82,7 +84,7 @@ async fn test_delayed_activity_execution(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -191,7 +193,7 @@ async fn test_scheduled_activity_execution(pool: PgPool) {
     .await
     .expect("Failed to insert workflow");
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -274,7 +276,7 @@ async fn test_immediate_activity_unaffected(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -366,7 +368,7 @@ async fn test_worker_respects_scheduled_for(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -510,7 +512,7 @@ async fn test_multiple_delayed_activities(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -581,7 +583,7 @@ async fn test_multiple_delayed_activities(pool: PgPool) {
         .expect("Failed to publish ActivityCompleted");
 
     event_source
-        .update_position("test_orchestrator", events.last().unwrap().id)
+        .update_position("test_orchestrator", events.last().unwrap().cursor())
         .await
         .expect("Failed to update position");
 
@@ -659,7 +661,7 @@ async fn test_delay_with_all_duration_units(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =

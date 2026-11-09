@@ -299,6 +299,8 @@ async fn test_workflow_events_ws_receives_broadcast_event(pool: PgPool) {
     // (avoids polling stale events from the shared database)
     let event = kruxiaflow_core::events::WorkflowEvent {
         id: Uuid::now_v7(),
+        position: 0,
+        tx: 0,
         workflow_id,
         event_type: WorkflowEventType::WorkflowCreated,
         activity_key: None,
@@ -380,17 +382,59 @@ async fn test_workflow_events_ws_shutdown_sends_close_frame(pool: PgPool) {
 // Replay Tests
 // ============================================================================
 
+/// Wait until every committed event is deliverable: `poll` and replay only
+/// return events below the instance's oldest open transaction, and other
+/// tests' transactions on the same instance can hold that back briefly
+async fn settle_events(pool: &PgPool) {
+    for _ in 0..2000 {
+        let blocked: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM workflow_events \
+             WHERE tx >= pg_snapshot_xmin(pg_current_snapshot()))",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap_or(false);
+        if !blocked {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
+/// Collect `event` messages until `count` arrive or the stream goes quiet
+async fn receive_events<S>(
+    ws_stream: &mut S,
+    count: usize,
+    quiet: Duration,
+) -> Vec<serde_json::Value>
+where
+    S: futures::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    let mut received = Vec::new();
+    while received.len() < count {
+        match timeout(quiet, ws_stream.next()).await {
+            Ok(Some(Ok(Message::Text(text)))) => {
+                let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+                if json["type"] == "event" {
+                    received.push(json);
+                }
+            }
+            _ => break,
+        }
+    }
+    received
+}
+
 #[sqlx::test(migrations = "../migrations")]
 async fn test_workflow_events_ws_replay_from_event_id(pool: PgPool) {
     let shutdown_token = CancellationToken::new();
-    let state = setup_test_state_with_token(pool, shutdown_token.clone()).await;
+    let state = setup_test_state_with_token(pool.clone(), shutdown_token.clone()).await;
     let event_source = state.event_source.clone();
     let addr = start_test_server(state).await;
     let token = get_valid_token(addr).await;
 
     // Publish some events first
     let workflow_id = Uuid::now_v7();
-    let mut event_ids = Vec::new();
     for i in 0..3 {
         event_source
             .publish(NewWorkflowEvent {
@@ -405,60 +449,159 @@ async fn test_workflow_events_ws_replay_from_event_id(pool: PgPool) {
     }
 
     // Poll to get the event IDs
+    settle_events(&pool).await;
     let events = event_source
         .poll("replay-test-consumer")
         .await
         .expect("Failed to poll");
+    assert_eq!(events.len(), 3);
 
-    // Consume them to record position
-    if let Some(last) = events.last() {
-        event_source
-            .update_position("replay-test-consumer", last.id)
-            .await
-            .ok();
-    }
+    // Replay from the first one: the other two, in stream order
+    let url = format!(
+        "ws://{}/api/v1/workflow_events/ws?token={}&from_event_id={}",
+        addr, token, events[0].id
+    );
+    let (mut ws_stream, _) = connect_async(&url)
+        .await
+        .expect("Failed to connect with replay");
 
-    for e in &events {
-        event_ids.push(e.id);
-    }
+    let replayed = receive_events(&mut ws_stream, 2, Duration::from_secs(3)).await;
+    let replayed_ids: Vec<String> = replayed
+        .iter()
+        .map(|m| m["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        replayed_ids,
+        vec![events[1].id.to_string(), events[2].id.to_string()]
+    );
+    assert_eq!(replayed[0]["position"], events[1].position);
+    assert_eq!(replayed[1]["position"], events[2].position);
 
-    // If we have at least 2 events, replay from the first one
-    if event_ids.len() >= 2 {
-        let from_id = event_ids[0];
+    ws_stream.close(None).await.ok();
+    shutdown_token.cancel();
+}
+
+/// An event that commits after a later one is replayed in commit-safe order
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_events_ws_replay_includes_late_commit(pool: PgPool) {
+    let shutdown_token = CancellationToken::new();
+    let state = setup_test_state_with_token(pool.clone(), shutdown_token.clone()).await;
+    let event_source = state.event_source.clone();
+    let addr = start_test_server(state).await;
+    let token = get_valid_token(addr).await;
+
+    let publish = |workflow_id: Uuid| {
+        let event_source = event_source.clone();
+        async move {
+            event_source
+                .publish(NewWorkflowEvent {
+                    workflow_id,
+                    event_type: WorkflowEventType::WorkflowCreated,
+                    activity_key: None,
+                    payload: serde_json::json!({}),
+                    iteration: None,
+                })
+                .await
+                .unwrap();
+            workflow_id
+        }
+    };
+    let id_of = |workflow_id: Uuid| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, Uuid>("SELECT id FROM workflow_events WHERE workflow_id = $1")
+                .bind(workflow_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+
+    let e0 = id_of(publish(Uuid::now_v7()).await).await;
+
+    // A inserts first and commits last
+    let mut a = pool.begin().await.unwrap();
+    let a_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO workflow_events (workflow_id, event_type, payload) \
+         VALUES ($1, 'WorkflowCreated', '{}') RETURNING id",
+    )
+    .bind(Uuid::now_v7())
+    .fetch_one(&mut *a)
+    .await
+    .unwrap();
+    let b_id = id_of(publish(Uuid::now_v7()).await).await;
+    a.commit().await.unwrap();
+    settle_events(&pool).await;
+
+    for (from, expected) in [(e0, vec![a_id, b_id]), (a_id, vec![b_id])] {
         let url = format!(
             "ws://{}/api/v1/workflow_events/ws?token={}&from_event_id={}",
-            addr, token, from_id
+            addr, token, from
         );
-        let (mut ws_stream, _) = connect_async(&url)
-            .await
-            .expect("Failed to connect with replay");
-
-        // Should receive replayed events (those after from_id)
-        let mut replayed = 0;
-        while let Ok(Some(msg_result)) = timeout(Duration::from_secs(3), ws_stream.next()).await {
-            match msg_result {
-                Ok(Message::Text(text)) => {
-                    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
-                    if json["type"] == "event" {
-                        replayed += 1;
-                    }
-                }
-                _ => break,
-            }
-            // Stop after we've received what we expect
-            if replayed >= 2 {
-                break;
-            }
-        }
-
-        assert!(
-            replayed >= 1,
-            "Expected at least 1 replayed event, got {}",
-            replayed
-        );
+        let (mut ws_stream, _) = connect_async(&url).await.expect("connect");
+        let replayed = receive_events(&mut ws_stream, expected.len(), Duration::from_secs(3)).await;
+        let ids: Vec<String> = replayed
+            .iter()
+            .map(|m| m["id"].as_str().unwrap().to_string())
+            .collect();
+        let expected: Vec<String> = expected.iter().map(Uuid::to_string).collect();
+        assert_eq!(ids, expected, "replay from {from}");
         ws_stream.close(None).await.ok();
     }
 
+    shutdown_token.cancel();
+}
+
+/// An unknown from_event_id yields an empty replay; the connection stays
+/// open and live events still arrive
+#[sqlx::test(migrations = "../migrations")]
+async fn test_workflow_events_ws_replay_unknown_id_streams_live(pool: PgPool) {
+    let shutdown_token = CancellationToken::new();
+    let state = setup_test_state_with_token(pool.clone(), shutdown_token.clone()).await;
+    let event_source = state.event_source.clone();
+    let manager = state.workflow_event_manager.clone();
+    let addr = start_test_server(state).await;
+    let token = get_valid_token(addr).await;
+
+    let workflow_id = Uuid::now_v7();
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id,
+            event_type: WorkflowEventType::WorkflowCreated,
+            activity_key: None,
+            payload: serde_json::json!({}),
+            iteration: None,
+        })
+        .await
+        .unwrap();
+    settle_events(&pool).await;
+
+    let url = format!(
+        "ws://{}/api/v1/workflow_events/ws?token={}&from_event_id={}",
+        addr,
+        token,
+        Uuid::now_v7()
+    );
+    let (mut ws_stream, _) = connect_async(&url).await.expect("connect");
+    assert!(
+        receive_events(&mut ws_stream, 1, Duration::from_millis(500))
+            .await
+            .is_empty(),
+        "unknown from_event_id must not replay anything"
+    );
+
+    // Live delivery still works
+    let event = event_source
+        .poll("unknown-id-test")
+        .await
+        .unwrap()
+        .remove(0);
+    manager.broadcast(&event).await;
+    let live = receive_events(&mut ws_stream, 1, Duration::from_secs(5)).await;
+    assert_eq!(live.len(), 1);
+    assert_eq!(live[0]["id"], event.id.to_string());
+
+    ws_stream.close(None).await.ok();
     shutdown_token.cancel();
 }
 

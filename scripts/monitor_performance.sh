@@ -78,7 +78,7 @@ SYSTEM_STATS_LOG="$OUTPUT_DIR/system_stats.csv"
 # Initialize CSV headers
 echo "timestamp,rss_mb,vsz_mb,cpu_percent" > "$MEMORY_LOG"
 echo "timestamp,total_connections,active,idle,idle_in_transaction,waiting" > "$DB_CONN_LOG"
-echo "timestamp,consumer_id,last_event_id,updated_at" > "$CONSUMER_POS_LOG"
+echo "timestamp,consumer_id,last_position,updated_at" > "$CONSUMER_POS_LOG"
 echo "timestamp,thread_count" > "$THREAD_COUNT_LOG"
 echo "timestamp,db_size_mb,event_count,workflow_count,activity_queue_size" > "$SYSTEM_STATS_LOG"
 
@@ -131,9 +131,9 @@ while [ $(date +%s) -lt $END_TIME ]; do
     CONSUMER_POSITIONS=$(psql "$DB_URL" -t -c "
         SELECT
             consumer_id,
-            last_event_id,
+            last_position,
             updated_at
-        FROM consumer_positions
+        FROM workflow_event_consumers
         ORDER BY consumer_id;
     " 2>/dev/null | while read -r line; do
         if [ ! -z "$line" ]; then

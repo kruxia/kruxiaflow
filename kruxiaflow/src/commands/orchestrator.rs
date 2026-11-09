@@ -1,14 +1,14 @@
 use anyhow::Result;
 use clap::Args;
 use kruxiaflow_core::{
-    ActivityQueue, EventSource, OrchestratorConfig, PostgresEventSource, PostgresQueue,
-    PostgresSubscriptionService, QueueConfig, SubscriptionService, run_orchestrator,
+    ActivityQueue, EventSource, OrchestratorConfig, PostgresQueue, PostgresSubscriptionService,
+    QueueConfig, SubscriptionService, run_orchestrator,
 };
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
-use crate::config::DbPoolArgs;
+use crate::config::{DbPoolArgs, EventWakeArgs};
 
 /// Default database pool size (override with --db-max/min-connections)
 const DEFAULT_DB_MAX_CONNECTIONS: u32 = 50;
@@ -49,14 +49,15 @@ Example: --poll-interval-min 100"
     #[arg(
         long,
         env = "KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX_MS",
-        default_value = "1000",
         help = "Maximum event polling interval in milliseconds",
         long_help = "Maximum interval between database polls when the system is idle\n\n\
 The orchestrator backs off to this interval when no events are being processed.\n\
-Default: 1000ms (1 poll/sec when idle)\n\
+With --event-wake notify the poll timer is only a safety net for lost\n\
+notifications, so the default is longer.\n\
+Default: 5000ms with --event-wake notify, 1000ms with --event-wake poll\n\
 Example: --poll-interval-max 2000"
     )]
-    pub poll_interval_max: u64,
+    pub poll_interval_max: Option<u64>,
 
     /// Backoff multiplier for polling interval
     #[arg(
@@ -83,6 +84,9 @@ Example: --backoff-multiplier 2.0"
     /// Database connection pool sizing
     #[command(flatten)]
     pub db_pool: DbPoolArgs,
+
+    #[command(flatten)]
+    pub event_wake: EventWakeArgs,
 }
 
 impl OrchestratorCommand {
@@ -91,7 +95,9 @@ impl OrchestratorCommand {
             anyhow::bail!("Minimum poll interval must be between 1 and 10000 milliseconds");
         }
 
-        if self.poll_interval_max < self.poll_interval_min || self.poll_interval_max > 60000 {
+        if let Some(max) = self.poll_interval_max
+            && (max < self.poll_interval_min || max > 60000)
+        {
             anyhow::bail!(
                 "Maximum poll interval must be >= minimum ({}) and <= 60000 milliseconds",
                 self.poll_interval_min
@@ -120,7 +126,7 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
     tracing::info!(
         consumer_id = %cmd.consumer_id,
         poll_interval_min_ms = cmd.poll_interval_min,
-        poll_interval_max_ms = cmd.poll_interval_max,
+        poll_interval_max_ms = ?cmd.poll_interval_max,
         backoff_multiplier = cmd.backoff_multiplier,
         "Starting Kruxia Flow orchestrator"
     );
@@ -146,7 +152,8 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
 
     // Create event source
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> =
+        Arc::new(cmd.event_wake.event_source(pool.clone()).await?);
 
     // Create subscription service
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -154,11 +161,15 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
 
     // Create orchestrator config from CLI parameters
     let config = OrchestratorConfig::new(pool.clone())
-        .with_poll_interval(
-            Duration::from_millis(cmd.poll_interval_min),
-            Duration::from_millis(cmd.poll_interval_max),
-        )
+        .with_poll_interval_min(Duration::from_millis(cmd.poll_interval_min))
         .with_backoff_multiplier(cmd.backoff_multiplier);
+    let config = match cmd.poll_interval_max {
+        Some(max) => config.with_poll_interval(
+            Duration::from_millis(cmd.poll_interval_min),
+            Duration::from_millis(max),
+        ),
+        None => config,
+    };
 
     tracing::info!(
         consumer_id = %cmd.consumer_id,
@@ -233,10 +244,11 @@ mod tests {
         OrchestratorCommand {
             consumer_id: "orch_test".to_string(),
             poll_interval_min: 50,
-            poll_interval_max: 1000,
+            poll_interval_max: Some(1000),
             backoff_multiplier: 1.5,
             shutdown_timeout: 30,
             db_pool: DbPoolArgs::default(),
+            event_wake: EventWakeArgs::default(),
         }
     }
 
@@ -263,14 +275,14 @@ mod tests {
     #[test]
     fn test_orchestrator_command_invalid_poll_interval_max_less_than_min() {
         let mut cmd = valid_orchestrator_command();
-        cmd.poll_interval_max = 10; // Less than min (50)
+        cmd.poll_interval_max = Some(10); // Less than min (50)
         assert!(cmd.validate().is_err());
     }
 
     #[test]
     fn test_orchestrator_command_invalid_poll_interval_max_too_high() {
         let mut cmd = valid_orchestrator_command();
-        cmd.poll_interval_max = 60001;
+        cmd.poll_interval_max = Some(60001);
         assert!(cmd.validate().is_err());
     }
 
@@ -307,14 +319,14 @@ mod tests {
         // Test minimum boundaries
         let mut cmd = valid_orchestrator_command();
         cmd.poll_interval_min = 1;
-        cmd.poll_interval_max = 1; // Can equal min
+        cmd.poll_interval_max = Some(1); // Can equal min
         cmd.backoff_multiplier = 1.0;
         cmd.shutdown_timeout = 5;
         assert!(cmd.validate().is_ok());
 
         // Test maximum boundaries
         cmd.poll_interval_min = 10000;
-        cmd.poll_interval_max = 60000;
+        cmd.poll_interval_max = Some(60000);
         cmd.backoff_multiplier = 10.0;
         cmd.shutdown_timeout = 300;
         assert!(cmd.validate().is_ok());
@@ -328,7 +340,7 @@ mod tests {
     fn test_orchestrator_command_validation_order_min_poll_first() {
         let mut cmd = valid_orchestrator_command();
         cmd.poll_interval_min = 0;
-        cmd.poll_interval_max = 0;
+        cmd.poll_interval_max = Some(0);
         cmd.backoff_multiplier = 0.0;
         cmd.shutdown_timeout = 0;
 
@@ -345,7 +357,7 @@ mod tests {
     #[test]
     fn test_orchestrator_command_validation_order_max_poll_after_min() {
         let mut cmd = valid_orchestrator_command();
-        cmd.poll_interval_max = 10; // Less than min (50)
+        cmd.poll_interval_max = Some(10); // Less than min (50)
         cmd.backoff_multiplier = 0.0;
         cmd.shutdown_timeout = 0;
 
@@ -394,10 +406,11 @@ mod tests {
         let cmd = OrchestratorCommand {
             consumer_id: "orch_prod_1".to_string(),
             poll_interval_min: 100,
-            poll_interval_max: 5000,
+            poll_interval_max: Some(5000),
             backoff_multiplier: 2.0,
             shutdown_timeout: 60,
             db_pool: DbPoolArgs::default(),
+            event_wake: EventWakeArgs::default(),
         };
 
         assert!(cmd.validate().is_ok());
@@ -409,10 +422,11 @@ mod tests {
         let cmd = OrchestratorCommand {
             consumer_id: "test".to_string(),
             poll_interval_min: 500,
-            poll_interval_max: 500, // Equal to min
+            poll_interval_max: Some(500), // Equal to min
             backoff_multiplier: 1.0,
             shutdown_timeout: 30,
             db_pool: DbPoolArgs::default(),
+            event_wake: EventWakeArgs::default(),
         };
 
         assert!(cmd.validate().is_ok());
@@ -423,10 +437,11 @@ mod tests {
         let cmd = OrchestratorCommand {
             consumer_id: "test".to_string(),
             poll_interval_min: 200,
-            poll_interval_max: 100, // Less than min
+            poll_interval_max: Some(100), // Less than min
             backoff_multiplier: 1.5,
             shutdown_timeout: 30,
             db_pool: DbPoolArgs::default(),
+            event_wake: EventWakeArgs::default(),
         };
 
         let result = cmd.validate();

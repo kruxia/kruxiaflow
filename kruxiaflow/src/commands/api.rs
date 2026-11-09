@@ -1,9 +1,8 @@
-use crate::config::{ApiConfig, DbPoolArgs, StorageArgs};
+use crate::config::{ApiConfig, DbPoolArgs, EventWakeArgs, StorageArgs};
 use crate::signals;
 use anyhow::{Context, Result};
 use clap::Args;
 use kruxiaflow_core::cache::{CacheService, RedisCache};
-use kruxiaflow_core::events::PostgresEventSource;
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_core::subscription::{PostgresSubscriptionService, SubscriptionService};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
@@ -61,6 +60,9 @@ Example: --bind 127.0.0.1"
     /// Database connection pool sizing
     #[command(flatten)]
     db_pool: DbPoolArgs,
+
+    #[command(flatten)]
+    event_wake: EventWakeArgs,
 
     /// Workflow file storage provider
     #[command(flatten)]
@@ -143,9 +145,10 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
     let activity_queue = Arc::new(PostgresQueue::new(db_pool.clone(), QueueConfig::default()));
     tracing::info!("Activity queue initialized (PostgreSQL)");
 
-    // Initialize event source (PostgreSQL polling implementation for MVP)
-    let event_source = Arc::new(PostgresEventSource::new(db_pool.clone()));
-    tracing::info!("Event source initialized (PostgreSQL polling)");
+    // Initialize event source (PostgreSQL; polling from a durable cursor,
+    // woken by commit notifications unless --event-wake poll)
+    let event_source = Arc::new(cmd.event_wake.event_source(db_pool.clone()).await?);
+    tracing::info!("Event source initialized (PostgreSQL)");
 
     // Initialize workflow storage (provider from --storage-provider)
     let workflow_storage = cmd.storage.create_storage(db_pool.clone())?;
@@ -223,6 +226,7 @@ mod tests {
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
             db_pool: DbPoolArgs::default(),
+            event_wake: EventWakeArgs::default(),
             storage: StorageArgs::default(),
         };
         assert_eq!(cmd.port, Some(8080));
@@ -238,6 +242,7 @@ mod tests {
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
             db_pool: DbPoolArgs::default(),
+            event_wake: EventWakeArgs::default(),
             storage: StorageArgs::default(),
         };
         assert_eq!(cmd.port, None);
@@ -254,6 +259,7 @@ mod tests {
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
             db_pool: DbPoolArgs::default(),
+            event_wake: EventWakeArgs::default(),
             storage: StorageArgs::default(),
         };
 
@@ -282,6 +288,7 @@ mod tests {
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
             db_pool: DbPoolArgs::default(),
+            event_wake: EventWakeArgs::default(),
             storage: StorageArgs::default(),
         };
 
@@ -315,6 +322,7 @@ mod tests {
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
             db_pool: DbPoolArgs::default(),
+            event_wake: EventWakeArgs::default(),
             storage: StorageArgs::default(),
         };
 
@@ -351,6 +359,7 @@ mod tests {
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
             db_pool: DbPoolArgs::default(),
+            event_wake: EventWakeArgs::default(),
             storage: StorageArgs::default(),
         };
 
@@ -394,6 +403,7 @@ mod tests {
             insecure_dev: false,
             insecure_dev_allow_nonloopback: false,
             db_pool: DbPoolArgs::default(),
+            event_wake: EventWakeArgs::default(),
             storage: StorageArgs::default(),
         };
 

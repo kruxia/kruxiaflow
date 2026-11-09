@@ -1,4 +1,4 @@
-use kruxiaflow_core::events::EventSource;
+use kruxiaflow_core::events::{EventSource, Wake};
 use kruxiaflow_core::orchestrator::AdaptiveBackoff;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,22 +15,28 @@ use super::manager::WorkflowEventManager;
 /// consumed by another.
 const CONSUMER_ID_PREFIX: &str = "ws";
 
+/// Backoff range for the broadcast poller. The idle maximum is longer when
+/// the event source has a wake signal, because the timer is then only a
+/// safety net for lost notifications.
+const POLL_INTERVAL_MIN: Duration = Duration::from_millis(50);
+const POLL_INTERVAL_MAX: Duration = Duration::from_secs(1);
+const WAKE_POLL_INTERVAL_MAX: Duration = Duration::from_secs(5);
+
 /// Run the event broadcast poller.
 ///
 /// Polls the EventSource for new workflow events and broadcasts them to all
 /// registered WebSocket subscriptions via the WorkflowEventManager.
 ///
-/// Runs unconditionally at API server boot. Adaptive backoff: 50ms when events
-/// are flowing, backs off to 1s when idle.
+/// Runs unconditionally at API server boot. Drains, then waits: after a
+/// non-empty batch it polls again at once; after an empty poll it waits for
+/// the event source's wake signal (if any) or the backoff timer (50ms up to
+/// 1s idle, or 5s with a wake signal), whichever comes first.
 ///
-/// Each API server instance uses a unique consumer_id (based on hostname + PID)
+/// Each API server instance uses a unique consumer_id (prefix + UUIDv7)
 /// so that in multi-instance deployments, every instance independently tracks
 /// its position and delivers all events to its local WebSocket subscribers.
 ///
 /// Shuts down gracefully when the CancellationToken is cancelled.
-///
-/// `min_interval` and `max_interval` control the adaptive backoff range.
-/// In production, use 50ms / 1s. Tests can use tighter values for speed.
 pub async fn run_event_broadcast_poller(
     event_source: Arc<dyn EventSource>,
     manager: WorkflowEventManager,
@@ -38,11 +44,18 @@ pub async fn run_event_broadcast_poller(
 ) {
     let consumer_id = format!("{}-{}", CONSUMER_ID_PREFIX, Uuid::now_v7());
 
-    let mut backoff = AdaptiveBackoff::new(Duration::from_millis(50), Duration::from_secs(1), 2.0);
+    let mut wake = event_source.wake();
+    let max_interval = if wake.is_some() {
+        WAKE_POLL_INTERVAL_MAX
+    } else {
+        POLL_INTERVAL_MAX
+    };
+    let mut backoff = AdaptiveBackoff::new(POLL_INTERVAL_MIN, max_interval, 2.0);
 
     tracing::info!(
-        "Workflow event broadcast poller started (consumer_id={})",
-        consumer_id
+        consumer_id = %consumer_id,
+        event_wake = if wake.is_some() { "notify" } else { "poll" },
+        "Workflow event broadcast poller started"
     );
 
     loop {
@@ -51,29 +64,15 @@ pub async fn run_event_broadcast_poller(
             return;
         }
 
-        match event_source.poll(&consumer_id).await {
-            Ok(events) if events.is_empty() => {
-                backoff.increase();
-            }
+        // Wait before the next poll only when caught up or failing
+        let wait = match event_source.poll(&consumer_id).await {
+            Ok(events) if events.is_empty() => true,
             Ok(events) => {
                 let event_count = events.len();
-                let mut last_event_id = None;
                 let mut total_sent = 0;
 
                 for event in &events {
-                    let sent = manager.broadcast(event).await;
-                    total_sent += sent;
-                    last_event_id = Some(event.id);
-                }
-
-                // Update consumer position after broadcasting all events
-                if let Some(last_id) = last_event_id
-                    && let Err(e) = event_source.update_position(&consumer_id, last_id).await
-                {
-                    tracing::error!(
-                        error = %e,
-                        "Failed to update websocket broadcast consumer position"
-                    );
+                    total_sent += manager.broadcast(event).await;
                 }
 
                 if total_sent > 0 {
@@ -84,7 +83,27 @@ pub async fn run_event_broadcast_poller(
                     );
                 }
 
-                backoff.reset();
+                // Update consumer position after broadcasting all events
+                let cursor = events.last().map(|event| event.cursor());
+                match cursor {
+                    Some(cursor) => {
+                        match event_source.update_position(&consumer_id, cursor).await {
+                            Ok(()) => {
+                                backoff.reset();
+                                false
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    error = %e,
+                                    "Failed to update websocket broadcast consumer position"
+                                );
+                                backoff.increase();
+                                true
+                            }
+                        }
+                    }
+                    None => true,
+                }
             }
             Err(e) => {
                 tracing::error!(
@@ -92,15 +111,36 @@ pub async fn run_event_broadcast_poller(
                     "Workflow event broadcast poller error"
                 );
                 backoff.increase();
+                true
             }
+        };
+
+        if !wait {
+            // Drain: poll again at once
+            continue;
         }
 
-        tokio::select! {
-            _ = tokio::time::sleep(backoff.current()) => {}
-            _ = shutdown_token.cancelled() => {
-                tracing::info!("Workflow event broadcast poller shutting down");
-                return;
-            }
+        let interval = backoff.current();
+        backoff.increase();
+        match wake.as_mut() {
+            Some(wake) => tokio::select! {
+                woken = wake.wait(interval) => {
+                    if woken == Wake::Woken {
+                        backoff.reset();
+                    }
+                }
+                _ = shutdown_token.cancelled() => {
+                    tracing::info!("Workflow event broadcast poller shutting down");
+                    return;
+                }
+            },
+            None => tokio::select! {
+                _ = tokio::time::sleep(interval) => {}
+                _ = shutdown_token.cancelled() => {
+                    tracing::info!("Workflow event broadcast poller shutting down");
+                    return;
+                }
+            },
         }
     }
 }
@@ -110,7 +150,9 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use chrono::{TimeZone, Utc};
-    use kruxiaflow_core::events::{EventError, NewWorkflowEvent, WorkflowEvent, WorkflowEventType};
+    use kruxiaflow_core::events::{
+        EventCursor, EventError, NewWorkflowEvent, WorkflowEvent, WorkflowEventType,
+    };
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::sync::mpsc;
@@ -159,7 +201,7 @@ mod tests {
         async fn update_position(
             &self,
             _consumer_id: &str,
-            _last_event_id: Uuid,
+            _cursor: EventCursor,
         ) -> kruxiaflow_core::events::Result<()> {
             self.update_position_count.fetch_add(1, Ordering::SeqCst);
             Ok(())
@@ -185,7 +227,7 @@ mod tests {
         async fn update_position(
             &self,
             _consumer_id: &str,
-            _last_event_id: Uuid,
+            _cursor: EventCursor,
         ) -> kruxiaflow_core::events::Result<()> {
             Ok(())
         }
@@ -221,7 +263,7 @@ mod tests {
         async fn update_position(
             &self,
             _consumer_id: &str,
-            _last_event_id: Uuid,
+            _cursor: EventCursor,
         ) -> kruxiaflow_core::events::Result<()> {
             Err(EventError::Invalid("update failed".to_string()))
         }
@@ -230,6 +272,8 @@ mod tests {
     fn make_event() -> WorkflowEvent {
         WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id: Uuid::now_v7(),
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,

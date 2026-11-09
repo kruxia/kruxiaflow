@@ -340,7 +340,7 @@ pub mod tests {
         async fn update_position(
             &self,
             _consumer_id: &str,
-            _last_event_id: Uuid,
+            _cursor: kruxiaflow_core::events::EventCursor,
         ) -> Result<(), EventError> {
             Ok(())
         }

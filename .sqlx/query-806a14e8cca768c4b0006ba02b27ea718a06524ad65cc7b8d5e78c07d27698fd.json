@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO workflow_event_consumers (consumer_id, last_tx, last_position, updated_at)\n            VALUES ($1, ($2::bigint)::text::xid8, $3, NOW())\n            ON CONFLICT (consumer_id)\n            DO UPDATE SET\n                last_tx = EXCLUDED.last_tx,\n                last_position = EXCLUDED.last_position,\n                updated_at = NOW()\n            WHERE (workflow_event_consumers.last_tx, workflow_event_consumers.last_position)\n                < (EXCLUDED.last_tx, EXCLUDED.last_position)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "806a14e8cca768c4b0006ba02b27ea718a06524ad65cc7b8d5e78c07d27698fd"
+}

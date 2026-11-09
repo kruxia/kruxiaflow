@@ -162,6 +162,28 @@ EXAMPLES:\n  \
     )]
     Migrate(commands::migrate::MigrateCommand),
 
+    /// Repair event cursors after moving the database to a new cluster
+    #[command(
+        name = "rebase-events",
+        about = "Repair event cursors after a dump/restore or logical migration",
+        long_about = "Repair workflow event cursors after the database moved to a new PostgreSQL cluster\n\n\
+Workflow events are ordered by the id of the transaction that inserted them, and\n\
+that counter belongs to the PostgreSQL cluster. pg_upgrade, replica promotion and\n\
+physical point-in-time recovery keep it. A pg_dump/restore or a logical-replication\n\
+migration does not: the restored ids are ahead of the new cluster's counter, and\n\
+events would silently stop being delivered. serve, api and orchestrator detect\n\
+this at startup and refuse to run.\n\n\
+This command renumbers the stored events and consumer cursors so they are\n\
+consistent with the current cluster, keeping the stream order and each consumer's\n\
+place in it. Events published after the restore are delivered; a few events from\n\
+before it may be delivered again (handlers are idempotent).\n\n\
+Stop every Kruxia Flow process first. Does nothing if no repair is needed.\n\n\
+EXAMPLES:\n  \
+  kruxiaflow rebase-events            # Repair if needed\n  \
+  kruxiaflow rebase-events --check    # Report only (exit code 1 if needed)"
+    )]
+    RebaseEvents(commands::rebase_events::RebaseEventsCommand),
+
     /// Seed OAuth client credentials
     #[command(
         name = "seed-client",
@@ -352,6 +374,9 @@ async fn main() -> Result<()> {
         Commands::Version(cmd) => commands::version::execute(cmd),
         Commands::SeedLlm(cmd) => commands::seed_llm::execute(cmd, database_url.unwrap()).await,
         Commands::Migrate(cmd) => commands::migrate::execute(cmd, database_url.unwrap()).await,
+        Commands::RebaseEvents(cmd) => {
+            commands::rebase_events::execute(cmd, database_url.unwrap()).await
+        }
         Commands::SeedClient(cmd) => {
             commands::seed_client::execute(cmd, database_url.unwrap()).await
         }

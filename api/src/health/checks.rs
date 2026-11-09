@@ -32,8 +32,16 @@ pub async fn check_database_health(pool: &PgPool) -> Result<()> {
 
 /// Check event source health
 ///
-/// For MVP (PostgreSQL-based EventSource), this delegates to database health check.
+/// For MVP (PostgreSQL-based EventSource), this checks database connectivity
+/// and that the stored event cursors belong to this database cluster.
 /// Future implementations (Kafka, NATS) would check broker connectivity.
+///
+/// The cursor check matters because the failure it catches is silent: after
+/// a dump/restore or a logical-replication migration, the stored transaction
+/// ids are ahead of the new cluster's counter, no event is delivered, and the
+/// orchestrator looks idle (see `kruxiaflow_core::events::rebase`). Processes
+/// refuse to start in that state, but a database swapped under a running
+/// process is only visible here and in the logs.
 ///
 /// # Arguments
 /// * `pool` - PostgreSQL connection pool (used by PostgresEventSource)
@@ -42,7 +50,6 @@ pub async fn check_database_health(pool: &PgPool) -> Result<()> {
 /// * `Ok(())` if event source is healthy
 /// * `Err(HealthCheckError)` if check fails
 pub async fn check_event_source_health(pool: &PgPool) -> Result<()> {
-    // For MVP with PostgresEventSource, verify database connectivity
     // Future: Add health_check() method to EventSource trait
     check_database_health(pool).await.map_err(|e| match e {
         HealthCheckError::DatabaseError(db_err) => {
@@ -50,7 +57,26 @@ pub async fn check_event_source_health(pool: &PgPool) -> Result<()> {
         }
         HealthCheckError::Timeout => HealthCheckError::EventSourceError("timeout".to_string()),
         _ => HealthCheckError::EventSourceError(e.to_string()),
-    })
+    })?;
+
+    let foreign = timeout(
+        Duration::from_secs(5),
+        kruxiaflow_core::events::find_foreign_xids(pool),
+    )
+    .await;
+
+    match foreign {
+        Ok(Ok(None)) => Ok(()),
+        Ok(Ok(Some(found))) => Err(HealthCheckError::EventSourceError(format!(
+            "event cursors were written by a different PostgreSQL cluster (highest stored \
+             transaction id {}, this cluster's next is {}); events are not being delivered. \
+             Stop every Kruxia Flow process, then run `kruxiaflow rebase-events`",
+            found.max_stored_tx(),
+            found.next_xid
+        ))),
+        Ok(Err(e)) => Err(HealthCheckError::EventSourceError(e.to_string())),
+        Err(_) => Err(HealthCheckError::EventSourceError("timeout".to_string())),
+    }
 }
 
 /// Check activity queue health
@@ -108,10 +134,11 @@ pub async fn check_orchestrator_health(pool: &PgPool) -> Result<String> {
             r#"
             SELECT EXTRACT(EPOCH FROM NOW() - MIN(timestamp))::float8
             FROM workflow_events
-            WHERE id > COALESCE(
-                (SELECT last_event_id FROM workflow_event_consumers
-                  WHERE consumer_id = 'orchestrator'),
-                '00000000-0000-0000-0000-000000000000'::uuid
+            WHERE (tx, position) > (
+                COALESCE((SELECT last_tx FROM workflow_event_consumers
+                           WHERE consumer_id = 'orchestrator'), '0'::xid8),
+                COALESCE((SELECT last_position FROM workflow_event_consumers
+                           WHERE consumer_id = 'orchestrator'), 0)
             )
             "#,
         )

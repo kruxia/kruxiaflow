@@ -1,5 +1,7 @@
+mod common;
+
 use kruxiaflow_core::events::{
-    ActivityDefinition, EventSource, NewWorkflowEvent, PostgresEventSource, WorkflowDefinition,
+    ActivityDefinition, EventCursor, EventSource, NewWorkflowEvent, WorkflowDefinition,
     WorkflowEventType,
 };
 use kruxiaflow_core::orchestrator::OrchestratorConfig;
@@ -31,20 +33,23 @@ async fn poll_with_retry(
 }
 
 /// Process all pending events until none remain
-/// Returns the last event ID processed (for chaining calls)
+/// Returns the cursor of the last event processed (for chaining calls)
 async fn process_all_events(
     event_source: &Arc<dyn EventSource>,
     activity_queue: &Arc<dyn ActivityQueue>,
     subscription_service: &Arc<dyn SubscriptionService>,
     config: &OrchestratorConfig,
     consumer_id: &str,
-    last_event_id: Option<uuid::Uuid>,
-) -> Option<uuid::Uuid> {
-    if let Some(id) = last_event_id {
-        event_source.update_position(consumer_id, id).await.unwrap();
+    last_cursor: Option<EventCursor>,
+) -> Option<EventCursor> {
+    if let Some(cursor) = last_cursor {
+        event_source
+            .update_position(consumer_id, cursor)
+            .await
+            .unwrap();
     }
 
-    let mut last_processed_id = last_event_id;
+    let mut last_processed = last_cursor;
 
     // Poll multiple times with delays to catch all cascading events
     for _ in 0..10 {
@@ -74,10 +79,10 @@ async fn process_all_events(
 
                 if let Some(last) = retry_events.last() {
                     event_source
-                        .update_position(consumer_id, last.id)
+                        .update_position(consumer_id, last.cursor())
                         .await
                         .unwrap();
-                    last_processed_id = Some(last.id);
+                    last_processed = Some(last.cursor());
                 }
                 continue;
             }
@@ -97,14 +102,14 @@ async fn process_all_events(
 
         if let Some(last) = events.last() {
             event_source
-                .update_position(consumer_id, last.id)
+                .update_position(consumer_id, last.cursor())
                 .await
                 .unwrap();
-            last_processed_id = Some(last.id);
+            last_processed = Some(last.cursor());
         }
     }
 
-    last_processed_id
+    last_processed
 }
 
 async fn insert_workflow_definition(pool: &PgPool, definition: &WorkflowDefinition) -> Uuid {
@@ -187,7 +192,7 @@ async fn test_activity_retry_with_exponential_backoff(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -235,13 +240,13 @@ async fn test_activity_retry_with_exponential_backoff(pool: PgPool) {
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
     // Process all events (ActivityFailed + ActivityScheduled for retry)
-    let last_event_id = process_all_events(
+    let last_cursor = process_all_events(
         &event_source,
         &activity_queue,
         &subscription_service,
         &config,
         "test_retry",
-        events.last().map(|e| e.id),
+        events.last().map(|e| e.cursor()),
     )
     .await;
 
@@ -261,13 +266,13 @@ async fn test_activity_retry_with_exponential_backoff(pool: PgPool) {
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
     // Process all events (ActivityFailed + ActivityScheduled for retry)
-    let _last_event_id = process_all_events(
+    let _last_cursor = process_all_events(
         &event_source,
         &activity_queue,
         &subscription_service,
         &config,
         "test_retry",
-        last_event_id,
+        last_cursor,
     )
     .await;
 
@@ -307,13 +312,13 @@ async fn test_activity_retry_with_exponential_backoff(pool: PgPool) {
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
     // Process all remaining events (ActivityCompleted + WorkflowCompleted)
-    let _last_event_id = process_all_events(
+    let _last_cursor = process_all_events(
         &event_source,
         &activity_queue,
         &subscription_service,
         &config,
         "test_retry",
-        _last_event_id,
+        _last_cursor,
     )
     .await;
 
@@ -374,7 +379,7 @@ async fn test_activity_retry_max_attempts_reached(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -422,13 +427,13 @@ async fn test_activity_retry_max_attempts_reached(pool: PgPool) {
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
     // Process all events (ActivityFailed + ActivityScheduled for retry)
-    let last_event_id = process_all_events(
+    let last_cursor = process_all_events(
         &event_source,
         &activity_queue,
         &subscription_service,
         &config,
         "test_max_attempts",
-        events.last().map(|e| e.id),
+        events.last().map(|e| e.cursor()),
     )
     .await;
 
@@ -448,13 +453,13 @@ async fn test_activity_retry_max_attempts_reached(pool: PgPool) {
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
     // Process all events (ActivityFailed + WorkflowFailed, NO more retry scheduled)
-    let _last_event_id = process_all_events(
+    let _last_cursor = process_all_events(
         &event_source,
         &activity_queue,
         &subscription_service,
         &config,
         "test_max_attempts",
-        last_event_id,
+        last_cursor,
     )
     .await;
 
@@ -530,7 +535,7 @@ async fn test_activity_retry_with_fixed_backoff(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -577,7 +582,7 @@ async fn test_activity_retry_with_fixed_backoff(pool: PgPool) {
         .unwrap();
 
     event_source
-        .update_position("test_fixed_backoff", events.last().unwrap().id)
+        .update_position("test_fixed_backoff", events.last().unwrap().cursor())
         .await
         .unwrap();
 
@@ -642,7 +647,7 @@ async fn test_activity_without_retry_fails_immediately(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -687,7 +692,7 @@ async fn test_activity_without_retry_fails_immediately(pool: PgPool) {
         .unwrap();
 
     event_source
-        .update_position("test_no_retry", events.last().unwrap().id)
+        .update_position("test_no_retry", events.last().unwrap().cursor())
         .await
         .unwrap();
 
@@ -730,7 +735,7 @@ async fn test_activity_without_retry_fails_immediately(pool: PgPool) {
 
     // Verify workflow failed immediately
     event_source
-        .update_position("test_no_retry", events.last().unwrap().id)
+        .update_position("test_no_retry", events.last().unwrap().cursor())
         .await
         .unwrap();
 
@@ -782,7 +787,7 @@ async fn test_retry_state_tracking_with_cost_accumulation(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -827,7 +832,7 @@ async fn test_retry_state_tracking_with_cost_accumulation(pool: PgPool) {
         .unwrap();
 
     event_source
-        .update_position("test_cost", events.last().unwrap().id)
+        .update_position("test_cost", events.last().unwrap().cursor())
         .await
         .unwrap();
 

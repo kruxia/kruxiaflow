@@ -1,6 +1,8 @@
+mod common;
+
 use kruxiaflow_core::events::{
-    ActivityDefinition, DependencyEdge, EventSource, NewWorkflowEvent, PostgresEventSource,
-    WorkflowDefinition, WorkflowEventType,
+    ActivityDefinition, DependencyEdge, EventSource, NewWorkflowEvent, WorkflowDefinition,
+    WorkflowEventType,
 };
 use kruxiaflow_core::orchestrator::OrchestratorConfig;
 use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
@@ -101,7 +103,7 @@ async fn test_sequential_workflow_integration(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -164,7 +166,7 @@ async fn test_sequential_workflow_integration(pool: PgPool) {
 
     // Update position and poll again
     event_source
-        .update_position("test_orchestrator", events[0].id)
+        .update_position("test_orchestrator", events[0].cursor())
         .await
         .expect("Failed to update position");
 
@@ -287,7 +289,7 @@ async fn test_parallel_workflow_integration(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -348,7 +350,7 @@ async fn test_parallel_workflow_integration(pool: PgPool) {
         .expect("Failed to publish ActivityCompleted");
 
     event_source
-        .update_position("test_orchestrator", events[0].id)
+        .update_position("test_orchestrator", events[0].cursor())
         .await
         .expect("Failed to update position");
 
@@ -398,9 +400,9 @@ async fn test_parallel_workflow_integration(pool: PgPool) {
     }
 
     // Poll and process all completion events
-    let last_event_id = events.last().unwrap().id;
+    let last_cursor = events.last().unwrap().cursor();
     event_source
-        .update_position("test_orchestrator", last_event_id)
+        .update_position("test_orchestrator", last_cursor)
         .await
         .expect("Failed to update position");
 
@@ -485,7 +487,7 @@ async fn test_conditional_workflow_integration(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -534,7 +536,7 @@ async fn test_conditional_workflow_integration(pool: PgPool) {
         .expect("Failed to publish ActivityCompleted");
 
     event_source
-        .update_position("test_orchestrator", events[0].id)
+        .update_position("test_orchestrator", events[0].cursor())
         .await
         .expect("Failed to update position");
 
@@ -591,7 +593,7 @@ async fn test_workflow_completion_success(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -640,7 +642,7 @@ async fn test_workflow_completion_success(pool: PgPool) {
         .expect("Failed to publish ActivityCompleted");
 
     event_source
-        .update_position("test_orchestrator", events.last().unwrap().id)
+        .update_position("test_orchestrator", events.last().unwrap().cursor())
         .await
         .expect("Failed to update position");
 
@@ -663,7 +665,7 @@ async fn test_workflow_completion_success(pool: PgPool) {
 
     // 3. Verify WorkflowCompleted event was published
     event_source
-        .update_position("test_orchestrator", events.last().unwrap().id)
+        .update_position("test_orchestrator", events.last().unwrap().cursor())
         .await
         .expect("Failed to update position");
 
@@ -717,7 +719,7 @@ async fn test_workflow_failure(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -766,7 +768,7 @@ async fn test_workflow_failure(pool: PgPool) {
         .expect("Failed to publish ActivityFailed");
 
     event_source
-        .update_position("test_orchestrator", events.last().unwrap().id)
+        .update_position("test_orchestrator", events.last().unwrap().cursor())
         .await
         .expect("Failed to update position");
 
@@ -789,7 +791,7 @@ async fn test_workflow_failure(pool: PgPool) {
 
     // 3. Verify WorkflowFailed event was published
     event_source
-        .update_position("test_orchestrator", events.last().unwrap().id)
+        .update_position("test_orchestrator", events.last().unwrap().cursor())
         .await
         .expect("Failed to update position");
 
@@ -875,7 +877,7 @@ async fn test_workflow_completion_with_multiple_activities(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -921,7 +923,7 @@ async fn test_workflow_completion_with_multiple_activities(pool: PgPool) {
             .unwrap();
 
         event_source
-            .update_position("test_orch", events.last().unwrap().id)
+            .update_position("test_orch", events.last().unwrap().cursor())
             .await
             .unwrap();
 
@@ -941,7 +943,7 @@ async fn test_workflow_completion_with_multiple_activities(pool: PgPool) {
 
     // Check for WorkflowCompleted
     event_source
-        .update_position("test_orch", events.last().unwrap().id)
+        .update_position("test_orch", events.last().unwrap().cursor())
         .await
         .unwrap();
 
@@ -975,7 +977,7 @@ async fn test_activity_scheduled_events_published(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -1009,7 +1011,7 @@ async fn test_activity_scheduled_events_published(pool: PgPool) {
 
     // Verify ActivityScheduled event was published
     event_source
-        .update_position("test_orch", events.last().unwrap().id)
+        .update_position("test_orch", events.last().unwrap().cursor())
         .await
         .unwrap();
 
@@ -1024,6 +1026,87 @@ async fn test_activity_scheduled_events_published(pool: PgPool) {
         assert_eq!(event.payload.get("worker").unwrap(), "test");
         assert_eq!(event.payload.get("activity_name").unwrap(), "work");
     }
+}
+
+/// With a NOTIFY wake attached, an event that arrives while the loop sits in
+/// a long backoff wait is processed at once rather than when the timer fires
+#[sqlx::test(migrations = "../migrations")]
+async fn test_run_orchestrator_wakes_on_notify(pool: PgPool) {
+    let definition = WorkflowDefinition {
+        id: Uuid::now_v7(),
+        name: "wake_test_workflow".to_string(),
+        version: "1.0".to_string(),
+        activities: vec![ActivityDefinition {
+            key: "task1".to_string(),
+            worker: "test".to_string(),
+            activity_name: "work".to_string(),
+            parameters: json!({}),
+            settings: None,
+            depends_on: None,
+            dependency_of: None,
+            output_definitions: None,
+        }],
+    };
+    let definition_id = insert_workflow_definition(&pool, &definition).await;
+    let workflow_id = Uuid::now_v7();
+    insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
+
+    let event_source: Arc<dyn EventSource> =
+        Arc::new(common::settled_event_source_with_wake(pool.clone()).await);
+    let activity_queue: Arc<dyn ActivityQueue> =
+        Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
+    // Waits of 50ms, 200ms, 800ms, then 3.2s from t≈1.05s to t≈4.25s
+    let config = OrchestratorConfig::new(pool.clone())
+        .with_poll_interval(Duration::from_millis(50), Duration::from_secs(30))
+        .with_backoff_multiplier(4.0);
+
+    let handle = {
+        let (es, aq, ss) = (
+            event_source.clone(),
+            activity_queue.clone(),
+            subscription_service.clone(),
+        );
+        tokio::spawn(async move {
+            kruxiaflow_core::orchestrator::orchestrator::run_orchestrator(es, aq, ss, config, None)
+                .await
+        })
+    };
+
+    // Let the loop back off into its 3.2s wait
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+
+    let published = std::time::Instant::now();
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id,
+            event_type: WorkflowEventType::WorkflowCreated,
+            activity_key: None,
+            payload: json!({}),
+            iteration: None,
+        })
+        .await
+        .unwrap();
+
+    let scheduled = common::wait_until(Duration::from_secs(5), || async {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM activity_queue WHERE workflow_id = $1")
+            .bind(workflow_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or(0)
+            > 0
+    })
+    .await;
+    let latency = published.elapsed();
+    handle.abort();
+
+    assert!(scheduled, "activity was never scheduled");
+    // On the timer alone this would take ~2.75s
+    assert!(
+        latency < Duration::from_secs(1),
+        "event took {latency:?} to process; the wake did not shorten the wait"
+    );
 }
 
 #[sqlx::test(migrations = "../migrations")]
@@ -1049,7 +1132,7 @@ async fn test_run_orchestrator_loop(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -1085,8 +1168,16 @@ async fn test_run_orchestrator_loop(pool: PgPool) {
         .await
     });
 
-    // Give orchestrator time to process events
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Wait for the orchestrator to schedule the first activity
+    common::wait_until(Duration::from_secs(5), || async {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM activity_queue WHERE workflow_id = $1")
+            .bind(workflow_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or(0)
+            > 0
+    })
+    .await;
 
     // Verify activity was scheduled
     let queued = sqlx::query!(
@@ -1112,8 +1203,17 @@ async fn test_run_orchestrator_loop(pool: PgPool) {
         .await
         .unwrap();
 
-    // Give orchestrator time to process completion
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Wait for the orchestrator to process the completion
+    common::wait_until(Duration::from_secs(5), || async {
+        sqlx::query_scalar::<_, bool>(
+            "SELECT status = 'completed'::workflow_status FROM workflows WHERE id = $1",
+        )
+        .bind(workflow_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap_or(false)
+    })
+    .await;
 
     // Verify workflow completed
     let workflow = sqlx::query!(
@@ -1133,7 +1233,7 @@ async fn test_run_orchestrator_loop(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_orchestrator_backoff_when_no_events(pool: PgPool) {
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -1223,7 +1323,7 @@ async fn test_workflow_failed_with_incomplete_template_dependencies(pool: PgPool
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -1286,7 +1386,7 @@ async fn test_workflow_failed_with_incomplete_template_dependencies(pool: PgPool
         .expect("Failed to publish WorkflowFailed");
 
     event_source
-        .update_position("test_orchestrator", events.last().unwrap().id)
+        .update_position("test_orchestrator", events.last().unwrap().cursor())
         .await
         .expect("Failed to update position");
 
@@ -1411,7 +1511,7 @@ async fn test_workflow_failed_with_multiple_incomplete_dependencies(pool: PgPool
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -1456,7 +1556,7 @@ async fn test_workflow_failed_with_multiple_incomplete_dependencies(pool: PgPool
         .unwrap();
 
     event_source
-        .update_position("test_orch", events.last().unwrap().id)
+        .update_position("test_orch", events.last().unwrap().cursor())
         .await
         .unwrap();
 
@@ -1532,7 +1632,7 @@ async fn test_normal_workflow_with_conditions_still_completes(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -1577,7 +1677,7 @@ async fn test_normal_workflow_with_conditions_still_completes(pool: PgPool) {
         .unwrap();
 
     event_source
-        .update_position("test_orch", events.last().unwrap().id)
+        .update_position("test_orch", events.last().unwrap().cursor())
         .await
         .unwrap();
 
@@ -1621,7 +1721,7 @@ async fn test_normal_workflow_with_conditions_still_completes(pool: PgPool) {
         .unwrap();
 
     event_source
-        .update_position("test_orch", events.last().unwrap().id)
+        .update_position("test_orch", events.last().unwrap().cursor())
         .await
         .unwrap();
 
@@ -1640,7 +1740,7 @@ async fn test_normal_workflow_with_conditions_still_completes(pool: PgPool) {
 
     // Check for completion
     event_source
-        .update_position("test_orch", events.last().unwrap().id)
+        .update_position("test_orch", events.last().unwrap().cursor())
         .await
         .unwrap();
 
@@ -1726,7 +1826,7 @@ async fn test_workflow_failed_event_persists_status_immediately(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -1787,7 +1887,7 @@ async fn test_workflow_failed_event_persists_status_immediately(pool: PgPool) {
         .expect("Failed to publish WorkflowFailed");
 
     event_source
-        .update_position("test_orchestrator", events.last().unwrap().id)
+        .update_position("test_orchestrator", events.last().unwrap().cursor())
         .await
         .expect("Failed to update position");
 
@@ -1866,7 +1966,7 @@ async fn test_failed_workflow_does_not_schedule_activities(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -1922,7 +2022,7 @@ async fn test_failed_workflow_does_not_schedule_activities(pool: PgPool) {
         .unwrap();
 
     event_source
-        .update_position("test_orch", events.last().unwrap().id)
+        .update_position("test_orch", events.last().unwrap().cursor())
         .await
         .unwrap();
 
@@ -1980,7 +2080,7 @@ async fn test_events_on_already_failed_workflow_handled_gracefully(pool: PgPool)
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -2025,7 +2125,7 @@ async fn test_events_on_already_failed_workflow_handled_gracefully(pool: PgPool)
         .unwrap();
 
     event_source
-        .update_position("test_orch", events.last().unwrap().id)
+        .update_position("test_orch", events.last().unwrap().cursor())
         .await
         .unwrap();
 
@@ -2066,7 +2166,7 @@ async fn test_events_on_already_failed_workflow_handled_gracefully(pool: PgPool)
         .unwrap();
 
     event_source
-        .update_position("test_orch", failure_events.last().unwrap().id)
+        .update_position("test_orch", failure_events.last().unwrap().cursor())
         .await
         .unwrap();
 
@@ -2132,7 +2232,7 @@ async fn test_completed_workflow_early_exit(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
@@ -2177,7 +2277,7 @@ async fn test_completed_workflow_early_exit(pool: PgPool) {
         .unwrap();
 
     event_source
-        .update_position("test_orch", events.last().unwrap().id)
+        .update_position("test_orch", events.last().unwrap().cursor())
         .await
         .unwrap();
 
@@ -2196,7 +2296,7 @@ async fn test_completed_workflow_early_exit(pool: PgPool) {
 
     // Process the WorkflowCompleted event
     event_source
-        .update_position("test_orch", events.last().unwrap().id)
+        .update_position("test_orch", events.last().unwrap().cursor())
         .await
         .unwrap();
 
@@ -2238,7 +2338,7 @@ async fn test_completed_workflow_early_exit(pool: PgPool) {
         .unwrap();
 
     event_source
-        .update_position("test_orch", completion_events.last().unwrap().id)
+        .update_position("test_orch", completion_events.last().unwrap().cursor())
         .await
         .unwrap();
 
@@ -2303,7 +2403,7 @@ async fn test_check_and_timeout_stuck_workflows(pool: PgPool) {
         .await
         .unwrap();
 
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
 
     // Create config with a 1-second timeout so the 2-hour-old workflow is stuck
     let mut config = OrchestratorConfig::new(pool.clone());
@@ -2345,7 +2445,7 @@ async fn test_check_and_timeout_stuck_workflows(pool: PgPool) {
 /// Test that check_and_timeout_stuck_workflows does nothing when no workflows are stuck
 #[sqlx::test(migrations = "../migrations")]
 async fn test_check_and_timeout_no_stuck_workflows(pool: PgPool) {
-    let event_source: Arc<dyn EventSource> = Arc::new(PostgresEventSource::new(pool.clone()));
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
 
     let config = OrchestratorConfig::new(pool.clone());
 

@@ -300,6 +300,107 @@ async fn test_check_event_source_health_success(pool: PgPool) {
     );
 }
 
+/// Event cursors written by another PostgreSQL cluster (a dump/restore or a
+/// logical migration under a running process) make the event source, and so
+/// readiness, unhealthy
+#[sqlx::test(migrations = "../migrations")]
+async fn test_event_source_health_fails_for_foreign_cluster_cursors(pool: PgPool) {
+    sqlx::query(
+        "INSERT INTO workflow_events (workflow_id, event_type, payload) \
+         VALUES (uuidv7(), 'WorkflowCreated', '{}')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(
+        kruxiaflow_api::health::check_event_source_health(&pool)
+            .await
+            .is_ok()
+    );
+
+    // Simulate the restore: the stored id is far above this cluster's counter
+    sqlx::query("UPDATE workflow_events SET tx = (tx::text::bigint + 1000000000000)::text::xid8")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let err = kruxiaflow_api::health::check_event_source_health(&pool)
+        .await
+        .expect_err("foreign cursors must be unhealthy");
+    assert!(matches!(
+        err,
+        kruxiaflow_api::health::HealthCheckError::EventSourceError(_)
+    ));
+    assert!(err.to_string().contains("kruxiaflow rebase-events"));
+
+    // Readiness reports it
+    let server = setup_test_server(pool.clone()).await;
+    let response = server.get("/health/ready").await;
+    assert_eq!(response.status_code(), StatusCode::SERVICE_UNAVAILABLE);
+
+    // Repaired: healthy again
+    kruxiaflow_core::events::rebase_event_xids(&pool)
+        .await
+        .unwrap();
+    assert!(
+        kruxiaflow_api::health::check_event_source_health(&pool)
+            .await
+            .is_ok()
+    );
+}
+
+/// Orchestrator lag is the age of the oldest event past the orchestrator's
+/// (tx, position) cursor
+#[sqlx::test(migrations = "../migrations")]
+async fn test_check_orchestrator_health_lag_over_cursor(pool: PgPool) {
+    use kruxiaflow_core::events::{EventCursor, EventSource};
+
+    // No events: caught up
+    let result = kruxiaflow_api::health::check_orchestrator_health(&pool).await;
+    assert_eq!(result.unwrap(), "caught up");
+
+    // An unprocessed event older than the threshold: unhealthy
+    let (tx, position): (i64, i64) = sqlx::query_as(
+        "INSERT INTO workflow_events (workflow_id, event_type, payload, timestamp) \
+         VALUES (uuidv7(), 'WorkflowCreated', '{}', now() - interval '1 hour') \
+         RETURNING tx::text::bigint, position",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let result = kruxiaflow_api::health::check_orchestrator_health(&pool).await;
+    assert!(result.is_err(), "stale unprocessed event must be unhealthy");
+
+    // Another consumer's cursor does not count
+    let source = PostgresEventSource::new(pool.clone());
+    let cursor = EventCursor { tx, position };
+    source.update_position("ws-other", cursor).await.unwrap();
+    assert!(
+        kruxiaflow_api::health::check_orchestrator_health(&pool)
+            .await
+            .is_err()
+    );
+
+    // The orchestrator's cursor at the event: caught up
+    source
+        .update_position("orchestrator", cursor)
+        .await
+        .unwrap();
+    let result = kruxiaflow_api::health::check_orchestrator_health(&pool).await;
+    assert_eq!(result.unwrap(), "caught up");
+
+    // A fresh event past the cursor: processing, still healthy
+    sqlx::query(
+        "INSERT INTO workflow_events (workflow_id, event_type, payload) \
+         VALUES (uuidv7(), 'WorkflowCreated', '{}')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let result = kruxiaflow_api::health::check_orchestrator_health(&pool).await;
+    assert!(result.unwrap().starts_with("processing"));
+}
+
 #[sqlx::test(migrations = "../migrations")]
 async fn test_check_activity_queue_health_success(pool: PgPool) {
     // Test that activity queue health check passes

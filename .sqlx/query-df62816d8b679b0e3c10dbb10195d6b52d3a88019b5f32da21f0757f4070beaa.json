@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                    SELECT id, workflow_id, event_type as \"event_type: WorkflowEventType\",\n                           activity_key, payload, timestamp, iteration\n                    FROM workflow_events\n                    WHERE id > $1 AND workflow_id = ANY($2)\n                    ORDER BY id ASC\n                    LIMIT $3\n                    ",
+  "query": "\n            SELECT id, position, tx::text::bigint AS \"tx!\", workflow_id,\n                   event_type as \"event_type: WorkflowEventType\",\n                   activity_key, payload, timestamp, iteration\n            FROM workflow_events\n            WHERE (tx, position) > (\n                    COALESCE((SELECT last_tx FROM workflow_event_consumers WHERE consumer_id = $1),\n                             '0'::xid8),\n                    COALESCE((SELECT last_position FROM workflow_event_consumers WHERE consumer_id = $1),\n                             0))\n              AND tx < pg_snapshot_xmin(pg_current_snapshot())\n            ORDER BY tx, position\n            LIMIT 1000\n            ",
   "describe": {
     "columns": [
       {
@@ -10,11 +10,21 @@
       },
       {
         "ordinal": 1,
+        "name": "position",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "tx!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
         "name": "workflow_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 2,
+        "ordinal": 4,
         "name": "event_type: WorkflowEventType",
         "type_info": {
           "Custom": {
@@ -36,35 +46,35 @@
         }
       },
       {
-        "ordinal": 3,
+        "ordinal": 5,
         "name": "activity_key",
         "type_info": "Text"
       },
       {
-        "ordinal": 4,
+        "ordinal": 6,
         "name": "payload",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 5,
+        "ordinal": 7,
         "name": "timestamp",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 8,
         "name": "iteration",
         "type_info": "Int4"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "UuidArray",
-        "Int8"
+        "Text"
       ]
     },
     "nullable": [
       false,
+      false,
+      null,
       false,
       false,
       true,
@@ -73,5 +83,5 @@
       true
     ]
   },
-  "hash": "b0916c6f9434cedf0d4f0489aca07feb7e535e8e9f50fdf730147a0b68447b1f"
+  "hash": "df62816d8b679b0e3c10dbb10195d6b52d3a88019b5f32da21f0757f4070beaa"
 }

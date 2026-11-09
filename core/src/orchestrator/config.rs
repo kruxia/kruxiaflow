@@ -2,12 +2,20 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use std::time::Duration;
 
+/// Default idle poll interval cap when a NOTIFY wake is attached
+pub const DEFAULT_WAKE_POLL_INTERVAL_MAX_MS: u64 = 5000;
+
 /// Orchestrator configuration
 #[derive(Clone)]
 pub struct OrchestratorConfig {
     pub pool: PgPool,
     pub poll_interval_min: Duration,
+    /// Longest wait between polls when no wake signal is attached (the timer
+    /// is the only delivery path)
     pub poll_interval_max: Duration,
+    /// Longest wait between polls when the event source has a wake signal
+    /// (the timer is only a safety net for lost notifications)
+    pub wake_poll_interval_max: Duration,
     pub backoff_multiplier: f64,
     pub workflow_timeout: Duration,
     pub timeout_check_interval: Duration,
@@ -21,8 +29,9 @@ impl OrchestratorConfig {
             pool,
             poll_interval_min: Duration::from_millis(50), // 20 polls/sec max (fix for high CPU)
             poll_interval_max: Duration::from_millis(1000), // 1 second when idle
-            backoff_multiplier: 1.5,                      // Moderate backoff
-            workflow_timeout: Duration::from_secs(300),   // 5 minutes default timeout
+            wake_poll_interval_max: Duration::from_millis(DEFAULT_WAKE_POLL_INTERVAL_MAX_MS),
+            backoff_multiplier: 1.5,                    // Moderate backoff
+            workflow_timeout: Duration::from_secs(300), // 5 minutes default timeout
             timeout_check_interval: Duration::from_secs(30), // Check every 30 seconds
             secrets: HashMap::new(),
         }
@@ -32,7 +41,9 @@ impl OrchestratorConfig {
     ///
     /// Environment variables:
     /// - `KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MIN_MS`: Minimum poll interval in milliseconds (default: 50)
-    /// - `KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX_MS`: Maximum poll interval in milliseconds (default: 1000)
+    /// - `KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX_MS`: Maximum poll interval in milliseconds
+    ///   (default: 1000 polling on the timer alone, 5000 with a NOTIFY wake attached; when set,
+    ///   it applies in both modes)
     /// - `KRUXIAFLOW_ORCHESTRATOR_BACKOFF_MULTIPLIER`: Backoff multiplier (default: 1.5)
     /// - `KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS`: Workflow timeout in seconds (default: 300)
     /// - `KRUXIAFLOW_ORCHESTRATOR_TIMEOUT_CHECK_INTERVAL_SECS`: Timeout check interval in seconds (default: 30)
@@ -43,11 +54,10 @@ impl OrchestratorConfig {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(50);
 
-        let poll_interval_max_ms: u64 =
+        let poll_interval_max_ms: Option<u64> =
             std::env::var("KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX_MS")
                 .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(1000);
+                .and_then(|s| s.parse().ok());
 
         let backoff_multiplier: f64 = std::env::var("KRUXIAFLOW_ORCHESTRATOR_BACKOFF_MULTIPLIER")
             .ok()
@@ -69,7 +79,10 @@ impl OrchestratorConfig {
         Self {
             pool,
             poll_interval_min: Duration::from_millis(poll_interval_min_ms),
-            poll_interval_max: Duration::from_millis(poll_interval_max_ms),
+            poll_interval_max: Duration::from_millis(poll_interval_max_ms.unwrap_or(1000)),
+            wake_poll_interval_max: Duration::from_millis(
+                poll_interval_max_ms.unwrap_or(DEFAULT_WAKE_POLL_INTERVAL_MAX_MS),
+            ),
             backoff_multiplier,
             workflow_timeout: Duration::from_secs(workflow_timeout_secs),
             timeout_check_interval: Duration::from_secs(timeout_check_interval_secs),
@@ -77,10 +90,27 @@ impl OrchestratorConfig {
         }
     }
 
+    /// Set the poll interval range; `max` applies with or without a wake signal
     pub fn with_poll_interval(mut self, min: Duration, max: Duration) -> Self {
         self.poll_interval_min = min;
         self.poll_interval_max = max;
+        self.wake_poll_interval_max = max;
         self
+    }
+
+    /// Set only the minimum poll interval, keeping the per-mode maximums
+    pub fn with_poll_interval_min(mut self, min: Duration) -> Self {
+        self.poll_interval_min = min;
+        self
+    }
+
+    /// The idle poll interval cap for a loop with or without a wake signal
+    pub fn effective_poll_interval_max(&self, has_wake: bool) -> Duration {
+        if has_wake {
+            self.wake_poll_interval_max
+        } else {
+            self.poll_interval_max
+        }
     }
 
     pub fn with_backoff_multiplier(mut self, multiplier: f64) -> Self {
@@ -424,6 +454,15 @@ mod tests {
         let config = OrchestratorConfig::new(lazy_pool());
         assert_eq!(config.poll_interval_min, Duration::from_millis(50));
         assert_eq!(config.poll_interval_max, Duration::from_millis(1000));
+        assert_eq!(config.wake_poll_interval_max, Duration::from_millis(5000));
+        assert_eq!(
+            config.effective_poll_interval_max(false),
+            Duration::from_millis(1000)
+        );
+        assert_eq!(
+            config.effective_poll_interval_max(true),
+            Duration::from_millis(5000)
+        );
         assert_eq!(config.backoff_multiplier, 1.5);
         assert_eq!(config.workflow_timeout, Duration::from_secs(300));
         assert_eq!(config.timeout_check_interval, Duration::from_secs(30));
@@ -450,6 +489,7 @@ mod tests {
         let config = OrchestratorConfig::from_env(lazy_pool());
         assert_eq!(config.poll_interval_min, Duration::from_millis(50));
         assert_eq!(config.poll_interval_max, Duration::from_millis(1000));
+        assert_eq!(config.wake_poll_interval_max, Duration::from_millis(5000));
         assert_eq!(config.backoff_multiplier, 1.5);
         assert_eq!(config.workflow_timeout, Duration::from_secs(300));
         assert_eq!(config.timeout_check_interval, Duration::from_secs(30));
@@ -477,6 +517,8 @@ mod tests {
         let config = OrchestratorConfig::from_env(lazy_pool());
         assert_eq!(config.poll_interval_min, Duration::from_millis(100));
         assert_eq!(config.poll_interval_max, Duration::from_millis(2000));
+        // An explicit maximum applies with or without a wake signal
+        assert_eq!(config.wake_poll_interval_max, Duration::from_millis(2000));
         assert_eq!(config.backoff_multiplier, 2.0);
         assert_eq!(config.workflow_timeout, Duration::from_secs(600));
         assert_eq!(config.timeout_check_interval, Duration::from_secs(60));
@@ -521,6 +563,7 @@ mod tests {
 
         assert_eq!(config.poll_interval_min, Duration::from_millis(200));
         assert_eq!(config.poll_interval_max, Duration::from_millis(5000));
+        assert_eq!(config.wake_poll_interval_max, Duration::from_millis(5000));
         assert_eq!(config.backoff_multiplier, 3.0);
         assert_eq!(config.workflow_timeout, Duration::from_secs(600));
         assert_eq!(config.timeout_check_interval, Duration::from_secs(120));

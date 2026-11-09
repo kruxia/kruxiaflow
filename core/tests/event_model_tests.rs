@@ -222,6 +222,8 @@ fn test_workflow_event_serialization() {
     let workflow_id = test_uuid();
     let event = WorkflowEvent {
         id,
+        position: 3,
+        tx: 900,
         workflow_id,
         event_type: WorkflowEventType::ActivityCompleted,
         activity_key: Some("activity1".to_string()),
@@ -233,7 +235,14 @@ fn test_workflow_event_serialization() {
     let json = serde_json::to_string(&event).unwrap();
     assert!(json.contains(&id.to_string()));
     assert!(json.contains(&workflow_id.to_string()));
-    assert!(json.contains("ActivityCompleted"));
+    assert!(json.contains("\"position\":3"));
+    assert_eq!(
+        event.cursor(),
+        EventCursor {
+            tx: 900,
+            position: 3
+        }
+    );
 }
 
 #[test]

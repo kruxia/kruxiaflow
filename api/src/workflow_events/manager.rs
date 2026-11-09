@@ -197,6 +197,8 @@ mod tests {
     fn make_event(workflow_id: Uuid, event_type: WorkflowEventType) -> WorkflowEvent {
         WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id,
             event_type,
             activity_key: None,

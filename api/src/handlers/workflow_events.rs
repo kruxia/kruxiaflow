@@ -203,6 +203,22 @@ async fn handle_workflow_event_socket(
                 }
                 if replay_count > 0 {
                     tracing::info!(replay_count, "Replayed missed workflow events");
+                } else if events.is_empty() {
+                    // An unknown id resolves to no cursor and an empty replay;
+                    // tell it apart from "nothing missed" for the operator
+                    let known: bool = sqlx::query_scalar(
+                        "SELECT EXISTS (SELECT 1 FROM workflow_events WHERE id = $1)",
+                    )
+                    .bind(from_event_id)
+                    .fetch_one(&state.db_pool)
+                    .await
+                    .unwrap_or(true);
+                    if !known {
+                        tracing::warn!(
+                            %from_event_id,
+                            "Replay requested from an unknown event id; streaming live events only"
+                        );
+                    }
                 }
             }
             Err(e) => {

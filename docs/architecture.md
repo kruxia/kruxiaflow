@@ -164,11 +164,11 @@ Real-time workflow execution events (WorkflowCreated, ActivityCompleted, Workflo
 are streamed to clients via WebSocket with optional filtering and reconnection replay:
 
 ```
-GET /api/v1/workflow_events/ws?token=<jwt>&workflow_id=<csv>&event_type=<csv>&event_id=<replay>
+GET /api/v1/workflow_events/ws?token=<jwt>&workflow_id=<csv>&event_type=<csv>&from_event_id=<uuid>
 ```
 
-A shared poller task polls the EventSource and broadcasts events to all registered
-subscriptions via in-memory filtering. Each API server instance tracks its own consumer
+A shared poller task polls the EventSource (woken by commit notifications) and
+broadcasts events to all registered subscriptions via in-memory filtering. Each API server instance tracks its own consumer
 position independently, ensuring multi-instance deployments deliver all events to all
 local subscribers. See [US-1A.9b](../kruxiaflow-internal/docs/implementation/US-1A.9b-websocket-workflow-events.md) for implementation details.
 
@@ -2596,201 +2596,191 @@ KRUXIAFLOW_QUEUE_SQS_REGION=us-east-1
 ```rust
 #[async_trait]
 pub trait EventSource: Send + Sync {
-    async fn publish(&self, event: WorkflowEvent) -> Result<()>;
-    async fn poll(&self, last_event_id: Option<Uuid>) -> Result<Vec<WorkflowEvent>>;
+    async fn publish(&self, event: NewWorkflowEvent) -> Result<()>;
+    /// Events past the consumer's durable cursor, in cursor order
+    async fn poll(&self, consumer_id: &str) -> Result<Vec<WorkflowEvent>>;
+    /// Store the consumer's cursor after processing (forward-only)
+    async fn update_position(&self, consumer_id: &str, cursor: EventCursor) -> Result<()>;
+    /// WebSocket reconnection replay from an event id
+    async fn get_events_from_id(&self, from_event_id: Uuid, workflow_ids: Option<&[Uuid]>, limit: i64)
+        -> Result<Vec<WorkflowEvent>>;
+    /// Optional wake-up signal; consumers must be correct without it
+    fn wake(&self) -> Option<WakeReceiver> { None }
 }
 
-pub struct PostgresPollingEventSource { /* ... */ }        // MVP: Polling-based
+pub struct PostgresEventSource { /* ... */ }               // MVP: commit-safe cursor + NOTIFY wake
 pub struct PostgresLogicalReplicationSource { /* ... */ }  // Post-MVP: Logical replication
 pub struct KafkaEventSource { /* ... */ }                  // Post-MVP: Kafka, Redpanda, WarpStream
 pub struct NatsEventSource { /* ... */ }                   // Post-MVP: NATS JetStream
 ```
 
-**MVP Implementation: Polling-based Event Streaming**
+**MVP Implementation: Delivery: commit-order cursor with a NOTIFY wake**
 
-```rust
-pub struct PostgresPollingEventSource {
-    pool: PgPool,
-    poll_interval: Duration,
-    backoff_strategy: BackoffStrategy,
-}
+Events live in `workflow_events`. Besides its UUIDv7 `id`, each row carries
+two database-assigned columns that define the read order:
 
-#[async_trait]
-impl EventSource for PostgresPollingEventSource {
-    async fn publish(&self, event: WorkflowEvent) -> Result<()> {
-        sqlx::query!(
-            "INSERT INTO workflow_events (id, workflow_id, event_type, activity_key, payload, timestamp)
-             VALUES ($1, $2, $3, $4, $5, $6)",
-            event.id,
-            event.workflow_id,
-            event.event_type,
-            event.activity_key,
-            event.payload,
-            event.timestamp
-        )
-        .execute(&self.pool)
-        .await?;
+| Column     | Type                                    | Purpose                                                |
+|------------|-----------------------------------------|--------------------------------------------------------|
+| `tx`       | `xid8` (default `pg_current_xact_id()`) | The inserting transaction (instance-wide, never wraps) |
+| `position` | `bigint GENERATED ALWAYS AS IDENTITY`   | Insert order within the table                          |
 
-        Ok(())
-    }
+Each consumer stores a durable cursor `(last_tx, last_position)` in
+`workflow_event_consumers` and polls:
 
-    async fn poll(&self, last_event_id: Option<Uuid>) -> Result<Vec<WorkflowEvent>> {
-        let events = if let Some(last_id) = last_event_id {
-            // Poll for events after the last seen event
-            sqlx::query_as!(
-                WorkflowEvent,
-                "SELECT * FROM workflow_events
-                 WHERE id > $1
-                 ORDER BY timestamp ASC, id ASC
-                 LIMIT 100",
-                last_id
-            )
-            .fetch_all(&self.pool)
-            .await?
-        } else {
-            // First poll - get recent events
-            sqlx::query_as!(
-                WorkflowEvent,
-                "SELECT * FROM workflow_events
-                 ORDER BY timestamp DESC, id DESC
-                 LIMIT 100"
-            )
-            .fetch_all(&self.pool)
-            .await?
-        };
-
-        Ok(events)
-    }
-}
+```sql
+SELECT ... FROM workflow_events
+WHERE (tx, position) > (<consumer last_tx>, <consumer last_position>)
+  AND tx < pg_snapshot_xmin(pg_current_snapshot())
+ORDER BY tx, position
+LIMIT 1000
 ```
 
-**Orchestrator Event Loop with Adaptive Backoff**:
+`pg_snapshot_xmin` is the oldest transaction still in progress anywhere on
+the instance. Every transaction below it has committed (its rows are visible
+to the poll) or aborted (its rows never will be), so the set of rows the
+predicate admits never grows behind the cursor: a row that becomes visible
+later belongs to a transaction at or above that xmin and sorts after every
+row returned so far. A consumer can store the cursor of the last event it
+processed with nothing left behind it, with no grace window and no clock.
 
-```rust
-pub async fn run_orchestrator(
-    event_source: Arc<dyn EventSource>,
-    config: OrchestratorConfig,
-) -> Result<()> {
-    let mut last_event_id: Option<Uuid> = None;
-    let mut backoff = AdaptiveBackoff::new(
-        Duration::from_millis(10),   // Min: 10ms when busy
-        Duration::from_secs(5),      // Max: 5s when quiet
-        1.5,                         // Backoff multiplier
-    );
+Why not `id` (or `position`) alone: ids and positions are assigned when the
+INSERT executes, but rows become visible in commit order. A reader of
+`id > cursor` can read event 101, advance past it, and never see event 100
+whose transaction commits a moment later (observed in 0.8.1 at 100-way
+concurrency). A position-only cursor with the `tx < xmin` filter still has a
+hole, because a transaction can take its xid before another one and insert its
+event after it (a lower `tx` with a higher `position`); ordering by
+`(tx, position)` closes it.
 
-    loop {
-        // Poll for new events
-        let events = event_source.poll(last_event_id).await?;
+**Trade-off: head-of-line blocking.** Transaction ids are instance-wide, so one
+long-running *writing* transaction in any database on the instance holds xmin
+down and delays every consumer until it ends (read-only transactions take no
+xid and block nothing). Kruxia Flow's own transactions are short. On an empty
+poll, at most once a minute, the event source looks for a writing transaction
+open longer than 30s and logs it at `warn` with its `pid`, so an operator can
+tell a stall from idleness. Sharing the Postgres instance with other
+write-heavy applications couples their long transactions to event latency.
 
-        if events.is_empty() {
-            // No events - increase backoff
-            backoff.increase();
-            tokio::time::sleep(backoff.current()).await;
-            continue;
-        }
+**Trade-off: cursors belong to the cluster.** `tx` values and consumer cursors
+are stored as data, but the transaction-id counter belongs to the PostgreSQL
+cluster. `pg_upgrade`, streaming-replica promotion and physical point-in-time
+recovery carry the counter along. A `pg_dump`/restore or a logical-replication
+migration (including the blue/green upgrades of some managed services) does
+not: restored events sit above the new cluster's xmin and are held back, and
+new events sort behind every restored cursor. Both would be silent, so:
 
-        // Process events
-        for event in &events {
-            process_workflow_event(event, &config).await?;
-            last_event_id = Some(event.id);
-        }
+- `serve`, `api` and `orchestrator` check at startup that no stored `tx` or
+  cursor is at or above the cluster's next transaction id (a committed row
+  never is, so the check has no false positives) and refuse to start
+  otherwise. For a database swapped under a running process without a
+  restart, the process repeats the check once a minute while idle and logs at
+  `error`, and `/health/ready` reports the event source unhealthy (503).
+- `kruxiaflow rebase-events` (all processes stopped) renumbers the stored
+  events to `tx = 0`, `position` = rank in the stream, and maps each cursor to
+  its rank. Events published after the restore are placed last, so they are
+  delivered; a restored event whose old `tx` is below the new counter cannot
+  be told apart from those and may be delivered again (handlers are
+  idempotent).
 
-        // Got events - reset backoff to minimum
-        backoff.reset();
-    }
-}
+`tx = 0` is below every transaction id a cluster assigns, so rows that carry
+it (pre-migration history, rebased history) are always deliverable and always
+sort first.
 
-pub struct AdaptiveBackoff {
-    min: Duration,
-    max: Duration,
-    current: Duration,
-    multiplier: f64,
-}
+**NOTIFY as a wake, never as data.** An `AFTER INSERT ... FOR EACH STATEMENT`
+trigger on `workflow_events` runs `pg_notify('workflow_events', '')`. Postgres
+delivers it when the inserting transaction commits; a rolled-back insert never
+notifies. Each process holds one `PgListener` and fans notifications out to its
+consumers (orchestrator, WebSocket broadcast poller) through a
+`tokio::sync::watch` counter, which keeps a notification that arrives between
+a consumer's poll and its wait. Three rules keep the data path honest:
 
-impl AdaptiveBackoff {
-    pub fn new(min: Duration, max: Duration, multiplier: f64) -> Self {
-        Self {
-            min,
-            max,
-            current: min,
-            multiplier,
-        }
-    }
+1. The payload is empty and never read: a wake means "poll from your cursor
+   until empty".
+2. Every wake and every backoff timer tick runs the same catch-up poll, so a
+   missed notification only delays an event until the next tick.
+3. A listener reconnect or error counts as a wake, because notifications sent
+   during the outage are gone.
 
-    pub fn current(&self) -> Duration {
-        self.current
-    }
+`KRUXIAFLOW_EVENT_WAKE=notify` (default) or `poll` (`--event-wake`). If
+`LISTEN` fails (no permission, a transaction-mode connection pooler), the
+process logs a warning and runs on the timer alone.
 
-    pub fn increase(&mut self) {
-        let next = Duration::from_secs_f64(
-            self.current.as_secs_f64() * self.multiplier
-        );
-        self.current = next.min(self.max);
-    }
+```mermaid
+sequenceDiagram
+    participant W as Writer (API / worker / orchestrator)
+    participant PG as PostgreSQL
+    participant L as PgListener (one per process)
+    participant C as Consumer loop
 
-    pub fn reset(&mut self) {
-        self.current = self.min;
-    }
-}
+    W->>PG: INSERT INTO workflow_events (in a transaction)
+    W->>PG: COMMIT
+    PG-->>L: NOTIFY workflow_events (at commit)
+    L-->>C: watch counter bump (wake)
+    C->>PG: poll: (tx, position) > cursor AND tx < xmin
+    PG-->>C: events (committed, final)
+    C->>C: process (replay-idempotent)
+    C->>PG: update_position(cursor of last resolved event)
+    C->>PG: poll again until empty, then wait for wake or timer
 ```
 
-**Configuration**:
+**Consumer loop (orchestrator and broadcast poller): drain, then wait.**
+After a non-empty batch the loop polls again at once (the `LIMIT` bounds each
+iteration). After an empty poll it waits for the wake or the adaptive backoff
+timer, whichever comes first; a wake resets the backoff. The idle timer cap is
+5s with a wake attached and 1s on the timer alone
+(`KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX_MS` overrides both).
 
-```bash
-# Event polling configuration
-KRUXIAFLOW_EVENT_POLL_INTERVAL_MIN=10ms   # Minimum interval when busy
-KRUXIAFLOW_EVENT_POLL_INTERVAL_MAX=5s     # Maximum interval when quiet
-KRUXIAFLOW_EVENT_BACKOFF_MULTIPLIER=1.5   # Backoff growth rate
-```
-
-**Why Polling (Not LISTEN/NOTIFY)**:
-
-PostgreSQL's LISTEN/NOTIFY is **not suitable for reliable event delivery** because:
-
-- ❌ **No delivery guarantees** - Notifications can be lost on connection drop
-- ❌ **Not transactional** - NOTIFY happens regardless of transaction commit/rollback
-- ❌ **Fire-and-forget** - No way to know if notification was received
-- ❌ **Connection-dependent** - Must maintain persistent connection per subscriber
-- ❌ **No backlog** - Late subscribers miss events that occurred while disconnected
-
-**Polling provides guaranteed delivery**:
-
-- ✅ **All events seen** - Query-based retrieval ensures no missed events
-- ✅ **Transactional** - Only see committed events in the table
-- ✅ **Recoverable** - Can resume from last seen event_id after restart
-- ✅ **Simple implementation** - No connection management complexity
-- ✅ **Efficient when busy** - 10ms polling keeps latency low under load
-- ✅ **Efficient when quiet** - Backs off to 5s when no activity
-- ✅ **Stateless** - Each poll is independent
-- ✅ **Debuggable** - Easy to understand and troubleshoot
-- ✅ **Database-agnostic** - Works with any PostgreSQL version/config
-
-**Guaranteed Delivery is Critical**: Workflow orchestration cannot tolerate missed events. A single missed "activity completed" event would cause a workflow to hang indefinitely. Polling ensures this cannot happen.
-
-**Visibility-grace cursor (required for the guarantee to actually hold)**:
-event ids are UUIDv7, assigned when the INSERT executes, but readers observe
-rows in *commit* order — under concurrent load an event can become visible a
-few milliseconds after a poll has already read past its id. A cursor advanced
-beyond it would strand it forever. The orchestrator therefore never advances
-its durable consumer position past `now - 500ms` (the visibility grace); the
-recent tail is re-polled until the grace window passes it, an in-memory
-seen-set prevents reprocessing within the process, and every event handler is
-replay-idempotent for at-least-once delivery (crash recovery, multiple
-orchestrators sharing a consumer): duplicate `WorkflowCreated` /
+The orchestrator advances its durable cursor only through the contiguous
+prefix of successfully processed events, so a transiently failing event pins
+the cursor and is genuinely retried on the next poll (spaced by the minimum
+poll interval) rather than skipped; after 5 failures it is treated as a poison
+message. Delivery is at-least-once (a crash between processing and the cursor
+write replays the batch; orchestrators sharing a consumer id race), so every
+event handler is replay-idempotent: duplicate `WorkflowCreated` /
 `ActivityCompleted` / `ActivityFailed` / `ActivityWaiting` / `ActivitySignaled`
-events are guarded no-ops. The cursor also advances only through the
-contiguous prefix of successfully processed events, so a transiently failing
-event is genuinely retried on the next poll rather than skipped. Trade-off: sustained
-event rates above the poll batch limit per grace window (1000 per 0.5s =
-2,000 events/sec) degrade processing latency toward the grace period;
-post-MVP, an xid-ordered cursor column removes that ceiling entirely.
+events are guarded no-ops.
+
+**WebSocket replay** resolves `from_event_id` to that event's `(tx, position)`
+and reads with the same predicate, so a reconnecting client cannot miss an
+event that committed late. An unknown id yields an empty replay (logged at
+`warn`) and the connection continues live. Messages carry `position` for
+information; clients deduplicate by `id`.
+
+**Guaranteed Delivery is Critical**: Workflow orchestration cannot tolerate
+missed events. A single missed "activity completed" event would cause a
+workflow to hang indefinitely. The durable cursor and the commit-safe predicate
+guarantee delivery; `NOTIFY` only reduces latency, and every consumer is
+correct with it disabled.
+
+**What LISTEN/NOTIFY can and cannot do**: notifications are delivered only on
+commit (they are transactional), but they are lost when the listening
+connection drops, there is no backlog for a subscriber that was not listening,
+and they are bound to a session connection (not usable through a
+transaction-mode pooler). That is why `NOTIFY` is a wake-up and never the
+delivery path.
 
 **Performance Characteristics**:
 
-- **High load**: ~10ms latency (polls every 10ms, finds events immediately)
-- **Low load**: ~2.5s average latency (polls every 5s when quiet)
-- **Database overhead**: Minimal - indexed query on `timestamp` column
-- **Scalability**: Multiple orchestrators poll independently without coordination
+- **Wake mode (default)**: an event is picked up within milliseconds of its
+  commit; the timer only catches lost notifications. Measured (`benchmarks/README.md`,
+  2026-11-08): about 6 ms for the first event after idle and 2 ms for
+  follow-up events on a quiet system, 7 ms at 10 concurrent workflows
+- **Timer only (`poll`)**: latency is the current backoff interval, 50ms when
+  busy up to 1s when idle (measured: 486 ms on average for the first event
+  after idle)
+- **Under heavy load the orchestrator is processing-bound**: it handles
+  events one at a time, so at 100 concurrent workflows reaction time (about
+  75 ms) is queueing behind earlier events, in either mode
+- **The activity round trip dominates per-step latency**: about 65-100 ms from
+  `ActivityScheduled` to `ActivityCompleted`, mostly the worker's
+  activity-queue poll
+- **No re-reads**: each poll returns only new rows, so throughput is bounded
+  by processing, not by a fixed window (the 0.8.1 grace window capped it near
+  2,000 events/sec)
+- **Database overhead**: an index range scan on `idx_events_consumer_poll`
+  `(tx, position)`; idle consumers in wake mode poll every 5s
+- **Scalability**: multiple consumers poll independently, each with its own
+  cursor
 
 **Post-MVP: Alternative Event Streaming Options**
 
@@ -2840,14 +2830,14 @@ Best for: Low latency (<1ms), simple ops, smaller scale (<50k events/sec)
 
 **Event Streaming Backend Comparison**:
 
-| Provider                 | MVP           | Delivery Guarantee | Latency | Throughput   | Complexity | Operations                                |
-|--------------------------|---------------|--------------------|---------|--------------|------------|-------------------------------------------|
-| **PostgreSQL Polling**   | ✅ Yes        | ✅ Guaranteed      | ~10ms   | ~10k/sec     | Low        | Single database                            |
-| **Postgres Logical Repl**| ❌ Post‑MVP   | ✅ Guaranteed      | <1ms    | ~10k/sec     | High       | Replication slots, connection management   |
-| **Kafka / Redpanda**     | ❌ Post‑MVP   | ✅ Guaranteed      | ~5ms    | >100k/sec    | Medium     | Topic management, consumer groups          |
-| **WarpStream**           | ❌ Post‑MVP   | ✅ Guaranteed      | ~10ms   | >100k/sec    | Low        | Managed, S3‑backed                         |
-| **NATS JetStream**       | ❌ Post‑MVP   | ✅ Guaranteed      | <1ms    | ~50k/sec     | Low        | Simple, lightweight                        |
-| **LISTEN/NOTIFY**        | ❌ Never      | ❌ Best‑effort     | <1ms    | ~1k/sec      | Medium     | ❌ Events can be lost                      |
+| Provider                  | MVP         | Delivery Guarantee | Latency | Throughput | Complexity | Operations                                |
+|---------------------------|-------------|--------------------|---------|------------|------------|-------------------------------------------|
+| **PostgreSQL Polling**    | ✅ Yes      | ✅ Guaranteed      | ~1ms*   | ~10k/sec   | Low        | Single database; *with the NOTIFY wake    |
+| **Postgres Logical Repl** | ❌ Post‑MVP | ✅ Guaranteed      | <1ms    | ~10k/sec   | High       | Replication slots, connection management  |
+| **Kafka / Redpanda**      | ❌ Post‑MVP | ✅ Guaranteed      | ~5ms    | >100k/sec  | Medium     | Topic management, consumer groups         |
+| **WarpStream**            | ❌ Post‑MVP | ✅ Guaranteed      | ~10ms   | >100k/sec  | Low        | Managed, S3‑backed                        |
+| **NATS JetStream**        | ❌ Post‑MVP | ✅ Guaranteed      | <1ms    | ~50k/sec   | Low        | Simple, lightweight                       |
+| **LISTEN/NOTIFY**         | Wake only   | ❌ Best‑effort     | <1ms    | ~1k/sec    | Medium     | ❌ Never the delivery path (lost on drop) |
 
 **Why Kafka-Protocol Services for High Scale**:
 

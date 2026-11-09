@@ -471,6 +471,8 @@ curl http://localhost:8080/api/v1/info
 
 Migrations only move forward. To roll back, restore both the previous binary and the database dump.
 
+Restoring a dump onto a fresh PostgreSQL install (a new SD card, a new host) needs one extra step from 0.10.0 on: run `kruxiaflow rebase-events` before starting the service. Workflow events are ordered by transaction id, a counter that starts over in a new PostgreSQL cluster, and the service refuses to start until the stored ids are renumbered. Restoring into the same PostgreSQL install does not need it.
+
 ---
 
 ## Performance Tuning

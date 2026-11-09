@@ -1,13 +1,13 @@
-use kruxiaflow_core::events::{
-    EventSource, NewWorkflowEvent, PostgresEventSource, WorkflowEventType,
-};
+mod common;
+
+use kruxiaflow_core::events::{EventSource, NewWorkflowEvent, WorkflowEventType};
 use serde_json::json;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_publish_event(pool: PgPool) {
-    let event_source = PostgresEventSource::new(pool.clone());
+    let event_source = common::settled_event_source(pool.clone());
     let workflow_id = Uuid::now_v7();
 
     let event = NewWorkflowEvent {
@@ -42,7 +42,7 @@ async fn test_publish_event(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_publish_event_idempotency(pool: PgPool) {
-    let event_source = PostgresEventSource::new(pool.clone());
+    let event_source = common::settled_event_source(pool.clone());
     let workflow_id = Uuid::now_v7();
 
     let event = NewWorkflowEvent {
@@ -78,7 +78,7 @@ async fn test_publish_event_idempotency(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_poll_no_events(pool: PgPool) {
-    let event_source = PostgresEventSource::new(pool.clone());
+    let event_source = common::settled_event_source(pool.clone());
 
     // Poll with no events
     let events = event_source
@@ -91,7 +91,7 @@ async fn test_poll_no_events(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_poll_with_events(pool: PgPool) {
-    let event_source = PostgresEventSource::new(pool.clone());
+    let event_source = common::settled_event_source(pool.clone());
     let workflow_id = Uuid::now_v7();
 
     // Publish two events
@@ -130,7 +130,7 @@ async fn test_poll_with_events(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_position_tracking(pool: PgPool) {
-    let event_source = PostgresEventSource::new(pool.clone());
+    let event_source = common::settled_event_source(pool.clone());
     let workflow_id = Uuid::now_v7();
 
     // Publish three events
@@ -176,7 +176,7 @@ async fn test_position_tracking(pool: PgPool) {
 
     // Update position to first event
     event_source
-        .update_position("test_consumer", events[0].id)
+        .update_position("test_consumer", events[0].cursor())
         .await
         .expect("Failed to update position");
 
@@ -190,7 +190,7 @@ async fn test_position_tracking(pool: PgPool) {
 
     // Update position to second event
     event_source
-        .update_position("test_consumer", events[0].id)
+        .update_position("test_consumer", events[0].cursor())
         .await
         .expect("Failed to update position");
 
@@ -204,7 +204,7 @@ async fn test_position_tracking(pool: PgPool) {
 
     // Update position to last event
     event_source
-        .update_position("test_consumer", events[0].id)
+        .update_position("test_consumer", events[0].cursor())
         .await
         .expect("Failed to update position");
 
@@ -218,7 +218,7 @@ async fn test_position_tracking(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_multiple_consumers(pool: PgPool) {
-    let event_source = PostgresEventSource::new(pool.clone());
+    let event_source = common::settled_event_source(pool.clone());
     let workflow_id = Uuid::now_v7();
 
     // Publish events
@@ -249,7 +249,7 @@ async fn test_multiple_consumers(pool: PgPool) {
 
     // Consumer 1 updates position
     event_source
-        .update_position("consumer1", events1[0].id)
+        .update_position("consumer1", events1[0].cursor())
         .await
         .expect("Failed to update position");
 

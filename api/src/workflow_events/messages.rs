@@ -20,8 +20,11 @@ pub const CLOSE_SLOW_CLIENT: u16 = 4002;
 pub enum WorkflowEventMessage {
     /// A workflow event
     Event {
-        /// Event ID (for replay checkpoint)
+        /// Event ID (for replay checkpoint: pass as `from_event_id` on reconnect)
         id: Uuid,
+        /// Insert order of the event in the stream (informational; deduplicate by `id`)
+        #[serde(default)]
+        position: i64,
         /// Workflow this event belongs to
         workflow_id: Uuid,
         /// PascalCase event type name
@@ -52,6 +55,7 @@ impl WorkflowEventMessage {
     pub fn from_workflow_event(event: &WorkflowEvent) -> Self {
         Self::Event {
             id: event.id,
+            position: event.position,
             workflow_id: event.workflow_id,
             event_type: event.event_type.to_string(),
             activity_key: event.activity_key.clone(),
@@ -98,6 +102,8 @@ mod tests {
     fn make_workflow_event() -> WorkflowEvent {
         WorkflowEvent {
             id: Uuid::nil(),
+            position: 7,
+            tx: 0,
             workflow_id: Uuid::nil(),
             event_type: WorkflowEventType::ActivityCompleted,
             activity_key: Some("step_1".to_string()),
@@ -122,6 +128,7 @@ mod tests {
         match msg {
             WorkflowEventMessage::Event {
                 id,
+                position,
                 workflow_id,
                 event_type,
                 activity_key,
@@ -130,6 +137,7 @@ mod tests {
                 iteration,
             } => {
                 assert_eq!(id, event.id);
+                assert_eq!(position, 7);
                 assert_eq!(workflow_id, event.workflow_id);
                 assert_eq!(event_type, "ActivityCompleted");
                 assert_eq!(activity_key, Some("step_1".to_string()));
@@ -145,6 +153,8 @@ mod tests {
     fn test_from_workflow_event_no_activity_key() {
         let event = WorkflowEvent {
             id: Uuid::nil(),
+            position: 0,
+            tx: 0,
             workflow_id: Uuid::nil(),
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,

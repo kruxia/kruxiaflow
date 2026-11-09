@@ -1137,6 +1137,56 @@ Authorization: Bearer <token>
 
 ---
 
+## Workflow Event Streaming (WebSocket)
+
+```
+GET /api/v1/workflow_events/ws?token=<jwt>&workflow_id=<csv>&event_type=<csv>&from_event_id=<uuid>
+```
+
+Streams workflow execution events (`WorkflowCreated`, `ActivityCompleted`,
+`WorkflowFailed`, ...) as they commit. Authentication is via the `token` query
+parameter since WebSocket upgrade bypasses HTTP middleware.
+
+| Parameter       | Description                                                                   |
+|-----------------|-------------------------------------------------------------------------------|
+| `token`         | JWT access token                                                              |
+| `workflow_id`   | Comma-separated workflow ids to receive (default: all)                        |
+| `event_type`    | Comma-separated PascalCase event types to receive (default: all)              |
+| `from_event_id` | Replay events after this event `id` before streaming live (up to 1000 events) |
+
+**Event message**:
+```json
+{
+  "type": "event",
+  "id": "01933b8e-7c3a-7d2e-9f4a-3c2b1a0e9d8c",
+  "position": 4182,
+  "workflow_id": "01933b8e-6a10-7b4c-8e2d-1f0a9b8c7d6e",
+  "event_type": "ActivityCompleted",
+  "activity_key": "summarize",
+  "payload": {"outputs": {"result": "..."}},
+  "timestamp": "2026-11-08T10:00:05Z",
+  "iteration": null
+}
+```
+
+- `id` is the replay checkpoint: on reconnect, pass the last `id` received as
+  `from_event_id`. The replay resolves it to the event's place in the stream
+  and returns the events after it in stream order, including any event that
+  committed after that one was delivered, so nothing is missed. An unknown
+  `from_event_id` replays nothing; the connection stays open and streams live
+  events.
+- `position` is the event's insert order in the stream. It is informational;
+  events arrive in stream order, which follows committing transactions and is
+  not strictly `position` order.
+- Replayed and live events can overlap: deduplicate by `id`.
+
+Other messages: `{"type": "ping", "timestamp": ...}` every 30 seconds, and
+`{"type": "error", "code": 1001 | 1011 | 4002, "message": ..., "timestamp": ...}`
+before the server closes the connection (shutdown, internal error, client too
+slow).
+
+---
+
 ## Cache Management
 
 ### Invalidate Cache Key
@@ -1282,16 +1332,17 @@ All endpoints return structured error responses:
 
 ### Public Routes (No Authentication)
 
-| Method | Path                      | Description             |
-|--------|---------------------------|-------------------------|
-| GET    | /health                   | Liveness check          |
-| GET    | /health/ready             | Readiness check         |
-| GET    | /health/pool              | Connection pool metrics |
-| GET    | /api/v1/info              | Service information     |
-| POST   | /api/v1/oauth/token       | Obtain access token     |
-| GET    | /api/v1/activities/:id/ws | WebSocket streaming     |
-| GET    | /api/v1/docs              | API documentation       |
-| GET    | /api/v1/openapi.json      | OpenAPI specification   |
+| Method | Path                       | Description                       |
+|--------|----------------------------|-----------------------------------|
+| GET    | /health                    | Liveness check                    |
+| GET    | /health/ready              | Readiness check                   |
+| GET    | /health/pool               | Connection pool metrics           |
+| GET    | /api/v1/info               | Service information               |
+| POST   | /api/v1/oauth/token        | Obtain access token               |
+| GET    | /api/v1/activities/:id/ws  | WebSocket streaming               |
+| GET    | /api/v1/workflow_events/ws | Workflow event stream (WebSocket) |
+| GET    | /api/v1/docs               | API documentation                 |
+| GET    | /api/v1/openapi.json       | OpenAPI specification             |
 
 ### Protected Routes (Require JWT)
 

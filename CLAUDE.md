@@ -95,12 +95,13 @@ All external infrastructure dependencies are wrapped in service interfaces:
 
 1. **AuthenticationService**: JWT token issuance and validation (PostgresAuthService)
 2. **ActivityQueue**: Activity scheduling and worker polling (PostgresQueue)
-3. **EventSource**: Workflow event publish/subscribe (PostgresEventSource with polling)
+3. **EventSource**: Workflow event publish/subscribe (PostgresEventSource: polling from a durable commit-safe cursor, woken by NOTIFY)
 4. **WorkflowStorage**: Artifact/large file storage (PostgresStorage using Large Objects)
 
 **MVP Implementation**: All interfaces use PostgreSQL
-- **EventSource uses polling** (not LISTEN/NOTIFY) with adaptive backoff (10ms-5s)
-  - **Critical**: LISTEN/NOTIFY cannot guarantee event delivery - polling ensures no missed events
+- **EventSource delivers by polling** a durable `(tx, position)` cursor with `tx < pg_snapshot_xmin(...)`, so no event can commit behind a cursor; adaptive backoff (50ms-1s timer only, 5s cap with the wake)
+  - **LISTEN/NOTIFY is a wake-up only**: a statement trigger notifies on commit, consumers poll from their cursor on every wake *and* on the timer
+  - **Critical**: LISTEN/NOTIFY cannot guarantee event delivery (lost on connection drop, no backlog) - the poll is the only data path
   - Workflow orchestration requires guaranteed delivery (missed events = hung workflows)
   - Only polling and logical replication provide delivery guarantees
 - **Auth uses custom JWT provider** (not external IdP like Auth0/Okta)
@@ -113,7 +114,7 @@ All external infrastructure dependencies are wrapped in service interfaces:
 - WorkflowStorage → S3-compatible storage, Filesystem
 
 **Never Use**:
-- ❌ LISTEN/NOTIFY for workflow events - no delivery guarantees, events can be lost
+- ❌ LISTEN/NOTIFY as the delivery path for workflow events; it is a wake-up only, and every consumer must be correct with it disabled
 
 ### Configuration
 

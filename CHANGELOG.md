@@ -7,6 +7,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Workflow events wake consumers on commit (`LISTEN`/`NOTIFY`)**: a
+  statement trigger on `workflow_events` notifies the `workflow_events`
+  channel when an insert commits, and each process's orchestrator and
+  WebSocket broadcast poller poll as soon as it arrives instead of waiting
+  out the backoff timer (previously up to 1s when idle). The notification is
+  a wake-up only: every consumer still reads from its durable cursor, on every
+  wake and on the timer, so a lost notification only delays an event. New
+  `KRUXIAFLOW_EVENT_WAKE` / `--event-wake` (`notify` default, `poll` for the
+  timer alone) on `serve`, `api` and `orchestrator`; if `LISTEN` fails
+  (e.g. a transaction-mode connection pooler) the process logs a warning and
+  falls back to polling. Measured against 0.9.1 (`benchmarks/README.md`,
+  2026-11-08): on a quiet system the orchestrator picks up the first event
+  after idle in about 6 ms instead of 456 ms on average (up to 1 s), and
+  follow-up events in about 2 ms instead of 25 ms; at 10 concurrent workflows
+  it reacts in 7 ms instead of 41 ms. The benchmark suite runs 31-38% faster
+  (Sequential-5 15.4 → 21.3 wf/s, High-Concurrency-3 110 → 150 wf/s) with
+  P50 latency down 28-32%, and all workflows complete.
+- **WebSocket event messages carry `position`** (the event's insert order),
+  next to `id`. Clients keep deduplicating by `id`; `from_event_id` is
+  unchanged.
+- **Guard and repair for a database moved to a new cluster**: the event cursor
+  orders by transaction id, and that counter belongs to the PostgreSQL
+  cluster. After a `pg_dump`/restore or a logical-replication migration the
+  stored ids are ahead of the new cluster's counter and events would silently
+  stop being delivered. `serve`, `api` and `orchestrator` now detect this at
+  startup and refuse to run (a running process logs it at `error` once a
+  minute while idle, and `/health/ready` returns 503 with the reason), and
+  the new `kruxiaflow rebase-events` command
+  renumbers the stored events and cursors, keeping the stream order and every
+  consumer's place in it. `pg_upgrade`, replica promotion and physical
+  point-in-time recovery keep the counter and need nothing.
+- **Stalled-stream warning**: when a poll finds nothing and a writing
+  transaction has been open for more than 30s, the event source logs it
+  (once a minute) with the backend `pid`, since such a transaction holds back
+  event delivery until it ends.
+
+### Changed
+
+- **Commit-safe event cursor replaces the 0.8.1 visibility-grace window**:
+  `workflow_events` gains `tx` (the inserting transaction, `xid8`) and
+  `position` (insert order), and consumers read
+  `(tx, position) > cursor AND tx < pg_snapshot_xmin(pg_current_snapshot())`
+  ordered by `(tx, position)`. Every transaction below that xmin has finished,
+  so no event can become visible behind a stored cursor. That makes delivery
+  correct by construction and removes the 500ms grace window, its in-memory
+  seen-set, its dependence on the orchestrator host's clock, and its
+  throughput knee near 2,000 events/sec (every poll used to re-read the last
+  500ms of events). The WebSocket broadcast poller, the reconnection replay
+  (`from_event_id`) and the orchestrator health check use the same cursor:
+  before, the poller and the replay had no grace window, so a late-committing
+  event could be missing from a live stream or a replay. Trade-off: one
+  long-running writing transaction anywhere on the Postgres instance delays
+  event delivery until it ends.
+- **Consumer loops drain, then wait**: after a non-empty batch the
+  orchestrator and broadcast poller poll again at once; after an empty poll
+  they wait for a wake or the backoff timer. The idle cap is 5s with the
+  wake and stays 1s with `--event-wake poll`; an explicit
+  `KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX_MS` applies to both.
+- **`EventSource` API**: `update_position` takes an `EventCursor` (from
+  `WorkflowEvent::cursor()`) instead of an event id; `WorkflowEvent` gains
+  `position` and `tx`; `EventSource::wake()` (default `None`) exposes the
+  wake signal.
+
+### Upgrading
+
+- **Coordinated upgrade required.** Migration `20261108000001` replaces
+  `workflow_event_consumers.last_event_id` with `(last_tx, last_position)`,
+  backfilled so no consumer replays history, so old and new binaries cannot
+  run side by side. Stop the orchestrator and API, run `kruxiaflow migrate`,
+  start the new binaries.
+- **The migration locks `workflow_events`** (`ACCESS EXCLUSIVE`) while it
+  numbers every existing row and builds two indexes: seconds for a few
+  million rows; run it in the upgrade's maintenance window on larger tables.
+- **After a `pg_dump`/restore or logical-replication migration**, run
+  `kruxiaflow rebase-events` before starting the services (they refuse to
+  start until then).
+- **`LISTEN` needs a session connection.** Behind PgBouncer in transaction
+  mode, point the processes at the database directly to get the wake;
+  otherwise they fall back to polling.
+
+### Fixed
+
+- **Inserts no longer fail on a connection after a rollback (PostgreSQL 17)**:
+  the `uuidv7()` implementation used before PostgreSQL 18 keeps its state in
+  session variables. If a connection's first `uuidv7()` call was in a
+  transaction that rolled back, every later call on that pooled connection
+  failed with `invalid input syntax for type bigint: ""` until the connection
+  closed, so any insert relying on a `uuidv7()` default failed whenever it
+  landed there. PostgreSQL 18+ (native `uuidv7()`) was not affected.
+- **Email tests no longer race under cargo-nextest**: the tests that read the
+  shared Mailpit inbox were marked `#[serial]`, which nextest's
+  process-per-test model does not honor; `.config/nextest.toml` now puts them
+  in a single-threaded test group.
+- **`kruxiaflow profile` explains the real event poll query**; the
+  `scripts/monitor_performance.sh` consumer-position log read a table that
+  no longer exists and now reads `workflow_event_consumers.last_position`.
+
 ## [0.9.1] - 2026-11-06
 
 ### Fixed

@@ -12,7 +12,8 @@ use super::{
 };
 use crate::cost::{ActivityCostRecord, CostCalculator, CostTracker, UsageEntry};
 use crate::events::{
-    EventSource, NewWorkflowEvent, WorkflowEvent, WorkflowEventType, WorkflowStatus,
+    EventCursor, EventSource, NewWorkflowEvent, Wake, WorkflowEvent, WorkflowEventType,
+    WorkflowStatus,
 };
 use crate::queue::{Activity, ActivityQueue, StaleActivityAction};
 use crate::subscription::{ExpiredSubscription, NewSubscription, SubscriptionService};
@@ -44,51 +45,27 @@ macro_rules! profile_span {
     };
 }
 
-/// How long a freshly assigned event id may remain invisible to readers.
-///
-/// Event ids are UUIDv7, assigned when the INSERT executes — but readers see
-/// rows in COMMIT order. Under load, an event can commit a few milliseconds
-/// after a poll has already read past its id; a cursor advanced beyond it
-/// would strand it forever (a lost completion = a workflow hung until the
-/// workflow timeout — observed live in the benchmark suite at 100-way
-/// concurrency). The durable cursor therefore never advances past
-/// `now - EVENT_VISIBILITY_GRACE`; events younger than the grace window are
-/// re-polled until the window passes them (an in-memory seen-set keeps them
-/// from being reprocessed in this process, and event processing is
-/// idempotent at-least-once for replays from elsewhere).
-///
-/// Sizing: the value must exceed the worst-case lag between an event INSERT
-/// starting to execute (id assigned) and its commit becoming visible —
-/// normally single-digit milliseconds for an autocommit single-row INSERT;
-/// 500ms covers checkpoint/fsync stalls with a wide margin. The trade-off is
-/// a throughput knee: sustained event rates above poll-LIMIT-per-grace
-/// (1000 per 0.5s = 2000 events/sec, roughly 2x the MVP target) would delay
-/// processing of new events by up to the grace period, because the
-/// LIMIT-bounded fetch window trails the pinned cursor. Post-MVP, an
-/// xid-ordered cursor column can remove the window entirely.
-const EVENT_VISIBILITY_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
-
-/// Smallest UUIDv7 whose embedded timestamp is `ts_ms`: every real UUIDv7
-/// generated at or after that millisecond compares greater.
-fn uuidv7_lower_bound(ts_ms: u64) -> Uuid {
-    let mut bytes = [0u8; 16];
-    bytes[0..6].copy_from_slice(&ts_ms.to_be_bytes()[2..8]);
-    bytes[6] = 0x70; // version 7, zero rand_a
-    bytes[8] = 0x80; // RFC 4122 variant, zero rand_b
-    Uuid::from_bytes(bytes)
-}
-
-/// The highest event id the durable cursor may advance to right now
-fn cursor_horizon() -> Uuid {
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-    uuidv7_lower_bound(now_ms.saturating_sub(EVENT_VISIBILITY_GRACE.as_millis() as u64))
+/// Resolves when `token` is cancelled; never, without a token
+async fn cancelled(token: &Option<CancellationToken>) {
+    match token {
+        Some(token) => token.cancelled().await,
+        None => std::future::pending().await,
+    }
 }
 
 /// Run the orchestrator main loop
 /// Polls for events, evaluates dependencies, schedules activities
+///
+/// The loop drains, then waits: after a non-empty batch it polls again at
+/// once (the poll LIMIT bounds each iteration); after an empty poll it waits
+/// for the event source's wake signal or the backoff timer, whichever comes
+/// first. The wake only shortens the wait: every wake and every timer tick
+/// runs the same catch-up poll from the durable cursor, so the loop is
+/// correct without it.
+///
+/// Delivery is at-least-once: a crash between processing and the cursor
+/// write replays the batch, and orchestrators sharing a consumer id race, so
+/// every event handler is replay-idempotent.
 ///
 /// # Arguments
 /// * `event_source` - Event source for polling workflow events
@@ -109,25 +86,25 @@ pub async fn run_orchestrator(
     config: OrchestratorConfig,
     shutdown_token: Option<CancellationToken>,
 ) -> Result<()> {
+    let mut wake = event_source.wake();
+    let poll_interval_max = config.effective_poll_interval_max(wake.is_some());
     let mut backoff = AdaptiveBackoff::new(
         config.poll_interval_min,
-        config.poll_interval_max,
+        poll_interval_max,
         config.backoff_multiplier,
     );
 
     // Track event processing failures to detect poison messages
     let mut event_failures: HashMap<Uuid, u32> = HashMap::new();
 
-    // Events already processed by this loop whose ids are still inside the
-    // visibility-grace window (the durable cursor hasn't passed them yet, so
-    // polls keep returning them). Pruned once the horizon moves past them.
-    let mut processed_recent: std::collections::BTreeSet<Uuid> = std::collections::BTreeSet::new();
-
     tracing::info!(
-        "Orchestrator starting with consumer_id={}, workflow_timeout={}s, max_event_retries={}",
+        "Orchestrator starting with consumer_id={}, workflow_timeout={}s, max_event_retries={}, \
+         event_wake={}, poll_interval_max={}ms",
         CONSUMER_ID,
         config.workflow_timeout.as_secs(),
-        MAX_EVENT_PROCESSING_RETRIES
+        MAX_EVENT_PROCESSING_RETRIES,
+        if wake.is_some() { "notify" } else { "poll" },
+        poll_interval_max.as_millis()
     );
 
     // Spawn background task to check for stuck workflows and stale activities
@@ -160,31 +137,35 @@ pub async fn run_orchestrator(
         let events = event_source.poll(CONSUMER_ID).await?;
 
         if events.is_empty() {
-            // No events - increase backoff
-            backoff.increase();
+            // Caught up: wait for a wake or the backoff timer
             let interval = backoff.current();
-            tracing::trace!("No events found, backoff interval: {:?}", interval);
-            tokio::time::sleep(interval).await;
+            backoff.increase();
+            tracing::trace!("No events found, waiting up to {:?}", interval);
+            match wake.as_mut() {
+                Some(wake) => tokio::select! {
+                    woken = wake.wait(interval) => {
+                        if woken == Wake::Woken {
+                            backoff.reset();
+                        }
+                    }
+                    _ = cancelled(&shutdown_token) => {}
+                },
+                None => tokio::select! {
+                    _ = tokio::time::sleep(interval) => {}
+                    _ = cancelled(&shutdown_token) => {}
+                },
+            }
             continue;
         }
 
         tracing::trace!("Polled {} events", events.len());
 
-        // The durable cursor never advances past this horizon (see
-        // EVENT_VISIBILITY_GRACE); ids at or below it can be pruned from the
-        // seen-set because polls can no longer return them.
-        let horizon = cursor_horizon();
-        processed_recent = processed_recent.split_off(&horizon);
-
-        // Any event actually processed this batch (vs. re-polled seen tail)?
-        let mut any_new = false;
-        // Highest id of the CONTIGUOUS resolved prefix of this id-ordered
+        // Cursor of the CONTIGUOUS resolved prefix of this cursor-ordered
         // batch. The durable cursor only advances through this prefix: a
-        // failed event pins it (so the retry-on-next-poll actually happens —
-        // previously a later success in the same batch advanced the cursor
-        // past the failure, silently dropping it), and the horizon caps it
-        // (so a late-committing event can never be stranded behind it).
-        let mut resolved_prefix: Option<Uuid> = None;
+        // failed event pins it, so the next poll returns that event again for
+        // retry (a later success in the same batch must not carry the cursor
+        // past the failure).
+        let mut resolved_prefix: Option<EventCursor> = None;
         let mut prefix_intact = true;
 
         // Process each event
@@ -196,16 +177,6 @@ pub async fn run_orchestrator(
                 tracing::info!("Shutdown requested during event processing, stopping");
                 return Ok(());
             }
-
-            // Already processed in this loop; still re-polled only because the
-            // cursor is pinned behind the visibility-grace horizon
-            if processed_recent.contains(&event.id) {
-                if prefix_intact {
-                    resolved_prefix = Some(event.id);
-                }
-                continue;
-            }
-            any_new = true;
 
             if let Err(e) = process_workflow_event(
                 event,
@@ -247,9 +218,8 @@ pub async fn run_orchestrator(
                     let _ = publish_failure_for_poison_event(event, &event_source, &e.to_string())
                         .await;
 
-                    processed_recent.insert(event.id);
                     if prefix_intact {
-                        resolved_prefix = Some(event.id);
+                        resolved_prefix = Some(event.cursor());
                     }
                     event_failures.remove(&event.id);
                 } else {
@@ -260,33 +230,29 @@ pub async fn run_orchestrator(
             } else {
                 // Success - clear failure count and mark resolved
                 event_failures.remove(&event.id);
-                processed_recent.insert(event.id);
                 if prefix_intact {
-                    resolved_prefix = Some(event.id);
+                    resolved_prefix = Some(event.cursor());
                 }
             }
         }
 
-        // One durable cursor write per batch, through the resolved prefix,
-        // capped at the (re-computed — time has passed) visibility horizon.
-        // The SQL update is forward-only, so a capped value never regresses.
-        if let Some(id) = resolved_prefix {
-            event_source
-                .update_position(CONSUMER_ID, id.min(cursor_horizon()))
-                .await?;
+        // One durable cursor write per batch, through the resolved prefix.
+        // The SQL update is forward-only.
+        if let Some(cursor) = resolved_prefix {
+            event_source.update_position(CONSUMER_ID, cursor).await?;
         }
 
-        // Reset backoff only on real progress: a batch that is entirely the
-        // already-seen tail inside the grace window is idle, not work
-        if any_new {
-            backoff.reset();
-        } else {
-            backoff.increase();
-        }
+        backoff.reset();
 
-        // Always sleep for at least minimum interval to avoid spinning
-        // This caps polling rate at ~1000/sec (with 1ms min) even under heavy load
-        tokio::time::sleep(backoff.current()).await;
+        if !prefix_intact {
+            // A failed event will be returned again by the next poll; space
+            // the retries instead of re-polling at once
+            tokio::select! {
+                _ = tokio::time::sleep(config.poll_interval_min) => {}
+                _ = cancelled(&shutdown_token) => {}
+            }
+        }
+        // Otherwise drain: poll again at once
     }
 }
 
@@ -1009,9 +975,8 @@ pub async fn process_workflow_event(
         if event.event_type == WorkflowEventType::WorkflowCreated {
             // Replay guard: WorkflowCreated initializes state, and re-running
             // it would WIPE activity progress back to not_scheduled (event
-            // delivery is at-least-once: crash replay, the cursor's
-            // visibility-grace window, multiple orchestrators sharing a
-            // consumer). If state is already initialized, this event was
+            // delivery is at-least-once: crash replay, multiple
+            // orchestrators sharing a consumer). If state is already initialized, this event was
             // fully processed — its queue inserts autocommit before the
             // state save, so nothing is lost by skipping.
             if let Ok(existing) = load_materialized_state(&mut tx, event.workflow_id).await
@@ -1154,9 +1119,9 @@ pub async fn process_workflow_event(
     }
 
     // 2.5. Duplicate/replay guard for completions (mirrors the ActivityFailed
-    // guard above). Event delivery is at-least-once — crash replay, the
-    // cursor's visibility-grace window, and multiple orchestrators sharing a
-    // consumer position can all deliver a completion twice — and the
+    // guard above). Event delivery is at-least-once — crash replay and
+    // multiple orchestrators sharing a consumer position can both deliver a
+    // completion twice — and the
     // iteration management and cost recording below must run exactly once.
     // apply_event_to_state has its own internal guard, but it cannot protect
     // these two side effects.
@@ -3371,7 +3336,7 @@ mod tests {
         impl EventSource for EventSrc {
             async fn publish(&self, event: NewWorkflowEvent) -> std::result::Result<(), crate::events::EventError>;
             async fn poll(&self, consumer_id: &str) -> std::result::Result<Vec<WorkflowEvent>, crate::events::EventError>;
-            async fn update_position(&self, consumer_id: &str, last_event_id: Uuid) -> std::result::Result<(), crate::events::EventError>;
+            async fn update_position(&self, consumer_id: &str, cursor: EventCursor) -> std::result::Result<(), crate::events::EventError>;
         }
     }
 
@@ -3412,6 +3377,8 @@ mod tests {
     ) -> WorkflowEvent {
         WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 1,
+            tx: 1,
             workflow_id: Uuid::now_v7(),
             event_type,
             activity_key: activity_key.map(|k| k.to_string()),
@@ -4057,6 +4024,7 @@ mod tests {
         let config = OrchestratorConfig {
             poll_interval_min: Duration::from_millis(10),
             poll_interval_max: Duration::from_millis(50),
+            wake_poll_interval_max: Duration::from_millis(50),
             backoff_multiplier: 1.5,
             workflow_timeout: Duration::from_secs(3600),
             timeout_check_interval: Duration::from_millis(50),
@@ -4106,6 +4074,7 @@ mod tests {
         let config = OrchestratorConfig {
             poll_interval_min: Duration::from_millis(10),
             poll_interval_max: Duration::from_millis(50),
+            wake_poll_interval_max: Duration::from_millis(50),
             backoff_multiplier: 1.5,
             workflow_timeout: Duration::from_secs(3600),
             timeout_check_interval: Duration::from_millis(10),
@@ -4151,6 +4120,7 @@ mod tests {
         let config = OrchestratorConfig {
             poll_interval_min: Duration::from_millis(10),
             poll_interval_max: Duration::from_millis(50),
+            wake_poll_interval_max: Duration::from_millis(50),
             backoff_multiplier: 1.5,
             workflow_timeout: Duration::from_secs(3600),
             timeout_check_interval: Duration::from_secs(60),
@@ -4199,6 +4169,7 @@ mod tests {
         let config = OrchestratorConfig {
             poll_interval_min: Duration::from_millis(1),
             poll_interval_max: Duration::from_millis(10),
+            wake_poll_interval_max: Duration::from_millis(10),
             backoff_multiplier: 1.5,
             workflow_timeout: Duration::from_secs(3600),
             timeout_check_interval: Duration::from_secs(60),
@@ -4250,6 +4221,7 @@ mod tests {
         let config = OrchestratorConfig {
             poll_interval_min: Duration::from_millis(1),
             poll_interval_max: Duration::from_millis(10),
+            wake_poll_interval_max: Duration::from_millis(10),
             backoff_multiplier: 1.5,
             workflow_timeout: Duration::from_secs(3600),
             timeout_check_interval: Duration::from_secs(60),

@@ -726,6 +726,8 @@ mod tests {
 
         let event = WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id: state.workflow_id,
             event_type: WorkflowEventType::ActivityWaiting,
             activity_key: Some("step1".to_string()),
@@ -770,6 +772,8 @@ mod tests {
 
         let event = WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id: state.workflow_id,
             event_type: WorkflowEventType::ActivitySignaled,
             activity_key: Some("step1".to_string()),
@@ -814,6 +818,8 @@ mod tests {
 
         let event = WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id: state.workflow_id,
             event_type: WorkflowEventType::ActivitySignaled,
             activity_key: Some("step1".to_string()),
@@ -857,6 +863,8 @@ mod tests {
 
         let event = WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id: state.workflow_id,
             event_type: WorkflowEventType::ActivitySignaled,
             activity_key: Some("step1".to_string()),
@@ -902,6 +910,8 @@ mod tests {
 
         let event = WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id: state.workflow_id,
             event_type: WorkflowEventType::ActivityFailed,
             activity_key: Some("step1".to_string()),
@@ -946,6 +956,8 @@ mod tests {
 
         let event = WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id: state.workflow_id,
             event_type: WorkflowEventType::ActivityCompleted,
             activity_key: Some("step1".to_string()),
@@ -994,6 +1006,8 @@ mod tests {
 
         let event = WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id: state.workflow_id,
             event_type: WorkflowEventType::ActivityCompleted,
             activity_key: Some("step1".to_string()),
@@ -1040,6 +1054,8 @@ mod tests {
 
         let event = WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id: state.workflow_id,
             event_type: WorkflowEventType::ActivityCompleted,
             activity_key: Some("step1".to_string()),
@@ -1072,6 +1088,8 @@ mod tests {
 
         let event = WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id: state.workflow_id,
             event_type: WorkflowEventType::WorkflowCompleted,
             activity_key: None,
@@ -1098,6 +1116,8 @@ mod tests {
 
         let event = WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id: state.workflow_id,
             event_type: WorkflowEventType::WorkflowFailed,
             activity_key: None,
@@ -1124,6 +1144,8 @@ mod tests {
 
         let event = WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id: state.workflow_id,
             event_type: WorkflowEventType::WorkflowUpdated,
             activity_key: None,
@@ -1151,6 +1173,8 @@ mod tests {
 
         let event = WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id: state.workflow_id,
             event_type: WorkflowEventType::WorkflowCreated,
             activity_key: None,
@@ -1193,6 +1217,8 @@ mod tests {
 
         let event = WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id: state.workflow_id,
             event_type: WorkflowEventType::ActivityScheduled,
             activity_key: Some("step1".to_string()),
@@ -1221,6 +1247,8 @@ mod tests {
 
         let event = WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id: state.workflow_id,
             event_type: WorkflowEventType::ActivityScheduled,
             activity_key: None, // Missing!

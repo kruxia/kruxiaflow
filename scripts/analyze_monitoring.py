@@ -151,15 +151,17 @@ def analyze_consumer_positions(data: List[Dict]) -> Dict:
             consumers[consumer_id] = []
         consumers[consumer_id].append({
             'timestamp': row['timestamp'],
-            'last_event_id': int(row['last_event_id'])
+            'last_position': int(row['last_position'])
         })
 
     # Analyze each consumer
     consumer_analysis = {}
     for consumer_id, positions in consumers.items():
-        event_ids = [p['last_event_id'] for p in positions]
-        initial = event_ids[0]
-        final = event_ids[-1]
+        # Positions are insert order; differences approximate events
+        # processed (conflicting inserts leave small gaps)
+        event_positions = [p['last_position'] for p in positions]
+        initial = event_positions[0]
+        final = event_positions[-1]
         events_processed = final - initial
 
         consumer_analysis[consumer_id] = {

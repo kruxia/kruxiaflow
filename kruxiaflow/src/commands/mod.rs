@@ -5,6 +5,7 @@ pub mod login;
 pub mod migrate;
 pub mod orchestrator;
 pub mod profile;
+pub mod rebase_events;
 pub mod seed_client;
 pub mod seed_llm;
 pub mod seed_user;

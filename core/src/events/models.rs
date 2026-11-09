@@ -13,10 +13,31 @@ pub struct NewWorkflowEvent {
     pub iteration: Option<i32>,
 }
 
+/// A consumer's read position in the event stream.
+///
+/// Events are read in `(tx, position)` order: `tx` is the inserting
+/// transaction's id (`xid8`, as `i64`), `position` the table's insert order.
+/// Only events whose transaction is below the instance's oldest in-progress
+/// transaction are returned, so no event can become visible behind a cursor
+/// (see `PostgresEventSource::poll`).
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+pub struct EventCursor {
+    pub tx: i64,
+    pub position: i64,
+}
+
 /// Event returned from polling (includes database-generated fields)
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct WorkflowEvent {
     pub id: Uuid,
+    /// Insert order within `workflow_events` (dense, monotonic)
+    #[serde(default)]
+    pub position: i64,
+    /// Id of the transaction that inserted the event (`xid8` as `i64`)
+    #[serde(default)]
+    pub tx: i64,
     pub workflow_id: Uuid,
     pub event_type: WorkflowEventType,
     pub activity_key: Option<String>,
@@ -24,6 +45,16 @@ pub struct WorkflowEvent {
     pub timestamp: DateTime<Utc>,
     #[serde(default)]
     pub iteration: Option<i32>,
+}
+
+impl WorkflowEvent {
+    /// The cursor value just past this event
+    pub fn cursor(&self) -> EventCursor {
+        EventCursor {
+            tx: self.tx,
+            position: self.position,
+        }
+    }
 }
 
 /// Workflow definition structure

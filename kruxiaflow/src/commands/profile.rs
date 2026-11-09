@@ -408,20 +408,24 @@ async fn get_connection_stats(pool: &PgPool) -> Result<Vec<ConnectionStats>> {
 /// Run EXPLAIN ANALYZE on hot path queries
 async fn explain_hot_paths(pool: &PgPool) -> Result<()> {
     // Event poll query explanation - scalar subquery pattern
-    // The scalar subquery is evaluated ONCE and used as a constant in the Index Condition
+    // The scalar subqueries are evaluated ONCE and used as constants in the
+    // index condition on idx_events_consumer_poll (tx, position); only events
+    // from transactions below the oldest in-progress one are returned
     println!("\n📊 Event Poll Query (orchestrator hot path):");
     println!("{:-<80}", "");
 
     let explain_result = sqlx::query_scalar!(
         r#"
         EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT)
-        SELECT id, workflow_id, event_type, activity_key, payload, timestamp, iteration
+        SELECT id, position, tx, workflow_id, event_type, activity_key, payload, timestamp, iteration
         FROM workflow_events
-        WHERE id > COALESCE(
-            (SELECT last_event_id FROM workflow_event_consumers WHERE consumer_id = 'explain_test'),
-            '00000000-0000-0000-0000-000000000000'::uuid
-        )
-        ORDER BY id ASC
+        WHERE (tx, position) > (
+                COALESCE((SELECT last_tx FROM workflow_event_consumers WHERE consumer_id = 'explain_test'),
+                         '0'::xid8),
+                COALESCE((SELECT last_position FROM workflow_event_consumers WHERE consumer_id = 'explain_test'),
+                         0))
+          AND tx < pg_snapshot_xmin(pg_current_snapshot())
+        ORDER BY tx, position
         LIMIT 100
         "#
     )

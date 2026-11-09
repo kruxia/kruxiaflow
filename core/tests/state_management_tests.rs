@@ -23,6 +23,8 @@ fn test_apply_workflow_created_event() {
 
     let event = WorkflowEvent {
         id: Uuid::now_v7(),
+        position: 0,
+        tx: 0,
         workflow_id,
         event_type: WorkflowEventType::WorkflowCreated,
         activity_key: None,
@@ -69,6 +71,8 @@ fn test_apply_activity_scheduled_event() {
 
     let event = WorkflowEvent {
         id: Uuid::now_v7(),
+        position: 0,
+        tx: 0,
         workflow_id,
         event_type: WorkflowEventType::ActivityScheduled,
         activity_key: Some("activity1".to_string()),
@@ -117,6 +121,8 @@ fn test_apply_activity_completed_event() {
 
     let event = WorkflowEvent {
         id: Uuid::now_v7(),
+        position: 0,
+        tx: 0,
         workflow_id,
         event_type: WorkflowEventType::ActivityCompleted,
         activity_key: Some("activity1".to_string()),
@@ -173,6 +179,8 @@ fn test_apply_activity_failed_event() {
 
     let event = WorkflowEvent {
         id: Uuid::now_v7(),
+        position: 0,
+        tx: 0,
         workflow_id,
         event_type: WorkflowEventType::ActivityFailed,
         activity_key: Some("activity1".to_string()),
@@ -204,6 +212,8 @@ fn test_apply_workflow_completed_event() {
 
     let event = WorkflowEvent {
         id: Uuid::now_v7(),
+        position: 0,
+        tx: 0,
         workflow_id,
         event_type: WorkflowEventType::WorkflowCompleted,
         activity_key: None,
@@ -232,6 +242,8 @@ fn test_apply_workflow_failed_event() {
 
     let event = WorkflowEvent {
         id: Uuid::now_v7(),
+        position: 0,
+        tx: 0,
         workflow_id,
         event_type: WorkflowEventType::WorkflowFailed,
         activity_key: None,
@@ -299,6 +311,8 @@ fn test_apply_multiple_events_sequential() {
     let events = vec![
         WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id,
             event_type: WorkflowEventType::ActivityScheduled,
             activity_key: Some("activity1".to_string()),
@@ -308,6 +322,8 @@ fn test_apply_multiple_events_sequential() {
         },
         WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id,
             event_type: WorkflowEventType::ActivityCompleted,
             activity_key: Some("activity1".to_string()),
@@ -317,6 +333,8 @@ fn test_apply_multiple_events_sequential() {
         },
         WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id,
             event_type: WorkflowEventType::ActivityScheduled,
             activity_key: Some("activity2".to_string()),
@@ -326,6 +344,8 @@ fn test_apply_multiple_events_sequential() {
         },
         WorkflowEvent {
             id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
             workflow_id,
             event_type: WorkflowEventType::ActivityCompleted,
             activity_key: Some("activity2".to_string()),
@@ -379,6 +399,8 @@ fn test_apply_workflow_updated_event() {
 
     let event = WorkflowEvent {
         id: Uuid::now_v7(),
+        position: 0,
+        tx: 0,
         workflow_id,
         event_type: WorkflowEventType::WorkflowUpdated,
         activity_key: None,
@@ -409,6 +431,8 @@ fn test_apply_activity_scheduled_event_nonexistent_activity() {
 
     let event = WorkflowEvent {
         id: Uuid::now_v7(),
+        position: 0,
+        tx: 0,
         workflow_id,
         event_type: WorkflowEventType::ActivityScheduled,
         activity_key: Some("nonexistent_activity".to_string()),
@@ -440,6 +464,8 @@ fn test_apply_activity_completed_event_nonexistent_activity() {
 
     let event = WorkflowEvent {
         id: Uuid::now_v7(),
+        position: 0,
+        tx: 0,
         workflow_id,
         event_type: WorkflowEventType::ActivityCompleted,
         activity_key: Some("nonexistent_activity".to_string()),
@@ -471,6 +497,8 @@ fn test_apply_activity_failed_event_nonexistent_activity() {
 
     let event = WorkflowEvent {
         id: Uuid::now_v7(),
+        position: 0,
+        tx: 0,
         workflow_id,
         event_type: WorkflowEventType::ActivityFailed,
         activity_key: Some("nonexistent_activity".to_string()),
