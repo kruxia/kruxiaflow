@@ -76,13 +76,15 @@ docker-compose down
 Measured on the reference hardware (Apple Silicon, Docker Desktop; July 2026):
 
 - **Kruxia Flow**: ~135-150 wf/sec high-concurrency (bound by the
-  orchestrator processing events one at a time); ~80 wf/sec Sequential-5 and
-  ~42 wf/sec Parallel-10. From 0.10.0; through 0.9.x it was ~85-110
+  orchestrator processing events one at a time); ~80-90 wf/sec Sequential-5
+  and ~42-44 wf/sec Parallel-10. From 0.10.0; through 0.9.x it was ~85-110
   high-concurrency and ~15-20 on the other two, which were bound by poll
   timers (see the two 2026-11-08 result sets)
-- **Temporal**: ~13-66 wf/sec (high run-to-run variance on this host)
+- **Temporal**: ~12-66 wf/sec (high run-to-run variance on this host)
 - **Airflow**: ~2-11 wf/sec (batch-oriented, not optimized for throughput)
-- **Speedup**: ~1.5-2x vs Temporal average, ~10x vs Airflow average
+- **Speedup**: from 0.10.0, ~5x vs Temporal on Sequential-5 and ~2.5x on the
+  other two scenarios (it was ~1.2-2x through 0.9.x); Airflow has not been
+  rerun since 0.8.0, when Kruxia Flow was ~7-12x faster
 - **Success rate**: 100% on every scenario is part of the pass criteria — a
   single hung workflow is an engine bug, not noise (see 2026-07-20 notes)
 
@@ -144,6 +146,82 @@ amd64-only — build it locally before running
 or the py-std services fail to start.
 
 ## Results
+
+### 2026-11-08 (0.10.0 against Temporal)
+
+Kruxia Flow 0.10.0 and Temporal, each alone on the same host in one session
+(Apple Silicon, Docker Desktop, the host doing other work throughout). Two
+runs of the harness per platform, each a discarded warm-up and three measured
+passes on a fresh stack: six passes per figure. Kruxia Flow is the released
+build from the section below (PostgreSQL 18, built-in Rust worker). Temporal
+is `temporalio/auto-setup:1.24.2` on PostgreSQL 13 with its default settings,
+as in the earlier comparisons, with a Python SDK 1.35.0 worker in the
+benchmark process.
+
+**Every workflow completed on both platforms** (2,700 each).
+
+Standard suite: median of six passes, with the range of throughput (wf/s) and
+latency in ms:
+
+| Scenario           | Metric     | Kruxia Flow 0.10.0  | Temporal 1.24.2  | Kruxia Flow vs Temporal |
+|--------------------|------------|---------------------|------------------|-------------------------|
+| Sequential-5       | Throughput | 89.9 (86.2-91.1)    | 17.6 (13.3-18.0) | 5.1x                    |
+| Sequential-5       | P50        | 108                 | 553              | 5.1x lower              |
+| Sequential-5       | P95        | 139                 | 696              | 5.0x lower              |
+| Parallel-10        | Throughput | 44.1 (39.9-45.0)    | 18.5 (12.1-25.9) | 2.4x                    |
+| Parallel-10        | P50        | 216                 | 380              | 1.8x lower              |
+| Parallel-10        | P95        | 272                 | 512              | 1.9x lower              |
+| High-Concurrency-3 | Throughput | 139.1 (125.1-144.6) | 55.9 (36.7-65.6) | 2.5x                    |
+| High-Concurrency-3 | P50        | 642                 | 802              | 1.2x lower              |
+| High-Concurrency-3 | P95        | 919                 | 2589             | 2.8x lower              |
+
+One workflow at a time on an otherwise idle system, after a random 4-8 s idle
+gap (30 one-activity and 10 five-activity workflows per run, two runs; mean
+end-to-end latency in ms as the client sees it):
+
+| Workflow     | Kruxia Flow 0.10.0 | Temporal 1.24.2 |
+|--------------|--------------------|-----------------|
+| 1 activity   | 18.4, 19.0         | 35.9, 36.9      |
+| 5 activities | 33.6, 35.2         | 72.2, 74.9      |
+
+How the comparison has moved (throughput, wf/s; Temporal's figures are from
+each session's own run):
+
+| Session    | Engine  | Sequential-5: KF / Temporal | Parallel-10: KF / Temporal | High-Concurrency-3: KF / Temporal |
+|------------|---------|-----------------------------|----------------------------|-----------------------------------|
+| 2026-03-01 | 86e9ac7 | 15.0 / 13.1                 | 17.5 / 26.1                | 74.0 / 47.7                       |
+| 2026-07-20 | 0.8.0   | 15.4 / 13.4                 | 18.7 / 12.7                | 86.6 / 46.0                       |
+| 2026-11-08 | 0.10.0  | 89.9 / 17.6                 | 44.1 / 18.5                | 139.1 / 55.9                      |
+
+What to keep in mind when reading these:
+
+- **Through 0.9.x Kruxia Flow's low-concurrency results were set by its
+  poll timers, not by work.** 0.10.0 removed those waits (event wake and
+  worker wake). Temporal's figures are about where they were in the earlier
+  sessions.
+- **This is each platform out of the box on one machine, not either at its
+  best.** Temporal runs all its services in one container with default
+  settings, and its
+  worker is the Python SDK inside the load generator's process. Kruxia Flow's
+  worker is compiled Rust inside the server. Temporal also records more per
+  step than Kruxia Flow does (a full replayable history). A tuned,
+  multi-node Temporal would do better than this; so would Kruxia Flow with
+  more than one worker.
+- **Temporal 1.24.2 is not current.** It is pinned for continuity with the
+  earlier sessions.
+- **The client measures the two differently, in Temporal's favour.** The
+  Kruxia Flow client learns of completion by polling the status endpoint
+  every 50 ms (every 5 ms in the idle test); the Temporal client is told at
+  once. Kruxia Flow's standard-suite latencies therefore include up to 50 ms
+  of waiting that is the client's, not the engine's.
+- **Temporal varies more from pass to pass on this host**, as before:
+  Parallel-10 passes fell into two groups, around 12-13 and 23-26 wf/s.
+- **At 100 concurrent workflows Kruxia Flow is limited by its orchestrator**,
+  which processes events one at a time; its median latency there (642 ms) is
+  queueing, and it is the smallest margin in the table.
+
+The Temporal stack and idle test used here are kept with the raw results
+(`results/2026-11-08-temporal/`, not in version control).
 
 ### 2026-11-08 (held-back check, for 0.10.0)
 
