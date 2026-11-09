@@ -256,6 +256,89 @@ impl EventWakeArgs {
     }
 }
 
+/// How a worker learns that work may be available
+#[derive(clap::ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WorkerWake {
+    /// Listen on the API server's wake stream; the poll timer stays as a safety net
+    #[default]
+    Sse,
+    /// Poll on the timer alone
+    Poll,
+}
+
+/// Worker wake-up selection for the commands that run a worker (`serve`'s
+/// built-in worker, `worker`).
+#[derive(Args, Debug, Clone)]
+pub struct WorkerWakeArgs {
+    /// Worker wake mode
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_WORKER_WAKE",
+        value_enum,
+        default_value_t = WorkerWake::Sse,
+        help = "How the worker learns of new activities: sse or poll",
+        long_help = "How the worker learns that an activity may be claimable\n\n\
+sse: keep a server-sent event stream open to the API server\n\
+(GET /api/v1/workers/wake) and poll as soon as it says an activity was\n\
+scheduled. While the stream is connected the poll timer is only a safety\n\
+net (--worker-wake-poll-interval). Whenever it is not connected, the\n\
+worker polls at its normal interval.\n\
+poll: poll on the timer alone.\n\n\
+Behind a proxy that buffers responses, use poll or disable buffering for\n\
+the wake path.\n\n\
+Default: sse\n\
+Example: --worker-wake poll"
+    )]
+    pub worker_wake: WorkerWake,
+
+    /// Idle poll interval in seconds while the wake stream is connected
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_WORKER_WAKE_POLL_INTERVAL",
+        default_value_t = 5.0,
+        help = "Idle poll interval in seconds while the wake stream is connected",
+        long_help = "How long the worker waits between polls while its wake stream is\n\
+connected and nothing is happening. The stream normally triggers polls;\n\
+this timer only catches a lost wake, and a running activity whose timeout\n\
+expired.\n\n\
+Default: 5\n\
+Example: --worker-wake-poll-interval 2"
+    )]
+    pub worker_wake_poll_interval: f64,
+}
+
+impl Default for WorkerWakeArgs {
+    fn default() -> Self {
+        Self {
+            worker_wake: WorkerWake::Sse,
+            worker_wake_poll_interval: 5.0,
+        }
+    }
+}
+
+impl WorkerWakeArgs {
+    /// Reject a non-positive or non-finite interval
+    pub fn validate(&self) -> Result<()> {
+        if !self.worker_wake_poll_interval.is_finite() || self.worker_wake_poll_interval <= 0.0 {
+            anyhow::bail!("Worker wake poll interval must be greater than 0 seconds");
+        }
+        Ok(())
+    }
+
+    /// The SDK wake mode for these args
+    pub fn mode(&self) -> kruxiaflow_std_worker::WakeMode {
+        match self.worker_wake {
+            WorkerWake::Sse => kruxiaflow_std_worker::WakeMode::Sse,
+            WorkerWake::Poll => kruxiaflow_std_worker::WakeMode::Poll,
+        }
+    }
+
+    /// The idle poll interval while the wake stream is connected
+    pub fn poll_interval(&self) -> std::time::Duration {
+        std::time::Duration::from_secs_f64(self.worker_wake_poll_interval)
+    }
+}
+
 /// Where workflow file content is stored
 #[derive(clap::ValueEnum, Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum StorageProvider {

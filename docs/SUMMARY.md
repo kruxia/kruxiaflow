@@ -31,6 +31,7 @@
 # Implementation Plans
 
 - [Commit-order event cursor and NOTIFY wake](implementation/2026-11-08-commit-order-cursor-and-notify-wake.md) (IMPLEMENTED with changes; release pending)
+- [Activity wake for workers over SSE](implementation/2026-11-08-activity-wake-sse.md) (IMPLEMENTED; Python SDK pending)
 
 ---
 

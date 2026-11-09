@@ -140,6 +140,7 @@ async fn test_worker_poll_and_execute_echo(pool: PgPool) {
         client_id: Some("test_worker_client".to_string()),
         client_secret: Some("test_worker_secret".to_string()),
         shutdown_timeout: Duration::from_secs(30),
+        ..WorkerConfig::default()
     };
 
     // Create worker with EchoActivity
@@ -209,6 +210,7 @@ async fn test_worker_concurrency(pool: PgPool) {
         client_id: Some("test_worker_client".to_string()),
         client_secret: Some("test_worker_secret".to_string()),
         shutdown_timeout: Duration::from_secs(30),
+        ..WorkerConfig::default()
     };
 
     // Create worker with EchoActivity
@@ -263,6 +265,7 @@ async fn test_worker_authentication_failure(pool: PgPool) {
         client_id: Some("test_worker_client".to_string()),
         client_secret: Some("wrong_secret".to_string()),
         shutdown_timeout: Duration::from_secs(30),
+        ..WorkerConfig::default()
     };
 
     // Create worker with EchoActivity

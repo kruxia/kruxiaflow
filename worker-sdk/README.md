@@ -134,8 +134,29 @@ Environment variables (matching the Python SDK), overridable via
 | `KRUXIAFLOW_WORKER_ACTIVITY_TIMEOUT`    | no       | 300 (seconds)  |
 | `KRUXIAFLOW_WORKER_HEARTBEAT_INTERVAL`  | no       | 30 (seconds)   |
 | `KRUXIAFLOW_WORKER_SHUTDOWN_TIMEOUT`    | no       | 30 (seconds)   |
+| `KRUXIAFLOW_WORKER_WAKE`                | no       | sse            |
+| `KRUXIAFLOW_WORKER_WAKE_POLL_INTERVAL`  | no       | 5 (seconds)    |
 
 \* not required against a dev-mode server (`kruxiaflow serve --insecure-dev`).
+
+## Wake stream
+
+By default the worker keeps a server-sent event stream open to the server
+(`GET /api/v1/workers/wake`) and polls as soon as the server says an activity
+for its worker type was scheduled, instead of waiting for its poll timer.
+Work is still claimed only by polling; the stream just says when.
+
+- While the stream is connected, the idle wait between polls is
+  `KRUXIAFLOW_WORKER_WAKE_POLL_INTERVAL` (5 s), a safety net for a lost wake.
+  Delayed and retried activities still start on time: an empty poll tells the
+  worker when the next one is due.
+- Whenever the stream is not connected (a server older than 0.10, a server
+  without a wake signal, a network fault), the worker polls every
+  `KRUXIAFLOW_WORKER_POLL_INTERVAL`, exactly as before, and keeps trying to
+  reconnect.
+- Behind a reverse proxy that buffers responses, wakes arrive late. Disable
+  buffering for that path (nginx: `proxy_buffering off;`) or set
+  `KRUXIAFLOW_WORKER_WAKE=poll` (`WakeMode::Poll` on the builder).
 
 ## Graceful shutdown
 

@@ -3,8 +3,10 @@ use crate::middleware::auth::ValidatedClaims;
 use crate::state::AppState;
 use axum::{
     Extension, Json,
-    extract::{Path, State},
+    extract::{Path, Query, State},
+    response::sse::{Event, KeepAlive, Sse},
 };
+use futures::Stream;
 use kruxiaflow_core::activity::{ActivityWorkerError, ActivityWorkerService};
 use kruxiaflow_core::cost::CostCalculator;
 use rust_decimal::Decimal;
@@ -118,7 +120,28 @@ pub struct PollActivitiesResponse {
 
     /// Number of activities returned
     pub count: usize,
+
+    /// When nothing was claimed: milliseconds until the earliest pending
+    /// activity for this worker type that is scheduled for later (a delay, a
+    /// `scheduled_for`, a retry backoff) becomes claimable. Absent when no
+    /// such activity exists. Nothing announces an activity coming due, so a
+    /// worker waiting on the wake stream should poll again no later than
+    /// this.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(example = 1500)]
+    pub next_due_ms: Option<u64>,
 }
+
+/// Query parameters for the worker wake stream
+#[derive(Debug, Deserialize)]
+pub struct WorkerWakeParams {
+    /// Worker type to receive wakes for (e.g., "std")
+    pub worker: String,
+}
+
+/// Interval between keepalive comments on the wake stream. Workers treat a
+/// stream that is silent for three of these as dead.
+const WAKE_KEEPALIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
 
 /// Activity heartbeat request
 #[derive(Debug, Deserialize, ToSchema)]
@@ -729,6 +752,7 @@ mod tests {
         let response = PollActivitiesResponse {
             activities: vec![],
             count: 0,
+            next_due_ms: None,
         };
         let json = serde_json::to_value(&response).unwrap();
         assert_eq!(json["count"], 0);
@@ -1042,6 +1066,85 @@ mod tests {
     }
 }
 
+/// Wake stream for workers
+///
+/// Endpoint: GET /api/v1/workers/wake?worker=<type>
+///
+/// A server-sent event stream that tells a worker when to poll. It sends a
+/// `wake` event on connection and one whenever an activity for the worker
+/// type is written as pending (several at once may arrive as one event),
+/// with a comment line every 15 seconds as a keepalive. Events carry no
+/// data: a woken worker calls `POST /api/v1/workers/poll`, which is the only
+/// way to claim work. Workers must keep polling on a timer as well; the
+/// stream only shortens the wait.
+///
+/// Answers 503 when this server has no wake signal (it runs with
+/// `KRUXIAFLOW_EVENT_WAKE=poll`, or could not LISTEN on the database);
+/// workers then stay on their poll timer.
+#[utoipa::path(
+    get,
+    path = "/api/v1/workers/wake",
+    tag = "Workers",
+    params(
+        ("worker" = String, Query, description = "Worker type to receive wakes for", example = "std")
+    ),
+    responses(
+        (status = 200, description = "Server-sent event stream of `wake` events", content_type = "text/event-stream"),
+        (status = 400, description = "Missing worker type"),
+        (status = 401, description = "Unauthorized"),
+        (status = 503, description = "This server has no wake signal; keep polling on a timer")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+pub async fn worker_wake_stream(
+    State(state): State<AppState>,
+    Query(params): Query<WorkerWakeParams>,
+) -> ApiResult<Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>>> {
+    let worker = params.worker.trim();
+    if worker.is_empty() {
+        return Err(AppError::BadRequest(
+            "Query parameter 'worker' must not be empty".to_string(),
+        ));
+    }
+
+    let Some(activity_wake) = state.activity_wake.as_ref() else {
+        return Err(AppError::ServiceUnavailable(
+            "Worker wake stream is not available on this server; poll on a timer".to_string(),
+        ));
+    };
+
+    tracing::debug!(worker = %worker, "Worker wake stream opened");
+
+    // Subscribe before the first event goes out: the wake on connection
+    // covers everything committed before this point, the receiver everything
+    // after it
+    let receiver = activity_wake.subscribe(worker);
+    let shutdown = state.shutdown_token.clone();
+
+    let stream = futures::stream::unfold(
+        (receiver, shutdown, true),
+        |(mut receiver, shutdown, first)| async move {
+            if !first {
+                tokio::select! {
+                    // End the stream so graceful shutdown is not held open
+                    _ = shutdown.cancelled() => return None,
+                    _ = receiver.woken() => {}
+                }
+            }
+            let event = Event::default().event("wake").data("");
+            Some((Ok(event), (receiver, shutdown, false)))
+        },
+    );
+
+    Ok(Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(WAKE_KEEPALIVE_INTERVAL)
+            .text("keepalive"),
+    ))
+}
+
 /// Poll for activities
 ///
 /// Endpoint: POST /api/v1/workers/poll
@@ -1089,6 +1192,22 @@ pub async fn poll_activities(
 
     let count = activities.len();
 
+    // Nothing claimable now: tell the worker when the next delayed or
+    // retrying activity comes due, so it can wait that long and no longer
+    let next_due_ms = if count == 0 {
+        match service.next_due_in(&request.worker).await {
+            // Round up: a worker that polls a moment late still finds the
+            // activity, one that polls a moment early finds nothing
+            Ok(due) => due.map(|d| d.as_millis() as u64 + 1),
+            Err(e) => {
+                tracing::debug!(error = ?e, "Next-due lookup failed");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     if count > 0 {
         tracing::debug!(
             worker_id = %request.worker_id,
@@ -1123,6 +1242,7 @@ pub async fn poll_activities(
             })
             .collect(),
         count,
+        next_due_ms,
     }))
 }
 

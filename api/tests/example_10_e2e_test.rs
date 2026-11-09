@@ -360,6 +360,7 @@ async fn test_example_10_order_processing_with_email(pool: PgPool) {
         client_id: Some("test_worker_ex10".to_string()),
         client_secret: Some("test_worker_secret_ex10".to_string()),
         shutdown_timeout: Duration::from_secs(30),
+        ..WorkerConfig::default()
     };
 
     let manager = WorkerManager::new(worker_config, registry, workflow_storage.clone());

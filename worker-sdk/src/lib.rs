@@ -96,14 +96,16 @@ pub mod result;
 pub mod types;
 pub mod worker;
 
-pub use client::{ReportAck, WorkerApiClient};
-pub use config::{WorkerConfig, WorkerConfigBuilder};
+pub use client::{ReportAck, WakeConnect, WakeStream, WorkerApiClient};
+pub use config::{WakeMode, WorkerConfig, WorkerConfigBuilder};
 pub use context::ActivityContext;
 pub use error::{ActivityError, ClientError, ConfigError};
 pub use poller::WorkerPoller;
 pub use registry::{ActivityExecutor, ActivityImpl, ActivityRegistry, TypedActivity};
 pub use result::ActivityResult;
-pub use types::{ActivityOutput, OutputType, PendingActivity, PollActivitiesResponse, UsageEntry};
+pub use types::{
+    ActivityOutput, OutputType, PendingActivity, PollActivitiesResponse, PollOutcome, UsageEntry,
+};
 pub use worker::{Worker, WorkerBuilder, WorkerHandle};
 
 // Implementing [`ActivityImpl`]/[`TypedActivity`] requires the same

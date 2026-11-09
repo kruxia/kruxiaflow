@@ -26,6 +26,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it reacts in 7 ms instead of 41 ms. The benchmark suite runs 31-38% faster
   (Sequential-5 15.4 → 21.3 wf/s, High-Concurrency-3 110 → 150 wf/s) with
   P50 latency down 28-32%, and all workflows complete.
+- **Workers are woken when work is scheduled (server-sent events)**: a
+  trigger on `activity_queue` notifies when an activity is written as
+  pending, the API server passes that on over the new
+  `GET /api/v1/workers/wake?worker=<type>` stream, and the worker polls at
+  once instead of waiting out its 100 ms poll timer. Work is still claimed
+  only through `POST /api/v1/workers/poll`, and the built-in worker uses the
+  stream through the API like any other worker. An empty poll response now
+  says when the next delayed or retried activity is due (`next_due_ms`), so
+  those still start on time while the worker's idle timer rises to 5 s with
+  the stream connected. The Rust worker SDK (`kruxiaflow-worker`) and the
+  built-in worker use the stream by default: `KRUXIAFLOW_WORKER_WAKE`
+  (`sse` default, `poll`), `KRUXIAFLOW_WORKER_WAKE_POLL_INTERVAL` (5 s),
+  `--worker-wake` / `--worker-wake-poll-interval` on `serve` and `worker`.
+  Nothing has to be upgraded together: a worker that cannot get the stream
+  (an older server, a server running with `KRUXIAFLOW_EVENT_WAKE=poll`, a
+  buffering proxy turned off with `KRUXIAFLOW_WORKER_WAKE=poll`) polls as
+  before, and older workers ignore the new response field. Measured against
+  the event wake alone (`benchmarks/README.md`, 2026-11-08): an activity is
+  picked up, run and reported in about 2 ms instead of 58-92 ms; a quiet
+  five-step workflow completes in 31 ms instead of 483 ms (914 ms in 0.9.1);
+  Sequential-5 at 10 concurrent runs 3.9x faster (21 → 82 wf/s) and
+  Parallel-10 57% faster. At 100 concurrent workflows throughput is unchanged:
+  the orchestrator, which processes events one at a time, is the limit there.
+  An idle server does about a fifth of the database work it did (11 → 2
+  transactions a second).
 - **WebSocket event messages carry `position`** (the event's insert order),
   next to `id`. Clients keep deduplicating by `id`; `from_event_id` is
   unchanged.
@@ -67,6 +92,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   they wait for a wake or the backoff timer. The idle cap is 5s with the
   wake and stays 1s with `--event-wake poll`; an explicit
   `KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX_MS` applies to both.
+- **Worker SDK API** (`kruxiaflow-worker`): `WorkerConfig` gains `wake` and
+  `wake_poll_interval` (code that builds it field by field needs
+  `..WorkerConfig::default()`); `WorkerApiClient::poll` returns the claimed
+  activities together with the next-due hint (`poll_activities` is
+  unchanged); `WorkerApiClient::open_wake_stream` opens the stream.
 - **`EventSource` API**: `update_position` takes an `EventCursor` (from
   `WorkflowEvent::cursor()`) instead of an event id; `WorkflowEvent` gains
   `position` and `tx`; `EventSource::wake()` (default `None`) exposes the

@@ -147,7 +147,10 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
 
     // Initialize event source (PostgreSQL; polling from a durable cursor,
     // woken by commit notifications unless --event-wake poll)
-    let event_source = Arc::new(cmd.event_wake.event_source(db_pool.clone()).await?);
+    let event_source = cmd.event_wake.event_source(db_pool.clone()).await?;
+    // The same LISTEN connection wakes workers (GET /api/v1/workers/wake)
+    let activity_wake = event_source.activity_wake();
+    let event_source = Arc::new(event_source);
     tracing::info!("Event source initialized (PostgreSQL)");
 
     // Initialize workflow storage (provider from --storage-provider)
@@ -177,7 +180,8 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
         subscription_service,
         shutdown_token,
     )
-    .with_insecure_dev(config.insecure_dev);
+    .with_insecure_dev(config.insecure_dev)
+    .with_activity_wake(activity_wake);
 
     // Spawn workflow event broadcast poller for WebSocket streaming
     tokio::spawn(kruxiaflow_api::workflow_events::run_event_broadcast_poller(

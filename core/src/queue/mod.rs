@@ -100,4 +100,19 @@ pub trait ActivityQueue: Send + Sync {
     ///
     /// Returns information about all reclaimed activities for event emission.
     async fn reclaim_stale_activities(&self, limit: i64) -> Result<Vec<StaleActivityInfo>>;
+
+    /// Time until the earliest pending activity for `worker` that is
+    /// scheduled for later (a delay, a `scheduled_for`, a retry backoff)
+    /// becomes claimable. `None` when no such activity exists, or when the
+    /// queue cannot tell.
+    ///
+    /// A worker that has just been told there is nothing to claim uses this
+    /// to bound how long it waits before polling again: the passing of time
+    /// makes such an activity claimable, and nothing announces it. The value
+    /// is a duration measured by the queue's own clock, so the caller's clock
+    /// does not matter.
+    async fn next_due_in(&self, worker: &str) -> Result<Option<std::time::Duration>> {
+        let _ = worker;
+        Ok(None)
+    }
 }

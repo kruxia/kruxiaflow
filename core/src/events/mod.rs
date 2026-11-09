@@ -10,7 +10,7 @@ pub use postgres_event_source::PostgresEventSource;
 pub use rebase::{
     ForeignXids, RebaseReport, find_foreign_xids, rebase_event_xids, verify_event_xids,
 };
-pub use wake::{EventWake, EventWakeMode, Wake, WakeReceiver};
+pub use wake::{ActivityWake, EventWake, EventWakeMode, Wake, WakeReceiver};
 
 use async_trait::async_trait;
 use uuid::Uuid;

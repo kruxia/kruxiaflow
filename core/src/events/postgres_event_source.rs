@@ -1,6 +1,6 @@
 use super::{
-    EventCursor, EventSource, EventWake, EventWakeMode, NewWorkflowEvent, Result, WakeReceiver,
-    WorkflowEvent, WorkflowEventType, find_foreign_xids, verify_event_xids,
+    ActivityWake, EventCursor, EventSource, EventWake, EventWakeMode, NewWorkflowEvent, Result,
+    WakeReceiver, WorkflowEvent, WorkflowEventType, find_foreign_xids, verify_event_xids,
 };
 use async_trait::async_trait;
 use sqlx::PgPool;
@@ -90,6 +90,13 @@ impl PostgresEventSource {
                 }
             },
         })
+    }
+
+    /// The activity-queue wake carried by this event source's listener
+    /// connection, if it has one (see [`ActivityWake`]). `None` in poll mode
+    /// or when `LISTEN` failed.
+    pub fn activity_wake(&self) -> Option<ActivityWake> {
+        self.wake.as_ref().map(EventWake::activity_wake)
     }
 
     /// On an empty poll, at most once per `STALL_CHECK_INTERVAL`, look for

@@ -31,7 +31,9 @@ pub use streaming::{
 };
 pub use users::create_user;
 pub use websocket::{activity_stream_by_key_handler, activity_stream_handler};
-pub use workers::{complete_activity, fail_activity, heartbeat_activity, poll_activities};
+pub use workers::{
+    complete_activity, fail_activity, heartbeat_activity, poll_activities, worker_wake_stream,
+};
 pub use workflow_definitions::{
     deploy_workflow_definition, get_workflow_definition, list_workflow_definitions,
 };

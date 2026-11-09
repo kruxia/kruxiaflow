@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{migrate, seed_client};
-use crate::config::{DbPoolArgs, EventWakeArgs, StorageArgs};
+use crate::config::{DbPoolArgs, EventWakeArgs, StorageArgs, WorkerWakeArgs};
 
 /// Default database pool size (override with --db-max/min-connections)
 const DEFAULT_DB_MAX_CONNECTIONS: u32 = 100;
@@ -216,6 +216,9 @@ Example: --db-connect-timeout 120"
     #[command(flatten)]
     pub event_wake: EventWakeArgs,
 
+    #[command(flatten)]
+    pub worker_wake: WorkerWakeArgs,
+
     /// Workflow file storage provider
     #[command(flatten)]
     pub storage: StorageArgs,
@@ -327,6 +330,8 @@ impl ServeCommand {
 
         self.db_pool
             .resolve(DEFAULT_DB_MAX_CONNECTIONS, DEFAULT_DB_MIN_CONNECTIONS)?;
+
+        self.worker_wake.validate()?;
 
         if self.insecure_dev
             && !self.insecure_dev_allow_nonloopback
@@ -442,16 +447,30 @@ async fn spawn_api_server(
     Ok((handle, ready_notify))
 }
 
-/// Spawn worker tasks
-async fn spawn_workers(
+/// Sizing and wake settings for the built-in worker
+struct BuiltinWorkerSettings {
     max_concurrent_activities: usize,
     poll_max_activities: usize,
+    /// Activity execution timeout in seconds
+    activity_timeout: u64,
+    wake: WorkerWakeArgs,
+}
+
+/// Spawn worker tasks
+async fn spawn_workers(
+    settings: BuiltinWorkerSettings,
     api_url: String,
     client_id: String,
     client_secret: String,
     workflow_storage: Arc<dyn kruxiaflow_core::WorkflowStorage>,
-    activity_timeout: u64,
 ) -> Result<Vec<JoinHandle<()>>> {
+    let BuiltinWorkerSettings {
+        max_concurrent_activities,
+        poll_max_activities,
+        activity_timeout,
+        wake: worker_wake,
+    } = settings;
+
     tracing::info!(
         max_concurrent_activities = max_concurrent_activities,
         api_url = %api_url,
@@ -477,6 +496,8 @@ async fn spawn_workers(
         heartbeat_interval: Duration::from_secs(30),
         client_id: Some(client_id),
         client_secret: Some(client_secret),
+        wake: worker_wake.mode(),
+        wake_poll_interval: worker_wake.poll_interval(),
         ..WorkerConfig::default()
     };
 
@@ -666,8 +687,10 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         Arc::new(PostgresQueue::new(pool.clone(), queue_config));
 
     // Create event source
-    let event_source: Arc<dyn EventSource> =
-        Arc::new(cmd.event_wake.event_source(pool.clone()).await?);
+    let event_source = cmd.event_wake.event_source(pool.clone()).await?;
+    // The same LISTEN connection wakes workers (GET /api/v1/workers/wake)
+    let activity_wake = event_source.activity_wake();
+    let event_source: Arc<dyn EventSource> = Arc::new(event_source);
 
     // Create workflow storage
     let workflow_storage = cmd.storage.create_storage(pool.clone())?;
@@ -693,7 +716,8 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         subscription_service.clone(),
         shutdown_token.clone(),
     )
-    .with_insecure_dev(cmd.insecure_dev);
+    .with_insecure_dev(cmd.insecure_dev)
+    .with_activity_wake(activity_wake);
 
     // Spawn workflow event broadcast poller for WebSocket streaming (as `api`
     // does); without it, WebSocket clients get only the initial replay.
@@ -743,13 +767,16 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         vec![]
     } else {
         spawn_workers(
-            cmd.max_activities,
-            cmd.poll_max_activities,
+            BuiltinWorkerSettings {
+                max_concurrent_activities: cmd.max_activities,
+                poll_max_activities: cmd.poll_max_activities,
+                activity_timeout: cmd.activity_timeout,
+                wake: cmd.worker_wake.clone(),
+            },
             api_url.clone(),
             cmd.client_id.clone(),
             cmd.client_secret.unwrap(),
             workflow_storage.clone(),
-            cmd.activity_timeout,
         )
         .await?
     };
@@ -960,6 +987,7 @@ mod tests {
             db_connect_timeout: 60,
             db_pool: DbPoolArgs::default(),
             event_wake: EventWakeArgs::default(),
+            worker_wake: WorkerWakeArgs::default(),
             storage: StorageArgs::default(),
             activity_timeout: 300,
             no_worker: false,
@@ -1169,6 +1197,7 @@ mod tests {
             db_connect_timeout: 120,
             db_pool: DbPoolArgs::default(),
             event_wake: EventWakeArgs::default(),
+            worker_wake: WorkerWakeArgs::default(),
             storage: StorageArgs::default(),
             activity_timeout: 300,
             no_worker: false,

@@ -1,15 +1,16 @@
 //! Poll / lease / execute loop with semaphore-based concurrency.
 
-use crate::client::WorkerApiClient;
-use crate::config::WorkerConfig;
+use crate::client::{WakeConnect, WorkerApiClient};
+use crate::config::{WakeMode, WorkerConfig};
 use crate::context::ActivityContext;
 use crate::error::{ActivityError, ClientError};
 use crate::registry::ActivityExecutor;
 use crate::types::PendingActivity;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
 use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -17,13 +18,61 @@ use uuid::Uuid;
 /// Sleep before retrying after a poll error.
 const ERROR_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 
+/// Wake stream reconnect backoff after a failure.
+const WAKE_RETRY_MIN: Duration = Duration::from_secs(1);
+const WAKE_RETRY_MAX: Duration = Duration::from_secs(30);
+
+/// How often to look again for a wake stream on a server that has none.
+const WAKE_UNAVAILABLE_RETRY: Duration = Duration::from_secs(60);
+
+/// What the wake stream task tells the poll loop.
+///
+/// `counter` changes on every wake, and whenever the stream drops (wakes may
+/// have been missed). `connected` says whether the stream is up right now,
+/// which decides how long the loop may wait between polls.
+struct WakeSignal {
+    counter: watch::Sender<u64>,
+    connected: AtomicBool,
+}
+
+impl WakeSignal {
+    fn new() -> Self {
+        Self {
+            counter: watch::channel(0u64).0,
+            connected: AtomicBool::new(false),
+        }
+    }
+
+    fn wake(&self) {
+        self.counter.send_modify(|n| *n = n.wrapping_add(1));
+    }
+}
+
+/// Stops a background task when dropped.
+///
+/// The wake stream task must not outlive the poll loop. The loop can end by
+/// returning, or by its future being dropped (a caller aborting the task that
+/// runs it, as `WorkerManager::stop` does); a bare `JoinHandle` would detach
+/// in the second case and leave the stream open.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// Activities with a timeout at or below this run without a heartbeat task.
 const HEARTBEAT_THRESHOLD: Duration = Duration::from_secs(60);
 
 /// Worker poll loop.
 ///
 /// Maintains up to `max_concurrent_activities` in-flight activities via a
-/// semaphore, polling for more work whenever slots free up. Each claimed
+/// semaphore, polling for more work whenever slots free up. When a poll
+/// finds nothing, the loop waits for the server's wake stream, for the next
+/// delayed activity to come due, or for its timer, whichever is first (see
+/// [`WorkerConfig`]); the wake only shortens the wait, and the loop is
+/// correct without it. Each claimed
 /// activity runs in its own task; panics are caught and reported as retryable
 /// failures, and completion is always reported before its heartbeat stops
 /// (so the activity cannot be reclaimed as stale mid-report).
@@ -73,6 +122,17 @@ impl WorkerPoller {
             "Starting worker poller"
         );
 
+        let signal = Arc::new(WakeSignal::new());
+        let mut wakes = signal.counter.subscribe();
+        let wake_task = (self.config.wake == WakeMode::Sse).then(|| {
+            AbortOnDrop(tokio::spawn(run_wake_stream(
+                self.client.clone(),
+                self.config.worker.clone(),
+                Arc::clone(&signal),
+                self.shutdown.clone(),
+            )))
+        });
+
         loop {
             // Wait for a free slot (or shutdown). Holding a permit before
             // polling guarantees we never claim work we cannot start.
@@ -87,8 +147,13 @@ impl WorkerPoller {
             // The poll + spawn phase is not cancelled by shutdown: dropping
             // it after the server assigned activities would strand them until
             // their timeout. Worst-case shutdown latency is one poll call.
+            //
+            // Mark the wakes seen so far before polling: one that arrives
+            // while the poll is in flight then ends the next wait at once,
+            // instead of being lost.
+            wakes.borrow_and_update();
             match self.poll_and_spawn(permit).await {
-                Ok(0) => self.sleep_or_shutdown(self.config.poll_interval).await,
+                Ok((0, next_due)) => self.idle_wait(&mut wakes, &signal, next_due).await,
                 Ok(_) => {} // work found: poll again immediately
                 Err(err) => {
                     tracing::error!(error = %err, "Poll failed");
@@ -97,7 +162,36 @@ impl WorkerPoller {
             }
         }
 
+        // Close the stream before draining: nothing more will be claimed
+        drop(wake_task);
+
         self.drain().await;
+    }
+
+    /// Wait after an empty poll: until a wake, until the next delayed
+    /// activity is due, until the timer, or until shutdown.
+    ///
+    /// The timer is `wake_poll_interval` only while the wake stream is
+    /// connected. Without it nothing would announce new work, so the loop
+    /// polls every `poll_interval` as it always has.
+    async fn idle_wait(
+        &self,
+        wakes: &mut watch::Receiver<u64>,
+        signal: &WakeSignal,
+        next_due: Option<Duration>,
+    ) {
+        let timer = if signal.connected.load(Ordering::Relaxed) {
+            self.config.wake_poll_interval
+        } else {
+            self.config.poll_interval
+        };
+        let wait = next_due.map_or(timer, |due| due.min(timer));
+
+        tokio::select! {
+            _ = self.shutdown.cancelled() => {}
+            _ = wakes.changed() => {}
+            _ = tokio::time::sleep(wait) => {}
+        }
     }
 
     /// Poll once, run whatever was claimed to completion, and return the
@@ -112,7 +206,7 @@ impl WorkerPoller {
         };
 
         let count = match self.poll_and_spawn(permit).await {
-            Ok(count) => count,
+            Ok((count, _)) => count,
             Err(err) => {
                 tracing::error!(error = %err, "Poll failed");
                 0
@@ -131,20 +225,26 @@ impl WorkerPoller {
     }
 
     /// Poll for up to the available slots and spawn a task per claimed
-    /// activity. Returns the number of activities claimed.
-    async fn poll_and_spawn(&self, permit: OwnedSemaphorePermit) -> Result<usize, ClientError> {
+    /// activity. Returns the number of activities claimed and, when that is
+    /// zero, how long until a delayed activity comes due (if the server knows
+    /// of one).
+    async fn poll_and_spawn(
+        &self,
+        permit: OwnedSemaphorePermit,
+    ) -> Result<(usize, Option<Duration>), ClientError> {
         // +1 for the permit we already hold
         let available_slots = self.semaphore.available_permits() + 1;
         let max_to_poll = available_slots.min(self.config.poll_max_activities);
 
-        let activities = self
+        let outcome = self
             .client
-            .poll_activities(&self.config.worker, &self.config.worker_id, max_to_poll)
+            .poll(&self.config.worker, &self.config.worker_id, max_to_poll)
             .await?;
+        let activities = outcome.activities;
 
         if activities.is_empty() {
             drop(permit);
-            return Ok(0);
+            return Ok((0, outcome.next_due));
         }
 
         let count = activities.len();
@@ -169,7 +269,7 @@ impl WorkerPoller {
             self.spawn_activity(activity, permit);
         }
 
-        Ok(count)
+        Ok((count, None))
     }
 
     fn spawn_activity(&self, activity: PendingActivity, permit: OwnedSemaphorePermit) {
@@ -433,6 +533,82 @@ async fn heartbeat_loop(
             Err(err) => {
                 tracing::warn!(%activity_id, error = %err, "Failed to send heartbeat");
             }
+        }
+    }
+}
+
+/// Keep the server's wake stream open for `worker` and pass each wake to the
+/// poll loop.
+///
+/// A stream that drops counts as a wake (wakes may have been missed) and is
+/// reopened with backoff. A server without a wake stream is asked again once
+/// a minute; until then the poll loop runs on its ordinary timer.
+async fn run_wake_stream(
+    client: WorkerApiClient,
+    worker: String,
+    signal: Arc<WakeSignal>,
+    shutdown: CancellationToken,
+) {
+    let mut retry = WAKE_RETRY_MIN;
+    let mut reported_unavailable = false;
+
+    loop {
+        let opened = tokio::select! {
+            _ = shutdown.cancelled() => return,
+            opened = client.open_wake_stream(&worker) => opened,
+        };
+
+        let delay = match opened {
+            Ok(WakeConnect::Stream(mut stream)) => {
+                tracing::info!(worker = %worker, "Wake stream connected");
+                signal.connected.store(true, Ordering::Relaxed);
+                retry = WAKE_RETRY_MIN;
+                reported_unavailable = false;
+
+                let reason = loop {
+                    tokio::select! {
+                        _ = shutdown.cancelled() => {
+                            signal.connected.store(false, Ordering::Relaxed);
+                            return;
+                        }
+                        wake = stream.next_wake() => match wake {
+                            Ok(()) => signal.wake(),
+                            Err(err) => break err,
+                        },
+                    }
+                };
+
+                signal.connected.store(false, Ordering::Relaxed);
+                signal.wake();
+                tracing::warn!(
+                    worker = %worker,
+                    reason = %reason,
+                    "Wake stream lost; polling on the timer until it reconnects"
+                );
+                WAKE_RETRY_MIN
+            }
+            Ok(WakeConnect::Unavailable { status }) => {
+                if !reported_unavailable {
+                    tracing::info!(
+                        worker = %worker,
+                        status,
+                        "Server offers no wake stream; polling on the timer"
+                    );
+                    reported_unavailable = true;
+                }
+                WAKE_UNAVAILABLE_RETRY
+            }
+            Err(err) => {
+                tracing::debug!(worker = %worker, error = %err, "Wake stream connect failed");
+                let delay = retry;
+                retry = (retry * 2).min(WAKE_RETRY_MAX);
+                delay
+            }
+        };
+
+        tokio::select! {
+            _ = shutdown.cancelled() => return,
+            _ = tokio::time::sleep(delay) => {}
         }
     }
 }

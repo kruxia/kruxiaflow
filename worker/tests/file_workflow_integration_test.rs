@@ -252,6 +252,7 @@ async fn test_end_to_end_file_workflow(pool: PgPool) -> Result<()> {
         client_id: Some(client_id.clone()),
         client_secret: Some(client_secret.clone()),
         shutdown_timeout: Duration::from_secs(30),
+        ..WorkerConfig::default()
     };
 
     let manager = WorkerManager::new(worker_config, registry, workflow_storage.clone());

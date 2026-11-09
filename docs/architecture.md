@@ -306,6 +306,7 @@ The built-in worker is implemented as an HTTP client to the API server rather th
 **Approach 1: Built-in Worker → API Server → Service Interfaces** (CHOSEN)
 - Built-in worker authenticates via JWT
 - Polls via `/api/v1/workers/poll` endpoint
+- Is woken via the `/api/v1/workers/wake` stream (no in-process shortcut)
 - Reports results via `/api/v1/activities/{id}/complete` endpoint
 - Identical code path to external workers
 
@@ -2591,6 +2592,23 @@ KRUXIAFLOW_QUEUE_SQS_URL=https://sqs.us-east-1.amazonaws.com/123456/kruxiaflow-a
 KRUXIAFLOW_QUEUE_SQS_REGION=us-east-1
 ```
 
+**Worker wake: claiming without a short poll timer**
+
+Workers claim activities only through `claim_next` (`POST /api/v1/workers/poll`). What changes with the wake is when they ask. An activity becomes claimable in one of two ways, and each is handled differently:
+
+| An activity becomes claimable when...                        | The worker learns of it by...                                                        |
+|--------------------------------------------------------------|--------------------------------------------------------------------------------------|
+| A transaction that wrote it as pending, due now, commits     | A wake: trigger → `NOTIFY activity_queue` → API listener → SSE stream → worker polls |
+| The clock reaches its `scheduled_for` (delay, retry backoff) | The `next_due_ms` in the answer to its last empty poll                               |
+| A running activity passes its timeout                        | Its idle timer (5 s), or the orchestrator's 30 s stale sweep (which then wakes it)   |
+
+- **Trigger.** A row-level trigger on `activity_queue` fires after an insert, or an update of `status` or `scheduled_for`, when the new row is `pending`, and notifies the channel `activity_queue` with the worker type as payload. Claims, heartbeats and completions do not match and cost nothing. The payload is a routing hint only.
+- **Fan-out.** The API process's one `LISTEN` connection carries this channel alongside `workflow_events`, with one wake counter per worker type. A reconnect or listener error wakes every subscriber. There is no transaction-id gate here: a row is claimable by any statement that starts after its commit.
+- **Stream.** `GET /api/v1/workers/wake?worker=<type>` sends a `wake` event on connection and on each notification, with a keepalive comment every 15 s. Events carry no data. The endpoint answers 503 when the process has no listener (`KRUXIAFLOW_EVENT_WAKE=poll`, or `LISTEN` failed).
+- **Worker loop.** After an empty poll the worker waits for a wake, for `next_due_ms`, or for its timer, whichever is first. The timer is `wake_poll_interval` (5 s) only while the stream is connected; otherwise it is the ordinary `poll_interval` (100 ms), so a worker that cannot get a stream behaves as it always did. A wake that arrives while a poll is in flight ends the next wait at once.
+- **SSE, not a held poll.** The worker never cancels a poll in flight, because the server may already have assigned work that would then be stranded until its timeout. A long-held poll would make shutdown wait out the hold; with a separate stream the claim stays a short request.
+- **Herd.** A notification wakes every idle worker of that type, and all but the winners poll for nothing (`SKIP LOCKED` keeps that safe). That is one wasted request per idle worker per activity, against ten per second per idle worker on the timer.
+
 ### Event Source Interface (Publish/Subscribe)
 
 ```rust
@@ -2771,9 +2789,10 @@ delivery path.
 - **Under heavy load the orchestrator is processing-bound**: it handles
   events one at a time, so at 100 concurrent workflows reaction time (about
   75 ms) is queueing behind earlier events, in either mode
-- **The activity round trip dominates per-step latency**: about 65-100 ms from
-  `ActivityScheduled` to `ActivityCompleted`, mostly the worker's
-  activity-queue poll
+- **Activity round trip with the worker wake**: about 2 ms from
+  `ActivityScheduled` to `ActivityCompleted` for an echo activity (it was
+  65-100 ms on the worker's 100 ms poll timer, which still applies to a worker
+  without a wake stream). A quiet five-step workflow completes in about 30 ms
 - **No re-reads**: each poll returns only new rows, so throughput is bounded
   by processing, not by a fixed window (the 0.8.1 grace window capped it near
   2,000 events/sec)

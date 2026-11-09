@@ -4,7 +4,7 @@ use kruxiaflow_std_worker::{WorkerConfig, WorkerManager};
 use std::time::Duration;
 use uuid::Uuid;
 
-use crate::config::{DbPoolArgs, StorageArgs};
+use crate::config::{DbPoolArgs, StorageArgs, WorkerWakeArgs};
 
 /// Default database pool size (override with --db-max/min-connections)
 const DEFAULT_DB_MAX_CONNECTIONS: u32 = 10;
@@ -139,6 +139,9 @@ Example: --poll-max-activities 5"
     #[command(flatten)]
     pub db_pool: DbPoolArgs,
 
+    #[command(flatten)]
+    pub worker_wake: WorkerWakeArgs,
+
     /// Workflow file storage provider
     #[command(flatten)]
     pub storage: StorageArgs,
@@ -149,6 +152,8 @@ impl WorkerCommand {
         if self.max_activities == 0 || self.max_activities > 100 {
             anyhow::bail!("Max concurrent activities must be between 1 and 100");
         }
+
+        self.worker_wake.validate()?;
 
         if self.poll_max_activities == 0 || self.poll_max_activities > 100 {
             anyhow::bail!("Max activities per poll must be between 1 and 100");
@@ -273,6 +278,8 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
         shutdown_timeout: Duration::from_secs(cmd.shutdown_timeout),
         client_id: Some(cmd.client_id.clone()),
         client_secret: cmd.client_secret.clone(),
+        wake: cmd.worker_wake.mode(),
+        wake_poll_interval: cmd.worker_wake.poll_interval(),
     };
 
     let manager = WorkerManager::new(config, registry, workflow_storage);
@@ -324,6 +331,7 @@ mod tests {
             client_secret: Some("secret".to_string()),
             shutdown_timeout: 30,
             db_pool: DbPoolArgs::default(),
+            worker_wake: WorkerWakeArgs::default(),
             storage: StorageArgs::default(),
         }
     }

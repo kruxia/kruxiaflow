@@ -27,6 +27,6 @@ pub use streaming::{
 // Re-exports from the SDK crate so consumers of the std worker use the same
 // protocol types.
 pub use kruxiaflow_worker::{
-    ActivityOutput, ActivityResult, OutputType, PendingActivity, UsageEntry, WorkerApiClient,
-    WorkerConfig, WorkerPoller,
+    ActivityOutput, ActivityResult, OutputType, PendingActivity, UsageEntry, WakeMode,
+    WorkerApiClient, WorkerConfig, WorkerPoller,
 };

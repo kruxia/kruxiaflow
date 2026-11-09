@@ -31,5 +31,8 @@ tracing = { workspace = true }
 [dev-dependencies]
 tokio-test = "0.4"
 wiremock = "0.6"
+# A mock server that can hold a server-sent event stream open (wake tests)
+axum = { workspace = true }
+futures = { workspace = true }
 rust_decimal_macros = "1.36"
 tracing-subscriber = { workspace = true }

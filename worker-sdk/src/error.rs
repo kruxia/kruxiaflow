@@ -140,4 +140,9 @@ pub enum ClientError {
 
     #[error("API error: {status} - {body}")]
     Api { status: u16, body: String },
+
+    /// The wake stream ended, stalled, or sent something unreadable. The
+    /// worker reconnects; meanwhile it polls on its timer.
+    #[error("Wake stream closed: {0}")]
+    WakeStream(String),
 }

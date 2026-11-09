@@ -599,6 +599,27 @@ impl ActivityQueue for PostgresQueue {
         Ok(cancelled)
     }
 
+    async fn next_due_in(&self, worker: &str) -> Result<Option<std::time::Duration>> {
+        // Runs after an empty claim, so the worker's pending rows are the
+        // future-dated ones; read through idx_queue_claimable (worker prefix)
+        let seconds: Option<f64> = sqlx::query_scalar(
+            r#"
+            SELECT EXTRACT(EPOCH FROM MIN(scheduled_for) - NOW())::float8
+            FROM activity_queue
+            WHERE worker = $1
+              AND status = 'pending'::activity_status
+              AND scheduled_for > NOW()
+            "#,
+        )
+        .bind(worker)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(seconds
+            .filter(|s| s.is_finite() && *s > 0.0)
+            .map(std::time::Duration::from_secs_f64))
+    }
+
     async fn reclaim_stale_activities(&self, limit: i64) -> Result<Vec<StaleActivityInfo>> {
         // Use a transaction to ensure consistent handling of all stale activities
         let mut tx = self.pool.begin().await?;

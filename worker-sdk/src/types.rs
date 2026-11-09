@@ -102,6 +102,22 @@ pub struct PollActivitiesResponse {
     pub activities: Vec<PendingActivity>,
     /// Number of activities claimed
     pub count: usize,
+    /// When nothing was claimed: milliseconds until the earliest activity
+    /// scheduled for later (a delay, a retry backoff) becomes claimable.
+    /// Absent when there is none, and from servers older than 0.10.
+    #[serde(default)]
+    pub next_due_ms: Option<u64>,
+}
+
+/// The result of one poll: what was claimed, and when to look again.
+#[derive(Debug)]
+pub struct PollOutcome {
+    /// Claimed activities
+    pub activities: Vec<PendingActivity>,
+    /// When nothing was claimed and an activity is scheduled for later: how
+    /// long until it becomes claimable. Nothing announces that moment, so a
+    /// worker waiting for a wake should poll again no later than this.
+    pub next_due: Option<std::time::Duration>,
 }
 
 /// Per-LLM-call usage made inside an activity, reported on completion or

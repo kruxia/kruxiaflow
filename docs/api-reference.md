@@ -873,7 +873,54 @@ Content-Type: application/json
 }
 ```
 
-When no activities are available, `activities` is an empty array and `count` is 0.
+When no activities are available, `activities` is an empty array and `count` is 0. In that case the response may also carry `next_due_ms`: the number of milliseconds until the earliest pending activity for this worker type that is scheduled for later (a `delay`, a `scheduled_for`, a retry backoff) becomes claimable. It is absent when there is none. Nothing announces an activity coming due, so a worker that waits on the wake stream should poll again no later than this.
+
+```json
+{
+  "activities": [],
+  "count": 0,
+  "next_due_ms": 1500
+}
+```
+
+### Wake Stream
+
+```http
+GET /api/v1/workers/wake?worker=std
+Authorization: Bearer <token>
+Accept: text/event-stream
+```
+
+A server-sent event stream that tells a worker when to poll, so it does not have to poll on a short timer. The stream never carries work: a woken worker calls `POST /api/v1/workers/poll`, which remains the only way to claim an activity.
+
+- `worker` - Required, the worker type to receive wakes for
+
+**Stream** (200 OK, `text/event-stream`):
+```
+event: wake
+data:
+
+: keepalive
+
+event: wake
+data:
+```
+
+- A `wake` event is sent on connection, and whenever an activity for the worker type is written as pending (scheduled, retried, or reclaimed after a timeout). Several at once may arrive as a single event.
+- A comment line (`: keepalive`) is sent every 15 seconds. A client should treat a stream that is silent for 45 seconds as dead and reconnect.
+- The stream ends when the server begins shutting down.
+
+What a worker must still do on its own:
+
+- **Keep a timer.** A wake can be lost (a dropped connection, a database failover), so poll at least every few seconds even while the stream is connected, and treat a reconnect as a wake.
+- **Honor `next_due_ms`.** An activity scheduled for later is announced when it is written, not when it comes due.
+- **Fall back.** If the stream cannot be opened, poll on a short timer as before.
+
+**Errors**:
+- 400 if `worker` is empty
+- 503 if this server has no wake signal (it runs with `KRUXIAFLOW_EVENT_WAKE=poll`, or could not `LISTEN` on the database); keep polling on a timer. Servers older than 0.10 answer 404.
+
+Behind a reverse proxy, disable response buffering for this path (for nginx, `proxy_buffering off;`), or wakes are delayed until the proxy's buffer flushes. The Rust SDK and the built-in worker use the stream by default; set `KRUXIAFLOW_WORKER_WAKE=poll` to turn it off.
 
 ### Heartbeat
 
@@ -1367,6 +1414,7 @@ All endpoints return structured error responses:
 | DELETE | /api/v1/cache/:key                                    | Invalidate cache key       |
 | POST   | /api/v1/cache/invalidate                              | Invalidate cache pattern   |
 | POST   | /api/v1/workers/poll                                  | Poll for activities        |
+| GET    | /api/v1/workers/wake                                  | Worker wake stream (SSE)   |
 | POST   | /api/v1/activities/:id/heartbeat                      | Activity heartbeat         |
 | POST   | /api/v1/activities/:id/complete                       | Complete activity          |
 | POST   | /api/v1/activities/:id/fail                           | Fail activity              |

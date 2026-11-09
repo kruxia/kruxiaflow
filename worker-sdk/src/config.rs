@@ -20,8 +20,23 @@ use std::time::Duration;
 /// | `KRUXIAFLOW_WORKER_ACTIVITY_TIMEOUT`     | no       | 300 (seconds)  |
 /// | `KRUXIAFLOW_WORKER_HEARTBEAT_INTERVAL`   | no       | 30 (seconds)   |
 /// | `KRUXIAFLOW_WORKER_SHUTDOWN_TIMEOUT`     | no       | 30 (seconds)   |
+/// | `KRUXIAFLOW_WORKER_WAKE`                 | no       | sse            |
+/// | `KRUXIAFLOW_WORKER_WAKE_POLL_INTERVAL`   | no       | 5 (seconds)    |
 ///
 /// \* not required when the server runs in dev mode (`--insecure-dev`).
+///
+/// # Wake stream
+///
+/// With `wake` set to [`WakeMode::Sse`] (the default) the worker opens
+/// `GET /api/v1/workers/wake` and polls as soon as the server says an
+/// activity for its worker type was scheduled. While that stream is
+/// connected, the idle wait between polls is `wake_poll_interval`, a safety
+/// net for lost wakes. Whenever it is not connected (an older server, a
+/// server without a wake signal, a network fault) the worker polls every
+/// `poll_interval`, exactly as with [`WakeMode::Poll`].
+///
+/// Behind a proxy that buffers responses, wakes arrive late; disable
+/// buffering for the wake path or use [`WakeMode::Poll`].
 #[derive(Debug, Clone)]
 pub struct WorkerConfig {
     /// API server base URL
@@ -59,6 +74,35 @@ pub struct WorkerConfig {
 
     /// OAuth client secret; `None` for a dev-mode server
     pub client_secret: Option<String>,
+
+    /// How the worker learns that work may be available
+    pub wake: WakeMode,
+
+    /// Idle wait between polls while the wake stream is connected
+    pub wake_poll_interval: Duration,
+}
+
+/// How a worker learns that work may be available.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WakeMode {
+    /// Listen on the server's wake stream and poll when woken, with the poll
+    /// timer as a safety net
+    #[default]
+    Sse,
+    /// Poll on the timer alone
+    Poll,
+}
+
+impl std::str::FromStr for WakeMode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "sse" => Ok(Self::Sse),
+            "poll" => Ok(Self::Poll),
+            other => Err(format!("expected 'sse' or 'poll', got '{other}'")),
+        }
+    }
 }
 
 fn default_worker_id() -> String {
@@ -79,6 +123,8 @@ impl Default for WorkerConfig {
             shutdown_timeout: Duration::from_secs(30),
             client_id: None,
             client_secret: None,
+            wake: WakeMode::default(),
+            wake_poll_interval: Duration::from_secs(5),
         }
     }
 }
@@ -145,6 +191,12 @@ impl WorkerConfig {
         if let Some(d) = env_seconds("KRUXIAFLOW_WORKER_SHUTDOWN_TIMEOUT")? {
             config.shutdown_timeout = d;
         }
+        if let Some(wake) = env_parse("KRUXIAFLOW_WORKER_WAKE")? {
+            config.wake = wake;
+        }
+        if let Some(d) = env_seconds("KRUXIAFLOW_WORKER_WAKE_POLL_INTERVAL")? {
+            config.wake_poll_interval = d;
+        }
         config.client_id = env_nonempty("KRUXIAFLOW_CLIENT_ID");
         config.client_secret = env_nonempty("KRUXIAFLOW_CLIENT_SECRET");
 
@@ -178,6 +230,12 @@ impl WorkerConfig {
         }
         if self.client_id.is_some() != self.client_secret.is_some() {
             return Err(ConfigError::PartialCredentials);
+        }
+        if self.wake_poll_interval.is_zero() {
+            return Err(ConfigError::InvalidValue {
+                var: "wake_poll_interval".to_string(),
+                reason: "must be > 0".to_string(),
+            });
         }
         Ok(())
     }
@@ -251,6 +309,18 @@ impl WorkerConfigBuilder {
     /// Set the graceful-shutdown drain deadline.
     pub fn shutdown_timeout(mut self, timeout: Duration) -> Self {
         self.config.shutdown_timeout = timeout;
+        self
+    }
+
+    /// Set how the worker learns that work may be available.
+    pub fn wake(mut self, wake: WakeMode) -> Self {
+        self.config.wake = wake;
+        self
+    }
+
+    /// Set the idle wait between polls while the wake stream is connected.
+    pub fn wake_poll_interval(mut self, interval: Duration) -> Self {
+        self.config.wake_poll_interval = interval;
         self
     }
 

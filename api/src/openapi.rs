@@ -89,6 +89,7 @@ use utoipa::OpenApi;
 
         // Worker Activity APIs
         crate::handlers::workers::poll_activities,
+        crate::handlers::workers::worker_wake_stream,
         crate::handlers::workers::heartbeat_activity,
         crate::handlers::workers::complete_activity,
         crate::handlers::workers::fail_activity,

@@ -1,4 +1,5 @@
-//! `LISTEN`/`NOTIFY` wake-up for event consumers.
+//! `LISTEN`/`NOTIFY` wake-ups: for event consumers, and for workers waiting
+//! on the activity queue.
 //!
 //! An `AFTER INSERT ... FOR EACH STATEMENT` trigger on `workflow_events` runs
 //! `pg_notify('workflow_events', '')`. Postgres delivers the notification when
@@ -15,8 +16,16 @@
 //!    a missed notification only delays an event until the next tick.
 //! 3. A listener reconnect counts as a wake, because notifications sent while
 //!    the connection was down are gone.
+//!
+//! The same listener connection also carries the activity queue's channel
+//! (trigger `activity_queue_notify`, payload = worker type). [`ActivityWake`]
+//! hands out one receiver per worker type; the API passes each wake on to the
+//! workers of that type (`GET /api/v1/workers/wake`), which then poll for
+//! work. The same three rules apply, with the payload used only to decide
+//! whom to wake.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -29,6 +38,10 @@ use super::Result;
 
 /// The channel the `workflow_events_notify` trigger notifies on
 pub const EVENT_NOTIFY_CHANNEL: &str = "workflow_events";
+
+/// The channel the `activity_queue_notify` trigger notifies on, with the
+/// worker type as payload
+pub const ACTIVITY_NOTIFY_CHANNEL: &str = "activity_queue";
 
 /// Environment variable selecting the wake mode (`notify` or `poll`)
 pub const EVENT_WAKE_ENV: &str = "KRUXIAFLOW_EVENT_WAKE";
@@ -89,10 +102,10 @@ pub enum Wake {
 }
 
 /// One notification from the listener connection
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListenerEvent {
-    /// A notification on the channel
-    Notification,
+    /// A notification on one of the channels
+    Notification { channel: String, payload: String },
     /// The connection was lost and re-established; notifications sent in
     /// between are gone
     Reconnected,
@@ -111,14 +124,66 @@ impl NotificationSource for PgListener {
         // try_recv returns Ok(None) when the connection was lost; the next
         // call reconnects and re-issues LISTEN
         match self.try_recv().await? {
-            Some(_) => Ok(ListenerEvent::Notification),
+            Some(notification) => Ok(ListenerEvent::Notification {
+                channel: notification.channel().to_string(),
+                payload: notification.payload().to_string(),
+            }),
             None => Ok(ListenerEvent::Reconnected),
         }
     }
 }
 
+/// The wake counters the listener task writes and receivers read
+struct Shared {
+    events: watch::Sender<u64>,
+    /// One counter per worker type, created on first subscription
+    activities: Mutex<HashMap<String, watch::Sender<u64>>>,
+}
+
+impl Shared {
+    fn new() -> Self {
+        Self {
+            events: watch::channel(0u64).0,
+            activities: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn wake_events(&self) {
+        bump(&self.events);
+    }
+
+    /// Wake the subscribers of one worker type (no-op if there are none)
+    fn wake_activity(&self, worker: &str) {
+        if let Ok(activities) = self.activities.lock()
+            && let Some(sender) = activities.get(worker)
+        {
+            bump(sender);
+        }
+    }
+
+    /// Wake everything: notifications may have been lost
+    fn wake_all(&self) {
+        bump(&self.events);
+        if let Ok(activities) = self.activities.lock() {
+            activities.values().for_each(bump);
+        }
+    }
+
+    fn subscribe_activity(&self, worker: &str) -> watch::Receiver<u64> {
+        match self.activities.lock() {
+            Ok(mut activities) => activities
+                .entry(worker.to_string())
+                .or_insert_with(|| watch::channel(0u64).0)
+                .subscribe(),
+            // A poisoned map cannot be used; hand out a receiver that only
+            // ever times out, which leaves the subscriber on its timer
+            Err(_) => watch::channel(0u64).1,
+        }
+    }
+}
+
 struct Inner {
-    sender: Arc<watch::Sender<u64>>,
+    shared: Arc<Shared>,
     task: AbortHandle,
 }
 
@@ -139,34 +204,69 @@ pub struct EventWake {
 
 impl EventWake {
     /// Open a dedicated listener connection on `pool`'s connect options and
-    /// `LISTEN` on [`EVENT_NOTIFY_CHANNEL`].
+    /// `LISTEN` on [`EVENT_NOTIFY_CHANNEL`] and [`ACTIVITY_NOTIFY_CHANNEL`].
     ///
     /// Fails if the connection or the `LISTEN` fails (no permission, a
     /// transaction-mode connection pooler); callers fall back to the timer.
     pub async fn connect(pool: &PgPool) -> Result<Self> {
         let mut listener = PgListener::connect_with(pool).await?;
-        listener.listen(EVENT_NOTIFY_CHANNEL).await?;
+        listener
+            .listen_all([EVENT_NOTIFY_CHANNEL, ACTIVITY_NOTIFY_CHANNEL])
+            .await?;
         Ok(Self::from_source(listener))
     }
 
     /// Run the listener loop over any notification source
     pub fn from_source<S: NotificationSource>(source: S) -> Self {
-        let sender = Arc::new(watch::channel(0u64).0);
-        let task = tokio::spawn(run_listener(source, sender.clone()));
+        let shared = Arc::new(Shared::new());
+        let task = tokio::spawn(run_listener(source, shared.clone()));
         Self {
             inner: Arc::new(Inner {
-                sender,
+                shared,
                 task: task.abort_handle(),
             }),
         }
     }
 
-    /// A receiver that wakes on every notification from now on
+    /// A receiver that wakes on every event notification from now on
     pub fn subscribe(&self) -> WakeReceiver {
         WakeReceiver {
-            rx: self.inner.sender.subscribe(),
+            rx: self.inner.shared.events.subscribe(),
             _inner: self.inner.clone(),
         }
+    }
+
+    /// The activity-queue side of the same listener
+    pub fn activity_wake(&self) -> ActivityWake {
+        ActivityWake {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+/// A process-wide wake-up signal for workers of each worker type, fed by the
+/// same listener connection as [`EventWake`].
+///
+/// Cheap to clone. A wake means "an activity for this worker type was written
+/// as pending, or notifications may have been lost": the worker should poll.
+#[derive(Clone)]
+pub struct ActivityWake {
+    inner: Arc<Inner>,
+}
+
+impl ActivityWake {
+    /// A receiver that wakes on every notification for `worker` from now on
+    pub fn subscribe(&self, worker: &str) -> WakeReceiver {
+        WakeReceiver {
+            rx: self.inner.shared.subscribe_activity(worker),
+            _inner: self.inner.clone(),
+        }
+    }
+}
+
+impl std::fmt::Debug for ActivityWake {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ActivityWake").finish_non_exhaustive()
     }
 }
 
@@ -176,23 +276,27 @@ impl std::fmt::Debug for EventWake {
     }
 }
 
-async fn run_listener<S: NotificationSource>(mut source: S, sender: Arc<watch::Sender<u64>>) {
+async fn run_listener<S: NotificationSource>(mut source: S, shared: Arc<Shared>) {
     const RETRY_MIN: Duration = Duration::from_millis(100);
     const RETRY_MAX: Duration = Duration::from_secs(5);
     let mut retry = RETRY_MIN;
 
     loop {
         match source.recv().await {
-            Ok(ListenerEvent::Notification) => {
+            Ok(ListenerEvent::Notification { channel, payload }) => {
                 retry = RETRY_MIN;
-                bump(&sender);
+                if channel == ACTIVITY_NOTIFY_CHANNEL {
+                    shared.wake_activity(&payload);
+                } else {
+                    shared.wake_events();
+                }
             }
             Ok(ListenerEvent::Reconnected) => {
                 tracing::warn!(
                     "Event listener connection lost; reconnecting (consumers poll to catch up)"
                 );
                 retry = RETRY_MIN;
-                bump(&sender);
+                shared.wake_all();
             }
             Err(e) => {
                 tracing::warn!(
@@ -202,7 +306,7 @@ async fn run_listener<S: NotificationSource>(mut source: S, sender: Arc<watch::S
                 );
                 // Notifications may have been lost while the listener was
                 // failing: wake consumers so they poll
-                bump(&sender);
+                shared.wake_all();
                 tokio::time::sleep(retry).await;
                 retry = (retry * 2).min(RETRY_MAX);
             }
@@ -221,6 +325,18 @@ pub struct WakeReceiver {
 }
 
 impl WakeReceiver {
+    /// Wait until a notification arrives, however long that takes.
+    ///
+    /// Like [`wait`](Self::wait), a notification that arrived since the
+    /// previous wait returned ends this one immediately.
+    pub async fn woken(&mut self) {
+        if self.rx.changed().await.is_err() {
+            // The sender is kept alive by `_inner`, so this cannot happen;
+            // never resolve rather than spin
+            std::future::pending::<()>().await;
+        }
+    }
+
     /// Wait for a notification or `timeout`, whichever comes first.
     ///
     /// A notification that arrived since the previous `wait` returned is not
@@ -270,6 +386,13 @@ mod tests {
         (tx, EventWake::from_source(StubSource(rx)))
     }
 
+    fn event_notification() -> ListenerEvent {
+        ListenerEvent::Notification {
+            channel: EVENT_NOTIFY_CHANNEL.to_string(),
+            payload: String::new(),
+        }
+    }
+
     const SHORT: Duration = Duration::from_millis(50);
     const LONG: Duration = Duration::from_secs(2);
 
@@ -277,7 +400,7 @@ mod tests {
     async fn test_notification_wakes() {
         let (tx, wake) = stub();
         let mut rx = wake.subscribe();
-        tx.send(Ok(ListenerEvent::Notification)).unwrap();
+        tx.send(Ok(event_notification())).unwrap();
         assert_eq!(rx.wait(LONG).await, Wake::Woken);
     }
 
@@ -304,7 +427,7 @@ mod tests {
             .unwrap();
         assert_eq!(rx.wait(LONG).await, Wake::Woken);
         // After the retry sleep the loop keeps delivering notifications
-        tx.send(Ok(ListenerEvent::Notification)).unwrap();
+        tx.send(Ok(event_notification())).unwrap();
         assert_eq!(rx.wait(LONG).await, Wake::Woken);
     }
 
@@ -312,7 +435,7 @@ mod tests {
     async fn test_wake_before_wait_is_not_lost() {
         let (tx, wake) = stub();
         let mut rx = wake.subscribe();
-        tx.send(Ok(ListenerEvent::Notification)).unwrap();
+        tx.send(Ok(event_notification())).unwrap();
         // Let the listener task deliver it before anyone waits
         tokio::time::sleep(SHORT).await;
         assert_eq!(rx.wait(SHORT).await, Wake::Woken);
@@ -325,7 +448,7 @@ mod tests {
         let (tx, wake) = stub();
         let mut a = wake.subscribe();
         let mut b = wake.subscribe();
-        tx.send(Ok(ListenerEvent::Notification)).unwrap();
+        tx.send(Ok(event_notification())).unwrap();
         assert_eq!(a.wait(LONG).await, Wake::Woken);
         assert_eq!(b.wait(LONG).await, Wake::Woken);
     }
@@ -335,8 +458,124 @@ mod tests {
         let (tx, wake) = stub();
         let mut rx = wake.subscribe();
         drop(wake);
-        tx.send(Ok(ListenerEvent::Notification)).unwrap();
+        tx.send(Ok(event_notification())).unwrap();
         assert_eq!(rx.wait(LONG).await, Wake::Woken);
+    }
+
+    fn activity_notification(worker: &str) -> ListenerEvent {
+        ListenerEvent::Notification {
+            channel: ACTIVITY_NOTIFY_CHANNEL.to_string(),
+            payload: worker.to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_activity_notification_wakes_only_that_worker_type() {
+        let (tx, wake) = stub();
+        let activities = wake.activity_wake();
+        let mut std_worker = activities.subscribe("std");
+        let mut other_worker = activities.subscribe("other");
+
+        tx.send(Ok(activity_notification("std"))).unwrap();
+        assert_eq!(std_worker.wait(LONG).await, Wake::Woken);
+        assert_eq!(other_worker.wait(SHORT).await, Wake::TimedOut);
+    }
+
+    #[tokio::test]
+    async fn test_event_and_activity_channels_do_not_wake_each_other() {
+        let (tx, wake) = stub();
+        let mut events = wake.subscribe();
+        let mut std_worker = wake.activity_wake().subscribe("std");
+
+        tx.send(Ok(activity_notification("std"))).unwrap();
+        assert_eq!(std_worker.wait(LONG).await, Wake::Woken);
+        assert_eq!(events.wait(SHORT).await, Wake::TimedOut);
+
+        tx.send(Ok(event_notification())).unwrap();
+        assert_eq!(events.wait(LONG).await, Wake::Woken);
+        assert_eq!(std_worker.wait(SHORT).await, Wake::TimedOut);
+    }
+
+    #[tokio::test]
+    async fn test_notification_for_a_worker_type_nobody_listens_to_is_ignored() {
+        let (tx, wake) = stub();
+        let mut std_worker = wake.activity_wake().subscribe("std");
+
+        tx.send(Ok(activity_notification("nobody"))).unwrap();
+        assert_eq!(std_worker.wait(SHORT).await, Wake::TimedOut);
+        // The listener keeps running
+        tx.send(Ok(activity_notification("std"))).unwrap();
+        assert_eq!(std_worker.wait(LONG).await, Wake::Woken);
+    }
+
+    #[tokio::test]
+    async fn test_reconnect_and_error_wake_every_activity_subscriber() {
+        let (tx, wake) = stub();
+        let activities = wake.activity_wake();
+        let mut events = wake.subscribe();
+        let mut a = activities.subscribe("a");
+        let mut b = activities.subscribe("b");
+
+        tx.send(Ok(ListenerEvent::Reconnected)).unwrap();
+        assert_eq!(events.wait(LONG).await, Wake::Woken);
+        assert_eq!(a.wait(LONG).await, Wake::Woken);
+        assert_eq!(b.wait(LONG).await, Wake::Woken);
+
+        tx.send(Err(EventError::Invalid("connection reset".into())))
+            .unwrap();
+        assert_eq!(a.wait(LONG).await, Wake::Woken);
+        assert_eq!(b.wait(LONG).await, Wake::Woken);
+    }
+
+    #[tokio::test]
+    async fn test_every_subscriber_of_a_worker_type_wakes() {
+        let (tx, wake) = stub();
+        let activities = wake.activity_wake();
+        let mut first = activities.subscribe("std");
+        let mut second = activities.subscribe("std");
+
+        tx.send(Ok(activity_notification("std"))).unwrap();
+        assert_eq!(first.wait(LONG).await, Wake::Woken);
+        assert_eq!(second.wait(LONG).await, Wake::Woken);
+    }
+
+    #[tokio::test]
+    async fn test_woken_waits_without_a_timeout_and_keeps_an_earlier_wake() {
+        let (tx, wake) = stub();
+        let mut std_worker = wake.activity_wake().subscribe("std");
+
+        // Nothing yet: still pending after a while
+        assert!(
+            tokio::time::timeout(SHORT, std_worker.woken())
+                .await
+                .is_err()
+        );
+
+        // A wake that arrives while nobody waits is kept for the next wait
+        tx.send(Ok(activity_notification("std"))).unwrap();
+        tokio::time::sleep(SHORT).await;
+        tokio::time::timeout(SHORT, std_worker.woken())
+            .await
+            .expect("an earlier wake ends the wait at once");
+
+        // ...and is consumed exactly once
+        assert!(
+            tokio::time::timeout(SHORT, std_worker.woken())
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_activity_receiver_outlives_the_event_wake() {
+        let (tx, wake) = stub();
+        let activities = wake.activity_wake();
+        let mut std_worker = activities.subscribe("std");
+        drop(wake);
+        drop(activities);
+
+        tx.send(Ok(activity_notification("std"))).unwrap();
+        assert_eq!(std_worker.wait(LONG).await, Wake::Woken);
     }
 
     #[test]

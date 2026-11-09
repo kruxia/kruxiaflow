@@ -73,6 +73,7 @@ pub fn public_routes() -> Router<AppState> {
 /// - GET /api/v1/workflows/{workflow_id}/activities/{activity_key}/files/{filename} - Download file
 /// - POST /api/v1/workflows/{workflow_id}/activities/{activity_key}/files/{filename} - Upload file
 /// - POST /api/v1/workers/poll - Poll for activities
+/// - GET /api/v1/workers/wake - Server-sent wake stream for workers
 /// - POST /api/v1/activities/{activity_id}/heartbeat - Send heartbeat
 /// - POST /api/v1/activities/{activity_id}/complete - Complete activity
 /// - POST /api/v1/activities/{activity_id}/fail - Fail activity
@@ -158,6 +159,7 @@ pub fn protected_routes() -> Router<AppState> {
         )
         // Worker Activity APIs
         .route("/api/v1/workers/poll", post(handlers::poll_activities))
+        .route("/api/v1/workers/wake", get(handlers::worker_wake_stream))
         .route(
             "/api/v1/activities/:activity_id/heartbeat",
             post(handlers::heartbeat_activity),

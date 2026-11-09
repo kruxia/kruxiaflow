@@ -109,6 +109,15 @@ impl ActivityWorkerService {
         Ok(claimed)
     }
 
+    /// Time until the next pending activity for `worker` becomes due, if one
+    /// is scheduled for later (see `ActivityQueue::next_due_in`)
+    pub async fn next_due_in(
+        &self,
+        worker: &str,
+    ) -> ActivityWorkerResult<Option<std::time::Duration>> {
+        Ok(self.queue.next_due_in(worker).await?)
+    }
+
     /// Send heartbeat for an activity
     ///
     /// Delegates to ActivityQueue::heartbeat to extend timeout deadline.

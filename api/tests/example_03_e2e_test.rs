@@ -187,6 +187,7 @@ async fn test_example_03_parallel_document_processing(pool: PgPool) {
         client_id: Some("test_worker".to_string()),
         client_secret: Some("test_worker_secret".to_string()),
         shutdown_timeout: Duration::from_secs(30),
+        ..WorkerConfig::default()
     };
 
     let manager = WorkerManager::new(worker_config, registry, workflow_storage.clone());

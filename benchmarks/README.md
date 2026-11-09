@@ -75,10 +75,11 @@ docker-compose down
 
 Measured on the reference hardware (Apple Silicon, Docker Desktop; July 2026):
 
-- **Kruxia Flow**: ~150 wf/sec high-concurrency; ~21-27 wf/sec on the
-  latency-bound sequential/parallel scenarios (dominated by per-step
-  round-trips, not engine capacity). From 0.10.0; through 0.9.x it was
-  ~85-110 and ~15-20 (see the 2026-11-08 results)
+- **Kruxia Flow**: ~135-150 wf/sec high-concurrency (bound by the
+  orchestrator processing events one at a time); ~80 wf/sec Sequential-5 and
+  ~42 wf/sec Parallel-10. From 0.10.0; through 0.9.x it was ~85-110
+  high-concurrency and ~15-20 on the other two, which were bound by poll
+  timers (see the two 2026-11-08 result sets)
 - **Temporal**: ~13-66 wf/sec (high run-to-run variance on this host)
 - **Airflow**: ~2-11 wf/sec (batch-oriented, not optimized for throughput)
 - **Speedup**: ~1.5-2x vs Temporal average, ~10x vs Airflow average
@@ -143,6 +144,88 @@ amd64-only — build it locally before running
 or the py-std services fail to start.
 
 ## Results
+
+### 2026-11-08 (worker wake over SSE, for 0.10.0)
+
+Same harness, host and day as the event-wake runs below. Two configurations
+built from source: the event-wake commit (the baseline here) and the worker
+wake on top of it (`docs/implementation/2026-11-08-activity-wake-sse.md`).
+Workers now learn that an activity was scheduled from a server-sent event
+stream and poll at once, instead of polling every 100 ms.
+
+**All 2,700 measured workflows completed in both configurations**, with 0
+errors and 0 warnings in the server logs.
+
+Standard suite, mean of three passes (throughput in wf/s, latency in ms). The
+0.9.1 column is from the event-wake runs below, for the cumulative picture:
+
+| Scenario           | Metric     | 0.9.1 | event wake | + worker wake | change vs event wake |
+|--------------------|------------|-------|------------|---------------|----------------------|
+| Sequential-5       | Throughput | 15.4  | 21.1       | 82.4          | 3.9x                 |
+| Sequential-5       | P50        | 642   | 436        | 111           | -75%                 |
+| Sequential-5       | P95        | 776   | 522        | 169           | -68%                 |
+| Sequential-5       | P99        | 798   | 575        | 176           | -69%                 |
+| Parallel-10        | Throughput | 20.3  | 26.8       | 42.1          | +57%                 |
+| Parallel-10        | P50        | 478   | 341        | 234           | -31%                 |
+| Parallel-10        | P95        | 570   | 427        | 275           | -35%                 |
+| Parallel-10        | P99        | 609   | 446        | 279           | -37%                 |
+| High-Concurrency-3 | Throughput | 110.3 | 135.4      | 134.9         | none                 |
+| High-Concurrency-3 | P50        | 805   | 653        | 682           | +4%                  |
+| High-Concurrency-3 | P95        | 1020  | 924        | 922           | none                 |
+| High-Concurrency-3 | P99        | 1161  | 1043       | 1015          | -3%                  |
+
+Where a step's time goes, from event timestamps in the database (mean, ms).
+"Activity round trip" is `ActivityScheduled` to `ActivityCompleted`: the
+worker noticing, claiming, running an echo, and reporting. "Orchestrator
+reaction" is an event being published to the orchestrator acting on it:
+
+| Load                     | Step                  | event wake | + worker wake |
+|--------------------------|-----------------------|------------|---------------|
+| Quiet system             | Activity round trip   | 58 to 92   | 2.0           |
+| Quiet system             | Orchestrator reaction | 3.0        | 2.5           |
+| 10 concurrent workflows  | Activity round trip   | 74.7       | 1.9           |
+| 10 concurrent workflows  | Orchestrator reaction | 7.5        | 13.8          |
+| 100 concurrent workflows | Activity round trip   | 69.6       | 5.8           |
+| 100 concurrent workflows | Orchestrator reaction | 81.2       | 132.3         |
+
+Quiet system, submit to completed as the client sees it (one workflow at a
+time after a random 4 to 8 s idle gap; mean, ms):
+
+| Workflow     | 0.9.1 | event wake | + worker wake |
+|--------------|-------|------------|---------------|
+| 1 activity   | 556   | 73.6       | 14.7          |
+| Sequential-5 | 914   | 483        | 31.3          |
+
+Other checks on an idle stack:
+
+| Measurement                                       | event wake | + worker wake |
+|---------------------------------------------------|------------|---------------|
+| Database transactions per second, nothing running | 11         | 2             |
+| A 2 s delayed activity completes late by (ms)     | 86 to 105  | 24 to 32      |
+
+Reading the numbers:
+
+- **The worker's poll timer is gone from the path.** An activity is picked
+  up, run and reported in about 2 ms, where it used to wait up to 100 ms to be
+  noticed. A quiet five-step workflow finishes in 31 ms instead of 483 ms
+  (914 ms in 0.9.1).
+- **Latency-bound scenarios gain the most.** Sequential-5 runs 3.9 times
+  faster (5.4 times faster than 0.9.1), because each workflow was five timer
+  waits and is now five round trips.
+- **At 100 concurrent workflows nothing changes, because the orchestrator is
+  the limit.** It processes events one at a time. Activities now complete in
+  6 ms instead of 70 ms, so their events simply reach the orchestrator's queue
+  sooner and wait there longer (reaction time 81 ms to 132 ms); throughput
+  and end-to-end latency are unchanged within run-to-run variance (the same
+  baseline code measured 135 wf/s here and 150 wf/s in the runs below).
+  Processing events for different workflows in parallel is what would move
+  this scenario.
+- **Idle cost drops.** An idle worker no longer polls ten times a second:
+  database activity with nothing running falls from 11 to 2 transactions a
+  second.
+- **Delayed activities are more punctual, not less**, even though the
+  worker's idle timer went from 100 ms to 5 s: an empty poll tells the worker
+  when the next one is due.
 
 ### 2026-11-08 (commit-order event cursor + NOTIFY wake, for 0.10.0)
 
@@ -226,7 +309,8 @@ Reading the numbers:
   65 to 100 ms between `ActivityScheduled` and `ActivityCompleted`, almost all
   of it the built-in worker's 100 ms activity-queue poll, which this work did
   not touch. Sequential-5 on a quiet system is five of those. The same wake
-  pattern applied to the activity queue is the next step.
+  pattern applied to the activity queue was the next step, and is measured in
+  the section above.
 - **Timer-only mode is a fallback, and behaves like one.** Its throughput is
   equal to or better than 0.9.1, and the first event after idle waits for the
   timer exactly as before. Two caveats: follow-up events on a quiet system

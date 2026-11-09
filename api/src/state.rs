@@ -1,7 +1,7 @@
 use crate::websocket::ConnectionManager;
 use crate::workflow_events::WorkflowEventManager;
 use kruxiaflow_core::cache::CacheService;
-use kruxiaflow_core::events::EventSource;
+use kruxiaflow_core::events::{ActivityWake, EventSource};
 use kruxiaflow_core::queue::ActivityQueue;
 use kruxiaflow_core::storage::WorkflowStorage;
 use kruxiaflow_core::subscription::SubscriptionService;
@@ -80,6 +80,12 @@ pub struct AppState {
     /// Insecure dev mode: unauthenticated requests execute as a synthetic
     /// dev principal. Local development only — never enabled by default.
     pub insecure_dev: bool,
+
+    /// Wake-up signal for workers, per worker type, fed by this process's
+    /// LISTEN connection. `None` when the process polls only
+    /// (`KRUXIAFLOW_EVENT_WAKE=poll`, or LISTEN failed); the worker wake
+    /// stream then answers 503 and workers stay on their poll timer.
+    pub activity_wake: Option<ActivityWake>,
 }
 
 impl AppState {
@@ -139,6 +145,7 @@ impl AppState {
                 "authentication".to_string(),
             ],
             insecure_dev: false,
+            activity_wake: None,
         }
     }
 
@@ -151,6 +158,12 @@ impl AppState {
         if enabled {
             self.features.push("insecure-dev".to_string());
         }
+        self
+    }
+
+    /// Attach the activity wake that `GET /api/v1/workers/wake` streams from
+    pub fn with_activity_wake(mut self, activity_wake: Option<ActivityWake>) -> Self {
+        self.activity_wake = activity_wake;
         self
     }
 
@@ -199,6 +212,7 @@ impl AppState {
             build,
             features,
             insecure_dev: false,
+            activity_wake: None,
         }
     }
 
