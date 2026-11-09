@@ -1,0 +1,13 @@
+# cargo-nextest configuration (scripts/test.sh uses nextest when installed).
+
+# Tests that read the shared Mailpit inbox must not overlap: each sends a
+# message and then asserts on the newest one. They are marked #[serial], but
+# that only serializes tests within one process, and nextest runs every test
+# in its own process. A test group restores the intent across processes and
+# across test binaries.
+[test-groups]
+mailpit = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = 'binary(email_activity_integration_test) | binary(example_10_e2e_test)'
+test-group = 'mailpit'
