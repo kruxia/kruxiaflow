@@ -1062,15 +1062,26 @@ async fn test_run_orchestrator_wakes_on_notify(pool: PgPool) {
         .with_poll_interval(Duration::from_millis(50), Duration::from_secs(30))
         .with_backoff_multiplier(4.0);
 
+    // Stopped through the token at the end, so the loop and its background
+    // task let go of the event source and its LISTEN connection; otherwise
+    // the test database cannot be torn down until that connection times out
+    let shutdown = tokio_util::sync::CancellationToken::new();
     let handle = {
         let (es, aq, ss) = (
             event_source.clone(),
             activity_queue.clone(),
             subscription_service.clone(),
         );
+        let shutdown = shutdown.clone();
         tokio::spawn(async move {
-            kruxiaflow_core::orchestrator::orchestrator::run_orchestrator(es, aq, ss, config, None)
-                .await
+            kruxiaflow_core::orchestrator::orchestrator::run_orchestrator(
+                es,
+                aq,
+                ss,
+                config,
+                Some(shutdown),
+            )
+            .await
         })
     };
 
@@ -1099,13 +1110,142 @@ async fn test_run_orchestrator_wakes_on_notify(pool: PgPool) {
     })
     .await;
     let latency = published.elapsed();
-    handle.abort();
+    shutdown.cancel();
+    let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
 
     assert!(scheduled, "activity was never scheduled");
     // On the timer alone this would take ~2.75s
     assert!(
         latency < Duration::from_secs(1),
         "event took {latency:?} to process; the wake did not shorten the wait"
+    );
+}
+
+/// A consumer can be woken by an event's commit and still find nothing: the
+/// event is held back until an older transaction ends, and that transaction's
+/// end notifies nobody. The loop must not then fall back to its idle timer.
+/// It asks the event source whether events are pending, and while they are it
+/// retries on a short backoff capped at the timer-only maximum.
+///
+/// Here the idle timer is 30 s, the timer-only maximum 100 ms, and the
+/// backoff multiplier 100, so a backoff growing towards the idle timer would
+/// retry at 50 ms and then not for another 5 s.
+///
+/// The blocker is held only briefly: transaction ids are instance-wide, so
+/// it also holds back event delivery in every test running alongside.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_run_orchestrator_delivers_a_held_back_event_soon_after_its_blocker_ends(
+    pool: PgPool,
+) {
+    use kruxiaflow_core::events::{EventWake, PostgresEventSource};
+
+    let definition = WorkflowDefinition {
+        id: Uuid::now_v7(),
+        name: "held_back_test_workflow".to_string(),
+        version: "1.0".to_string(),
+        activities: vec![ActivityDefinition {
+            key: "task1".to_string(),
+            worker: "test".to_string(),
+            activity_name: "work".to_string(),
+            parameters: json!({}),
+            settings: None,
+            depends_on: None,
+            dependency_of: None,
+            output_definitions: None,
+        }],
+    };
+    let definition_id = insert_workflow_definition(&pool, &definition).await;
+    let workflow_id = Uuid::now_v7();
+    insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
+
+    // The plain event source: the settling wrapper the other tests use would
+    // itself wait for the blocker and hide what the loop does
+    let wake = EventWake::connect(&pool).await.expect("LISTEN");
+    let event_source: Arc<dyn EventSource> =
+        Arc::new(PostgresEventSource::with_wake(pool.clone(), wake));
+    let activity_queue: Arc<dyn ActivityQueue> =
+        Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
+    let mut config = OrchestratorConfig::new(pool.clone()).with_backoff_multiplier(100.0);
+    config.poll_interval_min = Duration::from_millis(50);
+    config.poll_interval_max = Duration::from_millis(100);
+    config.wake_poll_interval_max = Duration::from_secs(30);
+
+    // Stopped through the token at the end, so the loop and its background
+    // task let go of the event source and its LISTEN connection; otherwise
+    // the test database cannot be torn down until that connection times out
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let handle = {
+        let (es, aq, ss) = (
+            event_source.clone(),
+            activity_queue.clone(),
+            subscription_service.clone(),
+        );
+        let shutdown = shutdown.clone();
+        tokio::spawn(async move {
+            kruxiaflow_core::orchestrator::orchestrator::run_orchestrator(
+                es,
+                aq,
+                ss,
+                config,
+                Some(shutdown),
+            )
+            .await
+        })
+    };
+    let scheduled = || async {
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM activity_queue WHERE workflow_id = $1")
+            .bind(workflow_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or(0)
+            > 0
+    };
+
+    // Let the loop reach its 30 s idle wait
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // An older writing transaction holds the horizon...
+    let mut blocker = pool.begin().await.unwrap();
+    sqlx::query("INSERT INTO workflow_definitions (name, activities) VALUES ('blocker', '[]')")
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
+
+    // ...while the event commits and wakes the loop
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id,
+            event_type: WorkflowEventType::WorkflowCreated,
+            activity_key: None,
+            payload: json!({}),
+            iteration: None,
+        })
+        .await
+        .unwrap();
+
+    // Woken, polled, found nothing: the event is held back
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!scheduled().await, "event delivered while held back");
+
+    // The blocker ends without notifying anyone
+    blocker.commit().await.unwrap();
+    let released = std::time::Instant::now();
+
+    let delivered = common::wait_until(Duration::from_secs(10), scheduled).await;
+    let late_by = released.elapsed();
+    shutdown.cancel();
+    let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+
+    assert!(delivered, "held-back event was never delivered");
+    // Retries are at most 100 ms apart. A backoff growing from the wake
+    // (50 ms, then 5 s) would deliver about 4.7 s late; the idle timer,
+    // 30 s late. The bound leaves room for a slow, busy CI runner.
+    assert!(
+        late_by < Duration::from_secs(2),
+        "delivered {late_by:?} after the blocker ended; retries were not capped \
+         at the timer-only maximum"
     );
 }
 

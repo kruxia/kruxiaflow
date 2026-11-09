@@ -180,6 +180,70 @@ async fn test_unrelated_open_transaction_delays_delivery(pool: PgPool) {
 }
 
 /// A read-only transaction takes no xid and blocks nothing
+/// `has_pending_events` is what tells a consumer that an empty poll does not
+/// mean it is caught up: true while a committed event waits behind an open
+/// transaction, and until the consumer's cursor has passed it.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_pending_events_are_reported_while_held_back(pool: PgPool) {
+    let source = PostgresEventSource::new(pool.clone());
+    let consumer = "pending-held-back";
+
+    // Nothing published, no cursor stored
+    assert!(!source.has_pending_events(consumer).await.unwrap());
+
+    // An older writing transaction holds the horizon
+    let mut blocker = pool.begin().await.unwrap();
+    sqlx::query("INSERT INTO workflow_definitions (name, activities) VALUES ('blocker', '[]')")
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
+
+    let id = publish(&source, &pool, Uuid::now_v7()).await;
+
+    // Committed but withheld: the poll is empty and the event is pending
+    assert!(poll_ids(&source, consumer).await.is_empty());
+    assert!(source.has_pending_events(consumer).await.unwrap());
+
+    // Released: still pending until the consumer has taken it
+    blocker.commit().await.unwrap();
+    common::settle_events(&pool).await;
+    assert!(source.has_pending_events(consumer).await.unwrap());
+
+    let events = source.poll(consumer).await.unwrap();
+    assert_eq!(events.iter().map(|e| e.id).collect::<Vec<_>>(), vec![id]);
+    // Polling does not move the cursor; storing it does
+    assert!(source.has_pending_events(consumer).await.unwrap());
+    source
+        .update_position(consumer, events[0].cursor())
+        .await
+        .unwrap();
+    assert!(!source.has_pending_events(consumer).await.unwrap());
+
+    // Each consumer has its own answer
+    assert!(source.has_pending_events("another-consumer").await.unwrap());
+}
+
+/// An event in a transaction that has not committed is not pending: its
+/// commit will send a wake, so the consumer has no reason to retry early.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_uncommitted_events_are_not_pending(pool: PgPool) {
+    let source = PostgresEventSource::new(pool.clone());
+    let consumer = "pending-uncommitted";
+
+    let mut writer = pool.begin().await.unwrap();
+    insert_event(&mut writer, Uuid::now_v7()).await;
+    assert!(!source.has_pending_events(consumer).await.unwrap());
+
+    // Rolled back: never pending
+    writer.rollback().await.unwrap();
+    assert!(!source.has_pending_events(consumer).await.unwrap());
+
+    let mut writer = pool.begin().await.unwrap();
+    insert_event(&mut writer, Uuid::now_v7()).await;
+    writer.commit().await.unwrap();
+    assert!(source.has_pending_events(consumer).await.unwrap());
+}
+
 #[sqlx::test(migrations = "../migrations")]
 async fn test_read_only_transaction_does_not_delay_delivery(pool: PgPool) {
     let source = PostgresEventSource::new(pool.clone());

@@ -1,5 +1,5 @@
 use super::{
-    AdaptiveBackoff, OrchestratorConfig, Result,
+    ConsumerPacing, OrchestratorConfig, Result,
     dependency_evaluator::{
         find_ready_activities, find_skipped_activities, is_workflow_complete, is_workflow_failed,
         status_to_string,
@@ -58,10 +58,17 @@ async fn cancelled(token: &Option<CancellationToken>) {
 ///
 /// The loop drains, then waits: after a non-empty batch it polls again at
 /// once (the poll LIMIT bounds each iteration); after an empty poll it waits
-/// for the event source's wake signal or the backoff timer, whichever comes
-/// first. The wake only shortens the wait: every wake and every timer tick
-/// runs the same catch-up poll from the durable cursor, so the loop is
-/// correct without it.
+/// for the event source's wake signal or a timer, whichever comes first. The
+/// wake only shortens the wait: every wake and every timer tick runs the
+/// same catch-up poll from the durable cursor, so the loop is correct
+/// without it.
+///
+/// How long the timer runs is decided by [`ConsumerPacing`]. An empty poll
+/// does not always mean the loop is caught up: committed events can be
+/// waiting behind the delivery horizon, and nothing announces the moment
+/// they are released. Before any wait longer than the minimum interval the
+/// loop asks the event source, and while events are pending it retries on a
+/// short backoff instead of the idle wait.
 ///
 /// Delivery is at-least-once: a crash between processing and the cursor
 /// write replays the batch, and orchestrators sharing a consumer id race, so
@@ -88,10 +95,12 @@ pub async fn run_orchestrator(
 ) -> Result<()> {
     let mut wake = event_source.wake();
     let poll_interval_max = config.effective_poll_interval_max(wake.is_some());
-    let mut backoff = AdaptiveBackoff::new(
+    let mut pacing = ConsumerPacing::new(
         config.poll_interval_min,
+        config.poll_interval_max,
         poll_interval_max,
         config.backoff_multiplier,
+        wake.is_some(),
     );
 
     // Track event processing failures to detect poison messages
@@ -137,15 +146,31 @@ pub async fn run_orchestrator(
         let events = event_source.poll(CONSUMER_ID).await?;
 
         if events.is_empty() {
-            // Caught up: wait for a wake or the backoff timer
-            let interval = backoff.current();
-            backoff.increase();
+            // The first empty poll after a batch or a wake waits the
+            // minimum interval and asks nothing, which keeps the check below
+            // off the busy path. After that the loop is caught up, unless
+            // committed events are waiting behind the delivery horizon. If
+            // the check itself fails, retry soon: the next poll reports a
+            // database that is really down.
+            let interval = match pacing.linger() {
+                Some(interval) => interval,
+                None => {
+                    let pending = match event_source.has_pending_events(CONSUMER_ID).await {
+                        Ok(pending) => pending,
+                        Err(e) => {
+                            tracing::debug!(error = %e, "Pending-events check failed");
+                            true
+                        }
+                    };
+                    pacing.caught_up(pending)
+                }
+            };
             tracing::trace!("No events found, waiting up to {:?}", interval);
             match wake.as_mut() {
                 Some(wake) => tokio::select! {
                     woken = wake.wait(interval) => {
                         if woken == Wake::Woken {
-                            backoff.reset();
+                            pacing.woken();
                         }
                     }
                     _ = cancelled(&shutdown_token) => {}
@@ -242,7 +267,7 @@ pub async fn run_orchestrator(
             event_source.update_position(CONSUMER_ID, cursor).await?;
         }
 
-        backoff.reset();
+        pacing.progressed();
 
         if !prefix_intact {
             // A failed event will be returned again by the next poll; space
@@ -2527,8 +2552,15 @@ async fn timeout_checker_task(
             return;
         }
 
-        // Sleep for check interval
-        tokio::time::sleep(config.timeout_check_interval).await;
+        // Sleep for the check interval, but stop at once on shutdown: this
+        // task holds the event source, and with it the LISTEN connection
+        tokio::select! {
+            _ = cancelled(&shutdown_token) => {
+                tracing::info!("Shutdown requested, timeout checker stopping");
+                return;
+            }
+            _ = tokio::time::sleep(config.timeout_check_interval) => {}
+        }
 
         // Check for stuck workflows (workflow-level timeout)
         if let Err(e) = check_and_timeout_stuck_workflows(&config, &event_source).await {

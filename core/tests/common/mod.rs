@@ -98,6 +98,10 @@ impl EventSource for SettledEventSource {
             .await
     }
 
+    async fn has_pending_events(&self, consumer_id: &str) -> Result<bool> {
+        self.inner.has_pending_events(consumer_id).await
+    }
+
     fn wake(&self) -> Option<WakeReceiver> {
         self.inner.wake()
     }

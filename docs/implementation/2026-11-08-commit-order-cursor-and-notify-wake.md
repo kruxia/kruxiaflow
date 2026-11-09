@@ -413,3 +413,46 @@ How this compares with what the plan predicted:
 - **The head-of-line cost (§2.1) did not show up.** Writing transactions were sampled every 10 ms during a pass, and none stayed open longer than about 10 ms.
 - **One small regression, in the fallback mode only.** In timer-only mode, follow-up events on a quiet system take about 42 ms instead of 25 ms. The new loop drains the orchestrator's own `ActivityScheduled` event immediately and then starts backing off, where the old loop's fixed 50 ms sleep happened to keep the timer at its minimum for one more tick. Not tuned; it does not affect the default mode.
 
+### 7.16 A woken consumer held back behind the horizon
+
+Raised from Kruxia Writer, whose event store uses the same horizon. Its first runtime waited for its timer when a consumer was woken by an event's commit while another transaction still held the horizon: the event is not deliverable yet, and the blocking transaction's end notifies nobody. Writer now detects "held back" on an empty catch-up and polls again after 50 ms, doubling up to its tick.
+
+**As first built, Kruxia Flow's loop avoided that wait by a side effect**, which neither the plan nor this record mentioned. A wake reset the backoff to its minimum, so the empty poll that followed a wake was retried after `poll_interval_min` (50 ms), then on the growing backoff, up to the idle maximum. That had three weaknesses:
+
+- The retry gap grew towards the idle maximum, which the wake had raised to 5 s. A transaction open for 10 s or more could cost up to 5 s beyond its own lifetime.
+- The loop made the same run of about a dozen empty polls after any wake that brought nothing.
+- The stall warning fired on an empty poll whenever a writing transaction was older than 30 s, whether or not an event was waiting behind it.
+
+**Now built: the loop asks.** A long transaction on a shared instance is always possible, so the side effect was replaced by an explicit check.
+
+| Part                                      | What it does                                                                                                                                                                                      |
+|-------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `EventSource::has_pending_events`         | Whether committed events lie past the consumer's stored cursor. In PostgreSQL, the poll's cursor comparison without the transaction-id bound: one index probe. Default `false` for other sources. |
+| `ConsumerPacing` (`orchestrator/backoff`) | The wait after an empty poll, shared by the orchestrator and the broadcast poller so the two cannot drift apart.                                                                                  |
+| Stall warning                             | Moved into the pending check: logged only while events are waiting, at most once a minute. The moved-database check stays on every empty poll, on its own once-a-minute timer.                    |
+
+The wait after an empty poll:
+
+| Empty poll                                  | Wait                                                                                  |
+|---------------------------------------------|---------------------------------------------------------------------------------------|
+| The first after a batch or a wake           | The minimum (50 ms). The event source is not asked.                                   |
+| A later one, nothing pending, wake attached | The idle maximum (5 s). An event that commits later sends a wake.                     |
+| A later one, nothing pending, timer only    | The backoff, continuing to the timer maximum (1 s). Unchanged.                        |
+| A later one, events pending                 | From 50 ms on first sight, growing to the timer maximum (1 s), with or without a wake |
+
+**The first version asked after every empty poll, and that cost 8 to 10% of throughput.** Run back to back against the commit before it (same host, two passes each, medians of three): Sequential-5 90.0 and 90.3 wf/s before, 78.8 and 85.1 after; Parallel-10 44.0 and 44.0 before, 40.0 and 40.5 after; High-Concurrency-3 141.5 and 143.0 before, 118.6 and 132.7 after. A busy orchestrator reaches an empty poll after almost every event and is woken again within milliseconds, so the probe added one database round trip to each turn of a serial loop that is already the limit. The unit and integration tests could not see this; the benchmark did. The fix is the first row of the table: the first empty poll after a batch or a wake waits the minimum interval without asking, exactly as the loop did before this section's change, and the probe runs only when that wait ends with nothing new. That is also the only time its answer matters, since no wait longer than the minimum is chosen without it. Results with the fix are in `benchmarks/README.md`.
+
+The check is safe against the race where the blocker ends between the empty poll and the check: it has no transaction-id bound, so it also answers yes for events that have just become deliverable, and the loop polls again within 50 ms. An event that commits after the check's snapshot is not seen by it, but its commit sends a notification after that snapshot, and the wake receiver does not lose a notification that arrives before the wait starts.
+
+Bounds, measured from the end of a blocker that was open for time H after the event committed:
+
+- H under 50 ms (every case seen in the benchmark, where no writing transaction lasted longer than about 10 ms): at most 50 ms.
+- Longer: at most about H/2 (orchestrator) or H (poller).
+- Never more than the timer maximum, 1 s by default. It was 5 s.
+
+Costs: one index probe per empty poll that follows a timer expiry, which means one about 50 ms after each burst of activity ends and one per idle timer tick. A wake that brought nothing costs two polls and a probe where it used to cost about a dozen polls. On a moved database (§7.9) the probe answers yes for as long as nothing is delivered, so a consumer polls once a second there instead of once every 5 s, next to the error it logs each minute.
+
+Tests: `ConsumerPacing` unit tests for each row of the table; `test_pending_events_are_reported_while_held_back` and `test_uncommitted_events_are_not_pending` for the PostgreSQL check; poller tests on a paused clock (3 polls in 9 s with nothing pending, 14 while events are pending, and no probe on the first empty poll after a batch); and `test_run_orchestrator_delivers_a_held_back_event_soon_after_its_blocker_ends`, with a 30 s idle maximum, a 100 ms timer maximum and a multiplier of 100 (so the old backoff would retry at 50 ms and then 5 s later), which requires delivery within 2 s of the blocker's end. With the check disabled that test fails ("never delivered"). The stall warning's 30 s threshold is not tested: a test holding a writing transaction that long would hold back event delivery for every test on the instance, which is also why the orchestrator test keeps its blocker to 300 ms.
+
+**Also fixed while writing that test:** the orchestrator's background timeout checker slept its full interval (30 s) without watching the shutdown token, so after a shutdown it kept the event source, and now its `LISTEN` connection, for up to 30 s. It stops at once.
+

@@ -145,6 +145,39 @@ or the py-std services fail to start.
 
 ## Results
 
+### 2026-11-08 (held-back check, for 0.10.0)
+
+A regression check on the last change before 0.10.0: after an empty poll the
+event consumers now ask whether committed events are waiting behind an open
+transaction (`docs/implementation/2026-11-08-commit-order-cursor-and-notify-wake.md`,
+§7.16). Three builds from source, run alternately in one session on the same
+host as the runs below: the worker-wake commit (before), the first version of
+the check, which asked after every empty poll, and the released version,
+which does not ask on the first empty poll after a batch or a wake. Each
+figure is the median of three passes after a discarded warm-up; each column
+is one run of the harness. Throughput in wf/s.
+
+| Scenario           | Before (3 runs)     | Check on every empty poll (3 runs) | Released (2 runs) |
+|--------------------|---------------------|------------------------------------|-------------------|
+| Sequential-5       | 90.0, 90.3, 90.7    | 75.4, 78.8, 85.1                   | 89.6, 90.8        |
+| Parallel-10        | 44.0, 44.0, 43.9    | 36.7, 40.0, 40.5                   | 42.0, 44.2        |
+| High-Concurrency-3 | 141.5, 143.0, 138.8 | 117.8, 118.6, 132.7                | 143.4, 137.7      |
+
+**Every workflow completed in every run** (1,840 per run), with 0 errors and
+0 warnings in the server logs.
+
+- **Asking after every empty poll cost 8-10% of throughput.** A busy
+  orchestrator reaches an empty poll after almost every event, so the probe
+  added a database round trip to each turn of a serial loop that is already
+  the limit. Orchestrator reaction time at 10 concurrent workflows rose from
+  11.3-12.2 ms to 12.3-15.1 ms.
+- **The released version costs nothing measurable**: it is within run-to-run
+  variation of the build before it on all three scenarios (reaction time at
+  10 concurrent: 11.4 and 11.9 ms).
+- These runs are several percent faster than the worker-wake table below for
+  the same code ("Before" here is the "+ worker wake" build there). The host
+  was doing other work in both sessions; compare within a session, not across.
+
 ### 2026-11-08 (worker wake over SSE, for 0.10.0)
 
 Same harness, host and day as the event-wake runs below. Two configurations

@@ -6,7 +6,7 @@ pub mod error;
 pub mod orchestrator;
 pub mod workflow_state;
 
-pub use backoff::AdaptiveBackoff;
+pub use backoff::{AdaptiveBackoff, ConsumerPacing};
 pub use config::OrchestratorConfig;
 pub use dependency_evaluator::{
     build_condition_context, evaluate_condition, find_ready_activities, find_skipped_activities,

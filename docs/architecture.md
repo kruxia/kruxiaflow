@@ -2673,11 +2673,13 @@ event after it (a lower `tx` with a higher `position`); ordering by
 **Trade-off: head-of-line blocking.** Transaction ids are instance-wide, so one
 long-running *writing* transaction in any database on the instance holds xmin
 down and delays every consumer until it ends (read-only transactions take no
-xid and block nothing). Kruxia Flow's own transactions are short. On an empty
-poll, at most once a minute, the event source looks for a writing transaction
-open longer than 30s and logs it at `warn` with its `pid`, so an operator can
-tell a stall from idleness. Sharing the Postgres instance with other
-write-heavy applications couples their long transactions to event latency.
+xid and block nothing). Kruxia Flow's own transactions are short. While
+committed events are waiting behind the horizon, at most once a minute, the
+event source looks for a writing transaction open longer than 30s and logs it
+at `warn` with its `pid`, so an operator can tell a stall from idleness.
+Sharing the Postgres instance with other write-heavy applications couples
+their long transactions to event latency; the consumer loop below bounds what
+that costs once the transaction ends.
 
 **Trade-off: cursors belong to the cluster.** `tx` values and consumer cursors
 are stored as data, but the transaction-id counter belongs to the PostgreSQL
@@ -2743,10 +2745,44 @@ sequenceDiagram
 
 **Consumer loop (orchestrator and broadcast poller): drain, then wait.**
 After a non-empty batch the loop polls again at once (the `LIMIT` bounds each
-iteration). After an empty poll it waits for the wake or the adaptive backoff
-timer, whichever comes first; a wake resets the backoff. The idle timer cap is
-5s with a wake attached and 1s on the timer alone
-(`KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX_MS` overrides both).
+iteration). After an empty poll it waits for the wake or a timer, whichever
+comes first. Both loops take the timer from one shared policy
+(`ConsumerPacing`):
+
+| Empty poll                                                   | Next poll                                                    |
+|--------------------------------------------------------------|--------------------------------------------------------------|
+| The first after a batch or a wake                            | On the wake, or after 50ms. Nothing is asked.                |
+| A later one, nothing pending, wake attached                  | On the wake, or after the idle maximum (5s)                  |
+| A later one, nothing pending, timer only                     | After the backoff interval, growing to the idle maximum (1s) |
+| A later one, committed events are pending behind the horizon | After 50ms, growing to at most 1s, in either mode            |
+
+`KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX_MS` overrides both maximums.
+
+**Held-back events.** An empty poll does not always mean the consumer is
+caught up. An event can be committed and still be withheld, because an older
+writing transaction is open; the consumer may even have been woken by that
+event's commit. The older transaction's end notifies nobody, so the wake
+cannot say when the event becomes deliverable. Before any wait longer than
+50ms the loop therefore asks the event source whether committed events lie
+past its cursor (`EventSource::has_pending_events`, one index probe with no
+transaction-id bound). While the answer is yes it retries on a short backoff
+that starts again at 50ms and is capped at the timer-only maximum (1s), not
+the 5s wake-mode idle maximum.
+
+The question is not asked on the first empty poll after a batch or a wake. A
+busy consumer reaches an empty poll after almost every event and is woken
+again within milliseconds, so asking there would add a query to each turn of
+a loop that is already the throughput limit (measured: 8-10% of suite
+throughput). The 50ms wait covers a short blocker on its own; the question is
+asked when that wait runs out with nothing new, which is the only time the
+answer changes what the loop does.
+
+The cost of a blocking transaction, measured from the moment it ends: at most
+50ms if it was open for less than 50ms; otherwise up to about half as long
+again as it was open (orchestrator, multiplier 1.5) or as long again
+(broadcast poller, multiplier 2), and never more than 1s. When nothing is
+pending, a wake that brought nothing (a duplicate publish, for example) costs
+two polls and one probe before the loop is back in its idle wait.
 
 The orchestrator advances its durable cursor only through the contiguous
 prefix of successfully processed events, so a transiently failing event pins

@@ -1,5 +1,5 @@
 use kruxiaflow_core::events::{EventSource, Wake};
-use kruxiaflow_core::orchestrator::AdaptiveBackoff;
+use kruxiaflow_core::orchestrator::ConsumerPacing;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
@@ -29,8 +29,11 @@ const WAKE_POLL_INTERVAL_MAX: Duration = Duration::from_secs(5);
 ///
 /// Runs unconditionally at API server boot. Drains, then waits: after a
 /// non-empty batch it polls again at once; after an empty poll it waits for
-/// the event source's wake signal (if any) or the backoff timer (50ms up to
-/// 1s idle, or 5s with a wake signal), whichever comes first.
+/// the event source's wake signal (if any) or a timer, whichever comes
+/// first. The timer is 50ms after a batch or a wake. After that it backs
+/// off to 1s without a wake signal and is 5s with one, except while
+/// committed events are waiting behind the delivery horizon: then it
+/// retries from 50ms up to 1s in either mode (see `ConsumerPacing`).
 ///
 /// Each API server instance uses a unique consumer_id (prefix + UUIDv7)
 /// so that in multi-instance deployments, every instance independently tracks
@@ -50,7 +53,13 @@ pub async fn run_event_broadcast_poller(
     } else {
         POLL_INTERVAL_MAX
     };
-    let mut backoff = AdaptiveBackoff::new(POLL_INTERVAL_MIN, max_interval, 2.0);
+    let mut pacing = ConsumerPacing::new(
+        POLL_INTERVAL_MIN,
+        POLL_INTERVAL_MAX,
+        max_interval,
+        2.0,
+        wake.is_some(),
+    );
 
     tracing::info!(
         consumer_id = %consumer_id,
@@ -64,9 +73,25 @@ pub async fn run_event_broadcast_poller(
             return;
         }
 
-        // Wait before the next poll only when caught up or failing
+        // `None` drains (poll again at once); otherwise wait this long
         let wait = match event_source.poll(&consumer_id).await {
-            Ok(events) if events.is_empty() => true,
+            Ok(events) if events.is_empty() => match pacing.linger() {
+                // First empty poll after a batch or a wake: a short wait,
+                // nothing asked
+                Some(interval) => Some(interval),
+                // Caught up, unless committed events are waiting behind the
+                // delivery horizon. If the check itself fails, retry soon.
+                None => {
+                    let pending = match event_source.has_pending_events(&consumer_id).await {
+                        Ok(pending) => pending,
+                        Err(e) => {
+                            tracing::debug!(error = %e, "Pending-events check failed");
+                            true
+                        }
+                    };
+                    Some(pacing.caught_up(pending))
+                }
+            },
             Ok(events) => {
                 let event_count = events.len();
                 let mut total_sent = 0;
@@ -84,25 +109,23 @@ pub async fn run_event_broadcast_poller(
                 }
 
                 // Update consumer position after broadcasting all events
-                let cursor = events.last().map(|event| event.cursor());
-                match cursor {
+                match events.last().map(|event| event.cursor()) {
                     Some(cursor) => {
                         match event_source.update_position(&consumer_id, cursor).await {
                             Ok(()) => {
-                                backoff.reset();
-                                false
+                                pacing.progressed();
+                                None
                             }
                             Err(e) => {
                                 tracing::error!(
                                     error = %e,
                                     "Failed to update websocket broadcast consumer position"
                                 );
-                                backoff.increase();
-                                true
+                                Some(pacing.failed())
                             }
                         }
                     }
-                    None => true,
+                    None => Some(pacing.failed()),
                 }
             }
             Err(e) => {
@@ -110,23 +133,20 @@ pub async fn run_event_broadcast_poller(
                     error = %e,
                     "Workflow event broadcast poller error"
                 );
-                backoff.increase();
-                true
+                Some(pacing.failed())
             }
         };
 
-        if !wait {
+        let Some(interval) = wait else {
             // Drain: poll again at once
             continue;
-        }
+        };
 
-        let interval = backoff.current();
-        backoff.increase();
         match wake.as_mut() {
             Some(wake) => tokio::select! {
                 woken = wake.wait(interval) => {
                     if woken == Wake::Woken {
-                        backoff.reset();
+                        pacing.woken();
                     }
                 }
                 _ = shutdown_token.cancelled() => {
@@ -150,8 +170,10 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use chrono::{TimeZone, Utc};
+    use kruxiaflow_core::events::wake::{ListenerEvent, NotificationSource};
     use kruxiaflow_core::events::{
-        EventCursor, EventError, NewWorkflowEvent, WorkflowEvent, WorkflowEventType,
+        EventCursor, EventError, EventWake, NewWorkflowEvent, WakeReceiver, WorkflowEvent,
+        WorkflowEventType,
     };
     use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -162,6 +184,20 @@ mod tests {
         events: tokio::sync::Mutex<Vec<WorkflowEvent>>,
         poll_count: AtomicUsize,
         update_position_count: AtomicUsize,
+        pending_check_count: AtomicUsize,
+        /// What `has_pending_events` answers
+        pending: bool,
+        wake: Option<EventWake>,
+    }
+
+    /// A listener connection on which no notification ever arrives
+    struct SilentNotifications;
+
+    #[async_trait]
+    impl NotificationSource for SilentNotifications {
+        async fn recv(&mut self) -> kruxiaflow_core::events::Result<ListenerEvent> {
+            std::future::pending().await
+        }
     }
 
     impl MockPollerEventSource {
@@ -170,7 +206,24 @@ mod tests {
                 events: tokio::sync::Mutex::new(events),
                 poll_count: AtomicUsize::new(0),
                 update_position_count: AtomicUsize::new(0),
+                pending_check_count: AtomicUsize::new(0),
+                pending: false,
+                wake: None,
             }
+        }
+
+        /// A source with a wake signal that never fires and no deliverable
+        /// events, answering `pending` to the pending-events check
+        fn idle_with_wake(pending: bool) -> Self {
+            Self {
+                pending,
+                wake: Some(EventWake::from_source(SilentNotifications)),
+                ..Self::new(vec![])
+            }
+        }
+
+        fn pending_check_count(&self) -> usize {
+            self.pending_check_count.load(Ordering::SeqCst)
         }
 
         fn poll_count(&self) -> usize {
@@ -205,6 +258,18 @@ mod tests {
         ) -> kruxiaflow_core::events::Result<()> {
             self.update_position_count.fetch_add(1, Ordering::SeqCst);
             Ok(())
+        }
+
+        async fn has_pending_events(
+            &self,
+            _consumer_id: &str,
+        ) -> kruxiaflow_core::events::Result<bool> {
+            self.pending_check_count.fetch_add(1, Ordering::SeqCst);
+            Ok(self.pending)
+        }
+
+        fn wake(&self) -> Option<WakeReceiver> {
+            self.wake.as_ref().map(EventWake::subscribe)
         }
     }
 
@@ -444,5 +509,67 @@ mod tests {
 
         let result = tokio::time::timeout(Duration::from_secs(2), handle).await;
         assert!(result.is_ok(), "Poller did not shut down during sleep");
+    }
+
+    #[tokio::test]
+    async fn test_poller_checks_for_pending_events_except_on_the_first_empty_poll() {
+        // One batch, then empty polls
+        let source = Arc::new(MockPollerEventSource::new(vec![make_event()]));
+        let source_ref = source.clone();
+        let manager = WorkflowEventManager::new();
+        let token = CancellationToken::new();
+
+        let token_clone = token.clone();
+        let handle = tokio::spawn(async move {
+            run_event_broadcast_poller(source, manager, token_clone).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        token.cancel();
+        let _ = tokio::time::timeout(Duration::from_secs(2), handle).await;
+
+        // The first poll returned the batch; the empty poll after it waited
+        // 50 ms without asking; every empty poll after that asked
+        assert!(source_ref.poll_count() >= 3);
+        assert_eq!(
+            source_ref.pending_check_count(),
+            source_ref.poll_count() - 2
+        );
+    }
+
+    /// Polls made in 9 s by a poller whose wake never fires
+    async fn polls_in_nine_seconds(pending: bool) -> usize {
+        let source = Arc::new(MockPollerEventSource::idle_with_wake(pending));
+        let source_ref = source.clone();
+        let token = CancellationToken::new();
+
+        let token_clone = token.clone();
+        let handle = tokio::spawn(async move {
+            run_event_broadcast_poller(source, WorkflowEventManager::new(), token_clone).await;
+        });
+
+        tokio::time::sleep(Duration::from_secs(9)).await;
+        token.cancel();
+        let _ = handle.await;
+
+        assert_eq!(source_ref.update_position_count(), 0);
+        source_ref.poll_count()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_poller_with_wake_and_nothing_pending_waits_the_idle_maximum() {
+        // Polls at 0, at 50 ms (which asks, and is told nothing is pending)
+        // and 5 s after that
+        assert_eq!(polls_in_nine_seconds(false).await, 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_poller_retries_within_a_second_while_events_are_pending() {
+        // Events are waiting behind the delivery horizon and nothing will
+        // announce their release: after the first 50 ms wait, retry after
+        // 50, 100, 200, 400 and 800 ms, then every second (the timer-only
+        // maximum), not every 5 s. Polls at 0, 0.05, 0.1, 0.2, 0.4, 0.8,
+        // 1.6, 2.6, ... 8.6 s.
+        assert_eq!(polls_in_nine_seconds(true).await, 14);
     }
 }

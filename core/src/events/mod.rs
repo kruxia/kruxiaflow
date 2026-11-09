@@ -53,6 +53,22 @@ pub trait EventSource: Send + Sync {
         ))
     }
 
+    /// Whether committed events lie past the consumer's stored cursor.
+    ///
+    /// A consumer calls this after `poll` returned nothing. `true` then
+    /// means events are waiting that `poll` withheld (they are not yet
+    /// final), or that became deliverable a moment ago. Nothing announces
+    /// the moment withheld events become deliverable, so the consumer must
+    /// poll again soon instead of waiting for a wake or its idle timer.
+    ///
+    /// The default is `false`, which is right for a source whose `poll`
+    /// returns every committed event. A source that can withhold committed
+    /// events must implement this.
+    async fn has_pending_events(&self, consumer_id: &str) -> Result<bool> {
+        let _ = consumer_id;
+        Ok(false)
+    }
+
     /// A wake-up signal that fires when new events may have committed.
     ///
     /// `None` (the default) means consumers poll on their backoff timer alone.

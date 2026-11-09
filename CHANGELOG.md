@@ -26,6 +26,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it reacts in 7 ms instead of 41 ms. The benchmark suite runs 31-38% faster
   (Sequential-5 15.4 → 21.3 wf/s, High-Concurrency-3 110 → 150 wf/s) with
   P50 latency down 28-32%, and all workflows complete.
+- **Events held back by a long transaction are picked up within a second of
+  its end**: an event that has committed is withheld while an older writing
+  transaction is open anywhere on the PostgreSQL instance, and nothing
+  announces that transaction's end. Before any wait longer than 50 ms the
+  orchestrator and the WebSocket broadcast poller now ask whether committed
+  events are waiting (`EventSource::has_pending_events`, one index probe)
+  and, while they are, poll again after 50 ms, backing off to at most 1 s,
+  instead of waiting out the idle timer (5 s with the wake). The probe is
+  kept off the busy path, where it cost 8-10% of throughput: the first empty
+  poll after a batch or a wake waits 50 ms without asking. The "long-running
+  writing transaction" warning is now logged only while events are actually
+  waiting behind it.
 - **Workers are woken when work is scheduled (server-sent events)**: a
   trigger on `activity_queue` notifies when an activity is written as
   pending, the API server passes that on over the new
@@ -100,7 +112,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`EventSource` API**: `update_position` takes an `EventCursor` (from
   `WorkflowEvent::cursor()`) instead of an event id; `WorkflowEvent` gains
   `position` and `tx`; `EventSource::wake()` (default `None`) exposes the
-  wake signal.
+  wake signal; `EventSource::has_pending_events()` (default `false`) says
+  whether committed events lie past a consumer's cursor, and a source whose
+  `poll` can withhold committed events must implement it.
 
 ### Upgrading
 

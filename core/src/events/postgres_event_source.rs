@@ -11,6 +11,10 @@ use uuid::Uuid;
 /// Report a stalled stream at most this often
 const STALL_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 
+/// Check that the stored transaction ids belong to this cluster at most this
+/// often
+const CLUSTER_CHECK_INTERVAL: Duration = Duration::from_secs(60);
+
 /// A writing transaction open longer than this is reported as a possible stall
 const STALL_TRANSACTION_AGE_SECS: f64 = 30.0;
 
@@ -30,12 +34,28 @@ const STALL_TRANSACTION_AGE_SECS: f64 = 30.0;
 ///
 /// The cost is head-of-line blocking: transaction ids are instance-wide, so
 /// one long-running *writing* transaction in any database on the instance
-/// holds xmin down and delays every consumer until it ends. An empty poll
-/// checks for that once a minute and logs the offending backend.
+/// holds xmin down and delays every consumer until it ends.
+/// [`has_pending_events`](EventSource::has_pending_events) tells a consumer
+/// whose poll came back empty that events are waiting behind such a
+/// transaction, so that it polls again soon; while they wait it logs the
+/// offending backend once a minute.
 pub struct PostgresEventSource {
     pool: PgPool,
     wake: Option<EventWake>,
     last_stall_check: Mutex<Option<Instant>>,
+    last_cluster_check: Mutex<Option<Instant>>,
+}
+
+/// True at most once per `interval` for the given timestamp slot
+fn due(slot: &Mutex<Option<Instant>>, interval: Duration) -> bool {
+    let Ok(mut last) = slot.lock() else {
+        return false;
+    };
+    if last.is_some_and(|t| t.elapsed() < interval) {
+        return false;
+    }
+    *last = Some(Instant::now());
+    true
 }
 
 impl PostgresEventSource {
@@ -45,6 +65,7 @@ impl PostgresEventSource {
             pool,
             wake: None,
             last_stall_check: Mutex::new(None),
+            last_cluster_check: Mutex::new(None),
         }
     }
 
@@ -99,22 +120,16 @@ impl PostgresEventSource {
         self.wake.as_ref().map(EventWake::activity_wake)
     }
 
-    /// On an empty poll, at most once per `STALL_CHECK_INTERVAL`, look for
-    /// the two conditions that make a stream look idle when it is not.
+    /// While events wait behind the delivery horizon, at most once per
+    /// `STALL_CHECK_INTERVAL`, log a writing transaction that has been open
+    /// longer than `STALL_TRANSACTION_AGE_SECS`.
     ///
-    /// If a writing transaction has been open longer than
-    /// `STALL_TRANSACTION_AGE_SECS`, log it. It holds back the instance's
-    /// xmin, so events committed after it started are not delivered until it
-    /// ends; without this an operator cannot tell a stall from idleness.
-    async fn check_for_stall(&self) {
-        {
-            let Ok(mut last) = self.last_stall_check.lock() else {
-                return;
-            };
-            if last.is_some_and(|t| t.elapsed() < STALL_CHECK_INTERVAL) {
-                return;
-            }
-            *last = Some(Instant::now());
+    /// It holds back the instance's xmin, so the waiting events are not
+    /// delivered until it ends; without this an operator cannot tell a stall
+    /// from idleness.
+    async fn warn_if_stalled(&self) {
+        if !due(&self.last_stall_check, STALL_CHECK_INTERVAL) {
+            return;
         }
 
         let oldest = sqlx::query_as::<_, (i32, Option<String>, f64, i64)>(
@@ -140,17 +155,26 @@ impl PostgresEventSource {
                 database = datname.as_deref().unwrap_or("?"),
                 transaction_age_secs = age_secs.round() as i64,
                 xids_behind,
-                "A long-running writing transaction is holding back event delivery \
-                 until it ends (events are delivered only below the oldest open \
-                 transaction id on the instance)"
+                "Committed workflow events are waiting behind a long-running writing \
+                 transaction and will not be delivered until it ends (events are \
+                 delivered only below the oldest open transaction id on the instance)"
             ),
             Ok(None) => {}
             Err(e) => tracing::debug!(error = %e, "Event stall check failed"),
         }
+    }
 
-        // The other way an idle-looking stream can be broken: the database
-        // was swapped for a restored or logically migrated copy under a
-        // running process (no restart, so the startup check never ran)
+    /// On an empty poll, at most once per `CLUSTER_CHECK_INTERVAL`, check
+    /// that the stored transaction ids still belong to this cluster.
+    ///
+    /// The database can be swapped for a restored or logically migrated copy
+    /// under a running process (no restart, so the startup check never ran);
+    /// nothing is delivered from then on.
+    async fn check_cluster(&self) {
+        if !due(&self.last_cluster_check, CLUSTER_CHECK_INTERVAL) {
+            return;
+        }
+
         match find_foreign_xids(&self.pool).await {
             Ok(Some(found)) => tracing::error!(
                 max_stored_tx = found.max_stored_tx(),
@@ -229,10 +253,42 @@ impl EventSource for PostgresEventSource {
         tracing::trace!(event_count = events.len(), "Polled events");
 
         if events.is_empty() {
-            self.check_for_stall().await;
+            self.check_cluster().await;
         }
 
         Ok(events)
+    }
+
+    /// Whether committed events lie past the consumer's stored cursor
+    ///
+    /// Unlike `poll` this has no transaction-id bound, so after an empty
+    /// poll it is true exactly when events are waiting behind the delivery
+    /// horizon (or crossed it since that poll). One index probe on
+    /// idx_events_consumer_poll.
+    #[tracing::instrument(skip(self), level = "trace")]
+    async fn has_pending_events(&self, consumer_id: &str) -> Result<bool> {
+        let pending = sqlx::query_scalar!(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM workflow_events
+                WHERE (tx, position) > (
+                        COALESCE((SELECT last_tx FROM workflow_event_consumers WHERE consumer_id = $1),
+                                 '0'::xid8),
+                        COALESCE((SELECT last_position FROM workflow_event_consumers WHERE consumer_id = $1),
+                                 0))
+            ) AS "pending!"
+            "#,
+            consumer_id
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        if pending {
+            self.warn_if_stalled().await;
+        }
+
+        Ok(pending)
     }
 
     /// Get events after a specific event ID, optionally filtered by workflow IDs.

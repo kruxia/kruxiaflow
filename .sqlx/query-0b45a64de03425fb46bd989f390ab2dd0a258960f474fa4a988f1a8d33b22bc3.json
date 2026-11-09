@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT EXISTS (\n                SELECT 1\n                FROM workflow_events\n                WHERE (tx, position) > (\n                        COALESCE((SELECT last_tx FROM workflow_event_consumers WHERE consumer_id = $1),\n                                 '0'::xid8),\n                        COALESCE((SELECT last_position FROM workflow_event_consumers WHERE consumer_id = $1),\n                                 0))\n            ) AS \"pending!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pending!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0b45a64de03425fb46bd989f390ab2dd0a258960f474fa4a988f1a8d33b22bc3"
+}
