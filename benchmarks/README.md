@@ -73,18 +73,23 @@ docker-compose down
 
 ## Expected Results
 
-Measured on the reference hardware (Apple Silicon, Docker Desktop; July 2026):
+Measured on the reference hardware (Apple Silicon, Docker Desktop; November 2026):
 
 - **Kruxia Flow**: ~135-150 wf/sec high-concurrency (bound by the
   orchestrator processing events one at a time); ~80-90 wf/sec Sequential-5
   and ~42-44 wf/sec Parallel-10. From 0.10.0; through 0.9.x it was ~85-110
   high-concurrency and ~15-20 on the other two, which were bound by poll
   timers (see the two 2026-11-08 result sets)
-- **Temporal**: ~12-66 wf/sec (high run-to-run variance on this host)
+- **Temporal**: 1.32.2 gives ~35 wf/sec Sequential-5, ~33 Parallel-10 and
+  ~117 high-concurrency, steady from pass to pass; 1.24.2 gave about half
+  that with high run-to-run variance (~12-66 wf/sec)
 - **Airflow**: ~2-11 wf/sec (batch-oriented, not optimized for throughput)
-- **Speedup**: from 0.10.0, ~5x vs Temporal on Sequential-5 and ~2.5x on the
-  other two scenarios (it was ~1.2-2x through 0.9.x); Airflow has not been
-  rerun since 0.8.0, when Kruxia Flow was ~7-12x faster
+- **Speedup**: 0.10.0 against Temporal 1.32.2 is ~2.5x on Sequential-5,
+  ~1.3x on Parallel-10 and ~1.2x on High-Concurrency-3 (where Temporal's
+  median latency is lower and its tail twice as long); a single workflow on
+  an idle system completes in about half the time. Through 0.9.x Kruxia Flow
+  was ~1.2-2x against Temporal 1.24.2; Airflow has not been rerun since
+  0.8.0, when Kruxia Flow was ~7-12x faster
 - **Success rate**: 100% on every scenario is part of the pass criteria — a
   single hung workflow is an engine bug, not noise (see 2026-07-20 notes)
 
@@ -147,6 +152,87 @@ or the py-std services fail to start.
 
 ## Results
 
+### 2026-11-09 (0.10.0 against Temporal 1.32.2)
+
+The same comparison as the next section, with Temporal brought up to date:
+server 1.32.2 (the current release; the all-in-one `auto-setup` image was
+deprecated with 1.29, so the stack now follows Temporal's reference
+docker-compose: `temporalio/admin-tools` creates the schema and the
+namespace, `temporalio/server` serves, default settings and the reference
+`development-sql.yaml` dynamic config), Python SDK 1.35.0, and PostgreSQL 18
+for both platforms. Kruxia Flow is the published `kruxia/kruxiaflow:0.10.0`
+image. Each platform alone on the host, alternating, a fresh stack per run
+with a discarded warm-up and three measured passes. Six runs each were made;
+the first two rounds of each platform coincided with heavy host load (load
+average near 6, another project's stack starting) and show it on both sides
+(Temporal passes at 5-8 wf/s, Kruxia Flow at 37-40), so the figures below
+are the four clean rounds: twelve passes per figure.
+
+**Every workflow completed on both platforms** (5,400 each over the four
+rounds; 8,100 counting the discarded ones).
+
+Standard suite: median of twelve passes, with the range of throughput (wf/s)
+and latency in ms:
+
+| Scenario           | Metric     | Kruxia Flow 0.10.0  | Temporal 1.32.2     | Kruxia Flow vs Temporal |
+|--------------------|------------|---------------------|---------------------|-------------------------|
+| Sequential-5       | Throughput | 87.5 (81.8-93.4)    | 34.9 (33.7-36.2)    | 2.5x                    |
+| Sequential-5       | P50        | 109                 | 297                 | 2.7x lower              |
+| Sequential-5       | P95        | 143                 | 314                 | 2.2x lower              |
+| Parallel-10        | Throughput | 42.0 (38.5-46.1)    | 33.0 (28.7-37.3)    | 1.3x                    |
+| Parallel-10        | P50        | 218                 | 282                 | 1.3x lower              |
+| Parallel-10        | P95        | 278                 | 358                 | 1.3x lower              |
+| High-Concurrency-3 | Throughput | 138.7 (103.3-142.3) | 117.3 (109.5-127.8) | 1.2x                    |
+| High-Concurrency-3 | P50        | 654                 | 554                 | 1.2x higher             |
+| High-Concurrency-3 | P95        | 906                 | 1769                | 2.0x lower              |
+| High-Concurrency-3 | P99        | 1036                | 2146                | 2.1x lower              |
+
+One workflow at a time on an otherwise idle system, after a random 4-8 s idle
+gap (30 one-activity and 10 five-activity workflows per run; mean end-to-end
+latency in ms as the client sees it, one figure per clean round):
+
+| Workflow     | Kruxia Flow 0.10.0     | Temporal 1.32.2        |
+|--------------|------------------------|------------------------|
+| 1 activity   | 20.4, 20.6, 17.9, 19.7 | 36.4, 34.7, 35.7, 36.7 |
+| 5 activities | 37.5, 35.4, 36.2, 30.8 | 69.5, 67.1, 73.6, 66.4 |
+
+What changed against the 1.24.2 comparison below, and what to keep in mind:
+
+- **Temporal 1.32.2 is about twice as fast as 1.24.2 on this suite** (34.9
+  vs 17.6, 33.0 vs 18.5 and 117.3 vs 55.9 wf/s), and far steadier from pass
+  to pass: the bimodal Parallel-10 results are gone. Kruxia Flow's figures
+  are the same as the day before. The margins are therefore 2.5x, 1.3x and
+  1.2x rather than 5.1x, 2.4x and 2.5x. Quote these, not the older ones.
+- **At 100 concurrent workflows Temporal's median latency is now lower than
+  Kruxia Flow's** (554 vs 654 ms), while its tail is still twice as long
+  (P95 1769 vs 906 ms). Kruxia Flow's orchestrator processes events one at a
+  time, so its latency there is queueing and is spread evenly across
+  workflows; on Temporal most workflows finish sooner and some wait much
+  longer.
+- **Idle latency did not move**: a single workflow still completes in about
+  half the time on Kruxia Flow (about 20 vs 36 ms for one activity, 35 vs
+  70 ms for five).
+- **This is each platform out of the box on one machine, not either at its
+  best.** Temporal runs all its services in one process with the reference
+  compose's default settings, and its worker is the
+  Python SDK inside the load generator's process. Kruxia Flow's worker is
+  compiled Rust inside the server. Temporal also records more per step (a
+  full replayable history).
+- **The client measures the two differently, in Temporal's favour.** The
+  Kruxia Flow client learns of completion by polling the status endpoint
+  every 50 ms (every 5 ms in the idle test); the Temporal client is told at
+  once. Kruxia Flow's standard-suite latencies include up to 50 ms of waiting
+  that is the client's, not the engine's. At Parallel-10 and High-Concurrency
+  that is a small share; at Sequential-5 (109 ms) it is not.
+- Temporal's server log carried a handful of transient errors per run
+  ("Queue reader unable to retrieve tasks", "Update workflow execution
+  operation failed"; 1-13 per run) with no failed workflows. Kruxia Flow's
+  log had none.
+
+The Temporal stack and idle test used here are kept with the raw results
+(`results/2026-11-09-temporal-1.32/`, not in version control); the stack
+itself is in `docker-compose.yml`.
+
 ### 2026-11-08 (0.10.0 against Temporal)
 
 Kruxia Flow 0.10.0 and Temporal, each alone on the same host in one session
@@ -187,11 +273,12 @@ end-to-end latency in ms as the client sees it):
 How the comparison has moved (throughput, wf/s; Temporal's figures are from
 each session's own run):
 
-| Session    | Engine  | Sequential-5: KF / Temporal | Parallel-10: KF / Temporal | High-Concurrency-3: KF / Temporal |
-|------------|---------|-----------------------------|----------------------------|-----------------------------------|
-| 2026-03-01 | 86e9ac7 | 15.0 / 13.1                 | 17.5 / 26.1                | 74.0 / 47.7                       |
-| 2026-07-20 | 0.8.0   | 15.4 / 13.4                 | 18.7 / 12.7                | 86.6 / 46.0                       |
-| 2026-11-08 | 0.10.0  | 89.9 / 17.6                 | 44.1 / 18.5                | 139.1 / 55.9                      |
+| Session    | Engine  | Temporal | Sequential-5: KF / Temporal | Parallel-10: KF / Temporal | High-Concurrency-3: KF / Temporal |
+|------------|---------|----------|-----------------------------|----------------------------|-----------------------------------|
+| 2026-03-01 | 86e9ac7 | 1.24.2   | 15.0 / 13.1                 | 17.5 / 26.1                | 74.0 / 47.7                       |
+| 2026-07-20 | 0.8.0   | 1.24.2   | 15.4 / 13.4                 | 18.7 / 12.7                | 86.6 / 46.0                       |
+| 2026-11-08 | 0.10.0  | 1.24.2   | 89.9 / 17.6                 | 44.1 / 18.5                | 139.1 / 55.9                      |
+| 2026-11-09 | 0.10.0  | 1.32.2   | 87.5 / 34.9                 | 42.0 / 33.0                | 138.7 / 117.3                     |
 
 What to keep in mind when reading these:
 
@@ -207,8 +294,9 @@ What to keep in mind when reading these:
   step than Kruxia Flow does (a full replayable history). A tuned,
   multi-node Temporal would do better than this; so would Kruxia Flow with
   more than one worker.
-- **Temporal 1.24.2 is not current.** It is pinned for continuity with the
-  earlier sessions.
+- **Temporal 1.24.2 is not current.** It was pinned for continuity with the
+  earlier sessions; the section above repeats the comparison against 1.32.2,
+  which is about twice as fast on this suite.
 - **The client measures the two differently, in Temporal's favour.** The
   Kruxia Flow client learns of completion by polling the status endpoint
   every 50 ms (every 5 ms in the idle test); the Temporal client is told at

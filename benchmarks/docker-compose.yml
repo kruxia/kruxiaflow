@@ -87,31 +87,75 @@ services:
       kruxiaflow-py-std-server:
         condition: service_healthy
 
-  # Temporal stack
+  # Temporal stack, laid out like Temporal's reference docker-compose for
+  # PostgreSQL (temporalio/temporal-server-operations, compose/): the
+  # admin-tools image creates the schema and the namespace, the server image
+  # only serves. The all-in-one auto-setup image was deprecated with 1.29.
   temporal-postgres:
-    image: postgres:13
+    image: postgres:18
     environment:
       POSTGRES_USER: temporal
       POSTGRES_PASSWORD: temporal
       POSTGRES_DB: temporal
     volumes:
-      - temporal_pg_data:/var/lib/postgresql/data
+      - temporal_pg_data:/var/lib/postgresql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U temporal" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-  temporal:
-    image: temporalio/auto-setup:1.24.2
+  temporal-setup:
+    image: temporalio/admin-tools:1.32.2
     depends_on:
-      - temporal-postgres
+      temporal-postgres:
+        condition: service_healthy
     environment:
       - DB=postgres12
       - DB_PORT=5432
       - POSTGRES_USER=temporal
       - POSTGRES_PWD=temporal
       - POSTGRES_SEEDS=temporal-postgres
+      - SQL_PASSWORD=temporal
+    volumes:
+      - ./temporal/setup:/scripts:ro
+    entrypoint: [ "/bin/sh" ]
+    command: /scripts/setup-postgres.sh
+
+  temporal:
+    image: temporalio/server:1.32.2
+    depends_on:
+      temporal-setup:
+        condition: service_completed_successfully
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=temporal-postgres
+      - BIND_ON_IP=0.0.0.0
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+    volumes:
+      - ./temporal/dynamicconfig:/etc/temporal/config/dynamicconfig:ro
     healthcheck:
-      test: [ "CMD", "tctl", "--address", "temporal:7233", "cluster", "health" ]
+      test: [ "CMD", "nc", "-z", "localhost", "7233" ]
       interval: 5s
-      timeout: 5s
-      retries: 10
+      timeout: 3s
+      retries: 12
+      start_period: 30s
+
+  temporal-namespace:
+    image: temporalio/admin-tools:1.32.2
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - DEFAULT_NAMESPACE=default
+    volumes:
+      - ./temporal/setup:/scripts:ro
+    entrypoint: [ "/bin/sh" ]
+    command: /scripts/create-namespace.sh
 
   # Airflow 3 stack
   airflow-postgres:
@@ -275,8 +319,8 @@ services:
         condition: service_healthy
       kruxiaflow-py-std:
         condition: service_started
-      temporal:
-        condition: service_healthy
+      temporal-namespace:
+        condition: service_completed_successfully
       airflow-api-server:
         condition: service_healthy
       airflow-scheduler:

@@ -1,0 +1,8 @@
+# Dynamic config from Temporal's reference docker-compose for SQL persistence
+# (compose/dynamicconfig/development-sql.yaml in temporal-server-operations).
+limit.maxIDLength:
+  - value: 255
+    constraints: {}
+system.forceSearchAttributesCacheRefreshOnRead:
+  - value: true # Dev setup only. Please don't turn this on in production.
+    constraints: {}
