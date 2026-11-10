@@ -232,7 +232,7 @@ Reading the memory figures:
   half-second sampling gives few samples per scenario and its CPU figures
   for Kruxia Flow are not usable.
 
-#### The server's memory growth: cause and fix (unreleased)
+#### The server's memory growth: cause and fix (fixed in 0.11.1)
 
 What the growth is, from the server's own `/proc` figures (resident anonymous
 memory, read through a sidecar in its pid namespace):
