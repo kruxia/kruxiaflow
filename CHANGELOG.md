@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The orchestrator handles events of different workflows concurrently**:
+  one poller reads events in commit order and hands each to one of several
+  partitions chosen by the workflow id; a partition handles its events one at
+  a time. Events of one workflow are still applied serially in commit order,
+  the durable cursor still never passes an unresolved event (it follows the
+  resolved prefix of a bounded window of fetched events), and delivery is
+  still at-least-once. A failing event is retried by its own partition and no
+  longer stops other workflows while it is retried. New
+  `KRUXIAFLOW_ORCHESTRATOR_PARTITIONS` / `--partitions` (default 8; 1 is the
+  previous serial behaviour) and `KRUXIAFLOW_ORCHESTRATOR_MAX_IN_FLIGHT` /
+  `--max-in-flight` (default 256) on `orchestrator`, and as environment
+  variables on `serve`. Each partition uses up to two database connections:
+  `orchestrator` rejects a pool smaller than 2 x partitions + 2, and `serve`
+  runs fewer partitions with a warning. Measured against 0.10.0
+  (`benchmarks/README.md`, 2026-11-09): the benchmark suite runs about twice
+  as fast (Sequential-5 90 → 160 wf/s, Parallel-10 45 → 81, High-Concurrency-3
+  140 → 269), the orchestrator's reaction time at 100 concurrent workflows
+  falls from about 130 ms to about 22 ms, and one partition matches 0.10.0.
+  No migration.
+- **`EventSource` gains `poll_after()` and `has_pending_events_after()`**, for
+  a consumer that reads ahead of its stored cursor. Both have default
+  implementations in terms of `poll()` and `has_pending_events()`.
+
 ## [0.10.0] - 2026-11-08
 
 ### Added

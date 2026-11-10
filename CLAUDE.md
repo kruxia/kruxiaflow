@@ -104,6 +104,7 @@ All external infrastructure dependencies are wrapped in service interfaces:
   - **Critical**: LISTEN/NOTIFY cannot guarantee event delivery (lost on connection drop, no backlog) - the poll is the only data path
   - Workflow orchestration requires guaranteed delivery (missed events = hung workflows)
   - Only polling and logical replication provide delivery guarantees
+- **The orchestrator is parallel across workflows and serial within one**: a poller dispatches events to partitions by workflow id (`KRUXIAFLOW_ORCHESTRATOR_PARTITIONS`, default 8); the durable cursor follows the resolved prefix of a bounded in-flight window, so every event handler must stay replay-idempotent
 - **Auth uses custom JWT provider** (not external IdP like Auth0/Okta)
 - **ActivityQueue uses PostgreSQL** with FOR UPDATE SKIP LOCKED for safe concurrency
 

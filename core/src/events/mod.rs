@@ -69,6 +69,47 @@ pub trait EventSource: Send + Sync {
         Ok(false)
     }
 
+    /// Poll for up to `limit` events after `after`, or after the consumer's
+    /// stored cursor when `after` is `None`.
+    ///
+    /// For a consumer that reads ahead of its stored cursor: it keeps the
+    /// cursor of the last event it fetched in memory, passes it here, and
+    /// stores a cursor (`update_position`) only once every event up to it is
+    /// processed. The guarantees are those of `poll`.
+    ///
+    /// The default reads from the stored cursor through `poll` and drops what
+    /// is not past `after`, which is correct for any source and re-reads
+    /// events on one that has not implemented this.
+    async fn poll_after(
+        &self,
+        consumer_id: &str,
+        after: Option<EventCursor>,
+        limit: usize,
+    ) -> Result<Vec<WorkflowEvent>> {
+        let mut events = self.poll(consumer_id).await?;
+        if let Some(after) = after {
+            events.retain(|event| event.cursor() > after);
+        }
+        events.truncate(limit);
+        Ok(events)
+    }
+
+    /// `has_pending_events` relative to `after` instead of the stored cursor
+    /// (the stored cursor when `after` is `None`).
+    ///
+    /// A consumer that reads ahead asks about the last event it fetched:
+    /// asked about the stored cursor, its own fetched-but-unacknowledged
+    /// events would count as pending. The default asks about the stored
+    /// cursor.
+    async fn has_pending_events_after(
+        &self,
+        consumer_id: &str,
+        after: Option<EventCursor>,
+    ) -> Result<bool> {
+        let _ = after;
+        self.has_pending_events(consumer_id).await
+    }
+
     /// A wake-up signal that fires when new events may have committed.
     ///
     /// `None` (the default) means consumers poll on their backoff timer alone.

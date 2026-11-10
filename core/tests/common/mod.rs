@@ -102,6 +102,26 @@ impl EventSource for SettledEventSource {
         self.inner.has_pending_events(consumer_id).await
     }
 
+    async fn poll_after(
+        &self,
+        consumer_id: &str,
+        after: Option<EventCursor>,
+        limit: usize,
+    ) -> Result<Vec<WorkflowEvent>> {
+        settle_events(&self.pool).await;
+        self.inner.poll_after(consumer_id, after, limit).await
+    }
+
+    async fn has_pending_events_after(
+        &self,
+        consumer_id: &str,
+        after: Option<EventCursor>,
+    ) -> Result<bool> {
+        self.inner
+            .has_pending_events_after(consumer_id, after)
+            .await
+    }
+
     fn wake(&self) -> Option<WakeReceiver> {
         self.inner.wake()
     }

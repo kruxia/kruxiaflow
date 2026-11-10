@@ -72,6 +72,35 @@ Example: --backoff-multiplier 2.0"
     )]
     pub backoff_multiplier: f64,
 
+    /// Partitions handling events concurrently
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_ORCHESTRATOR_PARTITIONS",
+        default_value = "8",
+        help = "Number of partitions handling workflow events concurrently",
+        long_help = "Number of partitions handling workflow events concurrently\n\n\
+Events of one workflow always go to the same partition and are handled there\n\
+one at a time in commit order; different workflows are handled concurrently.\n\
+1 handles every event serially. Each partition uses up to two database\n\
+connections, so the pool must hold at least 2 x partitions + 2.\n\
+Default: 8\n\
+Example: --partitions 16"
+    )]
+    pub partitions: usize,
+
+    /// Most events fetched but not yet acknowledged
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_ORCHESTRATOR_MAX_IN_FLIGHT",
+        default_value = "256",
+        help = "Most workflow events fetched but not yet acknowledged",
+        long_help = "Most workflow events fetched ahead of the durable cursor\n\n\
+Bounds memory and how many events are handled again after a crash.\n\
+Default: 256\n\
+Example: --max-in-flight 1024"
+    )]
+    pub max_in_flight: usize,
+
     /// Shutdown timeout in seconds
     #[arg(
         long,
@@ -112,8 +141,30 @@ impl OrchestratorCommand {
             anyhow::bail!("Shutdown timeout must be between 5 and 300 seconds");
         }
 
-        self.db_pool
+        if self.partitions == 0 || self.partitions > 256 {
+            anyhow::bail!("Partitions must be between 1 and 256");
+        }
+
+        if self.max_in_flight < self.partitions || self.max_in_flight > 100_000 {
+            anyhow::bail!(
+                "Max in-flight events must be >= partitions ({}) and <= 100000",
+                self.partitions
+            );
+        }
+
+        let (pool_max, _) = self
+            .db_pool
             .resolve(DEFAULT_DB_MAX_CONNECTIONS, DEFAULT_DB_MIN_CONNECTIONS)?;
+        let needed = 2 * self.partitions + 2;
+        if (pool_max as usize) < needed {
+            anyhow::bail!(
+                "{} partitions need a database pool of at least {} connections (2 per partition \
+                 + 2); the pool is limited to {}",
+                self.partitions,
+                needed,
+                pool_max
+            );
+        }
 
         Ok(())
     }
@@ -128,6 +179,8 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
         poll_interval_min_ms = cmd.poll_interval_min,
         poll_interval_max_ms = ?cmd.poll_interval_max,
         backoff_multiplier = cmd.backoff_multiplier,
+        partitions = cmd.partitions,
+        max_in_flight = cmd.max_in_flight,
         "Starting Kruxia Flow orchestrator"
     );
 
@@ -162,7 +215,9 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
     // Create orchestrator config from CLI parameters
     let config = OrchestratorConfig::new(pool.clone())
         .with_poll_interval_min(Duration::from_millis(cmd.poll_interval_min))
-        .with_backoff_multiplier(cmd.backoff_multiplier);
+        .with_backoff_multiplier(cmd.backoff_multiplier)
+        .with_partitions(cmd.partitions)
+        .with_max_in_flight(cmd.max_in_flight);
     let config = match cmd.poll_interval_max {
         Some(max) => config.with_poll_interval(
             Duration::from_millis(cmd.poll_interval_min),
@@ -246,6 +301,8 @@ mod tests {
             poll_interval_min: 50,
             poll_interval_max: Some(1000),
             backoff_multiplier: 1.5,
+            partitions: 4,
+            max_in_flight: 256,
             shutdown_timeout: 30,
             db_pool: DbPoolArgs::default(),
             event_wake: EventWakeArgs::default(),
@@ -408,6 +465,8 @@ mod tests {
             poll_interval_min: 100,
             poll_interval_max: Some(5000),
             backoff_multiplier: 2.0,
+            partitions: 4,
+            max_in_flight: 256,
             shutdown_timeout: 60,
             db_pool: DbPoolArgs::default(),
             event_wake: EventWakeArgs::default(),
@@ -424,6 +483,8 @@ mod tests {
             poll_interval_min: 500,
             poll_interval_max: Some(500), // Equal to min
             backoff_multiplier: 1.0,
+            partitions: 4,
+            max_in_flight: 256,
             shutdown_timeout: 30,
             db_pool: DbPoolArgs::default(),
             event_wake: EventWakeArgs::default(),
@@ -439,6 +500,8 @@ mod tests {
             poll_interval_min: 200,
             poll_interval_max: Some(100), // Less than min
             backoff_multiplier: 1.5,
+            partitions: 4,
+            max_in_flight: 256,
             shutdown_timeout: 30,
             db_pool: DbPoolArgs::default(),
             event_wake: EventWakeArgs::default(),

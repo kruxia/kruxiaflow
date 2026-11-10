@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT EXISTS (\n                SELECT 1\n                FROM workflow_events\n                WHERE (tx, position) > (($1::bigint)::text::xid8, $2)\n            ) AS \"pending!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pending!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "68be3b55ff5bbb7f0008a8fde5a2aff08a7b1554be365b701d3b2a1b22783f6b"
+}

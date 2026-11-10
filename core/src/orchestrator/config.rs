@@ -5,6 +5,16 @@ use std::time::Duration;
 /// Default idle poll interval cap when a NOTIFY wake is attached
 pub const DEFAULT_WAKE_POLL_INTERVAL_MAX_MS: u64 = 5000;
 
+/// Default number of partitions handling events concurrently
+pub const DEFAULT_PARTITIONS: usize = 8;
+
+/// Default bound on fetched, unacknowledged events
+pub const DEFAULT_MAX_IN_FLIGHT: usize = 256;
+
+/// Connections the orchestrator uses besides its partitions' (the poller and
+/// the timeout checker)
+const RESERVED_CONNECTIONS: usize = 2;
+
 /// Orchestrator configuration
 #[derive(Clone)]
 pub struct OrchestratorConfig {
@@ -17,6 +27,13 @@ pub struct OrchestratorConfig {
     /// (the timer is only a safety net for lost notifications)
     pub wake_poll_interval_max: Duration,
     pub backoff_multiplier: f64,
+    /// Number of partitions handling events concurrently. Events of one
+    /// workflow always go to the same partition and are handled there one at
+    /// a time in commit order; 1 handles every event serially.
+    pub partitions: usize,
+    /// Most events fetched but not yet acknowledged by the durable cursor.
+    /// Bounds memory and how much a crash replays.
+    pub max_in_flight: usize,
     pub workflow_timeout: Duration,
     pub timeout_check_interval: Duration,
     /// Secrets loaded from environment variables (KRUXIAFLOW_SECRET_*)
@@ -30,7 +47,9 @@ impl OrchestratorConfig {
             poll_interval_min: Duration::from_millis(50), // 20 polls/sec max (fix for high CPU)
             poll_interval_max: Duration::from_millis(1000), // 1 second when idle
             wake_poll_interval_max: Duration::from_millis(DEFAULT_WAKE_POLL_INTERVAL_MAX_MS),
-            backoff_multiplier: 1.5,                    // Moderate backoff
+            backoff_multiplier: 1.5, // Moderate backoff
+            partitions: DEFAULT_PARTITIONS,
+            max_in_flight: DEFAULT_MAX_IN_FLIGHT,
             workflow_timeout: Duration::from_secs(300), // 5 minutes default timeout
             timeout_check_interval: Duration::from_secs(30), // Check every 30 seconds
             secrets: HashMap::new(),
@@ -45,6 +64,9 @@ impl OrchestratorConfig {
     ///   (default: 1000 polling on the timer alone, 5000 with a NOTIFY wake attached; when set,
     ///   it applies in both modes)
     /// - `KRUXIAFLOW_ORCHESTRATOR_BACKOFF_MULTIPLIER`: Backoff multiplier (default: 1.5)
+    /// - `KRUXIAFLOW_ORCHESTRATOR_PARTITIONS`: Partitions handling events concurrently (default: 8;
+    ///   1 is serial)
+    /// - `KRUXIAFLOW_ORCHESTRATOR_MAX_IN_FLIGHT`: Most fetched, unacknowledged events (default: 256)
     /// - `KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS`: Workflow timeout in seconds (default: 300)
     /// - `KRUXIAFLOW_ORCHESTRATOR_TIMEOUT_CHECK_INTERVAL_SECS`: Timeout check interval in seconds (default: 30)
     pub fn from_env(pool: PgPool) -> Self {
@@ -63,6 +85,16 @@ impl OrchestratorConfig {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(1.5);
+
+        let partitions: usize = std::env::var("KRUXIAFLOW_ORCHESTRATOR_PARTITIONS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_PARTITIONS);
+
+        let max_in_flight: usize = std::env::var("KRUXIAFLOW_ORCHESTRATOR_MAX_IN_FLIGHT")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_MAX_IN_FLIGHT);
 
         let workflow_timeout_secs: u64 =
             std::env::var("KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS")
@@ -84,6 +116,8 @@ impl OrchestratorConfig {
                 poll_interval_max_ms.unwrap_or(DEFAULT_WAKE_POLL_INTERVAL_MAX_MS),
             ),
             backoff_multiplier,
+            partitions,
+            max_in_flight,
             workflow_timeout: Duration::from_secs(workflow_timeout_secs),
             timeout_check_interval: Duration::from_secs(timeout_check_interval_secs),
             secrets: load_secrets_from_env(),
@@ -116,6 +150,34 @@ impl OrchestratorConfig {
     pub fn with_backoff_multiplier(mut self, multiplier: f64) -> Self {
         self.backoff_multiplier = multiplier;
         self
+    }
+
+    /// Set the number of partitions handling events concurrently (1 = serial)
+    pub fn with_partitions(mut self, partitions: usize) -> Self {
+        self.partitions = partitions;
+        self
+    }
+
+    /// Set the bound on fetched, unacknowledged events
+    pub fn with_max_in_flight(mut self, max_in_flight: usize) -> Self {
+        self.max_in_flight = max_in_flight;
+        self
+    }
+
+    /// The number of partitions to run: the configured number, at least 1,
+    /// and no more than the connection pool can serve. A handler holds one
+    /// connection for its transaction and takes a second for work outside
+    /// it, so more partitions than half the pool could leave every handler
+    /// waiting for a connection another handler holds.
+    pub fn effective_partitions(&self) -> usize {
+        let pool_max = self.pool.options().get_max_connections() as usize;
+        let servable = pool_max.saturating_sub(RESERVED_CONNECTIONS) / 2;
+        self.partitions.clamp(1, servable.max(1))
+    }
+
+    /// The window size to run with: at least one event per partition
+    pub fn effective_max_in_flight(&self) -> usize {
+        self.max_in_flight.max(self.effective_partitions())
     }
 
     pub fn with_workflow_timeout(mut self, timeout: Duration) -> Self {

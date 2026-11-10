@@ -269,9 +269,66 @@ flowchart TD
 - State updated incrementally on event consumption (not reconstructed from all events)
 
 **Concurrency**:
-- PostgreSQL advisory locks ensure one orchestrator per workflow
-- Different workflows processed in parallel by different orchestrators
-- No write contention or race conditions
+
+The orchestrator handles events of different workflows concurrently and events
+of one workflow one at a time, in commit order.
+
+```mermaid
+flowchart LR
+    Stream[(workflow_events)]
+    Poller["Poller<br/>• fetch cursor in memory<br/>• pacing and wake"]
+    Window["In-flight window<br/>• cursor order<br/>• resolved or not"]
+    P0["Partition 0<br/>one handler, FIFO"]
+    P1["Partition 1<br/>one handler, FIFO"]
+    PN["Partition N-1<br/>one handler, FIFO"]
+    Cursor[(durable cursor)]
+
+    Stream -->|events after the fetch cursor| Poller
+    Poller -->|record as in flight| Window
+    Poller -->|hash of workflow id| P0
+    Poller --> P1
+    Poller --> PN
+    P0 -->|resolved| Window
+    P1 -->|resolved| Window
+    PN -->|resolved| Window
+    Window -->|end of resolved prefix| Cursor
+    P0 -.->|handler finished: poll now| Poller
+```
+
+- **Partitions keep per-workflow order.** One poller reads events in cursor
+  order and hands each to partition `hash(workflow_id) mod N`. A partition
+  handles its events one at a time in the order received, so all events of a
+  workflow are applied serially in commit order. `N` is
+  `KRUXIAFLOW_ORCHESTRATOR_PARTITIONS` (default 8; 1 handles every event
+  serially). A handler holds one connection for its transaction and takes a
+  second for work outside it, so the pool must hold `2N + 2`; the
+  `orchestrator` command rejects a smaller pool and `serve` runs fewer
+  partitions with a warning.
+- **The durable cursor follows the resolved prefix.** The poller reads ahead
+  of the durable cursor: it keeps the cursor of the last event fetched in
+  memory, and a window of the events fetched but not yet acknowledged. An
+  event resolves when its handler succeeds or declares it poison. The durable
+  cursor is written only through the contiguous resolved prefix of the
+  window, so it never passes an unresolved event. The window is bounded by
+  `KRUXIAFLOW_ORCHESTRATOR_MAX_IN_FLIGHT` (default 256), which bounds memory
+  and how many events a crash replays; when it is full the poller waits.
+- **Failures stay in their partition.** A failing event is retried by its
+  handler, spaced by the minimum poll interval, and after 5 failures is
+  replaced by a failure event. Later events of that partition wait behind it
+  (none of the same workflow may overtake it); other partitions keep working.
+  The unresolved event pins the durable cursor.
+- **A handler finishing wakes the poller.** Delivery is bounded by the oldest
+  writing transaction on the instance, and a handler's own transaction holds
+  back events that committed after it began writing. Its end notifies nobody,
+  so the handler tells the poller, which fetches at once.
+- **Delivery is at-least-once.** After a crash the orchestrator resumes from
+  the durable cursor and handles again whatever was handled but not
+  acknowledged, so every handler is replay-idempotent.
+- **Advisory locks** on the workflow still serialize a handler against the
+  timeout checker and against a second orchestrator process. Two processes
+  sharing the consumer both handle every event (safe, because handlers are
+  idempotent, but not a way to scale); dividing the work between processes is
+  post-MVP (`docs/post-mvp.md`).
 
 ### 3. Activity Worker (Built-in)
 
@@ -1583,11 +1640,11 @@ sqlx::query!(
 .await?;
 
 // Lock is transaction-scoped - released on commit
-// Different workflows can be processed in parallel by different orchestrator instances
+// Different workflows are handled in parallel by the orchestrator's partitions
 ```
 
 **Key Design Principles**:
-- **Stateless orchestrator**: Multiple orchestrator instances can run in parallel
+- **Parallel across workflows, serial within one**: the orchestrator's partitions handle different workflows concurrently and each workflow's events in commit order
 - **Workflow-level locking**: Advisory locks prevent race conditions on individual workflows
 - **Lock-free queue**: `FOR UPDATE SKIP LOCKED` allows concurrent worker claims
 - **Batch scheduling**: All ready activities scheduled in single transaction (idempotent via UNIQUE constraint)
@@ -2765,7 +2822,9 @@ event's commit. The older transaction's end notifies nobody, so the wake
 cannot say when the event becomes deliverable. Before any wait longer than
 50ms the loop therefore asks the event source whether committed events lie
 past its cursor (`EventSource::has_pending_events`, one index probe with no
-transaction-id bound). While the answer is yes it retries on a short backoff
+transaction-id bound; the orchestrator, which reads ahead of its durable
+cursor, asks about the last event it fetched with
+`has_pending_events_after`). While the answer is yes it retries on a short backoff
 that starts again at 50ms and is capped at the timer-only maximum (1s), not
 the 5s wake-mode idle maximum.
 
@@ -2785,8 +2844,9 @@ pending, a wake that brought nothing (a duplicate publish, for example) costs
 two polls and one probe before the loop is back in its idle wait.
 
 The orchestrator advances its durable cursor only through the contiguous
-prefix of successfully processed events, so a transiently failing event pins
-the cursor and is genuinely retried on the next poll (spaced by the minimum
+prefix of resolved events (see Concurrency under the orchestrator component),
+so a transiently failing event pins the cursor and is genuinely retried by
+its partition (spaced by the minimum
 poll interval) rather than skipped; after 5 failures it is treated as a poison
 message. Delivery is at-least-once (a crash between processing and the cursor
 write replays the batch; orchestrators sharing a consumer id race), so every
@@ -2822,9 +2882,13 @@ delivery path.
 - **Timer only (`poll`)**: latency is the current backoff interval, 50ms when
   busy up to 1s when idle (measured: 486 ms on average for the first event
   after idle)
-- **Under heavy load the orchestrator is processing-bound**: it handles
-  events one at a time, so at 100 concurrent workflows reaction time (about
-  75 ms) is queueing behind earlier events, in either mode
+- **Under load, reaction time is queueing behind earlier events, and
+  partitions divide the queue**: measured at 100 concurrent workflows
+  (`benchmarks/README.md`, 2026-11-09), about 130 ms with one partition, 42 ms
+  with four, 22 ms with eight (the default) and 10 ms with sixteen; at 10
+  concurrent workflows 12 ms with one and 4 ms with eight. Suite throughput
+  about doubles from one partition to eight and does not rise further with
+  sixteen
 - **Activity round trip with the worker wake**: about 2 ms from
   `ActivityScheduled` to `ActivityCompleted` for an echo activity (it was
   65-100 ms on the worker's 100 ms poll timer, which still applies to a worker

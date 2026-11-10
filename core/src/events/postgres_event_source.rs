@@ -291,6 +291,80 @@ impl EventSource for PostgresEventSource {
         Ok(pending)
     }
 
+    /// Events after an explicit cursor, under the same horizon as `poll`
+    #[tracing::instrument(skip(self), level = "trace")]
+    async fn poll_after(
+        &self,
+        consumer_id: &str,
+        after: Option<EventCursor>,
+        limit: usize,
+    ) -> Result<Vec<WorkflowEvent>> {
+        let Some(after) = after else {
+            let mut events = self.poll(consumer_id).await?;
+            events.truncate(limit);
+            return Ok(events);
+        };
+
+        let events = sqlx::query_as!(
+            WorkflowEvent,
+            r#"
+            SELECT id, position, tx::text::bigint AS "tx!", workflow_id,
+                   event_type as "event_type: WorkflowEventType",
+                   activity_key, payload, timestamp, iteration
+            FROM workflow_events
+            WHERE (tx, position) > (($1::bigint)::text::xid8, $2)
+              AND tx < pg_snapshot_xmin(pg_current_snapshot())
+            ORDER BY tx, position
+            LIMIT $3
+            "#,
+            after.tx,
+            after.position,
+            limit.min(1000) as i64
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        tracing::trace!(event_count = events.len(), "Polled events after cursor");
+
+        if events.is_empty() {
+            self.check_cluster().await;
+        }
+
+        Ok(events)
+    }
+
+    /// Whether committed events lie past an explicit cursor
+    #[tracing::instrument(skip(self), level = "trace")]
+    async fn has_pending_events_after(
+        &self,
+        consumer_id: &str,
+        after: Option<EventCursor>,
+    ) -> Result<bool> {
+        let Some(after) = after else {
+            return self.has_pending_events(consumer_id).await;
+        };
+
+        let pending = sqlx::query_scalar!(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM workflow_events
+                WHERE (tx, position) > (($1::bigint)::text::xid8, $2)
+            ) AS "pending!"
+            "#,
+            after.tx,
+            after.position
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        if pending {
+            self.warn_if_stalled().await;
+        }
+
+        Ok(pending)
+    }
+
     /// Get events after a specific event ID, optionally filtered by workflow IDs.
     ///
     /// Used for WebSocket reconnection replay. Resolves `from_event_id` to its

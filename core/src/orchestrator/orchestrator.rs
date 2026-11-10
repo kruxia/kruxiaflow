@@ -4,6 +4,7 @@ use super::{
         find_ready_activities, find_skipped_activities, is_workflow_complete, is_workflow_failed,
         status_to_string,
     },
+    window::InFlightWindow,
     workflow_state::{
         WorkflowActivityStatus, apply_event_to_state, initialize_workflow_state,
         load_materialized_state, load_workflow_definition, load_workflow_definition_by_id,
@@ -12,8 +13,8 @@ use super::{
 };
 use crate::cost::{ActivityCostRecord, CostCalculator, CostTracker, UsageEntry};
 use crate::events::{
-    EventCursor, EventSource, NewWorkflowEvent, Wake, WorkflowEvent, WorkflowEventType,
-    WorkflowStatus,
+    EventCursor, EventSource, NewWorkflowEvent, Wake, WakeReceiver, WorkflowEvent,
+    WorkflowEventType, WorkflowStatus,
 };
 use crate::queue::{Activity, ActivityQueue, StaleActivityAction};
 use crate::subscription::{ExpiredSubscription, NewSubscription, SubscriptionService};
@@ -24,6 +25,8 @@ use rust_decimal::Decimal;
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::mpsc;
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -53,25 +56,149 @@ async fn cancelled(token: &Option<CancellationToken>) {
     }
 }
 
-/// Run the orchestrator main loop
+/// What a partition reports to the poller when it is done with an event
+struct Resolved(EventCursor);
+
+/// Everything a partition's handler needs to process events
+#[derive(Clone)]
+struct HandlerContext {
+    event_source: Arc<dyn EventSource>,
+    activity_queue: Arc<dyn ActivityQueue>,
+    subscription_service: Arc<dyn SubscriptionService>,
+    config: OrchestratorConfig,
+    /// Cancelled when the orchestrator stops, for any reason
+    stop: CancellationToken,
+}
+
+/// Which partition handles a workflow's events. Stable for the life of the
+/// process, which is all that is needed: nothing is queued across a restart.
+fn partition_of(workflow_id: Uuid, partitions: usize) -> usize {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    workflow_id.hash(&mut hasher);
+    (hasher.finish() % partitions as u64) as usize
+}
+
+/// One partition: handle its events one at a time, in the order received.
+///
+/// All events of a workflow reach the same partition in commit order, so
+/// they are applied one at a time in that order. A failing event is retried
+/// here, spaced by the minimum poll interval; later events of the partition
+/// wait behind it so that none of the same workflow overtakes it. After the
+/// last retry the event is replaced by a failure event and counts as
+/// resolved. Every resolution is reported to the poller, which also takes it
+/// as a cue to poll (see `run_orchestrator`).
+async fn run_partition(
+    mut events: mpsc::UnboundedReceiver<WorkflowEvent>,
+    resolved: mpsc::UnboundedSender<Resolved>,
+    ctx: HandlerContext,
+) {
+    loop {
+        let event = tokio::select! {
+            biased;
+            _ = ctx.stop.cancelled() => return,
+            event = events.recv() => match event {
+                Some(event) => event,
+                None => return,
+            },
+        };
+
+        let mut failure_count = 0u32;
+        loop {
+            let Err(e) = process_workflow_event(
+                &event,
+                &ctx.event_source,
+                &ctx.activity_queue,
+                &ctx.subscription_service,
+                &ctx.config,
+            )
+            .await
+            else {
+                break;
+            };
+
+            failure_count += 1;
+            tracing::error!(
+                event_id = %event.id,
+                workflow_id = %event.workflow_id,
+                event_type = ?event.event_type,
+                failure_count,
+                max_retries = MAX_EVENT_PROCESSING_RETRIES,
+                error = %e,
+                "Failed to process event"
+            );
+
+            if failure_count >= MAX_EVENT_PROCESSING_RETRIES {
+                tracing::error!(
+                    event_id = %event.id,
+                    workflow_id = %event.workflow_id,
+                    event_type = ?event.event_type,
+                    failure_count,
+                    "Poison message detected - publishing failure event after {} failed attempts",
+                    MAX_EVENT_PROCESSING_RETRIES
+                );
+                // The poison event itself counts as resolved (skipped); the
+                // failure event will be processed normally
+                let _ = publish_failure_for_poison_event(&event, &ctx.event_source, &e.to_string())
+                    .await;
+                break;
+            }
+
+            // Unresolved: the event stays in the window, pinning the durable
+            // cursor, and is tried again after a pause
+            tokio::select! {
+                _ = ctx.stop.cancelled() => return,
+                _ = tokio::time::sleep(ctx.config.poll_interval_min) => {}
+            }
+        }
+
+        if resolved.send(Resolved(event.cursor())).is_err() {
+            return;
+        }
+    }
+}
+
+/// Run the orchestrator
 /// Polls for events, evaluates dependencies, schedules activities
 ///
-/// The loop drains, then waits: after a non-empty batch it polls again at
-/// once (the poll LIMIT bounds each iteration); after an empty poll it waits
-/// for the event source's wake signal or a timer, whichever comes first. The
-/// wake only shortens the wait: every wake and every timer tick runs the
-/// same catch-up poll from the durable cursor, so the loop is correct
-/// without it.
+/// # Structure
 ///
-/// How long the timer runs is decided by [`ConsumerPacing`]. An empty poll
+/// One poller (this function) reads events in cursor order and hands each
+/// to one of `partitions` handler tasks chosen by the workflow id
+/// (`run_partition`). Events of different workflows are handled
+/// concurrently; events of one workflow are handled one at a time in commit
+/// order. With one partition every event is handled serially.
+///
+/// The poller reads ahead of the durable cursor. It keeps the cursor of the
+/// last event it fetched in memory, and an [`InFlightWindow`] of the events
+/// fetched but not yet acknowledged. The durable cursor is written only
+/// through the contiguous resolved prefix of that window, so it never passes
+/// an unresolved event: a failing event pins it until the event is retried
+/// successfully or declared poison. The window is bounded by
+/// `max_in_flight`; when it is full the poller waits for the front to move.
+///
+/// # Waiting
+///
+/// After a non-empty fetch the poller fetches again at once; after an empty
+/// one it waits for the event source's wake signal, a handler finishing an
+/// event, or a timer, whichever comes first. The wake only shortens the
+/// wait: every wake and every timer tick runs the same catch-up fetch, so
+/// the loop is correct without it.
+///
+/// A handler finishing counts as a wake because delivery is bounded by the
+/// oldest writing transaction on the instance, and a handler's own
+/// transaction holds back events that committed after it began writing.
+/// When it ends nothing notifies, so the handler tells the poller.
+///
+/// How long the timer runs is decided by [`ConsumerPacing`]. An empty fetch
 /// does not always mean the loop is caught up: committed events can be
 /// waiting behind the delivery horizon, and nothing announces the moment
 /// they are released. Before any wait longer than the minimum interval the
-/// loop asks the event source, and while events are pending it retries on a
-/// short backoff instead of the idle wait.
+/// poller asks the event source, and while events are pending it retries on
+/// a short backoff instead of the idle wait.
 ///
-/// Delivery is at-least-once: a crash between processing and the cursor
-/// write replays the batch, and orchestrators sharing a consumer id race, so
+/// Delivery is at-least-once: a crash before the cursor write replays up to
+/// a window of events, and orchestrators sharing a consumer id race, so
 /// every event handler is replay-idempotent.
 ///
 /// # Arguments
@@ -93,23 +220,26 @@ pub async fn run_orchestrator(
     config: OrchestratorConfig,
     shutdown_token: Option<CancellationToken>,
 ) -> Result<()> {
-    let mut wake = event_source.wake();
+    let wake = event_source.wake();
     let poll_interval_max = config.effective_poll_interval_max(wake.is_some());
-    let mut pacing = ConsumerPacing::new(
-        config.poll_interval_min,
-        config.poll_interval_max,
-        poll_interval_max,
-        config.backoff_multiplier,
-        wake.is_some(),
-    );
+    let partitions = config.effective_partitions();
+    let max_in_flight = config.effective_max_in_flight();
 
-    // Track event processing failures to detect poison messages
-    let mut event_failures: HashMap<Uuid, u32> = HashMap::new();
+    if partitions < config.partitions {
+        tracing::warn!(
+            configured = config.partitions,
+            running = partitions,
+            pool_max_connections = config.pool.options().get_max_connections(),
+            "Fewer orchestrator partitions than configured: the connection pool cannot serve more"
+        );
+    }
 
     tracing::info!(
-        "Orchestrator starting with consumer_id={}, workflow_timeout={}s, max_event_retries={}, \
-         event_wake={}, poll_interval_max={}ms",
+        "Orchestrator starting with consumer_id={}, partitions={}, max_in_flight={}, \
+         workflow_timeout={}s, max_event_retries={}, event_wake={}, poll_interval_max={}ms",
         CONSUMER_ID,
+        partitions,
+        max_in_flight,
         config.workflow_timeout.as_secs(),
         MAX_EVENT_PROCESSING_RETRIES,
         if wake.is_some() { "notify" } else { "poll" },
@@ -133,152 +263,222 @@ pub async fn run_orchestrator(
         .await;
     });
 
-    loop {
-        // Check if shutdown has been requested
-        if let Some(ref token) = shutdown_token
-            && token.is_cancelled()
-        {
-            tracing::info!("Shutdown requested, orchestrator stopping gracefully");
-            return Ok(());
-        }
+    // Handlers stop when the orchestrator does, whether it was asked to shut
+    // down or the poller failed
+    let stop = CancellationToken::new();
+    let _stop_on_exit = stop.clone().drop_guard();
 
-        // Poll for new events (durable position tracking)
-        let events = event_source.poll(CONSUMER_ID).await?;
+    let (resolved_tx, resolved_rx) = mpsc::unbounded_channel();
+    let ctx = HandlerContext {
+        event_source: event_source.clone(),
+        activity_queue,
+        subscription_service,
+        config: config.clone(),
+        stop: stop.clone(),
+    };
+    let mut handlers = JoinSet::new();
+    let queues: Vec<mpsc::UnboundedSender<WorkflowEvent>> = (0..partitions)
+        .map(|_| {
+            let (queue_tx, queue_rx) = mpsc::unbounded_channel();
+            handlers.spawn(run_partition(queue_rx, resolved_tx.clone(), ctx.clone()));
+            queue_tx
+        })
+        .collect();
+    drop(resolved_tx);
 
-        if events.is_empty() {
-            // The first empty poll after a batch or a wake waits the
-            // minimum interval and asks nothing, which keeps the check below
-            // off the busy path. After that the loop is caught up, unless
-            // committed events are waiting behind the delivery horizon. If
-            // the check itself fails, retry soon: the next poll reports a
-            // database that is really down.
-            let interval = match pacing.linger() {
-                Some(interval) => interval,
-                None => {
-                    let pending = match event_source.has_pending_events(CONSUMER_ID).await {
-                        Ok(pending) => pending,
-                        Err(e) => {
-                            tracing::debug!(error = %e, "Pending-events check failed");
-                            true
-                        }
-                    };
-                    pacing.caught_up(pending)
-                }
-            };
-            tracing::trace!("No events found, waiting up to {:?}", interval);
-            match wake.as_mut() {
-                Some(wake) => tokio::select! {
-                    woken = wake.wait(interval) => {
-                        if woken == Wake::Woken {
-                            pacing.woken();
-                        }
-                    }
-                    _ = cancelled(&shutdown_token) => {}
-                },
-                None => tokio::select! {
-                    _ = tokio::time::sleep(interval) => {}
-                    _ = cancelled(&shutdown_token) => {}
-                },
-            }
-            continue;
-        }
+    let mut poller = Poller {
+        event_source,
+        pacing: ConsumerPacing::new(
+            config.poll_interval_min,
+            config.poll_interval_max,
+            poll_interval_max,
+            config.backoff_multiplier,
+            wake.is_some(),
+        ),
+        wake,
+        window: InFlightWindow::new(),
+        fetch_cursor: None,
+        resolved: resolved_rx,
+        queues,
+        max_in_flight,
+        pending_ack: None,
+    };
 
-        tracing::trace!("Polled {} events", events.len());
+    let result = poller.run(&shutdown_token).await;
 
-        // Cursor of the CONTIGUOUS resolved prefix of this cursor-ordered
-        // batch. The durable cursor only advances through this prefix: a
-        // failed event pins it, so the next poll returns that event again for
-        // retry (a later success in the same batch must not carry the cursor
-        // past the failure).
-        let mut resolved_prefix: Option<EventCursor> = None;
-        let mut prefix_intact = true;
+    // Let each handler finish the event it is on, then acknowledge what
+    // resolved. Events still queued are read again at the next start.
+    stop.cancel();
+    while handlers.join_next().await.is_some() {}
+    if result.is_ok() {
+        tracing::info!("Shutdown requested, orchestrator stopping gracefully");
+        poller.acknowledge_resolved().await?;
+    }
+    result
+}
 
-        // Process each event
-        for event in &events {
-            // Check shutdown again before processing each event
-            if let Some(ref token) = shutdown_token
+/// The orchestrator's reader: fetches events, dispatches them to partitions
+/// and stores the durable cursor
+struct Poller {
+    event_source: Arc<dyn EventSource>,
+    pacing: ConsumerPacing,
+    wake: Option<WakeReceiver>,
+    window: InFlightWindow,
+    /// Cursor of the last event fetched; `None` until the first event, when
+    /// fetching starts from the durable cursor
+    fetch_cursor: Option<EventCursor>,
+    resolved: mpsc::UnboundedReceiver<Resolved>,
+    queues: Vec<mpsc::UnboundedSender<WorkflowEvent>>,
+    max_in_flight: usize,
+    /// End of the resolved prefix not yet written to the durable cursor
+    pending_ack: Option<EventCursor>,
+}
+
+impl Poller {
+    /// Run until shutdown is requested (`Ok`) or the event source fails
+    async fn run(&mut self, shutdown_token: &Option<CancellationToken>) -> Result<()> {
+        loop {
+            if let Some(token) = shutdown_token
                 && token.is_cancelled()
             {
-                tracing::info!("Shutdown requested during event processing, stopping");
                 return Ok(());
             }
 
-            if let Err(e) = process_workflow_event(
-                event,
-                &event_source,
-                &activity_queue,
-                &subscription_service,
-                &config,
-            )
-            .await
-            {
-                // Track failure count for this event
-                let failure_count = event_failures.entry(event.id).or_insert(0);
-                *failure_count += 1;
+            self.acknowledge_resolved().await?;
 
-                tracing::error!(
-                    event_id = %event.id,
-                    workflow_id = %event.workflow_id,
-                    event_type = ?event.event_type,
-                    failure_count = *failure_count,
-                    max_retries = MAX_EVENT_PROCESSING_RETRIES,
-                    error = %e,
-                    "Failed to process event"
-                );
-
-                // If we've exceeded max retries, treat as poison message
-                if *failure_count >= MAX_EVENT_PROCESSING_RETRIES {
-                    tracing::error!(
-                        event_id = %event.id,
-                        workflow_id = %event.workflow_id,
-                        event_type = ?event.event_type,
-                        failure_count = *failure_count,
-                        "Poison message detected - publishing failure event after {} failed attempts",
-                        MAX_EVENT_PROCESSING_RETRIES
-                    );
-
-                    // Publish a failure event for this poison message; the
-                    // poison event itself counts as resolved (skipped). The
-                    // failure event will be processed normally.
-                    let _ = publish_failure_for_poison_event(event, &event_source, &e.to_string())
-                        .await;
-
-                    if prefix_intact {
-                        resolved_prefix = Some(event.cursor());
-                    }
-                    event_failures.remove(&event.id);
-                } else {
-                    // Unresolved: pin the cursor here so the next poll
-                    // returns this event again for retry
-                    prefix_intact = false;
+            // A full window: wait for the front to move
+            let free = self.max_in_flight.saturating_sub(self.window.len());
+            if free == 0 {
+                tokio::select! {
+                    resolved = self.resolved.recv() => self.note_resolved(resolved)?,
+                    _ = cancelled(shutdown_token) => {}
                 }
-            } else {
-                // Success - clear failure count and mark resolved
-                event_failures.remove(&event.id);
-                if prefix_intact {
-                    resolved_prefix = Some(event.cursor());
-                }
+                continue;
             }
-        }
 
-        // One durable cursor write per batch, through the resolved prefix.
-        // The SQL update is forward-only.
-        if let Some(cursor) = resolved_prefix {
-            event_source.update_position(CONSUMER_ID, cursor).await?;
-        }
+            let events = self
+                .event_source
+                .poll_after(CONSUMER_ID, self.fetch_cursor, free)
+                .await?;
 
-        pacing.progressed();
-
-        if !prefix_intact {
-            // A failed event will be returned again by the next poll; space
-            // the retries instead of re-polling at once
-            tokio::select! {
-                _ = tokio::time::sleep(config.poll_interval_min) => {}
-                _ = cancelled(&shutdown_token) => {}
+            if events.is_empty() {
+                self.wait_for_events(shutdown_token).await?;
+                continue;
             }
+
+            tracing::trace!("Polled {} events", events.len());
+            for event in events {
+                self.dispatch(event)?;
+            }
+            self.pacing.progressed();
+            // Drain: fetch again at once
         }
-        // Otherwise drain: poll again at once
     }
+
+    /// Record a fetched event and hand it to its workflow's partition
+    fn dispatch(&mut self, event: WorkflowEvent) -> Result<()> {
+        let cursor = event.cursor();
+        self.fetch_cursor = Some(cursor);
+        self.window.push(cursor);
+
+        // ActivityScheduled and ActivityWaiting are for observability only;
+        // the handler ignores them, so they resolve here
+        if matches!(
+            event.event_type,
+            WorkflowEventType::ActivityScheduled | WorkflowEventType::ActivityWaiting
+        ) {
+            self.pending_ack = self.window.resolve(cursor).or(self.pending_ack);
+            return Ok(());
+        }
+
+        let partition = partition_of(event.workflow_id, self.queues.len());
+        self.queues[partition]
+            .send(event)
+            .map_err(|_| handlers_stopped())
+    }
+
+    /// After an empty fetch: wait for a wake, a handler finishing, or the
+    /// pacing timer
+    async fn wait_for_events(&mut self, shutdown_token: &Option<CancellationToken>) -> Result<()> {
+        // The first empty fetch after progress or a wake waits the minimum
+        // interval and asks nothing, which keeps the check below off the
+        // busy path. After that the poller is caught up, unless committed
+        // events are waiting behind the delivery horizon. If the check
+        // itself fails, retry soon: the next fetch reports a database that
+        // is really down.
+        let interval = match self.pacing.linger() {
+            Some(interval) => interval,
+            None => {
+                let pending = match self
+                    .event_source
+                    .has_pending_events_after(CONSUMER_ID, self.fetch_cursor)
+                    .await
+                {
+                    Ok(pending) => pending,
+                    Err(e) => {
+                        tracing::debug!(error = %e, "Pending-events check failed");
+                        true
+                    }
+                };
+                self.pacing.caught_up(pending)
+            }
+        };
+        tracing::trace!("No events found, waiting up to {:?}", interval);
+
+        let wake = async {
+            match self.wake.as_mut() {
+                Some(wake) => wake.wait(interval).await,
+                None => {
+                    tokio::time::sleep(interval).await;
+                    Wake::TimedOut
+                }
+            }
+        };
+        tokio::select! {
+            woken = wake => {
+                if woken == Wake::Woken {
+                    self.pacing.woken();
+                }
+            }
+            resolved = self.resolved.recv() => {
+                self.note_resolved(resolved)?;
+                self.pacing.woken();
+            }
+            _ = cancelled(shutdown_token) => {}
+        }
+        Ok(())
+    }
+
+    /// Mark one reported event resolved
+    fn note_resolved(&mut self, resolved: Option<Resolved>) -> Result<()> {
+        let Resolved(cursor) = resolved.ok_or_else(handlers_stopped)?;
+        self.pending_ack = self.window.resolve(cursor).or(self.pending_ack);
+        Ok(())
+    }
+
+    /// Take in every resolution reported so far and store the durable
+    /// cursor through the resolved prefix: one forward-only write, however
+    /// many events resolved
+    async fn acknowledge_resolved(&mut self) -> Result<()> {
+        while let Ok(resolved) = self.resolved.try_recv() {
+            self.note_resolved(Some(resolved))?;
+        }
+        if let Some(cursor) = self.pending_ack {
+            self.event_source
+                .update_position(CONSUMER_ID, cursor)
+                .await?;
+            self.pending_ack = None;
+        }
+        Ok(())
+    }
+}
+
+/// The handlers are gone while the poller is still running: they only stop
+/// when the orchestrator does, so one of them panicked
+fn handlers_stopped() -> super::OrchestratorError {
+    super::OrchestratorError::InternalError(
+        "orchestrator event handler stopped unexpectedly".into(),
+    )
 }
 
 /// Compute scheduled_for timestamp based on activity settings
@@ -4057,6 +4257,8 @@ mod tests {
             poll_interval_min: Duration::from_millis(10),
             poll_interval_max: Duration::from_millis(50),
             wake_poll_interval_max: Duration::from_millis(50),
+            partitions: 4,
+            max_in_flight: 256,
             backoff_multiplier: 1.5,
             workflow_timeout: Duration::from_secs(3600),
             timeout_check_interval: Duration::from_millis(50),
@@ -4107,6 +4309,8 @@ mod tests {
             poll_interval_min: Duration::from_millis(10),
             poll_interval_max: Duration::from_millis(50),
             wake_poll_interval_max: Duration::from_millis(50),
+            partitions: 4,
+            max_in_flight: 256,
             backoff_multiplier: 1.5,
             workflow_timeout: Duration::from_secs(3600),
             timeout_check_interval: Duration::from_millis(10),
@@ -4153,6 +4357,8 @@ mod tests {
             poll_interval_min: Duration::from_millis(10),
             poll_interval_max: Duration::from_millis(50),
             wake_poll_interval_max: Duration::from_millis(50),
+            partitions: 4,
+            max_in_flight: 256,
             backoff_multiplier: 1.5,
             workflow_timeout: Duration::from_secs(3600),
             timeout_check_interval: Duration::from_secs(60),
@@ -4202,6 +4408,8 @@ mod tests {
             poll_interval_min: Duration::from_millis(1),
             poll_interval_max: Duration::from_millis(10),
             wake_poll_interval_max: Duration::from_millis(10),
+            partitions: 4,
+            max_in_flight: 256,
             backoff_multiplier: 1.5,
             workflow_timeout: Duration::from_secs(3600),
             timeout_check_interval: Duration::from_secs(60),
@@ -4254,6 +4462,8 @@ mod tests {
             poll_interval_min: Duration::from_millis(1),
             poll_interval_max: Duration::from_millis(10),
             wake_poll_interval_max: Duration::from_millis(10),
+            partitions: 4,
+            max_in_flight: 256,
             backoff_multiplier: 1.5,
             workflow_timeout: Duration::from_secs(3600),
             timeout_check_interval: Duration::from_secs(60),

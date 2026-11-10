@@ -1,6 +1,6 @@
 # Parallel event processing in the orchestrator
 
-**Date:** 2026-11-09 · **Status:** plan, not started · **Target release:** 0.11.0
+**Date:** 2026-11-09 · **Status:** implemented and benchmarked (§6); tests of §3.6 not written, completion-wake comparison not run · **Target release:** 0.11.0
 **Scope:** `kruxiaflow-core` (orchestrator, events), `kruxiaflow` (CLI settings), docs. No migration.
 
 The orchestrator processes one event at a time. Since 0.10.0 removed the poll-timer waits, that is what limits throughput and latency at high concurrency. This plan makes the orchestrator process events of different workflows concurrently, and keeps every guarantee the serial loop gives: events of one workflow are still applied one at a time in commit order, the durable cursor still never passes an unresolved event, and a crash still replays only what was not acknowledged.
@@ -116,10 +116,12 @@ Delivery is bounded by the oldest writing transaction on the instance: an event 
 
 | Setting                                 | Meaning                                         | Default |
 |-----------------------------------------|-------------------------------------------------|---------|
-| `KRUXIAFLOW_ORCHESTRATOR_PARTITIONS`    | Number of partitions (N); 1 is serial           | 4       |
+| `KRUXIAFLOW_ORCHESTRATOR_PARTITIONS`    | Number of partitions (N); 1 is serial           | 4 (*)   |
 | `KRUXIAFLOW_ORCHESTRATOR_MAX_IN_FLIGHT` | Window size (W): fetched, unacknowledged events | 256     |
 
 - The startup log line reports both. The defaults are provisional: §5 chooses them from measurements.
+
+> (*) Built with a default of 8, chosen from the measurements (§6.2, §6.4).
 
 ### 2.7 Several orchestrator processes (out of scope, kept possible)
 
@@ -188,7 +190,7 @@ Window behaviour is unit-tested without a database. The rest run against the loc
 ## 4. Rollout
 
 - No migration and no change to stored data. The consumer id and the cursor's meaning are unchanged, so upgrade and downgrade are a restart.
-- The default changes behaviour (N = 4). An operator who wants the old behaviour sets `KRUXIAFLOW_ORCHESTRATOR_PARTITIONS=1`.
+- The default changes behaviour (N = 4 as planned, 8 as built). An operator who wants the old behaviour sets `KRUXIAFLOW_ORCHESTRATOR_PARTITIONS=1`.
 - Order of work: events API (§3.1), window, partitions and poller behind N = 1 with the existing suite passing, then N > 1, the completion wake, the audit, benchmark, docs.
 
 ## 5. Benchmark
@@ -208,4 +210,49 @@ At higher throughput the built-in worker (one activity per poll in the benchmark
 
 ## 6. Implementation record
 
-To be filled in as the work is done: status of each part of §3, the audit results of §3.4, departures from this plan, and the benchmark results against the expectations of §5.
+### 6.1 Status
+
+| Part                              | Status                                                                                                |
+|-----------------------------------|-------------------------------------------------------------------------------------------------------|
+| §3.1 Events API                   | Done: `EventSource::poll_after`, `has_pending_events_after`, with defaults; Postgres and test wrapper |
+| §3.2 Window                       | Done: `core/src/orchestrator/window.rs` (`InFlightWindow`), with two unit tests                       |
+| §3.2 Partitions, poller, shutdown | Done: `run_partition`, `Poller`, `run_orchestrator` in `orchestrator.rs`                              |
+| §3.2 Completion wake              | Done; its effect not measured (§6.4)                                                                  |
+| §3.2 Config                       | Done: `partitions`, `max_in_flight`, environment parsing, builders                                    |
+| §3.3 CLI                          | Done on `orchestrator`; `serve` takes the environment variables (it has no orchestrator flags)        |
+| §3.4 Audit                        | Done (§6.3)                                                                                           |
+| §3.5 Docs                         | Done: architecture, CLAUDE.md, changelog, post-mvp.md (new), benchmark README                         |
+| §3.6 Tests                        | Not written (not asked for yet). The existing suite passes                                            |
+| §5 Benchmark                      | Done except the completion-wake comparison (§6.4)                                                     |
+
+### 6.2 Departures from this plan
+
+| The plan said                                           | What was built                                                                                       | Why                                                                                                      |
+|---------------------------------------------------------|------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|
+| Default of 4 partitions (provisional)                   | Default of 8                                                                                         | Measured: throughput rises to 8 and not beyond (§6.4)                                                    |
+| Startup rejects a partition count the pool cannot serve | The `orchestrator` command rejects it; the core loop runs fewer partitions and logs a warning        | `serve` and tests build the config without CLI validation; refusing to start there would be a regression |
+| A way to read the stored cursor at startup              | Not needed: `poll_after` with no cursor reads from the stored one                                    | One fewer method                                                                                         |
+| Handlers finish their current event on shutdown         | As planned; on an event-source error the handlers are stopped the same way and the error is returned | The serial loop returned the error at once                                                               |
+| (not in the plan)                                       | The existing suite exercises one partition only                                                      | `sqlx::test` pools hold 5 connections, which serve one partition under the 2N + 2 rule                   |
+
+The last row matters for §3.6: tests of more than one partition must build their own larger pool.
+
+### 6.3 Audit results (§3.4)
+
+- **No handler path reads another workflow's state.** Every query in `process_workflow_event` and the functions it calls is keyed by the event's workflow id: definition and state loads, the budget gate (`get_activity_cost(workflow, activity)`, `get_workflow_cost(workflow)`, `budget_limit_usd` of the workflow), cost records, subscriptions and queue operations. The two queries that scan across workflows are in the timeout checker, which already ran concurrently with the loop.
+- **Replay.** The handlers' duplicate guards were not changed, and what they must tolerate is unchanged in kind (events handled but not acknowledged are handled again in order per workflow); the set can now be up to the window instead of one batch. This was checked by reading the guards, not by a test: the restart test of §3.6 is still owed.
+
+### 6.4 Benchmark results against the expectations of §5
+
+Full tables in `benchmarks/README.md`, "2026-11-09 (parallel orchestrator, unreleased)". One session on a quiet host; every workflow completed in every run with no server warnings.
+
+| Question                                         | Expectation                                       | Result                                                                                                                              |
+|--------------------------------------------------|---------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
+| Does N = 1 cost anything?                        | Equal within noise                                | Equal: 89.2 / 42.1 / 132.2 wf/s against 90.2 / 44.9 / 140.3 for 0.10.0                                                              |
+| How much does parallelism buy at 100 concurrent? | Reaction time toward ~12 ms; throughput rises     | Reaction time 131 ms (0.10.0) → 42 (N=4) → 22 (N=8) → 10 (N=16); throughput 140 → 234 → 269 → 254 wf/s                              |
+| Where is the knee?                               | Chooses the default                               | 8: throughput does not rise from 8 to 16. Database CPU was not recorded, so what limits it is not known                             |
+| Does the completion wake matter?                 | Without it, 50 ms steps in the reaction-time tail | Not measured. With it, P99 reaction time at 10 concurrent is 10-17 ms, so no 50 ms steps are present                                |
+| Are the quiet cases unaffected?                  | Equal within noise                                | Wrong for the suite: Sequential-5 and Parallel-10 nearly double (90 → 160, 45 → 81 wf/s). Idle single-workflow latency is unchanged |
+| Is anything lost?                                | Every workflow completes, no warnings             | Yes: 1,840 of 1,840 in each of nine runs, no warnings                                                                               |
+
+The plan's expectation for the low-concurrency scenarios was wrong: at 10 concurrent workflows the serial orchestrator was already queueing (12 ms reaction time against 3-4 ms with eight partitions).

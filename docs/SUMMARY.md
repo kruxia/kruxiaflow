@@ -32,6 +32,8 @@
 
 - [Commit-order event cursor and NOTIFY wake](implementation/2026-11-08-commit-order-cursor-and-notify-wake.md) (IMPLEMENTED with changes; release pending)
 - [Activity wake for workers over SSE](implementation/2026-11-08-activity-wake-sse.md) (IMPLEMENTED; Python SDK pending)
+- [Parallel event processing in the orchestrator](implementation/2026-11-09-parallel-orchestrator.md) (IMPLEMENTED; tests pending)
+- [Post-MVP](post-mvp.md)
 
 ---
 

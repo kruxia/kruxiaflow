@@ -80,6 +80,9 @@ Measured on the reference hardware (Apple Silicon, Docker Desktop; November 2026
   and ~42-44 wf/sec Parallel-10. From 0.10.0; through 0.9.x it was ~85-110
   high-concurrency and ~15-20 on the other two, which were bound by poll
   timers (see the two 2026-11-08 result sets)
+- **Kruxia Flow, unreleased (parallel orchestrator, 8 partitions)**: ~250-310
+  wf/sec high-concurrency, ~155-165 Sequential-5 and ~80-87 Parallel-10
+  (see the 2026-11-09 parallel orchestrator result set)
 - **Temporal**: 1.32.2 gives ~35 wf/sec Sequential-5, ~33 Parallel-10 and
   ~117 high-concurrency, steady from pass to pass; 1.24.2 gave about half
   that with high run-to-run variance (~12-66 wf/sec)
@@ -151,6 +154,83 @@ amd64-only — build it locally before running
 or the py-std services fail to start.
 
 ## Results
+
+### 2026-11-09 (parallel orchestrator, unreleased)
+
+The orchestrator handling events of different workflows concurrently
+(`docs/implementation/2026-11-09-parallel-orchestrator.md`), against 0.10.0,
+across partition counts. One session on a quiet host (load average 1-3,
+nothing else running in Docker), configurations alternated, each run a fresh
+stack with a discarded warm-up and three measured passes. 0.10.0, 4 and 8
+partitions were run twice (six passes per figure), the others once (three).
+
+**Every workflow completed in every run** (1,840 per run, no server warnings).
+
+Throughput in wf/s, median with range:
+
+| Configuration | Sequential-5        | Parallel-10      | High-Concurrency-3  |
+|---------------|---------------------|------------------|---------------------|
+| 0.10.0        | 90.2 (84.7-94.8)    | 44.9 (41.6-46.1) | 140.3 (106.2-144.4) |
+| 1 partition   | 89.2 (83.2-89.8)    | 42.1 (41.4-44.1) | 132.2 (127.8-134.9) |
+| 2 partitions  | 113.4 (111.1-118.4) | 56.9 (54.4-60.3) | 181.3 (170.0-188.5) |
+| 4 partitions  | 148.1 (135.8-154.5) | 71.5 (65.4-76.4) | 233.7 (184.4-272.4) |
+| 8 partitions  | 159.7 (153.7-166.7) | 80.7 (80.0-87.4) | 268.6 (250.1-313.2) |
+| 16 partitions | 167.3 (161.6-167.4) | 81.2 (75.7-86.9) | 254.4 (211.6-264.1) |
+
+Client latency in ms, P50 / P95 (median of the passes):
+
+| Configuration | Sequential-5 | Parallel-10 | High-Concurrency-3 |
+|---------------|--------------|-------------|--------------------|
+| 0.10.0        | 108 / 122    | 216 / 264   | 650 / 915          |
+| 1 partition   | 109 / 123    | 218 / 274   | 687 / 958          |
+| 2 partitions  | 67 / 120     | 173 / 222   | 489 / 830          |
+| 4 partitions  | 57 / 109     | 112 / 215   | 403 / 610          |
+| 8 partitions  | 57 / 90      | 112 / 193   | 310 / 544          |
+| 16 partitions | 57 / 69      | 113 / 168   | 348 / 546          |
+
+Orchestrator reaction time (an event's commit to the next event of its
+workflow, from event timestamps in the database; mean in ms, one figure per
+run):
+
+| Configuration | 10 concurrent (Sequential-5) | 100 concurrent (High-Concurrency-3) |
+|---------------|------------------------------|-------------------------------------|
+| 0.10.0        | 12.0, 11.3                   | 139.6, 122.7                        |
+| 1 partition   | 12.7                         | 133.9                               |
+| 2 partitions  | 7.2                          | 75.0                                |
+| 4 partitions  | 5.1, 4.8                     | 39.2, 45.3                          |
+| 8 partitions  | 3.9, 3.7                     | 20.8, 23.6                          |
+| 16 partitions | 3.2                          | 10.4                                |
+
+Reading these:
+
+- **One partition is 0.10.0.** The restructured loop costs nothing when it
+  runs serially.
+- **Eight partitions about doubles throughput at 100 concurrent workflows and
+  cuts the orchestrator's reaction time there from about 130 ms to about
+  22 ms.** Eight is the default.
+- **The low-concurrency scenarios gain as much**, which the plan did not
+  expect: at 10 concurrent workflows the serial orchestrator was already
+  queueing (12 ms reaction time against 3-4 ms with eight partitions).
+  Sequential-5 P50 latency of 57 ms is close to the floor this client can
+  report: it polls for completion every 50 ms.
+- **Past eight partitions throughput stops rising** although reaction time
+  keeps falling, so something other than the orchestrator is the limit at
+  that point. Which part (the built-in worker claiming one activity per poll,
+  the load generator, PostgreSQL) was not measured.
+- **A single workflow on an idle system is unchanged** (20-23 ms for one
+  activity, 34-39 ms for five, in every configuration).
+- **Against Temporal 1.32.2** (figures from the section below, taken earlier
+  the same day on the same host, not in this session): 159.7 vs 34.9,
+  80.7 vs 33.0 and 268.6 vs 117.3 wf/s, that is 4.6x, 2.4x and 2.3x, where
+  0.10.0 was 2.5x, 1.3x and 1.2x. At 100 concurrent workflows the P50 is now
+  310 ms against Temporal's 554 ms.
+- **Not measured:** the effect of handlers waking the poller when they finish
+  (plan §2.4). The with/without comparison needs a second build and was not
+  run.
+
+An earlier session on a busy host showed the same ordering with lower
+absolute numbers and is kept with the raw results
+(`results/2026-11-09-parallel-orchestrator/`, not in version control).
 
 ### 2026-11-09 (0.10.0 against Temporal 1.32.2)
 
