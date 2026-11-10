@@ -20,8 +20,8 @@ Kruxia Flow is a lightweight, high-performance workflow engine designed for AI a
 | LLM cost tracking    | **Yes**    | No       | No      | No        |
 | Budget enforcement   | **Yes**    | No       | No      | No        |
 | Semantic caching     | **Yes**    | No       | No      | Partial   |
-| Single binary        | **7.5MB**  | ~200MB   | ~500MB+ | N/A       |
-| Docker image         | **63MB**   | ~500MB   | ~1GB+   | N/A       |
+| Server binary        | **13MB**   | 108MB    | N/A     | N/A       |
+| Docker image         | **50MB**   | 118MB    | 2.4GB   | N/A       |
 
 ## Quick Links
 

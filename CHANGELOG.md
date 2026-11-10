@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The server no longer uses about 1.5 MB of memory per client connection.**
+  `serve` and `api` handed `axum::serve` a bare router, which axum 0.7 copies
+  in full (every route and handler, including the OpenAPI document) for each
+  accepted connection; the allocator then kept the peak after the connections
+  closed and its per-thread arenas multiplied it. The server's memory was set
+  by the largest number of simultaneous connections it had ever seen: about
+  150 MB after 100, 2.4 GB after 1,000, and 530-700 MB under the benchmark
+  suite. The router is now shared between connections. Measured
+  (`benchmarks/README.md`, 2026-11-10): 34 MB after 1,000 simultaneous
+  connections, 27 MB and flat across 30 passes of the suite (13,500
+  workflows), throughput unchanged. On a Raspberry Pi Zero W the copy was
+  about 1 MB per connection (0.8.3: 57 MB after 50 connections; with the
+  fix: 17 MB after 200), against a recommended service limit of 150 MB.
+  Present since at least 0.8.3.
+
+### Changed
+
+- **Benchmarks: Airflow 3.4.0** (was 3.0.1) on PostgreSQL 18, rerun with
+  Kruxia Flow 0.11.0 and Temporal 1.32.2; binary, image and memory figures
+  re-measured for all three (`benchmarks/README.md`, 2026-11-10). The suite's
+  resource monitor takes the compose project name from
+  `BENCH_COMPOSE_PROJECT` (default `benchmarks`).
+- **Documentation: binary size corrected.** The Linux release binaries are
+  13-15 MB (11.5 MB for the Raspberry Pi Zero build), not 7.5 MB. The README
+  performance section now carries the current comparison with Temporal and
+  Airflow and a measured footprint table.
+
 ## [0.11.0] - 2026-11-09
 
 ### Changed

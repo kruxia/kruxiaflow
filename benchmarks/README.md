@@ -75,24 +75,23 @@ docker-compose down
 
 Measured on the reference hardware (Apple Silicon, Docker Desktop; November 2026):
 
-- **Kruxia Flow**: ~135-150 wf/sec high-concurrency (bound by the
-  orchestrator processing events one at a time); ~80-90 wf/sec Sequential-5
-  and ~42-44 wf/sec Parallel-10. From 0.10.0; through 0.9.x it was ~85-110
-  high-concurrency and ~15-20 on the other two, which were bound by poll
-  timers (see the two 2026-11-08 result sets)
-- **Kruxia Flow, unreleased (parallel orchestrator, 8 partitions)**: ~250-310
-  wf/sec high-concurrency, ~155-165 Sequential-5 and ~80-87 Parallel-10
-  (see the 2026-11-09 parallel orchestrator result set)
-- **Temporal**: 1.32.2 gives ~35 wf/sec Sequential-5, ~33 Parallel-10 and
-  ~117 high-concurrency, steady from pass to pass; 1.24.2 gave about half
+- **Kruxia Flow**: ~240-315 wf/sec high-concurrency, ~158-170 Sequential-5
+  and ~77-88 Parallel-10, from 0.11.0 (parallel orchestrator, 8 partitions
+  by default). 0.10.0 gave ~135-150, ~80-90 and ~42-44 (bound by the
+  orchestrator processing events one at a time); through 0.9.x it was
+  ~85-110 high-concurrency and ~15-20 on the other two, which were bound by
+  poll timers (see the two 2026-11-08 result sets)
+- **Temporal**: 1.32.2 gives ~35 wf/sec Sequential-5, ~34 Parallel-10 and
+  ~118 high-concurrency, steady from pass to pass; 1.24.2 gave about half
   that with high run-to-run variance (~12-66 wf/sec)
-- **Airflow**: ~2-11 wf/sec (batch-oriented, not optimized for throughput)
-- **Speedup**: 0.10.0 against Temporal 1.32.2 is ~2.5x on Sequential-5,
-  ~1.3x on Parallel-10 and ~1.2x on High-Concurrency-3 (where Temporal's
-  median latency is lower and its tail twice as long); a single workflow on
-  an idle system completes in about half the time. Through 0.9.x Kruxia Flow
-  was ~1.2-2x against Temporal 1.24.2; Airflow has not been rerun since
-  0.8.0, when Kruxia Flow was ~7-12x faster
+- **Airflow**: 3.4.0 gives ~1-3 wf/sec (batch-oriented, not optimized for
+  throughput); 3.0.1 gave ~2-7 in July
+- **Speedup**: 0.11.0 against Temporal 1.32.2 is ~4.7x on Sequential-5,
+  ~2.4x on Parallel-10 and ~2.3x on High-Concurrency-3, with lower latency
+  at every percentile; a single workflow on an idle system completes in
+  a little over half the time. 0.10.0 was ~2.5x, ~1.3x and ~1.2x; through
+  0.9.x Kruxia Flow was ~1.2-2x against Temporal 1.24.2. Against Airflow
+  3.4.0 it is ~80-90x
 - **Success rate**: 100% on every scenario is part of the pass criteria — a
   single hung workflow is an engine bug, not noise (see 2026-07-20 notes)
 
@@ -155,7 +154,225 @@ or the py-std services fail to start.
 
 ## Results
 
-### 2026-11-09 (parallel orchestrator, unreleased)
+### 2026-11-10 (Airflow 3.4.0, footprint and memory)
+
+Airflow brought up to date and rerun, and the size and memory figures
+re-measured for all three platforms. Kruxia Flow 0.11.0 (published image,
+default settings), Temporal 1.32.2 and Airflow 3.4.0 (was 3.0.1; CeleryExecutor,
+two workers at concurrency 16, Redis 7, PostgreSQL 18 like the other two), each
+alone on the host, two rounds in the order Kruxia Flow, Temporal, Airflow, a
+fresh stack per round with a discarded warm-up and three measured passes: six
+passes per figure. Load average 2-4 at the start of each round.
+
+**Every workflow completed on all three platforms** (2,700 each over the
+measured passes).
+
+Throughput in wf/s (median with range) and latency in ms (median of the
+passes):
+
+| Scenario           | Metric     | Kruxia Flow 0.11.0  | Temporal 1.32.2     | Airflow 3.4.0 |
+|--------------------|------------|---------------------|---------------------|---------------|
+| Sequential-5       | Throughput | 155.7 (145.4-158.5) | 34.9 (32.6-34.9)    | 1.7 (1.6-2.1) |
+| Sequential-5       | P50 / P95  | 57 / 82             | 298 / 330           | 6108 / 7338   |
+| Parallel-10        | Throughput | 79.8 (78.5-81.4)    | 38.5 (36.6-39.9)    | 1.0 (0.9-1.0) |
+| Parallel-10        | P50 / P95  | 111 / 176           | 248 / 325           | 10086 / 11826 |
+| High-Concurrency-3 | Throughput | 250.0 (212.1-324.9) | 120.0 (114.1-124.1) | 3.2 (3.0-3.5) |
+| High-Concurrency-3 | P50 / P95  | 361 / 554           | 524 / 1928          | 27006 / 43899 |
+
+Kruxia Flow and Temporal agree with the twelve-pass session in the next
+section, which remains the one to quote for those two. Kruxia Flow is about
+90x, 80x and 80x Airflow's throughput. Airflow 3.4.0 is slower here than
+3.0.1 was in July (2.2, 1.9 and 7.1 wf/s); the two were not run side by side,
+so whether that is the version, PostgreSQL 18 or the host is not known.
+
+Sizes, from the v0.11.0 release assets and the registry manifests (arm64
+unless noted):
+
+| Measure                     | Kruxia Flow 0.11.0                  | Temporal 1.32.2             | Airflow 3.4.0 |
+|-----------------------------|-------------------------------------|-----------------------------|---------------|
+| Server binary               | 12.9 MB (Linux arm64)               | 108 MB (`temporal-server`)  | n/a           |
+|                             | 14.7 MB (Linux x86_64)              |                             |               |
+|                             | 10.4 MB (macOS arm64)               |                             |               |
+| Release download (tar.gz)   | 5.1-5.7 MB                          | n/a                         | n/a           |
+| Image, compressed download  | 15.8 MB                             | 36.1 MB                     | 648 MB        |
+| Image, unpacked             | 50 MB                               | 118 MB                      | 2.4 GB        |
+| Other images needed         | PostgreSQL                          | PostgreSQL, `admin-tools`   | PostgreSQL,   |
+|                             |                                     | (93 MB, schema setup)       | Redis         |
+
+The 7.5 MB binary size quoted in earlier documentation does not match any
+0.11.0 release binary and has been corrected.
+
+Memory, in MB. "Suite monitor" is the sum over the platform's containers as
+sampled by `shared/resource_monitor.py` (peak per scenario, range over the
+measured passes). The per-container figures are from `docker stats` sampled
+on the host over three passes on a fresh stack:
+
+| Measure                           | Kruxia Flow 0.11.0 | Temporal 1.32.2 | Airflow 3.4.0 |
+|-----------------------------------|--------------------|-----------------|---------------|
+| At rest: server                   | 11                 | 72              | not measured  |
+| At rest: database                 | 52                 | 130             | not measured  |
+| Peak over three passes: server    | 549                | 261             | not measured  |
+| Peak over three passes: database  | 142                | 260             | not measured  |
+| Suite monitor, peak, all services | 700-926            | 699-979         | 4141-4970     |
+
+Reading the memory figures:
+
+- **At rest Kruxia Flow is small** (63 MB with its database against 202 MB),
+  **but under this suite the 0.11.0 server grows to several hundred MB and
+  does not give the memory back.** It rose pass by pass (64, 240, 480, 549 MB
+  over the first three passes) and 0.10.0 behaves the same way (488 MB after
+  three passes), so it is not the parallel orchestrator. Under load 0.11.0 is
+  level with Temporal on memory, not ahead of it. July's 370 MB figure was a
+  single pass. The cause was found and fixed the same day: see the next
+  subsection.
+- The suite monitor finds containers by compose project name and recorded
+  nothing in the earlier sessions of this month, which ran under other
+  project names; `BENCH_COMPOSE_PROJECT` now overrides the name.
+- Kruxia Flow's scenarios last under two seconds, so the monitor's
+  half-second sampling gives few samples per scenario and its CPU figures
+  for Kruxia Flow are not usable.
+
+#### The server's memory growth: cause and fix (unreleased)
+
+What the growth is, from the server's own `/proc` figures (resident anonymous
+memory, read through a sidecar in its pid namespace):
+
+- **It is not a leak in the usual sense.** Over 30 consecutive passes (13,500
+  workflows) 0.11.0 moved between 530 and 700 MB without a steady climb.
+- **It does not come from workflows, orchestration or the database pool.**
+  The `/health` endpoint, which touches none of them, reproduces it, and pool
+  sizes of 20 and 100 give the same memory.
+- **It is about 1.5 MB per simultaneously open client connection**, kept
+  after the connections close. `serve` and `api` passed `axum::serve` a bare
+  `Router`; axum 0.7 then copies the whole router (every route and handler,
+  one of which holds the OpenAPI document) for each accepted connection.
+  glibc's allocator does not return the peak to the system, and its
+  per-thread arenas multiply it (about 4x under the suite: 154 MB with
+  `MALLOC_ARENA_MAX=1`, 550-700 MB by default).
+
+So a 0.11.0 server's memory is set by the largest number of simultaneous
+connections it has ever served and stays there until restart; it does not
+grow with workflows run or with uptime at a steady connection count. The
+benchmark client opens up to 100 connections, which is the whole of the
+figure above.
+
+The fix is to hand `axum::serve` the router's make-service, which shares one
+router between connections. Server memory in MB after each step, steps run in
+order on one fresh stack (3,000-6,000 `/health` requests per step; default
+allocator settings unless noted):
+
+| Simultaneous connections | 0.11.0 | 0.11.0, one arena | With the fix | With the fix, one arena |
+|--------------------------|--------|-------------------|--------------|-------------------------|
+| 100                      | 155    | 153               | 8            | 7                       |
+| 300                      | 1216   | 459               | 19           | 11                      |
+| 300, repeated            | 1405   | 494               | 22           | 13                      |
+| 1,000                    | 2418   | 1494              | 34           | 25                      |
+
+Under workflow load, with the fix:
+
+| Measure                                             | 0.11.0  | With the fix |
+|-----------------------------------------------------|---------|--------------|
+| Server after 30 passes of the suite (13,500 wf), MB | 619     | 27           |
+| Server, range over passes 3-30, MB                  | 534-697 | 25-27        |
+| Server after 3,000 workflows at 300 concurrent, MB  | 731     | 18           |
+| Peak over three passes, server (`docker stats`), MB | 549     | 17           |
+| Peak over three passes, server + database, MB       | 690     | 236          |
+
+With the fix the server is flat from the fourth pass on, and the database is
+the larger part of the footprint. Throughput is unchanged (one round:
+159.1 / 81.2 / 293.5 wf/s, every workflow completed, no server warnings).
+The footprint table in the main README still shows the released 0.11.0.
+
+On 32-bit ARM (the Raspberry Pi Zero build, `arm-unknown-linux-gnueabihf`)
+the copy is about 1 MB per connection. Server resident memory in MB after
+each step:
+
+| Simultaneous connections | 0.8.3 on a Pi Zero W | Fix on the same Pi Zero W | 0.8.3, emulated ARM1176 | Fix, emulated ARM1176 |
+|--------------------------|----------------------|---------------------------|-------------------------|-----------------------|
+| start                    | 9                    | 13                        | 45                      | 44                    |
+| 10                       | 18                   | 14                        | 57                      | 47                    |
+| 30                       | 37                   | 14                        | 86                      | 48                    |
+| 50                       | 57                   | 15                        | 134                     | 48                    |
+| 100                      | not run              | 15                        | 221                     | 51                    |
+| 200                      | not run              | 17                        | not run                 | not run               |
+| 300                      | not run              | not run                   | 506                     | 51                    |
+| 300, repeated            | not run              | not run                   | 789                     | 54                    |
+
+The Pi is a Zero W (ARMv6, one core, 427 MB) whose service runs with
+`MemoryMax=150M`; 0.8.3 is the version it was running, and it was not taken
+past 50 connections so as not to reach that limit. The fixed build ran
+beside it on another port with a scratch database, and completed 20
+three-activity and 10 ten-activity-parallel workflows there with no warnings.
+The emulated figures (QEMU user mode, Raspbian userland in Docker) include
+the emulator's own memory, which is the 44 MB at start.
+
+Raw results are in `results/2026-11-10-airflow-3.4-footprint/` (not in
+version control).
+
+### 2026-11-09 (0.11.0 against Temporal 1.32.2)
+
+The released parallel orchestrator against current Temporal, in one session:
+the published `kruxia/kruxiaflow:0.11.0` image with default settings (8
+partitions) and Temporal server 1.32.2 with the stack described in the
+0.10.0 comparison below (Python SDK 1.35.0, PostgreSQL 18 for both). Each
+platform alone, four alternating rounds, a fresh stack per round with a
+discarded warm-up and three measured passes: twelve passes per figure. Other
+projects' containers were up but idle (load average 3-6); no round was
+discarded.
+
+**Every workflow completed on both platforms** (5,400 each over the measured
+passes); Kruxia Flow's server log had no warnings, Temporal's the usual
+handful of transient errors (0-9 per round).
+
+Standard suite: median of twelve passes, with the range of throughput (wf/s)
+and latency in ms:
+
+| Scenario           | Metric     | Kruxia Flow 0.11.0  | Temporal 1.32.2    | Kruxia Flow vs Temporal |
+|--------------------|------------|---------------------|--------------------|-------------------------|
+| Sequential-5       | Throughput | 163.0 (157.8-169.6) | 34.9 (33.7-36.8)   | 4.7x                    |
+| Sequential-5       | P50        | 56                  | 298                | 5.3x lower              |
+| Sequential-5       | P95        | 72                  | 331                | 4.6x lower              |
+| Parallel-10        | Throughput | 81.1 (77.4-88.2)    | 34.1 (31.4-38.7)   | 2.4x                    |
+| Parallel-10        | P50        | 111                 | 273                | 2.5x lower              |
+| Parallel-10        | P95        | 168                 | 347                | 2.1x lower              |
+| High-Concurrency-3 | Throughput | 267.1 (239.1-316.5) | 118.0 (91.1-124.3) | 2.3x                    |
+| High-Concurrency-3 | P50        | 324                 | 544                | 1.7x lower              |
+| High-Concurrency-3 | P95        | 499                 | 1985               | 4.0x lower              |
+| High-Concurrency-3 | P99        | 593                 | 2242               | 3.8x lower              |
+
+One workflow at a time on an otherwise idle system, after a random 4-8 s idle
+gap (30 one-activity and 10 five-activity workflows per round; mean
+end-to-end latency in ms as the client sees it, one figure per round):
+
+| Workflow     | Kruxia Flow 0.11.0     | Temporal 1.32.2        |
+|--------------|------------------------|------------------------|
+| 1 activity   | 20.4, 20.3, 21.5, 20.0 | 34.8, 31.3, 34.7, 34.8 |
+| 5 activities | 38.6, 32.5, 32.7, 34.4 | 65.2, 63.8, 63.3, 67.4 |
+
+Reading these:
+
+- **This confirms the cross-session estimate in the next section** (4.6x,
+  2.4x and 2.3x) with both platforms measured side by side: 4.7x, 2.4x and
+  2.3x. Temporal's figures match its earlier session on every scenario, so
+  the change against the 0.10.0 comparison (2.5x, 1.3x, 1.2x) is all on
+  Kruxia Flow's side.
+- **At 100 concurrent workflows Kruxia Flow now leads on every latency
+  figure.** With 0.10.0 Temporal's median was lower (554 vs 654 ms); it is
+  now 544 against 324 ms, and the tail is a quarter of Temporal's. The
+  orchestrator's mean reaction time in that scenario was 15-22 ms per round
+  (about 130 ms in 0.10.0), and 3.5-3.8 ms at 10 concurrent.
+- **Idle latency is unchanged** on both sides: about 20 vs 34 ms for one
+  activity, 35 vs 65 ms for five.
+- The caveats of the 0.10.0 comparison still apply: each platform out of the
+  box on one machine, Temporal's worker is the Python SDK in the load
+  generator's process, and the Kruxia Flow client polls for completion every
+  50 ms, so Sequential-5's 56 ms P50 is close to the least this client can
+  report.
+
+Raw results are in `results/2026-11-09-v0.11.0-temporal-1.32/` (not in
+version control).
+
+### 2026-11-09 (parallel orchestrator, for 0.11.0)
 
 The orchestrator handling events of different workflows concurrently
 (`docs/implementation/2026-11-09-parallel-orchestrator.md`), against 0.10.0,
@@ -359,6 +576,7 @@ each session's own run):
 | 2026-07-20 | 0.8.0   | 1.24.2   | 15.4 / 13.4                 | 18.7 / 12.7                | 86.6 / 46.0                       |
 | 2026-11-08 | 0.10.0  | 1.24.2   | 89.9 / 17.6                 | 44.1 / 18.5                | 139.1 / 55.9                      |
 | 2026-11-09 | 0.10.0  | 1.32.2   | 87.5 / 34.9                 | 42.0 / 33.0                | 138.7 / 117.3                     |
+| 2026-11-09 | 0.11.0  | 1.32.2   | 163.0 / 34.9                | 81.1 / 34.1                | 267.1 / 118.0                     |
 
 What to keep in mind when reading these:
 

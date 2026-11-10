@@ -81,10 +81,20 @@ ls -la target/aarch64-unknown-linux-gnu/release/kruxiaflow
 
 The release binary is optimized for size (`opt-level = 'z'`, LTO enabled, symbols stripped):
 
-| Target                        | Binary Size |
-|-------------------------------|-------------|
-| `arm-unknown-linux-gnueabihf` | ~7-8 MB     |
-| `aarch64-unknown-linux-gnu`   | ~7-8 MB     |
+| Target                        | Binary Size                                               |
+|-------------------------------|-----------------------------------------------------------|
+| `arm-unknown-linux-gnueabihf` | 11.5 MB (0.11.1, built as above)                          |
+| `aarch64-unknown-linux-gnu`   | 12.9 MB (0.11.1 published binary, with optional features) |
+
+### Server Memory
+
+From 0.11.1 the server's own memory does not depend on how many clients
+connect. Measured on a Pi Zero W (ARMv6, 0.11.1 code, `MemoryMax=150M`): 13 MB
+resident at start, 17 MB after 200 simultaneous connections and after running
+workflows. Through 0.11.0 the server kept about 1 MB per simultaneous
+connection on this board until restart (0.8.3 on the same Pi: 9 MB at start,
+57 MB after 50 connections), so about 140 connections at once would have
+reached the 150M limit. Upgrade if you run an earlier version.
 
 ---
 

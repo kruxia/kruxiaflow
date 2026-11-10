@@ -244,7 +244,7 @@ The last row matters for §3.6: tests of more than one partition must build thei
 
 ### 6.4 Benchmark results against the expectations of §5
 
-Full tables in `benchmarks/README.md`, "2026-11-09 (parallel orchestrator, unreleased)". One session on a quiet host; every workflow completed in every run with no server warnings.
+Full tables in `benchmarks/README.md`, "2026-11-09 (parallel orchestrator, for 0.11.0)"; the same-session comparison of the released 0.11.0 with Temporal 1.32.2 is the section above it (4.7x / 2.4x / 2.3x). One session on a quiet host; every workflow completed in every run with no server warnings.
 
 | Question                                         | Expectation                                       | Result                                                                                                                              |
 |--------------------------------------------------|---------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|

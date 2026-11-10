@@ -34,7 +34,7 @@ Kruxia Flow is a lightweight, high-performance workflow orchestration platform d
 
 ```mermaid
 flowchart TB
-    subgraph Binary["Kruxia Flow Binary (Single 7.5 MB Executable)"]
+    subgraph Binary["Kruxia Flow Binary (Single 13 MB Executable)"]
         API[API Server<br/>HTTP/WS]
         Orch[Orchestrator<br/>Event-Driven]
         Worker[Built-in Worker]

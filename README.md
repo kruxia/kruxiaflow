@@ -5,9 +5,9 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Discord](https://img.shields.io/discord/1457098705214640333?logo=discord&label=Discord)](https://discord.gg/ZJAzygCq)
 
-**Budgeted workflows: durable execution with hard cost limits built in.**
+**Budgeted workflows: fast durable execution with hard cost limits built in.**
 
-Put a spending limit on your agents. Kruxia Flow runs durable workflows that **stop, downgrade, or ask a human** when the budget runs out — with every token's cost tracked in your own PostgreSQL. One 7.5 MB binary, one database, no other infrastructure.
+Put a spending limit on your agents. Kruxia Flow runs fast durable workflows that **stop, downgrade, or ask a human** when the budget runs out — with every token's cost tracked in your own PostgreSQL. One 13 MB binary, one database, no other infrastructure.
 
 ```yaml
 activities:
@@ -39,6 +39,7 @@ Kruxia Flow is **cost-governed orchestration**: a durable execution engine — t
 - **Ask a human.** Workflows suspend on `wait_for_signal` — for budget approvals, review gates, or any human-in-the-loop step — and resume days later, surviving restarts while they wait.
 - **Costs in your database.** Token-level splits (input / output / cache) per activity, per attempt, queryable via the cost API. Your spend data lives in your Postgres, not a vendor dashboard.
 - **Durable by construction.** Event-sourced execution over PostgreSQL: crashes resume where they left off, with exactly-once semantics.
+- **Fast.** 2-5x the throughput of Temporal on the same hardware, with a single workflow completing in about 20 ms. See [Performance](#performance).
 
 Built for teams that run LLM pipelines on their own infrastructure — including fully local with [Ollama](https://ollama.com/) — and want the spend governed as carefully as the data.
 
@@ -293,7 +294,7 @@ Run it on a cloud VM, on-premise, or entirely air-gapped alongside local models.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                     Kruxia Flow (7.5MB binary)                  │
+│                     Kruxia Flow (13 MB binary)                  │
 ├─────────────────────────────────────────────────────────────────┤
 │  API Server  │  Orchestrator  │  Worker Pool  │  Cost Tracker   │
 └──────────────┴────────────────┴───────────────┴─────────────────┘
@@ -313,19 +314,32 @@ Run it on a cloud VM, on-premise, or entirely air-gapped alongside local models.
 
 ## Performance
 
-Kruxia Flow is benchmarked favorably against industry-standard workflow engines (July 2026, engine 0.8.0; high-concurrency scenario, 300 workflows at 100 concurrent, 100% success):
+**2-5x the throughput of Temporal on the same hardware, at lower latency at every percentile, and 80x or more the throughput of Airflow.** Kruxia Flow 0.11.0 against Temporal 1.32.2 and Airflow 3.4.0 (November 2026), each alone on the same machine, identical echo workflows, every workflow completed on all three:
 
-| Metric              | Kruxia Flow  | Temporal | Airflow  |
-|---------------------|--------------|----------|----------|
-| Throughput (wf/sec) | **87**       | 46       | 7        |
-| P99 Latency         | **0.6–1.6s** | 2.3–4.5s | 7.2–28s  |
-| Peak Memory         | **370MB**    | 444MB    | 7.4GB    |
-| Binary Size         | **13MB**     | ~200MB   | ~500MB+  |
-| Docker Image        | **68MB**     | ~500MB   | ~1GB+    |
+| Scenario                                     | Metric              | Kruxia Flow | Temporal | Airflow  | vs Temporal |
+|----------------------------------------------|---------------------|-------------|----------|----------|-------------|
+| 5 activities in sequence, 10 concurrent      | Throughput (wf/sec) | **163**     | 35       | 1.7      | 4.7x        |
+| 10 activities in parallel, 10 concurrent     | Throughput (wf/sec) | **81**      | 34       | 1.0      | 2.4x        |
+| 3 activities, 100 concurrent                 | Throughput (wf/sec) | **267**     | 118      | 3.2      | 2.3x        |
+| 3 activities, 100 concurrent                 | P50 latency         | **324 ms**  | 544 ms   | 27 s     | 1.7x lower  |
+| 3 activities, 100 concurrent                 | P99 latency         | **593 ms**  | 2,242 ms | 44 s     | 3.8x lower  |
+| One workflow on an idle system, 1 activity   | Mean latency        | **20 ms**   | 34 ms    | —        | 1.7x lower  |
+| One workflow on an idle system, 5 activities | Mean latency        | **35 ms**   | 65 ms    | —        | 1.9x lower  |
 
-Latency ranges span all three scenarios (sequential, parallel, high-concurrency). With the Python `py-std` worker instead of the built-in worker, high-concurrency throughput reaches 103 wf/sec.
+Footprint, measured from the published releases and images:
 
-Benchmark methodology: Identical echo workflows (sequential, parallel, high-concurrency), Docker Compose environment, same hardware, one platform at a time. See [`benchmarks/`](benchmarks/) for reproducible tests and dated result history.
+| Measure                                   | Kruxia Flow   | Temporal      | Airflow      |
+|-------------------------------------------|---------------|---------------|--------------|
+| Server binary (Linux)                     | **13-15 MB**  | 108 MB        | —            |
+| Docker image, compressed download         | **16 MB**     | 36 MB         | 648 MB       |
+| Docker image, unpacked                    | **50 MB**     | 118 MB        | 2.4 GB       |
+| Containers besides the database           | **1**         | 1             | 5 + Redis    |
+| Memory at rest, server + database         | **59 MB**     | 202 MB        | —            |
+| Peak memory under the suite, all services | **0.24 GB**   | 0.52 GB       | 4.1-5.0 GB   |
+
+This is each platform out of the box in Docker Compose on one machine, not any of them tuned to its best. Temporal's worker is its Python SDK, Kruxia Flow's is built into the server, and Temporal records a fuller replayable history per step; Airflow is a batch scheduler running on Celery, not built for this kind of load. Kruxia Flow and Temporal figures are medians of twelve passes from one session, Airflow's of six from another. Throughput and latency were measured on 0.11.0 and the memory rows on 0.11.1, which stopped the server holding about 1.5 MB per client connection; under the suite the 0.11.1 server itself stays under 30 MB and the rest is PostgreSQL.
+
+See [`benchmarks/README.md`](benchmarks/README.md#results) for the methodology, the full tables, the caveats, and the dated history of every result set, and [`benchmarks/`](benchmarks/) to reproduce them.
 
 ## Documentation
 

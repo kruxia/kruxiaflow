@@ -424,8 +424,11 @@ async fn spawn_api_server(
 
         tracing::info!(addr = %addr, "API server listening");
 
-        // Serve with graceful shutdown
-        axum::serve(listener, app)
+        // Serve with graceful shutdown.
+        // `into_make_service` matters: handed a bare `Router`, `axum::serve`
+        // deep-copies the whole router (every route and handler, about 1.5 MB
+        // here) for each accepted connection; the make-service shares it.
+        axum::serve(listener, app.into_make_service())
             .with_graceful_shutdown(async move {
                 shutdown_token.cancelled().await;
                 tracing::info!("API server shutdown signal received, draining connections...");

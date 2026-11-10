@@ -205,8 +205,11 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
     tracing::info!("Readiness check: http://{}/health/ready", bind_addr);
     tracing::info!("Service info: http://{}/api/v1/info", bind_addr);
 
-    // Serve with graceful shutdown
-    axum::serve(listener, app)
+    // Serve with graceful shutdown.
+    // `into_make_service` matters: handed a bare `Router`, `axum::serve`
+    // deep-copies the whole router (every route and handler, about 1.5 MB
+    // here) for each accepted connection; the make-service shares it.
+    axum::serve(listener, app.into_make_service())
         .with_graceful_shutdown(signals::shutdown_signal())
         .await
         .context("API server error")?;

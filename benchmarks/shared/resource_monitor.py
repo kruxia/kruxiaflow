@@ -1,6 +1,7 @@
 """Resource monitoring using Docker Stats API"""
 
 import asyncio
+import os
 import re
 import docker
 from dataclasses import dataclass, field
@@ -130,8 +131,12 @@ class ResourceMonitor:
         # Filter to benchmark compose project containers only, so dev cluster
         # containers (e.g. kruxiaflow-postgres from root docker-compose) don't
         # get counted alongside benchmarks-kruxiaflow-postgres-1.
+        # The project name is "benchmarks" when the suite is run from this
+        # directory; BENCH_COMPOSE_PROJECT overrides it for runs under
+        # another compose project name.
+        project = os.environ.get("BENCH_COMPOSE_PROJECT", "benchmarks")
         all_containers = self.client.containers.list(
-            filters={"label": "com.docker.compose.project=benchmarks"}
+            filters={"label": f"com.docker.compose.project={project}"}
         )
 
         self.containers = []
