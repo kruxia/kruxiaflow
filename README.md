@@ -336,6 +336,7 @@ Footprint, measured from the published releases and images:
 | Containers besides the database           | **1**         | 1             | 5 + Redis    |
 | Memory at rest, server + database         | **59 MB**     | 202 MB        | —            |
 | Peak memory under the suite, all services | **0.24 GB**   | 0.52 GB       | 4.1-5.0 GB   |
+| Runs on Raspberry Pi Zero                 | **[Awesome](docs/raspberry-pi-deployment.md)** | Maybe | No way |
 
 This is each platform out of the box in Docker Compose on one machine, not any of them tuned to its best. Temporal's worker is its Python SDK, Kruxia Flow's is built into the server, and Temporal records a fuller replayable history per step; Airflow is a batch scheduler running on Celery, not built for this kind of load. Kruxia Flow and Temporal figures are medians of twelve passes from one session, Airflow's of six from another. Throughput and latency were measured on 0.11.0 and the memory rows on 0.11.1, which stopped the server holding about 1.5 MB per client connection; under the suite the 0.11.1 server itself stays under 30 MB and the rest is PostgreSQL.
 

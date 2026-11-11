@@ -96,6 +96,28 @@ connection on this board until restart (0.8.3 on the same Pi: 9 MB at start,
 57 MB after 50 connections), so about 140 connections at once would have
 reached the 150M limit. Upgrade if you run an earlier version.
 
+### Idle Footprint on a Pi Zero W
+
+Kruxia Flow 0.11.1 and PostgreSQL together on one Pi Zero W (ARMv6, single
+core, 427 MB usable RAM), configured as in this guide (`shared_buffers = 32MB`,
+two orchestrator partitions, built-in worker), three hours after a restart
+with no workflows running. The board had been up for 28 days.
+
+| Measure                                    | Value                         |
+|--------------------------------------------|-------------------------------|
+| Kruxia Flow server, resident (`RES`)       | 14.9 MB (3.5% of RAM)         |
+| Kruxia Flow server, proportional (`Pss`)   | 13.2 MB                       |
+| PostgreSQL, 11 processes, proportional     | 41.3 MB (25.8 MB private)     |
+| **Server + database**                      | **about 55 MB**               |
+| CPU, whole board                           | 94% idle, load average 0.3    |
+| CPU, Kruxia Flow server                    | about 1%                      |
+| Memory available to other programs         | 274 MB of 427 MB, 16 MB swap  |
+
+The PostgreSQL figure is proportional because `top` counts the shared buffers
+once per process: its `RES` column adds up to 137 MB across the 11 processes
+for 41 MB of actual memory (see "Reading memory use" below). Proportional and
+private figures are from `/proc/<pid>/smaps_rollup`.
+
 ---
 
 ## Raspberry Pi Setup
