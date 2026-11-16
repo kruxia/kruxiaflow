@@ -405,12 +405,8 @@ fn evaluate_loop_condition(
         }
     }
 
-    // Check if dependency is in Completed state (required for loop-back)
-    if dep_state.status != WorkflowActivityStatus::Completed {
-        return Ok(false);
-    }
-
-    Ok(true) // All conditions met, continue loop
+    // All conditions met: loop back only if the dependency has completed
+    Ok(dep_state.status == WorkflowActivityStatus::Completed)
 }
 
 /// Get list of dependencies (activities this activity depends on)
