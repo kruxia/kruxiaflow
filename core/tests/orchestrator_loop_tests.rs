@@ -126,7 +126,6 @@ async fn test_simple_loop_workflow(pool: PgPool) {
         partitions: 4,
         max_in_flight: 256,
         backoff_multiplier: 2.0,
-        workflow_timeout: Duration::from_secs(300),
         timeout_check_interval: Duration::from_secs(60),
         secrets: std::collections::HashMap::new(),
     };
@@ -319,7 +318,6 @@ async fn test_loop_max_iterations_enforced(pool: PgPool) {
         partitions: 4,
         max_in_flight: 256,
         backoff_multiplier: 2.0,
-        workflow_timeout: Duration::from_secs(300),
         timeout_check_interval: Duration::from_secs(60),
         secrets: std::collections::HashMap::new(),
     };
@@ -491,7 +489,6 @@ async fn test_iteration_counter_without_scoping(pool: PgPool) {
         partitions: 4,
         max_in_flight: 256,
         backoff_multiplier: 2.0,
-        workflow_timeout: Duration::from_secs(300),
         timeout_check_interval: Duration::from_secs(60),
         secrets: std::collections::HashMap::new(),
     };
@@ -647,7 +644,6 @@ async fn test_iteration_budget_accumulation(pool: PgPool) {
         partitions: 4,
         max_in_flight: 256,
         backoff_multiplier: 2.0,
-        workflow_timeout: Duration::from_secs(300),
         timeout_check_interval: Duration::from_secs(60),
         secrets: std::collections::HashMap::new(),
     };
@@ -830,7 +826,6 @@ async fn test_loop_pattern_1_fixed_iterations(pool: PgPool) {
         partitions: 4,
         max_in_flight: 256,
         backoff_multiplier: 2.0,
-        workflow_timeout: Duration::from_secs(300),
         timeout_check_interval: Duration::from_secs(60),
         secrets: std::collections::HashMap::new(),
     };
@@ -995,7 +990,6 @@ async fn test_loop_pattern_2_condition_only(pool: PgPool) {
         partitions: 4,
         max_in_flight: 256,
         backoff_multiplier: 2.0,
-        workflow_timeout: Duration::from_secs(300),
         timeout_check_interval: Duration::from_secs(60),
         secrets: std::collections::HashMap::new(),
     };

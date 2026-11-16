@@ -2536,18 +2536,20 @@ async fn test_check_and_timeout_stuck_workflows(pool: PgPool) {
     let workflow_id = Uuid::now_v7();
     insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
 
-    // Backdate the workflow's created_at to make it look stuck
-    sqlx::query("UPDATE workflows SET created_at = NOW() - INTERVAL '2 hours' WHERE id = $1")
-        .bind(workflow_id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    // Backdate the workflow 2 hours with a 1-second timeout, so its deadline
+    // (timeout_at, set at submission from settings.timeout) has passed
+    sqlx::query(
+        "UPDATE workflows SET created_at = NOW() - INTERVAL '2 hours', \
+         timeout_at = NOW() - INTERVAL '2 hours' + INTERVAL '1 second' WHERE id = $1",
+    )
+    .bind(workflow_id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
 
-    // Create config with a 1-second timeout so the 2-hour-old workflow is stuck
-    let mut config = OrchestratorConfig::new(pool.clone());
-    config.workflow_timeout = Duration::from_secs(1);
+    let config = OrchestratorConfig::new(pool.clone());
 
     // Call check_and_timeout_stuck_workflows
     kruxiaflow_core::orchestrator::orchestrator::check_and_timeout_stuck_workflows(

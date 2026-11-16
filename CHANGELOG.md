@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **No server-wide workflow timeout.** The orchestrator used to fail every
+  workflow still running 300 seconds after creation
+  (`KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS`), which killed workflows
+  that wait on delays, schedules, signals or a busy queue. A workflow now runs
+  until it completes or fails, unless its definition sets a top-level
+  `settings.timeout` (seconds): the timeout checker now enforces that
+  setting, which was previously parsed and stored but ignored. Submission
+  fixes the deadline in a new `workflows.timeout_at` column (migration
+  `20261116000001` backfills unfinished workflows), and the checker reads
+  only a partial index of running workflows that have one, so workflows
+  without a timeout cost it nothing however long they run. The
+  `KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS` variable and
+  `OrchestratorConfig::workflow_timeout` / `with_workflow_timeout` are
+  removed; the variable is ignored if set. Activity timeouts and signal waits
+  are unchanged.
+
 ## [0.11.1] - 2026-11-10
 
 ### Fixed

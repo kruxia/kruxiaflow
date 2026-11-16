@@ -148,14 +148,26 @@ impl WorkflowService {
                 .map(|b| b.limit)
         });
 
+        // The definition's settings.timeout (seconds) fixes the workflow's
+        // deadline; without one the workflow never times out. NOW() is the
+        // transaction's start, so the deadline is measured from created_at.
+        let timeout_secs = definition
+            .settings
+            .as_ref()
+            .and_then(|s| s.timeout)
+            .map(|t| t as f64);
+
         let row = sqlx::query!(
             r#"
             INSERT INTO workflows (
                 id, definition_name, workflow_definition_id,
                 input, unique_key, status, activities, state_data,
-                budget_limit_usd, created_at, updated_at
+                budget_limit_usd, timeout_at, created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+            VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9,
+                NOW() + make_interval(secs => $10::float8), NOW(), NOW()
+            )
             RETURNING id, definition_name, workflow_definition_id,
                       input, unique_key, status AS "status: WorkflowStatus", created_at
             "#,
@@ -167,7 +179,8 @@ impl WorkflowService {
             status as WorkflowStatus,
             initial_activities,
             initial_state_data,
-            budget_limit_usd
+            budget_limit_usd,
+            timeout_secs as Option<f64>
         )
         .fetch_one(&mut *tx)
         .await

@@ -779,9 +779,14 @@ CREATE TABLE workflows (
     workflow_type TEXT NOT NULL,
     status TEXT NOT NULL,
     state_data JSONB NOT NULL,  -- Materialized workflow state (O(1) access)
+    timeout_at TIMESTAMPTZ,     -- created_at + settings.timeout; NULL = no timeout
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
 );
+
+-- The timeout checker reads only running workflows that have a deadline
+CREATE INDEX idx_workflows_running_timeout_at ON workflows(timeout_at)
+WHERE status = 'running' AND timeout_at IS NOT NULL;
 ```
 
 **Note**: The `state_data` JSONB column contains the complete current workflow state, including all activity statuses, outputs, and custom workflow data. This enables O(1) state access during orchestration, meeting the <1ms evaluation latency target for workflows of any size.
@@ -3546,6 +3551,18 @@ activities:
 - `budget`: Cost limits for LLM activities (`limit`, `action: abort`)
 - `delay`: Delayed execution for rate limiting (e.g., `"5s"`)
 - `scheduled_for`: Absolute scheduling timestamp
+
+**Workflow Settings** (top-level `settings:` in the definition):
+- `timeout`: Maximum workflow run time in seconds, measured from creation.
+  Submission fixes the deadline in `workflows.timeout_at`; the orchestrator's
+  timeout checker (every `KRUXIAFLOW_ORCHESTRATOR_TIMEOUT_CHECK_INTERVAL_SECS`,
+  default 30) fails a running workflow past it with `WorkflowFailed`, reading
+  only a partial index of running workflows that have a deadline. There is no
+  server-wide workflow timeout: a workflow whose definition sets none runs
+  until it completes or fails, for years if need be, at no cost to the
+  checker. Activity timeouts (`timeout_seconds`) and signal waits still bound
+  their own steps.
+- `budget`: Workflow-level cost limit (`limit`, `action`)
 
 **Iterative Workflows (Loops)**:
 - Loop detection via back-edges in dependency graph

@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, definition_name,\n               EXTRACT(EPOCH FROM timeout_at - created_at)::float8 AS \"timeout_secs!\"\n        FROM workflows\n        WHERE status = 'running'\n          AND timeout_at IS NOT NULL\n          AND timeout_at < NOW()\n        ORDER BY timeout_at\n        LIMIT 100\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "definition_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "timeout_secs!",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "5d0efeab5f1ac71d20836935fbb37ffbd8939b06d77bda247e6256e8e8f7ad5f"
+}

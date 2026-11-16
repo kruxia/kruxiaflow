@@ -96,22 +96,12 @@ async fn test_orchestrator_config_backoff_default(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../migrations")]
-async fn test_orchestrator_config_with_workflow_timeout(pool: PgPool) {
-    let config = OrchestratorConfig::new(pool).with_workflow_timeout(Duration::from_secs(600));
-
-    assert_eq!(config.workflow_timeout, Duration::from_secs(600));
-    // Other defaults should remain unchanged
-    assert_eq!(config.poll_interval_min, Duration::from_millis(50));
-    assert_eq!(config.timeout_check_interval, Duration::from_secs(30));
-}
-
-#[sqlx::test(migrations = "../migrations")]
 async fn test_orchestrator_config_with_timeout_check_interval(pool: PgPool) {
     let config = OrchestratorConfig::new(pool).with_timeout_check_interval(Duration::from_secs(60));
 
     assert_eq!(config.timeout_check_interval, Duration::from_secs(60));
     // Other defaults should remain unchanged
-    assert_eq!(config.workflow_timeout, Duration::from_secs(300));
+    assert_eq!(config.poll_interval_min, Duration::from_millis(50));
 }
 
 #[sqlx::test(migrations = "../migrations")]
@@ -119,13 +109,11 @@ async fn test_orchestrator_config_full_builder_chain(pool: PgPool) {
     let config = OrchestratorConfig::new(pool)
         .with_poll_interval(Duration::from_millis(5), Duration::from_secs(2))
         .with_backoff_multiplier(1.5)
-        .with_workflow_timeout(Duration::from_secs(900))
         .with_timeout_check_interval(Duration::from_secs(45));
 
     assert_eq!(config.poll_interval_min, Duration::from_millis(5));
     assert_eq!(config.poll_interval_max, Duration::from_secs(2));
     assert_eq!(config.backoff_multiplier, 1.5);
-    assert_eq!(config.workflow_timeout, Duration::from_secs(900));
     assert_eq!(config.timeout_check_interval, Duration::from_secs(45));
 }
 
@@ -134,6 +122,5 @@ async fn test_orchestrator_config_default_timeouts(pool: PgPool) {
     let config = OrchestratorConfig::new(pool);
 
     // Verify default timeout values
-    assert_eq!(config.workflow_timeout, Duration::from_secs(300)); // 5 minutes
     assert_eq!(config.timeout_check_interval, Duration::from_secs(30));
 }

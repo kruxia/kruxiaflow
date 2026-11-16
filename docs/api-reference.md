@@ -368,9 +368,10 @@ Authorization: Bearer <token>
 
 `error_message` carries the most specific failure reason available
 (dead-letter visibility): a failed activity's error text when an activity
-failed, otherwise the workflow-level reason (e.g.
-`"Workflow timeout after 300s: 1 queued activity was never claimed by any
-worker — is a worker for this queue running?"`).
+failed, otherwise the workflow-level reason (e.g., for a workflow past its
+definition's `settings.timeout`, `"Workflow timeout after 300s: 1 queued
+activity was never claimed by any worker — is a worker for this queue
+running?"`).
 `GET /api/v1/workflows?definition_name=X&status=failed` lists dead-letters
 with their reasons, no SQL required.
 

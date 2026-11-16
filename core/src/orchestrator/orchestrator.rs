@@ -236,11 +236,10 @@ pub async fn run_orchestrator(
 
     tracing::info!(
         "Orchestrator starting with consumer_id={}, partitions={}, max_in_flight={}, \
-         workflow_timeout={}s, max_event_retries={}, event_wake={}, poll_interval_max={}ms",
+         max_event_retries={}, event_wake={}, poll_interval_max={}ms",
         CONSUMER_ID,
         partitions,
         max_in_flight,
-        config.workflow_timeout.as_secs(),
         MAX_EVENT_PROCESSING_RETRIES,
         if wake.is_some() { "notify" } else { "poll" },
         poll_interval_max.as_millis()
@@ -2738,9 +2737,8 @@ async fn timeout_checker_task(
     shutdown_token: Option<CancellationToken>,
 ) {
     tracing::info!(
-        "Timeout checker starting (check_interval={}s, workflow_timeout={}s)",
-        config.timeout_check_interval.as_secs(),
-        config.workflow_timeout.as_secs()
+        "Timeout checker starting (check_interval={}s)",
+        config.timeout_check_interval.as_secs()
     );
 
     loop {
@@ -2762,7 +2760,7 @@ async fn timeout_checker_task(
             _ = tokio::time::sleep(config.timeout_check_interval) => {}
         }
 
-        // Check for stuck workflows (workflow-level timeout)
+        // Check for workflows past their definition's timeout
         if let Err(e) = check_and_timeout_stuck_workflows(&config, &event_source).await {
             tracing::error!("Failed to check for stuck workflows: {}", e);
         }
@@ -2781,23 +2779,26 @@ async fn timeout_checker_task(
     }
 }
 
-/// Check for workflows that have been running longer than the timeout and mark them as failed
+/// Fail running workflows past their deadline (`timeout_at`, fixed at
+/// submission from the definition's `settings.timeout`). A workflow without a
+/// deadline is never timed out and never read here: the query runs on a
+/// partial index of running workflows that have one. There is no server-wide
+/// workflow timeout.
 pub async fn check_and_timeout_stuck_workflows(
     config: &OrchestratorConfig,
     event_source: &Arc<dyn EventSource>,
 ) -> Result<()> {
-    let timeout_secs = config.workflow_timeout.as_secs() as f64;
-
-    // Query for workflows that are stuck (running for longer than timeout)
     let stuck_workflows = sqlx::query!(
         r#"
-        SELECT id, definition_name
+        SELECT id, definition_name,
+               EXTRACT(EPOCH FROM timeout_at - created_at)::float8 AS "timeout_secs!"
         FROM workflows
         WHERE status = 'running'
-          AND created_at < NOW() - make_interval(secs => $1)
+          AND timeout_at IS NOT NULL
+          AND timeout_at < NOW()
+        ORDER BY timeout_at
         LIMIT 100
-        "#,
-        timeout_secs
+        "#
     )
     .fetch_all(&config.pool)
     .await?;
@@ -2807,17 +2808,18 @@ pub async fn check_and_timeout_stuck_workflows(
     }
 
     tracing::warn!(
-        "Found {} stuck workflows (running > {}s), timing out",
-        stuck_workflows.len(),
-        timeout_secs
+        "Found {} workflows past their definition's timeout, timing out",
+        stuck_workflows.len()
     );
 
     // Publish timeout events for each stuck workflow
     for workflow in stuck_workflows {
+        let timeout_secs = workflow.timeout_secs;
         tracing::warn!(
-            "Timing out workflow {} ({})",
+            "Timing out workflow {} ({}, timeout {}s)",
             workflow.id,
-            workflow.definition_name
+            workflow.definition_name,
+            timeout_secs
         );
 
         // Diagnose WHY it hung so the dead-letter is self-explaining: queued
@@ -4260,7 +4262,6 @@ mod tests {
             partitions: 4,
             max_in_flight: 256,
             backoff_multiplier: 1.5,
-            workflow_timeout: Duration::from_secs(3600),
             timeout_check_interval: Duration::from_millis(50),
             pool: {
                 // We need a PgPool but it won't actually be used since we cancel immediately
@@ -4312,7 +4313,6 @@ mod tests {
             partitions: 4,
             max_in_flight: 256,
             backoff_multiplier: 1.5,
-            workflow_timeout: Duration::from_secs(3600),
             timeout_check_interval: Duration::from_millis(10),
             pool: sqlx::PgPool::connect_lazy("postgres://invalid:5432/test").unwrap(),
             secrets: HashMap::new(),
@@ -4360,7 +4360,6 @@ mod tests {
             partitions: 4,
             max_in_flight: 256,
             backoff_multiplier: 1.5,
-            workflow_timeout: Duration::from_secs(3600),
             timeout_check_interval: Duration::from_secs(60),
             pool: sqlx::PgPool::connect_lazy("postgres://invalid:5432/test").unwrap(),
             secrets: HashMap::new(),
@@ -4411,7 +4410,6 @@ mod tests {
             partitions: 4,
             max_in_flight: 256,
             backoff_multiplier: 1.5,
-            workflow_timeout: Duration::from_secs(3600),
             timeout_check_interval: Duration::from_secs(60),
             pool: sqlx::PgPool::connect_lazy("postgres://invalid:5432/test").unwrap(),
             secrets: HashMap::new(),
@@ -4465,7 +4463,6 @@ mod tests {
             partitions: 4,
             max_in_flight: 256,
             backoff_multiplier: 1.5,
-            workflow_timeout: Duration::from_secs(3600),
             timeout_check_interval: Duration::from_secs(60),
             pool: sqlx::PgPool::connect_lazy("postgres://invalid:5432/test").unwrap(),
             secrets: HashMap::new(),

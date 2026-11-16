@@ -34,7 +34,10 @@ pub struct OrchestratorConfig {
     /// Most events fetched but not yet acknowledged by the durable cursor.
     /// Bounds memory and how much a crash replays.
     pub max_in_flight: usize,
-    pub workflow_timeout: Duration,
+    /// How often the timeout checker looks for workflows past their
+    /// definition's `settings.timeout`, stale activities and expired signal
+    /// subscriptions. There is no server-wide workflow timeout: a workflow
+    /// runs until it finishes unless its definition sets one.
     pub timeout_check_interval: Duration,
     /// Secrets loaded from environment variables (KRUXIAFLOW_SECRET_*)
     pub secrets: HashMap<String, String>,
@@ -50,7 +53,6 @@ impl OrchestratorConfig {
             backoff_multiplier: 1.5, // Moderate backoff
             partitions: DEFAULT_PARTITIONS,
             max_in_flight: DEFAULT_MAX_IN_FLIGHT,
-            workflow_timeout: Duration::from_secs(300), // 5 minutes default timeout
             timeout_check_interval: Duration::from_secs(30), // Check every 30 seconds
             secrets: HashMap::new(),
         }
@@ -67,7 +69,6 @@ impl OrchestratorConfig {
     /// - `KRUXIAFLOW_ORCHESTRATOR_PARTITIONS`: Partitions handling events concurrently (default: 8;
     ///   1 is serial)
     /// - `KRUXIAFLOW_ORCHESTRATOR_MAX_IN_FLIGHT`: Most fetched, unacknowledged events (default: 256)
-    /// - `KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS`: Workflow timeout in seconds (default: 300)
     /// - `KRUXIAFLOW_ORCHESTRATOR_TIMEOUT_CHECK_INTERVAL_SECS`: Timeout check interval in seconds (default: 30)
     pub fn from_env(pool: PgPool) -> Self {
         let poll_interval_min_ms: u64 =
@@ -96,12 +97,6 @@ impl OrchestratorConfig {
             .and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_MAX_IN_FLIGHT);
 
-        let workflow_timeout_secs: u64 =
-            std::env::var("KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(300);
-
         let timeout_check_interval_secs: u64 =
             std::env::var("KRUXIAFLOW_ORCHESTRATOR_TIMEOUT_CHECK_INTERVAL_SECS")
                 .ok()
@@ -118,7 +113,6 @@ impl OrchestratorConfig {
             backoff_multiplier,
             partitions,
             max_in_flight,
-            workflow_timeout: Duration::from_secs(workflow_timeout_secs),
             timeout_check_interval: Duration::from_secs(timeout_check_interval_secs),
             secrets: load_secrets_from_env(),
         }
@@ -178,11 +172,6 @@ impl OrchestratorConfig {
     /// The window size to run with: at least one event per partition
     pub fn effective_max_in_flight(&self) -> usize {
         self.max_in_flight.max(self.effective_partitions())
-    }
-
-    pub fn with_workflow_timeout(mut self, timeout: Duration) -> Self {
-        self.workflow_timeout = timeout;
-        self
     }
 
     pub fn with_timeout_check_interval(mut self, interval: Duration) -> Self {
@@ -526,7 +515,6 @@ mod tests {
             Duration::from_millis(5000)
         );
         assert_eq!(config.backoff_multiplier, 1.5);
-        assert_eq!(config.workflow_timeout, Duration::from_secs(300));
         assert_eq!(config.timeout_check_interval, Duration::from_secs(30));
         assert!(config.secrets.is_empty());
     }
@@ -538,7 +526,6 @@ mod tests {
             "KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MIN_MS",
             "KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX_MS",
             "KRUXIAFLOW_ORCHESTRATOR_BACKOFF_MULTIPLIER",
-            "KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS",
             "KRUXIAFLOW_ORCHESTRATOR_TIMEOUT_CHECK_INTERVAL_SECS",
         ];
         let saved: Vec<Option<String>> = vars.iter().map(|v| std::env::var(v).ok()).collect();
@@ -553,7 +540,6 @@ mod tests {
         assert_eq!(config.poll_interval_max, Duration::from_millis(1000));
         assert_eq!(config.wake_poll_interval_max, Duration::from_millis(5000));
         assert_eq!(config.backoff_multiplier, 1.5);
-        assert_eq!(config.workflow_timeout, Duration::from_secs(300));
         assert_eq!(config.timeout_check_interval, Duration::from_secs(30));
 
         unsafe {
@@ -572,7 +558,6 @@ mod tests {
             std::env::set_var("KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MIN_MS", "100");
             std::env::set_var("KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX_MS", "2000");
             std::env::set_var("KRUXIAFLOW_ORCHESTRATOR_BACKOFF_MULTIPLIER", "2.0");
-            std::env::set_var("KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS", "600");
             std::env::set_var("KRUXIAFLOW_ORCHESTRATOR_TIMEOUT_CHECK_INTERVAL_SECS", "60");
         }
 
@@ -582,14 +567,12 @@ mod tests {
         // An explicit maximum applies with or without a wake signal
         assert_eq!(config.wake_poll_interval_max, Duration::from_millis(2000));
         assert_eq!(config.backoff_multiplier, 2.0);
-        assert_eq!(config.workflow_timeout, Duration::from_secs(600));
         assert_eq!(config.timeout_check_interval, Duration::from_secs(60));
 
         unsafe {
             std::env::remove_var("KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MIN_MS");
             std::env::remove_var("KRUXIAFLOW_ORCHESTRATOR_POLL_INTERVAL_MAX_MS");
             std::env::remove_var("KRUXIAFLOW_ORCHESTRATOR_BACKOFF_MULTIPLIER");
-            std::env::remove_var("KRUXIAFLOW_ORCHESTRATOR_WORKFLOW_TIMEOUT_SECS");
             std::env::remove_var("KRUXIAFLOW_ORCHESTRATOR_TIMEOUT_CHECK_INTERVAL_SECS");
         }
     }
@@ -620,14 +603,12 @@ mod tests {
         let config = OrchestratorConfig::new(lazy_pool())
             .with_poll_interval(Duration::from_millis(200), Duration::from_millis(5000))
             .with_backoff_multiplier(3.0)
-            .with_workflow_timeout(Duration::from_secs(600))
             .with_timeout_check_interval(Duration::from_secs(120));
 
         assert_eq!(config.poll_interval_min, Duration::from_millis(200));
         assert_eq!(config.poll_interval_max, Duration::from_millis(5000));
         assert_eq!(config.wake_poll_interval_max, Duration::from_millis(5000));
         assert_eq!(config.backoff_multiplier, 3.0);
-        assert_eq!(config.workflow_timeout, Duration::from_secs(600));
         assert_eq!(config.timeout_check_interval, Duration::from_secs(120));
     }
 
