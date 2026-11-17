@@ -4,7 +4,7 @@ pub mod postgres_event_source;
 pub mod rebase;
 pub mod wake;
 
-pub use error::{EventError, Result};
+pub use error::{EventError, Result, is_connection_error};
 pub use models::*;
 pub use postgres_event_source::PostgresEventSource;
 pub use rebase::{

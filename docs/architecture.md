@@ -316,7 +316,16 @@ flowchart LR
   handler, spaced by the minimum poll interval, and after 5 failures is
   replaced by a failure event. Later events of that partition wait behind it
   (none of the same workflow may overtake it); other partitions keep working.
-  The unresolved event pins the durable cursor.
+  The unresolved event pins the durable cursor. A failure that is the
+  database being unreachable is not counted: the handler retries on a backoff
+  (250 ms to 5 s) for as long as the outage lasts.
+- **A database outage is waited out.** The poller retries a fetch or cursor
+  write that failed on a connection error (I/O, TLS, protocol, pool timeout,
+  SQLSTATE `08xxx` or `57P01`-`57P03`) on the same backoff, keeping its window
+  and fetch cursor, so a restarted or recreated PostgreSQL costs only the
+  outage. Any other error ends the orchestrator, and `serve` and
+  `orchestrator` then shut down and exit non-zero for their supervisor to
+  restart them: the process never runs on with nothing consuming events.
 - **A handler finishing wakes the poller.** Delivery is bounded by the oldest
   writing transaction on the instance, and a handler's own transaction holds
   back events that committed after it began writing. Its end notifies nobody,
@@ -2853,7 +2862,7 @@ prefix of resolved events (see Concurrency under the orchestrator component),
 so a transiently failing event pins the cursor and is genuinely retried by
 its partition (spaced by the minimum
 poll interval) rather than skipped; after 5 failures it is treated as a poison
-message. Delivery is at-least-once (a crash between processing and the cursor
+message. Connection errors are not counted toward those 5. Delivery is at-least-once (a crash between processing and the cursor
 write replays the batch; orchestrators sharing a consumer id race), so every
 event handler is replay-idempotent: duplicate `WorkflowCreated` /
 `ActivityCompleted` / `ActivityFailed` / `ActivityWaiting` / `ActivitySignaled`

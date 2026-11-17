@@ -33,6 +33,13 @@ use uuid::Uuid;
 const CONSUMER_ID: &str = "orchestrator";
 const MAX_EVENT_PROCESSING_RETRIES: u32 = 5;
 
+/// Backoff while the database is unreachable, for the poller and for a
+/// handler's event alike. Each attempt can itself wait out the pool's
+/// acquire timeout, so the cap keeps recovery within a few seconds of the
+/// database coming back without hammering it while it is gone.
+const OUTAGE_RETRY_MIN: std::time::Duration = std::time::Duration::from_millis(250);
+const OUTAGE_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(5);
+
 // Conditional span creation macro - only creates spans when profiling feature is enabled
 #[cfg(feature = "profiling")]
 macro_rules! profile_span {
@@ -86,7 +93,9 @@ fn partition_of(workflow_id: Uuid, partitions: usize) -> usize {
 /// here, spaced by the minimum poll interval; later events of the partition
 /// wait behind it so that none of the same workflow overtakes it. After the
 /// last retry the event is replaced by a failure event and counts as
-/// resolved. Every resolution is reported to the poller, which also takes it
+/// resolved. Failures that are the database being unreachable are not
+/// counted: the event waits for the database, on a backoff, however long it
+/// is gone. Every resolution is reported to the poller, which also takes it
 /// as a cue to poll (see `run_orchestrator`).
 async fn run_partition(
     mut events: mpsc::UnboundedReceiver<WorkflowEvent>,
@@ -104,6 +113,7 @@ async fn run_partition(
         };
 
         let mut failure_count = 0u32;
+        let mut outage_retry = OUTAGE_RETRY_MIN;
         loop {
             let Err(e) = process_workflow_event(
                 &event,
@@ -116,6 +126,26 @@ async fn run_partition(
             else {
                 break;
             };
+
+            // The database being out of reach says nothing about the event:
+            // it is not counted toward poison (which would skip it, and with
+            // the failure event unpublishable, hang its workflow), only
+            // tried again once the database may be back
+            if e.is_connection_error() {
+                tracing::debug!(
+                    event_id = %event.id,
+                    workflow_id = %event.workflow_id,
+                    error = %e,
+                    retry_in_ms = outage_retry.as_millis() as u64,
+                    "Database unreachable while processing event; retrying"
+                );
+                tokio::select! {
+                    _ = ctx.stop.cancelled() => return,
+                    _ = tokio::time::sleep(outage_retry) => {}
+                }
+                outage_retry = (outage_retry * 2).min(OUTAGE_RETRY_MAX);
+                continue;
+            }
 
             failure_count += 1;
             tracing::error!(
@@ -334,8 +364,17 @@ struct Poller {
 }
 
 impl Poller {
-    /// Run until shutdown is requested (`Ok`) or the event source fails
+    /// Run until shutdown is requested (`Ok`) or a fault that retrying
+    /// cannot mend (`Err`).
+    ///
+    /// The database going away (a restarted or recreated PostgreSQL, a
+    /// network drop) is waited out: the step is retried on a backoff until
+    /// the database answers again. Nothing is lost meanwhile: the window,
+    /// the fetch cursor and the unwritten acknowledgement stay as they were,
+    /// and a failed fetch or cursor write has changed nothing.
     async fn run(&mut self, shutdown_token: &Option<CancellationToken>) -> Result<()> {
+        let mut retry = OUTAGE_RETRY_MIN;
+        let mut outage_since: Option<std::time::Instant> = None;
         loop {
             if let Some(token) = shutdown_token
                 && token.is_cancelled()
@@ -343,35 +382,69 @@ impl Poller {
                 return Ok(());
             }
 
-            self.acknowledge_resolved().await?;
-
-            // A full window: wait for the front to move
-            let free = self.max_in_flight.saturating_sub(self.window.len());
-            if free == 0 {
-                tokio::select! {
-                    resolved = self.resolved.recv() => self.note_resolved(resolved)?,
-                    _ = cancelled(shutdown_token) => {}
+            match self.step(shutdown_token).await {
+                Ok(()) => {
+                    if let Some(since) = outage_since.take() {
+                        tracing::info!(
+                            outage_secs = since.elapsed().as_secs(),
+                            "Database reachable again; orchestrator resuming"
+                        );
+                        retry = OUTAGE_RETRY_MIN;
+                    }
                 }
-                continue;
+                Err(e) if e.is_connection_error() => {
+                    if outage_since.is_none() {
+                        outage_since = Some(std::time::Instant::now());
+                        tracing::warn!(
+                            error = %e,
+                            "Database unreachable; orchestrator waiting for it to come back"
+                        );
+                    } else {
+                        tracing::debug!(error = %e, retry_in_ms = retry.as_millis() as u64,
+                            "Database still unreachable");
+                    }
+                    tokio::select! {
+                        _ = tokio::time::sleep(retry) => {}
+                        _ = cancelled(shutdown_token) => {}
+                    }
+                    retry = (retry * 2).min(OUTAGE_RETRY_MAX);
+                }
+                Err(e) => return Err(e),
             }
-
-            let events = self
-                .event_source
-                .poll_after(CONSUMER_ID, self.fetch_cursor, free)
-                .await?;
-
-            if events.is_empty() {
-                self.wait_for_events(shutdown_token).await?;
-                continue;
-            }
-
-            tracing::trace!("Polled {} events", events.len());
-            for event in events {
-                self.dispatch(event)?;
-            }
-            self.pacing.progressed();
-            // Drain: fetch again at once
         }
+    }
+
+    /// One turn of the loop: store the cursor, then fetch and dispatch, or
+    /// wait when there is nothing to fetch or no room in the window
+    async fn step(&mut self, shutdown_token: &Option<CancellationToken>) -> Result<()> {
+        self.acknowledge_resolved().await?;
+
+        // A full window: wait for the front to move
+        let free = self.max_in_flight.saturating_sub(self.window.len());
+        if free == 0 {
+            tokio::select! {
+                resolved = self.resolved.recv() => self.note_resolved(resolved)?,
+                _ = cancelled(shutdown_token) => {}
+            }
+            return Ok(());
+        }
+
+        let events = self
+            .event_source
+            .poll_after(CONSUMER_ID, self.fetch_cursor, free)
+            .await?;
+
+        if events.is_empty() {
+            return self.wait_for_events(shutdown_token).await;
+        }
+
+        tracing::trace!("Polled {} events", events.len());
+        for event in events {
+            self.dispatch(event)?;
+        }
+        self.pacing.progressed();
+        // Drain: the next step fetches again at once
+        Ok(())
     }
 
     /// Record a fetched event and hand it to its workflow's partition

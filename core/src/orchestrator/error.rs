@@ -46,3 +46,20 @@ pub enum OrchestratorError {
 }
 
 pub type Result<T> = std::result::Result<T, OrchestratorError>;
+
+impl OrchestratorError {
+    /// Whether this is the database being out of reach, which passes (see
+    /// [`crate::events::is_connection_error`]). The orchestrator waits such
+    /// errors out instead of stopping, and never counts them against an
+    /// event as a sign that it is poison.
+    pub fn is_connection_error(&self) -> bool {
+        use crate::events::is_connection_error;
+        use crate::queue::QueueError;
+        match self {
+            OrchestratorError::Database(e) => is_connection_error(e),
+            OrchestratorError::Event(e) => e.is_connection_error(),
+            OrchestratorError::Queue(QueueError::DatabaseError(e)) => is_connection_error(e),
+            _ => false,
+        }
+    }
+}

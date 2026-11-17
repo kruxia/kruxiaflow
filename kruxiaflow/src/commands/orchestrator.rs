@@ -260,20 +260,36 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
         })
     };
 
-    // Wait for shutdown signal
-    let shutdown_signal = crate::signals::wait_for_shutdown();
-    shutdown_signal.await;
-
-    tracing::info!("Shutdown signal received, stopping orchestrator...");
+    // Wait for a shutdown signal, or for the orchestrator to stop on its own:
+    // it waits out the database going away, so it stops only on a fault it
+    // cannot mend, and then the process exits non-zero for its supervisor to
+    // restart it rather than idling with nothing consuming events
+    let mut orchestrator_handle = orchestrator_handle;
+    let orchestrator_stopped = tokio::select! {
+        _ = crate::signals::wait_for_shutdown() => {
+            tracing::info!("Shutdown signal received, stopping orchestrator...");
+            None
+        }
+        result = &mut orchestrator_handle => {
+            let reason = super::serve::orchestrator_stop_reason(result);
+            tracing::error!(
+                reason = %reason,
+                "Orchestrator stopped; shutting down so that it can be restarted"
+            );
+            Some(reason)
+        }
+    };
     shutdown_token.cancel();
 
-    // Wait for orchestrator to stop
+    // Wait for orchestrator to stop, unless it already has
     let shutdown_timeout = Duration::from_secs(cmd.shutdown_timeout);
-    match tokio::time::timeout(shutdown_timeout, orchestrator_handle).await {
-        Ok(Ok(Ok(()))) => tracing::info!("Orchestrator stopped gracefully"),
-        Ok(Ok(Err(e))) => tracing::warn!("Orchestrator error during shutdown: {}", e),
-        Ok(Err(e)) => tracing::warn!("Orchestrator task error: {}", e),
-        Err(_) => tracing::warn!("Orchestrator shutdown timeout, forcing stop"),
+    if orchestrator_stopped.is_none() {
+        match tokio::time::timeout(shutdown_timeout, orchestrator_handle).await {
+            Ok(Ok(Ok(()))) => tracing::info!("Orchestrator stopped gracefully"),
+            Ok(Ok(Err(e))) => tracing::warn!("Orchestrator error during shutdown: {}", e),
+            Ok(Err(e)) => tracing::warn!("Orchestrator task error: {}", e),
+            Err(_) => tracing::warn!("Orchestrator shutdown timeout, forcing stop"),
+        }
     }
 
     // Wait for scheduler to stop (exits via shutdown token)
@@ -288,7 +304,10 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
     pool.close().await;
 
     tracing::info!("Orchestrator shutdown complete");
-    Ok(())
+    match orchestrator_stopped {
+        Some(reason) => Err(anyhow::anyhow!("Orchestrator stopped: {reason}")),
+        None => Ok(()),
+    }
 }
 
 #[cfg(test)]

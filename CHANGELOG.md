@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The orchestrator survives PostgreSQL going away.** When the database was
+  unreachable for longer than the pool's acquire timeout, or at all while its
+  hostname did not resolve (a recreated container), the orchestrator's poller
+  returned the error and stopped for good. `serve` and `orchestrator` did not
+  notice: the API and workers kept answering and the container stayed
+  healthy while no workflow advanced. The poller now waits out connection
+  errors (I/O, TLS, protocol, pool timeouts, SQLSTATE class `08` and
+  `57P01`-`57P03`) on a backoff of 250 ms to 5 s, logging once when the
+  database goes and once when it is back, and loses nothing it had read.
+- **An event in flight during an outage is no longer skipped as poison.** A
+  handler counted the database being unreachable toward the five failures
+  that mark an event poison, so an outage of more than about 25 seconds
+  skipped the event it was on, and the failure event replacing it could not
+  be written either, which left its workflow hung. Connection errors are now
+  retried without being counted.
+- **The process exits when its orchestrator stops.** If the orchestrator
+  task ends for any other reason (an error it cannot wait out, or a panic),
+  `serve` and `orchestrator` log it, shut down and exit non-zero, so that a
+  restart policy (`restart: unless-stopped`, a Kubernetes Deployment)
+  brings them back.
+
 ## [0.12.0] - 2026-11-16
 
 ### Changed

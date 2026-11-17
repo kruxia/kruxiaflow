@@ -881,11 +881,26 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         })
     };
 
-    // 6. Wait for shutdown signal
-    let shutdown_signal = crate::signals::wait_for_shutdown();
-    shutdown_signal.await;
-
-    tracing::info!("Shutdown signal received, initiating graceful shutdown...");
+    // 6. Wait for a shutdown signal, or for the orchestrator to stop on its
+    // own. It waits out the database going away, so it stops only on a fault
+    // it cannot mend; the process must not run on without it (the API and
+    // workers would keep answering while no workflow advances), so it shuts
+    // down and exits non-zero, for its supervisor to restart it.
+    let mut orchestrator_handle = orchestrator_handle;
+    let orchestrator_stopped = tokio::select! {
+        _ = crate::signals::wait_for_shutdown() => {
+            tracing::info!("Shutdown signal received, initiating graceful shutdown...");
+            None
+        }
+        result = &mut orchestrator_handle => {
+            let reason = orchestrator_stop_reason(result);
+            tracing::error!(
+                reason = %reason,
+                "Orchestrator stopped; shutting down so that Kruxia Flow can be restarted"
+            );
+            Some(reason)
+        }
+    };
 
     // 7. Trigger shutdown for all components
     shutdown_token.cancel();
@@ -917,14 +932,17 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
         Err(_) => tracing::warn!("API server shutdown timeout, forcing stop"),
     }
 
-    // Stop orchestrator (will stop polling via shutdown token)
-    tracing::info!("Stopping orchestrator...");
-    let orch_result = tokio::time::timeout(shutdown_timeout, orchestrator_handle).await;
-    match orch_result {
-        Ok(Ok(Ok(()))) => tracing::info!("Orchestrator stopped gracefully"),
-        Ok(Ok(Err(e))) => tracing::warn!("Orchestrator error during shutdown: {}", e),
-        Ok(Err(e)) => tracing::warn!("Orchestrator task error: {}", e),
-        Err(_) => tracing::warn!("Orchestrator shutdown timeout, forcing stop"),
+    // Stop orchestrator (will stop polling via shutdown token), unless it
+    // has already stopped
+    if orchestrator_stopped.is_none() {
+        tracing::info!("Stopping orchestrator...");
+        let orch_result = tokio::time::timeout(shutdown_timeout, orchestrator_handle).await;
+        match orch_result {
+            Ok(Ok(Ok(()))) => tracing::info!("Orchestrator stopped gracefully"),
+            Ok(Ok(Err(e))) => tracing::warn!("Orchestrator error during shutdown: {}", e),
+            Ok(Err(e)) => tracing::warn!("Orchestrator task error: {}", e),
+            Err(_) => tracing::warn!("Orchestrator shutdown timeout, forcing stop"),
+        }
     }
 
     // Stop scheduler (exits via shutdown token)
@@ -960,7 +978,22 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
 
     tracing::info!("Graceful shutdown complete");
 
-    Ok(())
+    match orchestrator_stopped {
+        Some(reason) => Err(anyhow::anyhow!("Orchestrator stopped: {reason}")),
+        None => Ok(()),
+    }
+}
+
+/// Why an orchestrator task ended without being asked to
+pub(crate) fn orchestrator_stop_reason<E: std::fmt::Display>(
+    result: std::result::Result<std::result::Result<(), E>, tokio::task::JoinError>,
+) -> String {
+    match result {
+        Ok(Ok(())) => "it returned without a shutdown being requested".to_string(),
+        Ok(Err(e)) => e.to_string(),
+        Err(e) if e.is_panic() => format!("it panicked: {e}"),
+        Err(e) => format!("its task was cancelled: {e}"),
+    }
 }
 
 #[cfg(test)]
