@@ -3219,6 +3219,7 @@ mod tests {
                         iteration: 0,
                         iteration_outputs: None,
                         signal_data: None,
+                        completion_seq: 0,
                     },
                 )
             })
@@ -3583,6 +3584,7 @@ mod tests {
                     map
                 }),
                 signal_data: None,
+                completion_seq: 0,
             },
         );
 
@@ -4300,6 +4302,7 @@ mod tests {
                 iteration: 0,
                 iteration_outputs: None,
                 signal_data: None,
+                completion_seq: 0,
             },
         );
 

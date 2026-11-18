@@ -38,8 +38,19 @@ Loops are detected during workflow validation (at registration time):
 
 1. Workflow definition is submitted via `POST /api/v1/workflow_definitions`
 2. Validator performs topological sort to identify back-edges
-3. Metadata (`is_loop_activity`, `is_back_edge`) computed and cached in database
+3. Metadata (`is_loop_activity`, `is_back_edge`) computed and cached in database. Every activity on the cycle is a loop activity, not only the two ends of the back-edge, so loops of three or more steps run every step each round
 4. Orchestrator uses O(1) lookups (no runtime graph traversal needed)
+
+### How a Round Runs
+
+Each step in a loop runs **once per round, and only on new input**. A completed loop activity is scheduled again only when one of its dependencies has completed since it last did:
+
+- **The step after the loop head** waits for the head to complete again. It does not re-run on the head's previous output.
+- **The loop head** re-runs when the step its back-edge points to has completed again, and the back-edge's conditions hold.
+- **A self-loop** (an activity whose back-edge is on itself) counts its own completion as new input.
+- **Dependencies outside the loop** (for example an `initialize` step that ran once before it) still have to be satisfied, but never trigger another round.
+
+Before this was fixed, the step after the head re-ran after each of its own completions, on stale input, until the default cap of 100 iterations (#18).
 
 ---
 

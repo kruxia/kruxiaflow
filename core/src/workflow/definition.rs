@@ -263,6 +263,17 @@ impl WorkflowDefinition {
             }
         };
 
+        // Every activity on a cycle is a loop member, not only the back-edge's
+        // two endpoints: in a loop of three or more steps the middle steps must
+        // also run again each round (#18). A member is reachable going forward
+        // from the back-edge's target and can reach its source.
+        let members = loop_members(&self.activities, &loops);
+        for activity in &mut self.activities {
+            if members.contains(activity.key.as_str()) {
+                activity.is_loop_activity = true;
+            }
+        }
+
         // Mark activities and dependencies that participate in loops (cache for orchestrator hot path)
         for loop_edge in &loops {
             // Mark both activities in the loop
@@ -1048,6 +1059,56 @@ struct LoopEdge {
     from: String,
     to: String,
     condition: Option<Vec<String>>,
+}
+
+/// Keys of every activity that lies on a loop: for each back-edge
+/// `from → to` (`to` depends on `from`), the activities reachable going
+/// forward from `to` that can also reach `from`. Uses both `depends_on` and
+/// `dependency_of` (called before normalization).
+fn loop_members(activities: &[ActivityDefinition], loops: &[LoopEdge]) -> HashSet<String> {
+    let mut forward: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut backward: HashMap<&str, Vec<&str>> = HashMap::new();
+    for activity in activities {
+        for dep in activity.depends_on.iter().flatten() {
+            forward
+                .entry(dep.activity_key.as_str())
+                .or_default()
+                .push(activity.key.as_str());
+            backward
+                .entry(activity.key.as_str())
+                .or_default()
+                .push(dep.activity_key.as_str());
+        }
+        for dep in activity.dependency_of.iter().flatten() {
+            forward
+                .entry(activity.key.as_str())
+                .or_default()
+                .push(dep.activity_key.as_str());
+            backward
+                .entry(dep.activity_key.as_str())
+                .or_default()
+                .push(activity.key.as_str());
+        }
+    }
+    fn reach<'a>(graph: &HashMap<&'a str, Vec<&'a str>>, start: &'a str) -> HashSet<&'a str> {
+        let mut seen = HashSet::from([start]);
+        let mut stack = vec![start];
+        while let Some(node) = stack.pop() {
+            for &next in graph.get(node).into_iter().flatten() {
+                if seen.insert(next) {
+                    stack.push(next);
+                }
+            }
+        }
+        seen
+    }
+    let mut members = HashSet::new();
+    for edge in loops {
+        let down = reach(&forward, edge.to.as_str());
+        let up = reach(&backward, edge.from.as_str());
+        members.extend(down.intersection(&up).map(|key| key.to_string()));
+    }
+    members
 }
 
 /// Check if string is valid identifier (alphanumeric, hyphens, underscores)
@@ -3593,5 +3654,47 @@ activities:
         let deserialized: ActivitySettings = serde_json::from_value(json).unwrap();
         assert!(deserialized.streaming.is_enabled());
         assert_eq!(deserialized.timeout_seconds, Some(30));
+    }
+
+    /// #18: every activity on a cycle is a loop member, not just the
+    /// back-edge's endpoints; activities before and after the loop are not
+    #[test]
+    fn test_all_steps_of_a_longer_loop_are_loop_members() {
+        let definition = WorkflowDefinition::from_yaml(
+            r#"
+name: three_step
+activities:
+  - key: start
+    activity_name: echo
+  - key: head
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - start
+      - activity_key: tail
+        conditions: ["{{ tail.status == 'completed' }}"]
+  - key: middle
+    activity_name: echo
+    depends_on: [head]
+  - key: tail
+    activity_name: echo
+    depends_on: [middle]
+  - key: done
+    activity_name: echo
+    depends_on: [tail]
+"#,
+        )
+        .unwrap();
+        let is_loop = |key: &str| {
+            definition
+                .activities
+                .iter()
+                .find(|a| a.key == key)
+                .unwrap()
+                .is_loop_activity
+        };
+        assert!(is_loop("head") && is_loop("middle") && is_loop("tail"));
+        assert!(!is_loop("start"));
+        assert!(!is_loop("done"));
     }
 }

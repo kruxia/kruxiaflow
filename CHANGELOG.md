@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Loop steps run once per round, on new input (#18).** In a two-step loop
+  (the shape of examples 07a and 07b), the step after the loop head re-ran
+  after every one of its own completions, on the head's previous output,
+  until the default cap of 100 iterations. The head also re-ran on the other
+  step's previous result. Paid LLM steps were called far more often than
+  intended. A completed loop activity is now scheduled again only when a
+  dependency has completed since it last did (a self-loop counts its own
+  completion).
+  - **Sequence numbers:** workflow state records a per-workflow completion
+    sequence number for this (`completion_seq`, default 0). Activities
+    completed before the upgrade keep the old behaviour, so workflows in
+    flight are not stalled.
+- **Loops of three or more steps run every step each round (#18).** Only the
+  two ends of a back-edge were marked as loop activities, so a middle step
+  ran once and never again. Every activity on the cycle is now a loop
+  activity.
+
 ## [0.12.1] - 2026-11-17
 
 ### Fixed
