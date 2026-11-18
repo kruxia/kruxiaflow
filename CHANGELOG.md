@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A template error fails the activity whose template is bad (#19).**
+  - **Before:** when an activity's parameters (or `delay` / `scheduled_for`)
+    referenced an undefined value, the error surfaced while processing the
+    upstream activity's completion. That event was retried five times and
+    dropped as poison, the upstream activity was marked failed although it had
+    succeeded, the activity with the bad template never ran or failed, and the
+    workflow stayed `running` indefinitely.
+  - **Now:** that activity fails with
+    `TEMPLATE_ERROR: Failed to resolve templates in activity <key>: …`, through
+    a terminal `ActivityFailed` like any other failure. Its `status == 'failed'`
+    branches run, its other dependents are skipped, and the workflow fails.
+- **Skipped activities cascade (#19).** Skipping was a single pass over the
+  state, so in a chain after a failed or skipped activity only the first
+  dependent was skipped and the rest stayed `not_scheduled`, which kept the
+  workflow from ever completing. Skipping now repeats until nothing changes.
+
 ## [0.12.1] - 2026-11-17
 
 ### Fixed

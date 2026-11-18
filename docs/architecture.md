@@ -1789,6 +1789,18 @@ condition: "{{find_data.status == 'completed'}}"
 
 **How it works**: MiniJinja's `and` operator short-circuits. If the left side (`status == 'completed'`) is `false`, the right side is never evaluated, so the undefined `result` is never accessed.
 
+Use the same guard in **parameters** that reference a step which may not have run, for example `{% if fix.status == 'completed' %}{{ fix.result.message }}{% endif %}`. Every activity is in the template context with a `status`, so `{% if fix is defined %}` is always true and guards nothing.
+
+#### When a Template Cannot Be Resolved
+
+Templates use strict undefined: referring to a value that does not exist is an error, not an empty string. When an activity's parameters, `delay` or `scheduled_for` cannot be resolved as it is about to be scheduled, **that activity fails**:
+
+- Its error is `TEMPLATE_ERROR: Failed to resolve templates in activity <key>: <reason>`. It is not retried, because the template would fail the same way.
+- Normal failure handling follows. Dependents on a `status == 'failed'` branch run, other dependents are skipped (and their dependents, all the way down), and the workflow fails if nothing else can run.
+- The upstream activity whose completion triggered the scheduling is unaffected.
+
+Before this was fixed (#19), the error was retried as an event-processing failure until the upstream activity's completion event was dropped as poison. That marked the upstream activity failed and left the workflow `running` indefinitely.
+
 #### Activity Status Values
 
 The `{{activity.status}}` variable returns one of:
