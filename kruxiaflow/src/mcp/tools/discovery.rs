@@ -98,31 +98,34 @@ impl ListActivities {
             {
                 "name": "echo",
                 "worker": "std",
-                "description": "Returns its input unchanged. Useful for testing and debugging workflows.",
+                "description": "Returns its parameters unchanged, as the output named echo. Useful for testing, debugging, and passing values along.",
                 "parameters": {
-                    "message": "Any value to echo back (string, object, or array)"
+                    "<any>": "Any parameters; all are returned as the echo output (e.g. {{step.echo.message}})"
                 },
-                "outputs": ["result"],
+                "outputs": ["echo"],
                 "settings": {
-                    "timeout": "Activity-level timeout in seconds"
+                    "timeout_seconds": "Activity-level timeout in seconds"
                 }
             },
             {
                 "name": "http_request",
                 "worker": "std",
-                "description": "Make HTTP/REST API requests with configurable method, headers, body, and retries.",
+                "description": "Make HTTP/REST API requests with configurable method, headers, query, body, and timeout.",
                 "parameters": {
                     "method": "HTTP method: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS",
                     "url": "Target URL (supports template expressions)",
                     "headers": "Optional HTTP headers as key-value pairs",
-                    "body": "Optional request body (JSON, text, or form data)",
                     "query": "Optional query parameters as key-value pairs",
-                    "timeout": "Request timeout in seconds (default: 30)"
+                    "body": "Optional request body (JSON value or string)",
+                    "timeout_seconds": "Request timeout in seconds (default: 30)",
+                    "include_body": "Include the response body in the output (default: true)",
+                    "download_to_file": "Stream the response body to a workflow file with this name instead of returning it"
                 },
-                "outputs": ["response", "status_code", "headers"],
+                "outputs": ["response"],
+                "output_shape": "response: {status (HTTP status code), success (true for 2xx), body (parsed JSON, or text)}. Reference as {{step.response.body}} or {{step.response.status}}",
                 "settings": {
-                    "retry": "Configurable retry policy (max_attempts, strategy, backoff)",
-                    "timeout": "Activity-level timeout in seconds"
+                    "retry": "Retry policy (max_attempts, strategy, base_seconds, factor, max_seconds)",
+                    "timeout_seconds": "Activity-level timeout in seconds"
                 }
             },
             {
@@ -130,19 +133,20 @@ impl ListActivities {
                 "worker": "std",
                 "description": "Call LLM APIs with multi-provider support, fallback chains, and budget controls. Supports Anthropic, OpenAI, Google, and Ollama.",
                 "parameters": {
-                    "model": "Model identifier or array for fallback (e.g. \"anthropic/claude-sonnet-4-5-20250929\")",
+                    "model": "Model identifier, or an array for budget-aware fallback (e.g. \"anthropic/claude-sonnet-5\"). Call search_llm_models for current identifiers",
                     "prompt": "User prompt text (supports template expressions)",
-                    "system": "Optional system prompt",
-                    "max_tokens": "Maximum tokens to generate (default: 1024)",
-                    "temperature": "Sampling temperature 0.0–1.0 (default: 1.0)",
-                    "tools": "Optional tool definitions for function calling",
-                    "stream": "Enable streaming responses (default: false)"
+                    "system_prompt": "Optional system prompt",
+                    "max_tokens": "Maximum tokens to generate",
+                    "temperature": "Sampling temperature",
+                    "top_p": "Nucleus sampling",
+                    "stop_sequences": "Optional array of stop sequences"
                 },
-                "outputs": ["result", "cost_usd", "provider", "model", "usage"],
+                "outputs": ["result"],
+                "output_shape": "result: {content (the text), model, provider, finish_reason, cost_usd, usage {prompt_tokens, output_tokens, total_tokens, cached_tokens}, budget_skipped_models}. Reference the text as {{step.result.content}}",
                 "settings": {
-                    "retry": "Retry with exponential backoff",
-                    "budget": "Budget limit in USD — action: abort or skip",
-                    "streaming": "WebSocket streaming for incremental token delivery"
+                    "retry": "Retry with backoff",
+                    "budget": "Budget limit in USD: {limit, action: abort or continue}",
+                    "streaming": "Token streaming over WebSocket (streaming: true)"
                 }
             },
             {
@@ -150,13 +154,14 @@ impl ListActivities {
                 "worker": "std",
                 "description": "Generate text embeddings with provider fallback chains.",
                 "parameters": {
-                    "model": "Embedding model (e.g. \"openai/text-embedding-3-small\")",
-                    "input": "Text or array of texts to embed",
-                    "dimensions": "Optional output dimensions (model-dependent)"
+                    "model": "Embedding model (e.g. \"openai/text-embedding-3-small\"), or an array for fallback",
+                    "input": "Array of texts to embed",
+                    "batch_size": "Texts per provider request (default: 500)"
                 },
-                "outputs": ["embeddings", "dimensions", "cost_usd"],
+                "outputs": ["result"],
+                "output_shape": "result: {embeddings (array of vectors), model, provider, usage, ...}; large results are streamed to a workflow file and referenced by embeddings_file",
                 "settings": {
-                    "retry": "Retry with exponential backoff",
+                    "retry": "Retry with backoff",
                     "budget": "Budget limit for embedding costs"
                 }
             },
@@ -165,14 +170,15 @@ impl ListActivities {
                 "worker": "std",
                 "description": "Execute a PostgreSQL query (SELECT, INSERT, UPDATE, DELETE) with parameterized placeholders.",
                 "parameters": {
+                    "db_url": "(required) Connection string; use a secret, e.g. \"{{SECRET.db_url}}\"",
                     "query": "SQL with $1, $2, … placeholders",
-                    "params": "Array of values bound to placeholders",
-                    "database_url": "Optional connection string (defaults to KRUXIAFLOW_DATABASE_URL)"
+                    "params": "Array of values bound to the placeholders"
                 },
-                "outputs": ["rows", "row_count"],
+                "outputs": ["result"],
+                "output_shape": "result: {rows (array of row objects, for queries returning rows), rows_affected}. Reference as {{step.result.rows[0].column}}",
                 "settings": {
                     "retry": "Retry for transient errors",
-                    "timeout": "Query timeout in seconds"
+                    "timeout_seconds": "Query timeout in seconds"
                 }
             },
             {
@@ -180,32 +186,35 @@ impl ListActivities {
                 "worker": "std",
                 "description": "Execute multiple SQL statements inside a single ACID transaction.",
                 "parameters": {
-                    "queries": "Array of SQL statements to run atomically",
-                    "database_url": "Optional connection string (defaults to KRUXIAFLOW_DATABASE_URL)"
+                    "db_url": "(required) Connection string; use a secret",
+                    "statements": "Array of {query, params} run in order, atomically",
+                    "isolation_level": "read_committed (default), repeatable_read, or serializable"
                 },
-                "outputs": ["results", "row_counts"],
+                "outputs": ["result"],
+                "output_shape": "result: {success, statements_executed, results (one {rows, rows_affected} per statement)}",
                 "settings": {
-                    "retry": "Retry on serialization failures",
-                    "isolation": "Transaction isolation level (default: READ COMMITTED)"
+                    "retry": "Retry on serialization failures"
                 }
             },
             {
                 "name": "email_send",
                 "worker": "std",
-                "description": "Send an email via SMTP with plain-text or HTML body.",
+                "description": "Send an email via SMTP with a plain-text and/or HTML body.",
                 "parameters": {
-                    "to": "Recipient address or array of addresses",
+                    "smtp_url": "(required) SMTP URL, e.g. \"{{SECRET.smtp_url}}\" (smtp:// or smtps://, with credentials)",
                     "from": "Sender address",
+                    "to": "Array of recipient addresses",
                     "subject": "Email subject",
-                    "body": "Email body (plain text or HTML)",
-                    "html": "true if body is HTML (default: false)",
-                    "cc": "Optional CC addresses",
-                    "bcc": "Optional BCC addresses"
+                    "text_body": "Plain-text body",
+                    "html_body": "HTML body",
+                    "cc": "Optional array of CC addresses",
+                    "bcc": "Optional array of BCC addresses",
+                    "reply_to": "Optional reply-to address"
                 },
-                "outputs": ["message_id", "status"],
+                "outputs": ["result"],
+                "output_shape": "result: {success, message_id, recipients_accepted, recipients_rejected}",
                 "settings": {
-                    "retry": "Retry on SMTP failures",
-                    "smtp": "SMTP config: host, port, auth credentials"
+                    "retry": "Retry on SMTP failures"
                 }
             },
             {
@@ -291,31 +300,31 @@ impl GetWorkflowAuthoringGuide {
                     "activities": "LIST of activity definitions (at least one required). Each entry carries its unique identifier in the 'key' field — a map keyed by activity name is NOT accepted."
                 },
                 "activity_fields": {
-                    "worker": "(required) Worker type that executes this activity — std, python, py-std, py-data, py-ml, py-nlp",
+                    "worker": "(optional, default: std) Worker type that executes this activity — std, python, py-std, py-data, py-ml, py-nlp",
                     "activity_name": "(required) Name of the activity within the worker (e.g. http_request, llm_prompt)",
                     "parameters": "Key-value map passed to the activity at runtime. Supports template expressions.",
                     "depends_on": "List of activity keys that must complete before this one starts. Each entry can be a plain key or {activity_key, conditions}.",
                     "dependency_of": "Inverse of depends_on — declares that other activities depend on this one. Normalised to depends_on internally.",
-                    "settings": "Per-activity settings: retry, timeout, budget, scheduling, signals (see settings_configuration)",
+                    "settings": "Per-activity settings: retry, timeout_seconds, budget, cache, delay / scheduled_for, wait_for_signal, iteration_limit, streaming (see settings_configuration). Unknown keys are silently ignored, so spell them exactly",
                     "output_definitions": "Optional: declare expected outputs for validation and documentation",
                     "iteration_scoped": "If true, outputs are stored per-loop iteration (default: false)",
                     "iteration_limit": "Max loop iterations before failing (prevents infinite loops)",
                     "streaming": "Enable token-level streaming for LLM activities"
                 },
-                "example": "name: fetch-and-summarise\nactivities:\n  - key: fetch\n    worker: std\n    activity_name: http_request\n    parameters:\n      method: GET\n      url: \"{{INPUT.url}}\"\n  - key: summarise\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-5\n      prompt: \"Summarise this text: {{fetch.response}}\"\n    depends_on: [fetch]"
+                "example": "name: fetch-and-summarise\nactivities:\n  - key: fetch\n    worker: std\n    activity_name: http_request\n    parameters:\n      method: GET\n      url: \"{{INPUT.url}}\"\n  - key: summarise\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-5\n      prompt: \"Summarise this text: {{fetch.response.body}}\"\n    depends_on: [fetch]"
             },
             "template_expressions": {
                 "description": "Dynamic values resolved at runtime using {{source.path}} syntax",
                 "syntax": "{{SOURCE.field.nested.path}} — dot-separated access into JSON. Array indexing with [N] is supported.",
                 "sources": {
                     "INPUT": "The input payload provided when the workflow is submitted (e.g. {{INPUT.user_id}})",
-                    "<activity_key>": "Output of a completed activity referenced by its key (e.g. {{fetch.response}}). The activity must be in depends_on (directly or transitively).",
+                    "<activity_key>": "Output of a completed activity: {{<key>.<output_name>.<path>}}, e.g. {{fetch.response.body}} (http_request), {{summarise.result.content}} (llm_prompt), {{query.result.rows}} (postgres_query). See each activity's outputs and output_shape in list_activities. The activity must be in depends_on (directly or transitively), and {{<key>.status}} is always available",
                     "SECRET": "Secrets injected at runtime (e.g. {{SECRET.api_key}}). Not stored in the definition.",
-                    "WORKFLOW": "Workflow-level metadata: {{WORKFLOW.id}}, {{WORKFLOW.name}}, {{WORKFLOW.submitted_at}}"
+                    "WORKFLOW": "Workflow-level metadata: {{WORKFLOW.id}} (the workflow's UUID) and {{WORKFLOW.status}}"
                 },
                 "examples": [
                     "{{INPUT.query}} — value of 'query' key from workflow input",
-                    "{{fetch_data.rows[0].name}} — first row's name field from fetch_data activity output",
+                    "{{fetch_data.result.rows[0].name}} — first row's name field from a postgres_query step named fetch_data",
                     "{{SECRET.openai_key}} — secret injected at runtime",
                     "{{WORKFLOW.id}} — UUID of the running workflow instance"
                 ]
@@ -332,11 +341,11 @@ impl GetWorkflowAuthoringGuide {
                 },
                 "fan_in": {
                     "description": "Multiple activities feed into one (fan-in). The downstream activity waits for ALL upstream activities.",
-                    "example": "activities:\n  - { key: fetch_a, worker: std, activity_name: http_request, parameters: {method: GET, url: \"{{INPUT.url_a}}\"} }\n  - { key: fetch_b, worker: std, activity_name: http_request, parameters: {method: GET, url: \"{{INPUT.url_b}}\"} }\n  - key: combine\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-5\n      prompt: \"Combine: {{fetch_a.response}} and {{fetch_b.response}}\"\n    depends_on: [fetch_a, fetch_b]"
+                    "example": "activities:\n  - { key: fetch_a, worker: std, activity_name: http_request, parameters: {method: GET, url: \"{{INPUT.url_a}}\"} }\n  - { key: fetch_b, worker: std, activity_name: http_request, parameters: {method: GET, url: \"{{INPUT.url_b}}\"} }\n  - key: combine\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-5\n      prompt: \"Combine: {{fetch_a.response.body}} and {{fetch_b.response.body}}\"\n    depends_on: [fetch_a, fetch_b]"
                 },
                 "conditional": {
-                    "description": "An activity only runs if a condition on an upstream output is met.",
-                    "example": "activities:\n  - key: check\n    worker: std\n    activity_name: http_request\n    parameters: {method: GET, url: \"{{INPUT.status_url}}\"}\n  - key: on_success\n    worker: std\n    activity_name: llm_prompt\n    parameters: {model: anthropic/claude-sonnet-5, prompt: \"Process success\"}\n    depends_on:\n      - activity_key: check\n        conditions: [\"check.status_code == 200\"]"
+                    "description": "An activity only runs if a condition on an upstream output is met. Conditions must be {{ }} templates: a bare expression is a non-empty string, which is always true.",
+                    "example": "activities:\n  - key: check\n    worker: std\n    activity_name: http_request\n    parameters: {method: GET, url: \"{{INPUT.status_url}}\"}\n  - key: on_success\n    worker: std\n    activity_name: llm_prompt\n    parameters: {model: anthropic/claude-sonnet-5, prompt: \"Process success\"}\n    depends_on:\n      - activity_key: check\n        conditions: [\"{{ check.response.status == 200 }}\"]"
                 }
             },
             "settings_configuration": {
@@ -345,44 +354,45 @@ impl GetWorkflowAuthoringGuide {
                     "fields": {
                         "max_attempts": "Total attempts including the first try (default: 1 = no retry)",
                         "strategy": "exponential (default) or fixed",
-                        "backoff_base_secs": "Base delay in seconds for exponential backoff (default: 1)",
-                        "backoff_max_secs": "Maximum delay cap (default: 300)"
+                        "base_seconds": "Base delay in seconds (default: 2)",
+                        "factor": "Multiplier per attempt for exponential backoff (default: 2.0)",
+                        "max_seconds": "Maximum delay cap in seconds (default: 300)"
                     },
-                    "example": "settings:\n  retry:\n    max_attempts: 3\n    strategy: exponential\n    backoff_base_secs: 2\n    backoff_max_secs: 60"
+                    "example": "settings:\n  retry:\n    max_attempts: 3\n    strategy: exponential\n    base_seconds: 2\n    max_seconds: 60"
                 },
                 "timeout": {
-                    "description": "Maximum wall-clock time for an activity",
-                    "example": "settings:\n  timeout: 300  # 5 minutes"
+                    "description": "Maximum wall-clock time for an activity (the key is timeout_seconds)",
+                    "example": "settings:\n  timeout_seconds: 300  # 5 minutes"
                 },
                 "budget": {
                     "description": "Per-activity cost cap (useful for LLM activities)",
                     "fields": {
                         "limit": "Maximum spend in USD (field name is 'limit', not 'limit_usd')",
-                        "action": "abort (fail the activity) or skip (return empty result)"
+                        "action": "abort (default: stop when the limit is reached) or continue (log a warning and go on)"
                     },
                     "example": "settings:\n  budget:\n    limit: 0.50\n    action: abort"
                 },
                 "scheduling": {
-                    "description": "Delay activity start by a fixed amount after its dependencies complete",
-                    "example": "settings:\n  delay_secs: 60  # Wait 60 s after dependencies finish"
+                    "description": "Delay activity start after its dependencies complete (delay: a duration such as 60s, 5m, 2h), or start at a time (scheduled_for: an ISO 8601 timestamp). Both accept templates",
+                    "example": "settings:\n  delay: 60s  # Wait 60 s after dependencies finish"
                 },
                 "signals": {
-                    "description": "Pause the activity until an external signal is received",
-                    "example": "settings:\n  wait_for_signal:\n    signal_name: approval\n    timeout: 3600  # Fail after 1 hour if no signal"
+                    "description": "Pause the activity until an external signal is received (send it with send_workflow_signal). event_name and timeout_seconds are required; on_timeout is continue, skip or fail",
+                    "example": "settings:\n  wait_for_signal:\n    event_name: approval\n    timeout_seconds: 3600\n    on_timeout: fail  # Fail after 1 hour if no signal"
                 }
             },
             "complete_examples": {
                 "simple_sequential": {
                     "description": "Fetch a URL, then summarise the response with an LLM",
-                    "yaml": "name: fetch-and-summarise\nactivities:\n  - key: fetch\n    worker: std\n    activity_name: http_request\n    parameters:\n      method: GET\n      url: \"{{INPUT.url}}\"\n    settings:\n      timeout: 30\n      retry:\n        max_attempts: 3\n  - key: summarise\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-5\n      system: You are a concise summariser.\n      prompt: \"Summarise: {{fetch.response}}\"\n      max_tokens: 256\n    depends_on: [fetch]\n    settings:\n      budget:\n        limit: 0.10\n        action: abort"
+                    "yaml": "name: fetch-and-summarise\nactivities:\n  - key: fetch\n    worker: std\n    activity_name: http_request\n    parameters:\n      method: GET\n      url: \"{{INPUT.url}}\"\n    settings:\n      timeout_seconds: 30\n      retry:\n        max_attempts: 3\n  - key: summarise\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-5\n      system_prompt: You are a concise summariser.\n      prompt: \"Summarise: {{fetch.response.body}}\"\n      max_tokens: 256\n    depends_on: [fetch]\n    settings:\n      budget:\n        limit: 0.10\n        action: abort"
                 },
                 "parallel_fan_in": {
                     "description": "Query two databases in parallel, then merge results",
-                    "yaml": "name: parallel-merge\nactivities:\n  - key: query_users\n    worker: std\n    activity_name: postgres_query\n    parameters:\n      query: \"SELECT * FROM users WHERE active = $1\"\n      params: [true]\n  - key: query_orders\n    worker: std\n    activity_name: postgres_query\n    parameters:\n      query: \"SELECT * FROM orders WHERE status = $1\"\n      params: [pending]\n  - key: merge\n    worker: python\n    activity_name: script\n    parameters:\n      code: |\n        users = INPUT[\"query_users_rows\"]\n        orders = INPUT[\"query_orders_rows\"]\n        result = {\"users\": users, \"orders\": orders, \"total\": len(users) + len(orders)}\n    depends_on: [query_users, query_orders]"
+                    "yaml": "name: parallel-merge\nactivities:\n  - key: query_users\n    worker: std\n    activity_name: postgres_query\n    parameters:\n      db_url: \"{{SECRET.db_url}}\"\n      query: \"SELECT * FROM users WHERE active = $1\"\n      params: [true]\n  - key: query_orders\n    worker: std\n    activity_name: postgres_query\n    parameters:\n      db_url: \"{{SECRET.db_url}}\"\n      query: \"SELECT * FROM orders WHERE status = $1\"\n      params: [pending]\n  - key: merge\n    worker: std\n    activity_name: echo\n    parameters:\n      users: \"{{query_users.result.rows}}\"\n      orders: \"{{query_orders.result.rows}}\"\n    depends_on: [query_users, query_orders]"
                 },
                 "conditional_with_signal": {
                     "description": "Classify input, route to approval if high-value, then process",
-                    "yaml": "name: approval-flow\nactivities:\n  - key: classify\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-5\n      prompt: \"Classify this request as high or low value: {{INPUT.request}}\"\n      max_tokens: 16\n  - key: await_approval\n    worker: std\n    activity_name: echo\n    parameters:\n      message: Waiting for approval\n    depends_on:\n      - activity_key: classify\n        conditions: [\"classify.result == high\"]\n    settings:\n      wait_for_signal:\n        signal_name: approval\n        timeout: 86400\n  - key: process\n    worker: std\n    activity_name: http_request\n    parameters:\n      method: POST\n      url: \"{{INPUT.callback_url}}\"\n      body: \"{\\\"status\\\": \\\"approved\\\"}\"\n    depends_on: [await_approval]"
+                    "yaml": "name: approval-flow\nactivities:\n  - key: classify\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-5\n      prompt: \"Classify this request as high or low value. Answer with exactly one word, high or low: {{INPUT.request}}\"\n      max_tokens: 16\n  - key: await_approval\n    worker: std\n    activity_name: echo\n    parameters:\n      message: Waiting for approval\n    depends_on:\n      - activity_key: classify\n        conditions: [\"{{ classify.result.content | trim | lower == 'high' }}\"]\n    settings:\n      wait_for_signal:\n        event_name: approval\n        timeout_seconds: 86400\n        on_timeout: fail\n  - key: process\n    worker: std\n    activity_name: http_request\n    parameters:\n      method: POST\n      url: \"{{INPUT.callback_url}}\"\n      body: {status: approved}\n    depends_on: [await_approval]"
                 }
             },
             "best_practices": {
@@ -878,5 +888,237 @@ mod tests {
             assert!(parsed.get("complete_examples").is_some());
             assert!(parsed.get("best_practices").is_some());
         }
+    }
+
+    // =========================================================================
+    // Catalog and guide accuracy: agents copy these examples verbatim, and
+    // settings silently ignore unknown keys, so a wrong key is a setting that
+    // quietly does nothing
+    // =========================================================================
+
+    fn guide_json() -> serde_json::Value {
+        let result = GetWorkflowAuthoringGuide {}.call_tool().unwrap();
+        serde_json::from_str(&result.content[0].as_text_content().unwrap().text).unwrap()
+    }
+
+    /// Every "example" / "yaml" string in the guide, with where it is
+    fn guide_examples() -> Vec<(String, String)> {
+        fn walk(v: &serde_json::Value, path: &str, out: &mut Vec<(String, String)>) {
+            match v {
+                serde_json::Value::Object(map) => {
+                    for (k, child) in map {
+                        let here = format!("{path}.{k}");
+                        if (k == "example" || k == "yaml") && child.is_string() {
+                            out.push((here, child.as_str().unwrap().to_string()));
+                        } else {
+                            walk(child, &here, out);
+                        }
+                    }
+                }
+                serde_json::Value::Array(items) => {
+                    for (i, child) in items.iter().enumerate() {
+                        walk(child, &format!("{path}[{i}]"), out);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        walk(&guide_json(), "guide", &mut out);
+        out
+    }
+
+    /// Turn a fragment into a whole workflow definition
+    fn as_workflow(example: &str) -> String {
+        if example.starts_with("name:") {
+            example.to_string()
+        } else if example.starts_with("activities:") {
+            format!("name: example\n{example}")
+        } else if example.starts_with("settings:") {
+            let indented: String = example.lines().map(|l| format!("    {l}\n")).collect();
+            format!("name: example\nactivities:\n  - key: a\n    activity_name: echo\n{indented}")
+        } else {
+            panic!("unrecognised example shape: {example}")
+        }
+    }
+
+    /// Keys present in `input` but missing after a parse/serialize round trip
+    fn dropped_keys(
+        input: &serde_json::Value,
+        parsed: &serde_json::Value,
+        path: &str,
+        out: &mut Vec<String>,
+    ) {
+        if let (Some(i), Some(p)) = (input.as_object(), parsed.as_object()) {
+            for (k, v) in i {
+                match p.get(k) {
+                    None => out.push(format!("{path}.{k}")),
+                    Some(pv) => dropped_keys(v, pv, &format!("{path}.{k}"), out),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_every_guide_example_is_a_valid_workflow() {
+        let mut problems = Vec::new();
+        for (where_, example) in guide_examples() {
+            let yaml = as_workflow(&example);
+            let definition = match kruxiaflow_core::workflow::WorkflowDefinition::from_yaml(&yaml) {
+                Ok(d) => d,
+                Err(e) => {
+                    problems.push(format!("{where_}: does not parse: {e:?}"));
+                    continue;
+                }
+            };
+            // settings keys the parser ignored
+            let raw: serde_json::Value = serde_yaml::from_str(&yaml).unwrap();
+            for (activity, parsed) in raw["activities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .zip(&definition.activities)
+            {
+                if let Some(settings) = activity.get("settings") {
+                    let round_trip = serde_json::to_value(&parsed.settings).unwrap();
+                    let mut dropped = Vec::new();
+                    dropped_keys(settings, &round_trip, "settings", &mut dropped);
+                    if !dropped.is_empty() {
+                        problems.push(format!("{where_}: ignored settings keys {dropped:?}"));
+                    }
+                }
+            }
+            // conditions must be templates, or they are always true
+            for activity in &definition.activities {
+                for dep in activity.depends_on.iter().flatten() {
+                    for condition in dep.conditions.iter().flatten() {
+                        if !condition.contains("{{") {
+                            problems.push(format!(
+                                "{where_}: condition {condition:?} has no {{{{ }}}}, so it is always true"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            problems.is_empty(),
+            "guide examples:\n{}",
+            problems.join("\n")
+        );
+    }
+
+    #[test]
+    fn test_guide_workflow_variables_exist() {
+        // The orchestrator sets WORKFLOW.id and WORKFLOW.status only
+        // (build_template_context); anything else is an undefined-value error
+        let text = serde_json::to_string(&guide_json()).unwrap();
+        for (i, _) in text.match_indices("WORKFLOW.") {
+            let field: String = text[i + 9..]
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect();
+            assert!(
+                ["id", "status"].contains(&field.as_str()),
+                "guide mentions WORKFLOW.{field}, which does not exist"
+            );
+        }
+    }
+
+    /// The catalog must use the names the activities actually accept and
+    /// return. Source of truth: the parameter structs and ActivityResult names
+    /// in worker/src/activities/ (http.rs HttpRequestParams, llm.rs
+    /// LLMPromptParams / EmbeddingParams, postgres.rs QueryParams /
+    /// TransactionParams, email.rs EmailParams, echo.rs). Update both when an
+    /// activity changes.
+    #[test]
+    fn test_catalog_matches_activity_parameters_and_outputs() {
+        let truth: &[(&str, &[&str], &[&str])] = &[
+            (
+                "http_request",
+                &[
+                    "method",
+                    "url",
+                    "headers",
+                    "query",
+                    "body",
+                    "timeout_seconds",
+                    "include_body",
+                    "download_to_file",
+                ],
+                &["response"],
+            ),
+            (
+                "llm_prompt",
+                &[
+                    "model",
+                    "prompt",
+                    "system_prompt",
+                    "max_tokens",
+                    "temperature",
+                    "top_p",
+                    "stop_sequences",
+                ],
+                &["result"],
+            ),
+            ("embedding", &["model", "input", "batch_size"], &["result"]),
+            (
+                "postgres_query",
+                &["db_url", "query", "params"],
+                &["result"],
+            ),
+            (
+                "postgres_transaction",
+                &["db_url", "statements", "isolation_level"],
+                &["result"],
+            ),
+            (
+                "email_send",
+                &[
+                    "smtp_url",
+                    "from",
+                    "to",
+                    "subject",
+                    "text_body",
+                    "html_body",
+                    "cc",
+                    "bcc",
+                    "reply_to",
+                ],
+                &["result"],
+            ),
+            ("echo", &[], &["echo"]),
+        ];
+        let result = ListActivities {}.call_tool().unwrap();
+        let catalog: serde_json::Value =
+            serde_json::from_str(&result.content[0].as_text_content().unwrap().text).unwrap();
+        let mut problems = Vec::new();
+        for (name, params, outputs) in truth {
+            let entry = catalog["activities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|a| a["name"] == *name)
+                .unwrap_or_else(|| panic!("{name} missing from catalog"));
+            if *name != "echo" {
+                for key in entry["parameters"].as_object().unwrap().keys() {
+                    if !params.contains(&key.as_str()) {
+                        problems.push(format!("{name}: catalog parameter {key:?} is not accepted (accepted: {params:?})"));
+                    }
+                }
+            }
+            let listed: Vec<&str> = entry["outputs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|o| o.as_str().unwrap())
+                .collect();
+            if listed != *outputs {
+                problems.push(format!(
+                    "{name}: catalog outputs {listed:?}, activity returns {outputs:?}"
+                ));
+            }
+        }
+        assert!(problems.is_empty(), "catalog:\n{}", problems.join("\n"));
     }
 }

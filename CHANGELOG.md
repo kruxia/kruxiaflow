@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The MCP activity catalog and authoring guide match the engine.** Both are
+  hand-written, had drifted from the activities and the parser, and agents
+  copy them verbatim. Because activity settings ignore unknown keys, several
+  of the mistakes produced settings that silently did nothing:
+  - **Settings:** `timeout` (the key is `timeout_seconds`), retry
+    `backoff_base_secs` / `backoff_max_secs` (`base_seconds` / `max_seconds`),
+    and `delay_secs` (`delay: 60s`). Budget `action: skip` is now
+    `abort` / `continue`.
+  - **Examples that didn't parse:** `wait_for_signal` used `signal_name` and
+    `timeout`; the parser requires `event_name` and `timeout_seconds`.
+  - **Conditions:** examples without `{{ }}`, which are always true.
+  - **Template variables:** `{{WORKFLOW.name}}` and `{{WORKFLOW.submitted_at}}`
+    (only `id` and `status` exist), and output paths such as
+    `{{fetch.response}}` for `{{fetch.response.body}}`, and `rows` for
+    `result.rows`.
+  - **Activity parameters and outputs:** 17 parameter and output names across
+    `http_request`, `llm_prompt`, `embedding`, `postgres_query`,
+    `postgres_transaction`, `email_send` and `echo` (for example `system` for
+    `system_prompt`, `database_url` for `db_url`, `body` / `html` for
+    `text_body` / `html_body`). Entries now carry each activity's
+    `output_shape`.
+  - **Guard against further drift:** new tests validate every guide example
+    with the workflow parser (including that no settings key is dropped, and
+    that conditions are templates), check the `WORKFLOW` variables, and pin
+    the catalog's parameter and output names to the activities'.
+
 ## [0.12.1] - 2026-11-17
 
 ### Fixed
