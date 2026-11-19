@@ -1415,6 +1415,32 @@ pub async fn process_workflow_event(
         // Otherwise, fall through to mark as permanently failed
     }
 
+    // 2.4. Stale completion of an earlier loop round: a loop activity already
+    // re-scheduled (Pending again) passes the status guard below, so a replayed
+    // completion from its previous round would be applied as a new one,
+    // advancing the iteration and giving its dependents spurious new input
+    // (#18). Completions carry the iteration they were scheduled with; one
+    // that doesn't match the activity's current iteration is a replay.
+    if event.event_type == WorkflowEventType::ActivityCompleted
+        && let Some(activity_key) = event.activity_key.as_ref()
+        && let Some(event_iteration) = event.iteration
+        && let Some(current) = state.activities.get(activity_key)
+        && definition
+            .activities
+            .iter()
+            .any(|a| &a.key == activity_key && a.is_loop_activity)
+        && i64::from(event_iteration) != i64::from(current.iteration)
+    {
+        tracing::debug!(
+            activity_key = %activity_key,
+            event_iteration,
+            current_iteration = current.iteration,
+            "Ignoring ActivityCompleted from an earlier loop iteration"
+        );
+        tx.commit().await?;
+        return Ok(());
+    }
+
     // 2.5. Duplicate/replay guard for completions (mirrors the ActivityFailed
     // guard above). Event delivery is at-least-once — crash replay and
     // multiple orchestrators sharing a consumer position can both deliver a

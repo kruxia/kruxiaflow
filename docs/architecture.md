@@ -1877,6 +1877,9 @@ activities:
 - **Iteration-scoped storage**: Activities with `iteration_scoped: true` store results as arrays, with each iteration appending to the array
 - **Iteration limits**: `iteration_limit` prevents infinite loops by enforcing a maximum number of iterations
 - **Conditional exit**: Loop exits when the back-edge condition evaluates to false
+- **Loop membership**: every activity on the cycle is a loop activity (`is_loop_activity`), not only the two ends of the back-edge, so every step of a longer loop runs each round. Membership is computed at validation and stored with the definition
+- **New input only**: a completed loop activity is scheduled again only when one of its dependencies completed after it last did (a self back-edge counts as new input; dependencies outside the loop never trigger a round). Each completion gets a per-workflow sequence number, `completion_seq`, in the activity's materialized state for this comparison. **Why** (#18): without it, a dependency still `Completed` from an earlier round re-triggered the activity, so a loop's tail re-ran on stale input until the iteration cap
+- **Stale completions**: a completion whose `iteration` does not match the activity's current iteration (a re-delivery from an earlier round) is ignored, since a re-scheduled loop activity is `Pending` again and passes the status-based duplicate guard
 
 **Iteration Context Variables**:
 

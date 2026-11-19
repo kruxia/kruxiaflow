@@ -52,6 +52,12 @@ Each step in a loop runs **once per round, and only on new input**. A completed 
 
 Before this was fixed, the step after the head re-ran after each of its own completions, on stale input, until the default cap of 100 iterations (#18).
 
+**Upgrading:**
+
+- **Loop membership is stored with each definition.** Definitions deployed before this fix keep the old marking, in which only the two ends of a back-edge are loop activities. A loop of **three or more steps** therefore runs its middle steps only once until it is **redeployed**. Redeploying creates a new definition version, even from unchanged YAML, because the stored metadata changed. Runs already in flight keep the version they started with.
+- **Middle steps now count iterations.** They are loop activities now, so `{{ACTIVITY.iteration}}` and `{{step.iteration}}` count up for them, and `iteration_scoped: true` stores their per-round outputs. Before, they stayed at 0.
+- **Two-step loops need no redeploy.** Both of their activities were already loop activities.
+
 ---
 
 ## Loop Patterns
@@ -696,6 +702,8 @@ Kruxia Flow uses precomputed metadata for loop detection:
 **Execution Time** (every activity completion):
 - Check if activity is in loop: O(1) (cached metadata lookup)
 - Check if dependency is back-edge: O(1) (cached metadata lookup)
+- Assign the completion's sequence number: O(V), a scan for the highest `completion_seq` among the workflow's activities (V is small, and this is in memory)
+- Check a completed loop activity for new input: O(D), its dependencies' `completion_seq`
 - **No graph traversal in orchestrator hot path**
 
 ### Storage Efficiency

@@ -25,6 +25,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   two ends of a back-edge were marked as loop activities, so a middle step
   ran once and never again. Every activity on the cycle is now a loop
   activity.
+  - **Upgrade note:** loop membership is stored with each deployed
+    definition. **Redeploy** workflows that have loops of three or more steps
+    to get the fix. That creates a new definition version, even from
+    unchanged YAML. In-flight runs keep the version they started with.
+    Two-step loops are fixed without a redeploy.
+  - **Behaviour change:** middle steps of such loops now count iterations
+    (`{{ACTIVITY.iteration}}`), and with `iteration_scoped: true` they store
+    per-round outputs.
+- **A re-delivered completion from an earlier loop round is ignored (#18).**
+  Event delivery is at-least-once. A loop activity already re-scheduled for
+  its next round passed the status-based duplicate guard, so a re-delivered
+  completion of its previous round was applied as new, advancing its
+  iteration and giving its dependents spurious input. Completions whose
+  iteration doesn't match the activity's current iteration are now ignored.
 
 ## [0.12.1] - 2026-11-17
 

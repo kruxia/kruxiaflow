@@ -46,6 +46,8 @@ pub fn find_ready_activities<'a>(
 /// ## Phase 2: Loop Back Eligibility
 /// For `Completed` activities marked with `is_loop_activity = true`:
 /// - If iteration limit exceeded → **Reject**
+/// - If no dependency completed since this activity last did (no new input,
+///   see [`has_new_input`]; a self back-edge counts) → **Reject** (#18)
 /// - If back-edge conditions will be checked → Proceed to Phase 3
 /// - Otherwise → **Reject** (loop is done)
 ///
