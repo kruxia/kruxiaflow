@@ -67,6 +67,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after `maybe` was skipped, but skips were applied after scheduling and
   publish no event, so nothing scheduled it and the workflow stayed `running`
   forever. Scheduling and skipping now repeat until a pass skips nothing.
+- **A loop's exit step runs when a later round exits (#27).** A step after a
+  loop, conditional on a loop step (such as "finish when the check passes"),
+  was skipped for good when its condition was false in the first round, and
+  the workflow completed without it. It now waits while the loop runs, and is
+  skipped only once the loop has ended without satisfying it.
 
 ## [0.12.1] - 2026-11-17
 
