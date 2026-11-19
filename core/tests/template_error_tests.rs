@@ -103,23 +103,32 @@ async fn run_workflow_with_id(pool: &PgPool, yaml: &str) -> (Uuid, WorkflowState
         let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
         tx.commit().await.unwrap();
 
-        let pending: Vec<String> = state
+        // Completions carry the iteration for loop activities, as a worker's
+        // do; without it a later round's completion would be dropped as a
+        // duplicate of the first
+        let pending: Vec<(String, Option<i32>)> = state
             .activities
             .values()
             .filter(|a| a.status == WorkflowActivityStatus::Pending)
-            .map(|a| a.key.clone())
+            .map(|a| {
+                let is_loop = definition
+                    .activities
+                    .iter()
+                    .any(|d| d.key == a.key && d.is_loop_activity);
+                (a.key.clone(), is_loop.then_some(a.iteration as i32))
+            })
             .collect();
         if pending.is_empty() {
             return (workflow_id, state);
         }
-        for key in pending {
+        for (key, iteration) in pending {
             event_source
                 .publish(NewWorkflowEvent {
                     workflow_id,
                     event_type: WorkflowEventType::ActivityCompleted,
                     activity_key: Some(key),
                     payload: json!({"outputs": {"result": {"value": 1}}}),
-                    iteration: None,
+                    iteration,
                 })
                 .await
                 .unwrap();
@@ -474,5 +483,45 @@ activities:
             .unwrap_or_default()
             .starts_with("TEMPLATE_ERROR:")
     );
+    assert_eq!(state.status, WorkflowStatus::Failed);
+}
+
+/// A template error in a later round of a loop fails that round's activity:
+/// `tail`'s template resolves in round 1 and refers to a missing value from
+/// round 2 on. The failure event carries the round's iteration, so it is
+/// not mistaken for a duplicate of an earlier event, and the workflow fails
+/// instead of hanging.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_template_error_in_a_later_loop_round_fails_that_round(pool: PgPool) {
+    let state = run_workflow(
+        &pool,
+        r#"
+name: loop_round_template_error
+activities:
+  - key: head
+    worker: test
+    activity_name: echo
+    settings:
+      iteration_limit: 3
+    depends_on:
+      - activity_key: tail
+        conditions: ["{{ tail.result.value == 1 }}"]
+  - key: tail
+    worker: test
+    activity_name: echo
+    parameters:
+      value: "{% if tail.status == 'completed' %}{{ head.result.missing }}{% else %}ok{% endif %}"
+    depends_on: [head]
+"#,
+    )
+    .await;
+
+    assert_eq!(status(&state, "tail"), WorkflowActivityStatus::Failed);
+    let error = state.activities["tail"]
+        .error
+        .as_deref()
+        .unwrap_or_default();
+    assert!(error.starts_with("TEMPLATE_ERROR:"), "{error}");
+    assert_eq!(state.activities["head"].iteration, 2, "failed in round 2");
     assert_eq!(state.status, WorkflowStatus::Failed);
 }
