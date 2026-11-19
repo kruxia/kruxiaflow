@@ -793,8 +793,10 @@ async fn handle_activity_failed(
         return Ok(false); // Don't retry - let it fail permanently
     }
 
-    // Build template context for resolving parameters (before mutating state)
-    let template_context = build_template_context(state, state.workflow_id, secrets);
+    // Build template context for resolving parameters (before mutating state);
+    // {{ACTIVITY.*}} is the activity being retried
+    let mut template_context = build_template_context(state, state.workflow_id, secrets);
+    template_context.set_current_activity(activity_def);
 
     // Bookkeeping: mirror in state what the queue already did to its row.
     let activity_state = state.activities.get_mut(activity_key).ok_or_else(|| {
@@ -1759,7 +1761,7 @@ pub async fn process_workflow_event(
 
                 // Build template context for resolving parameters
                 let context_span = profile_span!("build_template_context");
-                let template_context = {
+                let mut template_context = {
                     let _enter = context_span.enter();
                     build_template_context(&state, event.workflow_id, &config.secrets)
                 };
@@ -1767,6 +1769,9 @@ pub async fn process_workflow_event(
                 // Resolve templates in activity parameters
                 let mut activities_to_schedule = Vec::new();
                 for a in &ready_activities {
+                    // {{ACTIVITY.*}} is the activity being scheduled
+                    template_context.set_current_activity(a);
+
                     // Resolve template expressions in parameters
                     let params_value =
                         serde_json::to_value(a.parameters.as_ref().unwrap_or(&Default::default()))
