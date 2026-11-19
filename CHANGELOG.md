@@ -40,6 +40,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   completion of its previous round was applied as new, advancing its
   iteration and giving its dependents spurious input. Completions whose
   iteration doesn't match the activity's current iteration are now ignored.
+- **A loop's exit step runs when a later round exits (#27).** A step after a
+  loop, conditional on a loop step (such as "finish when the check passes"),
+  was skipped for good when its condition was false in the first round, and
+  the workflow completed without it. It now waits while the loop runs, and is
+  skipped only once the loop has ended without satisfying it.
+- **Skipping an activity decides what depends on it right away (#27).** An
+  activity after a skipped one (unconditional, or conditional on
+  `status == 'skipped'`) used to wait for a later event, and stayed
+  unscheduled if none came, so the workflow never completed. The orchestrator
+  now repeats scheduling and skipping in the same pass until nothing more is
+  skipped.
 
 ## [0.12.1] - 2026-11-17
 

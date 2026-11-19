@@ -582,11 +582,19 @@ pub fn is_workflow_failed(state: &WorkflowState) -> bool {
 /// - Status is NotScheduled (not yet processed)
 /// - All dependencies are in terminal states (Completed, Failed, or Skipped)
 /// - No applicable dependencies exist (all conditional dependencies have false conditions)
+/// - It is not an activity after a loop whose loop is still running: one that
+///   depends on a loop member without being one waits until no loop member is
+///   scheduled, running or waiting (#27)
+///
+/// Skipping one activity can decide others (what depends on it); the
+/// orchestrator calls this again after marking them, until it finds none.
 pub fn find_skipped_activities<'a>(
     definition: &'a WorkflowDefinition,
     state: &WorkflowState,
 ) -> Result<Vec<&'a ActivityDefinition>> {
     let mut skipped = Vec::new();
+    // Computed at most once, only when an activity after a loop would be skipped
+    let mut loop_running: Option<bool> = None;
 
     for activity in &definition.activities {
         // Only consider NotScheduled activities
@@ -626,12 +634,61 @@ pub fn find_skipped_activities<'a>(
 
         // Check if activity is ready (has applicable dependencies)
         // If not ready and all dependencies are terminal, it should be skipped
-        if !is_activity_ready(activity, definition, state)? {
-            skipped.push(activity);
+        if is_activity_ready(activity, definition, state)? {
+            continue;
         }
+
+        // An activity after a loop (it depends on a loop member but isn't one,
+        // like the loop's exit step) waits while the loop still runs: a later
+        // round completes that dependency again and may satisfy its
+        // condition. Skipped is terminal, so skipping it now would be for good
+        // (#27). Once no loop member is scheduled, running or waiting, the
+        // loop is over and the activity is skipped as usual.
+        if !activity.is_loop_activity
+            && dependencies
+                .iter()
+                .any(|dep| is_loop_member(definition, &dep.activity_key))
+            && *loop_running.get_or_insert_with(|| is_a_loop_running(definition, state))
+        {
+            tracing::trace!(
+                "Activity {} not skipped yet: a loop it depends on is still running",
+                activity.key
+            );
+            continue;
+        }
+
+        skipped.push(activity);
     }
 
     Ok(skipped)
+}
+
+/// Whether `key` names a loop member (`is_loop_activity`, set on every
+/// activity of a cycle by validation and on load)
+fn is_loop_member(definition: &WorkflowDefinition, key: &str) -> bool {
+    definition
+        .activities
+        .iter()
+        .any(|a| a.key == key && a.is_loop_activity)
+}
+
+/// Whether any loop member is scheduled, running or waiting: the loop can
+/// still go another round. The orchestrator schedules the next step of a
+/// loop in the same pass that handles the previous step's completion, before
+/// it looks for activities to skip, so a loop that goes on always has a
+/// member in one of these states, and one that has ended has none.
+fn is_a_loop_running(definition: &WorkflowDefinition, state: &WorkflowState) -> bool {
+    definition.activities.iter().any(|a| {
+        a.is_loop_activity
+            && state.activities.get(&a.key).is_some_and(|s| {
+                matches!(
+                    s.status,
+                    WorkflowActivityStatus::Pending
+                        | WorkflowActivityStatus::Running
+                        | WorkflowActivityStatus::Waiting
+                )
+            })
+    })
 }
 
 #[cfg(test)]
@@ -1455,5 +1512,119 @@ mod tests {
             ("tail".to_string(), tail.clone()),
         ]);
         assert!(!has_new_input(tail_def, &tail, &state));
+    }
+
+    // ============================================================================
+    // Activities after a loop wait for the loop to end before being skipped
+    // Regression tests for #27 [loop-exit-skipped]: the exit step was skipped
+    // for good when the loop's first round did not exit
+    // ============================================================================
+
+    /// A condition that is false here (`check` is never skipped in these tests)
+    fn rel_false(key: &str) -> ActivityRelationship {
+        ActivityRelationship {
+            activity_key: key.to_string(),
+            conditions: Some(vec![format!("{{{{ {key}.status == 'skipped' }}}}")]),
+            is_back_edge: false,
+        }
+    }
+
+    /// run ⇄ check (run holds the back-edge), and `done` after the loop,
+    /// conditional on `check`
+    fn loop_with_exit_step() -> WorkflowDefinition {
+        WorkflowDefinition {
+            name: "loop_exit".to_string(),
+            settings: None,
+            activities: vec![
+                loop_def("run", vec![rel("check", true)]),
+                loop_def("check", vec![rel("run", false)]),
+                make_activity_def("done", Some(vec![rel_false("check")])),
+            ],
+        }
+    }
+
+    fn with_status(
+        key: &str,
+        seq: u64,
+        status: WorkflowActivityStatus,
+    ) -> (String, super::super::workflow_state::ActivityState) {
+        let (key, mut state) = completed(key, seq, 1);
+        state.status = status;
+        (key, state)
+    }
+
+    #[test]
+    fn test_exit_step_is_not_skipped_while_the_loop_runs() {
+        let definition = loop_with_exit_step();
+        // check completed (condition false for done), run is going again
+        let state = make_workflow_state(vec![
+            with_status("run", 1, WorkflowActivityStatus::Pending),
+            completed("check", 2, 1),
+            make_activity_state("done", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert!(
+            find_skipped_activities(&definition, &state)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn test_exit_step_is_skipped_once_the_loop_has_ended() {
+        let definition = loop_with_exit_step();
+        // Nothing in the loop is scheduled, running or waiting: it is over
+        let state = make_workflow_state(vec![
+            completed("run", 1, 1),
+            completed("check", 2, 1),
+            make_activity_state("done", WorkflowActivityStatus::NotScheduled),
+        ]);
+        let skipped: Vec<&str> = find_skipped_activities(&definition, &state)
+            .unwrap()
+            .iter()
+            .map(|a| a.key.as_str())
+            .collect();
+        assert_eq!(skipped, vec!["done"]);
+    }
+
+    #[test]
+    fn test_loop_member_is_skipped_while_its_loop_runs() {
+        // Inside the loop nothing changes: a member whose condition is false is
+        // skipped at once, so the steps after it in the same round can proceed
+        let mut definition = loop_with_exit_step();
+        definition.activities[2] = loop_def("done", vec![rel_false("check")]);
+        let state = make_workflow_state(vec![
+            with_status("run", 1, WorkflowActivityStatus::Running),
+            completed("check", 2, 1),
+            make_activity_state("done", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(
+            find_skipped_activities(&definition, &state).unwrap().len(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_conditional_skip_without_a_loop_is_immediate() {
+        // No loop: skipped at once, even while another activity still runs
+        let definition = WorkflowDefinition {
+            name: "branch".to_string(),
+            settings: None,
+            activities: vec![
+                make_activity_def("check", None),
+                make_activity_def("slow", Some(vec![rel("check", false)])),
+                make_activity_def("done", Some(vec![rel_false("check")])),
+            ],
+        };
+        let state = make_workflow_state(vec![
+            completed("check", 1, 0),
+            with_status("slow", 0, WorkflowActivityStatus::Running),
+            make_activity_state("done", WorkflowActivityStatus::NotScheduled),
+        ]);
+        let skipped: Vec<&str> = find_skipped_activities(&definition, &state)
+            .unwrap()
+            .iter()
+            .map(|a| a.key.as_str())
+            .collect();
+        assert_eq!(skipped, vec!["done"]);
     }
 }
