@@ -5,7 +5,7 @@
 #
 # What This Example Demonstrates:
 # - Semantic caching for LLM responses
-# - Cache configuration (enabled, ttl_seconds, key)
+# - Cache configuration (`cache: true`, `cache_ttl`)
 # - Cache hit tracking for cost analysis
 # - Dramatic cost reduction for repeated/similar questions
 # - Database logging with cache metrics
@@ -35,7 +35,7 @@
 # export KRUXIAFLOW_REDIS_URL=redis://localhost:6379
 #
 # How Semantic Caching Works:
-# - First request: LLM call costs ~$0.001, result cached for 1 hour
+# - First request: LLM call costs ~$0.001, result cached for 1 day
 # - Identical request: Cache hit, costs $0.000 (100% savings!)
 # - Similar request: Future enhancement (semantic similarity matching)
 #
@@ -50,19 +50,21 @@
 # 1. answer_question: LLM call → cache miss → costs $0.001
 # 2. store_answer: Logs question, answer, cost=$0.001, cache_hit=false
 #
-# Second Identical Question (within 1 hour): "What are your business hours?"
+# Second Identical Question (within 1 day): "What are your business hours?"
 # 1. answer_question: Cache hit → costs $0.000
 # 2. store_answer: Logs question, answer, cost=$0.000, cache_hit=true
 #
 # Cache Key Structure:
-# The cache key is deterministically generated from:
-# - Activity name: llm_prompt
-# - Model: anthropic/haiku-4-5
-# - Messages: [system prompt, user question]
+# The cache key is a SHA-256 of the activity name (std.llm_prompt) and all of
+# its resolved parameters, so here it covers:
+# - Model: anthropic/claude-haiku-4-5-20251001
+# - Prompt: the instructions plus the user question
+# - max_tokens
 # This ensures identical questions hit the cache while different questions don't.
+# The key is not configurable; to change what it covers, change the parameters.
 #
 # Key Features Demonstrated (from mvp-workflows-implementation-plan.md lines 1057-1063):
-# ✅ Cache settings: enabled, ttl_seconds, key
+# ✅ Cache settings: cache, cache_ttl
 # ✅ Cache hit indicator in output ({{answer_question.cache_hit}})
 # ✅ Cost tracking with cache awareness (actual API cost vs cached)
 # ✅ Template expressions for cache metrics
@@ -86,14 +88,12 @@ activities:
     outputs:
       - result      # Contains the answer in result.content
     settings:
-      cache:
-        enabled: true
-        ttl_seconds: 86400  # Cache for 1 day
-        # Cache key components (deterministic hash)
-        key:
-          - llm_prompt
-          - "{{parameters.model}}"
-          - "{{parameters.prompt}}"
+      # Cache this activity's result. The key is not configurable: it is a
+      # SHA-256 of the activity name (std.llm_prompt) and all of its resolved
+      # parameters (model, prompt, max_tokens), so the same question with the
+      # same model hits the cache and a different question misses it.
+      cache: true
+      cache_ttl: 86400  # Seconds: cache for 1 day (default 3600)
       budget:
         limit: 0.10
         action: abort

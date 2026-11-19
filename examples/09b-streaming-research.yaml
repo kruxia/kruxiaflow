@@ -100,4 +100,4 @@ activities:
       timeout_seconds: 180
       budget:
         limit: 0.10
-        action: warn
+        action: continue  # Log a warning and keep going (the other choice is abort)
