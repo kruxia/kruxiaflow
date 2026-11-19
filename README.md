@@ -200,15 +200,20 @@ decision — then resume when signaled, even days later, surviving restarts in b
 activities:
   - key: await_approval
     settings:
-      wait_for_signal: approval
+      wait_for_signal:
+        event_name: approval
+        timeout_seconds: 604800   # then on_timeout: fail (default), continue or skip
 ```
 
 ```bash
 # Resume the waiting workflow
 curl -X POST http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/signal \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{"signal_name": "approval", "data": {"approved": true}}'
+  -H "Content-Type: application/json" \
+  -d '{"activity_key": "await_approval", "event_name": "approval", "data": {"approved": true}}'
 ```
+
+Inside a loop, the activity waits again in each round, for that round's signal.
 
 ### Result Caching
 
