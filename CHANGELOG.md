@@ -23,8 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which render to a non-empty string and so were always true (the loop ran
   to `iteration_limit`), and its email body used `{{fetch_page[*].result}}`,
   which is not template syntax. The conditions are now single expressions,
-  and the body uses `{{fetch_page.result}}`, the array of every round's
-  result. A new test runs the example through the orchestrator.
+  and the body uses `{{fetch_page.response}}`, the array of every round's
+  response (`http_request`'s output is `response`, not `result`, which the
+  example also declared). A new test runs the example through the
+  orchestrator.
 - **`{{ACTIVITY.*}}` resolves.** `ACTIVITY.iteration`,
   `ACTIVITY.accumulated_cost_usd` and `ACTIVITY.remaining_budget_usd` were
   documented but never set, so any template using them failed with
