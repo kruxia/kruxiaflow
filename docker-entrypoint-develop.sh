@@ -25,9 +25,10 @@ done
 sqlx migrate run
 
 # Build in debug mode for development (release LTO needs 6GB+ RAM)
-# Use ./docker up for optimized production builds
+# Use ./docker up for optimized production builds. The monty feature compiles
+# in run_code; the image sets KRUXIAFLOW_MONTY_BINARY to enable it.
 echo "Building Kruxia Flow (debug mode)..."
-cargo build
+cargo build --features monty
 
 # Seed the oauth client (idempotent - skips if exists)
 /opt/target/debug/kruxiaflow seed-client

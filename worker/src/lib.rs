@@ -11,6 +11,10 @@ pub mod registry;
 pub mod std_worker;
 pub mod streaming;
 
+#[cfg(feature = "monty")]
+pub use activities::run_code::{
+    AVAILABLE_MODULES, MONTY_VERSION, MontyConfig, RunCodeActivity, contract as run_code_contract,
+};
 pub use activities::{
     EchoActivity, EmailSendActivity, EmbeddingActivity, HttpRequestActivity, LLMPromptActivity,
     PostgresQueryActivity, new_pool_cache,
@@ -18,6 +22,8 @@ pub use activities::{
 pub use executor::StdActivityExecutor;
 pub use manager::WorkerManager;
 pub use registry::{ActivityImpl, ActivityRegistry};
+#[cfg(feature = "monty")]
+pub use std_worker::register_run_code;
 pub use std_worker::register_std_activities;
 pub use streaming::{
     CollectingStreamSender, HttpStreamSender, NoOpStreamSender, StreamError, StreamSender,

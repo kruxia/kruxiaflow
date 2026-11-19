@@ -82,3 +82,6 @@ default = []  # MCP excluded by default (opt-in for smaller edge binaries)
 mcp-server = ["dep:rust-mcp-sdk", "dep:async-trait", "dep:http"]
 profiling = ["tikv-jemallocator", "kruxiaflow-core/profiling", "kruxiaflow-std-worker/profiling"]
 redis-cache = ["kruxiaflow-core/redis-cache"]
+# Sandboxed Python: the std.run_code activity on Pydantic Monty. Opt-in; at
+# run time it also needs KRUXIAFLOW_MONTY_BINARY. Needs Rust 1.98+.
+monty = ["kruxiaflow-std-worker/monty"]

@@ -223,6 +223,11 @@ Example: --db-connect-timeout 120"
     #[command(flatten)]
     pub storage: StorageArgs,
 
+    /// Sandboxed code execution (run_code)
+    #[cfg(feature = "monty")]
+    #[command(flatten)]
+    pub monty: crate::config::MontyArgs,
+
     /// Disable built-in worker (run API + orchestrator only)
     #[arg(
         long,
@@ -457,6 +462,9 @@ struct BuiltinWorkerSettings {
     /// Activity execution timeout in seconds
     activity_timeout: u64,
     wake: WorkerWakeArgs,
+    /// run_code configuration; `None` when disabled
+    #[cfg(feature = "monty")]
+    monty: Option<kruxiaflow_std_worker::MontyConfig>,
 }
 
 /// Spawn worker tasks
@@ -472,6 +480,8 @@ async fn spawn_workers(
         poll_max_activities,
         activity_timeout,
         wake: worker_wake,
+        #[cfg(feature = "monty")]
+        monty,
     } = settings;
 
     tracing::info!(
@@ -487,6 +497,16 @@ async fn spawn_workers(
 
     // Create activity registry with all built-in activities pre-registered
     let registry = kruxiaflow_std_worker::register_std_activities(cache_service);
+
+    // Sandboxed code execution, when configured
+    #[cfg(feature = "monty")]
+    let registry = {
+        let mut registry = registry;
+        if let Some(monty) = monty {
+            kruxiaflow_std_worker::register_run_code(&mut registry, monty)?;
+        }
+        registry
+    };
 
     let config = WorkerConfig {
         api_url: api_url.clone(),
@@ -764,6 +784,15 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     let (api_handle, _) =
         spawn_api_server(state, cmd.bind.clone(), cmd.port, shutdown_token.clone()).await?;
 
+    // Sandboxed code (run_code) for the built-in worker, resolved once: the
+    // worker registers it and the MCP server advertises its contract
+    #[cfg(feature = "monty")]
+    let monty_config = if cmd.no_worker {
+        None
+    } else {
+        cmd.monty.to_config(cmd.max_activities)?
+    };
+
     // 5. Spawn workers (unless --no-worker)
     let worker_handles = if cmd.no_worker {
         tracing::info!("Built-in worker disabled (--no-worker), skipping worker startup");
@@ -775,6 +804,8 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
                 poll_max_activities: cmd.poll_max_activities,
                 activity_timeout: cmd.activity_timeout,
                 wake: cmd.worker_wake.clone(),
+                #[cfg(feature = "monty")]
+                monty: monty_config.clone(),
             },
             api_url.clone(),
             cmd.client_id.clone(),
@@ -823,11 +854,20 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
                 } else {
                     Some(auth_service.clone())
                 };
+            // Advertise run_code to agents only where this server runs it
+            #[cfg(feature = "monty")]
+            let run_code_contract = monty_config
+                .as_ref()
+                .map(kruxiaflow_std_worker::run_code_contract);
+            #[cfg(not(feature = "monty"))]
+            let run_code_contract = None;
+
             Some(crate::mcp::spawn_mcp_server(
                 Arc::new(mcp_config),
                 pool.clone(),
                 cache_service.clone(),
                 mcp_auth,
+                run_code_contract,
             ))
         } else {
             None
@@ -1025,6 +1065,8 @@ mod tests {
             event_wake: EventWakeArgs::default(),
             worker_wake: WorkerWakeArgs::default(),
             storage: StorageArgs::default(),
+            #[cfg(feature = "monty")]
+            monty: crate::config::MontyArgs::default(),
             activity_timeout: 300,
             no_worker: false,
             insecure_dev: false,
@@ -1235,6 +1277,8 @@ mod tests {
             event_wake: EventWakeArgs::default(),
             worker_wake: WorkerWakeArgs::default(),
             storage: StorageArgs::default(),
+            #[cfg(feature = "monty")]
+            monty: crate::config::MontyArgs::default(),
             activity_timeout: 300,
             no_worker: false,
             insecure_dev: false,

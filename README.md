@@ -249,6 +249,26 @@ Native support for all major providers:
 - **Google**: Gemini 3.5 Flash, Gemini 3.1 Pro, Gemini 2.5 family
 - **Ollama**: Self-hosted open models — run the whole pipeline, models included, on your own hardware
 
+### Sandboxed Code for Model-Written Steps (optional)
+
+"Governed code mode": an LLM writes a step as Python, and the `run_code` activity runs it in a
+[Pydantic Monty](https://github.com/pydantic/monty) sandbox, with no filesystem, network or
+environment, and only the host functions the step grants. Hard limits apply to memory, time,
+recursion and host calls, and every run records what it was allowed and what it used. Errors
+complete the step with a message for the model, so a budgeted loop can let the model repair its
+own code. The Docker image includes it and has it on; a source build needs `--features monty`
+and `KRUXIAFLOW_MONTY_BINARY`. See [Sandboxed Code](docs/run-code.md).
+
+```yaml
+- key: run_rule
+  activity_name: run_code
+  parameters:
+    code: "{{write_rule.result.content}}"   # Python an LLM just wrote
+    inputs: { orders: "{{INPUT.orders}}" }
+    capabilities: [log]
+    limits: { max_feed_duration_secs: 2, max_memory: 16000000 }
+```
+
 ## Examples
 
 Kruxia Flow includes 15+ production-ready example workflows in YAML and Python:
@@ -270,6 +290,7 @@ Kruxia Flow includes 15+ production-ready example workflows in YAML and Python:
 | 13 | [Customer Churn Prediction][ex13] | Python SDK, parallel ML training, LLM explanations |
 | 14 | [Document Intelligence][ex14]     | Python SDK, AI-powered document analysis           |
 | 15 | [Content Moderation System][ex15] | Python SDK, multi-stage moderation pipeline        |
+| 16 | [Sandboxed Code][ex16]            | `run_code`: model-written Python, repair loop      |
 
 [ex1]: examples/README.md#example-1-weather-report-pipeline
 [ex2]: examples/README.md#example-2-user-validation-with-conditional-branching
@@ -286,6 +307,7 @@ Kruxia Flow includes 15+ production-ready example workflows in YAML and Python:
 [ex13]: https://github.com/kruxia/kruxiaflow-python/blob/main/examples/13_customer_churn_prediction.py
 [ex14]: https://github.com/kruxia/kruxiaflow-python/blob/main/examples/14_document_intelligence.py
 [ex15]: https://github.com/kruxia/kruxiaflow-python/blob/main/examples/15_content_moderation_system.py
+[ex16]: examples/README.md#example-16-sandboxed-code-with-run_code
 
 ## Architecture
 
@@ -338,6 +360,11 @@ Footprint, measured from the published releases and images:
 | Peak memory under the suite, all services | **0.24 GB**   | 0.52 GB       | 4.1-5.0 GB   |
 | Runs on Raspberry Pi Zero                 | **[Awesome](docs/raspberry-pi-deployment.md)** | Maybe | No way |
 
+From the next release the Docker image also bundles the Monty worker binary for sandboxed code
+([`run_code`](docs/run-code.md)): in local arm64 builds the image grows from about 15 to 28 MB
+compressed and from 52 to 86 MB unpacked, and the server binary in it from 13.8 to 16.2 MB. The
+standalone release binaries do not include `run_code` and are unchanged.
+
 This is each platform out of the box in Docker Compose on one machine, not any of them tuned to its best. Temporal's worker is its Python SDK, Kruxia Flow's is built into the server, and Temporal records a fuller replayable history per step; Airflow is a batch scheduler running on Celery, not built for this kind of load. Kruxia Flow and Temporal figures are medians of twelve passes from one session, Airflow's of six from another. Throughput and latency were measured on 0.11.0 and the memory rows on 0.11.1, which stopped the server holding about 1.5 MB per client connection; under the suite the 0.11.1 server itself stays under 30 MB and the rest is PostgreSQL.
 
 See [`benchmarks/README.md`](benchmarks/README.md#results) for the methodology, the full tables, the caveats, and the dated history of every result set, and [`benchmarks/`](benchmarks/) to reproduce them.
@@ -345,6 +372,8 @@ See [`benchmarks/README.md`](benchmarks/README.md#results) for the methodology, 
 ## Documentation
 
 - **[Architecture](docs/architecture.md)** - System design and component overview
+- **[Sandboxed Code](docs/run-code.md)** - Running model-written Python with `run_code`
+- **[Development Setup](docs/dev-setup.md)** - Local tooling, optional features and their settings
 - **[MVP Requirements](docs/mvp-requirements.md)** - Product requirements and roadmap
 - **[Implementation Plans](docs/implementation/)** - Detailed technical implementation specifications
 - **[Post-MVP Roadmap](docs/post-mvp.md), [Features](docs/features/)** - Future features and integrations
@@ -354,7 +383,7 @@ See [`benchmarks/README.md`](benchmarks/README.md#results) for the methodology, 
 ### Prerequisites
 
 - Docker and Docker Compose
-- (Optional) Rust 1.90+ for local development
+- (Optional) Rust 1.90+ for local development (1.98+ with the optional `monty` feature)
 
 ### Local Development
 
@@ -411,6 +440,7 @@ cargo build --release
 - [Rust worker SDK](https://crates.io/crates/kruxiaflow-worker) — `cargo add kruxiaflow-worker`
 - Frictionless local dev mode (`kruxiaflow serve --insecure-dev`, no token setup)
 - CLI cost reports (`kruxiaflow cost workflow|analytics|top|export`) and a built-in cost analytics dashboard at `/dashboard`
+- Sandboxed execution of model-written Python (`run_code` on Pydantic Monty, optional `monty` build feature)
 
 ### Next
 - MCP server: agents author, run, and monitor budgeted workflows

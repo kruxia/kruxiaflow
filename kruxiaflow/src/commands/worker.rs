@@ -145,6 +145,11 @@ Example: --poll-max-activities 5"
     /// Workflow file storage provider
     #[command(flatten)]
     pub storage: StorageArgs,
+
+    /// Sandboxed code execution (run_code)
+    #[cfg(feature = "monty")]
+    #[command(flatten)]
+    pub monty: crate::config::MontyArgs,
 }
 
 impl WorkerCommand {
@@ -261,6 +266,16 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
         kruxiaflow_std_worker::register_std_activities(cache_service)
     };
 
+    // Sandboxed code execution, when configured
+    #[cfg(feature = "monty")]
+    let registry = {
+        let mut registry = registry;
+        if let Some(monty) = cmd.monty.to_config(cmd.max_activities)? {
+            kruxiaflow_std_worker::register_run_code(&mut registry, monty)?;
+        }
+        registry
+    };
+
     tracing::info!(
         activity_types = ?registry.activity_types(),
         "Activity registry initialized"
@@ -333,6 +348,8 @@ mod tests {
             db_pool: DbPoolArgs::default(),
             worker_wake: WorkerWakeArgs::default(),
             storage: StorageArgs::default(),
+            #[cfg(feature = "monty")]
+            monty: crate::config::MontyArgs::default(),
         }
     }
 

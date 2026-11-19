@@ -3,6 +3,8 @@ pub mod email;
 mod http;
 mod llm;
 mod postgres;
+#[cfg(feature = "monty")]
+pub mod run_code;
 
 pub use echo::EchoActivity;
 pub use email::EmailSendActivity;

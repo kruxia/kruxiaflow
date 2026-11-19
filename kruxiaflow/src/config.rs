@@ -447,6 +447,155 @@ impl StorageArgs {
     }
 }
 
+/// Sandboxed code execution (`run_code` on Pydantic Monty) for the commands
+/// that run a worker (`serve`'s built-in worker, `worker`). Compiled in with
+/// the `monty` feature; enabled at run time by `--monty-binary`.
+#[cfg(feature = "monty")]
+#[derive(Args, Debug, Clone)]
+pub struct MontyArgs {
+    /// Path to the `monty` worker binary; enables `std.run_code`
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_MONTY_BINARY",
+        help = "Absolute path to the monty worker binary; enables the run_code activity",
+        long_help = "Absolute path to the `monty` worker binary (crate monty-runtime, the\n\
+same version as this build). Setting it enables the std.run_code activity,\n\
+which runs untrusted Python in pooled Monty sandbox subprocesses. The path is\n\
+never looked up on PATH, and the binary's version is checked at start-up.\n\n\
+Install: cargo install monty-runtime --version 1.6.0 --locked\n\
+Default: unset (run_code disabled)\n\
+Example: --monty-binary /usr/local/bin/monty"
+    )]
+    pub monty_binary: Option<std::path::PathBuf>,
+
+    /// Prewarmed Monty workers
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_MONTY_MIN_PROCESSES",
+        default_value_t = 1,
+        help = "Monty worker processes kept warm"
+    )]
+    pub monty_min_processes: usize,
+
+    /// Upper bound on live Monty workers
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_MONTY_MAX_PROCESSES",
+        help = "Most Monty worker processes alive at once (default: the worker's activity concurrency)"
+    )]
+    pub monty_max_processes: Option<usize>,
+
+    /// Host-side kill switch for any single request to a Monty worker
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_MONTY_REQUEST_TIMEOUT_SECS",
+        default_value_t = 30,
+        help = "Seconds before a Monty worker that has not answered is killed",
+        long_help = "Seconds before a Monty worker that has not answered a request is\n\
+killed. A backstop behind the per-run limits: it must be at least twice\n\
+--monty-max-duration-secs plus 2 seconds.\n\n\
+Default: 30"
+    )]
+    pub monty_request_timeout_secs: u64,
+
+    /// Checkouts per Monty worker before it is replaced
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_MONTY_RECYCLE_AFTER",
+        default_value_t = 1,
+        help = "Runs per Monty worker before it is replaced (1 = never reused)",
+        long_help = "How many run_code runs a Monty worker serves before it is replaced.\n\
+1 (the default) gives every run a fresh process, so nothing can carry over\n\
+between workflows or tenants; it costs a few milliseconds per run.\n\n\
+Default: 1"
+    )]
+    pub monty_recycle_after: u32,
+
+    /// Memory ceiling per run, in bytes
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_MONTY_MAX_MEMORY_BYTES",
+        default_value_t = 64 * 1024 * 1024,
+        help = "Most memory a run may use (a workflow may ask for less, never more)"
+    )]
+    pub monty_max_memory_bytes: usize,
+
+    /// Execution-time ceiling per run, in seconds
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_MONTY_MAX_DURATION_SECS",
+        default_value_t = 10.0,
+        help = "Most execution time (and, separately, sleep) a run may use, in seconds"
+    )]
+    pub monty_max_duration_secs: f64,
+
+    /// Recursion-depth ceiling per run
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_MONTY_MAX_RECURSION_DEPTH",
+        default_value_t = 1000,
+        help = "Deepest recursion a run may use",
+        long_help = "Deepest recursion a run may use. Higher values do not crash the\n\
+sandbox but let runaway recursion run until the request timeout.\n\n\
+Default: 1000"
+    )]
+    pub monty_max_recursion_depth: usize,
+}
+
+#[cfg(feature = "monty")]
+impl Default for MontyArgs {
+    fn default() -> Self {
+        Self {
+            monty_binary: None,
+            monty_min_processes: 1,
+            monty_max_processes: None,
+            monty_request_timeout_secs: 30,
+            monty_recycle_after: 1,
+            monty_max_memory_bytes: 64 * 1024 * 1024,
+            monty_max_duration_secs: 10.0,
+            monty_max_recursion_depth: 1000,
+        }
+    }
+}
+
+#[cfg(feature = "monty")]
+impl MontyArgs {
+    /// The run_code configuration, or `None` when `--monty-binary` is unset.
+    /// `default_max_processes` is the worker's activity concurrency.
+    pub fn to_config(
+        &self,
+        default_max_processes: usize,
+    ) -> Result<Option<kruxiaflow_std_worker::MontyConfig>> {
+        // Unset or empty (the Docker image sets it; an empty value disables it)
+        let Some(binary) = self
+            .monty_binary
+            .clone()
+            .filter(|path| !path.as_os_str().is_empty())
+        else {
+            tracing::info!(
+                "run_code is compiled in but disabled: set KRUXIAFLOW_MONTY_BINARY to enable it"
+            );
+            return Ok(None);
+        };
+        let max_duration = std::time::Duration::try_from_secs_f64(self.monty_max_duration_secs)
+            .map_err(|_| {
+                anyhow::anyhow!(
+                    "KRUXIAFLOW_MONTY_MAX_DURATION_SECS must be a positive number of seconds"
+                )
+            })?;
+        Ok(Some(kruxiaflow_std_worker::MontyConfig {
+            binary,
+            min_processes: self.monty_min_processes,
+            max_processes: self.monty_max_processes.unwrap_or(default_max_processes),
+            request_timeout: std::time::Duration::from_secs(self.monty_request_timeout_secs),
+            recycle_after: self.monty_recycle_after,
+            max_memory_bytes: self.monty_max_memory_bytes,
+            max_duration,
+            max_recursion_depth: self.monty_max_recursion_depth,
+        }))
+    }
+}
+
 /// API Server configuration
 #[derive(Debug, Clone)]
 pub struct ApiConfig {
@@ -921,5 +1070,104 @@ mod tests {
         let debug_str = format!("{:?}", config);
         assert!(debug_str.contains("ApiConfig"));
         assert!(debug_str.contains("8080"));
+    }
+}
+
+#[cfg(all(test, feature = "monty"))]
+mod monty_args_tests {
+    use super::*;
+    use clap::Parser;
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    /// The flags exactly as `serve` and `worker` flatten them
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        monty: MontyArgs,
+    }
+
+    #[test]
+    fn test_unset_binary_disables_run_code() {
+        assert!(MontyArgs::default().to_config(16).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_empty_binary_disables_run_code() {
+        // The Docker image sets KRUXIAFLOW_MONTY_BINARY; an empty value turns it off
+        let args = MontyArgs {
+            monty_binary: Some(PathBuf::new()),
+            ..MontyArgs::default()
+        };
+        assert!(args.to_config(16).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_defaults_become_the_config() {
+        let args = MontyArgs {
+            monty_binary: Some(PathBuf::from("/monty")),
+            ..MontyArgs::default()
+        };
+        let config = args.to_config(16).unwrap().expect("enabled");
+        assert_eq!(config.binary, PathBuf::from("/monty"));
+        assert_eq!(config.min_processes, 1);
+        assert_eq!(
+            config.max_processes, 16,
+            "defaults to the worker's concurrency"
+        );
+        assert_eq!(config.request_timeout, Duration::from_secs(30));
+        assert_eq!(config.recycle_after, 1);
+        assert_eq!(config.max_memory_bytes, 64 * 1024 * 1024);
+        assert_eq!(config.max_duration, Duration::from_secs(10));
+        assert_eq!(config.max_recursion_depth, 1000);
+    }
+
+    #[test]
+    fn test_flags_parse_into_the_config() {
+        let cli = TestCli::try_parse_from([
+            "test",
+            "--monty-binary",
+            "/opt/monty",
+            "--monty-min-processes",
+            "2",
+            "--monty-max-processes",
+            "6",
+            "--monty-request-timeout-secs",
+            "40",
+            "--monty-recycle-after",
+            "5",
+            "--monty-max-memory-bytes",
+            "1000000",
+            "--monty-max-duration-secs",
+            "2.5",
+            "--monty-max-recursion-depth",
+            "300",
+        ])
+        .expect("valid flags");
+        let config = cli.monty.to_config(16).unwrap().expect("enabled");
+        assert_eq!(config.binary, PathBuf::from("/opt/monty"));
+        assert_eq!(config.min_processes, 2);
+        assert_eq!(config.max_processes, 6);
+        assert_eq!(config.request_timeout, Duration::from_secs(40));
+        assert_eq!(config.recycle_after, 5);
+        assert_eq!(config.max_memory_bytes, 1_000_000);
+        assert_eq!(config.max_duration, Duration::from_millis(2500));
+        assert_eq!(config.max_recursion_depth, 300);
+    }
+
+    #[test]
+    fn test_invalid_duration_is_an_error() {
+        let args = MontyArgs {
+            monty_binary: Some(PathBuf::from("/monty")),
+            monty_max_duration_secs: -1.0,
+            ..MontyArgs::default()
+        };
+        let err = args.to_config(16).unwrap_err().to_string();
+        assert!(err.contains("KRUXIAFLOW_MONTY_MAX_DURATION_SECS"), "{err}");
+    }
+
+    #[test]
+    fn test_non_numeric_flag_is_rejected() {
+        assert!(TestCli::try_parse_from(["test", "--monty-max-memory-bytes", "lots"]).is_err());
     }
 }

@@ -1,0 +1,100 @@
+# Example 16b: An LLM writes a rule, run_code runs it, and errors loop back
+#
+# Governed code mode: the model writes the step, Kruxia runs it sandboxed and
+# on budget. write_rule asks a model for Python; run_rule runs it with
+# std.run_code. Any error the code causes (a type error, an exception, an
+# unavailable module, a tripped limit) COMPLETES run_rule with
+# result.ok == false and a message written for the model, so write_rule runs
+# again with that message, up to iteration_limit times. The workflow budget
+# caps what the retries cost.
+#
+# Runs on the Docker image; a source build needs `--features monty` and
+# KRUXIAFLOW_MONTY_BINARY set (see docs/run-code.md). The model here is a local Ollama coder model;
+# any llm_prompt model works.
+#
+# Input:
+#   {"rule": "Flag orders over $500 from first-time customers placed on a weekend,
+#             and report the median total of the flagged orders",
+#    "orders": [{"id": "A1", "total": 612.50, "first_order": true, "weekday": "Sat"},
+#               {"id": "A2", "total": 980.00, "first_order": true, "weekday": "Sun"},
+#               {"id": "A3", "total": 900.00, "first_order": false, "weekday": "Sat"}]}
+#
+# Loop notes:
+# - write_rule's dependency on run_rule is a loop back-edge: satisfied
+#   automatically on the first pass, then taken while run_rule.result.ok is
+#   false.
+# - On the first pass run_rule has not run. Every activity is in the
+#   template context with a `status`, but `result` exists only once it has
+#   completed, and templates are strict about undefined values, so the prompt
+#   guards the reference with `{% if run_rule.status == 'completed' %}`.
+#   (`run_rule is defined` is always true and does not guard it.)
+#
+# Known issue #18 (engine, not run_code; fix pending review): the loop's tail step (run_rule) re-runs
+# after every completion until the default cap of 100 iterations, instead of
+# only when write_rule produces new code. The final result is still that of
+# the latest code. See docs/run-code.md#known-issues.
+
+name: run_code_repair_loop
+description: An LLM writes a business rule as Python; run_code runs it and feeds errors back
+activities:
+  - key: describe
+    activity_name: echo
+    parameters:
+      rule: "{{INPUT.rule}}"
+
+  - key: write_rule
+    activity_name: llm_prompt
+    iteration_limit: 3
+    parameters:
+      model: ollama/qwen2.5-coder:7b
+      max_tokens: 600
+      temperature: 0
+      prompt: |
+        Write Python for this business rule: {{describe.echo.rule}}
+
+        The code runs in a sandbox with a subset of Python and part of the
+        standard library. A variable `orders` holds a list of dicts with keys
+        id (str), total (float), first_order (bool) and weekday (str, e.g. "Sat").
+        Do not define a function or read input; operate on `orders` directly.
+        The code's last line must be an expression: a dict with the keys
+        "flagged" (list of ids) and "median_total" (float or None).
+        Reply with only the code in one ```python block.
+        {% if run_rule.status == 'completed' %}
+
+        Your previous code failed with this error. Fix it:
+        {{ run_rule.result.error.message }}
+        {% endif %}
+    outputs:
+      - result
+    settings:
+      budget:
+        limit: 0.05
+        action: abort
+    depends_on:
+      - describe
+      - activity_key: run_rule
+        conditions:
+          - "{{ run_rule.result.ok == false }}"
+
+  - key: run_rule
+    activity_name: run_code
+    parameters:
+      code: "{{write_rule.result.content}}"
+      inputs:
+        orders: "{{INPUT.orders}}"
+      limits:
+        max_feed_duration_secs: 2
+    outputs:
+      - result
+    depends_on:
+      - write_rule
+
+  - key: done
+    activity_name: echo
+    parameters:
+      flagged: "{{run_rule.result.value.flagged}}"
+      median_total: "{{run_rule.result.value.median_total}}"
+    depends_on:
+      - activity_key: run_rule
+        conditions:
+          - "{{ run_rule.result.ok }}"

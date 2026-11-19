@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Sandboxed code: the `std.run_code` activity (optional `monty` feature).**
+  Runs untrusted, typically LLM-written, Python in a Pydantic Monty 1.6
+  sandbox, in pooled `monty` worker subprocesses so an interpreter crash never
+  reaches the server. The code has no filesystem, network or environment, and
+  can call only the capabilities a step grants (`json_path`, `now`, `log`,
+  `fail`). Each call is checked when it arrives. Runs are limited in memory,
+  execution time, recursion, host calls and sleep, with a host-side kill
+  switch behind those limits.
+  - **Outcomes:** every outcome the code causes (a type error, an exception,
+    an unavailable module, a tripped limit, a value with no JSON form)
+    completes the step with `result.ok: false` and a message written for the
+    model, so a loop can let the model repair its code.
+  - **Run record:** `result.run` records the effective limits, measured
+    execution time and host calls, the capabilities granted and called, the
+    Monty version and a hash of the code.
+  - **Determinism:** the clock is frozen at the step's start and `random` is
+    seeded per step, so retries behave the same way.
+  - **Enabling it:** on by default in the Docker image. From source, build
+    with `--features monty` and set `KRUXIAFLOW_MONTY_BINARY` (and optionally
+    the `KRUXIAFLOW_MONTY_*` limit ceilings) on `serve` or `worker`. The
+    binary's version is checked at start-up.
+  - **Docs and examples:** `docs/run-code.md`, examples 16a and 16b.
+  - **Tests:** unit tests for every `run_code` module, integration tests
+    against real Monty workers (skipped when `KRUXIAFLOW_MONTY_BINARY` is
+    unset), and CLI flag tests. A new CI job, `Monty (run_code)`, runs clippy
+    and these tests with the feature on.
+- **MCP discovery for `run_code`.** On servers where it is enabled:
+  - **`list_activities`** lists `run_code`.
+  - **`get_workflow_authoring_guide`** gains a `sandboxed_code` section with
+    the rules, modules, capabilities, limit ceilings and a validated
+    repair-loop example.
+  - **`get_run_code_contract`**, a new tool, returns that contract. It is
+    generated from the worker's own registry and configuration.
+  - **The `script` catalog entry** is now marked not sandboxed.
+  - **Templates:** the guide teaches the `{% if step.status == 'completed' %}`
+    guard.
+- `docs/dev-setup.md`: local toolchain, optional build features and their
+  settings.
+
+### Changed
+
+- **The Docker image includes the Monty worker for `run_code`.**
+  - **Build:** the image now builds with `redis-cache,mcp-server,monty`,
+    ships the pinned `monty` worker binary at `/monty`, and sets
+    `KRUXIAFLOW_MONTY_BINARY=/monty`.
+  - **Size:** in local arm64 builds it grows from about 15 to 28 MB
+    compressed (52 to 86 MB unpacked), and the server binary in it from 13.8
+    to 16.2 MB.
+  - **Unchanged:** the standalone release binaries are built without the
+    feature, as before.
+  - **Develop container:** it builds with `--features monty` and has the
+    binary too.
+- **Docker builds use Rust 1.100** (was 1.97) in every stage. The
+  `monty-pool` crate needs 1.98 or newer. CI already builds on stable.
+- **Shared dependency updates from adding Monty:** hyper 1.8.1 → 1.12.0, h2
+  0.4.12 → 0.4.20, libc, want and cfg_aliases. They are in the lockfile, so
+  they apply to every build, with or without the `monty` feature.
+
 ## [0.12.1] - 2026-11-17
 
 ### Fixed

@@ -752,6 +752,57 @@ HTML/text email via SMTP.
 - SMTP URL configuration (supports authentication)
 - Template variable substitution in body
 
+#### run_code (optional, `monty` feature)
+
+Runs untrusted, typically LLM-written, Python in a [Pydantic Monty](https://github.com/pydantic/monty) sandbox. It is compiled in with `--features monty` and enabled when `KRUXIAFLOW_MONTY_BINARY` points at the `monty` worker binary. The Docker image has both, so it is on there by default. Full guide: [Sandboxed Code (`run_code`)](run-code.md).
+
+```yaml
+- key: run_rule
+  worker: std
+  activity_name: run_code
+  parameters:
+    code: "{{write_rule.result.content}}"
+    inputs:
+      orders: "{{INPUT.orders}}"
+    capabilities: [log, now]
+    limits:
+      max_feed_duration_secs: 2
+  outputs:
+    - result
+```
+
+**How it fits the worker**:
+
+```mermaid
+flowchart LR
+    Exec[StdActivityExecutor] -->|execute_with_context| RC[run_code activity]
+    RC -->|checkout| Pool[Monty pool<br/>monty-pool crate]
+    Pool -->|stdio protocol| W1[monty worker process]
+    Pool -->|stdio protocol| W2[monty worker process]
+    W1 -.->|host call: log, now, ...| RC
+    RC -.->|answer, or NameError if not granted| W1
+```
+
+- **Process isolation.** Code runs in `monty` worker subprocesses managed by one pool per worker process, never inside `kruxiaflow`. A crash kills one worker process, and the pool replaces it. The pool starts on first use. The binary's path and version are checked when the activity is registered.
+- **Capabilities.** The only route to the host is a capability compiled into the worker (`json_path`, `now`, `log`, `fail`). Each call is checked against the step's granted list when it arrives.
+- **Outcomes complete the step.** Type errors, exceptions, tripped limits and host-side kills caused by the code complete the activity with `result.ok: false` and a model-facing `error`, so a loop can feed the error back to the model. Only infrastructure failures fail the activity.
+- **Run record.** `result.run` carries the effective limits, measured execution time and host calls, the capabilities granted and called, the Monty version and a hash of the code. It lives in the output because the completion API carries no result metadata.
+
+**Why** (architecture decision, 2026-11-18): Monty runs in the Rust std worker through the subprocess pool (`monty-pool`), not the in-process `monty` crate and not a separate Python worker. The in-process crate cannot contain an interpreter abort, which would take the whole server down. A Python worker could not yet report LLM usage, which phase 2's metered `llm()` capability needs. The subprocess pool keeps `kruxiaflow serve` self-contained, apart from one extra binary, and confines crashes to a child process.
+
+**Configuration** (CLI flags `--monty-*` on `serve` and `worker`):
+
+| Env var                                 | Default                                  | Purpose                                                                                      |
+|-----------------------------------------|------------------------------------------|----------------------------------------------------------------------------------------------|
+| `KRUXIAFLOW_MONTY_BINARY`               | `/monty` in the Docker image; else unset | Absolute path to the `monty` worker binary (crate `monty-runtime`, 1.6.0); empty disables it |
+| `KRUXIAFLOW_MONTY_MIN_PROCESSES`        | 1                                        | Worker processes kept warm                                                                   |
+| `KRUXIAFLOW_MONTY_MAX_PROCESSES`        | the worker's `--max-activities`          | Most worker processes alive at once                                                          |
+| `KRUXIAFLOW_MONTY_REQUEST_TIMEOUT_SECS` | 30                                       | Kill switch for an unresponsive worker                                                       |
+| `KRUXIAFLOW_MONTY_RECYCLE_AFTER`        | 1                                        | Runs per worker process before replacement                                                   |
+| `KRUXIAFLOW_MONTY_MAX_MEMORY_BYTES`     | 67108864                                 | Ceiling on a run's memory                                                                    |
+| `KRUXIAFLOW_MONTY_MAX_DURATION_SECS`    | 10                                       | Ceiling on a run's execution time and, separately, its sleep                                 |
+| `KRUXIAFLOW_MONTY_MAX_RECURSION_DEPTH`  | 1000                                     | Ceiling on a run's recursion depth                                                           |
+
 ---
 
 ## Data Architecture

@@ -45,6 +45,8 @@ to recreate the volumes.
 | `09a-streaming-llm.yaml`               | LLM token streaming over WebSocket, provider fallback, two-level opt-in         |  Any LLM provider API key                               |
 | `09b-streaming-research.yaml`          | Selective streaming, multi-step with streaming final output, cost tracking      | Anthropic API key                                       |
 | `10-order-processing.yaml`             | E-commerce order flow, postgres_query, postgres_transaction, Mailpit email      | Examples environment                                    |
+| `16a-run-code-order-rules.yaml`        | Sandboxed Python (`run_code`), capabilities, limits, run record                 | Docker image (or a `--features monty` build)            |
+| `16b-run-code-repair-loop.yaml`        | LLM writes code, `run_code` runs it, errors loop back to the model              | As 16a, plus any LLM model (local Ollama works)         |
 
 ## Running Examples
 
@@ -821,3 +823,58 @@ validate_inventory → reserve_inventory → process_payment → record_order �
 - `http_request` to Mailpit REST API for HTML email
 - Sequential dependency chain modeling a real-world order flow
 - All resources are local (database + Mailpit) — no external APIs needed
+
+### Example 16: Sandboxed Code with run_code
+
+An LLM writes a step as Python, and `run_code` runs it in a Pydantic Monty sandbox: no
+filesystem, network or environment, only the capabilities the step names, under hard limits.
+Runs on the Docker image as is; a source build needs `--features monty` and
+`KRUXIAFLOW_MONTY_BINARY` pointing at the `monty` worker binary. See
+[Sandboxed Code](../docs/run-code.md).
+
+**16a** runs a fixed business rule ("flag orders over $500 from first-time customers on a
+weekend") with `Decimal` money handling, `log()` and `now()`:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/workflow_definitions \
+  -H "Authorization: Bearer $TOKEN" \
+  --data-binary @examples/16a-run-code-order-rules.yaml
+
+curl -X POST http://localhost:8080/api/v1/workflows \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "definition_name": "run_code_order_rules",
+    "input": {"orders": [
+      {"id": "A1", "total": 612.50, "first_order": true, "weekday": "Sat"},
+      {"id": "A2", "total": 80.00, "first_order": true, "weekday": "Sun"},
+      {"id": "A3", "total": 900.00, "first_order": false, "weekday": "Sat"}]}
+  }'
+```
+
+`check_orders.result` is `{"ok": true, "value": {"flagged": ["A1"], "checked": 3, ...}, "logs":
+["flagged A1: 612.5"], "run": {...}}`, where `run` records the limits the code ran under and
+what it used.
+
+**16b** has a model write the rule and repairs it in a loop: `run_code` completes with
+`result.ok == false` and a model-facing error, `write_rule` runs again with that error, up to
+`iteration_limit: 3`. It uses a local Ollama model (`ollama/qwen2.5-coder:7b`); any `llm_prompt`
+model works.
+
+**Workflow pattern:**
+```
+describe → write_rule ⇄ run_rule → done
+  (echo)  (llm_prompt)  (run_code)  (echo, when result.ok)
+```
+
+**Features demonstrated:**
+- `run_code` parameters: `code`, `inputs`, `capabilities`, `limits`
+- Code errors as data (`result.ok`, `result.error.kind`), so later steps can branch on them
+- A loop back-edge conditioned on `run_rule.result.ok == false`, with the first-pass guard
+  `{% if run_rule.status == 'completed' %}`
+- The run record (`result.run`) next to the model's cost
+
+**Known issue ([#18](https://github.com/kruxia/kruxiaflow/issues/18), fix pending review):** the engine re-runs the loop's tail step (`run_rule`) after each completion
+until the default cap of 100 iterations, instead of only when `write_rule` produces new code.
+The final result is correct, but `run_rule` runs far more often than it should (see
+[Known issues](../docs/run-code.md#known-issues)).
