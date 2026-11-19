@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The machine shop** (`machines/`, `api/tests/machine_shop.rs`): small
+  workflows inspired by physical machines, run against a real engine one at a
+  time and all at once, with a scoreboard. Starts with a domino run, a prism
+  and funnel, a railway switch, and a level crossing that traps #25.
+
 ## [0.12.1] - 2026-11-17
 
 ### Fixed

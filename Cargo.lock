@@ -1892,6 +1892,7 @@ dependencies = [
  "rust_decimal",
  "serde",
  "serde_json",
+ "serde_yaml",
  "serial_test",
  "sqlx",
  "thiserror 2.0.17",

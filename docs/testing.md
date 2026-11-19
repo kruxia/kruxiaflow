@@ -43,6 +43,17 @@ Kruxia Flow uses a unified test script at `scripts/test.sh` for all testing need
 ./scripts/test.sh --doc
 ```
 
+### The machine shop
+
+`machines/` holds small workflows called machines, each inspired by a physical machine, and runs them against a real API server, orchestrator and std worker. A machine is either simple (one engine function) or compound (about three). A machine that reproduces a known bug is a **trap**: it's reported as "known broken" until its fix lands, and doesn't fail the run.
+
+```bash
+# One machine at a time, then every machine at once
+cargo test -p kruxiaflow-api --test machine_shop -- --nocapture
+```
+
+The card format, the modes and the scoreboard are described in [`machines/README.md`](../machines/README.md).
+
 ### Debugging Tests
 
 ```bash

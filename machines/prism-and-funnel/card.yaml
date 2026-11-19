@@ -1,0 +1,23 @@
+name: Prism and funnel
+kind: simple
+picture: >
+  White light enters a prism and splits into red, green and blue beams.
+  A funnel on the other side gathers the three beams back into one.
+functions:
+  - "fan-out: one step starts three in parallel"
+  - "fan-in: a step that waits for all three, and runs exactly once"
+  - outputs from several steps combined in one template
+runs:
+  - name: white light
+    expect:
+      status: completed
+      steps:
+        beam: { status: completed, runs: 1 }
+        red: { status: completed, runs: 1 }
+        green: { status: completed, runs: 1 }
+        blue: { status: completed, runs: 1 }
+        funnel: { status: completed, runs: 1 }
+      outputs:
+        - step: funnel
+          output: echo
+          equals: { mixed: "red+green+blue", source: white }

@@ -1,0 +1,27 @@
+name: Level crossing
+kind: compound
+picture: >
+  A road crosses a quiet branch line. The signal box says no train is coming,
+  so the branch train never runs, and the crossing's lamp shows all clear.
+functions:
+  - a condition on a dependency, reading its output (the branch is skipped)
+  - a condition on a dependency's status ("run this because that was skipped")
+  - a step made ready by a skip, with no later event to wake the engine
+trap:
+  issue: 25
+  broken_looks_like: >
+    branch_train is skipped but crossing_lamp is never scheduled, and the
+    workflow stays running.
+runs:
+  - name: no train coming
+    timeout_seconds: 10
+    expect:
+      status: completed
+      steps:
+        signal_box: { status: completed, runs: 1 }
+        branch_train: { status: skipped, runs: 0 }
+        crossing_lamp: { status: completed, runs: 1 }
+      outputs:
+        - step: crossing_lamp
+          output: echo
+          equals: { lamp: all clear }

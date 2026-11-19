@@ -1,0 +1,40 @@
+# Level crossing: a crossing on a branch line. When no train is coming, the
+# branch train never runs, and the crossing's lamp shows all clear.
+#
+# Nothing else in this workflow finishes after the branch train is skipped.
+# Keep it that way: any later completion makes the engine check readiness
+# again, which would schedule the lamp and hide the bug this machine traps.
+name: machine_level_crossing
+
+activities:
+  - key: signal_box
+    worker: std
+    activity_name: echo
+    parameters:
+      train: none
+    outputs:
+      - echo
+
+  - key: branch_train
+    worker: std
+    activity_name: echo
+    parameters:
+      train: passing the crossing
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: signal_box
+        conditions:
+          - "{{ signal_box.echo.train == 'coming' }}"
+
+  - key: crossing_lamp
+    worker: std
+    activity_name: echo
+    parameters:
+      lamp: all clear
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: branch_train
+        conditions:
+          - "{{ branch_train.status == 'skipped' }}"

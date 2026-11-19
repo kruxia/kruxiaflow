@@ -1,0 +1,46 @@
+# Domino run: four dominoes in a line. Each one reads how many have fallen
+# before it, adds itself, and passes the count and the trail on.
+name: machine_domino_run
+
+activities:
+  - key: domino_1
+    worker: std
+    activity_name: echo
+    parameters:
+      fallen: "{{ INPUT.start + 1 }}"
+      trail: "tip"
+    outputs:
+      - echo
+
+  - key: domino_2
+    worker: std
+    activity_name: echo
+    parameters:
+      fallen: "{{ domino_1.echo.fallen + 1 }}"
+      trail: "{{ domino_1.echo.trail }} tip"
+    outputs:
+      - echo
+    depends_on:
+      - domino_1
+
+  - key: domino_3
+    worker: std
+    activity_name: echo
+    parameters:
+      fallen: "{{ domino_2.echo.fallen + 1 }}"
+      trail: "{{ domino_2.echo.trail }} tip"
+    outputs:
+      - echo
+    depends_on:
+      - domino_2
+
+  - key: domino_4
+    worker: std
+    activity_name: echo
+    parameters:
+      fallen: "{{ domino_3.echo.fallen + 1 }}"
+      trail: "{{ domino_3.echo.trail }} tip"
+    outputs:
+      - echo
+    depends_on:
+      - domino_3

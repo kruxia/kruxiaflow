@@ -1,0 +1,36 @@
+# Railway switch: a lever sets the points, and the train goes down one track.
+# The other track is never used.
+name: machine_railway_switch
+
+activities:
+  - key: lever
+    worker: std
+    activity_name: echo
+    parameters:
+      track: "{{ INPUT.track }}"
+    outputs:
+      - echo
+
+  - key: left_track
+    worker: std
+    activity_name: echo
+    parameters:
+      train: arrived on the left
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: lever
+        conditions:
+          - "{{ lever.echo.track == 'left' }}"
+
+  - key: right_track
+    worker: std
+    activity_name: echo
+    parameters:
+      train: arrived on the right
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: lever
+        conditions:
+          - "{{ lever.echo.track == 'right' }}"

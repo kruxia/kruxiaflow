@@ -1,0 +1,34 @@
+name: Railway switch
+kind: simple
+picture: >
+  A lever moves the points at a fork in the line. The train takes the track
+  the lever chose, and the other track stays empty.
+functions:
+  - a condition on a dependency, reading the dependency's output
+  - the branch whose condition is false is skipped
+  - a workflow with a skipped branch still completes
+runs:
+  - name: lever to the left
+    input: { track: left }
+    expect:
+      status: completed
+      steps:
+        lever: { status: completed, runs: 1 }
+        left_track: { status: completed, runs: 1 }
+        right_track: { status: skipped, runs: 0 }
+      outputs:
+        - step: left_track
+          output: echo
+          equals: { train: arrived on the left }
+  - name: lever to the right
+    input: { track: right }
+    expect:
+      status: completed
+      steps:
+        lever: { status: completed, runs: 1 }
+        left_track: { status: skipped, runs: 0 }
+        right_track: { status: completed, runs: 1 }
+      outputs:
+        - step: right_track
+          output: echo
+          equals: { train: arrived on the right }
