@@ -612,7 +612,7 @@ t=10s+                     └─→ aggregate_results
 - `settings.delay` for rate limiting between iterations
 - `iteration_scoped: true` for per-iteration output storage
 - Loop-back `depends_on` (activity depends on itself with condition)
-- All iterations' results as one array (`{{fetch_page.result}}` on an iteration-scoped activity)
+- All iterations' responses as one array (`{{fetch_page.response}}` on an iteration-scoped activity; `http_request`'s output is `response`)
 - `{{fetch_page.iteration}}`: the number of rounds completed (0 in the first round)
 - Configurable iteration count via workflow input with default
 
