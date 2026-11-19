@@ -17,7 +17,8 @@
 # Prerequisites:
 # - ANTHROPIC_API_KEY for Claude Haiku model
 # - PostgreSQL database with faq_log table
-# - Optional: Redis for distributed caching (falls back to in-memory)
+# - Redis for caching: without KRUXIAFLOW_CACHE_PROVIDER=redis, caching is off
+#   (the default provider is a no-op, and so is the fallback when Redis is unreachable)
 #
 # Database Setup:
 # CREATE TABLE faq_log (
@@ -29,7 +30,7 @@
 #     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 # );
 #
-# Optional Redis Setup (for production caching):
+# Redis Setup (required for caching):
 # docker run -d -p 6379:6379 redis:7-alpine
 # export KRUXIAFLOW_CACHE_PROVIDER=redis
 # export KRUXIAFLOW_REDIS_URL=redis://localhost:6379
@@ -60,6 +61,8 @@
 # - Model: anthropic/claude-haiku-4-5-20251001
 # - Prompt: the instructions plus the user question
 # - max_tokens
+# - The budget fields the orchestrator adds to LLM activities (budget limit,
+#   cost so far, model pricing), which are the same on every run of this workflow
 # This ensures identical questions hit the cache while different questions don't.
 # The key is not configurable; to change what it covers, change the parameters.
 #
@@ -90,8 +93,9 @@ activities:
     settings:
       # Cache this activity's result. The key is not configurable: it is a
       # SHA-256 of the activity name (std.llm_prompt) and all of its resolved
-      # parameters (model, prompt, max_tokens), so the same question with the
-      # same model hits the cache and a different question misses it.
+      # parameters (model, prompt, max_tokens and the budget fields the
+      # orchestrator adds), so the same question with the same model hits the
+      # cache and a different question misses it.
       cache: true
       cache_ttl: 86400  # Seconds: cache for 1 day (default 3600)
       budget:
