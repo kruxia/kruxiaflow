@@ -38,7 +38,7 @@ to recreate the volumes.
 | `06b-rag-index-builder.yaml`           | Batch embedding generation, bulk pgvector storage, unnest insert                | Examples environment, Google API key                    |
 | `06c-rag-query.yaml`                   | Complete RAG pattern: embed → search → augment → generate, MiniJinja loops      | Examples environment, Google + Anthropic API keys       |
 | `07a-agentic-research-simple.yaml`     | Iterative workflows (loops), iteration-scoped storage, budget-aware loops       | Anthropic API key                                       |
-| `07b-agentic-research-complete.yaml`   | Complete iterative research: model fallback, file storage, dual paths           | Examples environment, Anthropic API key                 |
+| `07b-agentic-research-complete.yaml`   | Complete iterative research: model fallback, every round's results, dual paths  | Examples environment, Anthropic API key                 |
 | `08a-rate-limited-api-calls.yaml`      | Iterative loop with `delay`, rate limiting, httpbin.org, configurable page count | Examples environment                                    |
 | `08b-scheduled-daily-report.yaml`      | Activity scheduling with `scheduled_for`, absolute timestamps, ISO 8601         | Examples environment, Anthropic API key                 |
 | `08c-delayed-reminders.yaml`           | Cascading delays, escalating reminders (1m → 3m → 8m), email escalation         | Examples environment                                    |
@@ -406,7 +406,8 @@ curl -X POST http://localhost:8080/api/v1/workflows \
 - Second identical question (within TTL): cache hit → costs $0.000
 
 **Features demonstrated:**
-- Semantic caching for LLM responses (enabled, ttl_seconds, key)
+- Result caching for LLM responses (`cache: true`, `cache_ttl`); the key is a hash of the
+  activity name and its resolved parameters
 - Cache hit tracking in outputs (`{{answer_question.result.cache_hit}}`)
 - Cost tracking with cache awareness
 
@@ -522,8 +523,8 @@ curl -X POST http://localhost:8080/api/v1/workflows \
 ### Example 7b: Complete Agentic Research (Production-Ready)
 
 Full agentic research workflow using Claude Haiku 4.5 for iterative research (with Gemini
-fallback), file storage with iteration scoping, structured field extraction, and dual
-success/failure paths.
+fallback), every round's results kept with iteration scoping, a round counter in conditions,
+and dual success/failure paths.
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/workflow_definitions \
@@ -540,26 +541,31 @@ curl -X POST http://localhost:8080/api/v1/workflows \
 ```
 
 **Features demonstrated (beyond 07a):**
-- Model fallback: Haiku 4.5 primary, Gemini 2.0 Flash Lite fallback for research
-- File storage with iteration scoping (`type: file`, `iteration_scoped: true`)
-- Structured field extraction (`{{evaluate.sufficient}}`)
-- Array access with bracket notation (`{{search_information[*].results}}`)
-- Dual success/failure paths (`publish_success` and `publish_failure`)
-- Complex boolean conditions (`AND`, `<`, `>`)
-- Budget checks in conditions
+- Model fallback: Haiku 4.5 primary, Gemini 2.5 Flash Lite fallback for research
+- Every round's results with `iteration_scoped: true`: `{{search_information.result}}` is the
+  array of all rounds' results, and `{{(search_information.result | last).content}}` is the latest
+- Round counter: `{{search_information.iteration}}`, the rounds completed so far
+- Dual success/failure paths: `compile_report` → `publish_success` when the evaluation says
+  SUFFICIENT, `publish_failure` when it still says CONTINUE after 5 rounds
+- Boolean conditions as single expressions
+  (`{{ 'CONTINUE' in (evaluate_sufficiency.result | last).content and search_information.iteration >= 5 }}`)
+
+Templates and conditions can't read an activity's accumulated cost or remaining budget, so
+the loop can't exit early on a low budget; `settings.budget` fails the activity instead.
+`{{ACTIVITY.remaining_budget_usd}}` in `evaluate_sufficiency`'s prompt is not set yet (#32).
 
 **Differences from 07a:**
 
-| Feature                | 07a (Simple)               | 07b (Complete)                             |
-|------------------------|----------------------------|--------------------------------------------|
-| Research activity      | LLM simulates research     | Haiku 4.5 with Gemini fallback              |
-| Loop condition syntax  | String matching            | Structured field access                     |
-| Results storage        | Inline JSON                | Files with iteration scoping                |
-| Array access           | Implicit (Jinja filters)   | Explicit ([*] bracket notation)             |
-| Failure handling       | Implicit (timeout/error)   | Explicit publish_failure activity           |
-| Budget checks          | Activity-level only        | Condition-level remaining checks            |
-| External dependencies  | None (LLM-only)            | Anthropic API key (+ Google for fallback)   |
-| Production readiness   | Educational demo           | Production-ready pattern                    |
+| Feature               | 07a (Simple)             | 07b (Complete)                            |
+|-----------------------|--------------------------|-------------------------------------------|
+| Research activity     | LLM simulates research   | Haiku 4.5 with Gemini fallback            |
+| Loop condition syntax | String matching          | String matching plus the round counter    |
+| Results storage       | Inline JSON              | Every round's result (iteration_scoped)   |
+| Array access          | Implicit (Jinja filters) | Explicit (map, join and last filters)     |
+| Failure handling      | Implicit (timeout/error) | Explicit publish_failure activity         |
+| Budget checks         | Activity-level only      | Activity-level only                       |
+| External dependencies | None (LLM-only)          | Anthropic API key (+ Google for fallback) |
+| Production readiness  | Educational demo         | Production-ready pattern                  |
 
 ---
 
@@ -606,7 +612,7 @@ t=10s+                     └─→ aggregate_results
 - `settings.delay` for rate limiting between iterations
 - `iteration_scoped: true` for per-iteration output storage
 - Loop-back `depends_on` (activity depends on itself with condition)
-- All iterations' results as one array (`{{fetch_page.result}}` on an iteration-scoped activity)
+- All iterations' responses as one array (`{{fetch_page.response}}` on an iteration-scoped activity; `http_request`'s output is `response`)
 - `{{fetch_page.iteration}}`: the number of rounds completed (0 in the first round)
 - Configurable iteration count via workflow input with default
 
@@ -767,7 +773,7 @@ gather_sources  ──┘
 - Selective streaming: only the final long-form output streams
 - Non-streaming preparation steps for efficiency
 - Multi-step workflow with streaming final output
-- Budget enforcement with warn action ($0.10)
+- Budget enforcement with the `continue` action ($0.10): logs a warning and keeps going
 
 ---
 

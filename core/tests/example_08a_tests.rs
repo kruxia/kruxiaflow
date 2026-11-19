@@ -126,7 +126,9 @@ impl Run {
                     workflow_id: self.wf,
                     event_type: WorkflowEventType::ActivityCompleted,
                     activity_key: Some(key),
-                    payload: json!({ "outputs": { "result": { "status_code": 200 } } }),
+                    // `http_request` returns its result as the `response` output
+                    // (worker/src/activities/http.rs), so the fake does too
+                    payload: json!({ "outputs": { "response": { "status_code": 200 } } }),
                     iteration,
                 })
                 .await
@@ -159,6 +161,24 @@ async fn assert_pages(pool: PgPool, input: Value, pages: u32) {
         .map(|p| json!(format!("https://httpbin.org/get?page={p}")))
         .collect();
     assert_eq!(fetched, expected);
+
+    // The email lists every page's response, so the example reads the
+    // output name `http_request` actually produces
+    let text: Option<String> = sqlx::query_scalar(
+        "SELECT parameters->'body'->>'Text' FROM activity_queue \
+         WHERE workflow_id = $1 AND activity_key = 'aggregate_results' \
+         ORDER BY id DESC LIMIT 1",
+    )
+    .bind(run.wf)
+    .fetch_one(&run.pool)
+    .await
+    .expect("queued aggregate_results row");
+    let text = text.unwrap_or_default();
+    assert_eq!(
+        text.matches("status_code").count(),
+        pages as usize,
+        "aggregate_results text: {text}"
+    );
 }
 
 /// The documented submission: `{"num_pages": 3}` fetches pages 0, 1, 2

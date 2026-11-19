@@ -105,8 +105,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which render to a non-empty string and so were always true (the loop ran
   to `iteration_limit`), and its email body used `{{fetch_page[*].result}}`,
   which is not template syntax. The conditions are now single expressions,
-  and the body uses `{{fetch_page.result}}`, the array of every round's
-  result. A new test runs the example through the orchestrator.
+  and the body uses `{{fetch_page.response}}`, the array of every round's
+  response (`http_request`'s output is `response`, not `result`, which the
+  example also declared). A new test runs the example through the
+  orchestrator.
 - **A signaled activity runs.** After `POST /api/v1/workflows/{id}/signal`
   the orchestrator evaluated the activity again, found `wait_for_signal`,
   and tried to create its subscription a second time. The first row was
@@ -122,6 +124,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `"signaled": true`; the workflow then waited for good. Subscriptions now
   record the loop round (migration `20261119000001` adds
   `activity_event_subscriptions.iteration`) and their events carry it.
+- **Examples 06a and 09b can be submitted.** They failed to parse. 06a's
+  `cache:` was a map (`enabled`, `ttl_seconds`, `key`), but `cache` is a
+  boolean with the TTL in `cache_ttl`; it is now `cache: true` and
+  `cache_ttl: 86400`. The cache key can't be configured: it is a hash of the
+  activity name and all of its resolved parameters, which covers the model and
+  prompt the old `key` listed. Its header no longer says caching falls back
+  to in-memory: without `KRUXIAFLOW_CACHE_PROVIDER=redis`, caching is off.
+  09b's budget `action: warn` is now `continue`, which logs a warning and
+  keeps going.
+- **Example 07b's conditions and templates resolve.** Its conditions were two
+  templates joined by an operator, or by `OR` outside a template, so they
+  rendered to a non-empty string and were always true. It also used `[*]`,
+  which is not template syntax, outputs `llm_prompt` doesn't produce
+  (`results`, `sufficient`, `reason`, `gaps`, file outputs), and per-step cost
+  fields templates can't read. The conditions are now single expressions on
+  the evaluation's reply and `{{search_information.iteration}}`, every round's
+  results are read from the iteration-scoped `result` array, and the loop's
+  budget-based exit is gone: `settings.budget` still fails an activity over
+  its budget. `{{ACTIVITY.remaining_budget_usd}}` in its prompt still depends
+  on #32.
+- **Every example is parsed by the test suite.** A new test parses and
+  validates each file in `examples/`, so an example the engine can't accept
+  fails the build.
 
 ## [0.12.1] - 2026-11-17
 
