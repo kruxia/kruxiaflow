@@ -194,12 +194,10 @@ struct Engine {
     pool: PgPool,
     http: reqwest::Client,
     shutdown: CancellationToken,
-}
-
-impl Drop for Engine {
-    fn drop(&mut self) {
-        self.shutdown.cancel();
-    }
+    /// The orchestrator, stopped by `shutdown`
+    orchestrator: tokio::task::JoinHandle<()>,
+    /// The API server and the worker's tasks, which are aborted
+    others: Vec<tokio::task::JoinHandle<()>>,
 }
 
 async fn create_oauth_client(pool: &PgPool, client_id: &str, client_secret: &str) {
@@ -257,11 +255,11 @@ impl Engine {
             .expect("bind API");
         let url = format!("http://{}", listener.local_addr().unwrap());
         let app = app_router(state);
-        tokio::spawn(async move {
+        let mut others = vec![tokio::spawn(async move {
             axum::serve(listener, app).await.expect("API server");
-        });
+        })];
 
-        {
+        let orchestrator = {
             let (events, queue, subscriptions, pool, shutdown) = (
                 events.clone(),
                 queue.clone(),
@@ -275,8 +273,8 @@ impl Engine {
                 run_orchestrator(events, queue, subscriptions, config, Some(shutdown))
                     .await
                     .expect("orchestrator");
-            });
-        }
+            })
+        };
 
         let http = reqwest::Client::new();
         let started = Instant::now();
@@ -309,8 +307,7 @@ impl Engine {
             registry,
             storage,
         );
-        // The handles are dropped: the worker runs until the test ends
-        let _handles = worker.start().await.expect("start worker");
+        others.extend(worker.start().await.expect("start worker"));
 
         let token: Value = http
             .post(format!("{url}/api/v1/oauth/token"))
@@ -336,7 +333,21 @@ impl Engine {
             pool,
             http,
             shutdown,
+            orchestrator,
+            others,
         }
+    }
+
+    /// Stop everything, so no connection outlives the test and its
+    /// database can be dropped
+    async fn stop(self) {
+        self.shutdown.cancel();
+        let _ = tokio::time::timeout(Duration::from_secs(5), self.orchestrator).await;
+        for task in self.others {
+            task.abort();
+            let _ = task.await;
+        }
+        self.pool.close().await;
     }
 
     async fn deploy(&self, dir: &str, yaml: &str) -> (String, String) {
@@ -711,6 +722,7 @@ async fn run_shop(pool: PgPool, mode: Mode) {
         }
     };
     let total = started.elapsed().as_secs_f64();
+    engine.stop().await;
 
     let board = scoreboard(mode, &rows, &machines, total);
     println!("\n{board}");
