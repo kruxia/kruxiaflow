@@ -57,7 +57,7 @@ Before this was fixed, the step after the head re-ran after each of its own comp
 - **No redeploy needed.** Definitions deployed before this fix marked only the two ends of a back-edge as loop activities. The orchestrator completes the marking each time it loads a definition, from the back-edges stored with it, so existing definitions and runs already in flight get every step of a longer loop running each round.
 - **Middle steps now count iterations.** They are loop activities now, so `{{ACTIVITY.iteration}}` and `{{step.iteration}}` count up for them, and `iteration_scoped: true` stores their per-round outputs. Before, they stayed at 0.
 
-**Known limitation: parallel branches inside a loop.** When a loop splits into branches of different lengths that join again (`head → a → b → join` alongside `head → c → join`), the join runs as soon as *any* of its inputs is new. It can therefore run once the short branch finishes, using the long branch's output from the previous round, and then again when the long branch finishes. Keep each loop a single chain of steps, or join the branches outside the loop. Requiring *every* input to be new would make the join wait forever whenever a branch's condition is false in a later round, so this needs a fuller design.
+**Parallel branches inside a loop.** When a loop splits into branches of different lengths that join again (`head → a → b → join` alongside `head → c → join`), the join runs once per round, after every branch has finished that round. A step waits while anything upstream of it in the same loop is still running, or is about to run on this round's input. A branch whose condition is false this round doesn't hold the join back: it won't run, so the join runs on that branch's output from the last round it ran. Steps of another loop never hold a step back, even when that loop is upstream (two loops in sequence). Before this was fixed, the join ran as soon as the short branch finished, on the long branch's output from the previous round, and then again (#28).
 
 ---
 
@@ -705,7 +705,8 @@ Kruxia Flow uses precomputed metadata for loop detection:
 - Check if dependency is back-edge: O(1) (cached metadata lookup)
 - Assign the completion's sequence number: O(V), a scan for the highest `completion_seq` among the workflow's activities (V is small, and this is in memory)
 - Check a completed loop activity for new input: O(D), its dependencies' `completion_seq`
-- **No graph traversal in orchestrator hot path**
+- Check a completed loop activity, otherwise ready, for unfinished work upstream in its loop: O(V + E), three walks of the definition's dependencies. Only done while such an activity is otherwise ready to run again, not on every evaluation
+- **No graph traversal in orchestrator hot path** otherwise
 
 ### Storage Efficiency
 
