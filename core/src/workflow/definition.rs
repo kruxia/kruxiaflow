@@ -253,6 +253,21 @@ impl WorkflowDefinition {
     fn detect_and_validate_loops(&mut self) -> Result<(), ValidationErrors> {
         let mut errors = ValidationErrors::new();
 
+        // Loop metadata is computed here, never taken from the input: an
+        // exported definition carries the markings it was stored with, which
+        // may predate the current rules (#26)
+        for activity in &mut self.activities {
+            activity.is_loop_activity = false;
+            for dep in activity
+                .depends_on
+                .iter_mut()
+                .chain(activity.dependency_of.iter_mut())
+                .flatten()
+            {
+                dep.is_back_edge = false;
+            }
+        }
+
         // Perform topological sort to identify back-edges
         // Back-edges are edges from later to earlier in topological order
         let loops = match self.detect_loops() {
@@ -284,22 +299,24 @@ impl WorkflowDefinition {
 
                 // Mark the specific dependency that is the back-edge
                 // LoopEdge represents the graph edge from -> to
-                // In dependency notation: edge A->B means "B depends_on A"
-                // So the back-edge should be marked on activity.key==to, dep.activity_key==from
-                if activity.key == loop_edge.to {
-                    // Check both depends_on and dependency_of (before normalization)
-                    if let Some(depends_on) = &mut activity.depends_on {
-                        for dep in depends_on {
-                            if dep.activity_key == loop_edge.from {
-                                dep.is_back_edge = true;
-                            }
+                // In dependency notation: edge A->B means "B depends_on A",
+                // written either as `to.depends_on: [from]` or as
+                // `from.dependency_of: [to]` (before normalization)
+                if activity.key == loop_edge.to
+                    && let Some(depends_on) = &mut activity.depends_on
+                {
+                    for dep in depends_on {
+                        if dep.activity_key == loop_edge.from {
+                            dep.is_back_edge = true;
                         }
                     }
-                    if let Some(dependency_of) = &mut activity.dependency_of {
-                        for dep in dependency_of {
-                            if dep.activity_key == loop_edge.from {
-                                dep.is_back_edge = true;
-                            }
+                }
+                if activity.key == loop_edge.from
+                    && let Some(dependency_of) = &mut activity.dependency_of
+                {
+                    for dep in dependency_of {
+                        if dep.activity_key == loop_edge.to {
+                            dep.is_back_edge = true;
                         }
                     }
                 }
@@ -346,6 +363,19 @@ impl WorkflowDefinition {
                         .push(dep.activity_key.as_str());
                 }
             }
+        }
+
+        // Visit dependents in the order they are written, whether the
+        // dependency was written as `depends_on` or `dependency_of`, so the
+        // back-edges found are the same before and after normalization (#26)
+        let position: HashMap<&str, usize> = self
+            .activities
+            .iter()
+            .enumerate()
+            .map(|(idx, activity)| (activity.key.as_str(), idx))
+            .collect();
+        for dependents in graph.values_mut() {
+            dependents.sort_by_key(|key| position.get(key).copied().unwrap_or(usize::MAX));
         }
 
         // Perform topological sort using Kahn's algorithm
@@ -406,11 +436,12 @@ impl WorkflowDefinition {
         let mut visited = HashSet::new();
         let mut rec_stack = HashSet::new();
 
-        // Find all back-edges using DFS
-        // Sort keys for deterministic iteration order (HashMap iteration is non-deterministic)
-        let mut nodes: Vec<&str> = graph.keys().copied().collect();
-        nodes.sort();
-        for node in nodes {
+        // Find all back-edges using DFS, starting from the activities in the
+        // order they are written. A loop is entered at its first written step
+        // (or where an earlier step leads into it), so the back-edge is the
+        // dependency that leads back there, whatever the keys are called. The
+        // search used to start from the alphabetically first key (#26).
+        for node in self.activities.iter().map(|activity| activity.key.as_str()) {
             if !visited.contains(node) {
                 self.dfs_find_loops(node, graph, &mut visited, &mut rec_stack, &mut loops);
             }
@@ -446,51 +477,24 @@ impl WorkflowDefinition {
                 if !visited.contains(neighbor) {
                     self.dfs_find_loops(neighbor, graph, visited, rec_stack, loops);
                 } else if rec_stack.contains(neighbor) {
-                    // Found a back-edge (loop)
-                    // In a cycle, check both directions for conditions
-                    // The back-edge is the one with the loop condition
+                    // Found a back-edge (loop): the DFS edge node -> neighbor,
+                    // "neighbor depends_on node", leads back to a step already
+                    // on the path, which was entered first in written order
+                    let condition_forward = self.dependency_conditions(neighbor, node);
 
-                    // Check current direction: node depends_on neighbor (edge: neighbor -> node)
-                    // This means "neighbor.depends_on.node" has the condition
-                    let mut condition_forward = None;
-                    if let Some(activity) = self.activities.iter().find(|a| a.key == neighbor)
-                        && let Some(depends_on) = &activity.depends_on
-                    {
-                        for dep in depends_on {
-                            if dep.activity_key == node {
-                                condition_forward = dep.conditions.clone();
-                            }
-                        }
-                    }
+                    // In a two-step loop the reverse dependency, "node
+                    // depends_on neighbor", closes the loop too. If only it has
+                    // a condition, it is the back-edge (the loop's exit)
+                    let condition_reverse = self.dependency_conditions(node, neighbor);
 
-                    // Check reverse direction: neighbor depends_on node (edge: node -> neighbor)
-                    // This means "node.depends_on.neighbor" has the condition
-                    let mut condition_reverse = None;
-                    if let Some(activity) = self.activities.iter().find(|a| a.key == node)
-                        && let Some(depends_on) = &activity.depends_on
-                    {
-                        for dep in depends_on {
-                            if dep.activity_key == neighbor {
-                                condition_reverse = dep.conditions.clone();
-                            }
-                        }
-                    }
-
-                    // Determine back-edge direction based on which edge has the condition
-                    // The back-edge is the one that loops back (has the condition)
-                    // condition_reverse: node depends_on neighbor → edge is neighbor -> node
-                    // condition_forward: neighbor depends_on node → edge is node -> neighbor
-                    let (from, to, condition) = if condition_reverse.is_some() {
-                        // node depends_on neighbor with condition → back-edge: neighbor -> node
-                        (neighbor.to_string(), node.to_string(), condition_reverse)
-                    } else if condition_forward.is_some() {
-                        // neighbor depends_on node with condition → back-edge: node -> neighbor
-                        (node.to_string(), neighbor.to_string(), condition_forward)
-                    } else {
-                        // No condition found - use DFS traversal direction as default
-                        // DFS edge node -> neighbor means we're at node going to neighbor
-                        (node.to_string(), neighbor.to_string(), None)
-                    };
+                    let (from, to, condition) =
+                        if condition_forward.is_none() && condition_reverse.is_some() {
+                            // back-edge: neighbor -> node
+                            (neighbor.to_string(), node.to_string(), condition_reverse)
+                        } else {
+                            // back-edge: node -> neighbor, the DFS edge
+                            (node.to_string(), neighbor.to_string(), condition_forward)
+                        };
 
                     loops.push(LoopEdge {
                         from,
@@ -502,6 +506,27 @@ impl WorkflowDefinition {
         }
 
         rec_stack.remove(node);
+    }
+
+    /// Conditions on "`activity` depends on `dependency`", written either as
+    /// `activity.depends_on` or as `dependency.dependency_of` (before
+    /// normalization). None if there are none, or no such dependency.
+    fn dependency_conditions(&self, activity: &str, dependency: &str) -> Option<Vec<String>> {
+        let depends_on = self
+            .activities
+            .iter()
+            .filter(|a| a.key == activity)
+            .flat_map(|a| a.depends_on.iter().flatten())
+            .filter(|dep| dep.activity_key == dependency);
+        let dependency_of = self
+            .activities
+            .iter()
+            .filter(|a| a.key == dependency)
+            .flat_map(|a| a.dependency_of.iter().flatten())
+            .filter(|dep| dep.activity_key == activity);
+        depends_on
+            .chain(dependency_of)
+            .find_map(|dep| dep.conditions.clone())
     }
 
     /// Validate that a loop edge has proper configuration (exit mechanism)
@@ -602,7 +627,8 @@ impl WorkflowDefinition {
                         .push(ActivityRelationship {
                             activity_key: activity.key.clone(),
                             conditions: relationship.conditions.clone(),
-                            is_back_edge: false, // Always computed during validation
+                            // Computed during validation, which runs first
+                            is_back_edge: relationship.is_back_edge,
                         });
                 }
             }
@@ -3735,5 +3761,181 @@ activities:
         assert!(is_loop("head") && is_loop("middle") && is_loop("tail"));
         assert!(!is_loop("start"));
         assert!(!is_loop("done"));
+    }
+
+    /// The back-edges of a definition, as (activity, the dependency marked
+    /// `is_back_edge`), in written order
+    fn back_edges(definition: &WorkflowDefinition) -> Vec<(String, String)> {
+        definition
+            .activities
+            .iter()
+            .flat_map(|activity| {
+                activity
+                    .depends_on
+                    .iter()
+                    .flatten()
+                    .filter(|dep| dep.is_back_edge)
+                    .map(|dep| (activity.key.clone(), dep.activity_key.clone()))
+            })
+            .collect()
+    }
+
+    fn pair(activity: &str, dependency: &str) -> (String, String) {
+        (activity.to_string(), dependency.to_string())
+    }
+
+    /// The repair loop from #26 (`run → check → fix → run`)
+    const REPAIR_LOOP: &str = r#"
+name: repair
+activities:
+  - key: run
+    activity_name: echo
+    iteration_limit: 5
+    depends_on:
+      - activity_key: fix
+        conditions: ["{{ fix.status == 'completed' }}"]
+  - key: check
+    activity_name: echo
+    depends_on: [run]
+  - key: fix
+    activity_name: echo
+    depends_on:
+      - activity_key: check
+        conditions: ["{{ check.result == 'fail' }}"]
+  - key: done
+    activity_name: echo
+    depends_on:
+      - activity_key: check
+        conditions: ["{{ check.result == 'pass' }}"]
+"#;
+
+    /// #26 [loop-backedge-by-name]: the back-edge is the dependency that leads
+    /// back to the loop's first written step, whatever the keys are called.
+    /// It used to be found by a search starting from the alphabetically first
+    /// key, so here `check`'s dependency on `run` was taken as the back-edge
+    #[test]
+    fn test_back_edge_follows_written_order_not_key_names() {
+        let definition = WorkflowDefinition::from_yaml(REPAIR_LOOP).unwrap();
+        assert_eq!(back_edges(&definition), vec![pair("run", "fix")]);
+
+        // Renaming the steps must not move the back-edge
+        let renamed = REPAIR_LOOP
+            .replace("run", "z_run")
+            .replace("check", "y_check")
+            .replace("fix", "x_fix");
+        let renamed = WorkflowDefinition::from_yaml(&renamed).unwrap();
+        assert_eq!(back_edges(&renamed), vec![pair("z_run", "x_fix")]);
+    }
+
+    /// #26: a loop with two branches (`head → a → a2 → join`, `head → b →
+    /// join`, `join → head`). Searching from key `a` took `b → join` as a second
+    /// back-edge, which has no exit mechanism, so validation failed
+    #[test]
+    fn test_diamond_loop_has_one_back_edge_to_its_first_step() {
+        let definition = WorkflowDefinition::from_yaml(
+            r#"
+name: diamond
+activities:
+  - key: head
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - activity_key: join
+        conditions: ["{{ join.status == 'completed' }}"]
+  - key: a
+    activity_name: echo
+    depends_on: [head]
+  - key: a2
+    activity_name: echo
+    depends_on: [a]
+  - key: b
+    activity_name: echo
+    depends_on: [head]
+  - key: join
+    activity_name: echo
+    depends_on: [a2, b]
+"#,
+        )
+        .expect("a loop with an exit mechanism is valid");
+        assert_eq!(back_edges(&definition), vec![pair("head", "join")]);
+    }
+
+    /// #26: a loop written with `dependency_of` gets the same back-edge, both
+    /// when parsed and when validated again after normalization (as the
+    /// repository does before storing). The condition on the `dependency_of`
+    /// entry is the loop's exit mechanism
+    #[test]
+    fn test_back_edge_written_with_dependency_of() {
+        let mut definition = WorkflowDefinition::from_yaml(
+            r#"
+name: repair
+activities:
+  - key: run
+    activity_name: echo
+  - key: check
+    activity_name: echo
+    depends_on: [run]
+  - key: fix
+    activity_name: echo
+    depends_on:
+      - activity_key: check
+        conditions: ["{{ check.result == 'fail' }}"]
+    dependency_of:
+      - activity_key: run
+        conditions: ["{{ fix.status == 'completed' }}"]
+"#,
+        )
+        .expect("the condition on the back-edge is an exit mechanism");
+        assert_eq!(back_edges(&definition), vec![pair("run", "fix")]);
+
+        definition.validate().unwrap();
+        assert_eq!(back_edges(&definition), vec![pair("run", "fix")]);
+    }
+
+    /// #26: back-edge and loop markings present in the input (an exported
+    /// definition stored with the old, key-order marking) are recomputed, not
+    /// kept alongside the new ones
+    #[test]
+    fn test_back_edge_markings_in_the_input_are_recomputed() {
+        let exported = REPAIR_LOOP.replace(
+            "    depends_on: [run]\n",
+            "    is_loop_activity: true\n    depends_on:\n      - activity_key: run\n        is_back_edge: true\n",
+        );
+        let exported = format!(
+            "{exported}  - key: after\n    activity_name: echo\n    is_loop_activity: true\n    depends_on: [done]\n"
+        );
+        let definition = WorkflowDefinition::from_yaml(&exported).unwrap();
+        assert_eq!(back_edges(&definition), vec![pair("run", "fix")]);
+        let after = definition
+            .activities
+            .iter()
+            .find(|a| a.key == "after")
+            .unwrap();
+        assert!(!after.is_loop_activity);
+    }
+
+    /// #26: in a two-step loop where both dependencies have conditions, the
+    /// back-edge is the one leading back to the step written first
+    #[test]
+    fn test_two_step_loop_with_conditions_both_ways_follows_written_order() {
+        let definition = WorkflowDefinition::from_yaml(
+            r#"
+name: two_step
+activities:
+  - key: draft
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - activity_key: review
+        conditions: ["{{ review.approved == false }}"]
+  - key: review
+    activity_name: echo
+    depends_on:
+      - activity_key: draft
+        conditions: ["{{ draft.status == 'completed' }}"]
+"#,
+        )
+        .unwrap();
+        assert_eq!(back_edges(&definition), vec![pair("draft", "review")]);
     }
 }

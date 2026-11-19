@@ -40,6 +40,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   completion of its previous round was applied as new, advancing its
   iteration and giving its dependents spurious input. Completions whose
   iteration doesn't match the activity's current iteration are now ignored.
+- **A loop's back-edge follows the order activities are written, not their
+  keys (#26).** The search for the back-edge started from the alphabetically
+  first key, so renaming steps could change how a loop ran. In the repair loop
+  `run → check → fix → run`, `check` started before `run`. A loop with two
+  branches could fail validation. The search now starts from the first written
+  activity, so a loop starts at its first written step.
+  - **Loops written with `dependency_of`** now get their back-edge marked when
+    parsed, and conditions written there count as the loop's exit condition.
+  - **Markings in the input are recomputed.** `is_back_edge` and
+    `is_loop_activity` in a submitted definition (for example an exported one)
+    are ignored, not kept alongside the computed ones.
+  - **Deployed definitions are unchanged.** They and runs in flight keep the
+    back-edge they were stored with. Redeploying an affected definition stores
+    a new version. Examples 07a, 07b and 08a keep the same back-edge.
 
 ## [0.12.1] - 2026-11-17
 

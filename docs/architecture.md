@@ -1873,7 +1873,7 @@ activities:
 
 **Loop Features**:
 
-- **Back-edge detection**: Loops are detected when an activity depends on another activity that appears later in execution order
+- **Back-edge detection**: Loops are detected when an activity depends on another activity that appears later in execution order. When the dependency graph has a cycle, the validator finds back-edges by a depth-first search that starts from the activities in written (list) order and visits dependents in written order; a dependency leading back to an activity on the current path is a back-edge. In a two-step loop, if only the other dependency has conditions, that one is the back-edge. Loop metadata (`is_back_edge`, `is_loop_activity`) is always recomputed at validation, never taken from the input, and `normalize` keeps `is_back_edge` on dependencies converted from `dependency_of`. **Why** (#26): the search used to start from the alphabetically first key, so renaming a step could move the back-edge, starting a loop at the wrong step or failing validation of a valid loop. Written order is what the author controls and what reads as "later" in the definition. Stored definitions keep their persisted back-edges (runs load the definition they started with); a redeploy stores a new version, since the content hash includes `is_back_edge`
 - **Iteration-scoped storage**: Activities with `iteration_scoped: true` store results as arrays, with each iteration appending to the array
 - **Iteration limits**: `iteration_limit` prevents infinite loops by enforcing a maximum number of iterations
 - **Conditional exit**: Loop exits when the back-edge condition evaluates to false

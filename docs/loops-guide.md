@@ -37,9 +37,36 @@ Loops in Kruxia Flow are created by adding a back-edge in the workflow dependenc
 Loops are detected during workflow validation (at registration time):
 
 1. Workflow definition is submitted via `POST /api/v1/workflow_definitions`
-2. Validator performs topological sort to identify back-edges
+2. Validator walks the activities **in the order they are written** to identify back-edges (see [Which Dependency Is the Back-Edge](#which-dependency-is-the-back-edge))
 3. Metadata (`is_loop_activity`, `is_back_edge`) computed and cached in database. Every activity on the cycle is a loop activity, not only the two ends of the back-edge, so loops of three or more steps run every step each round
 4. Orchestrator uses O(1) lookups (no runtime graph traversal needed)
+
+### Which Dependency Is the Back-Edge
+
+The back-edge is chosen by the **order the activities are written**, never by their keys. The validator starts from the first activity in the list and follows each activity to the activities that depend on it. A dependency that leads back to an activity already on that path is the back-edge. So a loop starts at its first written step (or where an earlier step leads into it), and the back-edge is that step's dependency on the loop's last step.
+
+**Write a loop's steps in the order they run.** In this repair loop, `run` is written first, so its dependency on `fix` is the back-edge and `run` starts the first round:
+
+```yaml
+activities:
+  - key: run                  # written first: starts each round
+    iteration_limit: 5
+    depends_on:
+      - activity_key: fix     # the back-edge
+        conditions: ["{{ fix.status == 'completed' }}"]
+  - key: check
+    depends_on: [run]
+  - key: fix
+    depends_on:
+      - activity_key: check
+        conditions: ["{{ check.result == 'fail' }}"]
+```
+
+- **`dependency_of`**: the same rule applies when the loop is written with `dependency_of` (for example `fix` with `dependency_of: [run]`). Conditions written there are the loop's exit condition.
+- **Two-step loops**: if only one of the two dependencies has conditions, that one is the back-edge, whatever the order.
+- **Renaming is safe**: renaming a step does not change which dependency is the back-edge.
+
+Before this was fixed (#26), the search started from the alphabetically first key. A rename could move the back-edge, so a loop could start at the wrong step, or a valid loop with two branches could fail validation. Definitions already deployed keep the back-edge they were stored with, and runs in flight are not affected. Redeploying such a definition stores a new version with the back-edge chosen by written order.
 
 ### How a Round Runs
 
