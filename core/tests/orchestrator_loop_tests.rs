@@ -2067,3 +2067,332 @@ activities:
     assert_eq!(runs.get("d_else"), Some(&1), "{runs:?}");
     assert_eq!(state.status, WorkflowStatus::Completed);
 }
+
+/// What [`drive_loop_workflow`] saw: how often each activity ran, the set of
+/// pending activities at every step, and the workflow's final status.
+struct LoopRun {
+    runs: std::collections::BTreeMap<String, u32>,
+    pending_history: Vec<Vec<String>>,
+    status: kruxiaflow_core::events::models::WorkflowStatus,
+}
+
+/// Drive a workflow through the real orchestrator, acting as the worker:
+/// at every step, complete the pending activities listed in `first` if any
+/// are pending, otherwise every pending activity. Completions carry the loop
+/// activity's iteration, and output it as `round`. Stops when nothing is pending (done, or hung).
+async fn drive_loop_workflow(pool: &PgPool, yaml: &str, first: &[&str]) -> LoopRun {
+    let definition = WorkflowDefinition::from_yaml(yaml).expect("valid loop definition");
+    let definition_id = insert_workflow_definition(pool, &definition).await;
+    let workflow_id = Uuid::now_v7();
+
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
+    let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
+        Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
+    let config = OrchestratorConfig::new(pool.clone());
+
+    let process_all = || async {
+        loop {
+            let events = event_source.poll("orchestrator").await.unwrap();
+            if events.is_empty() {
+                break;
+            }
+            for event in events {
+                kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
+                    &event,
+                    &event_source,
+                    &activity_queue,
+                    &subscription_service,
+                    &config,
+                )
+                .await
+                .expect("process event");
+                event_source
+                    .update_position("orchestrator", event.cursor())
+                    .await
+                    .unwrap();
+            }
+        }
+    };
+    let load = || async {
+        let mut tx = pool.begin().await.unwrap();
+        let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
+        tx.commit().await.unwrap();
+        state
+    };
+
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id,
+            event_type: WorkflowEventType::WorkflowCreated,
+            activity_key: None,
+            payload: json!({
+                "definition_name": definition.name,
+                "workflow_definition_id": definition_id,
+            }),
+            iteration: None,
+        })
+        .await
+        .unwrap();
+
+    let mut runs: std::collections::BTreeMap<String, u32> = Default::default();
+    let mut pending_history = Vec::new();
+    for _ in 0..100 {
+        process_all().await;
+        let state = load().await;
+        let mut pending: Vec<(String, u32)> = state
+            .activities
+            .values()
+            .filter(|a| a.status == WorkflowActivityStatus::Pending)
+            .map(|a| (a.key.clone(), a.iteration))
+            .collect();
+        if pending.is_empty() {
+            break;
+        }
+        pending.sort();
+        pending_history.push(pending.iter().map(|(k, _)| k.clone()).collect());
+        let preferred: Vec<(String, u32)> = pending
+            .iter()
+            .filter(|(k, _)| first.contains(&k.as_str()))
+            .cloned()
+            .collect();
+        let to_complete = if preferred.is_empty() {
+            pending
+        } else {
+            preferred
+        };
+        for (key, iteration) in to_complete {
+            *runs.entry(key.clone()).or_default() += 1;
+            event_source
+                .publish(NewWorkflowEvent {
+                    workflow_id,
+                    event_type: WorkflowEventType::ActivityCompleted,
+                    activity_key: Some(key),
+                    // `round` lets conditions tell rounds apart (0-based)
+                    payload: json!({"outputs": {"result": "ok", "round": iteration}}),
+                    iteration: Some(iteration as i32),
+                })
+                .await
+                .unwrap();
+        }
+    }
+    process_all().await;
+    let status = load().await.status;
+    LoopRun {
+        runs,
+        pending_history,
+        status,
+    }
+}
+
+/// #28 [loop-join-stale-input]: a join of parallel branches of different
+/// lengths inside a loop runs once per round, after both branches finished
+/// that round. It used to run as soon as the short branch finished, on the
+/// long branch's output from the previous round, and then again.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_loop_join_waits_for_every_branch_of_the_round(pool: PgPool) {
+    let run = drive_loop_workflow(
+        &pool,
+        r#"
+name: diamond_loop
+activities:
+  - key: start
+    worker: test
+    activity_name: echo
+  - key: a_head
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - start
+      - activity_key: e_join
+        conditions: ["{{ e_join.status == 'completed' }}"]
+  - key: b_long1
+    worker: test
+    activity_name: echo
+    depends_on: [a_head]
+  - key: c_long2
+    worker: test
+    activity_name: echo
+    depends_on: [b_long1]
+  - key: d_short
+    worker: test
+    activity_name: echo
+    depends_on: [a_head]
+  - key: e_join
+    worker: test
+    activity_name: echo
+    depends_on: [c_long2, d_short]
+"#,
+        &["d_short"],
+    )
+    .await;
+
+    for pending in &run.pending_history {
+        let long_branch_busy = pending.iter().any(|k| k == "b_long1" || k == "c_long2");
+        assert!(
+            !(pending.iter().any(|k| k == "e_join") && long_branch_busy),
+            "e_join scheduled while the long branch is still running its round: {pending:?} \
+             (history {:?})",
+            run.pending_history
+        );
+    }
+    for key in ["a_head", "b_long1", "c_long2", "d_short", "e_join"] {
+        assert_eq!(
+            run.runs.get(key),
+            Some(&3),
+            "{key} runs once per round: {:?}",
+            run.runs
+        );
+    }
+    assert_eq!(
+        run.status,
+        kruxiaflow_core::events::models::WorkflowStatus::Completed,
+        "{:?}",
+        run.runs
+    );
+}
+
+/// #28: a branch that runs in round 1 but whose condition is false from
+/// round 2 on stays `Completed` from round 1. The join must not wait for it
+/// (it will not run again), so the join still runs every round and the
+/// workflow completes instead of hanging.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_loop_join_does_not_wait_for_a_branch_that_will_not_run(pool: PgPool) {
+    let run = drive_loop_workflow(
+        &pool,
+        r#"
+name: diamond_loop_conditional_branch
+activities:
+  - key: start
+    worker: test
+    activity_name: echo
+  - key: a_head
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - start
+      - activity_key: e_join
+        conditions: ["{{ e_join.status == 'completed' }}"]
+  - key: b_long1
+    worker: test
+    activity_name: echo
+    depends_on: [a_head]
+  - key: c_long2
+    worker: test
+    activity_name: echo
+    depends_on: [b_long1]
+  - key: d_cond
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: a_head
+        conditions: ["{{ a_head.round == 0 }}"]
+  - key: e_join
+    worker: test
+    activity_name: echo
+    depends_on: [c_long2, d_cond]
+"#,
+        &["d_cond"],
+    )
+    .await;
+
+    assert_eq!(
+        run.runs.get("d_cond"),
+        Some(&1),
+        "d_cond runs in round 1 only: {:?}",
+        run.runs
+    );
+    for key in ["a_head", "b_long1", "c_long2", "e_join"] {
+        assert_eq!(
+            run.runs.get(key),
+            Some(&3),
+            "{key} runs once per round: {:?} (history {:?})",
+            run.runs,
+            run.pending_history
+        );
+    }
+    assert_eq!(
+        run.status,
+        kruxiaflow_core::events::models::WorkflowStatus::Completed,
+        "the workflow completes, it doesn't hang: {:?} (history {:?})",
+        run.runs,
+        run.pending_history
+    );
+}
+
+/// #28: two loops in sequence (loop 2's head depends on loop 1's tail). Each
+/// loop's steps belong to that loop only: loop 1 still running must not hold
+/// back loop 2, and both complete.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_two_sequential_loops_both_complete(pool: PgPool) {
+    let run = drive_loop_workflow(
+        &pool,
+        r#"
+name: sequential_loops
+activities:
+  - key: start
+    worker: test
+    activity_name: echo
+  - key: a_head
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - start
+      - activity_key: b_tail
+        conditions: ["{{ b_tail.status == 'completed' }}"]
+  - key: b_tail
+    worker: test
+    activity_name: echo
+    depends_on: [a_head]
+  - key: c_head
+    worker: test
+    activity_name: echo
+    iteration_limit: 2
+    depends_on:
+      - b_tail
+      - activity_key: d_tail
+        conditions: ["{{ d_tail.status == 'completed' }}"]
+  - key: d_tail
+    worker: test
+    activity_name: echo
+    depends_on: [c_head]
+"#,
+        &[],
+    )
+    .await;
+
+    assert_eq!(run.runs.get("start"), Some(&1), "{:?}", run.runs);
+    for (key, limit) in [("a_head", 3), ("b_tail", 3), ("c_head", 2), ("d_tail", 2)] {
+        assert_eq!(
+            run.runs.get(key),
+            Some(&limit),
+            "{key} runs its loop's iteration_limit: {:?} (history {:?})",
+            run.runs,
+            run.pending_history
+        );
+    }
+    // Both of loop 2's rounds start while loop 1 is still running: loop 1's
+    // steps are upstream of loop 2's head, but not in its loop
+    let overlapping = run
+        .pending_history
+        .iter()
+        .filter(|p| {
+            p.iter().any(|k| k == "c_head") && p.iter().any(|k| k == "a_head" || k == "b_tail")
+        })
+        .count();
+    assert_eq!(
+        overlapping, 2,
+        "loop 2 is not held back by loop 1: {:?}",
+        run.pending_history
+    );
+    assert_eq!(
+        run.status,
+        kruxiaflow_core::events::models::WorkflowStatus::Completed,
+        "{:?}",
+        run.runs
+    );
+}

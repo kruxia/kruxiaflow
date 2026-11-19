@@ -28,9 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **No redeploy needed:** the orchestrator completes the loop marking of
     every definition it loads, from the stored back-edges, so definitions
     deployed before the fix and runs already in flight are fixed too.
-  - **Known limitation:** a join of parallel branches inside a loop still
-    runs when any of its inputs is new, so it can run on a branch's output
-    from the previous round. See the loops guide.
   - **Behaviour change:** middle steps of such loops now count iterations
     (`{{ACTIVITY.iteration}}`), and with `iteration_scoped: true` they store
     per-round outputs.
@@ -72,6 +69,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was skipped for good when its condition was false in the first round, and
   the workflow completed without it. It now waits while the loop runs, and is
   skipped only once the loop has ended without satisfying it.
+- **A join of parallel branches inside a loop waits for every branch of the
+  round (#28).** With a loop split into branches of different lengths that
+  join again, the join ran as soon as the short branch finished, on the long
+  branch's output from the previous round, and then again. A completed loop
+  activity now also waits while anything upstream of it in the same loop is
+  still running or about to run. A branch whose condition is false that round
+  doesn't hold the join back, and an earlier, separate loop never holds a
+  step back.
 
 ## [0.12.1] - 2026-11-17
 
