@@ -1,8 +1,8 @@
 use super::{
     ConsumerPacing, OrchestratorConfig, Result,
     dependency_evaluator::{
-        find_ready_activities, find_skipped_activities, is_workflow_complete, is_workflow_failed,
-        status_to_string,
+        find_ready_or_unresolvable_activities, find_skipped_or_unresolvable_activities,
+        is_workflow_complete, is_workflow_failed, status_to_string,
     },
     window::InFlightWindow,
     workflow_state::{
@@ -1623,421 +1623,493 @@ pub async fn process_workflow_event(
         return Ok(());
     }
 
-    // 4. Find ready activities (using updated state)
-    let eval_start = std::time::Instant::now();
-    let eval_span = profile_span!(
-        "evaluate_dependencies",
-        num_activities = state.activities.len()
-    );
-    let ready_activities = {
-        let _enter = eval_span.enter();
+    // Steps 4 to 5.5 repeat until a pass skips nothing. Skipping is applied
+    // after scheduling, and a skip can make another activity ready: a
+    // `status == 'skipped'` branch, or a dependent whose other inputs are
+    // done. Skipping publishes no event, so without another pass that activity
+    // was never scheduled and the workflow stayed running (#25). Each extra
+    // pass follows at least one new skip, so the loop ends.
+    loop {
+        // 4. Find ready activities (using updated state)
+        let eval_start = std::time::Instant::now();
+        let eval_span = profile_span!(
+            "evaluate_dependencies",
+            num_activities = state.activities.len()
+        );
+        let ready_activities = {
+            let _enter = eval_span.enter();
 
-        // Log activity state distribution for observability
-        let mut state_counts = std::collections::HashMap::new();
-        for activity in state.activities.values() {
-            *state_counts.entry(&activity.status).or_insert(0) += 1;
+            // Log activity state distribution for observability
+            let mut state_counts = std::collections::HashMap::new();
+            for activity in state.activities.values() {
+                *state_counts.entry(&activity.status).or_insert(0) += 1;
+            }
+            tracing::debug!(
+                "Activity state distribution: not_scheduled={}, pending={}, completed={}, failed={}",
+                state_counts
+                    .get(&WorkflowActivityStatus::NotScheduled)
+                    .unwrap_or(&0),
+                state_counts
+                    .get(&WorkflowActivityStatus::Pending)
+                    .unwrap_or(&0),
+                state_counts
+                    .get(&WorkflowActivityStatus::Completed)
+                    .unwrap_or(&0),
+                state_counts
+                    .get(&WorkflowActivityStatus::Failed)
+                    .unwrap_or(&0)
+            );
+
+            find_ready_or_unresolvable_activities(&definition, &state)?
+        };
+        let (ready_activities, unresolvable_activities) = ready_activities;
+
+        // Activities failed for a template error in this event (#19): not
+        // scheduled, and no ActivityScheduled is published for them
+        let mut template_failed: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+
+        // Dependency conditions that cannot be evaluated fail their activity, not
+        // this event (#19)
+        for (activity, error) in &unresolvable_activities {
+            fail_unresolvable_activity(&mut state, activity, error, event_source).await?;
+            template_failed.insert(activity.key.clone());
         }
-        tracing::debug!(
-            "Activity state distribution: not_scheduled={}, pending={}, completed={}, failed={}",
-            state_counts
-                .get(&WorkflowActivityStatus::NotScheduled)
-                .unwrap_or(&0),
-            state_counts
-                .get(&WorkflowActivityStatus::Pending)
-                .unwrap_or(&0),
-            state_counts
-                .get(&WorkflowActivityStatus::Completed)
-                .unwrap_or(&0),
-            state_counts
-                .get(&WorkflowActivityStatus::Failed)
-                .unwrap_or(&0)
-        );
-
-        find_ready_activities(&definition, &state)?
-    };
-    tracing::trace!(
-        "Dependencies evaluated in {:?} for workflow {} ({} ready)",
-        eval_start.elapsed(),
-        event.workflow_id,
-        ready_activities.len()
-    );
-
-    tracing::debug!(
-        "Found {} ready activities for workflow {}",
-        ready_activities.len(),
-        event.workflow_id
-    );
-
-    // 5. Schedule ready activities to queue
-    if !ready_activities.is_empty() {
-        let schedule_start = std::time::Instant::now();
-        tracing::debug!(
-            "Scheduling {} activities for workflow {}: [{}]",
-            ready_activities.len(),
+        tracing::trace!(
+            "Dependencies evaluated in {:?} for workflow {} ({} ready)",
+            eval_start.elapsed(),
             event.workflow_id,
-            ready_activities
-                .iter()
-                .map(|a| a.key.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
+            ready_activities.len()
         );
 
-        let schedule_span = profile_span!("schedule_activities", count = ready_activities.len());
-        {
-            let _enter = schedule_span.enter();
+        tracing::debug!(
+            "Found {} ready activities for workflow {}",
+            ready_activities.len(),
+            event.workflow_id
+        );
 
-            // Build template context for resolving parameters
-            let context_span = profile_span!("build_template_context");
-            let template_context = {
-                let _enter = context_span.enter();
-                build_template_context(&state, event.workflow_id, &config.secrets)
-            };
+        // 5. Schedule ready activities to queue
+        if !ready_activities.is_empty() {
+            let schedule_start = std::time::Instant::now();
+            tracing::debug!(
+                "Scheduling {} activities for workflow {}: [{}]",
+                ready_activities.len(),
+                event.workflow_id,
+                ready_activities
+                    .iter()
+                    .map(|a| a.key.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
 
-            // Resolve templates in activity parameters
-            let mut activities_to_schedule = Vec::new();
-            for a in &ready_activities {
-                // Resolve template expressions in parameters
-                let params_value =
-                    serde_json::to_value(a.parameters.as_ref().unwrap_or(&Default::default()))
-                        .map_err(|e| {
-                            super::OrchestratorError::TemplateFailed(format!(
-                                "Failed to serialize parameters: {}",
-                                e
-                            ))
-                        })?;
+            let schedule_span =
+                profile_span!("schedule_activities", count = ready_activities.len());
+            {
+                let _enter = schedule_span.enter();
 
-                // Debug: Log input parameters before resolution
-                if a.key == "store_passages"
-                    && let Some(obj) = params_value.as_object()
-                {
+                // Build template context for resolving parameters
+                let context_span = profile_span!("build_template_context");
+                let template_context = {
+                    let _enter = context_span.enter();
+                    build_template_context(&state, event.workflow_id, &config.secrets)
+                };
+
+                // Resolve templates in activity parameters
+                let mut activities_to_schedule = Vec::new();
+                for a in &ready_activities {
+                    // Resolve template expressions in parameters
+                    let params_value =
+                        serde_json::to_value(a.parameters.as_ref().unwrap_or(&Default::default()))
+                            .map_err(|e| {
+                                super::OrchestratorError::TemplateFailed(format!(
+                                    "Failed to serialize parameters: {}",
+                                    e
+                                ))
+                            })?;
+
+                    // Debug: Log input parameters before resolution
+                    if a.key == "store_passages"
+                        && let Some(obj) = params_value.as_object()
+                    {
+                        tracing::info!(
+                            activity = %a.key,
+                            param_keys = ?obj.keys().collect::<Vec<_>>(),
+                            has_embeddings_file_key = obj.contains_key("embeddings_file"),
+                            embeddings_file_template = ?obj.get("embeddings_file"),
+                            "Input parameters BEFORE template resolution"
+                        );
+                    }
+
+                    // Debug: Log dependency activity outputs for template resolution
+                    for dep in a.depends_on.iter().flatten() {
+                        if let Some(dep_state) = state.activities.get(&dep.activity_key)
+                            && let Some(outputs) = &dep_state.outputs
+                        {
+                            let output_names: Vec<_> = outputs.iter().map(|o| &o.name).collect();
+                            tracing::info!(
+                                activity = %a.key,
+                                dependency = %dep.activity_key,
+                                output_names = ?output_names,
+                                "Template context: dependency outputs"
+                            );
+                            // Log the actual output values for debugging
+                            for output in outputs {
+                                tracing::debug!(
+                                    activity = %a.key,
+                                    dependency = %dep.activity_key,
+                                    output_name = %output.name,
+                                    output_value_type = ?output.value.as_object().map(|o| o.keys().collect::<Vec<_>>()).unwrap_or_default(),
+                                    output_value_preview = %format!("{:.200}", output.value),
+                                    "Template context: output detail"
+                                );
+                            }
+                        }
+                    }
+
+                    let resolved_params =
+                        match resolve_template_value(&params_value, &template_context) {
+                            Ok(resolved) => {
+                                // Debug: Log resolved embeddings-related fields
+                                if a.key == "store_passages"
+                                    && let Some(obj) = resolved.as_object()
+                                {
+                                    tracing::info!(
+                                        activity = %a.key,
+                                        embeddings_type = ?obj.get("embeddings").map(|v| match v {
+                                            serde_json::Value::Null => "null",
+                                            serde_json::Value::Array(_) => "array",
+                                            _ => "other",
+                                        }),
+                                        embeddings_file = ?obj.get("embeddings_file"),
+                                        "Resolved store_passages parameters"
+                                    );
+                                }
+                                resolved
+                            }
+                            Err(e) => {
+                                // This activity fails, not the event being processed
+                                // (#19): retrying cannot change a template, and the
+                                // upstream activity whose completion is being handled
+                                // did succeed
+                                fail_unresolvable_activity(
+                                    &mut state,
+                                    a,
+                                    &format!(
+                                        "Failed to resolve templates in activity {}: {}",
+                                        a.key, e
+                                    ),
+                                    event_source,
+                                )
+                                .await?;
+                                template_failed.insert(a.key.clone());
+                                continue;
+                            }
+                        };
+
+                    // Enrich LLM activity parameters with budget information
+                    let activity_name_str = a.activity_name.as_deref().unwrap_or("");
+                    let (params_w_budget, should_schedule) = enrich_llm_activity_params_w_budget(
+                        activity_name_str,
+                        resolved_params,
+                        a,
+                        &definition,
+                        &a.key,
+                        event.workflow_id,
+                        state.activities.get(&a.key).map(|s| s.attempt).unwrap_or(1),
+                        &config.pool,
+                    )
+                    .await?;
+
+                    // Only schedule if budget check passed
+                    if !should_schedule {
+                        tracing::warn!("Skipping LLM activity {} due to budget constraint", a.key);
+                        // Mark activity as failed due to budget
+                        if let Some(activity_state) = state.activities.get_mut(&a.key) {
+                            activity_state.status = WorkflowActivityStatus::Failed;
+                            activity_state
+                                .set_error("Budget exceeded before execution".to_string());
+                        }
+                        continue;
+                    }
+
+                    // Compute iteration for loop activities
+                    let iteration = if a.is_loop_activity {
+                        state.activities.get(&a.key).map(|s| s.iteration as i32)
+                    } else {
+                        None
+                    };
+
+                    // Check if activity has wait_for_signal setting
+                    if let Some(wait_settings) =
+                        a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref())
+                    {
+                        // Activity needs to wait for an external signal before executing
+                        // Create a subscription instead of scheduling to queue
+                        let new_sub = NewSubscription {
+                            workflow_id: event.workflow_id,
+                            activity_key: a.key.clone(),
+                            event_name: wait_settings.event_name.clone(),
+                            on_timeout: wait_settings.on_timeout.clone(),
+                            timeout_seconds: wait_settings.timeout_seconds,
+                        };
+
+                        match subscription_service.create_subscription(new_sub).await {
+                            Ok(sub_id) => {
+                                tracing::info!(
+                                    workflow_id = %event.workflow_id,
+                                    activity_key = %a.key,
+                                    event_name = %wait_settings.event_name,
+                                    timeout_seconds = wait_settings.timeout_seconds,
+                                    subscription_id = %sub_id,
+                                    "Activity now waiting for signal"
+                                );
+
+                                // Mark activity as Waiting in state
+                                if let Some(activity_state) = state.activities.get_mut(&a.key) {
+                                    activity_state.status = WorkflowActivityStatus::Waiting;
+                                    activity_state.started_at = Some(chrono::Utc::now());
+                                }
+
+                                // Publish ActivityWaiting event
+                                let waiting_event = NewWorkflowEvent {
+                                    workflow_id: event.workflow_id,
+                                    event_type: WorkflowEventType::ActivityWaiting,
+                                    activity_key: Some(a.key.clone()),
+                                    payload: json!({
+                                        "event_name": wait_settings.event_name,
+                                        "timeout_seconds": wait_settings.timeout_seconds,
+                                        "on_timeout": format!("{:?}", wait_settings.on_timeout),
+                                    }),
+                                    iteration,
+                                };
+                                event_source.publish(waiting_event).await?;
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    workflow_id = %event.workflow_id,
+                                    activity_key = %a.key,
+                                    "Failed to create subscription: {}",
+                                    e
+                                );
+                                // Mark activity as failed
+                                if let Some(activity_state) = state.activities.get_mut(&a.key) {
+                                    activity_state.status = WorkflowActivityStatus::Failed;
+                                    activity_state.set_error(format!(
+                                        "Failed to create signal subscription: {}",
+                                        e
+                                    ));
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
+                    // Compute scheduled_for based on activity settings (a `delay`
+                    // or `scheduled_for` template can fail like parameters, #19)
+                    let scheduled_for = match compute_scheduled_for(a, &template_context, iteration)
+                    {
+                        Ok(scheduled_for) => scheduled_for,
+                        Err(e) => {
+                            fail_unresolvable_activity(&mut state, a, &e.to_string(), event_source)
+                                .await?;
+                            template_failed.insert(a.key.clone());
+                            continue;
+                        }
+                    };
+
+                    // Get signal_data from activity state if present
+                    let signal_data = state
+                        .activities
+                        .get(&a.key)
+                        .and_then(|s| s.signal_data.clone());
+
+                    // Copy streaming config from activity definition into settings
+                    let settings = {
+                        let mut s = a.settings.clone().unwrap_or_default();
+                        s.streaming = a.streaming.clone();
+                        Some(s)
+                    };
+
+                    activities_to_schedule.push(Activity {
+                        key: a.key.clone(),
+                        worker: a.worker.clone(),
+                        activity_name: a.activity_name.clone().unwrap_or_default(),
+                        parameters: params_w_budget,
+                        settings,
+                        scheduled_for,
+                        output_definitions: a.output_definitions.clone(),
+                        iteration,
+                        signal_data,
+                    });
+                }
+
+                // Log info when activities are started
+                for activity in &activities_to_schedule {
                     tracing::info!(
-                        activity = %a.key,
-                        param_keys = ?obj.keys().collect::<Vec<_>>(),
-                        has_embeddings_file_key = obj.contains_key("embeddings_file"),
-                        embeddings_file_template = ?obj.get("embeddings_file"),
-                        "Input parameters BEFORE template resolution"
+                        workflow_id = %event.workflow_id,
+                        activity_key = %activity.key,
+                        worker = %activity.worker,
+                        activity_name = %activity.activity_name,
+                        iteration = ?activity.iteration,
+                        "Activity started"
                     );
                 }
 
-                // Debug: Log dependency activity outputs for template resolution
-                for dep in a.depends_on.iter().flatten() {
-                    if let Some(dep_state) = state.activities.get(&dep.activity_key)
-                        && let Some(outputs) = &dep_state.outputs
-                    {
-                        let output_names: Vec<_> = outputs.iter().map(|o| &o.name).collect();
-                        tracing::info!(
-                            activity = %a.key,
-                            dependency = %dep.activity_key,
-                            output_names = ?output_names,
-                            "Template context: dependency outputs"
-                        );
-                        // Log the actual output values for debugging
-                        for output in outputs {
+                activity_queue
+                    .schedule(event.workflow_id, activities_to_schedule)
+                    .await?;
+
+                // Update state immediately to mark activities as Pending
+                // This prevents race condition where activity completes before ActivityScheduled event is processed
+                // (Only for activities that were actually scheduled, not those entering Waiting state)
+                for activity in &ready_activities {
+                    // Failed for a template error: its failure is already in flight
+                    if template_failed.contains(&activity.key) {
+                        continue;
+                    }
+                    if let Some(activity_state) = state.activities.get_mut(&activity.key) {
+                        // Skip activities that entered Waiting state (already handled above)
+                        if activity_state.status == WorkflowActivityStatus::Waiting {
+                            continue;
+                        }
+                        // Skip activities that failed (e.g., budget or subscription error)
+                        if activity_state.status == WorkflowActivityStatus::Failed {
+                            continue;
+                        }
+
+                        // Check if this is a loop-back (re-execution)
+                        let is_loop_back =
+                            activity_state.status == WorkflowActivityStatus::Completed;
+
+                        if is_loop_back {
                             tracing::debug!(
-                                activity = %a.key,
-                                dependency = %dep.activity_key,
-                                output_name = %output.name,
-                                output_value_type = ?output.value.as_object().map(|o| o.keys().collect::<Vec<_>>()).unwrap_or_default(),
-                                output_value_preview = %format!("{:.200}", output.value),
-                                "Template context: output detail"
+                                "Activity {} is looping back (iteration={})",
+                                activity.key,
+                                activity_state.iteration
                             );
+
+                            // Reset status for next iteration
+                            // Note: iteration counter and iteration_outputs are preserved
+                            activity_state.status = WorkflowActivityStatus::Pending;
+                            activity_state.started_at = Some(chrono::Utc::now());
+                            activity_state.completed_at = None;
+                            // Don't reset outputs - they're either in iteration_outputs (iteration_scoped)
+                            // or will be overwritten on next completion (non-iteration_scoped)
+                        } else {
+                            // First execution
+                            activity_state.status = WorkflowActivityStatus::Pending;
+                            activity_state.started_at = Some(chrono::Utc::now());
+
+                            // Initialize iteration_outputs if iteration_scoped
+                            if activity.iteration_scoped
+                                && activity_state.iteration_outputs.is_none()
+                            {
+                                activity_state.iteration_outputs =
+                                    Some(std::collections::HashMap::new());
+                                tracing::debug!(
+                                    "Initialized iteration_outputs for iteration_scoped activity {}",
+                                    activity.key
+                                );
+                            }
                         }
                     }
                 }
 
-                let resolved_params = match resolve_template_value(&params_value, &template_context)
-                {
-                    Ok(resolved) => {
-                        // Debug: Log resolved embeddings-related fields
-                        if a.key == "store_passages"
-                            && let Some(obj) = resolved.as_object()
-                        {
-                            tracing::info!(
-                                activity = %a.key,
-                                embeddings_type = ?obj.get("embeddings").map(|v| match v {
-                                    serde_json::Value::Null => "null",
-                                    serde_json::Value::Array(_) => "array",
-                                    _ => "other",
-                                }),
-                                embeddings_file = ?obj.get("embeddings_file"),
-                                "Resolved store_passages parameters"
-                            );
+                // Publish ActivityScheduled events (for external observers)
+                // Note: Orchestrator skips these events to avoid duplicate processing
+                for activity in &ready_activities {
+                    // Never queued: failed for a template error (#19)
+                    if template_failed.contains(&activity.key) {
+                        continue;
+                    }
+                    // Skip activities that entered Waiting state (they got ActivityWaiting events instead)
+                    if let Some(activity_state) = state.activities.get(&activity.key) {
+                        if activity_state.status == WorkflowActivityStatus::Waiting {
+                            continue;
                         }
-                        resolved
+                        if activity_state.status == WorkflowActivityStatus::Failed {
+                            continue;
+                        }
                     }
-                    Err(e) => {
-                        tracing::error!("Template resolution failed for activity {}: {}", a.key, e);
-                        return Err(super::OrchestratorError::TemplateFailed(format!(
-                            "Failed to resolve templates in activity {}: {}",
-                            a.key, e
-                        )));
-                    }
-                };
 
-                // Enrich LLM activity parameters with budget information
-                let activity_name_str = a.activity_name.as_deref().unwrap_or("");
-                let (params_w_budget, should_schedule) = enrich_llm_activity_params_w_budget(
-                    activity_name_str,
-                    resolved_params,
-                    a,
-                    &definition,
-                    &a.key,
-                    event.workflow_id,
-                    state.activities.get(&a.key).map(|s| s.attempt).unwrap_or(1),
-                    &config.pool,
-                )
-                .await?;
+                    tracing::debug!(
+                        "Publishing ActivityScheduled event for {} in workflow {}",
+                        activity.key,
+                        event.workflow_id
+                    );
 
-                // Only schedule if budget check passed
-                if !should_schedule {
-                    tracing::warn!("Skipping LLM activity {} due to budget constraint", a.key);
-                    // Mark activity as failed due to budget
-                    if let Some(activity_state) = state.activities.get_mut(&a.key) {
-                        activity_state.status = WorkflowActivityStatus::Failed;
-                        activity_state.set_error("Budget exceeded before execution".to_string());
-                    }
-                    continue;
-                }
-
-                // Compute iteration for loop activities
-                let iteration = if a.is_loop_activity {
-                    state.activities.get(&a.key).map(|s| s.iteration as i32)
-                } else {
-                    None
-                };
-
-                // Check if activity has wait_for_signal setting
-                if let Some(wait_settings) =
-                    a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref())
-                {
-                    // Activity needs to wait for an external signal before executing
-                    // Create a subscription instead of scheduling to queue
-                    let new_sub = NewSubscription {
-                        workflow_id: event.workflow_id,
-                        activity_key: a.key.clone(),
-                        event_name: wait_settings.event_name.clone(),
-                        on_timeout: wait_settings.on_timeout.clone(),
-                        timeout_seconds: wait_settings.timeout_seconds,
+                    // For looping activities, include iteration to avoid unique constraint violation
+                    let iteration = if activity.is_loop_activity {
+                        state
+                            .activities
+                            .get(&activity.key)
+                            .map(|s| s.iteration as i32)
+                    } else {
+                        None
                     };
 
-                    match subscription_service.create_subscription(new_sub).await {
-                        Ok(sub_id) => {
-                            tracing::info!(
-                                workflow_id = %event.workflow_id,
-                                activity_key = %a.key,
-                                event_name = %wait_settings.event_name,
-                                timeout_seconds = wait_settings.timeout_seconds,
-                                subscription_id = %sub_id,
-                                "Activity now waiting for signal"
-                            );
-
-                            // Mark activity as Waiting in state
-                            if let Some(activity_state) = state.activities.get_mut(&a.key) {
-                                activity_state.status = WorkflowActivityStatus::Waiting;
-                                activity_state.started_at = Some(chrono::Utc::now());
-                            }
-
-                            // Publish ActivityWaiting event
-                            let waiting_event = NewWorkflowEvent {
-                                workflow_id: event.workflow_id,
-                                event_type: WorkflowEventType::ActivityWaiting,
-                                activity_key: Some(a.key.clone()),
-                                payload: json!({
-                                    "event_name": wait_settings.event_name,
-                                    "timeout_seconds": wait_settings.timeout_seconds,
-                                    "on_timeout": format!("{:?}", wait_settings.on_timeout),
-                                }),
-                                iteration,
-                            };
-                            event_source.publish(waiting_event).await?;
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                workflow_id = %event.workflow_id,
-                                activity_key = %a.key,
-                                "Failed to create subscription: {}",
-                                e
-                            );
-                            // Mark activity as failed
-                            if let Some(activity_state) = state.activities.get_mut(&a.key) {
-                                activity_state.status = WorkflowActivityStatus::Failed;
-                                activity_state.set_error(format!(
-                                    "Failed to create signal subscription: {}",
-                                    e
-                                ));
-                            }
-                        }
-                    }
-                    continue;
+                    let scheduled_event = NewWorkflowEvent {
+                        workflow_id: event.workflow_id,
+                        event_type: WorkflowEventType::ActivityScheduled,
+                        activity_key: Some(activity.key.clone()),
+                        payload: json!({
+                            "worker": activity.worker,
+                            "activity_name": activity.activity_name,
+                        }),
+                        iteration,
+                    };
+                    event_source.publish(scheduled_event).await?;
                 }
-
-                // Compute scheduled_for based on activity settings
-                let scheduled_for = compute_scheduled_for(a, &template_context, iteration)?;
-
-                // Get signal_data from activity state if present
-                let signal_data = state
-                    .activities
-                    .get(&a.key)
-                    .and_then(|s| s.signal_data.clone());
-
-                // Copy streaming config from activity definition into settings
-                let settings = {
-                    let mut s = a.settings.clone().unwrap_or_default();
-                    s.streaming = a.streaming.clone();
-                    Some(s)
-                };
-
-                activities_to_schedule.push(Activity {
-                    key: a.key.clone(),
-                    worker: a.worker.clone(),
-                    activity_name: a.activity_name.clone().unwrap_or_default(),
-                    parameters: params_w_budget,
-                    settings,
-                    scheduled_for,
-                    output_definitions: a.output_definitions.clone(),
-                    iteration,
-                    signal_data,
-                });
             }
+            tracing::trace!(
+                "Activities scheduled and events published in {:?} for workflow {}",
+                schedule_start.elapsed(),
+                event.workflow_id
+            );
+        } else {
+            tracing::debug!(
+                "No activities ready to schedule for workflow {} (event: {:?})",
+                event.workflow_id,
+                event.event_type
+            );
+        }
 
-            // Log info when activities are started
-            for activity in &activities_to_schedule {
-                tracing::info!(
-                    workflow_id = %event.workflow_id,
-                    activity_key = %activity.key,
-                    worker = %activity.worker,
-                    activity_name = %activity.activity_name,
-                    iteration = ?activity.iteration,
-                    "Activity started"
-                );
+        // 5.5. Mark activities as Skipped if they can never be scheduled. Repeat
+        // until nothing changes: skipping one activity can make its dependents
+        // skippable, and a single pass left them NotScheduled, so the workflow
+        // never completed (#19). A skip can also make a dependent's condition
+        // evaluable for the first time, and unresolvable (a condition on a
+        // skipped step's result): that activity is failed, like in step 4
+        let mut skipped_any = false;
+        loop {
+            let (skipped_activities, unresolvable_activities) =
+                find_skipped_or_unresolvable_activities(&definition, &state)?;
+            for (activity, error) in &unresolvable_activities {
+                fail_unresolvable_activity(&mut state, activity, error, event_source).await?;
             }
+            if skipped_activities.is_empty() {
+                break;
+            }
+            tracing::debug!(
+                "Marking {} activities as skipped for workflow {}: [{}]",
+                skipped_activities.len(),
+                event.workflow_id,
+                skipped_activities
+                    .iter()
+                    .map(|a| a.key.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
 
-            activity_queue
-                .schedule(event.workflow_id, activities_to_schedule)
-                .await?;
-
-            // Update state immediately to mark activities as Pending
-            // This prevents race condition where activity completes before ActivityScheduled event is processed
-            // (Only for activities that were actually scheduled, not those entering Waiting state)
-            for activity in &ready_activities {
+            for activity in skipped_activities {
                 if let Some(activity_state) = state.activities.get_mut(&activity.key) {
-                    // Skip activities that entered Waiting state (already handled above)
-                    if activity_state.status == WorkflowActivityStatus::Waiting {
-                        continue;
-                    }
-                    // Skip activities that failed (e.g., budget or subscription error)
-                    if activity_state.status == WorkflowActivityStatus::Failed {
-                        continue;
-                    }
-
-                    // Check if this is a loop-back (re-execution)
-                    let is_loop_back = activity_state.status == WorkflowActivityStatus::Completed;
-
-                    if is_loop_back {
-                        tracing::debug!(
-                            "Activity {} is looping back (iteration={})",
-                            activity.key,
-                            activity_state.iteration
-                        );
-
-                        // Reset status for next iteration
-                        // Note: iteration counter and iteration_outputs are preserved
-                        activity_state.status = WorkflowActivityStatus::Pending;
-                        activity_state.started_at = Some(chrono::Utc::now());
-                        activity_state.completed_at = None;
-                        // Don't reset outputs - they're either in iteration_outputs (iteration_scoped)
-                        // or will be overwritten on next completion (non-iteration_scoped)
-                    } else {
-                        // First execution
-                        activity_state.status = WorkflowActivityStatus::Pending;
-                        activity_state.started_at = Some(chrono::Utc::now());
-
-                        // Initialize iteration_outputs if iteration_scoped
-                        if activity.iteration_scoped && activity_state.iteration_outputs.is_none() {
-                            activity_state.iteration_outputs =
-                                Some(std::collections::HashMap::new());
-                            tracing::debug!(
-                                "Initialized iteration_outputs for iteration_scoped activity {}",
-                                activity.key
-                            );
-                        }
-                    }
+                    activity_state.status = WorkflowActivityStatus::Skipped;
+                    skipped_any = true;
                 }
-            }
-
-            // Publish ActivityScheduled events (for external observers)
-            // Note: Orchestrator skips these events to avoid duplicate processing
-            for activity in &ready_activities {
-                // Skip activities that entered Waiting state (they got ActivityWaiting events instead)
-                if let Some(activity_state) = state.activities.get(&activity.key) {
-                    if activity_state.status == WorkflowActivityStatus::Waiting {
-                        continue;
-                    }
-                    if activity_state.status == WorkflowActivityStatus::Failed {
-                        continue;
-                    }
-                }
-
-                tracing::debug!(
-                    "Publishing ActivityScheduled event for {} in workflow {}",
-                    activity.key,
-                    event.workflow_id
-                );
-
-                // For looping activities, include iteration to avoid unique constraint violation
-                let iteration = if activity.is_loop_activity {
-                    state
-                        .activities
-                        .get(&activity.key)
-                        .map(|s| s.iteration as i32)
-                } else {
-                    None
-                };
-
-                let scheduled_event = NewWorkflowEvent {
-                    workflow_id: event.workflow_id,
-                    event_type: WorkflowEventType::ActivityScheduled,
-                    activity_key: Some(activity.key.clone()),
-                    payload: json!({
-                        "worker": activity.worker,
-                        "activity_name": activity.activity_name,
-                    }),
-                    iteration,
-                };
-                event_source.publish(scheduled_event).await?;
             }
         }
-        tracing::trace!(
-            "Activities scheduled and events published in {:?} for workflow {}",
-            schedule_start.elapsed(),
-            event.workflow_id
-        );
-    } else {
-        tracing::debug!(
-            "No activities ready to schedule for workflow {} (event: {:?})",
-            event.workflow_id,
-            event.event_type
-        );
-    }
-
-    // 5.5. Mark activities as Skipped if they can never be scheduled
-    let skipped_activities = find_skipped_activities(&definition, &state)?;
-    if !skipped_activities.is_empty() {
-        tracing::debug!(
-            "Marking {} activities as skipped for workflow {}: [{}]",
-            skipped_activities.len(),
-            event.workflow_id,
-            skipped_activities
-                .iter()
-                .map(|a| a.key.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-
-        for activity in skipped_activities {
-            if let Some(activity_state) = state.activities.get_mut(&activity.key) {
-                activity_state.status = WorkflowActivityStatus::Skipped;
-            }
+        if !skipped_any {
+            break;
         }
     }
 
@@ -2763,6 +2835,63 @@ async fn record_reported_activity_cost(
     );
 
     Ok(totals)
+}
+
+/// Fail an activity whose templates (parameters, `delay`, `scheduled_for`)
+/// cannot be resolved, instead of failing the event being processed (#19).
+///
+/// A template error is deterministic: retrying the event cannot fix it.
+/// Returning it as an event-processing error used to retry the upstream
+/// activity's completion event until it was declared poison, which then
+/// failed the upstream activity (which had succeeded), never ran or failed
+/// this one, and left the workflow running.
+///
+/// Instead the failure goes the way a worker's failure does: the activity is
+/// marked `Pending` (a failure is in flight, so nothing schedules it again or
+/// skips it meanwhile) and a terminal `ActivityFailed` is published. When
+/// that event is processed the activity becomes `Failed` with the template
+/// error as its message, and the normal failure handling applies: dependents
+/// are evaluated (a `status == 'failed'` branch runs, others are skipped) and
+/// the workflow fails if nothing else is left to run.
+async fn fail_unresolvable_activity(
+    state: &mut super::workflow_state::WorkflowState,
+    activity_def: &crate::workflow::ActivityDefinition,
+    error: &str,
+    event_source: &Arc<dyn EventSource>,
+) -> Result<()> {
+    let activity_key = &activity_def.key;
+    let message = format!("TEMPLATE_ERROR: {error}");
+    tracing::error!(
+        workflow_id = %state.workflow_id,
+        activity_key = %activity_key,
+        error = %error,
+        "Template resolution failed; failing the activity"
+    );
+    let Some(activity_state) = state.activities.get_mut(activity_key) else {
+        return Ok(());
+    };
+    activity_state.status = WorkflowActivityStatus::Pending;
+
+    // For looping activities, include iteration to avoid unique constraint violation
+    let iteration = if activity_def.is_loop_activity {
+        Some(activity_state.iteration as i32)
+    } else {
+        None
+    };
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id: state.workflow_id,
+            event_type: WorkflowEventType::ActivityFailed,
+            activity_key: Some(activity_key.clone()),
+            payload: json!({
+                "error": message,
+                "error_code": "TEMPLATE_ERROR",
+                "will_retry": false,
+            }),
+            iteration,
+        })
+        .await?;
+    Ok(())
 }
 
 /// Publish a failure event when a poison message is detected

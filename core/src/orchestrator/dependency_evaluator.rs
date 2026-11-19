@@ -30,6 +30,35 @@ pub fn find_ready_activities<'a>(
     Ok(ready)
 }
 
+/// Activities ready to schedule, and activities whose conditions could not
+/// be evaluated (with the error)
+pub type ReadyOrUnresolvable<'a> = (
+    Vec<&'a ActivityDefinition>,
+    Vec<(&'a ActivityDefinition, String)>,
+);
+
+/// Like [`find_ready_activities`], but an activity whose dependency
+/// conditions cannot be evaluated (a template error, such as a reference to
+/// an undefined value) is returned separately with the error, instead of
+/// failing the whole evaluation (#19). The orchestrator fails that activity;
+/// a deterministic template error must not fail the event being processed.
+pub fn find_ready_or_unresolvable_activities<'a>(
+    definition: &'a WorkflowDefinition,
+    state: &WorkflowState,
+) -> Result<ReadyOrUnresolvable<'a>> {
+    let mut ready = Vec::new();
+    let mut unresolvable = Vec::new();
+    for activity in &definition.activities {
+        match is_activity_ready(activity, definition, state) {
+            Ok(true) => ready.push(activity),
+            Ok(false) => {}
+            Err(OrchestratorError::TemplateFailed(error)) => unresolvable.push((activity, error)),
+            Err(other) => return Err(other),
+        }
+    }
+    Ok((ready, unresolvable))
+}
+
 /// Check if an activity is ready to be scheduled.
 ///
 /// # Methodology
@@ -586,7 +615,26 @@ pub fn find_skipped_activities<'a>(
     definition: &'a WorkflowDefinition,
     state: &WorkflowState,
 ) -> Result<Vec<&'a ActivityDefinition>> {
+    Ok(find_skipped_or_unresolvable_activities(definition, state)?.0)
+}
+
+/// Activities to skip, and activities whose dependency conditions could not
+/// be evaluated (with the error)
+pub type SkippedOrUnresolvable<'a> = ReadyOrUnresolvable<'a>;
+
+/// Like [`find_skipped_activities`], but an activity whose dependencies are
+/// all terminal and whose conditions cannot be evaluated is returned
+/// separately with the error, so the orchestrator can fail it (#19). A
+/// condition can first be evaluated here: when its dependency was itself
+/// skipped earlier in the same skip pass, such as a condition on a skipped
+/// step's result. Left out, the activity stays NotScheduled with nothing to
+/// wake it, and the workflow hangs.
+pub fn find_skipped_or_unresolvable_activities<'a>(
+    definition: &'a WorkflowDefinition,
+    state: &WorkflowState,
+) -> Result<SkippedOrUnresolvable<'a>> {
     let mut skipped = Vec::new();
+    let mut unresolvable = Vec::new();
 
     for activity in &definition.activities {
         // Only consider NotScheduled activities
@@ -625,13 +673,18 @@ pub fn find_skipped_activities<'a>(
         }
 
         // Check if activity is ready (has applicable dependencies)
-        // If not ready and all dependencies are terminal, it should be skipped
-        if !is_activity_ready(activity, definition, state)? {
-            skipped.push(activity);
+        // If not ready and all dependencies are terminal, it should be skipped.
+        // An activity whose conditions can't be evaluated is not skippable:
+        // it is returned to be failed instead
+        match is_activity_ready(activity, definition, state) {
+            Ok(false) => skipped.push(activity),
+            Ok(true) => {}
+            Err(OrchestratorError::TemplateFailed(error)) => unresolvable.push((activity, error)),
+            Err(other) => return Err(other),
         }
     }
 
-    Ok(skipped)
+    Ok((skipped, unresolvable))
 }
 
 #[cfg(test)]
