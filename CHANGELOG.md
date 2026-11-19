@@ -30,6 +30,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `system_prompt`, `database_url` for `db_url`, `body` / `html` for
     `text_body` / `html_body`). Entries now carry each activity's
     `output_shape`.
+  - **`script`:** documented with parameters `code`, `globals` and
+    `timeout` and outputs `stdout` / `stderr`, on worker `python`. The Python
+    worker's activity takes `script` and `inputs`, returns `result` (the
+    script's `OUTPUT`), and runs on `py-std`.
+  - **Silently ineffective fields:** `streaming` under settings (the
+    orchestrator overwrites it with the activity-level `streaming`), and the
+    activity field `output_definitions` (the YAML key is `outputs`).
+  - **The approval example** never processed low-value requests: they
+    skipped the approval step, and the skip cascaded to processing. It now
+    has a direct path for low-value requests.
+  - **Output and parameter descriptions:** `postgres_query` returns `rows` or
+    `rows_affected`, never both; embeddings on a server are always in
+    `embeddings_file`; `download_to_file` is kept as a workflow file only when
+    declared in `outputs`; http `headers` and `query` take string values;
+    `iteration_limit` stops a loop rather than failing it.
+  - **MCP `send_workflow_signal`** claimed that omitting `activity_key`
+    matched the REST API, which always requires it.
   - **README:** the approval-gate example used `wait_for_signal: approval`
     and posted `signal_name`. The setting needs `event_name` and
     `timeout_seconds`, and the signal API takes `activity_key`, `event_name`
@@ -41,7 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Guard against further drift:** new tests validate every guide example
     with the workflow parser (including that no settings key is dropped, and
     that conditions are templates), check the `WORKFLOW` variables, and pin
-    the catalog's parameter and output names to the activities'.
+    the catalog's parameter and output names to the activities', in both
+    directions. Guide examples may use only real activity fields and each
+    activity's real parameters, and the approval example is run through the
+    orchestrator's readiness evaluation for both kinds of request.
 
 ## [0.12.1] - 2026-11-17
 

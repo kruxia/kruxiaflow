@@ -114,12 +114,12 @@ impl ListActivities {
                 "parameters": {
                     "method": "HTTP method: GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS",
                     "url": "Target URL (supports template expressions)",
-                    "headers": "Optional HTTP headers as key-value pairs",
-                    "query": "Optional query parameters as key-value pairs",
-                    "body": "Optional request body (JSON value or string)",
+                    "headers": "Optional HTTP headers: a map of string values",
+                    "query": "Optional query parameters: a map of string values (quote numbers, e.g. page: \"2\")",
+                    "body": "Optional request body, always sent as JSON (a string is sent as a JSON string)",
                     "timeout_seconds": "Request timeout in seconds (default: 30)",
                     "include_body": "Include the response body in the output (default: true)",
-                    "download_to_file": "Stream the response body to a workflow file with this name instead of returning it"
+                    "download_to_file": "Write the response body to a file with this name instead of returning it. It is kept as a workflow file only if the step declares it in outputs (e.g. outputs: [{name: report, type: file}]); otherwise it is written in the worker's working directory"
                 },
                 "outputs": ["response"],
                 "output_shape": "response: {status (HTTP status code), success (true for 2xx), body (parsed JSON, or text)}. Reference as {{step.response.body}} or {{step.response.status}}",
@@ -145,9 +145,9 @@ impl ListActivities {
                 "output_shape": "result: {content (the text), model, provider, finish_reason, cost_usd, usage {prompt_tokens, output_tokens, total_tokens, cached_tokens}, budget_skipped_models}. Reference the text as {{step.result.content}}",
                 "settings": {
                     "retry": "Retry with backoff",
-                    "budget": "Budget limit in USD: {limit, action: abort or continue}",
-                    "streaming": "Token streaming over WebSocket (streaming: true)"
-                }
+                    "budget": "Budget limit in USD: {limit, action: abort or continue}"
+                },
+                "streaming": "Token streaming over WebSocket: set streaming: true on the activity itself, not under settings (a settings value is ignored)"
             },
             {
                 "name": "embedding",
@@ -159,7 +159,7 @@ impl ListActivities {
                     "batch_size": "Texts per provider request (default: 500)"
                 },
                 "outputs": ["result"],
-                "output_shape": "result: {embeddings (array of vectors), model, provider, usage, ...}; large results are streamed to a workflow file and referenced by embeddings_file",
+                "output_shape": "result: {embeddings_file (a workflow file of the vectors, JSON Lines), embedding_count, model, provider, usage}. On a server the vectors are always written to that file and embeddings is null; embeddings holds the vectors inline only when no workflow storage is available",
                 "settings": {
                     "retry": "Retry with backoff",
                     "budget": "Budget limit for embedding costs"
@@ -175,7 +175,7 @@ impl ListActivities {
                     "params": "Array of values bound to the placeholders"
                 },
                 "outputs": ["result"],
-                "output_shape": "result: {rows (array of row objects, for queries returning rows), rows_affected}. Reference as {{step.result.rows[0].column}}",
+                "output_shape": "result: {rows} for SELECT (an array of row objects), or {rows_affected} for INSERT, UPDATE and DELETE; never both. Reference as {{step.result.rows[0].column}}",
                 "settings": {
                     "retry": "Retry for transient errors",
                     "timeout_seconds": "Query timeout in seconds"
@@ -191,7 +191,7 @@ impl ListActivities {
                     "isolation_level": "read_committed (default), repeatable_read, or serializable"
                 },
                 "outputs": ["result"],
-                "output_shape": "result: {success, statements_executed, results (one {rows, rows_affected} per statement)}",
+                "output_shape": "result: {success, statements_executed, results (one per statement: {rows} for SELECT, {rows_affected} otherwise)}",
                 "settings": {
                     "retry": "Retry on serialization failures"
                 }
@@ -219,17 +219,17 @@ impl ListActivities {
             },
             {
                 "name": "script",
-                "worker": "python",
+                "worker": "py-std",
                 "description": "Execute a Python script. Multiple worker pools are available with different pre-installed packages.",
                 "parameters": {
-                    "code": "Python source code to execute",
-                    "globals": "Optional dict of variables injected into global scope",
-                    "timeout": "Execution timeout in seconds (default: 300)"
+                    "script": "Python source code to execute",
+                    "inputs": "Optional object, available to the script as INPUT"
                 },
-                "outputs": ["result", "stdout", "stderr"],
+                "outputs": ["result"],
+                "output_shape": "result: the OUTPUT dict the script assigns (e.g. OUTPUT = {\"rows\": 3}). Reference as {{step.result.rows}}",
                 "settings": {
                     "retry": "Retry for transient failures",
-                    "timeout": "Script execution timeout"
+                    "timeout_seconds": "Activity-level timeout in seconds"
                 },
                 "worker_pools": {
                     "py-std": "General utilities (httpx, orjson, pydantic, dateutil)",
@@ -300,16 +300,16 @@ impl GetWorkflowAuthoringGuide {
                     "activities": "LIST of activity definitions (at least one required). Each entry carries its unique identifier in the 'key' field — a map keyed by activity name is NOT accepted."
                 },
                 "activity_fields": {
-                    "worker": "(optional, default: std) Worker type that executes this activity — std, python, py-std, py-data, py-ml, py-nlp",
+                    "worker": "(optional, default: std) Worker type that executes this activity — std, py-std, py-data, py-ml, py-nlp",
                     "activity_name": "(required) Name of the activity within the worker (e.g. http_request, llm_prompt)",
                     "parameters": "Key-value map passed to the activity at runtime. Supports template expressions.",
                     "depends_on": "List of activity keys that must complete before this one starts. Each entry can be a plain key or {activity_key, conditions}.",
                     "dependency_of": "Inverse of depends_on — declares that other activities depend on this one. Normalised to depends_on internally.",
-                    "settings": "Per-activity settings: retry, timeout_seconds, budget, cache, delay / scheduled_for, wait_for_signal, iteration_limit, streaming (see settings_configuration). Unknown keys are silently ignored, so spell them exactly",
-                    "output_definitions": "Optional: declare expected outputs for validation and documentation",
+                    "settings": "Per-activity settings: retry, timeout_seconds, budget, cache, delay / scheduled_for, wait_for_signal, iteration_limit (see settings_configuration). Unknown keys are silently ignored, so spell them exactly",
+                    "outputs": "Optional: declare the activity's outputs, e.g. [{name: report, type: file}] to keep a file it writes as a workflow file",
                     "iteration_scoped": "If true, outputs are stored per-loop iteration (default: false)",
-                    "iteration_limit": "Max loop iterations before failing (prevents infinite loops)",
-                    "streaming": "Enable token-level streaming for LLM activities"
+                    "iteration_limit": "Max loop iterations (also accepted under settings). At the limit the loop stops: the activity is not run again, and nothing fails",
+                    "streaming": "Enable token-level streaming for LLM activities (here, on the activity, not under settings)"
                 },
                 "example": "name: fetch-and-summarise\nactivities:\n  - key: fetch\n    worker: std\n    activity_name: http_request\n    parameters:\n      method: GET\n      url: \"{{INPUT.url}}\"\n  - key: summarise\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-5\n      prompt: \"Summarise this text: {{fetch.response.body}}\"\n    depends_on: [fetch]"
             },
@@ -391,8 +391,8 @@ impl GetWorkflowAuthoringGuide {
                     "yaml": "name: parallel-merge\nactivities:\n  - key: query_users\n    worker: std\n    activity_name: postgres_query\n    parameters:\n      db_url: \"{{SECRET.db_url}}\"\n      query: \"SELECT * FROM users WHERE active = $1\"\n      params: [true]\n  - key: query_orders\n    worker: std\n    activity_name: postgres_query\n    parameters:\n      db_url: \"{{SECRET.db_url}}\"\n      query: \"SELECT * FROM orders WHERE status = $1\"\n      params: [pending]\n  - key: merge\n    worker: std\n    activity_name: echo\n    parameters:\n      users: \"{{query_users.result.rows}}\"\n      orders: \"{{query_orders.result.rows}}\"\n    depends_on: [query_users, query_orders]"
                 },
                 "conditional_with_signal": {
-                    "description": "Classify input, route to approval if high-value, then process",
-                    "yaml": "name: approval-flow\nactivities:\n  - key: classify\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-5\n      prompt: \"Classify this request as high or low value. Answer with exactly one word, high or low: {{INPUT.request}}\"\n      max_tokens: 16\n  - key: await_approval\n    worker: std\n    activity_name: echo\n    parameters:\n      message: Waiting for approval\n    depends_on:\n      - activity_key: classify\n        conditions: [\"{{ classify.result.content | trim | lower == 'high' }}\"]\n    settings:\n      wait_for_signal:\n        event_name: approval\n        timeout_seconds: 86400\n        on_timeout: fail\n  - key: process\n    worker: std\n    activity_name: http_request\n    parameters:\n      method: POST\n      url: \"{{INPUT.callback_url}}\"\n      body: {status: approved}\n    depends_on: [await_approval]"
+                    "description": "Classify input: low-value requests are processed directly; high-value requests first wait for an approval signal (and fail after 24 hours without one)",
+                    "yaml": "name: approval-flow\nactivities:\n  - key: classify\n    worker: std\n    activity_name: llm_prompt\n    parameters:\n      model: anthropic/claude-sonnet-5\n      prompt: \"Classify this request as high or low value. Answer with exactly one word, high or low: {{INPUT.request}}\"\n      max_tokens: 16\n  - key: await_approval\n    worker: std\n    activity_name: echo\n    parameters:\n      message: Waiting for approval\n    depends_on:\n      - activity_key: classify\n        conditions: [\"{{ classify.result.content | trim | lower == 'high' }}\"]\n    settings:\n      wait_for_signal:\n        event_name: approval\n        timeout_seconds: 86400\n        on_timeout: fail\n  - key: process_low\n    worker: std\n    activity_name: http_request\n    parameters:\n      method: POST\n      url: \"{{INPUT.callback_url}}\"\n      body: {value: low}\n    depends_on:\n      - activity_key: classify\n        conditions: [\"{{ classify.result.content | trim | lower != 'high' }}\"]\n  - key: process_high\n    worker: std\n    activity_name: http_request\n    parameters:\n      method: POST\n      url: \"{{INPUT.callback_url}}\"\n      body: {value: high, approved: true}\n    depends_on: [await_approval]"
                 }
             },
             "best_practices": {
@@ -1025,6 +1025,71 @@ mod tests {
         }
     }
 
+    /// Parameter and output names each activity actually accepts and returns:
+    /// the parameter structs and ActivityResult names in worker/src/activities/
+    /// (http.rs HttpRequestParams, llm.rs LLMPromptParams / EmbeddingParams,
+    /// postgres.rs QueryParams / TransactionParams, email.rs EmailParams,
+    /// echo.rs), and the Python worker's script activity. Update this when an
+    /// activity changes.
+    const ACTIVITY_TRUTH: &[(&str, &[&str], &[&str])] = &[
+        (
+            "http_request",
+            &[
+                "method",
+                "url",
+                "headers",
+                "query",
+                "body",
+                "timeout_seconds",
+                "include_body",
+                "download_to_file",
+            ],
+            &["response"],
+        ),
+        (
+            "llm_prompt",
+            &[
+                "model",
+                "prompt",
+                "system_prompt",
+                "max_tokens",
+                "temperature",
+                "top_p",
+                "stop_sequences",
+            ],
+            &["result"],
+        ),
+        ("embedding", &["model", "input", "batch_size"], &["result"]),
+        (
+            "postgres_query",
+            &["db_url", "query", "params"],
+            &["result"],
+        ),
+        (
+            "postgres_transaction",
+            &["db_url", "statements", "isolation_level"],
+            &["result"],
+        ),
+        (
+            "email_send",
+            &[
+                "smtp_url",
+                "from",
+                "to",
+                "subject",
+                "text_body",
+                "html_body",
+                "cc",
+                "bcc",
+                "reply_to",
+            ],
+            &["result"],
+        ),
+        ("echo", &[], &["echo"]),
+        // py-std worker, kruxiaflow-python kruxiaflow/workers/script_activity.py
+        ("script", &["script", "inputs"], &["result"]),
+    ];
+
     /// The catalog must use the names the activities actually accept and
     /// return. Source of truth: the parameter structs and ActivityResult names
     /// in worker/src/activities/ (http.rs HttpRequestParams, llm.rs
@@ -1033,62 +1098,7 @@ mod tests {
     /// activity changes.
     #[test]
     fn test_catalog_matches_activity_parameters_and_outputs() {
-        let truth: &[(&str, &[&str], &[&str])] = &[
-            (
-                "http_request",
-                &[
-                    "method",
-                    "url",
-                    "headers",
-                    "query",
-                    "body",
-                    "timeout_seconds",
-                    "include_body",
-                    "download_to_file",
-                ],
-                &["response"],
-            ),
-            (
-                "llm_prompt",
-                &[
-                    "model",
-                    "prompt",
-                    "system_prompt",
-                    "max_tokens",
-                    "temperature",
-                    "top_p",
-                    "stop_sequences",
-                ],
-                &["result"],
-            ),
-            ("embedding", &["model", "input", "batch_size"], &["result"]),
-            (
-                "postgres_query",
-                &["db_url", "query", "params"],
-                &["result"],
-            ),
-            (
-                "postgres_transaction",
-                &["db_url", "statements", "isolation_level"],
-                &["result"],
-            ),
-            (
-                "email_send",
-                &[
-                    "smtp_url",
-                    "from",
-                    "to",
-                    "subject",
-                    "text_body",
-                    "html_body",
-                    "cc",
-                    "bcc",
-                    "reply_to",
-                ],
-                &["result"],
-            ),
-            ("echo", &[], &["echo"]),
-        ];
+        let truth = ACTIVITY_TRUTH;
         let result = ListActivities {}.call_tool().unwrap();
         let catalog: serde_json::Value =
             serde_json::from_str(&result.content[0].as_text_content().unwrap().text).unwrap();
@@ -1101,9 +1111,17 @@ mod tests {
                 .find(|a| a["name"] == *name)
                 .unwrap_or_else(|| panic!("{name} missing from catalog"));
             if *name != "echo" {
-                for key in entry["parameters"].as_object().unwrap().keys() {
+                let documented = entry["parameters"].as_object().unwrap();
+                for key in documented.keys() {
                     if !params.contains(&key.as_str()) {
                         problems.push(format!("{name}: catalog parameter {key:?} is not accepted (accepted: {params:?})"));
+                    }
+                }
+                for param in params.iter() {
+                    if !documented.contains_key(*param) {
+                        problems.push(format!(
+                            "{name}: accepted parameter {param:?} is missing from the catalog"
+                        ));
                     }
                 }
             }
@@ -1119,6 +1137,182 @@ mod tests {
                 ));
             }
         }
+        for entry in catalog["activities"].as_array().unwrap() {
+            let name = entry["name"].as_str().unwrap();
+            if !truth.iter().any(|(t, _, _)| *t == name) {
+                problems.push(format!("{name}: in the catalog but not in ACTIVITY_TRUTH"));
+            }
+        }
         assert!(problems.is_empty(), "catalog:\n{}", problems.join("\n"));
+    }
+
+    /// Activity-level keys and parameters in the guide's examples must be
+    /// real: unknown keys are silently ignored (`output_definitions` parsed to
+    /// nothing; `system` instead of `system_prompt` dropped the prompt), and
+    /// `streaming` under settings is overwritten by the activity-level field
+    #[test]
+    fn test_guide_examples_use_real_keys_and_parameters() {
+        const ACTIVITY_KEYS: &[&str] = &[
+            "key",
+            "worker",
+            "activity_name",
+            "parameters",
+            "outputs",
+            "depends_on",
+            "dependency_of",
+            "settings",
+            "iteration_scoped",
+            "iteration_limit",
+            "streaming",
+        ];
+        let mut problems = Vec::new();
+        for (where_, example) in guide_examples() {
+            let yaml = as_workflow(&example);
+            let raw: serde_json::Value = serde_yaml::from_str(&yaml).unwrap();
+            for activity in raw["activities"].as_array().unwrap() {
+                let key = activity["key"].as_str().unwrap_or("?");
+                for field in activity.as_object().unwrap().keys() {
+                    if !ACTIVITY_KEYS.contains(&field.as_str()) {
+                        problems.push(format!("{where_}: {key}: unknown activity field {field:?}"));
+                    }
+                }
+                if activity["settings"].get("streaming").is_some() {
+                    problems.push(format!(
+                        "{where_}: {key}: streaming under settings is ignored; set it on the activity"
+                    ));
+                }
+                let name = activity["activity_name"].as_str().unwrap_or_default();
+                if let (Some((_, params, _)), Some(given)) = (
+                    ACTIVITY_TRUTH.iter().find(|(t, _, _)| *t == name),
+                    activity["parameters"].as_object(),
+                ) && name != "echo"
+                {
+                    for param in given.keys() {
+                        if !params.contains(&param.as_str()) {
+                            problems.push(format!(
+                                "{where_}: {key}: {name} does not accept parameter {param:?}"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        // the activity_fields list names the YAML keys
+        let fields = guide_json()["yaml_structure"]["activity_fields"].clone();
+        assert!(fields.is_object(), "the guide lists activity_fields");
+        for field in fields.as_object().into_iter().flat_map(|f| f.keys()) {
+            if !ACTIVITY_KEYS.contains(&field.as_str()) {
+                problems.push(format!(
+                    "activity_fields: {field:?} is not an activity field"
+                ));
+            }
+        }
+        assert!(problems.is_empty(), "guide:\n{}", problems.join("\n"));
+    }
+
+    /// The approval example routes both kinds of request: low-value ones are
+    /// processed directly, high-value ones wait for the approval step. Driven
+    /// through the orchestrator's own readiness and skip evaluation.
+    #[test]
+    fn test_approval_example_routes_both_values() {
+        use WorkflowActivityStatus::{Completed, NotScheduled, Skipped};
+        use kruxiaflow_core::orchestrator::{
+            ActivityState, WorkflowActivityStatus, WorkflowState, find_ready_activities,
+            find_skipped_activities,
+        };
+        use kruxiaflow_core::workflow::{ActivityOutput, WorkflowDefinition};
+
+        fn activity(
+            key: &str,
+            status: WorkflowActivityStatus,
+            content: Option<&str>,
+        ) -> (String, ActivityState) {
+            (
+                key.to_string(),
+                ActivityState {
+                    key: key.to_string(),
+                    status,
+                    outputs: content.map(|c| {
+                        vec![ActivityOutput::value(
+                            "result",
+                            serde_json::json!({"content": c}),
+                        )]
+                    }),
+                    error: None,
+                    started_at: None,
+                    completed_at: None,
+                    attempt: 1,
+                    last_error: None,
+                    accumulated_cost_usd: rust_decimal::Decimal::ZERO,
+                    iteration: 0,
+                    iteration_outputs: None,
+                    signal_data: None,
+                },
+            )
+        }
+        fn state(activities: Vec<(String, ActivityState)>) -> WorkflowState {
+            WorkflowState {
+                workflow_id: uuid::Uuid::now_v7(),
+                definition_name: "approval-flow".to_string(),
+                status: kruxiaflow_core::events::WorkflowStatus::Running,
+                activities: activities.into_iter().collect(),
+                state_data: serde_json::json!({}),
+                input: serde_json::json!({}),
+                error_message: None,
+            }
+        }
+        fn keys(v: &[&kruxiaflow_core::workflow::ActivityDefinition]) -> Vec<String> {
+            let mut k: Vec<String> = v.iter().map(|a| a.key.clone()).collect();
+            k.sort();
+            k
+        }
+
+        let yaml = guide_json()["complete_examples"]["conditional_with_signal"]["yaml"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let definition = WorkflowDefinition::from_yaml(&yaml).unwrap();
+
+        // low: processed directly; the approval branch is skipped
+        let low = state(vec![
+            activity("classify", Completed, Some("low")),
+            activity("await_approval", NotScheduled, None),
+            activity("process_low", NotScheduled, None),
+            activity("process_high", NotScheduled, None),
+        ]);
+        assert_eq!(
+            keys(&find_ready_activities(&definition, &low).unwrap()),
+            ["process_low"]
+        );
+        assert_eq!(
+            keys(&find_skipped_activities(&definition, &low).unwrap()),
+            ["await_approval"]
+        );
+        let low_after_skip = state(vec![
+            activity("classify", Completed, Some("low")),
+            activity("await_approval", Skipped, None),
+            activity("process_low", NotScheduled, None),
+            activity("process_high", NotScheduled, None),
+        ]);
+        assert_eq!(
+            keys(&find_skipped_activities(&definition, &low_after_skip).unwrap()),
+            ["process_high"]
+        );
+
+        // high (as a model might answer): waits for approval first
+        let high = state(vec![
+            activity("classify", Completed, Some(" High\n")),
+            activity("await_approval", NotScheduled, None),
+            activity("process_low", NotScheduled, None),
+            activity("process_high", NotScheduled, None),
+        ]);
+        assert_eq!(
+            keys(&find_ready_activities(&definition, &high).unwrap()),
+            ["await_approval"]
+        );
+        assert_eq!(
+            keys(&find_skipped_activities(&definition, &high).unwrap()),
+            ["process_low"]
+        );
     }
 }
