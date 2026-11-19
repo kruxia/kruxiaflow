@@ -2539,3 +2539,52 @@ activities:
         "each round runs run, check, then fix while the check fails"
     );
 }
+
+/// Integration probe: the issue keys for #26 with #27's exit step
+#[sqlx::test(migrations = "../migrations")]
+async fn probe_issue_26_keys_with_exit_step(pool: PgPool) {
+    let (runs, state) = run_to_end(
+        &pool,
+        r#"
+name: repair
+activities:
+  - key: run
+    worker: test
+    activity_name: echo
+    iteration_limit: 5
+    depends_on:
+      - activity_key: fix
+        conditions: ["{{ fix.status == 'completed' }}"]
+  - key: check
+    worker: test
+    activity_name: echo
+    depends_on: [run]
+  - key: fix
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: check
+        conditions: ["{{ check.result.verdict == 'fail' }}"]
+  - key: done
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: check
+        conditions: ["{{ check.result.verdict == 'pass' }}"]
+"#,
+        |key, run| {
+            if key == "check" {
+                json!({"result": {"verdict": if run < 3 { "fail" } else { "pass" }}})
+            } else {
+                json!({"result": {"ok": true}})
+            }
+        },
+    )
+    .await;
+    eprintln!("PROBE runs {runs:?} status {:?}", state.status);
+    assert_eq!(runs.get("run"), Some(&3));
+    assert_eq!(runs.get("check"), Some(&3));
+    assert_eq!(runs.get("fix"), Some(&2));
+    assert_eq!(runs.get("done"), Some(&1));
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
