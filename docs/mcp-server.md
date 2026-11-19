@@ -172,7 +172,7 @@ endpoint.
 - `WORKFLOW` references must exist;
 - the catalog's parameter and output names must match the activities'.
 
-When you change an activity's parameters or outputs, update the catalog entry and the test's table together.
+When you change an activity's parameters or outputs, update the catalog entry and the test's table together. The tests compile only with `--features mcp-server`; CI runs them in its `MCP server` job (`cargo nextest run -p kruxiaflow --features mcp-server --bins -E 'test(mcp)'`).
 
 ## A budget-governed session, end to end
 

@@ -46,6 +46,42 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+  # The MCP server is behind the optional `mcp-server` feature, which the
+  # default-feature jobs above and below never compile: without this job its
+  # code is neither linted nor tested in CI (including the catalog and
+  # authoring-guide accuracy tests in kruxiaflow/src/mcp/tools/discovery.rs).
+  # The MCP tests need no database.
+  mcp:
+    name: MCP server
+    needs: [clippy, fmt]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: mcp
+          cache-on-failure: true
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Clippy with the mcp-server feature
+        run: cargo clippy -p kruxiaflow --features mcp-server --all-targets -- -D warnings
+
+      - name: Test the MCP server
+        run: cargo nextest run -p kruxiaflow --features mcp-server --bins -E 'test(mcp)'
+
   test:
     name: Test with Coverage
     # Don't spend the expensive test/coverage job on commits that fail the

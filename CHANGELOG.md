@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `system_prompt`, `database_url` for `db_url`, `body` / `html` for
     `text_body` / `html_body`). Entries now carry each activity's
     `output_shape`.
+  - **README:** the approval-gate example used `wait_for_signal: approval`
+    and posted `signal_name`. The setting needs `event_name` and
+    `timeout_seconds`, and the signal API takes `activity_key`, `event_name`
+    and `data`.
+  - **CI now lints and tests the MCP server.** Its code is behind the
+    optional `mcp-server` feature, which no CI job compiled, so none of its
+    tests ran in CI. A new `MCP server` job runs clippy and its tests with
+    the feature.
   - **Guard against further drift:** new tests validate every guide example
     with the workflow parser (including that no settings key is dropped, and
     that conditions are templates), check the `WORKFLOW` variables, and pin

@@ -199,15 +199,20 @@ decision — then resume when signaled, even days later, surviving restarts in b
 ```yaml
 activities:
   - key: await_approval
+    activity_name: echo
     settings:
-      wait_for_signal: approval
+      wait_for_signal:
+        event_name: approval
+        timeout_seconds: 86400   # give up after a day
+        on_timeout: fail
 ```
 
 ```bash
 # Resume the waiting workflow
 curl -X POST http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/signal \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{"signal_name": "approval", "data": {"approved": true}}'
+  -H "Content-Type: application/json" \
+  -d '{"activity_key": "await_approval", "event_name": "approval", "data": {"approved": true}}'
 ```
 
 ### Result Caching
