@@ -62,13 +62,14 @@ Kruxia Flow uses a unified test script at `scripts/test.sh` for all testing need
 
 ### Sandboxed Code (`run_code`) Tests
 
-`scripts/test.sh` builds default features, so it does not compile the optional `monty` feature or its tests. Run them separately. They need no database. The integration tests start real Monty workers when `KRUXIAFLOW_MONTY_BINARY` points at the pinned `monty` binary, and skip with a notice otherwise:
+`scripts/test.sh` builds default features, so it does not compile the optional `monty` feature or its tests. Run them separately. The integration tests start real Monty workers when `KRUXIAFLOW_MONTY_BINARY` points at the pinned `monty` binary, and skip with a notice otherwise. They need no database, except `example_16_run_code_e2e_test`, the end-to-end test for example 16a, which uses `DATABASE_URL` like every `#[sqlx::test]`:
 
 ```bash
 cargo install monty-runtime --version 1.6.0 --locked   # once
 export KRUXIAFLOW_MONTY_BINARY=$HOME/.cargo/bin/monty
-cargo nextest run -p kruxiaflow-std-worker --features monty --lib --test run_code_integration_tests
-cargo nextest run -p kruxiaflow --features monty --bins -E 'test(monty)'
+cargo nextest run -p kruxiaflow-std-worker --features monty --lib \
+  --test run_code_integration_tests --test example_16_run_code_e2e_test
+cargo nextest run -p kruxiaflow --features monty,mcp-server --bins -E 'test(monty) | test(discovery)'
 ```
 
 CI runs the same commands in the `Monty (run_code)` job. See [Sandboxed Code](run-code.md#testing).

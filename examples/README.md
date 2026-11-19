@@ -874,6 +874,8 @@ describe → write_rule ⇄ run_rule → done
   `{% if run_rule.status == 'completed' %}`
 - The run record (`result.run`) next to the model's cost
 
+**Tests:** `worker/tests/example_16_run_code_e2e_test.rs` deploys 16a through the API and runs it end to end, like the tests for examples 03 and 10. It also checks that 16b's definition parses with the expected loop. 16b itself needs an LLM, so it isn't run in tests.
+
 **Known issue ([#18](https://github.com/kruxia/kruxiaflow/issues/18), fix pending review):** the engine re-runs the loop's tail step (`run_rule`) after each completion
 until the default cap of 100 iterations, instead of only when `write_rule` produces new code.
 The final result is correct, but `run_rule` runs far more often than it should (see

@@ -33,7 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Docs and examples:** `docs/run-code.md`, examples 16a and 16b.
   - **Tests:** unit tests for every `run_code` module, integration tests
     against real Monty workers (skipped when `KRUXIAFLOW_MONTY_BINARY` is
-    unset), and CLI flag tests. A new CI job, `Monty (run_code)`, runs clippy
+    unset), CLI flag tests, and an end-to-end test for example 16a, in the
+    style of the tests for examples 03 and 10. A new CI job, `Monty (run_code)`, runs clippy
     and these tests with the feature on.
 - **MCP discovery for `run_code`.** On servers where it is enabled:
   - **`list_activities`** lists `run_code`.

@@ -229,11 +229,12 @@ Monty 1.6.0. Latency on an M4 Pro (macOS); sizes from a local Linux arm64 image 
 
 ## Testing
 
-The `run_code` tests build only with the feature. The integration tests run real Monty workers when `KRUXIAFLOW_MONTY_BINARY` is set, and skip otherwise:
+The `run_code` tests build only with the feature. The integration tests run real Monty workers when `KRUXIAFLOW_MONTY_BINARY` is set, and skip otherwise. `example_16_run_code_e2e_test` deploys example 16a through the API and runs it with the orchestrator and a worker, like the end-to-end tests for examples 03 and 10. It also needs `DATABASE_URL`:
 
 ```bash
 KRUXIAFLOW_MONTY_BINARY=$HOME/.cargo/bin/monty \
-  cargo nextest run -p kruxiaflow-std-worker --features monty --lib --test run_code_integration_tests
+  cargo nextest run -p kruxiaflow-std-worker --features monty --lib \
+  --test run_code_integration_tests --test example_16_run_code_e2e_test
 cargo nextest run -p kruxiaflow --features monty --bins -E 'test(monty)'
 ```
 

@@ -134,6 +134,23 @@ jobs:
       contents: read
     env:
       MONTY_VERSION: "1.6.0"
+    # For the Example 16 end-to-end test (API server, orchestrator, worker);
+    # the same service as the test job. #[sqlx::test] creates its own
+    # per-test databases on this server.
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_USER: kruxiaflow
+          POSTGRES_PASSWORD: kruxiaflow_test
+          POSTGRES_DB: kruxiaflow
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     steps:
       - uses: actions/checkout@v4
 
@@ -171,12 +188,16 @@ jobs:
       - name: Clippy with the monty feature
         run: cargo clippy -p kruxiaflow -p kruxiaflow-std-worker --features kruxiaflow/monty,kruxiaflow/mcp-server --all-targets -- -D warnings
 
-      # run_code needs no database: its unit tests, the worker-level
-      # integration tests against real Monty workers, and the CLI flag tests
+      # run_code's unit tests, the worker-level integration tests against
+      # real Monty workers, the Example 16 end-to-end test (needs the
+      # database), and the CLI flag and MCP discovery tests
       - name: Test run_code
+        env:
+          DATABASE_URL: postgres://kruxiaflow:kruxiaflow_test@localhost:5432/kruxiaflow
         run: |
           export KRUXIAFLOW_MONTY_BINARY="$HOME/monty-bin/bin/monty"
           "$KRUXIAFLOW_MONTY_BINARY" --version
-          cargo nextest run -p kruxiaflow-std-worker --features monty --lib --test run_code_integration_tests \
-            -E 'test(run_code) | binary(run_code_integration_tests)'
+          cargo nextest run -p kruxiaflow-std-worker --features monty --lib \
+            --test run_code_integration_tests --test example_16_run_code_e2e_test \
+            -E 'test(run_code) | binary(run_code_integration_tests) | binary(example_16_run_code_e2e_test)'
           cargo nextest run -p kruxiaflow --features monty,mcp-server --bins -E 'test(monty) | test(discovery)'
