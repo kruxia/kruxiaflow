@@ -1061,6 +1061,45 @@ struct LoopEdge {
     condition: Option<Vec<String>>,
 }
 
+impl WorkflowDefinition {
+    /// Mark every activity on a loop as a loop activity, from the back-edges
+    /// already marked in the definition (`is_back_edge`, set by `validate`).
+    ///
+    /// Definitions stored before #18 was fixed marked only the two ends of
+    /// each back-edge, so the middle steps of a loop of three or more never
+    /// counted as new input, and the loop stopped after its second round.
+    /// The orchestrator calls this on every definition it loads, so stored
+    /// definitions behave like freshly validated ones without a redeploy.
+    /// Idempotent; O(activities + dependencies).
+    pub fn mark_loop_members(&mut self) {
+        let loops: Vec<LoopEdge> = self
+            .activities
+            .iter()
+            .flat_map(|activity| {
+                activity
+                    .depends_on
+                    .iter()
+                    .flatten()
+                    .filter(|dep| dep.is_back_edge)
+                    .map(|dep| LoopEdge {
+                        from: dep.activity_key.clone(),
+                        to: activity.key.clone(),
+                        condition: None,
+                    })
+            })
+            .collect();
+        if loops.is_empty() {
+            return;
+        }
+        let members = loop_members(&self.activities, &loops);
+        for activity in &mut self.activities {
+            if members.contains(activity.key.as_str()) {
+                activity.is_loop_activity = true;
+            }
+        }
+    }
+}
+
 /// Keys of every activity that lies on a loop: for each back-edge
 /// `from → to` (`to` depends on `from`), the activities reachable going
 /// forward from `to` that can also reach `from`. Uses both `depends_on` and

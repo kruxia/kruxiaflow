@@ -162,11 +162,14 @@ pub async fn load_workflow_definition(
         .transpose()
         .map_err(|e| OrchestratorError::StateDeserialization(e.to_string()))?;
 
-    Ok(WorkflowDefinition {
+    let mut definition = WorkflowDefinition {
         name: row.name,
         activities,
         settings,
-    })
+    };
+    // Definitions stored before #18 was fixed lack some loop markings
+    definition.mark_loop_members();
+    Ok(definition)
 }
 
 /// Load workflow definition by definition ID (for WorkflowCreated events in tests)
@@ -194,11 +197,14 @@ pub async fn load_workflow_definition_by_id(
         .transpose()
         .map_err(|e| OrchestratorError::StateDeserialization(e.to_string()))?;
 
-    Ok(WorkflowDefinition {
+    let mut definition = WorkflowDefinition {
         name: row.name,
         activities,
         settings,
-    })
+    };
+    // Definitions stored before #18 was fixed lack some loop markings
+    definition.mark_loop_members();
+    Ok(definition)
 }
 
 /// Load materialized state from workflows table (O(1))

@@ -54,9 +54,10 @@ Before this was fixed, the step after the head re-ran after each of its own comp
 
 **Upgrading:**
 
-- **Loop membership is stored with each definition.** Definitions deployed before this fix keep the old marking, in which only the two ends of a back-edge are loop activities. A loop of **three or more steps** therefore runs its middle steps only once until it is **redeployed**. Redeploying creates a new definition version, even from unchanged YAML, because the stored metadata changed. Runs already in flight keep the version they started with.
+- **No redeploy needed.** Definitions deployed before this fix marked only the two ends of a back-edge as loop activities. The orchestrator completes the marking each time it loads a definition, from the back-edges stored with it, so existing definitions and runs already in flight get every step of a longer loop running each round.
 - **Middle steps now count iterations.** They are loop activities now, so `{{ACTIVITY.iteration}}` and `{{step.iteration}}` count up for them, and `iteration_scoped: true` stores their per-round outputs. Before, they stayed at 0.
-- **Two-step loops need no redeploy.** Both of their activities were already loop activities.
+
+**Known limitation: parallel branches inside a loop.** When a loop splits into branches of different lengths that join again (`head → a → b → join` alongside `head → c → join`), the join runs as soon as *any* of its inputs is new. It can therefore run once the short branch finishes, using the long branch's output from the previous round, and then again when the long branch finishes. Keep each loop a single chain of steps, or join the branches outside the loop. Requiring *every* input to be new would make the join wait forever whenever a branch's condition is false in a later round, so this needs a fuller design.
 
 ---
 
