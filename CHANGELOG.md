@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   state, so in a chain after a failed or skipped activity only the first
   dependent was skipped and the rest stayed `not_scheduled`, which kept the
   workflow from ever completing. Skipping now repeats until nothing changes.
+- **A step that runs because another was skipped now runs (#25).** A branch
+  such as `conditions: ["{{ maybe.status == 'skipped' }}"]` became ready only
+  after `maybe` was skipped, but skips were applied after scheduling and
+  publish no event, so nothing scheduled it and the workflow stayed `running`
+  forever. Scheduling and skipping now repeat until a pass skips nothing.
 
 ## [0.12.1] - 2026-11-17
 

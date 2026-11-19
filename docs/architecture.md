@@ -1835,6 +1835,21 @@ When an activity is skipped or fails, downstream activities with unconditional d
 
 This "fail-fast" behavior prevents workflows from hanging with activities stuck waiting for dependencies that can never be satisfied.
 
+**A skip can also make an activity ready.** A branch on `{{ step.status == 'skipped' }}`, for example, becomes ready only once `step` is skipped:
+
+```yaml
+- key: maybe
+  depends_on:
+    - activity_key: first
+      conditions: ["{{ first.result.value == 2 }}"]
+- key: fallback
+  depends_on:
+    - activity_key: maybe
+      conditions: ["{{ maybe.status == 'skipped' }}"]
+```
+
+When processing an event, the orchestrator therefore repeats *find ready activities → schedule them → mark skips* until a pass skips nothing. **Why** (#25): skips are applied after scheduling, and marking an activity skipped publishes no event. With a single pass, `fallback` stayed `not_scheduled` with nothing left to evaluate it, and the workflow stayed `running`. Each repeat follows at least one new skip, so the loop always ends.
+
 ### Long-Running Activities
 
 Activities post heartbeats to prevent timeout:
