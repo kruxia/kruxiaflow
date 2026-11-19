@@ -43,7 +43,8 @@
 # - `settings.delay` for rate limiting between iterations
 # - `iteration_scoped: true` for per-iteration output storage
 # - Loop-back `depends_on` (activity depends on itself with condition)
-# - Array access pattern (`{{fetch_page[*].result}}`) for all iteration results
+# - All iterations' results as one array (`{{fetch_page.result}}`, iteration-scoped)
+# - `{{fetch_page.iteration}}`: rounds completed so far (0 in the first round)
 # - `iteration_limit` as safety bound
 # - Configurable iteration count via workflow input with default
 
@@ -66,7 +67,7 @@ activities:
       # Loop: fetch_page depends on itself to iterate
       - activity_key: fetch_page
         conditions:
-          - "{{fetch_page.iteration}} < {{INPUT.num_pages | default(3)}}"
+          - "{{ fetch_page.iteration < (INPUT.num_pages | default(3)) }}"
 
   # Aggregate all page results and send via email
   - key: aggregate_results
@@ -87,8 +88,8 @@ activities:
         Text: |
           Fetched {{INPUT.num_pages | default(3)}} pages from httpbin.org:
 
-          {{fetch_page[*].result}}
+          {{fetch_page.result}}
     depends_on:
       - activity_key: fetch_page
         conditions:
-          - "{{fetch_page.iteration}} >= {{INPUT.num_pages | default(3)}}"
+          - "{{ fetch_page.iteration >= (INPUT.num_pages | default(3)) }}"

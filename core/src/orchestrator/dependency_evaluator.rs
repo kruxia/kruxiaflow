@@ -662,14 +662,15 @@ pub fn status_to_string(status: WorkflowActivityStatus) -> String {
 pub fn build_condition_context(state: &WorkflowState) -> TemplateContext {
     let mut context = TemplateContext::new();
 
-    // Add workflow inputs from state_data
-    if let Value::Object(state_obj) = &state.state_data {
-        let inputs: HashMap<String, Value> = state_obj
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        context = context.with_inputs(inputs);
+    // INPUT is the workflow's submitted input, as in parameter templates.
+    // state_data is merged underneath it for callers that seed state_data.
+    let mut inputs: HashMap<String, Value> = HashMap::new();
+    for source in [&state.state_data, &state.input] {
+        if let Value::Object(obj) = source {
+            inputs.extend(obj.iter().map(|(k, v)| (k.clone(), v.clone())));
+        }
     }
+    context = context.with_inputs(inputs);
 
     // Add activity outputs, iteration outputs, and status
     for (activity_key, activity_state) in &state.activities {
@@ -1503,6 +1504,31 @@ mod tests {
         // Verify context is built without error
         let result = evaluate_condition("{{step1.status == 'completed'}}", &context).unwrap();
         assert!(result);
+    }
+
+    #[test]
+    fn test_build_condition_context_input_is_workflow_input() {
+        // Submission stores the input in `input` and leaves state_data empty;
+        // conditions must see it as INPUT, as parameter templates do
+        let mut state = make_workflow_state(vec![make_activity_state(
+            "step1",
+            WorkflowActivityStatus::Completed,
+        )]);
+        state.input = serde_json::json!({"num_pages": 2});
+
+        let context = build_condition_context(&state);
+        assert!(evaluate_condition("{{ INPUT.num_pages == 2 }}", &context).unwrap());
+    }
+
+    #[test]
+    fn test_build_condition_context_exposes_activity_iteration() {
+        let (key, mut activity) = make_activity_state("fetch", WorkflowActivityStatus::Completed);
+        activity.iteration = 2;
+        let state = make_workflow_state(vec![(key, activity)]);
+
+        let context = build_condition_context(&state);
+        assert!(evaluate_condition("{{ fetch.iteration == 2 }}", &context).unwrap());
+        assert!(!evaluate_condition("{{ fetch.iteration >= 3 }}", &context).unwrap());
     }
 
     #[test]

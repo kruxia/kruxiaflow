@@ -1917,6 +1917,11 @@ activities:
 - `{{ACTIVITY.iteration}}` - Current iteration number (0-indexed)
 - `{{ACTIVITY.accumulated_cost_usd}}` - Total cost accumulated across all iterations (for LLM activities)
 - `{{ACTIVITY.remaining_budget_usd}}` - Remaining budget after current iteration
+- `{{activity_key.iteration}}` - Rounds of `activity_key` completed so far (0 before its first completion), in parameters and conditions alike. An output named `iteration` takes precedence.
+
+**Conditions** are one expression: `"{{ fetch.iteration < (INPUT.n | default(3)) }}"`. In a condition, `INPUT` is the workflow's submitted input, the same as in parameters.
+
+**Why**: Conditions read `INPUT` from `state_data`, which submission leaves empty, so every `INPUT.*` in a condition was undefined, and `{{activity_key.iteration}}` was missing from the template context although the iteration is tracked. Example 08a used both, and failed on its first activity.
 
 **Array Filters for Iteration Results**:
 
