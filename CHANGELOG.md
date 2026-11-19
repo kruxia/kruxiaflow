@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A signaled activity runs.** After `POST /api/v1/workflows/{id}/signal`
+  the orchestrator evaluated the activity again, found `wait_for_signal`,
+  and tried to create its subscription a second time. The first row was
+  still there, so every `wait_for_signal` activity failed with "Subscription
+  already exists" as soon as it was signaled, inside a loop or not. A
+  timeout with `on_timeout: continue` made the activity wait again instead
+  of running. The orchestrator now queues the activity whose wait the event
+  ended, and deletes its subscription.
+- **A signal wait inside a loop takes a signal every round.** The signal API
+  and the expiry checker published `ActivitySignaled` (and the timeout
+  `ActivityFailed`) without an iteration, so the event dedup index dropped
+  each round's after the first as a duplicate, while the API still answered
+  `"signaled": true`; the workflow then waited for good. Subscriptions now
+  record the loop round (migration `20261119000001` adds
+  `activity_event_subscriptions.iteration`) and their events carry it.
+
 ## [0.12.1] - 2026-11-17
 
 ### Fixed

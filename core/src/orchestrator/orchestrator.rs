@@ -1497,9 +1497,36 @@ pub async fn process_workflow_event(
         }
     }
 
+    // A signal (or a timeout that continues) ends the activity's current wait.
+    // It runs now, in this pass, instead of waiting again, and its subscription
+    // is deleted so that the next wait (a later loop round) can create one.
+    // Decided from state, so a replay of this event, or a duplicate that
+    // arrives once the activity has moved on, changes nothing.
+    let signaled_activity = (event.event_type == WorkflowEventType::ActivitySignaled)
+        .then_some(event.activity_key.as_ref())
+        .flatten()
+        .filter(|key| {
+            state
+                .activities
+                .get(key.as_str())
+                .is_some_and(|a| a.status == WorkflowActivityStatus::Waiting)
+        })
+        .cloned();
+
     {
         let _enter = apply_span.enter();
         apply_event_to_state(&mut state, event)?;
+    }
+
+    if let Some(key) = &signaled_activity {
+        subscription_service
+            .delete_subscription(event.workflow_id, key)
+            .await
+            .map_err(|e| {
+                super::OrchestratorError::InternalError(format!(
+                    "Failed to delete signal subscription for activity {key}: {e}"
+                ))
+            })?;
     }
     tracing::trace!(
         "Event applied to state in {:?} for workflow {}",
@@ -1627,7 +1654,23 @@ pub async fn process_workflow_event(
                 .unwrap_or(&0)
         );
 
-        find_ready_activities(&definition, &state)?
+        let mut ready = find_ready_activities(&definition, &state)?;
+
+        // The activity whose wait this event ended was already scheduled: its
+        // dependencies were evaluated when the wait began. It runs now, without
+        // re-evaluating them against state its own wait has changed (a
+        // self-loop's `{{self.status == 'completed'}}` no longer holds).
+        if let Some(key) = &signaled_activity
+            && state
+                .activities
+                .get(key)
+                .is_some_and(|a| a.status == WorkflowActivityStatus::NotScheduled)
+            && !ready.iter().any(|a| &a.key == key)
+            && let Some(activity) = definition.activities.iter().find(|a| &a.key == key)
+        {
+            ready.push(activity);
+        }
+        ready
     };
     tracing::trace!(
         "Dependencies evaluated in {:?} for workflow {} ({} ready)",
@@ -1780,9 +1823,11 @@ pub async fn process_workflow_event(
                     None
                 };
 
-                // Check if activity has wait_for_signal setting
+                // Check if activity has wait_for_signal setting, and is not the
+                // activity whose wait this event just ended
                 if let Some(wait_settings) =
                     a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref())
+                    && signaled_activity.as_deref() != Some(a.key.as_str())
                 {
                     // Activity needs to wait for an external signal before executing
                     // Create a subscription instead of scheduling to queue
@@ -1792,6 +1837,7 @@ pub async fn process_workflow_event(
                         event_name: wait_settings.event_name.clone(),
                         on_timeout: wait_settings.on_timeout.clone(),
                         timeout_seconds: wait_settings.timeout_seconds,
+                        iteration,
                     };
 
                     match subscription_service.create_subscription(new_sub).await {
@@ -3098,7 +3144,7 @@ async fn process_expired_subscriptions(
                         "reason": "timeout",
                         "on_timeout": "continue",
                     }),
-                    iteration: None,
+                    iteration: sub.iteration,
                 }
             }
             OnTimeout::Skip => {
@@ -3117,7 +3163,7 @@ async fn process_expired_subscriptions(
                         "reason": "timeout",
                         "on_timeout": "skip",
                     }),
-                    iteration: None,
+                    iteration: sub.iteration,
                 }
             }
             OnTimeout::Fail => {
@@ -3138,7 +3184,7 @@ async fn process_expired_subscriptions(
                         "on_timeout": "fail",
                         "will_retry": false,
                     }),
-                    iteration: None,
+                    iteration: sub.iteration,
                 }
             }
         };
@@ -3955,6 +4001,7 @@ mod tests {
                     activity_key: "recovered_step".to_string(),
                     event_name: "approval".to_string(),
                     on_timeout: OnTimeout::Fail,
+                    iteration: None,
                 }])
             });
 
@@ -3970,6 +4017,7 @@ mod tests {
                     activity_key: "new_expired".to_string(),
                     event_name: "signal".to_string(),
                     on_timeout: OnTimeout::Continue,
+                    iteration: None,
                 }])
             });
 
@@ -4021,6 +4069,7 @@ mod tests {
             activity_key: "wait_step".to_string(),
             event_name: "approval".to_string(),
             on_timeout: OnTimeout::Continue,
+            iteration: None,
         }];
 
         process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
@@ -4050,6 +4099,7 @@ mod tests {
             activity_key: "skip_step".to_string(),
             event_name: "signal".to_string(),
             on_timeout: OnTimeout::Skip,
+            iteration: None,
         }];
 
         process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
@@ -4084,6 +4134,7 @@ mod tests {
             activity_key: "fail_step".to_string(),
             event_name: "required_signal".to_string(),
             on_timeout: OnTimeout::Fail,
+            iteration: None,
         }];
 
         process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
@@ -4111,6 +4162,7 @@ mod tests {
             activity_key: "step".to_string(),
             event_name: "signal".to_string(),
             on_timeout: OnTimeout::Fail,
+            iteration: None,
         }];
 
         // Should not panic — error is logged and subscription is retained for retry
@@ -4138,6 +4190,7 @@ mod tests {
                 activity_key: "a".to_string(),
                 event_name: "sig".to_string(),
                 on_timeout: OnTimeout::Continue,
+                iteration: None,
             },
             ExpiredSubscription {
                 id: Uuid::now_v7(),
@@ -4145,6 +4198,7 @@ mod tests {
                 activity_key: "b".to_string(),
                 event_name: "sig".to_string(),
                 on_timeout: OnTimeout::Skip,
+                iteration: None,
             },
             ExpiredSubscription {
                 id: Uuid::now_v7(),
@@ -4152,6 +4206,7 @@ mod tests {
                 activity_key: "c".to_string(),
                 event_name: "sig".to_string(),
                 on_timeout: OnTimeout::Fail,
+                iteration: None,
             },
         ];
 
