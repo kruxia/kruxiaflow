@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `TEMPLATE_ERROR: Failed to resolve templates in activity <key>: …`, through
     a terminal `ActivityFailed` like any other failure. Its `status == 'failed'`
     branches run, its other dependents are skipped, and the workflow fails.
+  - **Conditions too:** a `conditions:` template on a dependency that can't
+    be evaluated fails the activity that carries it in the same way, instead
+    of poisoning the upstream completion.
+  - **No misleading event:** no `ActivityScheduled` is recorded for an
+    activity that failed this way, since it was never queued.
 - **Skipped activities cascade (#19).** Skipping was a single pass over the
   state, so in a chain after a failed or skipped activity only the first
   dependent was skipped and the rest stayed `not_scheduled`, which kept the

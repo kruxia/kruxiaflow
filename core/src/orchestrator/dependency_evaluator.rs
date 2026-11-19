@@ -30,6 +30,35 @@ pub fn find_ready_activities<'a>(
     Ok(ready)
 }
 
+/// Activities ready to schedule, and activities whose conditions could not
+/// be evaluated (with the error)
+pub type ReadyOrUnresolvable<'a> = (
+    Vec<&'a ActivityDefinition>,
+    Vec<(&'a ActivityDefinition, String)>,
+);
+
+/// Like [`find_ready_activities`], but an activity whose dependency
+/// conditions cannot be evaluated (a template error, such as a reference to
+/// an undefined value) is returned separately with the error, instead of
+/// failing the whole evaluation (#19). The orchestrator fails that activity;
+/// a deterministic template error must not fail the event being processed.
+pub fn find_ready_or_unresolvable_activities<'a>(
+    definition: &'a WorkflowDefinition,
+    state: &WorkflowState,
+) -> Result<ReadyOrUnresolvable<'a>> {
+    let mut ready = Vec::new();
+    let mut unresolvable = Vec::new();
+    for activity in &definition.activities {
+        match is_activity_ready(activity, definition, state) {
+            Ok(true) => ready.push(activity),
+            Ok(false) => {}
+            Err(OrchestratorError::TemplateFailed(error)) => unresolvable.push((activity, error)),
+            Err(other) => return Err(other),
+        }
+    }
+    Ok((ready, unresolvable))
+}
+
 /// Check if an activity is ready to be scheduled.
 ///
 /// # Methodology
@@ -582,9 +611,13 @@ pub fn find_skipped_activities<'a>(
         }
 
         // Check if activity is ready (has applicable dependencies)
-        // If not ready and all dependencies are terminal, it should be skipped
-        if !is_activity_ready(activity, definition, state)? {
-            skipped.push(activity);
+        // If not ready and all dependencies are terminal, it should be skipped.
+        // An activity whose conditions can't be evaluated is not skippable:
+        // it is failed instead (see find_ready_or_unresolvable_activities)
+        match is_activity_ready(activity, definition, state) {
+            Ok(false) => skipped.push(activity),
+            Ok(true) | Err(OrchestratorError::TemplateFailed(_)) => {}
+            Err(other) => return Err(other),
         }
     }
 

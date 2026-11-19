@@ -1,8 +1,8 @@
 use super::{
     ConsumerPacing, OrchestratorConfig, Result,
     dependency_evaluator::{
-        find_ready_activities, find_skipped_activities, is_workflow_complete, is_workflow_failed,
-        status_to_string,
+        find_ready_or_unresolvable_activities, find_skipped_activities, is_workflow_complete,
+        is_workflow_failed, status_to_string,
     },
     window::InFlightWindow,
     workflow_state::{
@@ -1627,8 +1627,20 @@ pub async fn process_workflow_event(
                 .unwrap_or(&0)
         );
 
-        find_ready_activities(&definition, &state)?
+        find_ready_or_unresolvable_activities(&definition, &state)?
     };
+    let (ready_activities, unresolvable_activities) = ready_activities;
+
+    // Activities failed for a template error in this event (#19): not
+    // scheduled, and no ActivityScheduled is published for them
+    let mut template_failed: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // Dependency conditions that cannot be evaluated fail their activity, not
+    // this event (#19)
+    for (activity, error) in &unresolvable_activities {
+        fail_unresolvable_activity(&mut state, activity, error, event_source).await?;
+        template_failed.insert(activity.key.clone());
+    }
     tracing::trace!(
         "Dependencies evaluated in {:?} for workflow {} ({} ready)",
         eval_start.elapsed(),
@@ -1751,6 +1763,7 @@ pub async fn process_workflow_event(
                             event_source,
                         )
                         .await?;
+                        template_failed.insert(a.key.clone());
                         continue;
                     }
                 };
@@ -1859,6 +1872,7 @@ pub async fn process_workflow_event(
                     Err(e) => {
                         fail_unresolvable_activity(&mut state, a, &e.to_string(), event_source)
                             .await?;
+                        template_failed.insert(a.key.clone());
                         continue;
                     }
                 };
@@ -1909,6 +1923,10 @@ pub async fn process_workflow_event(
             // This prevents race condition where activity completes before ActivityScheduled event is processed
             // (Only for activities that were actually scheduled, not those entering Waiting state)
             for activity in &ready_activities {
+                // Failed for a template error: its failure is already in flight
+                if template_failed.contains(&activity.key) {
+                    continue;
+                }
                 if let Some(activity_state) = state.activities.get_mut(&activity.key) {
                     // Skip activities that entered Waiting state (already handled above)
                     if activity_state.status == WorkflowActivityStatus::Waiting {
@@ -1957,6 +1975,10 @@ pub async fn process_workflow_event(
             // Publish ActivityScheduled events (for external observers)
             // Note: Orchestrator skips these events to avoid duplicate processing
             for activity in &ready_activities {
+                // Never queued: failed for a template error (#19)
+                if template_failed.contains(&activity.key) {
+                    continue;
+                }
                 // Skip activities that entered Waiting state (they got ActivityWaiting events instead)
                 if let Some(activity_state) = state.activities.get(&activity.key) {
                     if activity_state.status == WorkflowActivityStatus::Waiting {

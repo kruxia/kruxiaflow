@@ -1793,9 +1793,10 @@ Use the same guard in **parameters** that reference a step which may not have ru
 
 #### When a Template Cannot Be Resolved
 
-Templates use strict undefined: referring to a value that does not exist is an error, not an empty string. When an activity's parameters, `delay` or `scheduled_for` cannot be resolved as it is about to be scheduled, **that activity fails**:
+Templates use strict undefined: referring to a value that does not exist is an error, not an empty string. When an activity's parameters, `delay`, `scheduled_for`, or the `conditions` on its dependencies cannot be resolved as it is about to be scheduled, **that activity fails**:
 
-- Its error is `TEMPLATE_ERROR: Failed to resolve templates in activity <key>: <reason>`. It is not retried, because the template would fail the same way.
+- Its error starts with `TEMPLATE_ERROR:` and names the activity (or the condition) and the reason. It is not retried, because the template would fail the same way.
+- It fails through a terminal `ActivityFailed` event, like a worker failure. It was never queued, so no `ActivityScheduled` is recorded for it.
 - Normal failure handling follows. Dependents on a `status == 'failed'` branch run, other dependents are skipped (and their dependents, all the way down), and the workflow fails if nothing else can run.
 - The upstream activity whose completion triggered the scheduling is unaffected.
 

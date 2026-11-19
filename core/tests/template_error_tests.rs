@@ -45,6 +45,10 @@ async fn insert_workflow_definition(pool: &PgPool, definition: &WorkflowDefiniti
 /// pending until nothing is. Every event must process without error: a
 /// template error is not an event-processing failure.
 async fn run_workflow(pool: &PgPool, yaml: &str) -> WorkflowState {
+    run_workflow_with_id(pool, yaml).await.1
+}
+
+async fn run_workflow_with_id(pool: &PgPool, yaml: &str) -> (Uuid, WorkflowState) {
     let definition = WorkflowDefinition::from_yaml(yaml).expect("valid definition");
     let definition_id = insert_workflow_definition(pool, &definition).await;
     let workflow_id = Uuid::now_v7();
@@ -106,7 +110,7 @@ async fn run_workflow(pool: &PgPool, yaml: &str) -> WorkflowState {
             .map(|a| a.key.clone())
             .collect();
         if pending.is_empty() {
-            return state;
+            return (workflow_id, state);
         }
         for key in pending {
             event_source
@@ -315,5 +319,112 @@ activities:
             .starts_with("TEMPLATE_ERROR:")
     );
     assert_eq!(status(&state, "never"), WorkflowActivityStatus::Skipped);
+    assert_eq!(state.status, WorkflowStatus::Failed);
+}
+
+/// Events recorded for one activity, by type (runtime query: no offline
+/// query cache entry needed)
+async fn event_count(
+    pool: &PgPool,
+    workflow_id: Uuid,
+    activity_key: &str,
+    event_type: &str,
+) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM workflow_events \
+         WHERE workflow_id = $1 AND activity_key = $2 AND event_type::text = $3",
+    )
+    .bind(workflow_id)
+    .bind(activity_key)
+    .bind(event_type)
+    .fetch_one(pool)
+    .await
+    .expect("count events")
+}
+
+/// The failed activity was never queued, so no ActivityScheduled is recorded
+/// for it: only its ActivityFailed
+#[sqlx::test(migrations = "../migrations")]
+async fn test_no_activity_scheduled_event_for_a_template_failure(pool: PgPool) {
+    let (workflow_id, state) = run_workflow_with_id(
+        &pool,
+        r#"
+name: template_failure_events
+activities:
+  - key: first
+    worker: test
+    activity_name: echo
+  - key: second
+    worker: test
+    activity_name: echo
+    parameters:
+      value: "{{ later.result.value }}"
+    depends_on: [first]
+  - key: later
+    worker: test
+    activity_name: echo
+    depends_on: [second]
+"#,
+    )
+    .await;
+
+    assert_eq!(status(&state, "second"), WorkflowActivityStatus::Failed);
+    assert_eq!(
+        event_count(&pool, workflow_id, "second", "ActivityScheduled").await,
+        0
+    );
+    assert_eq!(
+        event_count(&pool, workflow_id, "second", "ActivityFailed").await,
+        1
+    );
+    assert_eq!(
+        event_count(&pool, workflow_id, "first", "ActivityScheduled").await,
+        1
+    );
+}
+
+/// A dependency condition that cannot be evaluated fails the activity that
+/// carries it, the same way as a bad parameter template, instead of failing
+/// the upstream activity's completion event
+#[sqlx::test(migrations = "../migrations")]
+async fn test_bad_condition_template_fails_its_own_activity(pool: PgPool) {
+    let state = run_workflow(
+        &pool,
+        r#"
+name: condition_template_error
+activities:
+  - key: first
+    worker: test
+    activity_name: echo
+  - key: gate
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: first
+        conditions: ["{{ later.result.value == 1 }}"]
+  - key: later
+    worker: test
+    activity_name: echo
+    depends_on: [gate]
+"#,
+    )
+    .await;
+
+    assert_eq!(
+        status(&state, "first"),
+        WorkflowActivityStatus::Completed,
+        "the upstream step succeeded"
+    );
+    assert_eq!(status(&state, "gate"), WorkflowActivityStatus::Failed);
+    let error = state.activities["gate"]
+        .error
+        .as_deref()
+        .unwrap_or_default();
+    assert!(error.starts_with("TEMPLATE_ERROR:"), "{error}");
+    assert!(
+        error.contains("condition"),
+        "the error says it was a condition: {error}"
+    );
+    assert_eq!(status(&state, "later"), WorkflowActivityStatus::Skipped);
     assert_eq!(state.status, WorkflowStatus::Failed);
 }
