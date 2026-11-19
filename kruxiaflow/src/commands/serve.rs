@@ -503,7 +503,7 @@ async fn spawn_workers(
     let registry = {
         let mut registry = registry;
         if let Some(monty) = monty {
-            kruxiaflow_std_worker::register_run_code(&mut registry, monty)?;
+            kruxiaflow_std_worker::register_run_code(&mut registry, monty).await?;
         }
         registry
     };

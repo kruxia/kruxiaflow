@@ -206,7 +206,7 @@ Monty is a language-level sandbox. The code cannot express an operation that tou
 - The worker binary path is explicit and version-checked.
 - Limits always apply, with `KRUXIAFLOW_MONTY_REQUEST_TIMEOUT_SECS` as a host-side kill switch behind them.
 
-For stronger isolation, run `run_code` on a separate `kruxiaflow worker` in its own container: no database credentials, a read-only filesystem, network access only to the API server. (`kruxiaflow worker` registers all built-in activities today; limiting a worker to `run_code` is not yet implemented.)
+For stronger isolation, run `run_code` on a separate `kruxiaflow worker` in its own container: no database credentials, a read-only filesystem, network access only to the API server. (`kruxiaflow worker` registers all built-in activities today. Its `--activity-types` flag is meant to limit that, for example to `std.run_code`, but the filtering is not yet implemented.)
 
 ## Known issues
 

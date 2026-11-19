@@ -51,7 +51,7 @@ impl MontyConfig {
     /// Returns the version line the binary reports (for run records). Fails
     /// with a message naming what to fix, so a misconfigured worker refuses to
     /// start instead of failing every `run_code` activity later.
-    pub fn validate(&self) -> Result<String> {
+    pub async fn validate(&self) -> Result<String> {
         if self.max_processes == 0 {
             bail!("KRUXIAFLOW_MONTY_MAX_PROCESSES must be at least 1");
         }
@@ -86,13 +86,13 @@ impl MontyConfig {
                 REQUEST_TIMEOUT_SLACK.as_secs()
             );
         }
-        check_worker_binary(&self.binary)
+        check_worker_binary(&self.binary).await
     }
 }
 
 /// Check that `path` is an absolute path to a `monty` worker binary of the
 /// pinned version. Returns its version line.
-fn check_worker_binary(path: &Path) -> Result<String> {
+async fn check_worker_binary(path: &Path) -> Result<String> {
     if !path.is_absolute() {
         bail!(
             "KRUXIAFLOW_MONTY_BINARY must be an absolute path (it is never looked up on PATH), got {}",
@@ -107,10 +107,11 @@ fn check_worker_binary(path: &Path) -> Result<String> {
             path.display()
         );
     }
-    let output = std::process::Command::new(path)
+    let output = tokio::process::Command::new(path)
         .arg("--version")
         .env_clear()
         .output()
+        .await
         .with_context(|| format!("failed to run {} --version", path.display()))?;
     let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
     let expected = format!("monty-runtime {MONTY_VERSION}");
@@ -158,55 +159,55 @@ mod tests {
         path
     }
 
-    fn error_of(config: &MontyConfig) -> String {
-        config.validate().unwrap_err().to_string()
+    async fn error_of(config: &MontyConfig) -> String {
+        config.validate().await.unwrap_err().to_string()
     }
 
-    #[test]
-    fn test_process_counts_are_validated() {
+    #[tokio::test]
+    async fn test_process_counts_are_validated() {
         let mut c = config(PathBuf::from("/x/monty"));
         c.max_processes = 0;
-        assert!(error_of(&c).contains("MAX_PROCESSES"));
+        assert!(error_of(&c).await.contains("MAX_PROCESSES"));
         let mut c = config(PathBuf::from("/x/monty"));
         c.min_processes = 3;
-        assert!(error_of(&c).contains("MIN_PROCESSES"));
+        assert!(error_of(&c).await.contains("MIN_PROCESSES"));
         let mut c = config(PathBuf::from("/x/monty"));
         c.recycle_after = 0;
-        assert!(error_of(&c).contains("RECYCLE_AFTER"));
+        assert!(error_of(&c).await.contains("RECYCLE_AFTER"));
     }
 
-    #[test]
-    fn test_ceilings_must_be_positive() {
+    #[tokio::test]
+    async fn test_ceilings_must_be_positive() {
         let mut c = config(PathBuf::from("/x/monty"));
         c.max_memory_bytes = 0;
-        assert!(error_of(&c).contains("MAX_MEMORY_BYTES"));
+        assert!(error_of(&c).await.contains("MAX_MEMORY_BYTES"));
         let mut c = config(PathBuf::from("/x/monty"));
         c.max_duration = Duration::ZERO;
-        assert!(error_of(&c).contains("MAX_DURATION_SECS"));
+        assert!(error_of(&c).await.contains("MAX_DURATION_SECS"));
         let mut c = config(PathBuf::from("/x/monty"));
         c.max_recursion_depth = 0;
-        assert!(error_of(&c).contains("MAX_RECURSION_DEPTH"));
+        assert!(error_of(&c).await.contains("MAX_RECURSION_DEPTH"));
     }
 
-    #[test]
-    fn test_request_timeout_must_cover_a_full_run() {
+    #[tokio::test]
+    async fn test_request_timeout_must_cover_a_full_run() {
         let mut c = config(PathBuf::from("/x/monty"));
         c.max_duration = Duration::from_secs(10);
         c.request_timeout = Duration::from_secs(21); // needs 2 * 10 + 2
-        let err = error_of(&c);
+        let err = error_of(&c).await;
         assert!(err.contains("REQUEST_TIMEOUT_SECS"), "{err}");
         assert!(err.contains("at least 22s"), "{err}");
     }
 
-    #[test]
-    fn test_binary_path_must_be_absolute() {
-        let err = error_of(&config(PathBuf::from("monty")));
+    #[tokio::test]
+    async fn test_binary_path_must_be_absolute() {
+        let err = error_of(&config(PathBuf::from("monty"))).await;
         assert!(err.contains("absolute path"), "{err}");
     }
 
-    #[test]
-    fn test_missing_binary_says_how_to_install() {
-        let err = error_of(&config(PathBuf::from("/nonexistent/dir/monty")));
+    #[tokio::test]
+    async fn test_missing_binary_says_how_to_install() {
+        let err = error_of(&config(PathBuf::from("/nonexistent/dir/monty"))).await;
         assert!(err.contains("does not exist"), "{err}");
         assert!(
             err.contains(&format!("monty-runtime --version {MONTY_VERSION}")),
@@ -215,20 +216,20 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn test_matching_version_is_accepted() {
+    #[tokio::test]
+    async fn test_matching_version_is_accepted() {
         let binary = fake_binary(&format!("monty-runtime {MONTY_VERSION}"), 0);
         assert_eq!(
-            config(binary).validate().unwrap(),
+            config(binary).validate().await.unwrap(),
             format!("monty-runtime {MONTY_VERSION}")
         );
     }
 
     #[cfg(unix)]
-    #[test]
-    fn test_other_version_is_refused() {
+    #[tokio::test]
+    async fn test_other_version_is_refused() {
         let binary = fake_binary("monty-runtime 0.0.1", 0);
-        let err = error_of(&config(binary));
+        let err = error_of(&config(binary)).await;
         assert!(err.contains("reports \"monty-runtime 0.0.1\""), "{err}");
         assert!(
             err.contains(&format!("monty-runtime {MONTY_VERSION}")),
@@ -237,9 +238,9 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn test_failing_binary_is_refused() {
+    #[tokio::test]
+    async fn test_failing_binary_is_refused() {
         let binary = fake_binary(&format!("monty-runtime {MONTY_VERSION}"), 1);
-        assert!(config(binary).validate().is_err());
+        assert!(config(binary).validate().await.is_err());
     }
 }

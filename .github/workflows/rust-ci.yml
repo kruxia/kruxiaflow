@@ -169,7 +169,7 @@ jobs:
           tool: cargo-nextest
 
       - name: Clippy with the monty feature
-        run: cargo clippy -p kruxiaflow -p kruxiaflow-std-worker --features kruxiaflow/monty --all-targets -- -D warnings
+        run: cargo clippy -p kruxiaflow -p kruxiaflow-std-worker --features kruxiaflow/monty,kruxiaflow/mcp-server --all-targets -- -D warnings
 
       # run_code needs no database: its unit tests, the worker-level
       # integration tests against real Monty workers, and the CLI flag tests
@@ -179,4 +179,4 @@ jobs:
           "$KRUXIAFLOW_MONTY_BINARY" --version
           cargo nextest run -p kruxiaflow-std-worker --features monty --lib --test run_code_integration_tests \
             -E 'test(run_code) | binary(run_code_integration_tests)'
-          cargo nextest run -p kruxiaflow --features monty --bins -E 'test(monty)'
+          cargo nextest run -p kruxiaflow --features monty,mcp-server --bins -E 'test(monty) | test(discovery)'

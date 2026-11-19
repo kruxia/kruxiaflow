@@ -307,8 +307,8 @@ impl RunCodeActivity {
     /// Create the activity, validating the configuration and the `monty`
     /// worker binary. Fails with an actionable message when either is wrong,
     /// so a misconfigured worker refuses to start.
-    pub fn new(config: MontyConfig) -> Result<Self> {
-        let monty_version = config.validate()?;
+    pub async fn new(config: MontyConfig) -> Result<Self> {
+        let monty_version = config.validate().await?;
         Ok(Self {
             config,
             monty_version,

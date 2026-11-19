@@ -27,7 +27,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 /// The activity under test, or `None` (with a notice) when no binary is set
-fn activity() -> Option<RunCodeActivity> {
+async fn activity() -> Option<RunCodeActivity> {
     let binary = std::env::var_os("KRUXIAFLOW_MONTY_BINARY").filter(|b| !b.is_empty())?;
     let config = MontyConfig {
         binary: PathBuf::from(binary),
@@ -39,12 +39,16 @@ fn activity() -> Option<RunCodeActivity> {
         max_duration: Duration::from_secs(2),
         max_recursion_depth: 1000,
     };
-    Some(RunCodeActivity::new(config).expect("valid Monty configuration and binary"))
+    Some(
+        RunCodeActivity::new(config)
+            .await
+            .expect("valid Monty configuration and binary"),
+    )
 }
 
 macro_rules! activity_or_skip {
     () => {
-        match activity() {
+        match activity().await {
             Some(activity) => activity,
             None => {
                 eprintln!("skipped: set KRUXIAFLOW_MONTY_BINARY to run run_code integration tests");
