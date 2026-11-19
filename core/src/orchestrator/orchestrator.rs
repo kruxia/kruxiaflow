@@ -1,8 +1,8 @@
 use super::{
     ConsumerPacing, OrchestratorConfig, Result,
     dependency_evaluator::{
-        find_ready_or_unresolvable_activities, find_skipped_activities, is_workflow_complete,
-        is_workflow_failed, status_to_string,
+        find_ready_or_unresolvable_activities, find_skipped_or_unresolvable_activities,
+        is_workflow_complete, is_workflow_failed, status_to_string,
     },
     window::InFlightWindow,
     workflow_state::{
@@ -2034,9 +2034,15 @@ pub async fn process_workflow_event(
     // 5.5. Mark activities as Skipped if they can never be scheduled. Repeat
     // until nothing changes: skipping one activity can make its dependents
     // skippable, and a single pass left them NotScheduled, so the workflow
-    // never completed (#19)
+    // never completed (#19). A skip can also make a dependent's condition
+    // evaluable for the first time, and unresolvable (a condition on a
+    // skipped step's result): that activity is failed, like in step 4
     loop {
-        let skipped_activities = find_skipped_activities(&definition, &state)?;
+        let (skipped_activities, unresolvable_activities) =
+            find_skipped_or_unresolvable_activities(&definition, &state)?;
+        for (activity, error) in &unresolvable_activities {
+            fail_unresolvable_activity(&mut state, activity, error, event_source).await?;
+        }
         if skipped_activities.is_empty() {
             break;
         }

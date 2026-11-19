@@ -572,7 +572,26 @@ pub fn find_skipped_activities<'a>(
     definition: &'a WorkflowDefinition,
     state: &WorkflowState,
 ) -> Result<Vec<&'a ActivityDefinition>> {
+    Ok(find_skipped_or_unresolvable_activities(definition, state)?.0)
+}
+
+/// Activities to skip, and activities whose dependency conditions could not
+/// be evaluated (with the error)
+pub type SkippedOrUnresolvable<'a> = ReadyOrUnresolvable<'a>;
+
+/// Like [`find_skipped_activities`], but an activity whose dependencies are
+/// all terminal and whose conditions cannot be evaluated is returned
+/// separately with the error, so the orchestrator can fail it (#19). A
+/// condition can first be evaluated here: when its dependency was itself
+/// skipped earlier in the same skip pass, such as a condition on a skipped
+/// step's result. Left out, the activity stays NotScheduled with nothing to
+/// wake it, and the workflow hangs.
+pub fn find_skipped_or_unresolvable_activities<'a>(
+    definition: &'a WorkflowDefinition,
+    state: &WorkflowState,
+) -> Result<SkippedOrUnresolvable<'a>> {
     let mut skipped = Vec::new();
+    let mut unresolvable = Vec::new();
 
     for activity in &definition.activities {
         // Only consider NotScheduled activities
@@ -613,15 +632,16 @@ pub fn find_skipped_activities<'a>(
         // Check if activity is ready (has applicable dependencies)
         // If not ready and all dependencies are terminal, it should be skipped.
         // An activity whose conditions can't be evaluated is not skippable:
-        // it is failed instead (see find_ready_or_unresolvable_activities)
+        // it is returned to be failed instead
         match is_activity_ready(activity, definition, state) {
             Ok(false) => skipped.push(activity),
-            Ok(true) | Err(OrchestratorError::TemplateFailed(_)) => {}
+            Ok(true) => {}
+            Err(OrchestratorError::TemplateFailed(error)) => unresolvable.push((activity, error)),
             Err(other) => return Err(other),
         }
     }
 
-    Ok(skipped)
+    Ok((skipped, unresolvable))
 }
 
 #[cfg(test)]

@@ -22,7 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     branches run, its other dependents are skipped, and the workflow fails.
   - **Conditions too:** a `conditions:` template on a dependency that can't
     be evaluated fails the activity that carries it in the same way, instead
-    of poisoning the upstream completion.
+    of poisoning the upstream completion. That includes a condition that only
+    becomes evaluable when its dependency is skipped, such as a condition on
+    a skipped step's result.
   - **No misleading event:** no `ActivityScheduled` is recorded for an
     activity that failed this way, since it was never queued.
 - **Skipped activities cascade (#19).** Skipping was a single pass over the

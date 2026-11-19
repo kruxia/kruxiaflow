@@ -428,3 +428,51 @@ activities:
     assert_eq!(status(&state, "later"), WorkflowActivityStatus::Skipped);
     assert_eq!(state.status, WorkflowStatus::Failed);
 }
+
+/// A condition that can only be evaluated after an earlier skip in the same
+/// pass: `classify` is skipped (its own condition is false), which makes it
+/// terminal, and `act`'s condition on it refers to its result, which a
+/// skipped step does not have. The skip pass must fail `act` rather than
+/// leave it NotScheduled with nothing left to wake it.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_condition_unresolvable_after_a_skip_fails_its_activity(pool: PgPool) {
+    let state = run_workflow(
+        &pool,
+        r#"
+name: unresolvable_after_skip
+activities:
+  - key: first
+    worker: test
+    activity_name: echo
+  - key: classify
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: first
+        conditions: ["{{ first.result.value == 2 }}"]
+  - key: act
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: classify
+        conditions: ["{{ classify.result.value == 1 }}"]
+"#,
+    )
+    .await;
+
+    assert_eq!(status(&state, "first"), WorkflowActivityStatus::Completed);
+    assert_eq!(status(&state, "classify"), WorkflowActivityStatus::Skipped);
+    assert_eq!(
+        status(&state, "act"),
+        WorkflowActivityStatus::Failed,
+        "not left NotScheduled"
+    );
+    assert!(
+        state.activities["act"]
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with("TEMPLATE_ERROR:")
+    );
+    assert_eq!(state.status, WorkflowStatus::Failed);
+}
