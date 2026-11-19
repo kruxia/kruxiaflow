@@ -1,4 +1,4 @@
-use super::{ActivityOutput, OutputType};
+use super::{ActivityDefinition, ActivityOutput, OutputType};
 use minijinja::{Environment, Value as MiniValue};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -139,6 +139,22 @@ impl TemplateContext {
         self.current_activity_key = Some(activity_key);
         self.current_activity_budget_limit = budget_limit;
         self
+    }
+
+    /// Make `activity` the one `{{ACTIVITY.*}}` describes: its key, and its
+    /// own budget limit (`settings.budget.limit`) for `remaining_budget_usd`.
+    ///
+    /// Called for each activity before its parameters, `delay` and
+    /// `scheduled_for` are resolved, and before the conditions on its
+    /// `depends_on` are evaluated, so one shared context can be reused across
+    /// activities without cloning it.
+    pub fn set_current_activity(&mut self, activity: &ActivityDefinition) {
+        self.current_activity_key = Some(activity.key.clone());
+        self.current_activity_budget_limit = activity
+            .settings
+            .as_ref()
+            .and_then(|s| s.budget.as_ref())
+            .map(|b| b.limit);
     }
 
     /// Convert TemplateContext to minijinja Value for template evaluation
@@ -303,21 +319,23 @@ impl TemplateContext {
             context_map.insert("FOLDER".to_string(), serde_json_to_minijinja(&folder_value));
         }
 
-        // Add ACTIVITY context (for current activity being resolved)
+        // Add ACTIVITY context (for current activity being resolved).
+        // Costs are numbers so they compare and add like numbers in
+        // templates (a string such as "7.50" would compare greater than any
+        // number); remaining_budget_usd is null when the activity has no
+        // budget, never a 0 that reads as "budget exhausted".
         if let Some(current_key) = &self.current_activity_key
             && let Some(activity_info) = self.activity_states.get(current_key)
         {
-            let remaining_budget = if let Some(limit) = self.current_activity_budget_limit {
-                (limit - activity_info.accumulated_cost_usd)
-                    .max(rust_decimal::Decimal::ZERO)
-                    .to_string()
-            } else {
-                "0.00".to_string()
-            };
+            let remaining_budget = self.current_activity_budget_limit.map(|limit| {
+                decimal_to_json(
+                    (limit - activity_info.accumulated_cost_usd).max(rust_decimal::Decimal::ZERO),
+                )
+            });
 
             let activity_context = serde_json::json!({
                 "iteration": activity_info.iteration,
-                "accumulated_cost_usd": activity_info.accumulated_cost_usd.to_string(),
+                "accumulated_cost_usd": decimal_to_json(activity_info.accumulated_cost_usd),
                 "remaining_budget_usd": remaining_budget,
                 "status": activity_info.status,
             });
@@ -341,6 +359,15 @@ impl Default for TemplateContext {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// A USD amount as a JSON number for templates
+fn decimal_to_json(amount: rust_decimal::Decimal) -> Value {
+    use rust_decimal::prelude::ToPrimitive;
+    amount
+        .to_f64()
+        .and_then(serde_json::Number::from_f64)
+        .map_or(Value::Null, Value::Number)
 }
 
 /// Create a minijinja Environment with custom filters
@@ -1190,7 +1217,7 @@ mod tests {
         // Access accumulated cost via {{ACTIVITY.accumulated_cost_usd}}
         let value = Value::String("{{ACTIVITY.accumulated_cost_usd}}".to_string());
         let result = resolve_template_value(&value, &context).unwrap();
-        assert_eq!(result, Value::String("10.50".to_string()));
+        assert_eq!(result, serde_json::json!(10.5));
     }
 
     #[test]
@@ -1218,7 +1245,82 @@ mod tests {
         // Access remaining budget via {{ACTIVITY.remaining_budget_usd}}
         let value = Value::String("{{ACTIVITY.remaining_budget_usd}}".to_string());
         let result = resolve_template_value(&value, &context).unwrap();
-        assert_eq!(result, Value::String("2.50".to_string())); // $10.00 - $7.50 = $2.50
+        assert_eq!(result, serde_json::json!(2.5)); // $10.00 - $7.50 = $2.50
+    }
+
+    /// A context with one activity, `search`, that has spent `spent` so far
+    fn context_with_spend(spent: rust_decimal::Decimal) -> TemplateContext {
+        let mut context = TemplateContext::new();
+        context.add_activity_state(
+            "search".to_string(),
+            vec![],
+            None,
+            2,
+            spent,
+            "completed".to_string(),
+        );
+        context
+    }
+
+    #[test]
+    fn test_activity_costs_compare_as_numbers() {
+        // As strings, "3.00" < 5 is false (a string orders after any number)
+        let context = context_with_spend(rust_decimal::Decimal::new(300, 2)).with_current_activity(
+            "search".to_string(),
+            Some(rust_decimal::Decimal::new(10, 0)),
+        );
+        for (template, expected) in [
+            ("{{ACTIVITY.accumulated_cost_usd < 5}}", true),
+            ("{{ACTIVITY.accumulated_cost_usd > 5}}", false),
+            ("{{ACTIVITY.remaining_budget_usd > 5}}", true),
+            ("{{ACTIVITY.remaining_budget_usd < 1}}", false),
+        ] {
+            let value = Value::String(template.to_string());
+            assert_eq!(
+                resolve_template_value(&value, &context).unwrap(),
+                Value::Bool(expected),
+                "{template}"
+            );
+        }
+        // And add like numbers
+        let value = Value::String("{{ACTIVITY.accumulated_cost_usd + 1}}".to_string());
+        assert_eq!(
+            resolve_template_value(&value, &context).unwrap(),
+            serde_json::json!(4)
+        );
+    }
+
+    #[test]
+    fn test_set_current_activity_from_definition() {
+        let mut context = context_with_spend(rust_decimal::Decimal::new(750, 2));
+        let with_budget: ActivityDefinition = serde_json::from_value(serde_json::json!({
+            "key": "search",
+            "worker": "std",
+            "settings": { "budget": { "limit": "10.00", "action": "abort" } }
+        }))
+        .unwrap();
+        context.set_current_activity(&with_budget);
+        let value = Value::String(
+            "{{ACTIVITY.iteration}} {{ACTIVITY.accumulated_cost_usd}} {{ACTIVITY.remaining_budget_usd}}"
+                .to_string(),
+        );
+        assert_eq!(
+            resolve_template_value(&value, &context).unwrap(),
+            Value::String("2 7.5 2.5".to_string())
+        );
+
+        // Reusing the context for an activity without a budget clears it
+        let without_budget: ActivityDefinition = serde_json::from_value(serde_json::json!({
+            "key": "search",
+            "worker": "std"
+        }))
+        .unwrap();
+        context.set_current_activity(&without_budget);
+        let value = Value::String("{{ACTIVITY.remaining_budget_usd}}".to_string());
+        assert_eq!(
+            resolve_template_value(&value, &context).unwrap(),
+            Value::Null
+        );
     }
 
     #[test]
@@ -2186,7 +2288,7 @@ mod tests {
         let value = Value::String("{{ACTIVITY.remaining_budget_usd}}".to_string());
         let result = resolve_template_value(&value, &context).unwrap();
         // Should be clamped to 0 (not negative)
-        assert_eq!(result, Value::String("0".to_string()));
+        assert_eq!(result, serde_json::json!(0));
     }
 
     #[test]
@@ -2204,9 +2306,14 @@ mod tests {
         // No budget limit
         context = context.with_current_activity("unlimited".to_string(), None);
 
+        // No budget is not "budget exhausted": null, not 0
         let value = Value::String("{{ACTIVITY.remaining_budget_usd}}".to_string());
         let result = resolve_template_value(&value, &context).unwrap();
-        assert_eq!(result, Value::String("0.00".to_string()));
+        assert_eq!(result, Value::Null);
+
+        let value = Value::String("{{ACTIVITY.remaining_budget_usd | coalesce(100)}}".to_string());
+        let result = resolve_template_value(&value, &context).unwrap();
+        assert_eq!(result, serde_json::json!(100));
     }
 
     // ============================================================================

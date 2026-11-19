@@ -25,6 +25,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which is not template syntax. The conditions are now single expressions,
   and the body uses `{{fetch_page.result}}`, the array of every round's
   result. A new test runs the example through the orchestrator.
+- **`{{ACTIVITY.*}}` resolves.** `ACTIVITY.iteration`,
+  `ACTIVITY.accumulated_cost_usd` and `ACTIVITY.remaining_budget_usd` were
+  documented but never set, so any template using them failed with
+  "undefined value" (#32). `ACTIVITY` is now the activity whose templates
+  are being resolved: its parameters, `delay` and `scheduled_for`, and the
+  conditions on its own `depends_on`.
+
+### Changed
+
+- **`ACTIVITY` costs are numbers.** `accumulated_cost_usd` and
+  `remaining_budget_usd` were strings such as `"7.50"`, which compare greater
+  than every number, so `{{ACTIVITY.accumulated_cost_usd < 5}}` was always
+  false. With no `settings.budget` on the activity, `remaining_budget_usd`
+  is `null` rather than `"0.00"`, which read as an exhausted budget.
 
 ## [0.12.1] - 2026-11-17
 

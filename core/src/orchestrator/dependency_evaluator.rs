@@ -224,7 +224,13 @@ fn is_activity_ready(
             let current_activity_state = activity_state
                 .ok_or_else(|| OrchestratorError::ActivityNotFound(activity.key.clone()))?;
 
-            if !evaluate_loop_condition(dep_rel, dependency_state, state, current_activity_state)? {
+            if !evaluate_loop_condition(
+                activity,
+                dep_rel,
+                dependency_state,
+                state,
+                current_activity_state,
+            )? {
                 tracing::trace!(
                     "Activity {} not ready: back-edge condition not met for {}",
                     activity.key,
@@ -258,8 +264,10 @@ fn is_activity_ready(
 
             // Now check conditions (if any)
             if let Some(condition_list) = &dep_rel.conditions {
-                // Build template context for condition evaluation
-                let context = build_condition_context(state);
+                // Build template context for condition evaluation;
+                // {{ACTIVITY.*}} is the activity these conditions gate
+                let mut context = build_condition_context(state);
+                context.set_current_activity(activity);
 
                 // Check if conditions are satisfied
                 let mut conditions_satisfied = true;
@@ -365,6 +373,7 @@ fn is_max_iterations_exceeded(
 
 /// Evaluate loop exit/continuation condition
 fn evaluate_loop_condition(
+    activity: &ActivityDefinition,
     dep: &ActivityRelationship,
     dep_state: &super::workflow_state::ActivityState,
     state: &WorkflowState,
@@ -396,7 +405,9 @@ fn evaluate_loop_condition(
     // Exit conditions should evaluate to false to stop looping
 
     if let Some(conditions) = &dep.conditions {
-        let context = build_condition_context(state);
+        // {{ACTIVITY.*}} is the looping activity these conditions gate
+        let mut context = build_condition_context(state);
+        context.set_current_activity(activity);
 
         for condition in conditions {
             if !evaluate_condition(condition, &context)? {

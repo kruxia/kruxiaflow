@@ -1880,14 +1880,17 @@ activities:
 
 **Iteration Context Variables**:
 
-- `{{ACTIVITY.iteration}}` - Current iteration number (0-indexed)
-- `{{ACTIVITY.accumulated_cost_usd}}` - Total cost accumulated across all iterations (for LLM activities)
-- `{{ACTIVITY.remaining_budget_usd}}` - Remaining budget after current iteration
+- `{{ACTIVITY.iteration}}` - The round of this activity being scheduled (0-indexed); the same value as `{{<its key>.iteration}}`
+- `{{ACTIVITY.accumulated_cost_usd}}` - Number: USD this activity has spent in earlier rounds and failed attempts (the reported and computed costs recorded for it)
+- `{{ACTIVITY.remaining_budget_usd}}` - Number: the activity's own `settings.budget.limit` minus `accumulated_cost_usd`, never below 0; `null` when the activity has no budget. The workflow-level budget is not included.
+- `ACTIVITY` is the activity whose templates are being resolved: its `parameters`, `delay` and `scheduled_for` when it is scheduled (and its parameters again when an LLM retry is budget-checked), and the conditions on its own `depends_on`. In a condition it is the activity the condition gates, not the one the condition names.
 - `{{activity_key.iteration}}` - Rounds of `activity_key` completed so far (0 before its first completion), in parameters and conditions alike. An output named `iteration` takes precedence.
 
 **Conditions** are one expression: `"{{ fetch.iteration < (INPUT.n | default(3)) }}"`. In a condition, `INPUT` is the workflow's submitted input, the same as in parameters.
 
 **Why**: Conditions read `INPUT` from `state_data`, which submission leaves empty, so every `INPUT.*` in a condition was undefined, and `{{activity_key.iteration}}` was missing from the template context although the iteration is tracked. Example 08a used both, and failed on its first activity.
+
+**Why `ACTIVITY` is set per activity**: one template context is built per event and reused for every activity scheduled from it; `TemplateContext::set_current_activity` points `ACTIVITY` at each activity in turn, before its templates are resolved. Nothing set it before (#32), so every template using `ACTIVITY.*` failed with `undefined value`. In conditions, `ACTIVITY` is the gated activity because that is the activity a condition decides to schedule, so a loop's back-edge condition reads the loop's own round and budget, as its parameters do. The costs are numbers, not strings, because a string such as `"7.50"` compares greater than every number in MiniJinja, which made `ACTIVITY.accumulated_cost_usd < 5` silently false. With no budget, `remaining_budget_usd` is `null`, not `0`, so it cannot be mistaken for an exhausted budget.
 
 **Array Filters for Iteration Results**:
 
