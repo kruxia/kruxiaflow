@@ -175,7 +175,7 @@ impl ListActivities {
                     "params": "Array of values bound to the placeholders"
                 },
                 "outputs": ["result"],
-                "output_shape": "result: {rows} for SELECT (an array of row objects), or {rows_affected} for INSERT, UPDATE and DELETE; never both. Reference as {{step.result.rows[0].column}}",
+                "output_shape": "result: {rows} (an array of row objects) for SELECT, WITH, and INSERT/UPDATE/DELETE … RETURNING; otherwise {rows_affected}; never both. Reference as {{step.result.rows[0].column}}",
                 "settings": {
                     "retry": "Retry for transient errors",
                     "timeout_seconds": "Query timeout in seconds"
@@ -191,7 +191,7 @@ impl ListActivities {
                     "isolation_level": "read_committed (default), repeatable_read, or serializable"
                 },
                 "outputs": ["result"],
-                "output_shape": "result: {success, statements_executed, results (one per statement: {rows} for SELECT, {rows_affected} otherwise)}",
+                "output_shape": "result: {success, statements_executed, results (one per statement: {rows} for SELECT, WITH and … RETURNING, {rows_affected} otherwise)}",
                 "settings": {
                     "retry": "Retry on serialization failures"
                 }
@@ -220,7 +220,7 @@ impl ListActivities {
             {
                 "name": "script",
                 "worker": "py-std",
-                "description": "Execute a Python script. Multiple worker pools are available with different pre-installed packages.",
+                "description": "Execute a Python script on a Python worker. The worker type decides which packages are installed.",
                 "parameters": {
                     "script": "Python source code to execute",
                     "inputs": "Optional object, available to the script as INPUT"
@@ -232,10 +232,8 @@ impl ListActivities {
                     "timeout_seconds": "Activity-level timeout in seconds"
                 },
                 "worker_pools": {
-                    "py-std": "General utilities (httpx, orjson, pydantic, dateutil)",
-                    "py-data": "ETL (pandas, polars, duckdb, sqlalchemy)",
-                    "py-ml": "ML (sklearn, torch, numpy, scipy)",
-                    "py-nlp": "NLP (transformers, spacy, tiktoken)"
+                    "py-std": "pandas, polars, pyarrow, duckdb, numpy, scikit-learn, torch (CPU), sentence-transformers, transformers, tiktoken, orjson, python-dateutil",
+                    "py-sys": "The SDK only, with curl and jq"
                 }
             }
         ]);
@@ -300,7 +298,7 @@ impl GetWorkflowAuthoringGuide {
                     "activities": "LIST of activity definitions (at least one required). Each entry carries its unique identifier in the 'key' field — a map keyed by activity name is NOT accepted."
                 },
                 "activity_fields": {
-                    "worker": "(optional, default: std) Worker type that executes this activity — std, py-std, py-data, py-ml, py-nlp",
+                    "worker": "(optional, default: std) Worker type that executes this activity — std, py-std, py-sys (or a custom worker type)",
                     "activity_name": "(required) Name of the activity within the worker (e.g. http_request, llm_prompt)",
                     "parameters": "Key-value map passed to the activity at runtime. Supports template expressions.",
                     "depends_on": "List of activity keys that must complete before this one starts. Each entry can be a plain key or {activity_key, conditions}.",
@@ -1090,12 +1088,20 @@ mod tests {
         ("script", &["script", "inputs"], &["result"]),
     ];
 
-    /// The catalog must use the names the activities actually accept and
-    /// return. Source of truth: the parameter structs and ActivityResult names
-    /// in worker/src/activities/ (http.rs HttpRequestParams, llm.rs
-    /// LLMPromptParams / EmbeddingParams, postgres.rs QueryParams /
-    /// TransactionParams, email.rs EmailParams, echo.rs). Update both when an
-    /// activity changes.
+    /// The parameters each activity can't run without: the fields of its
+    /// parameter struct that have no default (the script activity runs an
+    /// empty script without `script`)
+    const ACTIVITY_REQUIRED: &[(&str, &[&str])] = &[
+        ("http_request", &["method", "url"]),
+        ("llm_prompt", &["model", "prompt"]),
+        ("embedding", &["model", "input"]),
+        ("postgres_query", &["db_url", "query"]),
+        ("postgres_transaction", &["db_url", "statements"]),
+        ("email_send", &["smtp_url", "from", "to", "subject"]),
+        ("script", &["script"]),
+    ];
+
+    /// The catalog must use the names in [`ACTIVITY_TRUTH`]
     #[test]
     fn test_catalog_matches_activity_parameters_and_outputs() {
         let truth = ACTIVITY_TRUTH;
@@ -1147,9 +1153,9 @@ mod tests {
     }
 
     /// Activity-level keys and parameters in the guide's examples must be
-    /// real: unknown keys are silently ignored (`output_definitions` parsed to
-    /// nothing; `system` instead of `system_prompt` dropped the prompt), and
-    /// `streaming` under settings is overwritten by the activity-level field
+    /// real, and each example must give its activity's required parameters:
+    /// unknown keys are silently ignored, and `streaming` under settings is
+    /// overwritten by the activity-level field
     #[test]
     fn test_guide_examples_use_real_keys_and_parameters() {
         const ACTIVITY_KEYS: &[&str] = &[
@@ -1192,6 +1198,14 @@ mod tests {
                             problems.push(format!(
                                 "{where_}: {key}: {name} does not accept parameter {param:?}"
                             ));
+                        }
+                    }
+                }
+                if let Some((_, required)) = ACTIVITY_REQUIRED.iter().find(|(t, _)| *t == name) {
+                    for param in required.iter() {
+                        if activity["parameters"].get(*param).is_none() {
+                            problems
+                                .push(format!("{where_}: {key}: {name} needs parameter {param:?}"));
                         }
                     }
                 }

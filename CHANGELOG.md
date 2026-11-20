@@ -33,7 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **`script`:** documented with parameters `code`, `globals` and
     `timeout` and outputs `stdout` / `stderr`, on worker `python`. The Python
     worker's activity takes `script` and `inputs`, returns `result` (the
-    script's `OUTPUT`), and runs on `py-std`.
+    script's `OUTPUT`), and runs on `py-std`. The catalog listed worker
+    pools `py-data`, `py-ml` and `py-nlp`, which the SDK doesn't build; it
+    now lists `py-std` and `py-sys`.
   - **Silently ineffective fields:** `streaming` under settings (the
     orchestrator overwrites it with the activity-level `streaming`), and the
     activity field `output_definitions` (the YAML key is `outputs`).
@@ -41,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     skipped the approval step, and the skip cascaded to processing. It now
     has a direct path for low-value requests.
   - **Output and parameter descriptions:** `postgres_query` returns `rows` or
-    `rows_affected`, never both; embeddings on a server are always in
+    `rows_affected`, never both (`rows` also for `WITH` and `… RETURNING`); embeddings on a server are always in
     `embeddings_file`; `download_to_file` is kept as a workflow file only when
     declared in `outputs`; http `headers` and `query` take string values;
     `iteration_limit` stops a loop rather than failing it.
@@ -54,13 +56,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **CI now lints and tests the MCP server.** Its code is behind the
     optional `mcp-server` feature, which no CI job compiled, so none of its
     tests ran in CI. A new `MCP server` job runs clippy and its tests with
-    the feature.
+    the feature, against a PostgreSQL service for its database tests.
   - **Guard against further drift:** new tests validate every guide example
     with the workflow parser (including that no settings key is dropped, and
     that conditions are templates), check the `WORKFLOW` variables, and pin
     the catalog's parameter and output names to the activities', in both
     directions. Guide examples may use only real activity fields and each
-    activity's real parameters, and the approval example is run through the
+    activity's real parameters, must give its required parameters, and the
+    approval example is run through the
     orchestrator's readiness evaluation for both kinds of request.
 
 ## [0.12.1] - 2026-11-17
