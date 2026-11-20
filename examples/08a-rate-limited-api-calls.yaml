@@ -1,8 +1,10 @@
 # Example 8a: Rate-Limited API Calls (Iterative with Delay)
 #
-# Demonstrates iterative HTTP requests with rate limiting using `delay` between
-# iterations. Fetches multiple pages from httpbin.org with a configurable page
-# count and a 5-second delay between each request.
+# Demonstrates iterative HTTP requests with `settings.delay`. Fetches multiple
+# pages from httpbin.org with a configurable page count. The delay applies only
+# to an activity's first round (round 0), so it holds back the first request by
+# 5 seconds; the later rounds run as soon as the previous one completes, so the
+# requests are not spaced out.
 #
 # Workflow Pattern:
 # fetch_page (iterates with delay) → aggregate_results (sends email)
@@ -14,25 +16,26 @@
 # Expected Execution Flow:
 #
 # 1. fetch_page (iteration 0): GET httpbin.org/get?page=0
-#    - No delay on first iteration (no dependencies met yet)
+#    - Scheduled 5s after the workflow starts (the delay)
 #
 # 2. fetch_page (iteration 1): GET httpbin.org/get?page=1
-#    - 5s delay after loop-back condition met
+#    - Runs once round 0 completes, with no delay
 #
 # 3. fetch_page (iteration 2): GET httpbin.org/get?page=2
-#    - 5s delay after loop-back condition met
+#    - Runs once round 1 completes, with no delay
 #    - Loop exits: iteration >= num_pages
 #
 # 4. aggregate_results: Sends all page results via Mailpit
 #
 # ```
-# t=0s     fetch_page[0] ━━━┓
-#                             │ (loop back, 5s delay)
-# t=5s     fetch_page[1] ━━━┓
-#                             │ (loop back, 5s delay)
-# t=10s    fetch_page[2] ━━━┓
+# t=0s     (delay, 5s)
+# t=5s     fetch_page[0] ━━━┓
+#                             │ (loop back, no delay)
+# t=5s+    fetch_page[1] ━━━┓
+#                             │ (loop back, no delay)
+# t=5s+    fetch_page[2] ━━━┓
 #                             │ (loop exits)
-# t=10s+                     └─→ aggregate_results
+# t=5s+                      └─→ aggregate_results
 # ```
 #
 # Prerequisites:
@@ -40,7 +43,7 @@
 #
 # Features Demonstrated:
 # - Iterative loop with fixed count (no evaluation activity needed)
-# - `settings.delay` for rate limiting between iterations
+# - `settings.delay`, which applies to the first round only
 # - `iteration_scoped: true` for per-iteration output storage
 # - Loop-back `depends_on` (activity depends on itself with condition)
 # - All iterations' responses as one array (`{{fetch_page.response}}`, iteration-scoped;
@@ -63,7 +66,7 @@ activities:
     outputs:
       - response
     settings:
-      delay: "5s"               # Rate limit: 5 seconds between iterations
+      delay: "5s"               # Holds back round 0 only; later rounds aren't delayed
     depends_on:
       # Loop: fetch_page depends on itself to iterate
       - activity_key: fetch_page

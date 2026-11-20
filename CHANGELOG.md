@@ -26,7 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the body uses `{{fetch_page.response}}`, the array of every round's
   response (`http_request`'s output is `response`, not `result`, which the
   example also declared). A new test runs the example through the
-  orchestrator.
+  orchestrator. Its header and README described a 5-second delay between
+  requests; `settings.delay` applies only to an activity's first round, so
+  it holds back the first request and the later ones are not spaced out.
+  They now say so.
 - **Examples 06a and 09b can be submitted.** They failed to parse. 06a's
   `cache:` was a map (`enabled`, `ttl_seconds`, `key`), but `cache` is a
   boolean with the TTL in `cache_ttl`; it is now `cache: true` and
@@ -37,20 +40,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Its log step no longer reads `result.cache_hit`, which `llm_prompt` doesn't
   return (a cache hit shows only in the activity's metadata): it bound NULL
   into the log table's `NOT NULL` `cache_hit` column, so the step failed on
-  every run. The `cache_hit` column is gone. 09b's budget `action: warn` is now
-  `continue`, which doesn't stop the step before it runs; the LLM worker
+  every run. The `cache_hit` column is gone. 09b's budget `action: warn` is
+  now `continue`, which doesn't stop the step before it runs; the LLM worker
   still skips models over the limit.
-- **Example 07b's conditions and templates are valid.** Its conditions were two
-  templates joined by an operator, or by `OR` outside a template, so they
+- **Example 07b's conditions and templates are valid.** Its conditions were
+  two templates joined by an operator, or by `OR` outside a template, so they
   rendered to a non-empty string and were always true. It also used `[*]`,
   which is not template syntax, outputs `llm_prompt` doesn't produce
   (`results`, `sufficient`, `reason`, `gaps`, file outputs), and per-step cost
   fields templates can't read. The conditions are now single expressions on
   the start of the evaluation's reply (any case) and
-  `{{search_information.iteration}}`, tested against sample replies, every round's
-  results are read from the iteration-scoped `result` array, and the loop's
-  budget-based exit is gone: `settings.budget` still fails an activity over
-  its budget. `{{ACTIVITY.remaining_budget_usd}}` in its prompt still depends
+  `{{search_information.iteration}}`, tested against sample replies; every
+  round's results are read from the iteration-scoped `result` array, and the
+  loop's budget-based exit is gone: `settings.budget` still fails an activity
+  over its budget. `{{ACTIVITY.remaining_budget_usd}}` in its prompt still depends
   on #32.
 - **Every example is parsed by the test suite.** A new test parses and
   validates each file in `examples/`, so an example the engine can't accept
