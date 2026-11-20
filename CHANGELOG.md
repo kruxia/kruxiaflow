@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A signal wait takes one signal, with or without `data`.** A wait
+  recorded "signaled" by storing the signal's `data`, so a signal sent
+  without `data` left it looking unsignaled until the orchestrator took it.
+  Meanwhile a second signal was answered `"signaled": true` while its data
+  was dropped, and the expiry checker could still time the wait out: with
+  `on_timeout: fail`, a step whose signal arrived before the deadline
+  failed with `SIGNAL_TIMEOUT`. A signal was also accepted after its wait
+  had timed out. Migration `20261119000002` adds
+  `activity_event_subscriptions.signaled_at` (backfilled for rows signaled
+  with data); a signal now needs a wait that is neither signaled nor
+  expired, and the expiry checker skips signaled waits. The MCP tools
+  `send_workflow_signal` and `list_waiting_workflows` use the same test.
+
 ## [0.12.1] - 2026-11-17
 
 ### Fixed

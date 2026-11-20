@@ -31,7 +31,9 @@ pub trait SubscriptionService: Send + Sync {
     async fn create_subscription(&self, subscription: NewSubscription) -> Result<Uuid>;
 
     /// Signal an activity, transitioning it from waiting to pending
-    /// Returns the subscription if found and event_name matches, None otherwise
+    /// Returns the subscription if found, event_name matches and the wait is
+    /// still open (not already signaled, not expired), None otherwise.
+    /// A wait takes one signal, with or without data.
     async fn signal_activity(&self, request: SignalRequest)
     -> Result<Option<ActivitySubscription>>;
 

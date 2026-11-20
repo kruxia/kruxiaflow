@@ -562,6 +562,11 @@ Sends a signal to a waiting activity within a workflow.
 - `event_name` - Required, not empty
 - `data` - Optional, any JSON object
 
+A wait takes one signal, with or without `data`. Once a signal has been
+accepted, another signal for the same wait gets `"signaled": false` (its
+`data` is not used), and so does a signal for a wait whose timeout has
+already expired.
+
 **Response** (200 OK):
 ```json
 {
