@@ -8,6 +8,9 @@
 <!--
   The Shop Floor: every machine at once, each drawn as a schematic of its
   own workflow, with every step lit by what it did in the chosen results.
+  Written for edge developers: each machine's edge reading, what each run
+  cost (its footprint), where it ran (its host), and, in plug mode, whether
+  a twin with the plug pulled partway came out the same.
 
   A prototype, to compare with stack.html. The runner fills in the data
   marker below and writes this page next to the results; see
@@ -179,7 +182,39 @@
   th, td { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--grid); vertical-align: top; white-space: nowrap; }
   th { font-weight: 600; color: var(--ink-secondary); }
 
+  /* at the edge: the machine where the network, the power or the operator can't be trusted */
+  .edge { margin: 0; font-size: 13px; color: var(--ink-secondary); max-width: 66ch; }
+  .edge b { font-size: 10.5px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); margin-right: 6px; }
+
+  /* pull the plug: one mark per twin, coloured by how it came out */
+  .plug { display: inline-block; width: 12px; height: 12px; flex: none; vertical-align: -1px; }
+  .plug path, .plug rect { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+  .plug rect { fill: currentColor; }
+  .plug.identical { color: var(--status-good); }
+  .plug.different { color: var(--status-critical); }
+  .plug.hung { color: var(--status-serious); }
+  .plug.missed { color: var(--ink-muted); }
+  .chip.plugged { gap: 6px; }
+  .chip.different { border-color: var(--status-critical); color: var(--status-critical); }
+  .chip.hung { border-color: var(--status-serious); }
+  .twin { margin: 0; padding: 8px 10px; border-radius: 6px; font-size: 12.5px; display: grid; gap: 4px;
+    background: color-mix(in srgb, var(--ink-muted) 7%, var(--surface)); }
+  .twin.different { background: color-mix(in srgb, var(--status-critical) 8%, var(--surface)); }
+  .twin.hung { background: color-mix(in srgb, var(--status-serious) 12%, var(--surface)); }
+  .twin p { margin: 0; }
+  .twin ul { margin: 0; padding-left: 18px; }
+
+  /* footprint: this run, and the machine's runs together */
+  .foot { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .foot dt { color: var(--ink-muted); }
+  .foot dd { margin: 0; color: var(--ink-secondary); min-width: 0; overflow-wrap: anywhere; }
+  .hosts { display: flex; flex-wrap: wrap; gap: 4px; }
+  .hosts .chip { font-size: 11.5px; }
+
   .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--ink-secondary); align-items: center; }
+  .notes { margin: 10px 0 0; display: grid; gap: 2px; font-size: 12px; color: var(--ink-secondary); max-width: 90ch; }
+  .notes p { margin: 0; }
+  .notes b { color: var(--ink); font-weight: 600; }
   .legend svg { vertical-align: middle; margin-right: 4px; }
   .empty { max-width: 60ch; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
   .empty code { font-family: var(--mono); font-size: 12px; }
@@ -214,6 +249,7 @@
 <main>
   <div class="wrap">
     <div class="legend" id="legend"></div>
+    <div class="notes" id="notes"></div>
     <div class="floor" id="floor" style="margin-top:14px"></div>
   </div>
 </main>
@@ -261,9 +297,14 @@ function when(iso) {
   if (isNaN(d)) return iso || "";
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
+/** Where a set ran; results files before machine-shop-results/2 don't say */
+function hostOf(s) { return s && s.host ? s.host : "host not recorded"; }
+const HOSTS = [...new Set(SETS.map(hostOf))];
+const MULTI_HOST = HOSTS.length > 1;
 function setName(s) {
-  const twins = SETS.filter(o => o.tree.label === s.tree.label && o.mode === s.mode).length;
-  return `${s.tree.label} · ${s.mode}` + (twins > 1 ? ` · ${when(s.started_at)}` : "");
+  const same = SETS.filter(o => o.tree.label === s.tree.label && o.mode === s.mode && hostOf(o) === hostOf(s) && !o.plug === !s.plug).length;
+  return `${s.tree.label} · ${s.mode}` + (MULTI_HOST ? ` · ${hostOf(s)}` : "") + (s.plug ? " · plug" : "") +
+    (same > 1 ? ` · ${when(s.started_at)}` : "");
 }
 function runIn(set, dir, run) { return set ? set.runs.find(r => r.machine === dir && r.run === run) : undefined; }
 function worst(rs) { return rs.length ? rs.reduce((a, b) => (RESULT_RANK[b.result] > RESULT_RANK[a.result] ? b : a)) : null; }
@@ -271,6 +312,53 @@ function resultLabel(r) {
   if (!r) return "Not run";
   const issues = runIssues(r);
   return (RESULT_TEXT[r.result] || r.result) + (issues.length ? ` · ${issueText(issues, ", ")}` : "");
+}
+
+// Pull the plug: a run's twin, and how it came out against the run
+const TWIN_TEXT = { identical: "Identical", different: "Different", hung: "Hung", missed: "Missed" };
+const TWIN_RANK = { hung: 3, different: 2, identical: 1, missed: 0 };
+const TWIN_MEANS = {
+  identical: "the twin came out the same as the uninterrupted run",
+  different: "the twin came out differently",
+  hung: "the twin never finished, though the uninterrupted run did",
+  missed: "the twin finished before the plug was pulled",
+};
+const PLUG_SIMULATES = "Pulling the plug aborts the engine's in-process tasks (API server, orchestrator and std worker) at once, " +
+  "which drops their connections and rolls back their open transactions. It is not a process kill and not a database power loss: " +
+  "PostgreSQL keeps running throughout.";
+function twinOf(r) { return r && r.twin ? r.twin : null; }
+function worstTwin(rs) {
+  const ts = rs.map(twinOf).filter(Boolean);
+  return ts.length ? ts.reduce((a, b) => (TWIN_RANK[b.outcome] > TWIN_RANK[a.outcome] ? b : a)) : null;
+}
+function hasTwins(s) { return !!s && s.runs.some(r => r.twin); }
+/** A plug, coloured by the twin's outcome; the words go in `label` */
+function plugMark(outcome, label) {
+  return `<svg class="plug ${esc(outcome)}" viewBox="0 0 12 12" role="img" aria-label="${esc(label)}"><title>${esc(label)}</title>` +
+    `<path d="M4.5 1v3M7.5 1v3M6 8.5V11"/><rect x="2.5" y="4" width="7" height="4.5" rx="1.2"/></svg>`;
+}
+function twinLabel(t) { return t ? `Pull the plug: ${TWIN_TEXT[t.outcome] || t.outcome}, ${TWIN_MEANS[t.outcome] || ""}` : ""; }
+
+// Footprint: what a run cost the engine
+function secs(n) { return `${Number(n).toFixed(2)} s`; }
+function bytes(n) { return n < 1000 ? `${n} B` : `${(n / 1000).toFixed(1)} kB`; }
+function plural(n, one, many) { return `${n} ${n === 1 ? one : many}`; }
+function footText(f) {
+  const parts = [plural(f.events, "event", "events"), `${bytes(f.payload_bytes)} of event payload`, plural(f.queue_rows, "queue row", "queue rows")];
+  if (f.peak_engine_connections != null) parts.push(`${f.peak_engine_connections} engine connections at most`);
+  return parts.join(" · ");
+}
+/** The machine's runs in `set`, added up: the runner's own sums, or the same sums made here */
+function machineFoot(set, dir) {
+  if (set.machine_footprints && set.machine_footprints[dir]) return set.machine_footprints[dir];
+  const rs = set.runs.filter(r => r.machine === dir);
+  const measured = rs.filter(r => r.footprint);
+  if (!measured.length) return null;
+  const sum = k => measured.reduce((a, r) => a + r.footprint[k], 0);
+  const peaks = measured.map(r => r.footprint.peak_engine_connections).filter(n => n != null);
+  return { runs: rs.length, measured: measured.length, seconds: rs.reduce((a, r) => a + r.seconds, 0),
+    seconds_max: Math.max(...rs.map(r => r.seconds)), events: sum("events"), payload_bytes: sum("payload_bytes"),
+    queue_rows: sum("queue_rows"), peak_engine_connections: peaks.length ? Math.max(...peaks) : null };
 }
 
 // ---------------------------------------------------------------------------
@@ -411,19 +499,28 @@ function tally() {
     const n = MACHINES.reduce((acc, m) => acc + m.card.runs.filter(r => changed(m.dir, r.name)).length, 0);
     html += `<span class="chip changed">Δ Changed since ${esc(setName(cmp()))} <b>${n}</b></span>`;
   }
+  if (hasTwins(s)) {
+    const t = { identical: 0, different: 0, hung: 0, missed: 0 };
+    s.runs.forEach(r => { if (r.twin) t[r.twin.outcome] = (t[r.twin.outcome] || 0) + 1; });
+    html += Object.entries(t).map(([k, n]) =>
+      `<span class="chip plugged ${k}" title="${esc(TWIN_MEANS[k] || "")}">${plugMark(k, TWIN_TEXT[k])}${TWIN_TEXT[k]} <b>${n}</b></span>`).join("");
+  }
   return html;
 }
 
 function meta() {
   const s = cur();
   if (!s) return "";
-  return `<code>${esc(s.tree.branch)} @ ${esc(s.tree.commit)}</code> · ${esc(s.runner)} runner · ${esc(s.mode)} mode · ${esc(when(s.started_at))} · ${s.runs.length} runs in ${Number(s.seconds).toFixed(1)}s`;
+  return `<code>${esc(s.tree.branch)} @ ${esc(s.tree.commit)}</code> · ${esc(s.runner)} runner · ${esc(s.mode)} mode · ran on <code>${esc(hostOf(s))}</code> · ${esc(when(s.started_at))} · ${s.runs.length} runs in ${Number(s.seconds).toFixed(1)}s` +
+    (s.footprint && s.footprint.peak_engine_connections != null ? ` · at most ${s.footprint.peak_engine_connections} of ${s.footprint.engine_pool_max_connections} engine connections` : "") +
+    (s.plug ? ` · plug seed ${esc(s.plug.seed)}` : "");
 }
 
 function andon() {
   return MACHINES.map(m => {
-    const r = worst((cur() ? cur().runs : []).filter(x => x.machine === m.dir));
-    return `<a class="lamp-link" href="#${esc(m.dir)}" title="${esc(resultLabel(r))}"><span class="lamp ${r ? r.result : ""}"></span>${esc(m.card.name)}</a>`;
+    const rs = (cur() ? cur().runs : []).filter(x => x.machine === m.dir);
+    const r = worst(rs), t = worstTwin(rs);
+    return `<a class="lamp-link" href="#${esc(m.dir)}" title="${esc(resultLabel(r))}"><span class="lamp ${r ? r.result : ""}"></span>${esc(m.card.name)}${t ? plugMark(t.outcome, twinLabel(t)) : ""}</a>`;
   }).join("");
 }
 
@@ -435,19 +532,75 @@ function legend() {
     <span>${box("failed")}failed</span>
     <span><svg width="22" height="14" viewBox="0 0 22 14"><circle class="badge-bg miss" cx="7" cy="7" r="6"/><text class="badge badge-text" x="7" y="10.5" text-anchor="middle">!</text></svg>not what the card expects</span>
     ${cmp() ? `<span><svg width="22" height="14" viewBox="0 0 22 14"><circle class="badge-bg delta" cx="7" cy="7" r="6"/><text class="badge badge-text" x="7" y="10.5" text-anchor="middle">Δ</text></svg>different in ${esc(setName(cmp()))}</span>` : ""}
-    <span><svg width="22" height="14" viewBox="0 0 22 14"><path class="link gated" d="M0 7 H22"/><path class="gate" d="M11 2 L16 7 L11 12 L6 7 Z"/></svg>runs only if a condition holds</span>`;
+    <span><svg width="22" height="14" viewBox="0 0 22 14"><path class="link gated" d="M0 7 H22"/><path class="gate" d="M11 2 L16 7 L11 12 L6 7 Z"/></svg>runs only if a condition holds</span>
+    ${hasTwins(cur()) ? Object.keys(TWIN_TEXT).map(k => `<span>${plugMark(k, TWIN_TEXT[k])} ${esc(TWIN_MEANS[k])}</span>`).join("") : ""}`;
+}
+
+function notes() {
+  return (hasTwins(cur()) ? `<p><b>Pull the plug.</b> Each run has a twin, and partway through it the engine was stopped and restarted on the same database. ${esc(PLUG_SIMULATES)}</p>` : "") +
+    `<p><b>Works offline.</b> This page loads nothing from the network: the machines and every results set are inside the file.</p>
+    <p><b>Only PostgreSQL.</b> The engine under test needs nothing else: these runs used its API server, orchestrator and std worker, with no cache, broker or other service.</p>`;
+}
+
+/** Where the plug was pulled on a twin, and how it came out, in words */
+function twinBlock(set, run) {
+  if (!set || !set.plug || !run) return "";
+  const t = twinOf(run);
+  if (!t) {
+    const why = !run.footprint ? "its workflow wasn't deployed" : "the run had too few events to pull the plug partway through";
+    return `<div class="twin"><p>No twin: ${esc(why)}.</p></div>`;
+  }
+  const p = t.plug;
+  let where;
+  if (!p) where = "The plug was never pulled: the twin finished first.";
+  else if (p.after_event != null) where = `Pulled the plug after event ${p.after_event} of ${p.of_events}; ${plural(p.events_at_plug, "event was", "events were")} in when the engine stopped, and it was down for ${secs(p.down_seconds)}.`;
+  else where = `Pulled the plug once for the whole shop; this twin had ${p.events_at_plug} of the uninterrupted run's ${p.of_events} events in, and the engine was down for ${secs(p.down_seconds)}.`;
+  if (p && p.settled_before) where += " The twin had already finished.";
+  const came = `The twin took ${secs(t.seconds)}, against ${secs(run.seconds)} uninterrupted: ${TWIN_TEXT[t.outcome] || t.outcome}, ${TWIN_MEANS[t.outcome] || ""}.`;
+  const diffs = t.differences && t.differences.length ? `<ul>${t.differences.map(d => `<li>${esc(d)}</li>`).join("")}</ul>` : "";
+  return `<div class="twin ${esc(t.outcome)}"><p>${plugMark(t.outcome, twinLabel(t))} ${esc(where)}</p><p>${esc(came)}</p>${diffs}</div>`;
+}
+
+/** The footprint of the chosen run, and of the machine's runs together */
+function footBlock(set, m, run) {
+  if (!set || !run) return "";
+  if (!run.footprint) {
+    const why = run.status === "not_deployed" ? "the workflow wasn't deployed, so nothing ran"
+      : `this results set has no footprints (${esc(set.schema || "machine-shop-results/1")})`;
+    return `<dl class="foot"><dt>Footprint</dt><dd>None: ${why}.</dd></dl>`;
+  }
+  const mf = machineFoot(set, m.dir);
+  const all = mf && mf.runs > 1
+    ? `<dt>All ${mf.runs} runs</dt><dd>${secs(mf.seconds)} in all, longest ${secs(mf.seconds_max)} · ${esc(footText(mf))}</dd>` : "";
+  const twin = run.twin && run.twin.footprint ? `<dt>Its twin</dt><dd>${secs(run.twin.seconds)} · ${esc(footText(run.twin.footprint))}</dd>` : "";
+  return `<dl class="foot"><dt>This run</dt><dd>${secs(run.seconds)} · ${esc(footText(run.footprint))}</dd>${twin}${all}</dl>`;
+}
+
+/** With results from several hosts: the machine's latest result on each, for the chosen set's mode */
+function hostsBlock(m) {
+  const s = cur();
+  if (!MULTI_HOST || !s) return "";
+  const chips = HOSTS.map(h => {
+    const sets = SETS.filter(o => hostOf(o) === h && o.mode === s.mode);
+    const pick = [...sets].reverse().find(o => o.tree.label === s.tree.label) || sets[sets.length - 1];
+    if (!pick) return "";
+    const rs = pick.runs.filter(r => r.machine === m.dir);
+    const r = worst(rs), t = worstTwin(rs);
+    return `<span class="chip" title="${esc(setName(pick))}: ${esc(resultLabel(r))}"><span class="lamp ${r ? r.result : ""}"></span>${esc(h)}${t ? plugMark(t.outcome, twinLabel(t)) : ""}</span>`;
+  }).join("");
+  return chips ? `<div class="hosts" aria-label="By host">${chips}</div>` : "";
 }
 
 function bay(m) {
   const c = m.card;
   const spec = c.runs.find(r => r.name === state.run[m.dir]) || c.runs[0];
   const run = runIn(cur(), m.dir, spec.name);
-  const all = cur() ? cur().runs.filter(x => x.machine === m.dir) : [];
   const anyChanged = c.runs.some(r => changed(m.dir, r.name));
+  const mark = rr => (twinOf(rr) ? plugMark(rr.twin.outcome, twinLabel(rr.twin)) : "");
   const tabs = c.runs.length > 1 ? `<div class="runs" role="group" aria-label="Runs">${c.runs.map(r => {
     const rr = runIn(cur(), m.dir, r.name);
-    return `<button type="button" data-machine="${esc(m.dir)}" data-run="${esc(r.name)}" aria-pressed="${r.name === spec.name}"><span class="lamp ${rr ? rr.result : ""}"></span>${esc(r.name)}${changed(m.dir, r.name) ? " Δ" : ""}</button>`;
-  }).join("")}</div>` : `<div class="runs"><span class="meta">Run: ${esc(spec.name)}</span></div>`;
+    return `<button type="button" data-machine="${esc(m.dir)}" data-run="${esc(r.name)}" aria-pressed="${r.name === spec.name}"><span class="lamp ${rr ? rr.result : ""}"></span>${esc(r.name)}${changed(m.dir, r.name) ? " Δ" : ""}${mark(rr)}</button>`;
+  }).join("")}</div>` : `<div class="runs"><span class="meta">Run: ${esc(spec.name)}</span>${mark(run)}</div>`;
 
   let findings = "";
   if (!run) findings = `<p class="ok">Not run in ${esc(setName(cur()))}.</p>`;
@@ -462,10 +615,9 @@ function bay(m) {
   const matrix = `<div class="scroll"><table><thead><tr><th>Run</th>${recent.map(s => `<th>${esc(setName(s))}</th>`).join("")}</tr></thead><tbody>${
     c.runs.map(r => `<tr><td>${esc(r.name)}</td>${recent.map(s => {
       const x = runIn(s, m.dir, r.name);
-      return `<td><span class="lamp ${x ? x.result : ""}" style="display:inline-block;width:8px;height:8px;margin-right:5px"></span>${esc(resultLabel(x))}${x ? ` · ${Number(x.seconds).toFixed(2)}s` : ""}</td>`;
+      return `<td><span class="lamp ${x ? x.result : ""}" style="display:inline-block;width:8px;height:8px;margin-right:5px"></span>${esc(resultLabel(x))}${x ? ` · ${Number(x.seconds).toFixed(2)}s` : ""}${x && x.footprint ? ` · ${plural(x.footprint.events, "event", "events")}` : ""} ${mark(x)}</td>`;
     }).join("")}</tr>`).join("")}</tbody></table></div>`;
 
-  const r = worst(all);
   const wide = layout(m.workflow.steps).width > 370;
   return `<section class="bay${wide ? " wide" : ""}${c.trap ? " trap" : ""}${state.onlyChanged && cmp() && !anyChanged ? " dim" : ""}" id="${esc(m.dir)}" aria-label="${esc(c.name)}">
     <div class="bay-head">
@@ -474,9 +626,13 @@ function bay(m) {
       <div class="verdict"><span>${esc(resultLabel(run))}</span>${run ? `<span class="secs">${Number(run.seconds).toFixed(2)}s</span>` : ""}
         ${trapIssues(c.trap).length ? `<span class="trapchip">Trap · ${issueLinks(trapIssues(c.trap))}</span>` : ""}</div>
     </div>
+    ${c.edge ? `<p class="edge"><b>At the edge</b>${esc(c.edge)}</p>` : ""}
+    ${hostsBlock(m)}
     ${tabs}
     <div class="schematic">${schematic(m, run, spec)}</div>
     ${findings}
+    ${twinBlock(cur(), run)}
+    ${footBlock(cur(), m, run)}
     <details><summary>Card: story, engine functions, recent results</summary>
       <p class="story">${esc(c.picture)}</p>
       ${c.trap ? `<p class="story"><b>When the bug is there:</b> ${esc(c.trap.broken_looks_like)}</p>` : ""}
@@ -498,6 +654,7 @@ function render() {
   document.getElementById("meta").innerHTML = meta();
   document.getElementById("andon").innerHTML = andon();
   document.getElementById("legend").innerHTML = legend();
+  document.getElementById("notes").innerHTML = notes();
   uid = 0;
   document.getElementById("floor").innerHTML = MACHINES.map(bay).join("");
   open.forEach(id => { const d = document.querySelector(`#${CSS.escape(id)} details`); if (d) d.open = true; });
