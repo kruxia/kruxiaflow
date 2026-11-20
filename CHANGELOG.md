@@ -26,7 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the body uses `{{fetch_page.response}}`, the array of every round's
   response (`http_request`'s output is `response`, not `result`, which the
   example also declared). A new test runs the example through the
-  orchestrator.
+  orchestrator. Its header and README described a 5-second delay between
+  requests; `settings.delay` applies only to an activity's first round, so
+  it holds back the first request and the later ones are not spaced out.
+  They now say so.
 
 ## [0.12.1] - 2026-11-17
 

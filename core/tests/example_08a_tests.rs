@@ -162,8 +162,7 @@ async fn assert_pages(pool: PgPool, input: Value, pages: u32) {
         .collect();
     assert_eq!(fetched, expected);
 
-    // The email lists every page's response, so the example reads the
-    // output name `http_request` actually produces
+    // The email lists every page's response
     let text: Option<String> = sqlx::query_scalar(
         "SELECT parameters->'body'->>'Text' FROM activity_queue \
          WHERE workflow_id = $1 AND activity_key = 'aggregate_results' \
