@@ -20,19 +20,64 @@ There are two modes, one test each:
 | `machine_shop_shop`  | shop  | Starts every run of every machine at once, in one engine    |
 
 - **Pick machines:** set `MACHINE_SHOP_ONLY` to a comma-separated list of directory names, such as `MACHINE_SHOP_ONLY=level-crossing`, to run only those.
-- **Scoreboard:** each mode prints one and writes it to `target/tmp/machine-shop/<mode>.md`.
+- **Scoreboard:** each mode prints one and writes it to `target/tmp/machine-shop/<mode>.md`, with each run's result and footprint, a footprint per machine, and the twins' outcomes in plug mode.
 - **Results file:** each mode also writes `results/<tree>-<mode>-<time>.json` there. They accumulate, so runs on different trees and days can be compared.
 - **Views:** each mode then writes every page in `machines/views/` next to the results, with the machines and all the results files embedded. Open it from disk; it needs no server and loads nothing from the network. `machine_shop_views` rewrites the pages from the results already there, without running the machines.
 
 Environment variables:
 
-| Variable            | Default                   | What it does                                                      |
-|---------------------|---------------------------|-------------------------------------------------------------------|
-| `MACHINE_SHOP_ONLY` | every machine             | Runs only these machines (comma-separated directory names)        |
-| `MACHINE_SHOP_OUT`  | `target/tmp/machine-shop` | Where scoreboards, results and views go; share one across trees   |
-| `MACHINE_SHOP_TREE` | the branch name           | The tree's label in the results, such as `main` or `merged-fixes` |
+| Variable                  | Default                   | What it does                                                                                     |
+|---------------------------|---------------------------|--------------------------------------------------------------------------------------------------|
+| `MACHINE_SHOP_ONLY`       | every machine             | Runs only these machines (comma-separated directory names)                                       |
+| `MACHINE_SHOP_OUT`        | `target/tmp/machine-shop` | Where scoreboards, results and views go; share one across trees and hosts                        |
+| `MACHINE_SHOP_TREE`       | the branch name           | The tree's label in the results, such as `main` or `merged-fixes`                                |
+| `MACHINE_SHOP_HOST`       | `<os>/<arch>`             | Where it ran, such as `pi-5` or `m4`; the default is `std::env::consts`, such as `macos/aarch64` |
+| `MACHINE_SHOP_PLUG`       | off                       | `on`, or a seed (a whole number), gives every run a twin that has the plug pulled; see below     |
+| `MACHINE_SHOP_PLUG_GRACE` | `75`                      | Seconds past its card's timeout that a twin may take, when the uninterrupted run finished        |
 
-To compare two trees, run the shop on each with the same `MACHINE_SHOP_OUT` and different `MACHINE_SHOP_TREE` labels. The views written by the second run show both.
+To compare two trees, run the shop on each with the same `MACHINE_SHOP_OUT` and different `MACHINE_SHOP_TREE` labels. The views written by the second run show both. The same works across hosts: the host label is all the results record about the machine, never its hostname or user.
+
+### Footprint
+
+Each run records what it cost, read from the test database when it ends:
+
+| Field                     | What it is                                                                                              |
+|---------------------------|---------------------------------------------------------------------------------------------------------|
+| `seconds`                 | Wall time, from submitting the workflow until it ended or the run's timeout passed                      |
+| `events`                  | Rows in `workflow_events` for the workflow                                                              |
+| `payload_bytes`           | Those events' payloads as stored (`pg_column_size` of the jsonb), without row headers or indexes        |
+| `queue_rows`              | Rows in `activity_queue` for the workflow: one per step and round, since a retry reuses its row         |
+| `peak_engine_connections` | The most connections the engine held on the test database at once, sampled every 25 ms; bench mode only |
+
+The engine's connections are the ones whose `application_name` is `kruxiaflow-machine-shop-engine`: its pool and its `LISTEN` connection, not the runner's, and not those a machine's `postgres_query` opens. Shop-mode runs overlap, so their connections are reported only for the whole set. A sample can miss a peak shorter than 25 ms. The engine's pool is the size of the test's pool (5).
+
+### Pull the plug
+
+`MACHINE_SHOP_PLUG=on` gives every run a twin. After the uninterrupted runs, the runner starts a fresh engine on the same database and runs each twin, and partway through, it pulls the plug:
+
+1. **It stops the engine abruptly.** The API server, orchestrator and std worker run in a Tokio runtime of their own, with their own connection pool. The runner shuts that runtime down at once, which drops every task the engine spawned: the poller, the partition handlers, the timeout checker, and any activity a worker is running.
+2. **It waits until PostgreSQL has seen the engine's connections go,** then reads how many events the twin has.
+3. **It restarts the engine** on the same database and the same port, and the twin runs to the end. A request the runner had in flight gets no answer; it asks again.
+4. **It compares the twin's outcome with the uninterrupted run's:** the workflow's status, each step's status and run count, and each output the card checks.
+
+**What this simulates, exactly:** aborting in-process tasks, which drops their connections and rolls back their open transactions. It is not a process kill, since the runner's own process carries on, and it is not a database power loss: PostgreSQL keeps running throughout, and nothing it committed is lost.
+
+Where the plug is pulled:
+- **Bench mode:** once the twin has `k` events, where `k` is picked from the seed, the machine and the run, between 1 and one less than the uninterrupted run's events. The same seed picks the same points; another seed picks others.
+- **Shop mode:** once, for every twin at once, when the twins together have a share of the uninterrupted runs' events, picked from the seed between 25% and 75%. Each twin records how many of its own events were in when the plug was pulled.
+
+Each twin ends as one of four outcomes:
+
+| Outcome   | Meaning                                                                                          |
+|-----------|--------------------------------------------------------------------------------------------------|
+| identical | Same workflow status, step statuses and run counts, and checked outputs as the uninterrupted run |
+| different | Something differs; the differences are listed                                                    |
+| hung      | The uninterrupted run finished, and the twin hadn't within its card's timeout plus the grace     |
+| missed    | The plug wasn't pulled mid-run: the twin had already finished                                    |
+
+A twin of a run that never finished waits only its card's timeout plus five seconds, and is compared as it stands. A different or hung twin doesn't fail the test: it's a candidate engine finding, printed as a `PLUG:` line and listed in the scoreboard.
+
+**Recovery takes time, and the twin's footprint shows it.** A step whose worker was stopped mid-activity keeps its claim on the queue row until the activity's timeout runs out (the engine's default is 60 seconds), and only then runs again. So a twin can come out identical and still take a minute longer, and the grace is 75 seconds by default.
 
 ### Views: two prototypes
 
@@ -43,11 +88,16 @@ There are two views of the same results, built to compare before choosing one. N
 | `stack.html` | **The Stack:** one card per machine, in homage to HyperCard. A 1-bit look, a pixel picture and pixel title for each machine, its story and functions, and a stamp for each run in each results set. Arrow keys flip cards; Find searches the stack; a compare card lists runs whose result changed.                                                         |
 | `floor.html` | **The Shop Floor:** every machine on one page, each drawn as a schematic of its own workflow, with every step lit by what it did: completed, skipped, never ran or failed. A red mark shows a step that didn't do what the card expects; a blue mark shows a step that changed since the results set you compare with. Uses the engine dashboard's colours. |
 
-The results file (`machine-shop-results/1`) is the contract between runners and views:
+The results file (`machine-shop-results/2`) is the contract between runners and views:
 
-- `runner`, `mode`, `engine_version`, `tree` (`label`, `branch`, `commit`), `started_at`, `seconds`
-- `runs`: one entry per run, with `machine`, `run`, `result` (`works`, `broken`, `known_broken` or `fixed`), `trap` (a trap's first issue, or null), `trap_issues` (all of them, or empty), `seconds`, the workflow's final `status` (`not_deployed` when the engine rejected the definition), `steps` (each step's `status` and `runs`), and `problems`
-- Readers treat a file without `trap_issues` as having `[trap]`, so older results files still read
+- `runner`, `mode`, `engine_version`, `tree` (`label`, `branch`, `commit`), `host`, `started_at`, `seconds`
+- `footprint`: the set's `peak_engine_connections` (sampled, or null) and `engine_pool_max_connections`
+- `plug`: null, or the `seed`, `grace_seconds` and, in shop mode, `shop_fraction`
+- `machine_footprints`: per machine, its `runs`, `measured` runs, `seconds` (all runs), `seconds_max`, `events`, `payload_bytes`, `queue_rows` and `peak_engine_connections`
+- `runs`: one entry per run, with `machine`, `run`, `result` (`works`, `broken`, `known_broken` or `fixed`), `trap` (a trap's first issue, or null), `trap_issues` (all of them, or empty), `seconds`, the workflow's final `status` (`not_deployed` when the engine rejected the definition), `steps` (each step's `status` and `runs`), `problems`, `footprint` (see above; null when not deployed), and `twin`
+- `twin`: null, or its `outcome`, `plug` (`after_event` in bench mode, `events_at_plug`, `of_events`, `down_seconds`, `settled_before`; null if never pulled), `seconds`, `status`, `steps`, `differences`, `problems` and `footprint`
+
+Version 1 is version 2 without `host`, `footprint`, `plug`, `machine_footprints`, or a run's `footprint` and `twin`. The runner bundles both versions into the views, and the views render a version 1 set without those parts. Readers treat a file without `trap_issues` as having `[trap]`, so the oldest results files still read.
 
 Each run ends as one of four results:
 
