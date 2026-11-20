@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The README's approval-gate example** (#35) now works as written:
+  `wait_for_signal` is an object with `event_name` and `timeout_seconds`, and
+  the signal request sends JSON with `activity_key`, `event_name` and `data`.
+
 ## [0.12.1] - 2026-11-17
 
 ### Fixed
