@@ -1,0 +1,40 @@
+# Water pump: a hand pump. Each stroke, the piston lifts water and the valve
+# lets that stroke's water out. The piston strokes again once the valve has
+# let the last stroke out, three strokes in all.
+#
+# The piston numbers each stroke from the valve's last one, so the valve's
+# output says which stroke it let out.
+name: machine_water_pump
+
+activities:
+  - key: intake
+    worker: std
+    activity_name: echo
+    parameters:
+      well: full
+    outputs:
+      - echo
+
+  - key: piston
+    worker: std
+    activity_name: echo
+    iteration_limit: 3
+    parameters:
+      stroke: "{{ (valve.echo.stroke + 1) if valve.status == 'completed' else 1 }}"
+    outputs:
+      - echo
+    depends_on:
+      - intake
+      - activity_key: valve
+        conditions:
+          - "{{ valve.status == 'completed' }}"
+
+  - key: valve
+    worker: std
+    activity_name: echo
+    parameters:
+      stroke: "{{ piston.echo.stroke }}"
+    outputs:
+      - echo
+    depends_on:
+      - piston

@@ -1,0 +1,34 @@
+name: Twin grindstone mill
+kind: compound
+picture: >
+  A mill grinds each batch of grain between two grindstones, coarse then
+  fine, while a sample of the batch goes through a sieve. The sack takes the
+  flour and the sample of the same batch; then the hopper lets in the next.
+  Three batches, three sacks, each with its own batch's flour.
+functions:
+  - a loop with two parallel branches of different lengths that join again
+  - the join (sack) runs once per round, after both branches of that round
+  - iteration_limit ends the loop
+trap:
+  issue: 28
+  broken_looks_like: >
+    From the second batch on, the sack runs as soon as the sieve finishes,
+    on the grindstones' flour from the batch before, and then again when
+    they finish. On main #18 shows first: the grindstones and the sieve run
+    once, and the sack runs 100 times on the first batch's flour.
+runs:
+  - name: three batches
+    timeout_seconds: 10
+    expect:
+      status: completed
+      steps:
+        grain: { status: completed, runs: 1 }
+        hopper: { status: completed, runs: 3 }
+        stone_coarse: { status: completed, runs: 3 }
+        stone_fine: { status: completed, runs: 3 }
+        sieve: { status: completed, runs: 3 }
+        sack: { status: completed, runs: 3 }
+      outputs:
+        - step: sack
+          output: echo
+          equals: { batch: 3, flour: 3, sample: 3 }

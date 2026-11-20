@@ -1,0 +1,37 @@
+name: Kiln
+kind: compound
+picture: >
+  A pottery kiln heats up, a pyrometer reads the temperature, and the stoker
+  adds fuel until the pots are fired at 1200 degrees. Then the kiln is
+  unloaded. The first reading is too cool, and so is the second.
+functions:
+  - a three-step loop that ends through a condition, not its iteration_limit
+  - a step after the loop (unload) waits while the loop runs, and runs once when it exits
+  - the stoker doesn't run in the round where the loop exits, and keeps its last round's result
+trap:
+  issue: 27
+  broken_looks_like: >
+    unload is skipped after the first reading (600 degrees, not ready) and
+    stays skipped, so the pots are never unloaded. On main the loop is
+    broken too (#18): the pyrometer reads once, the stoker runs 100 times
+    on that reading, and the workflow completes without unloading.
+runs:
+  - name: a firing to 1200 degrees
+    timeout_seconds: 10
+    expect:
+      status: completed
+      steps:
+        heat: { status: completed, runs: 3 }
+        pyrometer: { status: completed, runs: 3 }
+        # A loop step whose condition is false in a later round doesn't
+        # run, and keeps its last round's status and output (loops guide,
+        # "How a Round Runs"). It is skipped only if it never ran.
+        stoke: { status: completed, runs: 2 }
+        unload: { status: completed, runs: 1 }
+      outputs:
+        - step: pyrometer
+          output: echo
+          equals: { temp: 1200, ready: true }
+        - step: unload
+          output: echo
+          equals: { fired_at: 1200 }

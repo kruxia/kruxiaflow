@@ -1,0 +1,43 @@
+# Ferris wheel: riders step in, the wheel goes round, and they alight at the
+# bottom. Then the next riders step in: three turns in all.
+#
+# The steps are written in the order they run, step_in first, but their keys
+# sort the other way round (alight, go_round, step_in). The loop must start
+# at step_in, the first step written, whatever the keys are: its dependency
+# on alight is the back-edge. Don't rename the steps into alphabetical
+# order; that would hide the bug this machine traps.
+name: machine_ferris_wheel
+
+activities:
+  - key: step_in
+    worker: std
+    activity_name: echo
+    iteration_limit: 3
+    parameters:
+      turn: "{{ (alight.echo.turn + 1) if alight.status == 'completed' else 1 }}"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: alight
+        conditions:
+          - "{{ alight.status == 'completed' }}"
+
+  - key: go_round
+    worker: std
+    activity_name: echo
+    parameters:
+      turn: "{{ step_in.echo.turn }}"
+    outputs:
+      - echo
+    depends_on:
+      - step_in
+
+  - key: alight
+    worker: std
+    activity_name: echo
+    parameters:
+      turn: "{{ go_round.echo.turn }}"
+    outputs:
+      - echo
+    depends_on:
+      - go_round
