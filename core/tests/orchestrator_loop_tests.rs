@@ -2401,10 +2401,8 @@ activities:
 // A loop whose way in is closed is skipped [loop-entry-not-skipped]
 //
 // Entering a loop for the first time, a step's back-edge points at a loop step
-// that hasn't run (for a self-loop, the step itself). It used to count as
-// satisfied, so the loop ran although its entry condition was false, and it
-// kept the skip pass waiting for that step to finish, so a loop behind a
-// skipped step stayed not_scheduled and the workflow hung.
+// that hasn't run (for a self-loop, the step itself), so it is left out on
+// round 0 and the loop's other dependencies decide.
 // ============================================================================
 
 /// `gate` echoes `open` from `open_gate`; everything else echoes its key
@@ -2437,7 +2435,7 @@ activities:
 "#;
 
 /// The entry condition is false: the self-loop is skipped, and so is the step
-/// after it; the workflow completes. It used to run three times.
+/// after it; the workflow completes.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_self_loop_with_a_false_entry_condition_is_skipped(pool: PgPool) {
     let (runs, state) = run_to_end(&pool, GATED_SELF_LOOP, gate_outputs(false)).await;
@@ -2450,7 +2448,7 @@ async fn test_self_loop_with_a_false_entry_condition_is_skipped(pool: PgPool) {
     assert_eq!(state.status, WorkflowStatus::Completed);
 }
 
-/// The entry condition is true: the loop runs to its iteration_limit, as before
+/// The entry condition is true: the loop runs to its iteration_limit
 #[sqlx::test(migrations = "../migrations")]
 async fn test_self_loop_with_a_true_entry_condition_runs(pool: PgPool) {
     let (runs, state) = run_to_end(&pool, GATED_SELF_LOOP, gate_outputs(true)).await;
@@ -2461,8 +2459,7 @@ async fn test_self_loop_with_a_true_entry_condition_runs(pool: PgPool) {
 }
 
 /// The entry is a skipped step: the self-loop is skipped too, and the skip
-/// cascades past it; the workflow completes. The loop used to stay
-/// not_scheduled, and the workflow running, for ever.
+/// cascades past it; the workflow completes.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_self_loop_behind_a_skipped_step_is_skipped(pool: PgPool) {
     let yaml = r#"
@@ -2526,7 +2523,7 @@ activities:
 "#;
 
 /// The head's entry condition is false: head and tail are skipped, and the
-/// step that handles a skipped loop runs. The loop used to run three rounds.
+/// step that handles a skipped loop runs.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_two_step_loop_with_a_false_entry_condition_is_skipped(pool: PgPool) {
     let (runs, state) = run_to_end(&pool, GATED_TWO_STEP_LOOP, gate_outputs(false)).await;
@@ -2555,8 +2552,7 @@ async fn test_two_step_loop_with_a_true_entry_condition_runs(pool: PgPool) {
 }
 
 /// A two-step loop whose head depends on a skipped step: head and tail are
-/// skipped and the workflow completes. It used to hang with both
-/// not_scheduled.
+/// skipped and the workflow completes.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_two_step_loop_behind_a_skipped_step_is_skipped(pool: PgPool) {
     let yaml = r#"
@@ -2656,7 +2652,7 @@ activities:
     assert_eq!(state.status, WorkflowStatus::Completed);
 }
 
-/// A loop with no dependency outside it starts with the workflow, as before:
+/// A loop with no dependency outside it starts with the workflow:
 /// its back-edge neither lets it in nor keeps it out
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_entered_from_the_workflow_start_runs(pool: PgPool) {
@@ -2691,8 +2687,7 @@ activities:
 /// A loop whose entry condition reads an earlier loop's step waits for that
 /// loop to end before it is skipped, like a step after a loop (#27): the
 /// condition is false after the counter's first rounds and true after its
-/// last, so the second loop starts then, not before. It used to start after
-/// the counter's first round, condition or not.
+/// last, so the second loop starts then, not before.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_entry_on_an_earlier_loop_waits_for_it(pool: PgPool) {
     let run = drive_loop_workflow(

@@ -421,11 +421,7 @@ fn is_activity_ready(
             );
 
             // For back-edges, evaluate loop condition
-            // Activity state should always exist if we're evaluating its dependencies
-            let current_activity_state = activity_state
-                .ok_or_else(|| OrchestratorError::ActivityNotFound(activity.key.clone()))?;
-
-            if !evaluate_loop_condition(dep_rel, dependency_state, state, current_activity_state)? {
+            if !evaluate_loop_condition(dep_rel, dependency_state, state)? {
                 tracing::trace!(
                     "Activity {} not ready: back-edge condition not met for {}",
                     activity.key,
@@ -601,22 +597,12 @@ fn evaluate_loop_condition(
     dep: &ActivityRelationship,
     dep_state: &super::workflow_state::ActivityState,
     state: &WorkflowState,
-    activity_state: &super::workflow_state::ActivityState,
 ) -> Result<bool> {
-    // An activity entering its loop for the first time never gets here: its
-    // back-edges are left out (see `deciding_dependencies`), so its other
-    // dependencies decide whether it runs (#38). A completed loop activity
-    // whose iteration was never counted (a middle step that completed before
-    // its loop marking was completed on load, #18) keeps going as before.
-    if activity_state.iteration == 0 {
-        tracing::trace!(
-            "Back-edge dependency satisfied for {} (first iteration)",
-            activity_state.key
-        );
-        return Ok(true);
-    }
+    // Only an activity that has run gets here: entering its loop for the
+    // first time, its back-edges are left out (see `deciding_dependencies`),
+    // so its other dependencies decide whether it runs (#38)
 
-    // For subsequent iterations, check if dependency has completed at least once
+    // Check if dependency has completed at least once
     // We need the dependency to have run before we can evaluate conditions that reference its outputs
     if dep_state.status != WorkflowActivityStatus::Completed && dep_state.iteration == 0 {
         // Dependency hasn't run yet in this loop cycle, can't loop back
@@ -2051,9 +2037,7 @@ mod tests {
     }
 
     // ============================================================================
-    // A loop whose way in is closed is skipped
-    // Regression tests for #38 [loop-entry-not-skipped]: entering its loop the
-    // first time, a step's back-edge let it in, or kept it waiting for ever
+    // A loop whose way in is closed is skipped (#38)
     // ============================================================================
 
     fn rel_if(key: &str, condition: &str) -> ActivityRelationship {
@@ -2213,16 +2197,9 @@ mod tests {
 
     #[test]
     fn test_later_rounds_still_follow_the_back_edge() {
-        // porter has run a round: from now on its back-edge decides, as
-        // before #38, whatever its entry condition says by now
-        let mut definition = gated_self_loop();
-        definition.activities[1] = loop_def(
-            "porter",
-            vec![
-                rel_if("gate", "{{ gate.status == 'skipped' }}"),
-                rel("porter", true),
-            ],
-        );
+        // porter has run a round: its back-edge decides, whatever its entry
+        // condition says now
+        let definition = gated_self_loop();
         let state = make_workflow_state(vec![
             completed("gate", 1, 0),
             completed("porter", 2, 1),
