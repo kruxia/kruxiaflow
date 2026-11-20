@@ -2188,8 +2188,7 @@ async fn drive_loop_workflow(pool: &PgPool, yaml: &str, first: &[&str]) -> LoopR
 
 /// #28 [loop-join-stale-input]: a join of parallel branches of different
 /// lengths inside a loop runs once per round, after both branches finished
-/// that round. It used to run as soon as the short branch finished, on the
-/// long branch's output from the previous round, and then again.
+/// that round.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_join_waits_for_every_branch_of_the_round(pool: PgPool) {
     let run = drive_loop_workflow(

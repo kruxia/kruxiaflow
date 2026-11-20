@@ -1695,10 +1695,9 @@ mod tests {
     }
 
     #[test]
-    fn test_state_without_sequence_numbers_keeps_previous_behaviour() {
-        // Saved before completion_seq existed (all 0): no ordering
-        // information, so a completed loop member may run again as before.
-        // The tail still waits while the head, upstream of it in the same
+    fn test_state_without_sequence_numbers_counts_as_new_input() {
+        // All `completion_seq` 0: no ordering information, so every completed
+        // loop member counts as having new input. The tail still waits while the head, upstream of it in the same
         // loop, is ready to run (#28); it runs on the head's next completion.
         let definition = two_step_loop();
         let state = make_workflow_state(vec![
@@ -1708,10 +1707,9 @@ mod tests {
         ]);
         assert_eq!(ready_keys(&definition, &state), vec!["head"]);
         let mut state = state;
-        if let Some(head) = state.activities.get_mut("head") {
-            head.completion_seq = 1;
-            head.iteration = 2;
-        }
+        let head = state.activities.get_mut("head").unwrap();
+        head.completion_seq = 1;
+        head.iteration = 2;
         assert_eq!(ready_keys(&definition, &state), vec!["tail"]);
     }
 
@@ -1845,9 +1843,7 @@ mod tests {
     }
 
     // ============================================================================
-    // A completed loop member waits for the rest of its round upstream
-    // Regression tests for #28 [loop-join-stale-input]: a join of parallel
-    // branches inside a loop ran as soon as the short branch finished
+    // A completed loop member waits for the rest of its round upstream (#28)
     // ============================================================================
 
     /// The issue's diamond: start → a_head → (b_long1 → c_long2 | d_short)
