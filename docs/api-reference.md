@@ -565,7 +565,8 @@ Sends a signal to a waiting activity within a workflow.
 A wait takes one signal, with or without `data`. Once a signal has been
 accepted, another signal for the same wait gets `"signaled": false` (its
 `data` is not used), and so does a signal for a wait whose timeout has
-already expired.
+already expired. A 500 response means the signal was not taken (the wait is
+still open), so it can be retried.
 
 **Response** (200 OK):
 ```json

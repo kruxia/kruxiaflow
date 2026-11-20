@@ -1,7 +1,7 @@
 -- Back to signal_data as the only "signaled" marker. A wait signaled without
 -- data keeps counting as signaled: its signal_data becomes JSON null, which
--- is not SQL NULL. (Workers get the signal's data from the ActivitySignaled
--- event, not from this row.)
+-- is not SQL NULL. (The orchestrator takes a signal's data from its
+-- ActivitySignaled event, not from this row.)
 UPDATE activity_event_subscriptions
 SET signal_data = 'null'::jsonb
 WHERE signaled_at IS NOT NULL AND signal_data IS NULL;

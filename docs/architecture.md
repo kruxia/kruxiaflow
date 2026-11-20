@@ -2877,7 +2877,10 @@ checker (`expire_subscriptions`) only picks rows whose `signaled_at` is NULL,
 so a wait ends once: by its signal or by its timeout. Each is a single
 `UPDATE` of the row, so concurrent signals and the checker serialize on its
 row lock. The checker repeats its conditions outside its `id IN (subquery)`,
-because PostgreSQL re-checks only those on a row changed under it.
+because PostgreSQL re-checks only those on a row changed under it. The mark
+and the `ActivitySignaled` publish are two statements: if the publish fails,
+the API clears the mark again (`release_signal`) and answers 500, so the
+client can retry and the timeout still applies.
 
 **Why**: the "signaled" marker used to be `signal_data IS NULL`. A signal
 without `data` left the row looking unsignaled until the orchestrator deleted

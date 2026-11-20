@@ -10,7 +10,9 @@ use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum_test::TestServer;
 use bcrypt::hash;
 use kruxiaflow_api::{AppState, app_router};
-use kruxiaflow_core::events::PostgresEventSource;
+use kruxiaflow_core::events::{
+    EventCursor, EventError, EventSource, NewWorkflowEvent, PostgresEventSource, WorkflowEvent,
+};
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_core::subscription::NewSubscription;
 use kruxiaflow_core::workflow::OnTimeout;
@@ -19,6 +21,7 @@ use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -30,6 +33,40 @@ struct Api {
 }
 
 async fn start(pool: PgPool) -> Api {
+    start_with(pool.clone(), Arc::new(PostgresEventSource::new(pool))).await
+}
+
+/// An event source whose first publish fails, as a database error would
+struct FailFirstPublish {
+    inner: PostgresEventSource,
+    failed: AtomicBool,
+}
+
+#[async_trait::async_trait]
+impl EventSource for FailFirstPublish {
+    async fn publish(&self, event: NewWorkflowEvent) -> kruxiaflow_core::events::Result<()> {
+        if !self.failed.swap(true, Ordering::SeqCst) {
+            return Err(EventError::Database(sqlx::Error::Protocol(
+                "connection lost".to_string(),
+            )));
+        }
+        self.inner.publish(event).await
+    }
+
+    async fn poll(&self, consumer_id: &str) -> kruxiaflow_core::events::Result<Vec<WorkflowEvent>> {
+        self.inner.poll(consumer_id).await
+    }
+
+    async fn update_position(
+        &self,
+        consumer_id: &str,
+        cursor: EventCursor,
+    ) -> kruxiaflow_core::events::Result<()> {
+        self.inner.update_position(consumer_id, cursor).await
+    }
+}
+
+async fn start_with(pool: PgPool, event_source: Arc<dyn EventSource>) -> Api {
     let auth_service = PostgresAuthService::new(
         pool.clone(),
         AuthConfig {
@@ -58,7 +95,7 @@ async fn start(pool: PgPool) -> Api {
         pool.clone(),
         Arc::new(auth_service),
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default())),
-        Arc::new(PostgresEventSource::new(pool.clone())),
+        event_source,
         Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone())),
         Arc::new(kruxiaflow_core::cache::NoOpCache::new()),
         subscriptions.clone(),
@@ -124,6 +161,12 @@ impl Api {
 
     /// Send a signal; `None` leaves `data` out of the request body entirely
     async fn signal(&self, workflow_id: Uuid, data: Option<Value>) -> Value {
+        let (status, body) = self.signal_status(workflow_id, data).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body
+    }
+
+    async fn signal_status(&self, workflow_id: Uuid, data: Option<Value>) -> (StatusCode, Value) {
         let mut body = json!({"activity_key": "approve", "event_name": "go"});
         if let Some(data) = data {
             body["data"] = data;
@@ -137,8 +180,10 @@ impl Api {
             )
             .json(&body)
             .await;
-        assert_eq!(response.status_code(), StatusCode::OK);
-        response.json()
+        (
+            response.status_code(),
+            response.json::<Option<Value>>().unwrap_or_default(),
+        )
     }
 
     /// The subscription row: (signaled_at is set, signal_data, expired_at is set)
@@ -195,7 +240,7 @@ async fn test_duplicate_signal_without_then_with_data(pool: PgPool) {
     duplicate_signal(pool, None, Some(json!({"approved": false}))).await;
 }
 
-/// The comparison: with data, this already held before the fix
+/// Both signals carry data
 #[sqlx::test(migrations = "../migrations")]
 async fn test_duplicate_signal_with_data(pool: PgPool) {
     duplicate_signal(pool, Some(json!({"n": 1})), Some(json!({"n": 2}))).await;
@@ -260,4 +305,60 @@ async fn test_signal_after_expiry_without_data(pool: PgPool) {
 #[sqlx::test(migrations = "../migrations")]
 async fn test_signal_after_expiry_with_data(pool: PgPool) {
     signal_after_expiry(pool, Some(json!({"n": 1}))).await;
+}
+
+/// A signal whose event fails to publish gets an error and leaves the wait
+/// open: a retry is accepted and publishes the event
+async fn failed_publish_then_retry(pool: PgPool, data: Option<Value>) {
+    let api = start_with(
+        pool.clone(),
+        Arc::new(FailFirstPublish {
+            inner: PostgresEventSource::new(pool),
+            failed: AtomicBool::new(false),
+        }),
+    )
+    .await;
+    let id = api.waiting_workflow(600).await;
+
+    let (status, body) = api.signal_status(id, data.clone()).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    assert_eq!(api.row(id).await, (false, None, false));
+
+    let r = api.signal(id, data.clone()).await;
+    assert_eq!(r["signaled"], true, "retry after a failed publish: {r}");
+    assert_eq!(api.row(id).await, (true, data, false));
+    assert_eq!(api.signaled_events(id).await, 1);
+}
+
+#[sqlx::test(migrations = "../migrations")]
+async fn test_failed_publish_then_retry_without_data(pool: PgPool) {
+    failed_publish_then_retry(pool, None).await;
+}
+
+#[sqlx::test(migrations = "../migrations")]
+async fn test_failed_publish_then_retry_with_data(pool: PgPool) {
+    failed_publish_then_retry(pool, Some(json!({"n": 1}))).await;
+}
+
+/// A wait whose signal failed to publish still times out
+#[sqlx::test(migrations = "../migrations")]
+async fn test_failed_publish_wait_still_expires(pool: PgPool) {
+    let api = start_with(
+        pool.clone(),
+        Arc::new(FailFirstPublish {
+            inner: PostgresEventSource::new(pool),
+            failed: AtomicBool::new(false),
+        }),
+    )
+    .await;
+    let id = api.waiting_workflow(0).await;
+
+    let (status, body) = api.signal_status(id, Some(json!({"n": 1}))).await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
+    let expired = api.subscriptions.expire_subscriptions(100).await.unwrap();
+    assert_eq!(
+        expired.len(),
+        1,
+        "a wait whose signal failed was not expired"
+    );
 }

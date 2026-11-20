@@ -121,7 +121,7 @@ async fn test_second_signal_rejected_without_then_with_data(pool: PgPool) {
     second_signal_rejected(pool, None, Some(json!({"approved": false}))).await;
 }
 
-/// The comparison: with data, this already held before the fix
+/// Both signals carry data
 #[sqlx::test(migrations = "../migrations")]
 async fn test_second_signal_rejected_with_data(pool: PgPool) {
     second_signal_rejected(pool, Some(json!({"n": 1})), Some(json!({"n": 2}))).await;
@@ -330,4 +330,58 @@ async fn test_migration_backfill_and_down(pool: PgPool) {
         .execute(&pool)
         .await
         .expect("up migration");
+}
+
+/// A signal that commits while the expiry checker's UPDATE waits on the row
+/// wins: the checker skips the row instead of marking a signaled wait expired
+#[sqlx::test(migrations = "../migrations")]
+async fn test_signal_committed_during_expiry_wins(pool: PgPool) {
+    let workflow_id = insert_test_workflow(&pool).await;
+    let service = PostgresSubscriptionService::new(pool.clone());
+    service
+        .create_subscription(wait(workflow_id, "step", 0))
+        .await
+        .unwrap();
+
+    // The signal's UPDATE, holding the row lock until it commits
+    let mut signal_tx = pool.begin().await.unwrap();
+    sqlx::query(
+        "UPDATE activity_event_subscriptions SET signaled_at = NOW() \
+         WHERE workflow_id = $1 AND signaled_at IS NULL AND expired_at IS NULL",
+    )
+    .bind(workflow_id)
+    .execute(&mut *signal_tx)
+    .await
+    .unwrap();
+
+    let checker = tokio::spawn(async move { service.expire_subscriptions(100).await });
+
+    // Wait until the checker's UPDATE is blocked on the row
+    let start = std::time::Instant::now();
+    loop {
+        let blocked: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM pg_stat_activity \
+             WHERE datname = current_database() AND wait_event_type = 'Lock' \
+               AND query LIKE '%SET expired_at%')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        if blocked {
+            break;
+        }
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(10),
+            "the checker never blocked on the signaled row"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    signal_tx.commit().await.unwrap();
+
+    let expired = checker.await.unwrap().unwrap();
+    assert!(
+        expired.is_empty(),
+        "a signaled wait was expired: {expired:?}"
+    );
+    assert_eq!(row(&pool, workflow_id, "step").await, (true, None, false));
 }

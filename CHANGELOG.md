@@ -19,7 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   had timed out. Migration `20261119000002` adds
   `activity_event_subscriptions.signaled_at` (backfilled for rows signaled
   with data); a signal now needs a wait that is neither signaled nor
-  expired, and the expiry checker skips signaled waits. The MCP tools
+  expired, and the expiry checker skips signaled waits. If the signal's
+  event fails to publish, the API reopens the wait before answering 500, so
+  a retry is accepted and the timeout still applies. The MCP tools
   `send_workflow_signal` and `list_waiting_workflows` use the same test.
 
 ## [0.12.1] - 2026-11-17

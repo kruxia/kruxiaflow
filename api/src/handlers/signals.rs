@@ -300,6 +300,13 @@ mod tests {
         ) -> kruxiaflow_core::subscription::Result<()> {
             Ok(())
         }
+
+        async fn release_signal(
+            &self,
+            _subscription_id: Uuid,
+        ) -> kruxiaflow_core::subscription::Result<()> {
+            Ok(())
+        }
     }
 
     fn setup_test_state_with_found_subscription(pool: PgPool) -> AppState {
@@ -417,6 +424,13 @@ mod tests {
         ) -> kruxiaflow_core::subscription::Result<()> {
             Ok(())
         }
+
+        async fn release_signal(
+            &self,
+            _subscription_id: Uuid,
+        ) -> kruxiaflow_core::subscription::Result<()> {
+            Ok(())
+        }
     }
 
     #[sqlx::test(migrations = "../migrations")]
@@ -525,10 +539,19 @@ pub async fn signal_activity(
                 iteration: None,
             };
 
-            state.event_source.publish(event).await.map_err(|e| {
+            // The row is marked signaled, so without the event the wait would
+            // take no retry and never time out: on a failed publish, reopen it
+            if let Err(e) = state.event_source.publish(event).await {
                 tracing::error!("Failed to publish ActivitySignaled event: {:?}", e);
-                AppError::InternalError(anyhow::anyhow!(e))
-            })?;
+                if let Err(release) = state.subscription_service.release_signal(sub.id).await {
+                    tracing::error!(
+                        subscription_id = %sub.id,
+                        "Failed to reopen the wait after a failed publish: {:?}",
+                        release
+                    );
+                }
+                return Err(AppError::InternalError(anyhow::anyhow!(e)));
+            }
 
             tracing::info!(
                 workflow_id = %workflow_id,

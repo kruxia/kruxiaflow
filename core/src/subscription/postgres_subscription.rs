@@ -201,6 +201,21 @@ impl SubscriptionService for PostgresSubscriptionService {
             .collect())
     }
 
+    async fn release_signal(&self, subscription_id: Uuid) -> Result<()> {
+        sqlx::query!(
+            r#"
+            UPDATE activity_event_subscriptions
+            SET signaled_at = NULL, signal_data = NULL
+            WHERE id = $1
+            "#,
+            subscription_id
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
     async fn delete_subscription(&self, workflow_id: Uuid, activity_key: &str) -> Result<()> {
         sqlx::query!(
             r#"

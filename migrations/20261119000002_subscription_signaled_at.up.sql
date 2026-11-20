@@ -1,21 +1,12 @@
--- When a signal wait took its signal (NULL while it still waits).
---
--- Why: "signaled" used to be read off signal_data IS NULL, but signal_data is
--- the payload, and a signal sent without data stores SQL NULL there. Such a
--- wait still looked unsignaled until the orchestrator deleted its row:
---   - a second signal was accepted (signaled: true) and its data was lost,
---     because its ActivitySignaled event is dropped by the event dedup index;
---   - the expiry checker could still expire the wait, so with
---     on_timeout: fail a step whose signal arrived in time failed (#33).
--- signaled_at is now the marker. A signal matches only a row that is neither
--- signaled nor expired, and the expiry checker only a row not signaled, so a
--- wait ends once: by its signal or by its timeout.
+-- When the wait took its signal (NULL while waiting). This is the "signaled"
+-- marker; signal_data is only the payload and stays NULL for a signal without
+-- data. A signal takes only a row neither signaled nor expired, and the expiry
+-- checker only an unsignaled row, so a wait ends once (#33).
 ALTER TABLE activity_event_subscriptions ADD COLUMN signaled_at TIMESTAMPTZ;
 
--- Rows already signaled with data count as signaled. The signal time was not
--- recorded; NOW() stands in for it (only NULL / NOT NULL is ever read). A row
--- signaled without data cannot be told from a waiting one and stays waiting,
--- as it already behaved.
+-- Rows with signal_data count as signaled; NOW() stands in for the time (only
+-- NULL / NOT NULL is read). A row signaled without data is indistinguishable
+-- from a waiting one and stays waiting.
 UPDATE activity_event_subscriptions
 SET signaled_at = NOW()
 WHERE signal_data IS NOT NULL;
