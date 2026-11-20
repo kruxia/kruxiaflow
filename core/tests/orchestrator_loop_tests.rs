@@ -1717,9 +1717,7 @@ activities:
 
 /// #26 [loop-backedge-by-name]: the repair loop `run → check → fix → run`
 /// starts with `run`, the step written first, and runs each step once per
-/// round. The back-edge used to be chosen by key order, so `check → run` was
-/// taken as the back-edge and `check` started first, before anything had run
-/// (check ran 3 times, run 2).
+/// round.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_repair_loop_starts_with_its_first_written_step(pool: PgPool) {
     let definition = WorkflowDefinition::from_yaml(

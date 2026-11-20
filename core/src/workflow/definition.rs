@@ -253,9 +253,8 @@ impl WorkflowDefinition {
     fn detect_and_validate_loops(&mut self) -> Result<(), ValidationErrors> {
         let mut errors = ValidationErrors::new();
 
-        // Loop metadata is computed here, never taken from the input: an
-        // exported definition carries the markings it was stored with, which
-        // may predate the current rules (#26)
+        // Loop metadata is computed here, never taken from the input (an
+        // exported definition carries its stored markings) (#26)
         for activity in &mut self.activities {
             activity.is_loop_activity = false;
             for dep in activity
@@ -439,8 +438,7 @@ impl WorkflowDefinition {
         // Find all back-edges using DFS, starting from the activities in the
         // order they are written. A loop is entered at its first written step
         // (or where an earlier step leads into it), so the back-edge is the
-        // dependency that leads back there, whatever the keys are called. The
-        // search used to start from the alphabetically first key (#26).
+        // dependency that leads back there, whatever the keys are called (#26).
         for node in self.activities.iter().map(|activity| activity.key.as_str()) {
             if !visited.contains(node) {
                 self.dfs_find_loops(node, graph, &mut visited, &mut rec_stack, &mut loops);
@@ -3810,9 +3808,7 @@ activities:
 "#;
 
     /// #26 [loop-backedge-by-name]: the back-edge is the dependency that leads
-    /// back to the loop's first written step, whatever the keys are called.
-    /// It used to be found by a search starting from the alphabetically first
-    /// key, so here `check`'s dependency on `run` was taken as the back-edge
+    /// back to the loop's first written step, whatever the keys are called
     #[test]
     fn test_back_edge_follows_written_order_not_key_names() {
         let definition = WorkflowDefinition::from_yaml(REPAIR_LOOP).unwrap();
@@ -3828,8 +3824,7 @@ activities:
     }
 
     /// #26: a loop with two branches (`head → a → a2 → join`, `head → b →
-    /// join`, `join → head`). Searching from key `a` took `b → join` as a second
-    /// back-edge, which has no exit mechanism, so validation failed
+    /// join`, `join → head`) has exactly one back-edge, so it validates
     #[test]
     fn test_diamond_loop_has_one_back_edge_to_its_first_step() {
         let definition = WorkflowDefinition::from_yaml(
@@ -3892,9 +3887,9 @@ activities:
         assert_eq!(back_edges(&definition), vec![pair("run", "fix")]);
     }
 
-    /// #26: back-edge and loop markings present in the input (an exported
-    /// definition stored with the old, key-order marking) are recomputed, not
-    /// kept alongside the new ones
+    /// #26: back-edge and loop markings present in the input (as in an
+    /// exported definition) are recomputed, not kept alongside the computed
+    /// ones
     #[test]
     fn test_back_edge_markings_in_the_input_are_recomputed() {
         let exported = REPAIR_LOOP.replace(
