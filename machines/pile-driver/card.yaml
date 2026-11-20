@@ -1,0 +1,37 @@
+name: Pile driver
+kind: compound
+picture: >
+  On a building site, the crane lifts the hammer and drops it on an oak
+  pile, three blows in all. Then the surveyor measures how deep the pile
+  went: three blows deep. The tamper packs the backfill around the pile
+  twice, and the foreman signs off on a pile three blows deep, tamped twice.
+functions:
+  - a step after a two-step loop, depending on it with no condition, runs once, after the loop's last round
+  - a step after a self-loop, depending on it with no condition, runs once, after the loop's last round
+  - iteration_limit ends both loops
+trap:
+  issue: 40
+  broken_looks_like: >
+    The surveyor measures after the first blow, a pile one blow deep, and
+    never again; the tamper starts while the hammer is still driving, and
+    the foreman signs off after the first tamp. On main #18 shows too: drop
+    runs over and over on the first lift.
+runs:
+  - name: three blows, two tamps
+    timeout_seconds: 10
+    expect:
+      status: completed
+      steps:
+        crane: { status: completed, runs: 1 }
+        lift: { status: completed, runs: 3 }
+        drop: { status: completed, runs: 3 }
+        survey: { status: completed, runs: 1 }
+        tamper: { status: completed, runs: 2 }
+        sign_off: { status: completed, runs: 1 }
+      outputs:
+        - step: survey
+          output: echo
+          equals: { depth: 3 }
+        - step: sign_off
+          output: echo
+          equals: { depth: 3, tamps: 2 }

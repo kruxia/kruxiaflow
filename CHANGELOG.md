@@ -13,10 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workflows inspired by physical machines, run against a real engine one at a
   time and all at once, with a scoreboard. Starts with a domino run, a prism
   and funnel, a railway switch, a level crossing that traps #25, and a
-  drawbridge that traps #29 and #37. Eight more traps: a water pump (#18), a
+  drawbridge that traps #29 and #37. Nine more traps: a water pump (#18), a
   jammed gear (#19), a ferris wheel (#26), a kiln (#27), a twin grindstone
-  mill (#28), a thermostat (#30 and #38), a taxi meter (#32) and a revolving
-  door (#38). A run can send
+  mill (#28), a thermostat (#30 and #38), a taxi meter (#32), a revolving
+  door (#38) and a pile driver (#40). A run can send
   signals: the runner waits for the step to be waiting, then signals it
   through the public API. A trap can name several issues. A definition the
   engine rejects is reported as each of its runs' result, not a crash. Each
