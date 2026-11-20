@@ -5,10 +5,9 @@
 # The heater's condition reads INPUT and {{heater.iteration}}, the rounds it
 # has run so far; its parameters read them too.
 #
-# There is no "heating off" run, with the heater behind a condition that's
-# false: a loop whose way in is skipped or false isn't skipped itself (it
-# runs anyway, or waits for ever), whether or not INPUT can be read. That's
-# a separate bug from the one this machine traps.
+# The heater only switches on when the dial shows the room below the
+# setpoint: that's the condition on its way in, its dependency on the dial.
+# On a warm morning the heater is skipped, and the workflow completes.
 name: machine_thermostat
 
 activities:
@@ -31,7 +30,9 @@ activities:
     outputs:
       - echo
     depends_on:
-      - dial
+      - activity_key: dial
+        conditions:
+          - "{{ dial.echo.room < dial.echo.setpoint }}"
       - activity_key: heater
         conditions:
           - "{{ INPUT.room + heater.iteration < INPUT.setpoint }}"

@@ -1,0 +1,88 @@
+# Revolving door: the keeper says whether the gate is unlocked and whether
+# the front desk is staffed. Behind the gate a revolving door turns three
+# times, and visitors reach the lobby. At the desk, when it's staffed, the
+# clerk rings the call bell twice for a porter.
+#
+# Two self-loops, each with its dependency on itself as its back-edge, and a
+# different way in:
+# - The door's way in is a condition on the gate: the gate is open. When the
+#   gate is locked the condition is false, and the door must be skipped, and
+#   the lobby after it.
+# - The bell's way in is the desk, with no condition, and the desk has a
+#   condition of its own: it's staffed. When it isn't, the desk is skipped,
+#   and the bell must be skipped with it.
+# A back-edge points at a step that hasn't run yet the first time (here, the
+# loop step itself): it must not let the loop in, nor keep it waiting.
+#
+# The bell depends on the desk without a condition on purpose: a condition
+# reading a skipped step's output can't be evaluated, which fails the step
+# that carries it.
+name: machine_revolving_door
+
+activities:
+  - key: keeper
+    worker: std
+    activity_name: echo
+    parameters:
+      unlock: "{{ INPUT.unlock }}"
+      desk_staffed: "{{ INPUT.desk_staffed }}"
+    outputs:
+      - echo
+
+  - key: gate
+    worker: std
+    activity_name: echo
+    parameters:
+      open: "{{ keeper.echo.unlock }}"
+    outputs:
+      - echo
+    depends_on:
+      - keeper
+
+  - key: door
+    worker: std
+    activity_name: echo
+    iteration_limit: 3
+    parameters:
+      turn: "{{ (door.echo.turn + 1) if door.status == 'completed' else 1 }}"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: gate
+        conditions:
+          - "{{ gate.echo.open }}"
+      - door
+
+  - key: lobby
+    worker: std
+    activity_name: echo
+    parameters:
+      visitors: arrived
+    outputs:
+      - echo
+    depends_on:
+      - door
+
+  - key: desk
+    worker: std
+    activity_name: echo
+    parameters:
+      clerk: on duty
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: keeper
+        conditions:
+          - "{{ keeper.echo.desk_staffed }}"
+
+  - key: bell
+    worker: std
+    activity_name: echo
+    iteration_limit: 2
+    parameters:
+      ring: "{{ (bell.echo.ring + 1) if bell.status == 'completed' else 1 }}"
+    outputs:
+      - echo
+    depends_on:
+      - desk
+      - bell
