@@ -1600,9 +1600,9 @@ pub async fn process_workflow_event(
     // Steps 4 to 5.5 repeat until a pass skips nothing. Skipping is applied
     // after scheduling, and a skip can make another activity ready: a
     // `status == 'skipped'` branch, or a dependent whose other inputs are
-    // done. Skipping publishes no event, so without another pass that activity
-    // was never scheduled and the workflow stayed running (#25). Each extra
-    // pass follows at least one new skip, so the loop ends.
+    // done. Skipping publishes no event, so only another pass schedules that
+    // activity (#25). Each extra pass follows at least one new skip, so the
+    // loop ends.
     loop {
         // 4. Find ready activities (using updated state)
         let eval_start = std::time::Instant::now();
@@ -1638,7 +1638,7 @@ pub async fn process_workflow_event(
         };
         let (ready_activities, unresolvable_activities) = ready_activities;
 
-        // Activities failed for a template error in this event (#19): not
+        // Activities failed for a template error in this pass (#19): not
         // scheduled, and no ActivityScheduled is published for them
         let mut template_failed: std::collections::HashSet<String> =
             std::collections::HashSet::new();
