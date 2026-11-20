@@ -338,10 +338,11 @@ Budget limits apply to the **total accumulated cost across all iterations**, not
 - Loop terminates
 - Orchestrator marks workflow as failed
 
-**`action: warn`**:
-- Log warning but continue execution
-- Budget can be exceeded
-- Use for soft limits
+**`action: continue`**:
+- The activity is not stopped before it runs
+- An LLM activity's worker still skips any model whose estimated cost would
+  exceed the limit, and the activity fails if no model is left
+- Use when a condition, not the budget, should end the loop
 
 ### Budget-Aware Loop Design
 
@@ -362,7 +363,7 @@ Loop stops at whichever limit is reached first.
   settings:
     budget:
       limit: 10.00
-      action: warn             # Don't abort, just warn
+      action: continue         # Don't stop it before it runs
   depends_on:
     - activity_key: evaluate
       conditions:
@@ -400,7 +401,7 @@ Loop stops at whichever limit is reached first.
 ```yaml
 parameters:
   issue_number: "{{ACTIVITY.iteration + 1}}"  # 1, 2, 3 (not 0, 1, 2)
-  status: "Processing iteration {{ACTIVITY.iteration + 1}} of {{settings.iteration_limit}}"
+  status: "Processing iteration {{ACTIVITY.iteration + 1}} of 10"  # iteration_limit: 10
 ```
 
 ### 3. Set Appropriate Iteration Limits

@@ -346,7 +346,7 @@ async fn test_activity_context_in_llm_retry(pool: PgPool) {
 
 /// Example 07a's `{{ACTIVITY.*}}` lines render for the activity that uses
 /// them, with that activity's own budget from the example. Only those lines
-/// are rendered: the rest of the prompts is outside this fix.
+/// are rendered.
 #[test]
 fn test_example_07a_activity_templates_render() {
     let def = WorkflowDefinition::from_yaml(EXAMPLE_07A).expect("example 07a parses");
