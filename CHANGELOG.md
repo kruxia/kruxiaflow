@@ -154,6 +154,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are being resolved: its parameters, `delay` and `scheduled_for`, and the
   conditions on its own `depends_on`.
 
+- **`{{SIGNAL.*}}` resolves** (#37). The data a signal carries was never put
+  in the template context, and parameters were resolved before the activity
+  started waiting, so an activity using `{{SIGNAL.*}}` failed with
+  "undefined value" before it could wait. Its templates are now resolved when
+  its wait ends, with `SIGNAL` set to the signal's `data`, or `null` when it
+  carried none or the wait timed out with `on_timeout: continue`. A budget
+  check for a waiting activity happens then too, not when the wait begins.
+
 ### Changed
 
 - **`ACTIVITY` costs are numbers.** `accumulated_cost_usd` and
