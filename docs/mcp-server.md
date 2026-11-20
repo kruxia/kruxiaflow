@@ -164,6 +164,18 @@ publishes the port on `127.0.0.1` only).
 `cancel_workflow` is intentionally absent until the engine gains a cancel
 endpoint.
 
+## Keeping the catalog honest
+
+`list_activities` and `get_workflow_authoring_guide` are maintained by hand in `kruxiaflow/src/mcp/tools/discovery.rs`. Tests guard them:
+
+- every example in the guide must parse as a workflow, without dropping any settings key, and with `{{ }}` conditions;
+- examples may use only real activity fields (not `output_definitions`, not `streaming` under settings) and each activity's real parameters;
+- `WORKFLOW` references must exist;
+- the catalog's parameter and output names must match the activities', in both directions, and every catalog entry must be in the test's table;
+- the approval example must route both low- and high-value requests, checked with the orchestrator's own readiness evaluation.
+
+The table is `ACTIVITY_TRUTH` in the test module. It's a second hand-written copy, so when you change an activity's parameters or outputs, update the catalog entry and `ACTIVITY_TRUTH` together. It doesn't check `output_shape` text or output paths inside templates; review those by hand. The tests compile only with `--features mcp-server`; CI runs them in its `MCP server` job (`cargo nextest run -p kruxiaflow --features mcp-server --bins -E 'test(mcp)'`).
+
 ## A budget-governed session, end to end
 
 What an agent connected over MCP typically does with a request like *"research

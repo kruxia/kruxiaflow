@@ -31,8 +31,8 @@ use kruxiaflow_core::{
         \n\
         If activity_key is provided, only that activity is signaled (it must have an \
         active subscription for the signal_name). If omitted, the signal is delivered \
-        to every activity in the workflow currently waiting for that signal_name — \
-        matching the REST API's workflow-level signal semantics.\n\
+        to every activity in the workflow currently waiting for that signal_name. \
+        (The REST signal endpoint always requires activity_key.)\n\
         \n\
         When to use: After list_waiting_workflows identifies a workflow waiting \
         for a specific signal — for example, an approval gate waiting for a human \
@@ -139,8 +139,8 @@ tool_box!(
 /// Deliver a signal and publish the orchestrator event.
 ///
 /// With `activity_key` set, signals that one activity. Without it, delivers the
-/// signal to every activity in the workflow currently waiting for `signal_name`
-/// (workflow-level semantics, matching the REST API).
+/// signal to every activity in the workflow currently waiting for `signal_name`.
+/// The REST signal endpoint always requires `activity_key`.
 pub async fn run_send_workflow_signal(
     pool: &PgPool,
     params: &SendWorkflowSignal,
