@@ -91,6 +91,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     loop's step now waits for that loop to end before it's skipped, like a
     step after a loop (#27). It used to start after the earlier loop's first
     round, whatever the condition said.
+- **A step after a loop runs after the loop's last round (#40).** A step
+  that depends on a loop step without being part of the loop ran as soon as
+  that step first completed: with no condition, after the loop's first
+  round, on that round's output, and never again. Now it waits while a step
+  of that loop is still running or about to start another round, and runs
+  (or is skipped) once the loop has ended, on its last round. A loop running
+  elsewhere in the workflow doesn't hold it back.
+  - **Loops in sequence:** a loop whose way in is a step of an earlier loop
+    now starts once that loop has ended, condition or not. It used to start
+    after the earlier loop's first round and run alongside it.
+  - **Conditions on a step after a loop** are decided by the last round: a
+    condition that held after an earlier round but not after the last no
+    longer runs the step.
 
 ## [0.12.1] - 2026-11-17
 

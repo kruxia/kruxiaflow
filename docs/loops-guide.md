@@ -116,12 +116,25 @@ activities:
 - **When the loop exits through its condition**, `d_done` runs if its own condition holds.
 - **When the loop ends without passing** (here, after 5 rounds), `d_done` is skipped, and so is everything that depends on it unconditionally. A step with a condition such as `{{ d_done.status == 'skipped' }}` runs then, which suits a "give up" step. The workflow completes.
 
-The loop counts as running while any loop step in the workflow is pending, running or waiting for a signal. Before this was fixed, `d_done` was skipped as soon as the first check failed, and the workflow completed without it (#27).
+**A step after a loop with no condition** runs once, after the loop's last round, on that round's output. In the repair loop above, a report on the checks:
 
-**Known limitations:**
+```yaml
+  - key: report            # runs once, after the last check, pass or not
+    activity_name: echo
+    parameters:
+      last_check: "{{ b_check.result }}"
+    depends_on: [b_check]
+```
 
-- **A loop that starts after another loop** waits for it in the same way: the head of the second loop, conditional on a step of the first, isn't skipped while the first loop runs (#38). If its condition becomes true after an earlier round of the first loop, it starts then, like an exit step.
-- **Another loop running elsewhere in the workflow** also holds the step back. It is decided when that loop ends too, which only delays it.
+`report` runs after the check that passes or, if none does, once the loop has ended after its fifth round. It never runs after an earlier check, so `{{ b_check.result }}` is always the last one. This is also how to follow a loop with fixed iterations (Pattern 1), which has no condition to wait on.
+
+**When a step after a loop is decided:**
+
+- **It runs** once no step of the loop it depends on is pending, running or waiting for a signal, or about to start another round. Its conditions are evaluated then, on the last round's output: a condition that held after an earlier round but not after the last doesn't run it. Only that loop counts; another loop running elsewhere in the workflow doesn't hold it back. Before this was fixed, a step after a loop ran as soon as its loop step first completed with its conditions true: with no condition, after the first round, on that round's output, and never again (#40).
+- **It's skipped** once no loop step in the workflow is pending, running or waiting for a signal. Before this was fixed, `d_done` was skipped as soon as the first check failed, and the workflow completed without it (#27).
+- **A loop that starts after another loop** is a step after that loop too: the head of the second loop, which depends on a step of the first, starts or is skipped once the first loop has ended, on its last round (#38, #40). The two loops run one after the other. Before #40, a second loop whose way in had no condition, or a condition true in an earlier round, started then, and ran alongside the first.
+
+**Known limitation:** another loop running elsewhere in the workflow holds back the *skip* of a step after a loop, not its run. It is skipped when that loop ends too, which only delays it.
 
 ---
 
