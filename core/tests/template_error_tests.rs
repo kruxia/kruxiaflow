@@ -8,12 +8,13 @@
 
 mod common;
 
+use kruxiaflow_core::activity::{ActivityWorkerService, PendingActivityRecord};
 use kruxiaflow_core::events::{EventSource, NewWorkflowEvent, WorkflowEventType, WorkflowStatus};
 use kruxiaflow_core::orchestrator::{
     OrchestratorConfig,
     workflow_state::{WorkflowActivityStatus, WorkflowState, load_materialized_state},
 };
-use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
+use kruxiaflow_core::queue::{ActivityQueue, PostgresQueue, QueueConfig};
 use kruxiaflow_core::workflow::WorkflowDefinition;
 use kruxiaflow_core::{PostgresSubscriptionService, SubscriptionService};
 use serde_json::json;
@@ -670,4 +671,317 @@ activities:
     .await
     .unwrap();
     assert_eq!(queued, 0, "the queued retry is cancelled");
+}
+
+/// An LLM step whose parameters use a secret, retried immediately on a
+/// retryable failure, driven through the real queue, worker service and
+/// orchestrator. The orchestrator runs with the secret until the first
+/// attempt is scheduled, and without it afterwards.
+struct RetryHarness {
+    pool: PgPool,
+    workflow_id: Uuid,
+    event_source: Arc<dyn EventSource>,
+    activity_queue: Arc<dyn ActivityQueue>,
+    subscription_service: Arc<dyn SubscriptionService>,
+    worker: ActivityWorkerService,
+    without_secret: OrchestratorConfig,
+}
+
+const RETRY_WORKER_ID: &str = "worker-1";
+
+impl RetryHarness {
+    async fn start(pool: PgPool) -> Self {
+        let definition = WorkflowDefinition::from_yaml(
+            r#"
+name: claimed_retry_template_error
+activities:
+  - key: ask
+    worker: test
+    activity_name: llm_prompt
+    parameters:
+      prompt: "Token {{ SECRET.token }}"
+    settings:
+      retry:
+        max_attempts: 3
+        strategy: fixed
+        base_seconds: 0
+"#,
+        )
+        .expect("valid definition");
+        let definition_id = insert_workflow_definition(&pool, &definition).await;
+        let event_source: Arc<dyn EventSource> =
+            Arc::new(common::settled_event_source(pool.clone()));
+        let activity_queue: Arc<dyn ActivityQueue> =
+            Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+        let mut with_secret = OrchestratorConfig::new(pool.clone());
+        with_secret
+            .secrets
+            .insert("token".to_string(), "t0ken".to_string());
+        let harness = Self {
+            workflow_id: Uuid::now_v7(),
+            worker: ActivityWorkerService::new(activity_queue.clone(), event_source.clone()),
+            subscription_service: Arc::new(PostgresSubscriptionService::new(pool.clone())),
+            without_secret: OrchestratorConfig::new(pool.clone()),
+            event_source,
+            activity_queue,
+            pool,
+        };
+
+        harness
+            .event_source
+            .publish(NewWorkflowEvent {
+                workflow_id: harness.workflow_id,
+                event_type: WorkflowEventType::WorkflowCreated,
+                activity_key: None,
+                payload: json!({
+                    "definition_name": definition.name,
+                    "workflow_definition_id": definition_id,
+                }),
+                iteration: None,
+            })
+            .await
+            .unwrap();
+        harness.process_all(&with_secret).await;
+        harness
+    }
+
+    /// Processes every event in the stream; each must process cleanly
+    async fn process_all(&self, config: &OrchestratorConfig) {
+        loop {
+            let events = self.event_source.poll("orchestrator").await.unwrap();
+            if events.is_empty() {
+                break;
+            }
+            for event in events {
+                kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
+                    &event,
+                    &self.event_source,
+                    &self.activity_queue,
+                    &self.subscription_service,
+                    config,
+                )
+                .await
+                .unwrap_or_else(|e| {
+                    panic!("{:?} must process cleanly, got: {e}", event.event_type)
+                });
+                self.event_source
+                    .update_position("orchestrator", event.cursor())
+                    .await
+                    .unwrap();
+            }
+        }
+    }
+
+    async fn process_without_secret(&self) {
+        self.process_all(&self.without_secret).await;
+    }
+
+    /// Claims the step's queue row, as a worker does
+    async fn claim(&self) -> PendingActivityRecord {
+        let mut claimed = self
+            .worker
+            .poll_activities("test", RETRY_WORKER_ID, 10)
+            .await
+            .unwrap();
+        assert_eq!(claimed.len(), 1, "exactly one attempt is claimable");
+        claimed.remove(0)
+    }
+
+    async fn fail(&self, activity_id: Uuid) -> bool {
+        self.worker
+            .fail_activity(
+                activity_id,
+                RETRY_WORKER_ID.to_string(),
+                "RATE_LIMITED".to_string(),
+                "rate limited".to_string(),
+                true,
+                None,
+                None,
+            )
+            .await
+            .unwrap()
+    }
+
+    async fn complete(&self, activity_id: Uuid) {
+        self.worker
+            .complete_activity(
+                activity_id,
+                RETRY_WORKER_ID.to_string(),
+                json!({"result": {"value": 2}}),
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+    }
+
+    async fn state(&self) -> WorkflowState {
+        let mut tx = self.pool.begin().await.unwrap();
+        let state = load_materialized_state(&mut tx, self.workflow_id)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        state
+    }
+
+    /// The step's queue row: (status, retry_count)
+    async fn queue_row(&self) -> (String, i32) {
+        sqlx::query_as(
+            "SELECT status::text, retry_count FROM activity_queue WHERE workflow_id = $1",
+        )
+        .bind(self.workflow_id)
+        .fetch_one(&self.pool)
+        .await
+        .unwrap()
+    }
+
+    /// Every orchestrator-published `TEMPLATE_ERROR` failure of the step
+    async fn template_error_events(&self) -> i64 {
+        sqlx::query_scalar(
+            "SELECT count(*) FROM workflow_events
+             WHERE workflow_id = $1 AND event_type = 'ActivityFailed'
+               AND payload->>'error_code' = 'TEMPLATE_ERROR'",
+        )
+        .bind(self.workflow_id)
+        .fetch_one(&self.pool)
+        .await
+        .unwrap()
+    }
+}
+
+fn assert_template_error(state: &WorkflowState) {
+    assert_eq!(status(state, "ask"), WorkflowActivityStatus::Failed);
+    let error = state.activities["ask"].error.as_deref().unwrap_or_default();
+    assert!(error.starts_with("TEMPLATE_ERROR:"), "{error}");
+    assert!(state.activities["ask"].outputs.is_none());
+    assert_eq!(state.status, WorkflowStatus::Failed);
+}
+
+/// A worker claims the retry before the orchestrator handles the first
+/// attempt's failure, so there is no pending retry to cancel. The step
+/// fails with `TEMPLATE_ERROR`, and the claimed attempt's later completion
+/// is ignored: the step stays failed with no outputs.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_claimed_retry_completing_after_its_template_error_is_ignored(pool: PgPool) {
+    let harness = RetryHarness::start(pool).await;
+
+    let first = harness.claim().await;
+    assert_eq!(
+        first.parameters["prompt"], "Token t0ken",
+        "the queued row holds parameters resolved at scheduling"
+    );
+    assert!(harness.fail(first.id).await, "the queue requeues the retry");
+    let retry = harness.claim().await;
+    assert_eq!(retry.id, first.id, "the retry is the same queue row");
+    assert_eq!(
+        retry.parameters["prompt"], "Token t0ken",
+        "the retry runs on the parameters resolved at scheduling"
+    );
+
+    harness.process_without_secret().await;
+    assert_template_error(&harness.state().await);
+    assert_eq!(harness.queue_row().await.0, "running", "the claim survives");
+
+    harness.complete(retry.id).await;
+    harness.process_without_secret().await;
+
+    let state = harness.state().await;
+    assert_template_error(&state);
+    assert_eq!(state.activities["ask"].attempt, 2);
+    assert_eq!(harness.queue_row().await, ("completed".to_string(), 1));
+    assert_eq!(harness.template_error_events().await, 1);
+}
+
+/// The retry completes before the orchestrator handles the first attempt's
+/// failure. The completion is processed first, so the step completes with
+/// the retry's outputs; the `TEMPLATE_ERROR` failure published while
+/// handling the first failure then arrives for a completed step and is
+/// ignored.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_retry_completed_before_its_template_error_completes_the_step(pool: PgPool) {
+    let harness = RetryHarness::start(pool).await;
+
+    let first = harness.claim().await;
+    assert!(harness.fail(first.id).await, "the queue requeues the retry");
+    let retry = harness.claim().await;
+    harness.complete(retry.id).await;
+
+    harness.process_without_secret().await;
+
+    let state = harness.state().await;
+    assert_eq!(status(&state, "ask"), WorkflowActivityStatus::Completed);
+    let outputs = state.activities["ask"].outputs.as_ref().expect("outputs");
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(outputs[0].name, "result");
+    assert_eq!(outputs[0].value, json!({"value": 2}));
+    assert_eq!(state.status, WorkflowStatus::Completed);
+    assert_eq!(harness.queue_row().await, ("completed".to_string(), 1));
+    assert_eq!(
+        harness.template_error_events().await,
+        1,
+        "the template failure is published, then ignored"
+    );
+}
+
+/// A worker claims the retry before the orchestrator handles the first
+/// attempt's failure, and the retry fails after the step has failed with
+/// `TEMPLATE_ERROR`. That failure is ignored: the step keeps its
+/// `TEMPLATE_ERROR` and the workflow stays failed. The queue has already
+/// requeued a third attempt, and nothing cancels it: the workflow's failure
+/// swept the queue while the retry was still claimed.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_claimed_retry_failing_after_its_template_error_is_ignored(pool: PgPool) {
+    let harness = RetryHarness::start(pool).await;
+
+    let first = harness.claim().await;
+    assert!(harness.fail(first.id).await, "the queue requeues the retry");
+    let retry = harness.claim().await;
+
+    harness.process_without_secret().await;
+    assert_template_error(&harness.state().await);
+
+    assert!(
+        harness.fail(retry.id).await,
+        "the queue requeues a third attempt"
+    );
+    harness.process_without_secret().await;
+
+    let state = harness.state().await;
+    assert_template_error(&state);
+    assert_eq!(state.activities["ask"].attempt, 2);
+    assert_eq!(harness.template_error_events().await, 1);
+    assert_eq!(
+        harness.queue_row().await,
+        ("pending".to_string(), 2),
+        "the third attempt stays claimable"
+    );
+}
+
+/// The retry fails before the orchestrator handles the first attempt's
+/// failure. Handling the first failure cancels the attempt the queue
+/// requeued after the second, and handling the second publishes the same
+/// `TEMPLATE_ERROR` failure again, which the event dedup drops. The step
+/// fails with `TEMPLATE_ERROR` and nothing is left to run.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_retry_failed_before_its_template_error_fails_the_step(pool: PgPool) {
+    let harness = RetryHarness::start(pool).await;
+
+    let first = harness.claim().await;
+    assert!(harness.fail(first.id).await, "the queue requeues the retry");
+    let retry = harness.claim().await;
+    assert!(
+        harness.fail(retry.id).await,
+        "the queue requeues a third attempt"
+    );
+
+    harness.process_without_secret().await;
+
+    let state = harness.state().await;
+    assert_template_error(&state);
+    assert_eq!(harness.template_error_events().await, 1);
+    assert_eq!(
+        harness.queue_row().await,
+        ("failed".to_string(), 2),
+        "the third attempt is cancelled before it runs"
+    );
 }

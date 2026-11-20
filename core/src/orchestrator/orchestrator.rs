@@ -837,10 +837,20 @@ async fn handle_activity_failed(
         let resolved_params = match resolve_template_value(&params_value, &template_context) {
             Ok(resolved) => resolved,
             Err(e) => {
-                // The retry cannot run on these parameters: cancel it and fail
-                // the activity with the template error, not this event (#19).
-                // If a worker already claimed the retry, the terminal failure
-                // still lands and its completion is ignored as a duplicate.
+                // The budget cannot be checked: cancel the retry and fail the
+                // activity with the template error, not this event (#19).
+                // A worker may have claimed the retry before this cancel; the
+                // outcome then depends on which event is processed first:
+                // - the TEMPLATE_ERROR failure published here: the activity
+                //   fails, and the retry's completion or failure is ignored
+                //   (if that failure requeued another attempt, the row stays
+                //   claimable and its result is ignored too);
+                // - the retry's completion: the activity completes with its
+                //   outputs, and the TEMPLATE_ERROR failure is ignored;
+                // - the retry's failure: the activity fails. A retryable one
+                //   comes back to this branch, which withdraws the attempt the
+                //   queue requeued (if this cancel has not already) and
+                //   publishes this failure again; the event dedup drops the copy.
                 activity_queue
                     .cancel_pending(state.workflow_id, activity_key, event.iteration)
                     .await?;

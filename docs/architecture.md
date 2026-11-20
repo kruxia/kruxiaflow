@@ -1800,7 +1800,7 @@ Templates use strict undefined: referring to a value that does not exist is an e
 - Normal failure handling follows. Dependents on a `status == 'failed'` branch run, other dependents are skipped (and their dependents, all the way down), and the workflow fails if nothing else can run.
 - The upstream activity whose completion triggered the scheduling is unaffected.
 - Conditions are evaluated only once every forward dependency of the activity is terminal, so a condition may read any of them, whatever order they complete in.
-- An LLM activity's retry resolves its parameters again for the budget check. If they no longer resolve, the queued retry is cancelled and the activity fails the same way.
+- An LLM activity's retry resolves its parameters again for the budget check. If they no longer resolve, the queued retry is cancelled and the activity fails the same way. If a worker has already claimed the retry and its completion is processed before that failure, the activity completes with the retry's outputs instead.
 - The same applies when a skip makes a condition evaluable for the first time. For example, a condition on `classify.result` cannot be resolved once `classify` has been skipped, so the activity that carries it fails rather than waiting forever. To branch on a step that may be skipped, guard the reference: `{% if classify.status == 'completed' %}…{% endif %}`, or test `classify.status` itself.
 
 Before this was fixed (#19), the error was retried as an event-processing failure until the upstream activity's completion event was dropped as poison. That marked the upstream activity failed and left the workflow `running` indefinitely.
