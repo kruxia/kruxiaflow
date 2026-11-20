@@ -34,15 +34,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   activity name and all of its resolved parameters, which covers the model and
   prompt the old `key` listed. Its header no longer says caching falls back
   to in-memory: without `KRUXIAFLOW_CACHE_PROVIDER=redis`, caching is off.
-  09b's budget `action: warn` is now `continue`, which logs a warning and
-  keeps going.
-- **Example 07b's conditions and templates resolve.** Its conditions were two
+  Its log step no longer reads `result.cache_hit`, which `llm_prompt` doesn't
+  return (a cache hit shows only in the activity's metadata): it bound NULL
+  into the log table's `NOT NULL` `cache_hit` column, so the step failed on
+  every run. The `cache_hit` column is gone. 09b's budget `action: warn` is now
+  `continue`, which doesn't stop the step before it runs; the LLM worker
+  still skips models over the limit.
+- **Example 07b's conditions and templates are valid.** Its conditions were two
   templates joined by an operator, or by `OR` outside a template, so they
   rendered to a non-empty string and were always true. It also used `[*]`,
   which is not template syntax, outputs `llm_prompt` doesn't produce
   (`results`, `sufficient`, `reason`, `gaps`, file outputs), and per-step cost
   fields templates can't read. The conditions are now single expressions on
-  the evaluation's reply and `{{search_information.iteration}}`, every round's
+  the start of the evaluation's reply (any case) and
+  `{{search_information.iteration}}`, tested against sample replies, every round's
   results are read from the iteration-scoped `result` array, and the loop's
   budget-based exit is gone: `settings.budget` still fails an activity over
   its budget. `{{ACTIVITY.remaining_budget_usd}}` in its prompt still depends

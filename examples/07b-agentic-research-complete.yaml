@@ -65,7 +65,7 @@
 #
 # 6. evaluate_sufficiency (round 3): Now sufficient → SUFFICIENT
 #    - Cost: ~$0.001, Total: $0.009
-#    - Loop back condition NOT met (no CONTINUE)
+#    - Loop back condition NOT met (the reply starts with SUFFICIENT)
 #    - compile_report condition IS met
 #
 # 7. compile_report: Synthesize all findings from 3 rounds
@@ -187,9 +187,9 @@ activities:
         conditions:
           # Loop back if:
           # 1. Fewer than 5 rounds so far (redundant with iteration_limit, but explicit)
-          # 2. evaluate said insufficient (its latest reply contains CONTINUE)
+          # 2. evaluate said insufficient (its latest reply starts with CONTINUE)
           - "{{ search_information.iteration < 5 }}"
-          - "{{ 'CONTINUE' in (evaluate_sufficiency.result | last).content }}"
+          - "{{ ((evaluate_sufficiency.result | last).content | trim | upper) is startingwith('CONTINUE') }}"
 
   # Step 2: Evaluate if gathered information is sufficient (after each search)
   # {{ACTIVITY.remaining_budget_usd}} below depends on #32.
@@ -259,8 +259,9 @@ activities:
     depends_on:
       - activity_key: evaluate_sufficiency
         conditions:
-          # Only compile report when evaluate said sufficient (no CONTINUE)
-          - "{{ 'CONTINUE' not in (evaluate_sufficiency.result | last).content }}"
+          # Only compile report when evaluate said sufficient (its latest reply
+          # doesn't start with CONTINUE)
+          - "{{ ((evaluate_sufficiency.result | last).content | trim | upper) is not startingwith('CONTINUE') }}"
 
   # Step 4a: Publish success result (after successful research completion)
   - key: publish_success
@@ -321,4 +322,4 @@ activities:
         conditions:
           # Publish failure if evaluate still said insufficient (CONTINUE)
           # when the iteration limit was reached
-          - "{{ 'CONTINUE' in (evaluate_sufficiency.result | last).content and search_information.iteration >= 5 }}"
+          - "{{ ((evaluate_sufficiency.result | last).content | trim | upper) is startingwith('CONTINUE') and search_information.iteration >= 5 }}"

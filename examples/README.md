@@ -403,13 +403,13 @@ curl -X POST http://localhost:8080/api/v1/workflows \
 
 **Expected behavior:**
 - First question: LLM call → cache miss → costs ~$0.001
-- Second identical question (within TTL): cache hit → costs $0.000
+- Second identical question (within TTL): cache hit → no LLM call, and the activity is
+  recorded at $0.000 (its `result`, `cost_usd` included, is the cached one)
 
 **Features demonstrated:**
 - Result caching for LLM responses (`cache: true`, `cache_ttl`); the key is a hash of the
   activity name and its resolved parameters
-- Cache hit tracking in outputs (`{{answer_question.result.cache_hit}}`)
-- Cost tracking with cache awareness
+- Cost tracking with cache awareness (a cache hit is recorded at $0)
 
 ---
 
@@ -548,7 +548,8 @@ curl -X POST http://localhost:8080/api/v1/workflows \
 - Dual success/failure paths: `compile_report` → `publish_success` when the evaluation says
   SUFFICIENT, `publish_failure` when it still says CONTINUE after 5 rounds
 - Boolean conditions as single expressions
-  (`{{ 'CONTINUE' in (evaluate_sufficiency.result | last).content and search_information.iteration >= 5 }}`)
+  (`{{ ((evaluate_sufficiency.result | last).content | trim | upper) is startingwith('CONTINUE') and search_information.iteration >= 5 }}`),
+  reading only the start of the reply, in any case
 
 Templates and conditions can't read an activity's accumulated cost or remaining budget, so
 the loop can't exit early on a low budget; `settings.budget` fails the activity instead.
@@ -773,7 +774,9 @@ gather_sources  ──┘
 - Selective streaming: only the final long-form output streams
 - Non-streaming preparation steps for efficiency
 - Multi-step workflow with streaming final output
-- Budget enforcement with the `continue` action ($0.10): logs a warning and keeps going
+- Budget with the `continue` action ($0.10): the step isn't stopped before it runs, but the
+  LLM worker still skips any model whose estimated cost would exceed the limit, and the step
+  fails if none is left
 
 ---
 

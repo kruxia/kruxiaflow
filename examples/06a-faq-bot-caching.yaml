@@ -6,7 +6,7 @@
 # What This Example Demonstrates:
 # - Semantic caching for LLM responses
 # - Cache configuration (`cache: true`, `cache_ttl`)
-# - Cache hit tracking for cost analysis
+# - Cost tracking with caching (a cache hit is recorded at $0)
 # - Dramatic cost reduction for repeated/similar questions
 # - Database logging with cache metrics
 #
@@ -26,7 +26,6 @@
 #     question TEXT NOT NULL,
 #     answer TEXT NOT NULL,
 #     cost DECIMAL(10, 6),
-#     cache_hit BOOLEAN NOT NULL,
 #     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 # );
 #
@@ -37,7 +36,7 @@
 #
 # How Semantic Caching Works:
 # - First request: LLM call costs ~$0.001, result cached for 1 day
-# - Identical request: Cache hit, costs $0.000 (100% savings!)
+# - Identical request: Cache hit, no LLM call, recorded at $0.000 (100% savings!)
 # - Similar request: Future enhancement (semantic similarity matching)
 #
 # Cost Analysis (100 questions, 70% cache hit rate):
@@ -49,11 +48,12 @@
 #
 # First Question: "What are your business hours?"
 # 1. answer_question: LLM call → cache miss → costs $0.001
-# 2. store_answer: Logs question, answer, cost=$0.001, cache_hit=false
+# 2. store_answer: Logs question, answer, cost=$0.001
 #
 # Second Identical Question (within 1 day): "What are your business hours?"
-# 1. answer_question: Cache hit → costs $0.000
-# 2. store_answer: Logs question, answer, cost=$0.000, cache_hit=true
+# 1. answer_question: Cache hit → no LLM call; the activity is recorded at $0.000
+# 2. store_answer: Logs question, answer, cost=$0.001: result.cost_usd is part of
+#    the cached result, so it is the original call's cost
 #
 # Cache Key Structure:
 # The cache key is a SHA-256 of the activity name (std.llm_prompt) and all of
@@ -68,7 +68,6 @@
 #
 # Key Features Demonstrated (from mvp-workflows-implementation-plan.md lines 1057-1063):
 # ✅ Cache settings: cache, cache_ttl
-# ✅ Cache hit indicator in output ({{answer_question.cache_hit}})
 # ✅ Cost tracking with cache awareness (actual API cost vs cached)
 # ✅ Template expressions for cache metrics
 # ✅ Budget enforcement (even with caching)
@@ -110,14 +109,13 @@ activities:
       db_url: "{{SECRET.db_url}}"
       query: |
         INSERT INTO faq_log
-        (question, answer, cost, cache_hit, created_at)
-        VALUES ($1, $2, $3::numeric, $4, NOW())
+        (question, answer, cost, created_at)
+        VALUES ($1, $2, $3::numeric, NOW())
         RETURNING id
       params:
         - "{{INPUT.question}}"
         - "{{answer_question.result.content}}"
         - "{{answer_question.result.cost_usd}}"
-        - "{{answer_question.result.cache_hit}}"
     outputs:
       - result
     depends_on:
