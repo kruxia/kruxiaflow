@@ -4,6 +4,10 @@ picture: >
   A taxi meter ticks once a mile. Each tick it shows the mile, the fare so
   far and how much of the passenger's $20 budget is left, and after the third
   mile it stops: the ride is over.
+edge: >
+  A delivery van's meter ticks once a mile, each tick reading its own mile
+  count, the cost so far and the budget left, and it stops itself after the
+  third mile.
 functions:
   - "{{ACTIVITY.iteration}}, {{ACTIVITY.accumulated_cost_usd}} and {{ACTIVITY.remaining_budget_usd}} in a step's own parameters"
   - "{{ACTIVITY.iteration}} in the condition on a step's own back-edge"

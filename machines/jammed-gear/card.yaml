@@ -5,6 +5,10 @@ picture: >
   belt's speed before the belt has moved. The gear jams; the belt never
   moves, and the machine stops with the gear marked as the part that failed.
   The motor did its job.
+edge: >
+  A vehicle's trip report is wired to read a value that an earlier step
+  never produced. The report step fails, and so does the run, instead of
+  sending a blank, and the step that already ran stays done.
 functions:
   - a template that can't be resolved fails the step it belongs to, and the workflow fails
 trap:

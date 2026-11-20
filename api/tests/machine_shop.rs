@@ -56,6 +56,10 @@ struct Card {
     name: String,
     kind: Kind,
     picture: String,
+    /// The machine in an edge setting (a shop, a clinic, a vehicle, a
+    /// gateway): one or two sentences, true to what it exercises
+    #[serde(default)]
+    edge: Option<String>,
     functions: Vec<String>,
     #[serde(default)]
     trap: Option<Trap>,
@@ -1359,7 +1363,53 @@ fn machine_cards_are_valid() {
     for m in &machines {
         assert!(!m.card.name.is_empty() && !m.card.picture.trim().is_empty());
         assert!(!m.card.functions.is_empty(), "{}: no functions", m.dir);
+        assert!(
+            m.card.edge.as_deref().is_some_and(|e| !e.trim().is_empty()),
+            "{}: no edge reading",
+            m.dir
+        );
     }
+}
+
+const CARD_WITHOUT_EDGE: &str = r#"
+name: Test bench
+kind: simple
+picture: A bench.
+functions: [a step]
+runs:
+  - name: once
+    expect:
+      status: completed
+      steps:
+        a: { status: completed, runs: 1 }
+"#;
+
+/// `edge` is optional to the parser; `machine_cards_are_valid` requires it
+/// of every card in `machines/`
+#[test]
+fn card_parses_without_edge() {
+    let card: Card = serde_yaml::from_str(CARD_WITHOUT_EDGE).unwrap();
+    assert!(card.edge.is_none());
+    assert_eq!(card.runs.len(), 1);
+}
+
+#[test]
+fn card_parses_with_edge() {
+    let text = CARD_WITHOUT_EDGE.replace(
+        "functions:",
+        "edge: >\n  A till waits for a manager,\n  then falls back.\nfunctions:",
+    );
+    let card: Card = serde_yaml::from_str(&text).unwrap();
+    assert_eq!(
+        card.edge.as_deref(),
+        Some("A till waits for a manager, then falls back.\n")
+    );
+}
+
+#[test]
+fn card_rejects_unknown_fields() {
+    let text = CARD_WITHOUT_EDGE.replace("functions:", "edges: nope\nfunctions:");
+    assert!(serde_yaml::from_str::<Card>(&text).is_err());
 }
 
 /// The views open from disk, so they must not load anything from a

@@ -6,6 +6,10 @@ picture: >
   golden. Then it's buttered. Someone who reaches for the lever after the
   timer has popped it finds nothing to pop: the toast is made once, as the
   timer made it.
+edge: >
+  A self-service kiosk waits for the customer to choose, and when nobody
+  does, the timer goes ahead with the default. A tap after the timer is
+  refused, and doesn't run the step a second time.
 functions:
   - "on_timeout: continue: the step runs with {{SIGNAL}} null, and the step after it reads its output"
   - a signal that arrives after the wait has timed out and continued is refused, and doesn't run the step again

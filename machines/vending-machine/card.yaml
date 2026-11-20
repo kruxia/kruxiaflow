@@ -5,6 +5,10 @@ picture: >
   pushed in while it's warming up drops straight out, and has to go in
   again. The coin mechanism jams on the first try and frees itself on the
   second, still holding the same coin, and the machine dispenses.
+edge: >
+  A parking meter refuses a payment tapped while it's still booting, so it
+  has to be tapped again. When the card reader glitches on the first try,
+  the step retries with the same payment, without asking for it again.
 functions:
   - a signal sent before the step waits is refused, and isn't kept for later
   - a signaled step with settings.retry that fails is run again, without waiting for another signal

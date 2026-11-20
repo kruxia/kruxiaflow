@@ -4,6 +4,10 @@ picture: >
   Riders step into a gondola, the wheel goes round, and they alight at the
   bottom; then the next riders step in. The wheel turns three times, and
   nobody alights before they've stepped in.
+edge: >
+  A line controller cycles load, process and unload a fixed number of times,
+  and each cycle runs its steps in that order, never unloading before
+  loading.
 functions:
   - a three-step loop whose back-edge is chosen by the order the steps are written, not by their keys
 trap:

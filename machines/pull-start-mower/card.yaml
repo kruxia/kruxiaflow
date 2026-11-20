@@ -5,6 +5,10 @@ picture: >
   good day it catches on the first pull; on a cold one, the third. A flooded
   engine doesn't catch in three pulls, so nobody mows and the mechanic is
   called, told it took three pulls.
+edge: >
+  A backup generator's controller tries to start the engine up to three
+  times, pausing between tries, and calls for service if it never starts.
+  The try count is kept in PostgreSQL, so each try sees the ones before it.
 functions:
   - "settings.retry: a step that fails is run again, up to max_attempts in all, after a fixed backoff"
   - a step that fails and then succeeds within its retries completes once, with the successful attempt's output

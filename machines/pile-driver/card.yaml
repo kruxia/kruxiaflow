@@ -5,6 +5,10 @@ picture: >
   pile, three blows in all. Then the surveyor measures how deep the pile
   went: three blows deep. The tamper packs the backfill around the pile
   twice, and the foreman signs off on a pile three blows deep, tamped twice.
+edge: >
+  A ship's bilge pump runs a fixed number of strokes, then a level check
+  runs once; a valve is flushed twice, then signed off once. Neither check
+  may run after the first round and miss the rest.
 functions:
   - a step after a two-step loop, depending on it with no condition, runs once, after the loop's last round
   - a step after a self-loop, depending on it with no condition, runs once, after the loop's last round

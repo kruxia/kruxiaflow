@@ -6,6 +6,11 @@ picture: >
   desk is staffed, the clerk rings the call bell twice for a porter. When the
   gate stays locked the door doesn't turn and the lobby stays empty; when
   the desk isn't staffed nobody rings the bell. Either way the day ends.
+edge: >
+  A depot gate controller cycles three vehicles through when the gate is
+  unlocked, and skips the cycle, and the step after it, when the gate stays
+  locked. A loop behind a skipped step is skipped too, and the day still
+  closes.
 functions:
   - a self-loop whose way in is a condition on the previous step's output, skipped when it's false
   - a self-loop behind a skipped step, skipped with it

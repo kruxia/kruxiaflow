@@ -5,6 +5,10 @@ picture: >
   The heater warms the room a degree at a time and switches off when the
   room reaches the setpoint: three rounds on a cold morning, one on a mild
   one, and on a warm morning it never switches on.
+edge: >
+  A cold room's controller warms the room a degree per round until it
+  reaches the setpoint, and never switches the heater on when the room is
+  already warm enough.
 functions:
   - "a condition on a self-loop's back-edge, reading the workflow's INPUT and {{<step>.iteration}}"
   - "{{<step>.iteration}} in a loop step's own parameters"

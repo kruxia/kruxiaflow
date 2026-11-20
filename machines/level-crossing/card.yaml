@@ -3,6 +3,10 @@ kind: compound
 picture: >
   A road crosses a quiet branch line. The signal box says no train is coming,
   so the branch train never runs, and the crossing's lamp shows all clear.
+edge: >
+  A gateway skips its alarm step when the sensor reports nothing, and the
+  all-clear report, which runs because the alarm was skipped, must still go
+  out.
 functions:
   - a condition on a dependency, reading its output (the branch is skipped)
   - a condition on a dependency's status ("run this because that was skipped")

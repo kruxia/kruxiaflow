@@ -5,6 +5,10 @@ picture: >
   saying how high to raise it; the bridge lifts by that much and the boat
   passes underneath. If the keeper gives no height, or never answers, the
   bridge lifts its standard 3 metres after a short wait.
+edge: >
+  A store's price override waits for a manager to send the new price. If the
+  manager sends none, or never answers, the register goes ahead with the
+  standard price after a short wait.
 functions:
   - "wait_for_signal: a step waits until it is signaled through the API"
   - "{{SIGNAL}} in the resumed step's parameters: the signal's data, or null"

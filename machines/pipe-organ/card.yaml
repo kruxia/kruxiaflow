@@ -5,6 +5,10 @@ picture: >
   sounds only if its key is held down. The wind chest gathers every pipe
   that sounded into one chord, once. With no key held, no pipe sounds and
   there's no chord.
+edge: >
+  A factory line controller acts, in parallel, only on the stations an order
+  flags, and writes one combined report once every station has acted or been
+  skipped. With no station flagged there's no report.
 functions:
   - "wide fan-out: one step starts twelve, each behind its own condition"
   - "wide fan-in: a join of twelve, each dependency with a status condition, waits for every branch to run or be skipped, then runs once"

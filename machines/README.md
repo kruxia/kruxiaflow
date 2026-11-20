@@ -72,6 +72,8 @@ name: Railway switch
 kind: simple                # simple or compound
 picture: >
   A lever moves the points at a fork in the line ...
+edge: >                     # the same machine in an edge setting
+  A point-of-sale terminal sends a payment down one of two paths ...
 functions:                  # the engine functions it exercises
   - a condition on a dependency, reading the dependency's output
 trap:                       # only for a trap
@@ -99,6 +101,7 @@ runs:                       # one or more runs, each with its own input
 
 Rules:
 - **List every step in every run.** The runner checks the card against the workflow.
+- **Give every card an `edge` reading:** one or two sentences that put the machine where the network, the power or the operator can't be trusted, such as a shop, a clinic, a vehicle or a gateway. It must describe what the machine actually exercises, and claim nothing the engine can't do. The parser treats it as optional; `machine_cards_are_valid` requires it of every card in `machines/`.
 - **Write expectations from the docs and the intended behaviour,** never by running the machine and copying what it did.
 - **Use real activities and their real output names.** For example, `echo` returns its parameters as the output `echo`.
 - **Keep a machine correct whatever else is running.** Use its own inputs, and depend on nothing outside it.

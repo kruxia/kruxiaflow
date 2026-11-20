@@ -3,6 +3,9 @@ kind: simple
 picture: >
   White light enters a prism and splits into red, green and blue beams.
   A funnel on the other side gathers the three beams back into one.
+edge: >
+  A gateway sends one reading to three processors in parallel and merges
+  their results into one record, exactly once.
 functions:
   - "fan-out: one step starts three in parallel"
   - "fan-in: a step that waits for all three, and runs exactly once"

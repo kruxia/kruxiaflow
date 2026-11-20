@@ -3,6 +3,10 @@ kind: simple
 picture: >
   A lever moves the points at a fork in the line. The train takes the track
   the lever chose, and the other track stays empty.
+edge: >
+  A point-of-sale terminal sends a payment down one of two paths, chosen by
+  the input. The path not taken is marked skipped, and the sale still
+  completes.
 functions:
   - a condition on a dependency, reading the dependency's output
   - the branch whose condition is false is skipped

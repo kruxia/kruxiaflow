@@ -3,6 +3,9 @@ kind: simple
 picture: >
   A line of dominoes. Tip the first one and each knocks over the next,
   until the last one falls.
+edge: >
+  A gateway passes a sensor reading through a chain of steps, each working
+  on the output of the one before, strictly in order.
 functions:
   - a chain of depends_on, run in order
   - one step's output used in the next step's parameters

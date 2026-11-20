@@ -6,6 +6,10 @@ picture: >
   plate smudges and is printed again; on a good run it takes on the second
   impression. If it never takes, the other three are printed but there's
   no page.
+edge: >
+  A vehicle back at the depot uploads four files in parallel, and one that
+  fails on a flaky link is retried after a pause. The trip is closed once
+  all four are in, and stays open if that one never gets through.
 functions:
   - "fan-out to four branches, one with settings.retry"
   - a join with no conditions waits while a branch is retried, and runs once with the retried branch's successful output

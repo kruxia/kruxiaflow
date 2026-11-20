@@ -6,6 +6,10 @@ picture: >
   nobody comes, the locker gives up, no receipt is printed, and the van
   takes the parcel back to the depot. A code typed after the locker has
   given up is refused. Either way the locker is closed out once.
+edge: >
+  A clinic's medicine locker waits for a patient's pickup code; with no code
+  in time it skips the handover and books a return, and it refuses a code
+  typed too late. Either way it closes out once.
 functions:
   - "on_timeout: skip, when nobody signals: the step is skipped without running, and the workflow carries on"
   - a step that depends on the skipped step with no condition is skipped too

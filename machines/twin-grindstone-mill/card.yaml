@@ -5,6 +5,10 @@ picture: >
   fine, while a sample of the batch goes through a sieve. The sack takes the
   flour and the sample of the same batch; then the hopper lets in the next.
   Three batches, three sacks, each with its own batch's flour.
+edge: >
+  A packing line sends each batch down two parallel paths of different
+  lengths, weighing and inspecting, and boxes it only when both are done:
+  three batches in a row, each box with its own batch.
 functions:
   - a loop with two parallel branches of different lengths that join again
   - the join (sack) runs once per round, after both branches of that round

@@ -4,6 +4,9 @@ picture: >
   A pottery kiln heats up, a pyrometer reads the temperature, and the stoker
   adds fuel until the pots are fired at 1200 degrees. Then the kiln is
   unloaded. The first reading is too cool, and so is the second.
+edge: >
+  A greenhouse heater controller reads the temperature and adds heat round
+  by round until it reaches the target. Then the next stage runs, once.
 functions:
   - a three-step loop that ends through a condition, not its iteration_limit
   - a step after the loop (unload) waits while the loop runs, and runs once when it exits

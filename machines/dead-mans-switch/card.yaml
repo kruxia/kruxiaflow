@@ -6,6 +6,10 @@ picture: >
   doesn't press it in time, the switch trips: the brakes go on and the run
   ends as failed. A press that comes after the switch has tripped is too
   late, and changes nothing.
+edge: >
+  An operator-presence check on a remote pump: the operator must confirm
+  within seconds, or the run fails and a safe-stop step runs instead. A
+  confirmation that comes after the timeout is refused.
 functions:
   - "on_timeout: fail, when nobody signals: the step fails, and so does the workflow"
   - a step that depends on the failed step with no condition is skipped

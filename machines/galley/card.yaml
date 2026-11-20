@@ -4,6 +4,9 @@ picture: >
   The drummer beats the stroke, and twelve oarsmen pull at once, each on
   their own oar. The coxswain counts the stroke once, when every oar has
   pulled: a full stroke of all twelve.
+edge: >
+  A cell-site controller polls twelve radios at once, and writes one status
+  report, once, only after all twelve have answered.
 functions:
   - "wide fan-out with dependency_of: one step starts twelve in parallel"
   - "wide fan-in with depends_on, no conditions: a step waits for all twelve and runs exactly once"

@@ -4,6 +4,10 @@ picture: >
   The alarm rings and waits for someone to switch it off. Left alone, it
   snoozes and rings again, three rings in all, then gives up. Someone can
   snooze it by hand, or switch it off, and then the bedroom is quiet.
+edge: >
+  A night-shift alert at an unstaffed site rings and waits for an
+  acknowledgement, re-alerting up to three times before it gives up. Someone
+  can snooze it, or acknowledge it and end it.
 functions:
   - a wait_for_signal step in a self-loop waits again in every round
   - "on_timeout: continue in every round of a loop: each round's wait times out on its own"

@@ -5,6 +5,10 @@ picture: >
   door opens only when both have turned theirs, in either order, while the
   guard logs the opening. If the teller never comes, the teller's key is
   never turned, the door stays shut, and the opening fails.
+edge: >
+  Two-person sign-off on a pharmacy's controlled-drugs cabinet: two staff
+  approve, in either order, and it opens once both have. If one never
+  approves, the opening fails instead of going ahead on one key.
 functions:
   - "two wait_for_signal steps in parallel branches, waiting at once for the same event_name"
   - a signal ends only the wait of the step it names, whichever is signaled first
