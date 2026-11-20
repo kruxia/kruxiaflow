@@ -360,18 +360,18 @@ fn should_loop_back(
 /// Whether a completed loop activity has new input to run on: at least one of
 /// its dependencies completed after it last did (#18).
 ///
-/// Without this, a loop member whose dependency is still `Completed` from an
-/// earlier round runs again on that stale input. In a two-step loop the tail
-/// then re-runs after every completion until the iteration cap, and the head
-/// re-runs on the tail's previous result as soon as it completes.
+/// A dependency still `Completed` from an earlier round is not new input, so a
+/// loop member never runs twice on the same input.
 ///
 /// - A self back-edge (`depends_on` itself) counts as new input: the
 ///   activity's own completion is what it loops on.
-/// - Dependencies outside the loop (completed once, before it) never count as
-///   new, but don't block either; the back-edge or in-loop dependency does.
-/// - Activities completed before completion sequence numbers existed
-///   (`completion_seq == 0`) keep the previous behaviour, so workflows in
-///   flight across an upgrade are not stalled.
+/// - Any dependency that completed after this activity counts, wherever it
+///   is. A dependency that completes only once, before the loop starts (an
+///   `initialize` step), never counts as new, but doesn't block either; the
+///   back-edge or an in-loop dependency does. A step of an earlier loop
+///   completes again each round of that loop, so it does count.
+/// - `completion_seq == 0` carries no ordering (state saved without it), so
+///   it counts as new input rather than stalling the activity.
 fn has_new_input(
     activity: &ActivityDefinition,
     activity_state: &super::workflow_state::ActivityState,
@@ -1317,9 +1317,7 @@ mod tests {
     }
 
     // ============================================================================
-    // Loop members run again only on new input
-    // Regression tests for #18 [loop-tail-rerun]: in a two-step loop the tail
-    // re-ran after every completion (stale input) until the iteration cap
+    // Loop members run again only on new input (#18)
     // ============================================================================
 
     fn rel(key: &str, is_back_edge: bool) -> ActivityRelationship {
@@ -1430,9 +1428,9 @@ mod tests {
     }
 
     #[test]
-    fn test_state_without_sequence_numbers_keeps_previous_behaviour() {
-        // Saved before completion_seq existed (all 0): no ordering
-        // information, so a completed loop member may run again as before
+    fn test_state_without_sequence_numbers_counts_as_new_input() {
+        // All `completion_seq` 0: no ordering information, so every completed
+        // loop member counts as having new input
         let definition = two_step_loop();
         let state = make_workflow_state(vec![
             completed("start", 0, 0),

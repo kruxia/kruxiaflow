@@ -1065,11 +1065,10 @@ impl WorkflowDefinition {
     /// Mark every activity on a loop as a loop activity, from the back-edges
     /// already marked in the definition (`is_back_edge`, set by `validate`).
     ///
-    /// Definitions stored before #18 was fixed marked only the two ends of
-    /// each back-edge, so the middle steps of a loop of three or more never
-    /// counted as new input, and the loop stopped after its second round.
-    /// The orchestrator calls this on every definition it loads, so stored
-    /// definitions behave like freshly validated ones without a redeploy.
+    /// A stored definition may mark only the two ends of each back-edge; this
+    /// marks every step on the cycle. The orchestrator calls this on every
+    /// definition it loads, so stored definitions behave like freshly
+    /// validated ones without a redeploy.
     /// Idempotent; O(activities + dependencies).
     pub fn mark_loop_members(&mut self) {
         let loops: Vec<LoopEdge> = self

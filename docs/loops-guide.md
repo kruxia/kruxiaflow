@@ -48,7 +48,7 @@ Each step in a loop runs **once per round, and only on new input**. A completed 
 - **The step after the loop head** waits for the head to complete again. It does not re-run on the head's previous output.
 - **The loop head** re-runs when the step its back-edge points to has completed again, and the back-edge's conditions hold.
 - **A self-loop** (an activity whose back-edge is on itself) counts its own completion as new input.
-- **Dependencies outside the loop** (for example an `initialize` step that ran once before it) still have to be satisfied, but never trigger another round.
+- **A dependency that completes only once** (for example an `initialize` step that ran before the loop) still has to be satisfied, but never triggers another round. A dependency that completes again, such as a step of an earlier loop, counts as new input each time it does.
 
 Before this was fixed, the step after the head re-ran after each of its own completions, on stale input, until the default cap of 100 iterations (#18).
 

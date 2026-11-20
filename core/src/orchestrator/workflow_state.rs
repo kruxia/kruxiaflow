@@ -65,7 +65,7 @@ pub struct ActivityState {
 
     /// Workflow-wide sequence number of this activity's latest completion:
     /// one more than the highest sequence number in the workflow at the time.
-    /// 0 means never completed, or completed before sequence numbers existed.
+    /// 0 means never completed, or loaded from state saved without one.
     /// Lets loop members tell new input from input left over from an earlier
     /// round (see `dependency_evaluator::has_new_input`).
     #[serde(default)]
@@ -167,7 +167,8 @@ pub async fn load_workflow_definition(
         activities,
         settings,
     };
-    // Definitions stored before #18 was fixed lack some loop markings
+    // A stored definition may mark only each back-edge's two ends; mark
+    // every step on the cycle
     definition.mark_loop_members();
     Ok(definition)
 }
@@ -202,7 +203,8 @@ pub async fn load_workflow_definition_by_id(
         activities,
         settings,
     };
-    // Definitions stored before #18 was fixed lack some loop markings
+    // A stored definition may mark only each back-edge's two ends; mark
+    // every step on the cycle
     definition.mark_loop_members();
     Ok(definition)
 }
@@ -1479,7 +1481,7 @@ mod tests {
         assert_eq!(state.activities["tail"].completion_seq, 2);
     }
 
-    /// State saved before #18 has no `completion_seq`; it must still load
+    /// State without `completion_seq` loads, with 0
     #[test]
     fn test_activity_state_without_completion_seq_deserializes() {
         let json = json!({
