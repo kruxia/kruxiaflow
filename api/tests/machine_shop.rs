@@ -15,10 +15,17 @@
 //! - **known broken**: a trap that still shows its bug (expected)
 //! - **fixed**: a trap that now passes (take the trap label off)
 //!
-//! A scoreboard is printed and written to
-//! `$CARGO_TARGET_TMPDIR/machine-shop/<mode>.md`.
+//! Each mode writes, under `$CARGO_TARGET_TMPDIR/machine-shop/` (or
+//! `MACHINE_SHOP_OUT`):
+//! - `<mode>.md`: a scoreboard, also printed
+//! - `results/<tree>-<mode>-<time>.json`: the results file (see
+//!   `machines/README.md`), which accumulates across runs and trees
+//! - one page per view in `machines/views/`, with the machines and every
+//!   results file embedded, to open from disk
 //!
-//! Set `MACHINE_SHOP_ONLY=domino-run,level-crossing` to run some machines.
+//! Set `MACHINE_SHOP_ONLY=domino-run,level-crossing` to run some machines,
+//! and `MACHINE_SHOP_TREE` to label the tree in the results (default: the
+//! branch name).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -518,10 +525,35 @@ struct Row {
     outcome: Outcome,
     seconds: f64,
     notes: String,
+    /// The workflow's final status
+    status: String,
+    /// What each step did: `{status, runs}`
+    steps: BTreeMap<String, Value>,
+    problems: Vec<String>,
 }
 
-/// Everything that differs from the card, as readable lines
-async fn check(engine: &Engine, id: Uuid, status: &str, spec: &RunSpec) -> Vec<String> {
+impl Outcome {
+    /// The result's name in the results file
+    fn key(&self) -> &'static str {
+        match self {
+            Outcome::Works => "works",
+            Outcome::Broken => "broken",
+            Outcome::KnownBroken(_) => "known_broken",
+            Outcome::Fixed(_) => "fixed",
+        }
+    }
+}
+
+/// What a run did, as the results file records it
+struct Observed {
+    status: String,
+    steps: BTreeMap<String, Value>,
+    problems: Vec<String>,
+}
+
+/// What the run did, and everything that differs from the card, as
+/// readable lines
+async fn check(engine: &Engine, id: Uuid, status: &str, spec: &RunSpec) -> Observed {
     let mut problems = Vec::new();
     if status != spec.expect.status {
         let settled = matches!(status, "completed" | "failed" | "cancelled");
@@ -536,6 +568,15 @@ async fn check(engine: &Engine, id: Uuid, status: &str, spec: &RunSpec) -> Vec<S
     }
     let statuses = engine.step_statuses(id).await;
     let runs = engine.step_runs(id).await;
+    let steps: BTreeMap<String, Value> = statuses
+        .keys()
+        .chain(spec.expect.steps.keys())
+        .map(|k| {
+            let status = statuses.get(k).map(String::as_str).unwrap_or("absent");
+            let n = runs.get(k).copied().unwrap_or(0);
+            (k.clone(), json!({ "status": status, "runs": n }))
+        })
+        .collect();
     for (step, want) in &spec.expect.steps {
         let got = statuses.get(step).map(String::as_str).unwrap_or("absent");
         if got != want.status {
@@ -562,12 +603,16 @@ async fn check(engine: &Engine, id: Uuid, status: &str, spec: &RunSpec) -> Vec<S
             Err(e) => problems.push(format!("{}.{}: {e}", o.step, o.output)),
         }
     }
-    problems
+    Observed {
+        status: status.to_string(),
+        steps,
+        problems,
+    }
 }
 
-fn judge(machine: &Machine, run: &RunSpec, problems: Vec<String>, seconds: f64) -> Row {
+fn judge(machine: &Machine, run: &RunSpec, observed: Observed, seconds: f64) -> Row {
     let trap = machine.card.trap.as_ref().map(|t| t.issue);
-    let outcome = match (problems.is_empty(), trap) {
+    let outcome = match (observed.problems.is_empty(), trap) {
         (true, None) => Outcome::Works,
         (true, Some(n)) => Outcome::Fixed(n),
         (false, None) => Outcome::Broken,
@@ -579,7 +624,10 @@ fn judge(machine: &Machine, run: &RunSpec, problems: Vec<String>, seconds: f64) 
         run: run.name.clone(),
         outcome,
         seconds,
-        notes: problems.join("; "),
+        notes: observed.problems.join("; "),
+        status: observed.status,
+        steps: observed.steps,
+        problems: observed.problems,
     }
 }
 
@@ -591,12 +639,12 @@ async fn run_one(engine: &Engine, machine: &Machine, def: &(String, String), run
         .wait(id, Duration::from_secs(run.timeout_seconds))
         .await;
     let seconds = started.elapsed().as_secs_f64();
-    let problems = check(engine, id, &status, run).await;
-    judge(machine, run, problems, seconds)
+    let observed = check(engine, id, &status, run).await;
+    judge(machine, run, observed, seconds)
 }
 
-fn git_describe() -> String {
-    let git = |args: &[&str]| {
+fn git(args: &[&str]) -> String {
+    {
         std::process::Command::new("git")
             .args(args)
             .current_dir(env!("CARGO_MANIFEST_DIR"))
@@ -605,12 +653,23 @@ fn git_describe() -> String {
             .filter(|o| o.status.success())
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
             .unwrap_or_else(|| "unknown".to_string())
-    };
-    format!(
-        "{} @ {}",
-        git(&["rev-parse", "--abbrev-ref", "HEAD"]),
-        git(&["rev-parse", "--short", "HEAD"])
-    )
+    }
+}
+
+/// The tree under test: its label, branch and commit
+fn tree() -> (String, String, String) {
+    let branch = git(&["rev-parse", "--abbrev-ref", "HEAD"]);
+    let commit = git(&["rev-parse", "--short", "HEAD"]);
+    let label = std::env::var("MACHINE_SHOP_TREE")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| branch.clone());
+    (label, branch, commit)
+}
+
+fn git_describe() -> String {
+    let (label, _, commit) = tree();
+    format!("{label} @ {commit}")
 }
 
 fn scoreboard(mode: Mode, rows: &[Row], machines: &[Machine], total: f64) -> String {
@@ -699,6 +758,7 @@ async fn run_shop(pool: PgPool, mode: Mode) {
         defs.push(engine.deploy(&m.dir, &m.workflow_yaml).await);
     }
 
+    let started_at = chrono::Utc::now();
     let started = Instant::now();
     let rows: Vec<Row> = match mode {
         Mode::Bench => {
@@ -726,11 +786,16 @@ async fn run_shop(pool: PgPool, mode: Mode) {
 
     let board = scoreboard(mode, &rows, &machines, total);
     println!("\n{board}");
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("machine-shop");
+    let dir = out_dir();
     std::fs::create_dir_all(&dir).expect("scoreboard dir");
     let path = dir.join(format!("{}.md", mode.name()));
     std::fs::write(&path, &board).expect("write scoreboard");
     println!("Scoreboard written to {}", path.display());
+    let path = write_results(&dir, mode, &rows, started_at, total);
+    println!("Results written to {}", path.display());
+    for page in bundle_views(&dir) {
+        println!("View written to {}", page.display());
+    }
 
     for r in &rows {
         if let Outcome::Fixed(n) = r.outcome {
@@ -746,6 +811,212 @@ async fn run_shop(pool: PgPool, mode: Mode) {
         .map(|r| format!("{} / {}: {}", r.machine, r.run, r.notes))
         .collect();
     assert!(broken.is_empty(), "broken machines:\n{}", broken.join("\n"));
+}
+
+// ---------------------------------------------------------------------------
+// Results files and views
+// ---------------------------------------------------------------------------
+
+/// The results format's version, written into every results file
+const RESULTS_SCHEMA: &str = "machine-shop-results/1";
+
+fn out_dir() -> PathBuf {
+    std::env::var("MACHINE_SHOP_OUT")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("machine-shop"))
+}
+
+/// Write the whole file, then rename it into place, so a reader never
+/// sees half of it
+fn write_atomic(path: &Path, contents: &str) {
+    let tmp = path.with_extension(format!("tmp-{}", Uuid::now_v7()));
+    std::fs::write(&tmp, contents).expect("write temporary file");
+    std::fs::rename(&tmp, path).expect("move file into place");
+}
+
+fn slug(s: &str) -> String {
+    let s: String = s
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    s.split('-')
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+fn write_results(
+    dir: &Path,
+    mode: Mode,
+    rows: &[Row],
+    started_at: chrono::DateTime<chrono::Utc>,
+    total: f64,
+) -> PathBuf {
+    let (label, branch, commit) = tree();
+    let runs: Vec<Value> = rows
+        .iter()
+        .map(|r| {
+            let trap = match r.outcome {
+                Outcome::KnownBroken(n) | Outcome::Fixed(n) => Some(n),
+                _ => None,
+            };
+            json!({
+                "machine": r.machine,
+                "run": r.run,
+                "result": r.outcome.key(),
+                "trap": trap,
+                "seconds": r.seconds,
+                "status": r.status,
+                "steps": r.steps,
+                "problems": r.problems,
+            })
+        })
+        .collect();
+    let results = json!({
+        "schema": RESULTS_SCHEMA,
+        "runner": "rust",
+        "mode": mode.name(),
+        "engine_version": env!("CARGO_PKG_VERSION"),
+        "tree": { "label": label, "branch": branch, "commit": commit },
+        "started_at": started_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        "seconds": total,
+        "runs": runs,
+    });
+    let dir = dir.join("results");
+    std::fs::create_dir_all(&dir).expect("results dir");
+    let path = dir.join(format!(
+        "{}-{}-{}.json",
+        slug(&label),
+        mode.name(),
+        started_at.format("%Y%m%dT%H%M%SZ")
+    ));
+    write_atomic(&path, &serde_json::to_string_pretty(&results).unwrap());
+    path
+}
+
+/// A machine as the views see it: its card, plus its steps and what each
+/// one depends on (with `dependency_of` folded into `depends_on`, as the
+/// engine normalizes it)
+fn machine_view(dir: &str) -> Value {
+    let base = machines_dir().join(dir);
+    let card: Value =
+        serde_yaml::from_str(&std::fs::read_to_string(base.join("card.yaml")).expect("card.yaml"))
+            .expect("card.yaml parses");
+    let wf: Value = serde_yaml::from_str(
+        &std::fs::read_to_string(base.join("workflow.yaml")).expect("workflow.yaml"),
+    )
+    .expect("workflow.yaml parses");
+    let acts = wf["activities"].as_array().cloned().unwrap_or_default();
+
+    // A dependency is a bare key or `{activity_key, conditions}`
+    let dep = |d: &Value| -> Option<(String, Value)> {
+        match d {
+            Value::String(k) => Some((k.clone(), json!([]))),
+            Value::Object(m) => Some((
+                m.get("activity_key")?.as_str()?.to_string(),
+                m.get("conditions").cloned().unwrap_or(json!([])),
+            )),
+            _ => None,
+        }
+    };
+    let mut depends: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+    for a in &acts {
+        let key = a["key"].as_str().unwrap_or_default().to_string();
+        let list = depends.entry(key.clone()).or_default();
+        for d in a["depends_on"].as_array().into_iter().flatten() {
+            if let Some((k, c)) = dep(d) {
+                list.push(json!({ "step": k, "conditions": c }));
+            }
+        }
+        for d in a["dependency_of"].as_array().into_iter().flatten() {
+            if let Some((target, c)) = dep(d) {
+                depends
+                    .entry(target)
+                    .or_default()
+                    .push(json!({ "step": key, "conditions": c }));
+            }
+        }
+    }
+    let steps: Vec<Value> = acts
+        .iter()
+        .map(|a| {
+            let key = a["key"].as_str().unwrap_or_default();
+            json!({
+                "key": key,
+                "activity": a["activity_name"],
+                "worker": a["worker"],
+                "depends_on": depends.get(key).cloned().unwrap_or_default(),
+            })
+        })
+        .collect();
+    json!({
+        "dir": dir,
+        "card": card,
+        "workflow": { "name": wf["name"], "steps": steps },
+    })
+}
+
+/// Fill each page in `machines/views/` with every machine and every
+/// results file, and write it next to the results, ready to open from disk
+fn bundle_views(dir: &Path) -> Vec<PathBuf> {
+    const MARKER: &str = "__MACHINE_SHOP_DATA__";
+    let mut machine_dirs: Vec<String> = std::fs::read_dir(machines_dir())
+        .expect("machines/")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.join("card.yaml").is_file())
+        .map(|p| p.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+    machine_dirs.sort();
+    let machines: Vec<Value> = machine_dirs.iter().map(|d| machine_view(d)).collect();
+
+    let mut results: Vec<Value> = std::fs::read_dir(dir.join("results"))
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .filter_map(|p| std::fs::read_to_string(p).ok())
+        .filter_map(|s| serde_json::from_str::<Value>(&s).ok())
+        .filter(|v| v["schema"] == RESULTS_SCHEMA)
+        .collect();
+    results.sort_by(|a, b| {
+        a["started_at"]
+            .as_str()
+            .unwrap_or_default()
+            .cmp(b["started_at"].as_str().unwrap_or_default())
+    });
+
+    let data = json!({ "machines": machines, "results": results });
+    // Inside <script>, "</" would end the element; "\/" is the same JSON
+    let data = serde_json::to_string(&data).unwrap().replace("</", "<\\/");
+
+    let mut pages = Vec::new();
+    let views = machines_dir().join("views");
+    for path in std::fs::read_dir(&views)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok().map(|e| e.path()))
+    {
+        if path.extension().is_none_or(|x| x != "html") {
+            continue;
+        }
+        let template = std::fs::read_to_string(&path).expect("view template");
+        if !template.contains(MARKER) {
+            continue;
+        }
+        let out = dir.join(path.file_name().unwrap());
+        write_atomic(&out, &template.replacen(MARKER, &data, 1));
+        pages.push(out);
+    }
+    pages.sort();
+    pages
 }
 
 /// Every machine, one at a time
@@ -768,4 +1039,38 @@ fn machine_cards_are_valid() {
         assert!(!m.card.name.is_empty() && !m.card.picture.trim().is_empty());
         assert!(!m.card.functions.is_empty(), "{}: no functions", m.dir);
     }
+}
+
+/// The views open from disk, so they must not load anything from a network
+#[test]
+fn machine_views_are_self_contained() {
+    let views = machines_dir().join("views");
+    let mut seen = 0;
+    for path in std::fs::read_dir(&views)
+        .expect("machines/views/")
+        .filter_map(|e| e.ok().map(|e| e.path()))
+    {
+        if path.extension().is_none_or(|x| x != "html") {
+            continue;
+        }
+        seen += 1;
+        let page = std::fs::read_to_string(&path).unwrap();
+        let name = path.display();
+        assert!(
+            page.contains("__MACHINE_SHOP_DATA__"),
+            "{name}: no data marker"
+        );
+        // Links out (to an issue) are fine; loads are not
+        for banned in [
+            "<script src",
+            "<link",
+            "@import",
+            "url(http",
+            "src=\"http",
+            "fetch(",
+        ] {
+            assert!(!page.contains(banned), "{name}: contains {banned}");
+        }
+    }
+    assert!(seen > 0, "no views in machines/views/");
 }
