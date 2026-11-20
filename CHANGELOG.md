@@ -77,6 +77,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still running or about to run. A branch whose condition is false that round
   doesn't hold the join back, and an earlier, separate loop never holds a
   step back.
+- **A loop whose way in is closed is skipped (#38).** The first time a loop
+  was reached, its back-edge (the head's dependency on itself, or on the
+  loop's last step) counted although that step hadn't run. A loop behind a
+  false condition ran anyway, to its `iteration_limit`, and a loop behind a
+  skipped step stayed `not_scheduled`, so the workflow stayed `running`
+  forever. Now the loop's dependencies from outside it decide its first
+  round, like any other step's: a false condition, or an unconditional
+  dependency on a skipped step, skips the loop, and the skip cascades to what
+  follows. Later rounds follow the back-edge as before, and a loop with no
+  dependency outside it still starts with the workflow.
+  - **Loops in sequence:** a loop whose way in is a condition on an earlier
+    loop's step now waits for that loop to end before it's skipped, like a
+    step after a loop (#27). It used to start after the earlier loop's first
+    round, whatever the condition said.
 
 ## [0.12.1] - 2026-11-17
 

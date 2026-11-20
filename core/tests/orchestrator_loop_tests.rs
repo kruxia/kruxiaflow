@@ -2396,3 +2396,347 @@ activities:
         run.runs
     );
 }
+
+// ============================================================================
+// A loop whose way in is closed is skipped [loop-entry-not-skipped]
+//
+// Entering a loop for the first time, a step's back-edge points at a loop step
+// that hasn't run (for a self-loop, the step itself). It used to count as
+// satisfied, so the loop ran although its entry condition was false, and it
+// kept the skip pass waiting for that step to finish, so a loop behind a
+// skipped step stayed not_scheduled and the workflow hung.
+// ============================================================================
+
+/// `gate` echoes `open` from `open_gate`; everything else echoes its key
+fn gate_outputs(open_gate: bool) -> impl Fn(&str, u32) -> serde_json::Value {
+    move |key, run| match key {
+        "gate" => json!({ "open": open_gate }),
+        _ => json!({ "step": key, "run": run }),
+    }
+}
+
+/// A self-loop behind a conditional entry, and a step after it
+const GATED_SELF_LOOP: &str = r#"
+name: gated_self_loop
+activities:
+  - key: gate
+    worker: test
+    activity_name: echo
+  - key: porter
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - activity_key: gate
+        conditions: ["{{ gate.open }}"]
+      - porter
+  - key: lobby
+    worker: test
+    activity_name: echo
+    depends_on: [porter]
+"#;
+
+/// The entry condition is false: the self-loop is skipped, and so is the step
+/// after it; the workflow completes. It used to run three times.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_self_loop_with_a_false_entry_condition_is_skipped(pool: PgPool) {
+    let (runs, state) = run_to_end(&pool, GATED_SELF_LOOP, gate_outputs(false)).await;
+
+    assert_eq!(runs.get("gate"), Some(&1), "{runs:?}");
+    assert_eq!(runs.get("porter"), None, "the loop never starts: {runs:?}");
+    assert_eq!(runs.get("lobby"), None, "{runs:?}");
+    assert_eq!(status_of(&state, "porter"), WorkflowActivityStatus::Skipped);
+    assert_eq!(status_of(&state, "lobby"), WorkflowActivityStatus::Skipped);
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// The entry condition is true: the loop runs to its iteration_limit, as before
+#[sqlx::test(migrations = "../migrations")]
+async fn test_self_loop_with_a_true_entry_condition_runs(pool: PgPool) {
+    let (runs, state) = run_to_end(&pool, GATED_SELF_LOOP, gate_outputs(true)).await;
+
+    assert_eq!(runs.get("porter"), Some(&3), "{runs:?}");
+    assert_eq!(runs.get("lobby"), Some(&1), "{runs:?}");
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// The entry is a skipped step: the self-loop is skipped too, and the skip
+/// cascades past it; the workflow completes. The loop used to stay
+/// not_scheduled, and the workflow running, for ever.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_self_loop_behind_a_skipped_step_is_skipped(pool: PgPool) {
+    let yaml = r#"
+name: skipped_entry_self_loop
+activities:
+  - key: gate
+    worker: test
+    activity_name: echo
+  - key: bell
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: gate
+        conditions: ["{{ gate.open }}"]
+  - key: ringer
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on: [bell, ringer]
+  - key: lobby
+    worker: test
+    activity_name: echo
+    depends_on: [ringer]
+"#;
+    let (runs, state) = run_to_end(&pool, yaml, gate_outputs(false)).await;
+
+    assert_eq!(runs.get("ringer"), None, "{runs:?}");
+    assert_eq!(status_of(&state, "bell"), WorkflowActivityStatus::Skipped);
+    assert_eq!(status_of(&state, "ringer"), WorkflowActivityStatus::Skipped);
+    assert_eq!(status_of(&state, "lobby"), WorkflowActivityStatus::Skipped);
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// A two-step loop (head and tail) behind a conditional entry, and a step
+/// after it that runs only when the loop was skipped
+const GATED_TWO_STEP_LOOP: &str = r#"
+name: gated_two_step_loop
+activities:
+  - key: gate
+    worker: test
+    activity_name: echo
+  - key: a_head
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - activity_key: gate
+        conditions: ["{{ gate.open }}"]
+      - activity_key: b_tail
+        conditions: ["{{ b_tail.status == 'completed' }}"]
+  - key: b_tail
+    worker: test
+    activity_name: echo
+    depends_on: [a_head]
+  - key: c_closed
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: b_tail
+        conditions: ["{{ b_tail.status == 'skipped' }}"]
+"#;
+
+/// The head's entry condition is false: head and tail are skipped, and the
+/// step that handles a skipped loop runs. The loop used to run three rounds.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_two_step_loop_with_a_false_entry_condition_is_skipped(pool: PgPool) {
+    let (runs, state) = run_to_end(&pool, GATED_TWO_STEP_LOOP, gate_outputs(false)).await;
+
+    assert_eq!(runs.get("a_head"), None, "{runs:?}");
+    assert_eq!(runs.get("b_tail"), None, "{runs:?}");
+    assert_eq!(status_of(&state, "a_head"), WorkflowActivityStatus::Skipped);
+    assert_eq!(status_of(&state, "b_tail"), WorkflowActivityStatus::Skipped);
+    assert_eq!(runs.get("c_closed"), Some(&1), "{runs:?}");
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// The head's entry condition is true: three rounds, and the skipped-loop
+/// step is skipped
+#[sqlx::test(migrations = "../migrations")]
+async fn test_two_step_loop_with_a_true_entry_condition_runs(pool: PgPool) {
+    let (runs, state) = run_to_end(&pool, GATED_TWO_STEP_LOOP, gate_outputs(true)).await;
+
+    assert_eq!(runs.get("a_head"), Some(&3), "{runs:?}");
+    assert_eq!(runs.get("b_tail"), Some(&3), "{runs:?}");
+    assert_eq!(
+        status_of(&state, "c_closed"),
+        WorkflowActivityStatus::Skipped
+    );
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// A two-step loop whose head depends on a skipped step: head and tail are
+/// skipped and the workflow completes. It used to hang with both
+/// not_scheduled.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_two_step_loop_behind_a_skipped_step_is_skipped(pool: PgPool) {
+    let yaml = r#"
+name: skipped_entry_two_step_loop
+activities:
+  - key: gate
+    worker: test
+    activity_name: echo
+  - key: bell
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: gate
+        conditions: ["{{ gate.open }}"]
+  - key: c_head
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - bell
+      - activity_key: d_tail
+        conditions: ["{{ d_tail.status == 'completed' }}"]
+  - key: d_tail
+    worker: test
+    activity_name: echo
+    depends_on: [c_head]
+"#;
+    let (runs, state) = run_to_end(&pool, yaml, gate_outputs(false)).await;
+
+    assert_eq!(runs.get("c_head"), None, "{runs:?}");
+    assert_eq!(status_of(&state, "c_head"), WorkflowActivityStatus::Skipped);
+    assert_eq!(status_of(&state, "d_tail"), WorkflowActivityStatus::Skipped);
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// Two entry dependencies decide like any step's: the loop runs when one of
+/// them applies, and is skipped when neither does
+#[sqlx::test(migrations = "../migrations")]
+async fn test_loop_with_two_entry_dependencies(pool: PgPool) {
+    let yaml = |second_open: bool| {
+        format!(
+            r#"
+name: two_entries_{second_open}
+activities:
+  - key: gate
+    worker: test
+    activity_name: echo
+  - key: side_gate
+    worker: test
+    activity_name: echo
+  - key: porter
+    worker: test
+    activity_name: echo
+    iteration_limit: 2
+    depends_on:
+      - activity_key: gate
+        conditions: ["{{{{ gate.open }}}}"]
+      - activity_key: side_gate
+        conditions: ["{{{{ {second_open} }}}}"]
+      - porter
+"#
+        )
+    };
+
+    let (runs, state) = run_to_end(&pool, &yaml(true), gate_outputs(false)).await;
+    assert_eq!(runs.get("porter"), Some(&2), "one way in is open: {runs:?}");
+    assert_eq!(state.status, WorkflowStatus::Completed);
+
+    let (runs, state) = run_to_end(&pool, &yaml(false), gate_outputs(false)).await;
+    assert_eq!(runs.get("porter"), None, "both ways in are shut: {runs:?}");
+    assert_eq!(status_of(&state, "porter"), WorkflowActivityStatus::Skipped);
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// The entry written with `dependency_of` on the gate decides the same way
+#[sqlx::test(migrations = "../migrations")]
+async fn test_loop_entry_written_with_dependency_of_is_skipped(pool: PgPool) {
+    let yaml = r#"
+name: dependency_of_entry
+activities:
+  - key: gate
+    worker: test
+    activity_name: echo
+    dependency_of:
+      - activity_key: porter
+        conditions: ["{{ gate.open }}"]
+  - key: porter
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on: [porter]
+"#;
+    let (runs, state) = run_to_end(&pool, yaml, gate_outputs(false)).await;
+
+    assert_eq!(runs.get("porter"), None, "{runs:?}");
+    assert_eq!(status_of(&state, "porter"), WorkflowActivityStatus::Skipped);
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// A loop with no dependency outside it starts with the workflow, as before:
+/// its back-edge neither lets it in nor keeps it out
+#[sqlx::test(migrations = "../migrations")]
+async fn test_loop_entered_from_the_workflow_start_runs(pool: PgPool) {
+    let yaml = r#"
+name: loop_from_start
+activities:
+  - key: a_step_in
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - activity_key: b_alight
+        conditions: ["{{ b_alight.status == 'completed' }}"]
+  - key: b_alight
+    worker: test
+    activity_name: echo
+    depends_on: [a_step_in]
+  - key: spinner
+    worker: test
+    activity_name: echo
+    iteration_limit: 2
+    depends_on: [spinner]
+"#;
+    let (runs, state) = run_to_end(&pool, yaml, gate_outputs(true)).await;
+
+    assert_eq!(runs.get("a_step_in"), Some(&3), "{runs:?}");
+    assert_eq!(runs.get("b_alight"), Some(&3), "{runs:?}");
+    assert_eq!(runs.get("spinner"), Some(&2), "{runs:?}");
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// A loop whose entry condition reads an earlier loop's step waits for that
+/// loop to end before it is skipped, like a step after a loop (#27): the
+/// condition is false after the counter's first rounds and true after its
+/// last, so the second loop starts then, not before. It used to start after
+/// the counter's first round, condition or not.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_loop_entry_on_an_earlier_loop_waits_for_it(pool: PgPool) {
+    let run = drive_loop_workflow(
+        &pool,
+        r#"
+name: loop_after_loop
+activities:
+  - key: counter
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on: [counter]
+  - key: spender
+    worker: test
+    activity_name: echo
+    iteration_limit: 2
+    depends_on:
+      - activity_key: counter
+        conditions: ["{{ counter.round >= 2 }}"]
+      - spender
+"#,
+        &[],
+    )
+    .await;
+
+    assert_eq!(run.runs.get("counter"), Some(&3), "{:?}", run.runs);
+    assert_eq!(
+        run.runs.get("spender"),
+        Some(&2),
+        "starts once the counter's last round is done: {:?} (history {:?})",
+        run.runs,
+        run.pending_history
+    );
+    assert!(
+        !run.pending_history
+            .iter()
+            .any(|p| p.iter().any(|k| k == "counter") && p.iter().any(|k| k == "spender")),
+        "spender never runs alongside counter: {:?}",
+        run.pending_history
+    );
+    assert_eq!(
+        run.status,
+        kruxiaflow_core::events::models::WorkflowStatus::Completed,
+        "{:?}",
+        run.runs
+    );
+}

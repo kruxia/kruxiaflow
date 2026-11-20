@@ -50,6 +50,32 @@ Each step in a loop runs **once per round, and only on new input**. A completed 
 - **A self-loop** (an activity whose back-edge is on itself) counts its own completion as new input.
 - **Dependencies outside the loop** (for example an `initialize` step that ran once before it) still have to be satisfied, but never trigger another round.
 
+**Entering the loop.** The first time a loop is reached, its back-edge points at a step that hasn't run yet (for a self-loop, the step itself), so it neither lets the loop in nor keeps it waiting. The loop head's dependencies from outside the loop decide whether round 0 runs, exactly as for any other step:
+
+```yaml
+activities:
+  - key: gate
+    activity_name: echo
+    parameters: { open: false }
+  - key: porter              # a self-loop behind a condition
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - activity_key: gate
+        conditions: ["{{ gate.echo.open }}"]
+      - porter               # the back-edge
+  - key: lobby
+    activity_name: echo
+    depends_on: [porter]
+```
+
+- **The condition is true:** `porter` runs its first round, and from then on its back-edge decides, as described above.
+- **The condition is false,** or `gate` was itself skipped and `porter` depends on it without a condition: `porter` is skipped, and so is everything that depends on it unconditionally (`lobby`; in a longer loop, the rest of the loop). The workflow completes. A step with `{{ porter.status == 'skipped' }}` runs then.
+- **Several dependencies outside the loop** combine like any step's: the loop runs when at least one applies, and all unconditional ones must have completed.
+- **No dependency outside the loop:** the loop starts with the workflow, as a step with no dependencies does. The back-edge's conditions are first checked when the first round has completed.
+
+Before this was fixed, the back-edge counted the first time too: a loop behind a false condition ran anyway, and a loop behind a skipped step stayed `not_scheduled` while the workflow stayed `running` forever (#38).
+
 Before this was fixed, the step after the head re-ran after each of its own completions, on stale input, until the default cap of 100 iterations (#18).
 
 **Upgrading:**
@@ -94,7 +120,7 @@ The loop counts as running while any loop step in the workflow is pending, runni
 
 **Known limitations:**
 
-- **A step after a loop that starts a loop of its own** is a loop step itself, so it is still skipped as soon as its condition is false. Put a plain step between the two loops.
+- **A loop that starts after another loop** waits for it in the same way: the head of the second loop, conditional on a step of the first, isn't skipped while the first loop runs (#38). If its condition becomes true after an earlier round of the first loop, it starts then, like an exit step.
 - **Another loop running elsewhere in the workflow** also holds the step back. It is decided when that loop ends too, which only delays it.
 
 ---

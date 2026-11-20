@@ -243,12 +243,16 @@ fn is_upstream_of_round_unsettled(
 ///
 /// ### 4a. Root Activities (No Dependencies)
 /// - No `depends_on` relationships → **Accept** (always ready)
+/// - An activity that has never been scheduled leaves its back-edges out
+///   ([`deciding_dependencies`], #38), so a loop with no dependency outside it
+///   is a root activity on its first round
 ///
 /// ### 4b. For Each Dependency:
 ///
 /// #### Back-Edge Dependencies (`is_back_edge = true`):
 /// Loop back-edges that create iterative execution:
-/// - **Iteration 0**: Automatically satisfied (allows first loop entry)
+/// - **First round** (never scheduled): left out; the other dependencies
+///   decide whether the loop is entered or skipped (#38)
 /// - **Iteration 1+**: Evaluate loop conditions:
 ///   - If conditions exist → All must evaluate to `true`
 ///   - Dependency must be `Completed`
@@ -284,8 +288,11 @@ fn is_upstream_of_round_unsettled(
 /// # Loop Behavior
 ///
 /// **First Execution** (iteration 0):
-/// - Root activity or all forward dependencies satisfied → Schedule
-/// - Back-edge dependencies automatically satisfied → Allows loop entry
+/// - Back-edge dependencies left out: they point at a loop step that hasn't
+///   run yet (#38)
+/// - Root activity, or the forward dependencies applicable → Schedule
+/// - No forward dependency applicable → not ready; skipped once they are all
+///   terminal (see [`find_skipped_activities`])
 ///
 /// **Subsequent Iterations** (iteration 1+):
 /// - Check iteration limit
@@ -370,10 +377,12 @@ fn is_activity_ready(
         return Ok(false);
     }
 
-    // Get list of dependencies from definition
-    let dependencies = get_dependencies(activity);
+    // The dependencies that decide: a loop step entering its loop for the
+    // first time leaves its back-edges out (#38)
+    let dependencies = deciding_dependencies(activity, activity_state);
 
-    // If no dependencies, it's a root activity (always ready initially)
+    // If no dependencies, it's a root activity (always ready initially), or a
+    // loop that starts with the workflow
     if dependencies.is_empty() {
         tracing::trace!(
             "Activity {} is a root activity (no dependencies)",
@@ -594,8 +603,11 @@ fn evaluate_loop_condition(
     state: &WorkflowState,
     activity_state: &super::workflow_state::ActivityState,
 ) -> Result<bool> {
-    // For the first iteration (iteration 0), back-edge dependencies are automatically satisfied
-    // This allows the activity to enter the loop for the first time
+    // An activity entering its loop for the first time never gets here: its
+    // back-edges are left out (see `deciding_dependencies`), so its other
+    // dependencies decide whether it runs (#38). A completed loop activity
+    // whose iteration was never counted (a middle step that completed before
+    // its loop marking was completed on load, #18) keeps going as before.
     if activity_state.iteration == 0 {
         tracing::trace!(
             "Back-edge dependency satisfied for {} (first iteration)",
@@ -643,6 +655,30 @@ fn get_dependencies(activity: &ActivityDefinition) -> Vec<&ActivityRelationship>
     } else {
         Vec::new()
     }
+}
+
+/// The dependencies that decide whether `activity` runs or is skipped now.
+///
+/// A loop step entering its loop for the first time (it has never been
+/// scheduled) leaves its back-edges out (#38). A back-edge points at a step of
+/// the loop that hasn't run yet, for a self-loop the step itself, so it can
+/// neither let the step in nor keep it waiting. The step's other dependencies
+/// (those from outside the loop, for the loop's head) decide round 0, like any
+/// other step's: a false condition, or an unconditional dependency on a
+/// skipped step, skips it, and the skip cascades. A step with nothing but
+/// back-edges has no dependency left, so its loop starts with the workflow.
+///
+/// Once the step has run, its back-edges decide the later rounds, through
+/// [`evaluate_loop_condition`].
+fn deciding_dependencies<'a>(
+    activity: &'a ActivityDefinition,
+    activity_state: Option<&super::workflow_state::ActivityState>,
+) -> Vec<&'a ActivityRelationship> {
+    let entering = activity_state.is_none_or(|s| s.status == WorkflowActivityStatus::NotScheduled);
+    get_dependencies(activity)
+        .into_iter()
+        .filter(|dep| !(entering && dep.is_back_edge))
+        .collect()
 }
 
 /// Convert WorkflowActivityStatus to snake_case string for template context
@@ -761,11 +797,14 @@ pub fn is_workflow_failed(state: &WorkflowState) -> bool {
 ///
 /// An activity should be skipped when:
 /// - Status is NotScheduled (not yet processed)
-/// - All dependencies are in terminal states (Completed, Failed, or Skipped)
+/// - All dependencies are in terminal states (Completed, Failed, or Skipped);
+///   a loop step's back-edges don't count, since it has never been scheduled
+///   (#38, see [`deciding_dependencies`])
 /// - No applicable dependencies exist (all conditional dependencies have false conditions)
 /// - It is not an activity after a loop whose loop is still running: one that
-///   depends on a loop member without being one waits until no loop member is
-///   scheduled, running or waiting (#27)
+///   depends on a step of a loop it isn't part of (an exit step, or the head
+///   of a later loop) waits until no loop member is scheduled, running or
+///   waiting (#27, #38)
 ///
 /// Skipping one activity can decide others (what depends on it); the
 /// orchestrator calls this again after marking them, until it finds none.
@@ -795,6 +834,8 @@ pub fn find_skipped_or_unresolvable_activities<'a>(
     let mut unresolvable = Vec::new();
     // Computed at most once, only when an activity after a loop would be skipped
     let mut loop_running: Option<bool> = None;
+    // Built at most once, only when a loop step depends on a loop step
+    let mut graph: Option<DependencyGraph<'a>> = None;
 
     for activity in &definition.activities {
         // Only consider NotScheduled activities
@@ -804,10 +845,14 @@ pub fn find_skipped_or_unresolvable_activities<'a>(
             continue;
         }
 
-        // Get dependencies
-        let dependencies = get_dependencies(activity);
+        // Get the dependencies that decide: an activity here has never been
+        // scheduled, so a loop step's back-edges are left out. They point at
+        // a step of its loop that hasn't run, which would never be terminal
+        // and would keep a loop behind a skipped step waiting for ever (#38)
+        let dependencies = deciding_dependencies(activity, state.activities.get(&activity.key));
 
-        // If no dependencies, it's a root activity and should not be skipped
+        // If no dependencies, it's a root activity (or a loop that starts with
+        // the workflow) and should not be skipped
         if dependencies.is_empty() {
             continue;
         }
@@ -846,17 +891,22 @@ pub fn find_skipped_or_unresolvable_activities<'a>(
             Err(other) => return Err(other),
         }
 
-        // An activity after a loop (it depends on a loop member but isn't one,
-        // like the loop's exit step) waits while the loop still runs: a later
-        // round completes that dependency again and may satisfy its
-        // condition. Skipped is terminal, so skipping it now would be for good
-        // (#27). Once no loop member is scheduled, running or waiting, the
-        // loop is over and the activity is skipped as usual.
-        if !activity.is_loop_activity
-            && dependencies
-                .iter()
-                .any(|dep| is_loop_member(definition, &dep.activity_key))
-            && *loop_running.get_or_insert_with(|| is_a_loop_running(definition, state))
+        // An activity after a loop (it depends on a step of a loop it isn't
+        // part of, like the loop's exit step, or the head of a later loop)
+        // waits while the loop still runs: a later round completes that
+        // dependency again and may satisfy its condition. Skipped is
+        // terminal, so skipping it now would be for good (#27, #38). Once no
+        // loop member is scheduled, running or waiting, the loop is over and
+        // the activity is skipped as usual.
+        if dependencies.iter().any(|dep| {
+            is_loop_member(definition, &dep.activity_key)
+                && !(activity.is_loop_activity
+                    && in_same_loop(
+                        graph.get_or_insert_with(|| DependencyGraph::new(definition)),
+                        &activity.key,
+                        &dep.activity_key,
+                    ))
+        }) && *loop_running.get_or_insert_with(|| is_a_loop_running(definition, state))
         {
             tracing::trace!(
                 "Activity {} not skipped yet: a loop it depends on is still running",
@@ -869,6 +919,21 @@ pub fn find_skipped_or_unresolvable_activities<'a>(
     }
 
     Ok((skipped, unresolvable))
+}
+
+/// Whether loop step `key` is on a cycle with its dependency `dep`: `key` can
+/// reach `dep` going forward through any dependency, back-edges included
+/// (`dep` reaches `key` directly). False for a dependency in an earlier,
+/// separate loop.
+fn in_same_loop(graph: &DependencyGraph<'_>, key: &str, dep: &str) -> bool {
+    key == dep || reach_from(graph, key).contains(dep)
+}
+
+fn reach_from<'a>(graph: &DependencyGraph<'a>, key: &str) -> HashSet<&'a str> {
+    match graph.all_dependents.get_key_value(key) {
+        Some((&start, _)) => DependencyGraph::reach(&graph.all_dependents, start),
+        None => HashSet::new(),
+    }
 }
 
 /// Whether `key` names a loop member (`is_loop_activity`, set on every
@@ -1805,8 +1870,10 @@ mod tests {
     #[test]
     fn test_loop_member_is_skipped_while_its_loop_runs() {
         // Inside the loop nothing changes: a member whose condition is false is
-        // skipped at once, so the steps after it in the same round can proceed
+        // skipped at once, so the steps after it in the same round can proceed.
+        // `done` is on the loop here: `run` also loops back on it.
         let mut definition = loop_with_exit_step();
+        definition.activities[0] = loop_def("run", vec![rel("check", true), rel("done", true)]);
         definition.activities[2] = loop_def("done", vec![rel_false("check")]);
         let state = make_workflow_state(vec![
             with_status("run", 1, WorkflowActivityStatus::Running),
@@ -1981,5 +2048,187 @@ mod tests {
         };
         let state = make_workflow_state(vec![completed("x", 1, 1), completed("y", 2, 1)]);
         assert_eq!(ready_keys(&definition, &state), vec!["x", "y"]);
+    }
+
+    // ============================================================================
+    // A loop whose way in is closed is skipped
+    // Regression tests for #38 [loop-entry-not-skipped]: entering its loop the
+    // first time, a step's back-edge let it in, or kept it waiting for ever
+    // ============================================================================
+
+    fn rel_if(key: &str, condition: &str) -> ActivityRelationship {
+        ActivityRelationship {
+            activity_key: key.to_string(),
+            conditions: Some(vec![condition.to_string()]),
+            is_back_edge: false,
+        }
+    }
+
+    /// gate → porter (conditional, a self-loop) → lobby
+    fn gated_self_loop() -> WorkflowDefinition {
+        WorkflowDefinition {
+            name: "gated".to_string(),
+            settings: None,
+            activities: vec![
+                make_activity_def("gate", None),
+                loop_def(
+                    "porter",
+                    vec![
+                        rel_if("gate", "{{ gate.status == 'skipped' }}"),
+                        rel("porter", true),
+                    ],
+                ),
+                make_activity_def("lobby", Some(vec![rel("porter", false)])),
+            ],
+        }
+    }
+
+    fn skipped_keys(definition: &WorkflowDefinition, state: &WorkflowState) -> Vec<String> {
+        let mut keys: Vec<String> = find_skipped_activities(definition, state)
+            .unwrap()
+            .into_iter()
+            .map(|a| a.key.clone())
+            .collect();
+        keys.sort();
+        keys
+    }
+
+    #[test]
+    fn test_back_edge_does_not_let_a_loop_in_on_its_first_round() {
+        // gate completed, so the condition on it is false
+        let definition = gated_self_loop();
+        let state = make_workflow_state(vec![
+            completed("gate", 1, 0),
+            make_activity_state("porter", WorkflowActivityStatus::NotScheduled),
+            make_activity_state("lobby", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert!(ready_keys(&definition, &state).is_empty());
+        assert_eq!(skipped_keys(&definition, &state), vec!["porter"]);
+    }
+
+    #[test]
+    fn test_back_edge_does_not_keep_a_loop_behind_a_skipped_step_waiting() {
+        // porter depends on gate without a condition, and gate was skipped
+        let mut definition = gated_self_loop();
+        definition.activities[1] =
+            loop_def("porter", vec![rel("gate", false), rel("porter", true)]);
+        let state = make_workflow_state(vec![
+            make_activity_state("gate", WorkflowActivityStatus::Skipped),
+            make_activity_state("porter", WorkflowActivityStatus::NotScheduled),
+            make_activity_state("lobby", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert!(ready_keys(&definition, &state).is_empty());
+        assert_eq!(skipped_keys(&definition, &state), vec!["porter"]);
+    }
+
+    #[test]
+    fn test_loop_with_an_open_entry_runs_its_first_round() {
+        let mut definition = gated_self_loop();
+        definition.activities[1] = loop_def(
+            "porter",
+            vec![
+                rel_if("gate", "{{ gate.status == 'completed' }}"),
+                rel("porter", true),
+            ],
+        );
+        let state = make_workflow_state(vec![
+            completed("gate", 1, 0),
+            make_activity_state("porter", WorkflowActivityStatus::NotScheduled),
+            make_activity_state("lobby", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(ready_keys(&definition, &state), vec!["porter"]);
+    }
+
+    #[test]
+    fn test_loop_with_only_back_edges_starts_with_the_workflow() {
+        // head ⇄ tail and nothing outside: the head is ready at once, the
+        // tail waits for it, and neither is skipped
+        let definition = WorkflowDefinition {
+            name: "from_start".to_string(),
+            settings: None,
+            activities: vec![
+                loop_def("head", vec![rel("tail", true)]),
+                loop_def("tail", vec![rel("head", false)]),
+            ],
+        };
+        let state = make_workflow_state(vec![
+            make_activity_state("head", WorkflowActivityStatus::NotScheduled),
+            make_activity_state("tail", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(ready_keys(&definition, &state), vec!["head"]);
+        assert!(skipped_keys(&definition, &state).is_empty());
+    }
+
+    #[test]
+    fn test_skipped_loop_head_cascades_to_its_tail() {
+        // The head was skipped on its way in: the tail, depending on the head
+        // inside the same loop, is skipped at once
+        let definition = WorkflowDefinition {
+            name: "cascade".to_string(),
+            settings: None,
+            activities: vec![
+                make_activity_def("gate", None),
+                loop_def("head", vec![rel("gate", false), rel("tail", true)]),
+                loop_def("tail", vec![rel("head", false)]),
+            ],
+        };
+        let state = make_workflow_state(vec![
+            make_activity_state("gate", WorkflowActivityStatus::Skipped),
+            make_activity_state("head", WorkflowActivityStatus::Skipped),
+            make_activity_state("tail", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(skipped_keys(&definition, &state), vec!["tail"]);
+    }
+
+    #[test]
+    fn test_loop_head_after_another_loop_waits_for_it_before_being_skipped() {
+        // counter is a self-loop going round again; spender's entry condition
+        // on it is false for now, but a later round may make it true
+        let definition = WorkflowDefinition {
+            name: "loop_after_loop".to_string(),
+            settings: None,
+            activities: vec![
+                loop_def("counter", vec![rel("counter", true)]),
+                loop_def(
+                    "spender",
+                    vec![
+                        rel_if("counter", "{{ counter.status == 'skipped' }}"),
+                        rel("spender", true),
+                    ],
+                ),
+            ],
+        };
+        let running = make_workflow_state(vec![
+            with_status("counter", 1, WorkflowActivityStatus::Pending),
+            make_activity_state("spender", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert!(skipped_keys(&definition, &running).is_empty());
+
+        let ended = make_workflow_state(vec![
+            completed("counter", 3, 3),
+            make_activity_state("spender", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(skipped_keys(&definition, &ended), vec!["spender"]);
+    }
+
+    #[test]
+    fn test_later_rounds_still_follow_the_back_edge() {
+        // porter has run a round: from now on its back-edge decides, as
+        // before #38, whatever its entry condition says by now
+        let mut definition = gated_self_loop();
+        definition.activities[1] = loop_def(
+            "porter",
+            vec![
+                rel_if("gate", "{{ gate.status == 'skipped' }}"),
+                rel("porter", true),
+            ],
+        );
+        let state = make_workflow_state(vec![
+            completed("gate", 1, 0),
+            completed("porter", 2, 1),
+            make_activity_state("lobby", WorkflowActivityStatus::NotScheduled),
+        ]);
+        let ready = ready_keys(&definition, &state);
+        assert!(ready.contains(&"porter".to_string()), "{ready:?}");
     }
 }
