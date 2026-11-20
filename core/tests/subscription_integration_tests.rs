@@ -47,6 +47,7 @@ async fn test_create_subscription(pool: PgPool) {
         event_name: "approval".to_string(),
         on_timeout: OnTimeout::Fail,
         timeout_seconds: 300,
+        iteration: None,
     };
 
     let id = service.create_subscription(sub).await.unwrap();
@@ -65,6 +66,7 @@ async fn test_create_duplicate_subscription_fails(pool: PgPool) {
         event_name: "approval".to_string(),
         on_timeout: OnTimeout::Fail,
         timeout_seconds: 300,
+        iteration: None,
     };
 
     // First create should succeed
@@ -95,6 +97,7 @@ async fn test_signal_activity_found(pool: PgPool) {
         event_name: "approval".to_string(),
         on_timeout: OnTimeout::Continue,
         timeout_seconds: 300,
+        iteration: None,
     };
     service.create_subscription(sub).await.unwrap();
 
@@ -144,6 +147,7 @@ async fn test_signal_activity_already_signaled(pool: PgPool) {
         event_name: "go".to_string(),
         on_timeout: OnTimeout::Fail,
         timeout_seconds: 300,
+        iteration: None,
     };
     service.create_subscription(sub).await.unwrap();
 
@@ -181,6 +185,7 @@ async fn test_get_signal_data(pool: PgPool) {
         event_name: "data_event".to_string(),
         on_timeout: OnTimeout::Skip,
         timeout_seconds: 300,
+        iteration: None,
     };
     service.create_subscription(sub).await.unwrap();
 
@@ -223,6 +228,7 @@ async fn test_delete_subscription(pool: PgPool) {
         event_name: "event".to_string(),
         on_timeout: OnTimeout::Fail,
         timeout_seconds: 300,
+        iteration: None,
     };
     service.create_subscription(sub).await.unwrap();
 
@@ -256,6 +262,7 @@ async fn test_expire_subscriptions(pool: PgPool) {
         event_name: "never_comes".to_string(),
         on_timeout: OnTimeout::Fail,
         timeout_seconds: 1,
+        iteration: None,
     };
     service.create_subscription(sub).await.unwrap();
 
@@ -283,6 +290,7 @@ async fn test_expire_subscriptions_none_expired(pool: PgPool) {
         event_name: "event".to_string(),
         on_timeout: OnTimeout::Continue,
         timeout_seconds: 3600,
+        iteration: None,
     };
     service.create_subscription(sub).await.unwrap();
 
@@ -304,6 +312,7 @@ async fn test_recover_expired(pool: PgPool) {
         event_name: "event".to_string(),
         on_timeout: OnTimeout::Skip,
         timeout_seconds: 1,
+        iteration: None,
     };
     service.create_subscription(sub).await.unwrap();
 
@@ -337,6 +346,7 @@ async fn test_on_timeout_variants(pool: PgPool) {
         event_name: "event".to_string(),
         on_timeout: OnTimeout::Continue,
         timeout_seconds: 300,
+        iteration: None,
     };
     service.create_subscription(sub).await.unwrap();
 
@@ -356,6 +366,7 @@ async fn test_on_timeout_variants(pool: PgPool) {
         event_name: "event".to_string(),
         on_timeout: OnTimeout::Skip,
         timeout_seconds: 300,
+        iteration: None,
     };
     service.create_subscription(sub2).await.unwrap();
 
@@ -367,4 +378,48 @@ async fn test_on_timeout_variants(pool: PgPool) {
     };
     let result2 = service.signal_activity(signal2).await.unwrap().unwrap();
     assert!(matches!(result2.on_timeout, OnTimeout::Skip));
+}
+
+/// The loop round a subscription waits in comes back on the signal and on
+/// expiry, so the events they produce carry it
+#[sqlx::test(migrations = "../migrations")]
+async fn test_subscription_iteration_round_trip(pool: PgPool) {
+    use kruxiaflow_core::subscription::SignalRequest;
+
+    let workflow_id = insert_test_workflow(&pool).await;
+    let service = PostgresSubscriptionService::new(pool.clone());
+
+    let new_sub = |key: &str, timeout_seconds| NewSubscription {
+        workflow_id,
+        activity_key: key.to_string(),
+        event_name: "go".to_string(),
+        on_timeout: OnTimeout::Continue,
+        timeout_seconds,
+        iteration: Some(2),
+    };
+    service
+        .create_subscription(new_sub("signaled", 300))
+        .await
+        .unwrap();
+    service
+        .create_subscription(new_sub("expiring", 0))
+        .await
+        .unwrap();
+
+    let signaled = service
+        .signal_activity(SignalRequest {
+            workflow_id,
+            activity_key: "signaled".to_string(),
+            event_name: "go".to_string(),
+            data: Some(json!({"ok": true})),
+        })
+        .await
+        .unwrap()
+        .expect("a subscription to signal");
+    assert_eq!(signaled.iteration, Some(2));
+
+    let expired = service.expire_subscriptions(100).await.unwrap();
+    assert_eq!(expired.len(), 1);
+    assert_eq!(expired[0].activity_key, "expiring");
+    assert_eq!(expired[0].iteration, Some(2));
 }

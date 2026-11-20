@@ -18,6 +18,8 @@ pub struct ActivitySubscription {
     pub timeout_at: DateTime<Utc>,
     pub signal_data: Option<Value>,
     pub created_at: DateTime<Utc>,
+    /// Loop round of the waiting activity (None outside loops)
+    pub iteration: Option<i32>,
 }
 
 /// Request to create a new subscription
@@ -28,6 +30,9 @@ pub struct NewSubscription {
     pub event_name: String,
     pub on_timeout: OnTimeout,
     pub timeout_seconds: u64,
+    /// Loop round of the waiting activity (None outside loops); the events
+    /// this subscription produces carry it
+    pub iteration: Option<i32>,
 }
 
 /// Request to signal an activity
@@ -47,4 +52,6 @@ pub struct ExpiredSubscription {
     pub activity_key: String,
     pub event_name: String,
     pub on_timeout: OnTimeout,
+    /// Loop round of the waiting activity (None outside loops)
+    pub iteration: Option<i32>,
 }

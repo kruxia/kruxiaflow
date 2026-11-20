@@ -2876,6 +2876,24 @@ event handler is replay-idempotent: duplicate `WorkflowCreated` /
 `ActivityCompleted` / `ActivityFailed` / `ActivityWaiting` / `ActivitySignaled`
 events are guarded no-ops.
 
+**Signal waits** (`settings.wait_for_signal`): scheduling such an activity
+creates one row in `activity_event_subscriptions` (one per activity, holding
+the loop round in `iteration`) and marks the activity `Waiting` instead of
+queueing it. The signal API marks the row and publishes `ActivitySignaled`
+stamped with the row's `iteration`; the expiry checker does the same for a
+timeout. The orchestrator handles an `ActivitySignaled` for a `Waiting`
+activity by deleting the row and queueing the activity in the same pass,
+without evaluating its dependencies again (they held when the wait began). In
+the next loop round the activity waits again, on a new row.
+
+**Why**: The orchestrator used to evaluate the signaled activity like any
+other and, finding `wait_for_signal`, create its subscription again. The row
+was still there, so every signaled activity failed with "Subscription already
+exists", in or out of a loop. Deleting the row lets a loop round wait again,
+and the round's `iteration` on the event keeps the dedup index
+`(workflow_id, event_type, activity_key, iteration, attempt)` from dropping
+every signal after the first as a duplicate.
+
 **WebSocket replay** resolves `from_event_id` to that event's `(tx, position)`
 and reads with the same predicate, so a reconnecting client cannot miss an
 event that committed late. An unknown id yields an empty replay (logged at
