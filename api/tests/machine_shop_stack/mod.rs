@@ -503,9 +503,10 @@ fn references(workflow: &Value, prefix: &str) -> Vec<String> {
 
 /// The workflow's pins: `INPUT` fields and secrets in, signals as
 /// interrupts, and the declared outputs of the steps nothing depends on
-/// (a step that only depends on itself still counts as nothing)
+/// but a loop's back-edge (the loop's last step still hands its output on)
 pub fn pins(workflow: &Value) -> Vec<Value> {
     let steps = steps(workflow);
+    let back = back_edges(&steps);
     let mut pins: Vec<Value> = references(workflow, "INPUT.")
         .into_iter()
         .map(|n| json!({ "dir": "in", "kind": "input", "name": n }))
@@ -526,7 +527,7 @@ pub fn pins(workflow: &Value) -> Vec<Value> {
         .flat_map(|s| {
             s.deps
                 .iter()
-                .filter(|d| d.step != s.key)
+                .filter(|d| !back.contains(&(s.key.clone(), d.step.clone())))
                 .map(|d| d.step.as_str())
         })
         .collect();
@@ -1039,6 +1040,10 @@ activities:
     activity_name: echo
     depends_on: [tick]
     outputs: [echo]
+  - key: piston
+    activity_name: echo
+    depends_on: [tick, { activity_key: valve, conditions: ["{{ valve.status == 'completed' }}"] }]
+  - { key: valve, activity_name: echo, depends_on: [piston], outputs: [echo] }
 "#);
         let names: Vec<String> = pins(&w)
             .iter()
@@ -1060,7 +1065,7 @@ activities:
                 "secret - db_url",
                 "output toast echo",
                 "output toast shade",
-                "output tick echo",
+                "output valve echo",
             ]
         );
         let r = ratings(&w);
@@ -1070,7 +1075,8 @@ activities:
             [
                 "Signal wait, toast (pop)",
                 "Attempts, toast",
-                "Rounds of tick"
+                "Rounds of tick",
+                "Rounds of piston"
             ]
         );
         assert_eq!(r[0]["note"], "on_timeout: continue");
