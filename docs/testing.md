@@ -52,7 +52,7 @@ Kruxia Flow uses a unified test script at `scripts/test.sh` for all testing need
 cargo test -p kruxiaflow-api --test machine_shop -- --nocapture
 ```
 
-The card format, the modes and the scoreboard are described in [`machines/README.md`](../machines/README.md).
+Each run also writes a results file and two views of the results, `stack.html` and `floor.html`, under `target/tmp/machine-shop/`. The card format, the modes, the results file and the views are described in [`machines/README.md`](../machines/README.md).
 
 ### Debugging Tests
 

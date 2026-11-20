@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Machine Shop Floor</title>
+<!--
+  The Shop Floor: every machine at once, each drawn as a schematic of its
+  own workflow, with every step lit by what it did in the chosen results.
+
+  A prototype, to compare with stack.html. The runner fills in the data
+  marker below and writes this page next to the results; see
+  machines/README.md. Everything is in this file: no network, no build.
+  Colours and type follow the engine dashboard (dashboard/assets/
+  dashboard.html), so the two read as one family, but nothing is shared.
+-->
+<style>
+  /* Layout: a sticky control bar and andon board, then the floor: a grid of bays, one machine per bay. */
+  :root {
+    --page:           #f9f9f7;
+    --surface:        #fcfcfb;
+    --ink:            #0b0b0b;
+    --ink-secondary:  #52514e;
+    --ink-muted:      #898781;
+    --grid:           #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11, 11, 11, 0.10);
+    --series:         #2a78d6;
+    --status-good:    #0ca30c;
+    --status-warning: #fab219;
+    --status-serious: #ec835a;
+    --status-critical:#d03b3b;
+    --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-secondary: #c3c2b7; --ink-muted: #898781;
+      --grid: #2c2c2a; --baseline: #383835; --border: rgba(255, 255, 255, 0.10); --series: #3987e5;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-secondary: #c3c2b7; --ink-muted: #898781;
+    --grid: #2c2c2a; --baseline: #383835; --border: rgba(255, 255, 255, 0.10); --series: #3987e5;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    font: 14px/1.5 var(--sans);
+    color: var(--ink);
+    background: var(--page);
+  }
+  a { color: var(--series); }
+  button, select { font: inherit; color: var(--ink); }
+  :focus-visible { outline: 2px solid var(--series); outline-offset: 2px; }
+  .wrap {
+    max-width: 1280px; margin: 0 auto;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+
+  /* control bar */
+  body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
+  header {
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+  }
+  header .wrap { padding-block: 12px; display: grid; gap: 10px; }
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+  h1 { font-size: 17px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+  h1 span { color: var(--ink-muted); font-weight: 400; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-left: auto; }
+  .controls label { display: flex; gap: 6px; align-items: center; font-size: 12px; color: var(--ink-secondary); }
+  select { background: var(--surface); border: 1px solid var(--baseline); border-radius: 6px; padding: 4px 6px; max-width: 220px; }
+  .controls .check { cursor: pointer; }
+  .meta { font-size: 12px; color: var(--ink-secondary); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; min-width: 0; }
+  .meta code { font-family: var(--mono); font-size: 11.5px; }
+
+  /* andon board: one lamp per machine */
+  .andon { display: flex; flex-wrap: wrap; gap: 6px; }
+  .lamp-link {
+    display: inline-flex; align-items: center; gap: 7px; padding: 3px 9px 3px 6px;
+    border: 1px solid var(--border); border-radius: 999px; background: var(--page);
+    color: var(--ink); text-decoration: none; font-size: 12px;
+  }
+  .lamp-link:hover { border-color: var(--baseline); }
+  .lamp { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--ink-muted); }
+  .lamp.works, .lamp.fixed { background: var(--status-good); }
+  .lamp.known_broken { background: var(--status-warning); }
+  .lamp.broken { background: var(--status-critical); box-shadow: 0 0 0 3px color-mix(in srgb, var(--status-critical) 25%, transparent); }
+  .tally { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px; padding: 1px 8px; border-radius: 999px;
+    font-size: 12px; font-variant-numeric: tabular-nums; border: 1px solid var(--border); background: var(--surface);
+    white-space: nowrap;
+  }
+  .chip b { font-weight: 650; }
+  .chip.works, .chip.fixed { border-color: color-mix(in srgb, var(--status-good) 45%, transparent); }
+  .chip.known_broken { border-color: color-mix(in srgb, var(--status-warning) 60%, transparent); }
+  .chip.broken { border-color: var(--status-critical); color: var(--status-critical); }
+  .chip.changed { border-color: var(--series); color: var(--series); }
+
+  /* the floor */
+  main {
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 24px 24px;
+    background-position: -1px -1px;
+    min-height: 60vh;
+  }
+  main .wrap { padding-block: 20px 40px; }
+  .floor { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 400px), 1fr)); gap: 16px; align-items: start; }
+  .bay {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    display: grid; gap: 10px; padding: 14px; min-width: 0; scroll-margin-top: 140px;
+  }
+  .bay.trap { border-style: dashed; border-color: var(--baseline); }
+  .bay.dim { opacity: 0.45; }
+  .bay-head { display: flex; align-items: flex-start; gap: 10px; }
+  .bay-head .lamp { width: 14px; height: 14px; margin-top: 3px; }
+  .bay-head .names { display: grid; gap: 1px; min-width: 0; flex: 1; }
+  .bay-head h2 { font-size: 15px; margin: 0; font-weight: 650; }
+  .bay-head .kind { font-size: 11px; color: var(--ink-muted); text-transform: uppercase; letter-spacing: 0.08em; }
+  .verdict { font-size: 12px; text-align: right; display: grid; gap: 2px; justify-items: end; }
+  .verdict .secs { color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+  .trapchip { font-size: 12px; }
+  .runs { display: flex; flex-wrap: wrap; gap: 4px; }
+  .runs button {
+    border: 1px solid var(--border); background: var(--page); border-radius: 6px; padding: 2px 8px; font-size: 12px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .runs button[aria-pressed="true"] { border-color: var(--ink-secondary); background: var(--surface); font-weight: 600; }
+  .runs .lamp { width: 8px; height: 8px; }
+
+  .schematic { overflow-x: auto; }
+  .schematic svg { display: block; max-width: none; height: auto; }
+  @media (min-width: 840px) { .bay.wide { grid-column: span 2; } }
+  .schematic text { font-family: var(--sans); }
+  .link { fill: none; stroke: var(--baseline); stroke-width: 1.5; }
+  .link.gated { stroke-dasharray: 4 3; }
+  .gate { fill: var(--surface); stroke: var(--ink-muted); stroke-width: 1.2; }
+  .arrow { fill: var(--baseline); }
+  .part rect.body { stroke-width: 1.2; }
+  .part.completed rect.body { fill: color-mix(in srgb, var(--status-good) 16%, var(--surface)); stroke: color-mix(in srgb, var(--status-good) 70%, var(--surface)); }
+  .part.failed rect.body { fill: color-mix(in srgb, var(--status-critical) 18%, var(--surface)); stroke: var(--status-critical); }
+  .part.running rect.body, .part.scheduled rect.body { fill: color-mix(in srgb, var(--status-warning) 22%, var(--surface)); stroke: var(--status-warning); }
+  .part.skipped rect.body { fill: url(#hatch); stroke: var(--ink-muted); }
+  .part.idle rect.body { fill: var(--surface); stroke: var(--ink-muted); stroke-dasharray: 3 3; }
+  .hatch-bg { fill: var(--surface); }
+  .hatch-line { stroke: var(--grid); stroke-width: 3; }
+  .part .key { font-size: 11.5px; fill: var(--ink); font-weight: 600; }
+  .part .state { font-size: 10.5px; fill: var(--ink-secondary); }
+  .part .miss { fill: none; stroke: var(--status-critical); stroke-width: 2.5; }
+  .part .delta { fill: none; stroke: var(--series); stroke-width: 1.5; stroke-dasharray: 2 2; }
+  .badge { font-size: 10px; font-weight: 700; }
+  .badge-bg.miss { fill: var(--status-critical); }
+  .badge-bg.delta { fill: var(--series); }
+  .badge-text { fill: #ffffff; }
+
+  .problems { margin: 0; padding: 8px 10px 8px 26px; border-radius: 6px; font-size: 12.5px;
+    background: color-mix(in srgb, var(--status-critical) 8%, var(--surface)); }
+  .problems.known { background: color-mix(in srgb, var(--status-warning) 12%, var(--surface)); }
+  .problems li + li { margin-top: 2px; }
+  .ok { margin: 0; font-size: 12.5px; color: var(--ink-secondary); }
+  .changes { margin: 0; font-size: 12.5px; color: var(--series); }
+
+  details { border-top: 1px solid var(--border); padding-top: 8px; }
+  summary { cursor: pointer; font-size: 12px; color: var(--ink-secondary); }
+  details[open] summary { margin-bottom: 8px; }
+  .story { margin: 0 0 8px; max-width: 62ch; color: var(--ink-secondary); }
+  .functions { margin: 0 0 10px; padding-left: 18px; font-size: 13px; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; width: 100%; }
+  th, td { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--grid); vertical-align: top; white-space: nowrap; }
+  th { font-weight: 600; color: var(--ink-secondary); }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--ink-secondary); align-items: center; }
+  .legend svg { vertical-align: middle; margin-right: 4px; }
+  .empty { max-width: 60ch; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .empty code { font-family: var(--mono); font-size: 12px; }
+  @media (max-width: 560px) {
+    header { position: static; }
+    .controls { margin-left: 0; }
+    .bay { scroll-margin-top: 8px; }
+  }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <pattern id="hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <rect class="hatch-bg" width="6" height="6"/><line class="hatch-line" x1="0" y1="0" x2="0" y2="6"/>
+    </pattern>
+  </defs>
+</svg>
+<header>
+  <div class="wrap">
+    <div class="bar">
+      <h1>Machine shop <span>· shop floor</span></h1>
+      <div class="controls" id="controls"></div>
+    </div>
+    <div class="bar">
+      <div class="tally" id="tally"></div>
+      <div class="meta" id="meta"></div>
+    </div>
+    <nav class="andon" id="andon" aria-label="Machines"></nav>
+  </div>
+</header>
+<main>
+  <div class="wrap">
+    <div class="legend" id="legend"></div>
+    <div class="floor" id="floor" style="margin-top:14px"></div>
+  </div>
+</main>
+
+<script id="shop-data" type="application/json">__MACHINE_SHOP_DATA__</script>
+<script>
+"use strict";
+
+// ---------------------------------------------------------------------------
+// Data
+// ---------------------------------------------------------------------------
+
+let DATA = null;
+try { DATA = JSON.parse(document.getElementById("shop-data").textContent); } catch (e) { DATA = null; }
+const MACHINES = DATA ? DATA.machines : [];
+const SETS = DATA ? DATA.results.map((s, i) => ({ ...s, id: i })) : [];
+const ISSUE_URL = "https://github.com/kruxia/kruxiaflow/issues/";
+
+const RESULT_TEXT = { works: "Works", broken: "Broken", known_broken: "Known broken", fixed: "Fixed" };
+const RESULT_RANK = { broken: 3, known_broken: 2, fixed: 1, works: 0 };
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function when(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return iso || "";
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+function setName(s) {
+  const twins = SETS.filter(o => o.tree.label === s.tree.label && o.mode === s.mode).length;
+  return `${s.tree.label} · ${s.mode}` + (twins > 1 ? ` · ${when(s.started_at)}` : "");
+}
+function runIn(set, dir, run) { return set ? set.runs.find(r => r.machine === dir && r.run === run) : undefined; }
+function worst(rs) { return rs.length ? rs.reduce((a, b) => (RESULT_RANK[b.result] > RESULT_RANK[a.result] ? b : a)) : null; }
+function resultLabel(r) { return r ? (RESULT_TEXT[r.result] || r.result) + (r.trap ? ` · #${r.trap}` : "") : "Not run"; }
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+
+const state = { set: null, compare: null, onlyChanged: false, run: {} };
+if (SETS.length) {
+  const last = SETS[SETS.length - 1];
+  state.set = last.id;
+  const other = [...SETS].reverse().find(s => s.mode === last.mode && s.tree.label !== last.tree.label);
+  state.compare = other ? other.id : null;
+}
+for (const m of MACHINES) state.run[m.dir] = m.card.runs[0] ? m.card.runs[0].name : null;
+const cur = () => (state.set === null ? null : SETS[state.set]);
+const cmp = () => (state.compare === null ? null : SETS[state.compare]);
+
+/** Did this run's result, or any step, differ from the compare set? */
+function changed(dir, run) {
+  const a = runIn(cmp(), dir, run), b = runIn(cur(), dir, run);
+  if (!cmp() || !a || !b) return false;
+  if (a.result !== b.result) return true;
+  return Object.keys({ ...a.steps, ...b.steps }).some(k =>
+    (a.steps[k] || {}).status !== (b.steps[k] || {}).status || (a.steps[k] || {}).runs !== (b.steps[k] || {}).runs);
+}
+
+// ---------------------------------------------------------------------------
+// Schematic: steps in columns by depth, each depends_on drawn as a link
+// ---------------------------------------------------------------------------
+
+const W = 100, H = 40, GX = 24, GY = 14, PAD = 10;
+
+function layout(steps) {
+  const byKey = Object.fromEntries(steps.map(s => [s.key, s]));
+  const depth = {};
+  const visit = (k, seen = new Set()) => {
+    if (depth[k] !== undefined) return depth[k];
+    if (seen.has(k)) return 0;
+    seen.add(k);
+    const deps = (byKey[k] ? byKey[k].depends_on : []).filter(d => byKey[d.step]);
+    depth[k] = deps.length ? 1 + Math.max(...deps.map(d => visit(d.step, seen))) : 0;
+    return depth[k];
+  };
+  steps.forEach(s => visit(s.key));
+  const cols = [];
+  steps.forEach(s => (cols[depth[s.key]] ||= []).push(s.key));
+  const rows = Math.max(...cols.map(c => c.length));
+  const pos = {};
+  cols.forEach((c, x) => c.forEach((k, i) => {
+    const offset = (rows - c.length) * (H + GY) / 2;
+    pos[k] = { x: PAD + x * (W + GX), y: PAD + offset + i * (H + GY) };
+  }));
+  return { pos, width: PAD * 2 + cols.length * W + (cols.length - 1) * GX, height: PAD * 2 + rows * H + (rows - 1) * GY };
+}
+
+function stateClass(status) {
+  if (status === "completed") return "completed";
+  if (status === "failed") return "failed";
+  if (status === "skipped") return "skipped";
+  if (status === "running" || status === "scheduled") return "running";
+  return "idle";
+}
+function stateText(st) {
+  if (!st) return "not run";
+  const status = st.status === "not_scheduled" || st.status === "absent" ? "never ran" : st.status.replace(/_/g, " ");
+  return st.runs > 1 ? `${status} · ran ${st.runs}×` : status;
+}
+
+let uid = 0;
+function schematic(m, run, spec) {
+  const steps = m.workflow.steps;
+  const { pos, width, height } = layout(steps);
+  const id = `s${uid++}`;
+  const prev = runIn(cmp(), m.dir, spec.name);
+  let links = "", parts = "";
+  for (const s of steps) {
+    for (const d of s.depends_on) {
+      const a = pos[d.step], b = pos[s.key];
+      if (!a || !b) continue;
+      const x1 = a.x + W, y1 = a.y + H / 2, x2 = b.x - 4, y2 = b.y + H / 2, mx = (x1 + x2) / 2;
+      const gated = d.conditions && d.conditions.length;
+      links += `<path class="link${gated ? " gated" : ""}" d="M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2} ${y2}" marker-end="url(#${id}-arrow)"/>`;
+      if (gated) {
+        const gx = mx, gy = (y1 + y2) / 2;
+        links += `<g><title>Only if ${esc(d.conditions.join(" and "))}</title><path class="gate" d="M${gx} ${gy - 6} L${gx + 6} ${gy} L${gx} ${gy + 6} L${gx - 6} ${gy} Z"/></g>`;
+      }
+    }
+  }
+  for (const s of steps) {
+    const p = pos[s.key];
+    const got = run ? run.steps[s.key] : null;
+    const want = spec.expect.steps[s.key];
+    const miss = run && want && (!got || got.status !== want.status || (want.runs != null && got.runs !== want.runs));
+    const was = prev ? prev.steps[s.key] : null;
+    const delta = run && prev && was && got && (was.status !== got.status || was.runs !== got.runs);
+    const tip = [`${s.key}: ${s.activity || "?"} on ${s.worker || "?"}`,
+      got ? `now: ${stateText(got)}` : "", want ? `card expects: ${want.status}${want.runs != null ? `, ${want.runs} run${want.runs === 1 ? "" : "s"}` : ""}` : "",
+      delta ? `in ${setName(cmp())}: ${stateText(was)}` : ""].filter(Boolean).join("\n");
+    const cls = got ? stateClass(got.status) : "idle";
+    let badges = "", bx = p.x + W - 8;
+    if (miss) { badges += `<circle class="badge-bg miss" cx="${bx}" cy="${p.y}" r="7"/><text class="badge badge-text" x="${bx}" y="${p.y + 3.5}" text-anchor="middle">!</text>`; bx -= 16; }
+    if (delta) { badges += `<circle class="badge-bg delta" cx="${bx}" cy="${p.y}" r="7"/><text class="badge badge-text" x="${bx}" y="${p.y + 3.5}" text-anchor="middle">Δ</text>`; }
+    parts += `<g class="part ${cls}"><title>${esc(tip)}</title>
+      ${delta ? `<rect class="delta" x="${p.x - 4}" y="${p.y - 4}" width="${W + 8}" height="${H + 8}" rx="8"/>` : ""}
+      <rect class="body" x="${p.x}" y="${p.y}" width="${W}" height="${H}" rx="5"/>
+      ${miss ? `<rect class="miss" x="${p.x}" y="${p.y}" width="${W}" height="${H}" rx="5"/>` : ""}
+      <text class="key" x="${p.x + 9}" y="${p.y + 17}">${esc(s.key.length > 14 ? s.key.slice(0, 13) + "…" : s.key)}</text>
+      <text class="state" x="${p.x + 9}" y="${p.y + 31}">${esc(stateText(got))}</text>
+      ${badges}</g>`;
+  }
+  return `<svg viewBox="-2 -9 ${width + 4} ${height + 11}" width="${width + 4}" role="img" aria-label="Schematic of ${esc(m.card.name)}">
+    <defs>
+      <marker id="${id}-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0 0 L8 4 L0 8 Z"/></marker>
+    </defs>${links}${parts}</svg>`;
+}
+
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
+function controls() {
+  if (!SETS.length) return "";
+  const opts = (sel, none) => (none ? `<option value=""${sel === null ? " selected" : ""}>Nothing</option>` : "") +
+    SETS.map(s => `<option value="${s.id}"${s.id === sel ? " selected" : ""}>${esc(setName(s))}</option>`).join("");
+  return `<label for="pick-set">Results <select id="pick-set">${opts(state.set)}</select></label>
+    <label for="pick-cmp">Compare with <select id="pick-cmp">${opts(state.compare, true)}</select></label>
+    <label class="check" for="only-changed"><input type="checkbox" id="only-changed"${state.onlyChanged ? " checked" : ""}${cmp() ? "" : " disabled"}> Only what changed</label>`;
+}
+
+function tally() {
+  const s = cur();
+  if (!s) return "";
+  const c = { works: 0, broken: 0, known_broken: 0, fixed: 0 };
+  s.runs.forEach(r => (c[r.result] = (c[r.result] || 0) + 1));
+  let html = Object.entries(c).map(([k, n]) => `<span class="chip ${k}${n ? "" : " zero"}"><span class="lamp ${k}"></span>${RESULT_TEXT[k]} <b>${n}</b></span>`).join("");
+  if (cmp()) {
+    const n = MACHINES.reduce((acc, m) => acc + m.card.runs.filter(r => changed(m.dir, r.name)).length, 0);
+    html += `<span class="chip changed">Δ Changed since ${esc(setName(cmp()))} <b>${n}</b></span>`;
+  }
+  return html;
+}
+
+function meta() {
+  const s = cur();
+  if (!s) return "";
+  return `<code>${esc(s.tree.branch)} @ ${esc(s.tree.commit)}</code> · ${esc(s.runner)} runner · ${esc(s.mode)} mode · ${esc(when(s.started_at))} · ${s.runs.length} runs in ${Number(s.seconds).toFixed(1)}s`;
+}
+
+function andon() {
+  return MACHINES.map(m => {
+    const r = worst((cur() ? cur().runs : []).filter(x => x.machine === m.dir));
+    return `<a class="lamp-link" href="#${esc(m.dir)}" title="${esc(resultLabel(r))}"><span class="lamp ${r ? r.result : ""}"></span>${esc(m.card.name)}</a>`;
+  }).join("");
+}
+
+function legend() {
+  const box = (cls, extra = "") => `<svg width="22" height="14" viewBox="0 0 22 14"><g class="part ${cls}"><rect class="body" x="1" y="1" width="20" height="12" rx="3"/>${extra}</g></svg>`;
+  return `<span>${box("completed")}completed</span>
+    <span>${box("skipped")}skipped</span>
+    <span>${box("idle")}never ran</span>
+    <span>${box("failed")}failed</span>
+    <span><svg width="22" height="14" viewBox="0 0 22 14"><circle class="badge-bg miss" cx="7" cy="7" r="6"/><text class="badge badge-text" x="7" y="10.5" text-anchor="middle">!</text></svg>not what the card expects</span>
+    ${cmp() ? `<span><svg width="22" height="14" viewBox="0 0 22 14"><circle class="badge-bg delta" cx="7" cy="7" r="6"/><text class="badge badge-text" x="7" y="10.5" text-anchor="middle">Δ</text></svg>different in ${esc(setName(cmp()))}</span>` : ""}
+    <span><svg width="22" height="14" viewBox="0 0 22 14"><path class="link gated" d="M0 7 H22"/><path class="gate" d="M11 2 L16 7 L11 12 L6 7 Z"/></svg>runs only if a condition holds</span>`;
+}
+
+function bay(m) {
+  const c = m.card;
+  const spec = c.runs.find(r => r.name === state.run[m.dir]) || c.runs[0];
+  const run = runIn(cur(), m.dir, spec.name);
+  const all = cur() ? cur().runs.filter(x => x.machine === m.dir) : [];
+  const anyChanged = c.runs.some(r => changed(m.dir, r.name));
+  const tabs = c.runs.length > 1 ? `<div class="runs" role="group" aria-label="Runs">${c.runs.map(r => {
+    const rr = runIn(cur(), m.dir, r.name);
+    return `<button type="button" data-machine="${esc(m.dir)}" data-run="${esc(r.name)}" aria-pressed="${r.name === spec.name}"><span class="lamp ${rr ? rr.result : ""}"></span>${esc(r.name)}${changed(m.dir, r.name) ? " Δ" : ""}</button>`;
+  }).join("")}</div>` : `<div class="runs"><span class="meta">Run: ${esc(spec.name)}</span></div>`;
+
+  let findings = "";
+  if (!run) findings = `<p class="ok">Not run in ${esc(setName(cur()))}.</p>`;
+  else if (run.problems.length) findings = `<ul class="problems${run.result === "known_broken" ? " known" : ""}">${run.problems.map(p => `<li>${esc(p)}</li>`).join("")}</ul>`;
+  else findings = `<p class="ok">Did what its card says.${run.result === "fixed" ? ` Trap #${run.trap} now passes: take the trap label off.` : ""}</p>`;
+  const prev = runIn(cmp(), m.dir, spec.name);
+  if (run && prev && prev.result !== run.result) {
+    findings += `<p class="changes">Δ ${esc(setName(cmp()))}: ${esc(resultLabel(prev))} → ${esc(setName(cur()))}: ${esc(resultLabel(run))}</p>`;
+  }
+
+  const recent = SETS.slice(-4);
+  const matrix = `<div class="scroll"><table><thead><tr><th>Run</th>${recent.map(s => `<th>${esc(setName(s))}</th>`).join("")}</tr></thead><tbody>${
+    c.runs.map(r => `<tr><td>${esc(r.name)}</td>${recent.map(s => {
+      const x = runIn(s, m.dir, r.name);
+      return `<td><span class="lamp ${x ? x.result : ""}" style="display:inline-block;width:8px;height:8px;margin-right:5px"></span>${esc(resultLabel(x))}${x ? ` · ${Number(x.seconds).toFixed(2)}s` : ""}</td>`;
+    }).join("")}</tr>`).join("")}</tbody></table></div>`;
+
+  const r = worst(all);
+  const wide = layout(m.workflow.steps).width > 370;
+  return `<section class="bay${wide ? " wide" : ""}${c.trap ? " trap" : ""}${state.onlyChanged && cmp() && !anyChanged ? " dim" : ""}" id="${esc(m.dir)}" aria-label="${esc(c.name)}">
+    <div class="bay-head">
+      <span class="lamp ${run ? run.result : ""}" title="${esc(resultLabel(run))}"></span>
+      <div class="names"><h2>${esc(c.name)}</h2><span class="kind">${esc(c.kind)} machine · ${m.workflow.steps.length} steps</span></div>
+      <div class="verdict"><span>${esc(resultLabel(run))}</span>${run ? `<span class="secs">${Number(run.seconds).toFixed(2)}s</span>` : ""}
+        ${c.trap ? `<a class="trapchip" href="${ISSUE_URL}${c.trap.issue}" target="_blank" rel="noopener">Trap · #${c.trap.issue}</a>` : ""}</div>
+    </div>
+    ${tabs}
+    <div class="schematic">${schematic(m, run, spec)}</div>
+    ${findings}
+    <details><summary>Card: story, engine functions, recent results</summary>
+      <p class="story">${esc(c.picture)}</p>
+      ${c.trap ? `<p class="story"><b>When the bug is there:</b> ${esc(c.trap.broken_looks_like)}</p>` : ""}
+      <ul class="functions">${c.functions.map(f => `<li>${esc(f)}</li>`).join("")}</ul>
+      ${matrix}
+    </details>
+  </section>`;
+}
+
+function render() {
+  if (!DATA) {
+    document.getElementById("floor").innerHTML = `<div class="empty"><p>This is the page template, with no results in it yet. Run the machine shop and open the page it writes:</p>
+      <p><code>cargo test -p kruxiaflow-api --test machine_shop</code></p><p>The page is written to <code>target/tmp/machine-shop/floor.html</code>.</p></div>`;
+    return;
+  }
+  const open = new Set([...document.querySelectorAll(".bay details[open]")].map(d => d.closest(".bay").id));
+  document.getElementById("controls").innerHTML = controls();
+  document.getElementById("tally").innerHTML = tally();
+  document.getElementById("meta").innerHTML = meta();
+  document.getElementById("andon").innerHTML = andon();
+  document.getElementById("legend").innerHTML = legend();
+  uid = 0;
+  document.getElementById("floor").innerHTML = MACHINES.map(bay).join("");
+  open.forEach(id => { const d = document.querySelector(`#${CSS.escape(id)} details`); if (d) d.open = true; });
+
+  const ps = document.getElementById("pick-set"), pc = document.getElementById("pick-cmp"), oc = document.getElementById("only-changed");
+  if (ps) ps.onchange = () => { state.set = Number(ps.value); render(); };
+  if (pc) pc.onchange = () => { state.compare = pc.value === "" ? null : Number(pc.value); render(); };
+  if (oc) oc.onchange = () => { state.onlyChanged = oc.checked; render(); };
+}
+
+document.getElementById("floor").addEventListener("click", e => {
+  const b = e.target.closest("button[data-run]");
+  if (!b) return;
+  state.run[b.dataset.machine] = b.dataset.run;
+  render();
+});
+
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,535 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Machine Shop Stack</title>
+<!--
+  The Stack: the machine shop as a stack of cards, one card per machine,
+  in homage to HyperCard (the look, not Apple's artwork, names or fonts).
+
+  A prototype, to compare with floor.html. The runner fills in the data
+  marker below and writes this page next to the results; see
+  machines/README.md. Everything is in this file: no network, no build.
+-->
+<style>
+  /* Layout: one card in a window on a dithered desk; a tool bar under it. 1-bit: ink on paper, inverted in dark mode. */
+  :root {
+    --paper: #ffffff;
+    --ink: #000000;
+    --page: var(--paper);
+    --surface: var(--paper);
+    --border: var(--ink);
+    --body: Geneva, Verdana, "DejaVu Sans", sans-serif;
+    --mono: Monaco, Menlo, ui-monospace, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --paper: #000000; --ink: #ffffff; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --paper: #000000; --ink: #ffffff; color-scheme: dark; }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    font: 14px/1.45 var(--body);
+    color: var(--ink);
+    /* the desk: a 25% dither */
+    background:
+      repeating-conic-gradient(var(--ink) 0 25%, var(--paper) 0 100%) 0 0 / 4px 4px,
+      var(--paper);
+    background-color: var(--paper);
+    min-height: 100vh;
+    padding-block: 24px 32px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  a { color: inherit; }
+  button, input, select { font: inherit; color: var(--ink); }
+  :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  .px { display: inline-block; vertical-align: middle; max-width: 100%; height: auto; }
+
+  .window {
+    max-width: 760px;
+    margin: 0 auto;
+    background: var(--paper);
+    border: 2px solid var(--ink);
+    box-shadow: 4px 4px 0 var(--ink);
+  }
+  .titlebar {
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+    height: 26px;
+    border-bottom: 2px solid var(--ink);
+    background:
+      repeating-linear-gradient(to bottom, var(--ink) 0 1px, var(--paper) 1px 3px) 0 4px / 100% 18px no-repeat,
+      var(--paper);
+  }
+  .titlebar .label { background: var(--paper); padding: 0 10px; line-height: 0; }
+  .titlebar .box {
+    position: absolute; left: 10px; top: 5px; width: 13px; height: 13px;
+    border: 1px solid var(--ink); background: var(--paper);
+  }
+
+  .card { position: relative; min-height: 420px; }
+  .card > .inner { padding: 20px; background: var(--paper); min-height: inherit; }
+  /* a trap card: a dithered frame, so traps stand out as you flip */
+  .card.trap { padding: 10px; background: repeating-conic-gradient(var(--ink) 0 25%, var(--paper) 0 50%) 0 0 / 2px 2px; }
+  .card.trap > .inner { border: 2px solid var(--ink); min-height: 400px; }
+  @media (prefers-reduced-motion: no-preference) {
+    .card.flip { animation: dissolve 240ms steps(4) both; }
+  }
+  @keyframes dissolve { from { opacity: 0.35; } to { opacity: 1; } }
+
+  .head { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+  .frame { border: 2px solid var(--ink); padding: 4px; line-height: 0; background: var(--paper); color: var(--ink); }
+  .picture { display: block; image-rendering: pixelated; }
+  .head .text { flex: 1 1 260px; min-width: 0; display: grid; gap: 8px; }
+  .kind { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; }
+  .traplabel {
+    display: inline-block; justify-self: start;
+    background: var(--ink); color: var(--paper);
+    padding: 2px 8px; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+    text-decoration: none;
+  }
+  .traplabel:hover { text-decoration: underline; }
+
+  /* a "shadow" field, as HyperCard drew them */
+  .field {
+    border: 1px solid var(--ink);
+    box-shadow: 2px 2px 0 var(--ink);
+    padding: 8px 10px;
+    background: var(--paper);
+    min-width: 0;
+  }
+  .field + .field, .section { margin-top: 18px; }
+  h2 { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; margin: 0 0 6px; font-weight: bold; }
+  .story { margin: 0; max-width: 62ch; }
+  ul.functions { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; }
+  ul.functions li { padding-left: 18px; position: relative; }
+  ul.functions li::before {
+    content: ""; position: absolute; left: 2px; top: 0.45em; width: 7px; height: 7px; border: 1px solid var(--ink);
+  }
+
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { border: 1px solid var(--ink); padding: 6px 8px; text-align: left; vertical-align: top; }
+  th { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: bold; }
+  th .sub { display: block; font-weight: normal; text-transform: none; letter-spacing: 0; font-family: var(--mono); font-size: 11px; }
+  td .secs { display: block; font-size: 11px; margin-top: 3px; font-family: var(--mono); }
+
+  /* rubber stamps */
+  .stamp {
+    display: inline-block; white-space: nowrap;
+    padding: 1px 6px; border: 2px solid var(--ink);
+    font: bold 11px/1.4 var(--body); letter-spacing: 0.08em; text-transform: uppercase;
+    transform: rotate(-2deg);
+  }
+  .stamp.broken { background: var(--ink); color: var(--paper); }
+  .stamp.known_broken {
+    background: repeating-conic-gradient(var(--ink) 0 25%, var(--paper) 0 50%) 0 0 / 2px 2px;
+  }
+  .stamp.known_broken span { background: var(--paper); padding: 0 3px; }
+  .stamp.fixed { border-style: double; border-width: 4px; padding: 0 5px; }
+  .stamp.none { border-style: dotted; font-weight: normal; transform: none; }
+
+  .notes { margin: 0; padding-left: 18px; font-family: var(--mono); font-size: 12px; }
+  .notes li + li { margin-top: 3px; }
+
+  /* home card */
+  .hero { display: grid; gap: 6px; margin-bottom: 18px; }
+  .hero p { margin: 0; max-width: 60ch; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+  .tile { display: grid; gap: 4px; }
+  .tile .name { font-weight: bold; }
+  .tile .meta { font-family: var(--mono); font-size: 11px; overflow-wrap: anywhere; }
+  .tile .counts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .machines { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; }
+  .mbutton {
+    display: grid; justify-items: center; gap: 6px; padding: 10px 6px;
+    background: var(--paper); border: 1px solid transparent; cursor: pointer; text-align: center;
+  }
+  .mbutton:hover, .mbutton:focus-visible { border-color: var(--ink); }
+  .mbutton:active { background: var(--ink); color: var(--paper); }
+
+  /* compare card */
+  .pickers { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }
+  .pickers label { display: grid; gap: 3px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+  select, input[type="search"] {
+    background: var(--paper); border: 1px solid var(--ink); border-radius: 0; padding: 4px 6px; max-width: 100%;
+  }
+  .arrow { font-family: var(--mono); padding: 0 6px; }
+
+  /* tool bar */
+  .tools {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    border-top: 2px solid var(--ink); padding: 8px 12px;
+  }
+  .tools button {
+    background: var(--paper); border: 2px solid var(--ink); border-radius: 8px;
+    padding: 3px 10px; line-height: 0; cursor: pointer; min-height: 30px;
+  }
+  .tools button:active { background: var(--ink); color: var(--paper); }
+  .tools .where { font-size: 12px; margin-left: 4px; }
+  .tools form { margin-left: auto; display: flex; gap: 6px; align-items: center; min-width: 0; }
+  .tools input { width: 160px; }
+  .message { font-size: 12px; min-height: 1.4em; padding: 0 12px 8px; }
+
+  .empty { max-width: 56ch; }
+  .empty code { font-family: var(--mono); font-size: 12px; }
+  @media (max-width: 520px) {
+    .card > .inner { padding: 14px; }
+    .tools form { margin-left: 0; width: 100%; }
+    .tools input { flex: 1; width: auto; }
+  }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar"><span class="box" aria-hidden="true"></span><span class="label" id="title"></span></div>
+  <main class="card" id="card" tabindex="-1"></main>
+  <div class="tools">
+    <button type="button" id="prev" aria-label="Previous card"></button>
+    <button type="button" id="home" aria-label="Home card"></button>
+    <button type="button" id="next" aria-label="Next card"></button>
+    <span class="where" id="where"></span>
+    <form id="find" role="search">
+      <input type="search" id="find-text" placeholder="Find" aria-label="Find in the stack">
+    </form>
+  </div>
+  <div class="message" id="message" role="status"></div>
+</div>
+
+<script id="shop-data" type="application/json">__MACHINE_SHOP_DATA__</script>
+<script>
+"use strict";
+
+// ---------------------------------------------------------------------------
+// Data
+// ---------------------------------------------------------------------------
+
+let DATA = null;
+try { DATA = JSON.parse(document.getElementById("shop-data").textContent); } catch (e) { DATA = null; }
+const MACHINES = DATA ? DATA.machines : [];
+const SETS = DATA ? DATA.results.map((s, i) => ({ ...s, id: i })) : [];
+const ISSUE_URL = "https://github.com/kruxia/kruxiaflow/issues/";
+
+const RESULT_TEXT = { works: "Works", broken: "Broken", known_broken: "Known broken", fixed: "Fixed" };
+const RESULT_RANK = { broken: 3, known_broken: 2, fixed: 1, works: 0 };
+
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function when(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return iso || "";
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+function setName(s) {
+  const twins = SETS.filter(o => o.tree.label === s.tree.label && o.mode === s.mode).length;
+  return `${s.tree.label} · ${s.mode}` + (twins > 1 ? ` · ${when(s.started_at)}` : "");
+}
+function runIn(set, dir, run) { return set.runs.find(r => r.machine === dir && r.run === run); }
+function counts(set) {
+  const c = { works: 0, broken: 0, known_broken: 0, fixed: 0 };
+  for (const r of set.runs) c[r.result] = (c[r.result] || 0) + 1;
+  return c;
+}
+/** The worst result for a machine in the newest set that ran it */
+function latestFor(dir) {
+  for (let i = SETS.length - 1; i >= 0; i--) {
+    const rs = SETS[i].runs.filter(r => r.machine === dir);
+    if (rs.length) return rs.reduce((a, b) => (RESULT_RANK[b.result] > RESULT_RANK[a.result] ? b : a));
+  }
+  return null;
+}
+function stamp(r) {
+  if (!r) return `<span class="stamp none">not run</span>`;
+  const text = esc(RESULT_TEXT[r.result] || r.result) + (r.trap ? ` #${r.trap}` : "");
+  return r.result === "known_broken"
+    ? `<span class="stamp known_broken"><span>${text}</span></span>`
+    : `<span class="stamp ${esc(r.result)}">${text}</span>`;
+}
+
+// ---------------------------------------------------------------------------
+// Pixel type: a 5×7 bitmap face drawn for this page
+// ---------------------------------------------------------------------------
+
+const FONT = {
+  A: "01110 10001 10001 11111 10001 10001 10001", B: "11110 10001 10001 11110 10001 10001 11110",
+  C: "01110 10001 10000 10000 10000 10001 01110", D: "11100 10010 10001 10001 10001 10010 11100",
+  E: "11111 10000 10000 11110 10000 10000 11111", F: "11111 10000 10000 11110 10000 10000 10000",
+  G: "01110 10001 10000 10111 10001 10001 01111", H: "10001 10001 10001 11111 10001 10001 10001",
+  I: "111 010 010 010 010 010 111", J: "00111 00010 00010 00010 00010 10010 01100",
+  K: "10001 10010 10100 11000 10100 10010 10001", L: "10000 10000 10000 10000 10000 10000 11111",
+  M: "10001 11011 10101 10101 10001 10001 10001", N: "10001 10001 11001 10101 10011 10001 10001",
+  O: "01110 10001 10001 10001 10001 10001 01110", P: "11110 10001 10001 11110 10000 10000 10000",
+  Q: "01110 10001 10001 10001 10101 10010 01101", R: "11110 10001 10001 11110 10100 10010 10001",
+  S: "01111 10000 10000 01110 00001 00001 11110", T: "11111 00100 00100 00100 00100 00100 00100",
+  U: "10001 10001 10001 10001 10001 10001 01110", V: "10001 10001 10001 10001 10001 01010 00100",
+  W: "10001 10001 10001 10101 10101 10101 01010", X: "10001 10001 01010 00100 01010 10001 10001",
+  Y: "10001 10001 10001 01010 00100 00100 00100", Z: "11111 00001 00010 00100 01000 10000 11111",
+  0: "01110 10001 10011 10101 11001 10001 01110", 1: "010 110 010 010 010 010 111",
+  2: "01110 10001 00001 00010 00100 01000 11111", 3: "11111 00010 00100 00010 00001 10001 01110",
+  4: "00010 00110 01010 10010 11111 00010 00010", 5: "11111 10000 11110 00001 00001 10001 01110",
+  6: "00110 01000 10000 11110 10001 10001 01110", 7: "11111 00001 00010 00100 01000 01000 01000",
+  8: "01110 10001 10001 01110 10001 10001 01110", 9: "01110 10001 10001 01111 00001 00010 01100",
+  " ": "000 000 000 000 000 000 000", "#": "01010 01010 11111 01010 11111 01010 01010",
+  ".": "00 00 00 00 00 11 11", ":": "00 11 11 00 11 11 00", ",": "00 00 00 00 11 01 10",
+  "-": "0000 0000 0000 1111 0000 0000 0000", "'": "1 1 0 0 0 0 0", "/": "00000 00001 00010 00100 01000 10000 00000",
+  "(": "001 010 100 100 100 010 001", ")": "100 010 001 001 001 010 100",
+  "?": "01110 10001 00001 00010 00100 00000 00100", "!": "1 1 1 1 1 0 1",
+  "+": "00000 00100 00100 11111 00100 00100 00000",
+  "<": "0001 0011 0111 1111 0111 0011 0001", ">": "1000 1100 1110 1111 1110 1100 1000",
+  "^": "0001000 0010100 0100010 1111111 0100010 0101010 0111110",
+};
+function pixelText(text, scale = 2) {
+  const s = String(text).toUpperCase();
+  let x = 0, d = "";
+  for (const ch of s) {
+    const rows = (FONT[ch] || FONT["?"]).split(" ");
+    rows.forEach((r, y) => { for (let i = 0; i < r.length; i++) if (r[i] === "1") d += `M${x + i} ${y}h1v1h-1z`; });
+    x += rows[0].length + 1;
+  }
+  const w = Math.max(x - 1, 1);
+  return `<svg class="px" viewBox="0 0 ${w} 7" width="${w * scale}" height="${7 * scale}" role="img" aria-label="${esc(text)}" shape-rendering="crispEdges"><path d="${d}" fill="currentColor"/></svg>`;
+}
+
+// ---------------------------------------------------------------------------
+// Pictures: 32×32, one per machine, drawn for this page. A machine without
+// one gets the gear.
+// ---------------------------------------------------------------------------
+
+const PICTURES = {
+  "domino-run": [
+    "................................", "................................", "................................", "................................",
+    "................................", "................................", "................................", ".........................#......",
+    "........................#...#...", ".......................#...#....", "..........................#.....", "................................",
+    "..#####..#####..................", "..#...#..#...#........###.......", "..#...#..#...#........#..##.....", "..#.#.#..#.#.#.......#....#.....",
+    "..#...#..#...#.......#...#......", "..#...#..#...#......##...#......", "..#...#..#...#......#...#.......", "..#.#.#..#.#.#......#...#.......",
+    "..#...#..#...#.....#....#.......", "..#...#..#...#.....##..#........", "..#...#..#...#.....#...#........", "..#.#.#..#.#.#....#...#.########",
+    "..#...#..#...#....#...#.#.#..#.#", "..#...#..#...#...#...#..#......#", "..#####..#####...#####..########", "################################",
+    "................................", "................................", "................................", "................................",
+  ],
+  "prism-and-funnel": [
+    "................................", "................................", "................................", "................................",
+    "................................", "................................", "................................", "........................#.......",
+    "........................##......", "........................##......", "...........#..........###.#.....", "...........#.........#..#..#....",
+    "..........#.#......##...#...#...", "..........#.#.....#.....#...#...", ".........#...#..##......#....#..", ".........#...#.#........#....#..",
+    "........#.....#.........#....#..", "#######.#.....#.....#####....###", "........#.....#.####....#....#..", ".......#.......#........#....#..",
+    ".......#.......#........#....#..", "......#........##.......#...#...", "......#.........###.....#...#...", ".....#...........#.##...#..#....",
+    ".....#############...##.#.#.....", ".......................###......", "........................##......", "........................#.......",
+    "................................", "................................", "................................", "................................",
+  ],
+  "railway-switch": [
+    "................................", "................................", "................................", "...#...#.............#...#......",
+    "....#...#...........#...#.......", "....#...#...........#...#.......", ".....#...#.........#...#........", ".....#...#.........#...#........",
+    "......#...#.......#...#.........", "......#...#.......#...#.........", ".......#...#.....#...#..........", ".......#...#.....#...#..........",
+    "........#...#...#...#...........", "........#...#...#...#...........", ".........#...#.#...#............", ".........#...#.#...#............",
+    "..........#...#...#.............", "..........#...#...#.........###.", "...........#.#.#.#..........###.", "...........#.#.#.#..........###.",
+    "............#...#............#..", "............#...#...........#...", "..........#########.........#...", "............#...#..........#....",
+    "............#...#..........#....", "..........#########.......#.....", "............#...#.........#.....", "............#...#.......######..",
+    "..........#########.....######..", "............#...#.......######..", "............#...#...............", "............#...#...............",
+  ],
+  "level-crossing": [
+    "................................", "................................", "................................", "................................",
+    ".#....#....#....................", "..#...#...#.....................", "...##.#.##......................", ".....###........................",
+    "......#.........................", ".....###........................", "...##.#.##......................", ".##...#...##....................",
+    ".##...#...##....................", "...#..#..#......................", "....#####.......................", "....#####.......................",
+    "###.#####.###...................", "....#####.......................", "....#####.......................", "......#.........................",
+    "......#.........................", "......#.........................", ".............##.###.............", ".#...#...#...######..#...#...#..",
+    "###############.################", ".#...#...#...######..#...#...#..", ".#...#...#...##.###..#...#...#..", ".#...#...#...######..#...#...#..",
+    "###############.################", ".#...#...#...######..#...#...#..", ".............##.###.............", "................................",
+  ],
+  _gear: [
+    "................................", "................................", "..............####..............", "..............####..............",
+    "..............####..............", ".......#.....######.....#.......", "......###.############.###......", ".....######################.....",
+    "......####################......", ".......##################.......", "......####################......", "......####################......",
+    "......#######......#######......", ".....#######........#######.....", "..##########........##########..", "..##########........##########..",
+    "..##########........##########..", "..##########........##########..", ".....#######........#######.....", "......#######......#######......",
+    "......####################......", "......####################......", ".......##################.......", "......####################......",
+    ".....######################.....", "......###.############.###......", ".......#.....######.....#.......", "..............####..............",
+    "..............####..............", "..............####..............", "................................", "................................",
+  ],
+};
+function picture(dir, size) {
+  const rows = PICTURES[dir] || PICTURES._gear;
+  let d = "";
+  rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) if (r[x] === "#") d += `M${x} ${y}h1v1h-1z`; });
+  return `<svg class="picture" viewBox="0 0 32 32" width="${size}" height="${size}" aria-hidden="true" shape-rendering="crispEdges"><path d="${d}" fill="currentColor"/></svg>`;
+}
+
+// ---------------------------------------------------------------------------
+// Cards
+// ---------------------------------------------------------------------------
+
+const CARDS = ["home", ...MACHINES.map(m => m.dir), "compare"];
+let current = 0;
+
+function homeCard() {
+  if (!DATA) {
+    return `<div class="hero">${pixelText("Machine shop", 3)}</div>
+      <div class="field empty"><p>This is the page template, with no results in it yet. Run the machine shop and open the page it writes:</p>
+      <p><code>cargo test -p kruxiaflow-api --test machine_shop</code></p>
+      <p>The page is written to <code>target/tmp/machine-shop/stack.html</code>.</p></div>`;
+  }
+  const tiles = SETS.length
+    ? [...SETS].reverse().map(s => {
+        const c = counts(s);
+        const chips = Object.entries(c).filter(([, n]) => n).map(([k, n]) => `${stamp({ result: k })}<span>${n}</span>`).join(" ");
+        return `<div class="field tile">
+          <span class="name">${esc(setName(s))}</span>
+          <span class="meta">${esc(s.tree.branch)} @ ${esc(s.tree.commit)} · ${esc(s.runner)} runner</span>
+          <span class="meta">${esc(when(s.started_at))} · ${s.runs.length} runs · ${Number(s.seconds).toFixed(1)}s</span>
+          <span class="counts">${chips}</span></div>`;
+      }).join("")
+    : `<div class="field">No results yet.</div>`;
+  const buttons = MACHINES.map((m, i) => `
+    <button type="button" class="mbutton" data-go="${i + 1}">
+      <span class="frame">${picture(m.dir, 64)}</span>
+      <span>${esc(m.card.name)}</span>
+      ${stamp(latestFor(m.dir))}
+    </button>`).join("");
+  return `
+    <div class="hero">${pixelText("Machine shop", 3)}
+      <p>Small workflows, each inspired by a physical machine, that test the Kruxia Flow engine. One card per machine. Flip through with the arrows, or pick one below.</p></div>
+    <section class="section"><h2>Machines</h2><div class="machines">${buttons}</div></section>
+    <section class="section"><h2>Results sets</h2><div class="tiles">${tiles}</div></section>`;
+}
+
+function machineCard(m) {
+  const c = m.card;
+  const shown = SETS.slice(-4);
+  const head = shown.map(s => `<th>${esc(setName(s))}<span class="sub">${esc(s.tree.commit)}</span></th>`).join("");
+  const rows = c.runs.map(run => {
+    const cells = shown.map(s => {
+      const r = runIn(s, m.dir, run.name);
+      return `<td>${stamp(r)}${r ? `<span class="secs">${Number(r.seconds).toFixed(2)}s</span>` : ""}</td>`;
+    }).join("");
+    return `<tr><th scope="row">${esc(run.name)}</th>${cells}</tr>`;
+  }).join("");
+  const notes = [];
+  for (const s of shown) for (const run of c.runs) {
+    const r = runIn(s, m.dir, run.name);
+    if (r && r.problems && r.problems.length) {
+      for (const p of r.problems) notes.push(`<li><b>${esc(setName(s))}</b>, ${esc(run.name)}: ${esc(p)}</li>`);
+    }
+  }
+  const trap = c.trap
+    ? `<a class="traplabel" href="${ISSUE_URL}${c.trap.issue}" target="_blank" rel="noopener">Trap · issue #${c.trap.issue}</a>`
+    : "";
+  return `
+    <div class="head">
+      <div class="frame">${picture(m.dir, 128)}</div>
+      <div class="text">
+        ${pixelText(c.name, 3)}
+        <span class="kind">${esc(c.kind)} machine</span>
+        ${trap}
+      </div>
+    </div>
+    <div class="field section"><h2>Story</h2><p class="story">${esc(c.picture)}</p></div>
+    ${c.trap ? `<div class="field"><h2>When the bug is there</h2><p class="story">${esc(c.trap.broken_looks_like)}</p></div>` : ""}
+    <div class="field"><h2>Engine functions</h2><ul class="functions">${c.functions.map(f => `<li>${esc(f)}</li>`).join("")}</ul></div>
+    <div class="field"><h2>Runs</h2>
+      ${shown.length ? `<div class="scroll"><table><thead><tr><th>Run</th>${head}</tr></thead><tbody>${rows}</tbody></table></div>` : "<p>No results yet.</p>"}
+    </div>
+    ${notes.length ? `<div class="field"><h2>Notes</h2><ul class="notes">${notes.join("")}</ul></div>` : ""}`;
+}
+
+let cmpA = null, cmpB = null;
+function compareCard() {
+  if (SETS.length < 2) return `${pixelText("Compare", 3)}<div class="field section">Compare needs two results sets. There ${SETS.length === 1 ? "is one" : "are none"}.</div>`;
+  if (cmpA === null || cmpB === null) {
+    const last = SETS[SETS.length - 1];
+    const other = [...SETS].reverse().find(s => s.mode === last.mode && s.tree.label !== last.tree.label);
+    cmpB = last.id; cmpA = other ? other.id : SETS[SETS.length - 2].id;
+  }
+  const opts = sel => SETS.map(s => `<option value="${s.id}"${s.id === sel ? " selected" : ""}>${esc(setName(s))}</option>`).join("");
+  const A = SETS[cmpA], B = SETS[cmpB];
+  const rows = [];
+  for (const m of MACHINES) for (const run of m.card.runs) {
+    const a = runIn(A, m.dir, run.name), b = runIn(B, m.dir, run.name);
+    if ((a && a.result) !== (b && b.result)) {
+      rows.push(`<tr><th scope="row"><a href="#${esc(m.dir)}">${esc(m.card.name)}</a></th><td>${esc(run.name)}</td><td>${stamp(a)}</td><td>${stamp(b)}</td></tr>`);
+    }
+  }
+  return `${pixelText("Compare", 3)}
+    <div class="field section"><div class="pickers">
+      <label for="cmp-a">From<select id="cmp-a">${opts(cmpA)}</select></label>
+      <span class="arrow" aria-hidden="true">→</span>
+      <label for="cmp-b">To<select id="cmp-b">${opts(cmpB)}</select></label>
+    </div></div>
+    <div class="field"><h2>Runs whose result changed</h2>
+      ${rows.length
+        ? `<div class="scroll"><table><thead><tr><th>Machine</th><th>Run</th><th>${esc(setName(A))}</th><th>${esc(setName(B))}</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>`
+        : "<p>No run's result changed between these two sets.</p>"}
+    </div>`;
+}
+
+const cardEl = document.getElementById("card");
+function show(i, focus, still) {
+  current = (i + CARDS.length) % CARDS.length;
+  const id = CARDS[current];
+  const m = MACHINES.find(x => x.dir === id);
+  cardEl.className = "card" + (m && m.card.trap ? " trap" : "");
+  cardEl.innerHTML = `<div class="inner">${id === "home" ? homeCard() : id === "compare" ? compareCard() : machineCard(m)}</div>`;
+  if (!still) { void cardEl.offsetWidth; cardEl.classList.add("flip"); }
+  document.getElementById("where").textContent = `Card ${current + 1} of ${CARDS.length}`;
+  if (location.hash.slice(1) !== id) history.replaceState(null, "", "#" + id);
+  if (focus) cardEl.focus({ preventScroll: true });
+  const a = document.getElementById("cmp-a"), b = document.getElementById("cmp-b");
+  if (a) a.onchange = () => { cmpA = Number(a.value); show(current, false, true); };
+  if (b) b.onchange = () => { cmpB = Number(b.value); show(current, false, true); };
+}
+
+document.getElementById("title").innerHTML = pixelText("Machine shop", 2);
+document.getElementById("prev").innerHTML = pixelText("<", 2);
+document.getElementById("home").innerHTML = pixelText("^", 2);
+document.getElementById("next").innerHTML = pixelText(">", 2);
+document.getElementById("prev").onclick = () => show(current - 1, true);
+document.getElementById("next").onclick = () => show(current + 1, true);
+document.getElementById("home").onclick = () => show(0, true);
+cardEl.addEventListener("click", e => {
+  const go = e.target.closest("[data-go]");
+  if (go) show(Number(go.dataset.go), true);
+});
+document.addEventListener("keydown", e => {
+  if (e.target.closest("input, select, textarea")) return;
+  if (e.key === "ArrowRight") show(current + 1);
+  else if (e.key === "ArrowLeft") show(current - 1);
+  else if (e.key === "Home") show(0);
+});
+window.addEventListener("hashchange", () => {
+  const i = CARDS.indexOf(location.hash.slice(1));
+  if (i >= 0 && i !== current) show(i);
+});
+
+// Find: the next card, after this one, whose words include the text
+function words(id) {
+  const m = MACHINES.find(x => x.dir === id);
+  if (!m) return id;
+  const c = m.card;
+  return [c.name, c.kind, c.picture, ...(c.functions || []), ...c.runs.map(r => r.name),
+    ...m.workflow.steps.map(s => s.key), c.trap ? `#${c.trap.issue} ${c.trap.broken_looks_like}` : ""].join(" ");
+}
+document.getElementById("find").addEventListener("submit", e => {
+  e.preventDefault();
+  const q = document.getElementById("find-text").value.trim().toLowerCase();
+  const msg = document.getElementById("message");
+  if (!q) { msg.textContent = ""; return; }
+  for (let k = 1; k <= CARDS.length; k++) {
+    const i = (current + k) % CARDS.length;
+    if (words(CARDS[i]).toLowerCase().includes(q)) {
+      show(i);
+      msg.textContent = `Found “${q}” on ${i === 0 ? "the home card" : CARDS[i] === "compare" ? "the compare card" : MACHINES[i - 1].card.name}.`;
+      return;
+    }
+  }
+  msg.textContent = `“${q}” isn't on any card.`;
+});
+
+show(Math.max(0, CARDS.indexOf(location.hash.slice(1))), false, true);
+</script>
+</body>
+</html>

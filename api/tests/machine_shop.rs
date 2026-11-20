@@ -1041,9 +1041,11 @@ fn machine_cards_are_valid() {
     }
 }
 
-/// The views open from disk, so they must not load anything from a network
+/// The views open from disk, so they must not load anything from a
+/// network. Also rewrites the pages from the results already there, so a
+/// view can be changed and looked at without running the machines.
 #[test]
-fn machine_views_are_self_contained() {
+fn machine_shop_views() {
     let views = machines_dir().join("views");
     let mut seen = 0;
     for path in std::fs::read_dir(&views)
@@ -1073,4 +1075,9 @@ fn machine_views_are_self_contained() {
         }
     }
     assert!(seen > 0, "no views in machines/views/");
+    let dir = out_dir();
+    std::fs::create_dir_all(&dir).expect("output dir");
+    for page in bundle_views(&dir) {
+        println!("View written to {}", page.display());
+    }
 }

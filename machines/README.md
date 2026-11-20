@@ -21,6 +21,32 @@ There are two modes, one test each:
 
 - **Pick machines:** set `MACHINE_SHOP_ONLY` to a comma-separated list of directory names, such as `MACHINE_SHOP_ONLY=level-crossing`, to run only those.
 - **Scoreboard:** each mode prints one and writes it to `target/tmp/machine-shop/<mode>.md`.
+- **Results file:** each mode also writes `results/<tree>-<mode>-<time>.json` there. They accumulate, so runs on different trees and days can be compared.
+- **Views:** each mode then writes every page in `machines/views/` next to the results, with the machines and all the results files embedded. Open it from disk; it needs no server and loads nothing from the network. `machine_shop_views` rewrites the pages from the results already there, without running the machines.
+
+Environment variables:
+
+| Variable            | Default                   | What it does                                                      |
+|---------------------|---------------------------|-------------------------------------------------------------------|
+| `MACHINE_SHOP_ONLY` | every machine             | Runs only these machines (comma-separated directory names)        |
+| `MACHINE_SHOP_OUT`  | `target/tmp/machine-shop` | Where scoreboards, results and views go; share one across trees   |
+| `MACHINE_SHOP_TREE` | the branch name           | The tree's label in the results, such as `main` or `merged-fixes` |
+
+To compare two trees, run the shop on each with the same `MACHINE_SHOP_OUT` and different `MACHINE_SHOP_TREE` labels. The views written by the second run show both.
+
+### Views: two prototypes
+
+There are two views of the same results, built to compare before choosing one. Neither is part of the engine's own dashboard, and they share nothing with it.
+
+| Page         | What it is                                                                                                                                                                                                                                                                                                                                                  |
+|--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `stack.html` | **The Stack:** one card per machine, in homage to HyperCard. A 1-bit look, a pixel picture and pixel title for each machine, its story and functions, and a stamp for each run in each results set. Arrow keys flip cards; Find searches the stack; a compare card lists runs whose result changed.                                                         |
+| `floor.html` | **The Shop Floor:** every machine on one page, each drawn as a schematic of its own workflow, with every step lit by what it did: completed, skipped, never ran or failed. A red mark shows a step that didn't do what the card expects; a blue mark shows a step that changed since the results set you compare with. Uses the engine dashboard's colours. |
+
+The results file (`machine-shop-results/1`) is the contract between runners and views:
+
+- `runner`, `mode`, `engine_version`, `tree` (`label`, `branch`, `commit`), `started_at`, `seconds`
+- `runs`: one entry per run, with `machine`, `run`, `result` (`works`, `broken`, `known_broken` or `fixed`), `trap`, `seconds`, the workflow's final `status`, `steps` (each step's `status` and `runs`), and `problems`
 
 Each run ends as one of four results:
 
