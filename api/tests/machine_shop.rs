@@ -1624,11 +1624,13 @@ async fn finish_twin(
     run: &RunSpec,
     (status, signal_problems): (String, Vec<String>),
     started: Instant,
+    driven_at: Instant,
     settle_by: Instant,
     original: &Observed,
     plug: Option<PlugPoint>,
 ) -> Twin {
     let mut status = status;
+    let mut caught_up = false;
     let (mut observed, mut differences) = loop {
         let observed = check(engine, id, &status, run).await;
         let differences = differences(original, &observed);
@@ -1637,8 +1639,12 @@ async fn finish_twin(
         }
         tokio::time::sleep(Duration::from_millis(500)).await;
         status = engine.stored_status(id).await;
+        caught_up = true;
     };
-    let seconds = started.elapsed().as_secs_f64();
+    // The twin's own time: until it was driven to the end, or until it
+    // caught up
+    let ended = if caught_up { Instant::now() } else { driven_at };
+    let seconds = ended.duration_since(started).as_secs_f64();
     let mut problems = signal_problems;
     problems.append(&mut observed.problems);
     observed.problems = problems;
@@ -1680,7 +1686,7 @@ async fn twin_bench(
     let driving = async {
         let r = drive(engine, id, run, deadline).await;
         done.set(true);
-        r
+        (r, Instant::now())
     };
     let watching = async {
         while !done.get() {
@@ -1692,7 +1698,7 @@ async fn twin_bench(
         }
         None
     };
-    let (driven, pulled) = tokio::join!(driving, watching);
+    let ((driven, driven_at), pulled) = tokio::join!(driving, watching);
     let point = pulled.map(|p| PlugPoint {
         after_event: Some(k),
         events_at_plug: p.events.get(&id).copied().unwrap_or(0),
@@ -1707,6 +1713,7 @@ async fn twin_bench(
         run,
         driven,
         started,
+        driven_at,
         settle_by,
         &original.observed,
         point,
@@ -1764,7 +1771,7 @@ async fn twins_shop(
         async move {
             let r = drive(engine, t.id, t.run, t.deadline).await;
             running.set(running.get() - 1);
-            r
+            (r, Instant::now())
         }
     }));
     let watching = async {
@@ -1781,7 +1788,7 @@ async fn twins_shop(
 
     // Read them all at once, so one twin catching up doesn't add to
     // another's time
-    let finishing = twins.iter().zip(driven).map(|(t, driven)| {
+    let finishing = twins.iter().zip(driven).map(|(t, (driven, driven_at))| {
         let original = &rows[t.row];
         let point = pulled.as_ref().map(|p| PlugPoint {
             after_event: None,
@@ -1797,6 +1804,7 @@ async fn twins_shop(
             t.run,
             driven,
             t.started,
+            driven_at,
             settle_by,
             &original.observed,
             point,
