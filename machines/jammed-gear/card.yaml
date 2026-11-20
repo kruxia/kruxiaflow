@@ -1,0 +1,25 @@
+name: Jammed gear
+kind: simple
+picture: >
+  A motor turns a gear that drives a belt, but the gear is wired to read the
+  belt's speed before the belt has moved. The gear jams; the belt never
+  moves, and the machine stops with the gear marked as the part that failed.
+  The motor did its job.
+functions:
+  - a template that can't be resolved fails the step it belongs to, and the workflow fails
+trap:
+  issue: 19
+  broken_looks_like: >
+    The gear's template error is raised while the motor's completion is
+    processed. That event is retried and dropped, the motor is marked failed
+    although it succeeded, the gear never runs or fails, and the workflow
+    stays running.
+runs:
+  - name: the gear jams
+    timeout_seconds: 10
+    expect:
+      status: failed
+      steps:
+        motor: { status: completed, runs: 1 }
+        gear: { status: failed, runs: 0 }
+        belt: { status: skipped, runs: 0 }

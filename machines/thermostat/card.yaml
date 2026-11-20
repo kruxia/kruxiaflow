@@ -1,0 +1,43 @@
+name: Thermostat
+kind: simple
+picture: >
+  A thermostat's dial says how warm the room is and how warm it should be.
+  The heater warms the room a degree at a time and switches off when the
+  room reaches the setpoint: three rounds on a cold morning, one on a mild
+  one.
+functions:
+  - "a condition on a self-loop's back-edge, reading the workflow's INPUT and {{<step>.iteration}}"
+  - "{{<step>.iteration}} in a loop step's own parameters"
+trap:
+  issue: 30
+  broken_looks_like: >
+    The heater's {{heater.iteration}} isn't in the template context, and its
+    condition reads INPUT from state_data, which is empty. On main the
+    heater's templates fail while the dial's completion is processed: the
+    dial is marked failed although it ran, the heater never runs, and the
+    workflow stays running (#19).
+runs:
+  - name: cold morning, 17 to 20 degrees
+    input: { room: 17, setpoint: 20 }
+    timeout_seconds: 10
+    expect:
+      status: completed
+      steps:
+        dial: { status: completed, runs: 1 }
+        heater: { status: completed, runs: 3 }
+      outputs:
+        - step: heater
+          output: echo
+          equals: { round: 3, room: 20 }
+  - name: mild morning, one degree short
+    input: { room: 19, setpoint: 20 }
+    timeout_seconds: 10
+    expect:
+      status: completed
+      steps:
+        dial: { status: completed, runs: 1 }
+        heater: { status: completed, runs: 1 }
+      outputs:
+        - step: heater
+          output: echo
+          equals: { round: 1, room: 20 }
