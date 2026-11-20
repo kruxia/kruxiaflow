@@ -71,6 +71,8 @@ stateDiagram-v2
     waiting --> skipped: timeout, on_timeout skip
     pending --> running: a worker claims it
     running --> completed
+    waiting --> failed: signal arrives, LLM budget exceeded
+    running --> failed: error, no retries left
 ```
 
 ---
@@ -227,7 +229,9 @@ curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID | \
 The [MCP server](mcp-server.md) has a tool for it: `list_waiting_workflows`
 lists the running workflows that have a step waiting for a signal, optionally
 only those waiting for one `signal_name` (an `event_name`), with `limit`
-(default 20) and `offset`. For example, `list_waiting_workflows {"signal_name": "approval"}`
+(default 20) and `offset`. `limit`, `offset` and `total` count waiting steps,
+not workflows: a page of `limit` steps is grouped by workflow, so it can hold
+fewer workflows than `limit`. For example, `list_waiting_workflows {"signal_name": "approval"}`
 returns:
 
 ```json
@@ -382,7 +386,9 @@ curl -s -X POST http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/signal \
 `publish` is `pending` for five seconds, then runs. Signaled without data, it
 runs at once. `scheduled_for` works the same way with an ISO 8601 timestamp,
 for example `scheduled_for: "{{SIGNAL.send_at}}"` with
-`"data": {"send_at": "2026-12-01T09:00:00Z"}`.
+`"data": {"send_at": "2026-12-01T09:00:00Z"}`. In a loop, `delay` and
+`scheduled_for` apply only to the step's first round; later rounds run as
+soon as they are signaled.
 
 ### Custom workers
 
@@ -512,14 +518,21 @@ Start a run with `"input": {"text": "Release notes v2"}`. Each signal ends one
 round:
 
 ```bash
+last=""
 for data in '{"approved": false, "comment": "tighten the intro"}' \
             '{"approved": false, "comment": "one more pass"}' \
             '{"approved": true}'; do
+  # Wait for the next round's wait: review waiting, with a new started_at
+  until since=$(curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID | jq -r \
+          '.activities[] | select(.activity_key == "review" and .status == "waiting") | .started_at') &&
+        [ -n "$since" ] && [ "$since" != "$last" ]; do
+    sleep 0.5
+  done
+  last=$since
   curl -s -X POST http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/signal \
     -H "Content-Type: application/json" \
-    -d "{\"activity_key\": \"review\", \"event_name\": \"review\", \"data\": $data}"
-  echo
-  sleep 2   # let the round run and the next wait open
+    -d "{\"activity_key\": \"review\", \"event_name\": \"review\", \"data\": $data}" |
+    jq -e '.signaled' >/dev/null || { echo "not signaled"; break; }
 done
 ```
 
@@ -548,8 +561,10 @@ re-runs without new input), which is still open.
   It publishes the data in place of the signal event's payload, so `SIGNAL` is
   `null` (a `signal_data` or `on_timeout` key in the data is read as part of
   the event), and in a loop it loses every round's signal after the first:
-  the tool answers `signaled` but the step keeps waiting. Use the REST
-  endpoint to send signals.
+  the tool answers `signaled` but the step keeps waiting. If its event fails
+  to publish, it still answers success (`event_published: false`), and a wait
+  signaled with data then never runs and never times out.
+  Use the REST endpoint to send signals.
 - **Timeouts are checked periodically**, not at the exact second (see
   [Timeouts](#timeouts)).
 - **One step, one event name.** A step waits for a single `event_name`, and

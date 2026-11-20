@@ -394,7 +394,7 @@ Authorization: Bearer <token>
     {
       "activity_key": "validate_payment",
       "status": "completed",
-      "outputs": {"valid": true},
+      "outputs": [{"name": "result", "type": "value", "value": {"valid": true}}],
       "error": null,
       "started_at": "2025-11-06T10:00:00Z",
       "completed_at": "2025-11-06T10:00:01Z"
