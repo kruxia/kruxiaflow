@@ -441,7 +441,10 @@ impl Engine {
         self.pool.close().await;
     }
 
-    async fn deploy(&self, dir: &str, yaml: &str) -> (String, String) {
+    /// Deploy a machine's workflow. A definition the engine rejects is the
+    /// engine's answer, not the runner's failure: each of the machine's runs
+    /// reports it, and the other machines still run.
+    async fn deploy(&self, yaml: &str) -> Result<(String, String), String> {
         let r = self
             .http
             .post(format!("{}/api/v1/workflow_definitions", self.url))
@@ -453,11 +456,18 @@ impl Engine {
             .expect("deploy request");
         let status = r.status();
         let body: Value = r.json().await.unwrap_or(Value::Null);
-        assert_eq!(status, 201, "machines/{dir}: deploy failed: {body}");
-        (
+        if status != 201 {
+            // The validator's own words, when it gives them
+            let detail = match &body["error"]["details"] {
+                Value::Null => body["error"]["message"].to_string(),
+                d => d.to_string(),
+            };
+            return Err(format!("deploy rejected ({status}): {detail}"));
+        }
+        Ok((
             body["name"].as_str().unwrap().to_string(),
             body["version"].as_str().unwrap().to_string(),
-        )
+        ))
     }
 
     async fn submit(&self, name: &str, version: &str, input: &Value) -> Uuid {
@@ -796,7 +806,30 @@ fn judge(machine: &Machine, run: &RunSpec, observed: Observed, seconds: f64) -> 
     }
 }
 
-async fn run_one(engine: &Engine, machine: &Machine, def: &(String, String), run: &RunSpec) -> Row {
+async fn run_one(
+    engine: &Engine,
+    machine: &Machine,
+    def: &Result<(String, String), String>,
+    run: &RunSpec,
+) -> Row {
+    let def = match def {
+        Ok(def) => def,
+        // Nothing ran: every step is absent, and the rejection is the problem
+        Err(e) => {
+            let steps = run
+                .expect
+                .steps
+                .keys()
+                .map(|k| (k.clone(), json!({ "status": "absent", "runs": 0 })))
+                .collect();
+            let observed = Observed {
+                status: "not_deployed".to_string(),
+                steps,
+                problems: vec![e.clone()],
+            };
+            return judge(machine, run, observed, 0.0);
+        }
+    };
     let input = run.input.clone().unwrap_or_else(|| json!({}));
     let started = Instant::now();
     let deadline = started + Duration::from_secs(run.timeout_seconds);
@@ -929,7 +962,7 @@ async fn run_shop(pool: PgPool, mode: Mode) {
 
     let mut defs = Vec::new();
     for m in &machines {
-        defs.push(engine.deploy(&m.dir, &m.workflow_yaml).await);
+        defs.push(engine.deploy(&m.workflow_yaml).await);
     }
 
     let started_at = chrono::Utc::now();

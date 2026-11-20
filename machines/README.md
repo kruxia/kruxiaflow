@@ -46,7 +46,7 @@ There are two views of the same results, built to compare before choosing one. N
 The results file (`machine-shop-results/1`) is the contract between runners and views:
 
 - `runner`, `mode`, `engine_version`, `tree` (`label`, `branch`, `commit`), `started_at`, `seconds`
-- `runs`: one entry per run, with `machine`, `run`, `result` (`works`, `broken`, `known_broken` or `fixed`), `trap` (a trap's first issue, or null), `trap_issues` (all of them, or empty), `seconds`, the workflow's final `status`, `steps` (each step's `status` and `runs`), and `problems`
+- `runs`: one entry per run, with `machine`, `run`, `result` (`works`, `broken`, `known_broken` or `fixed`), `trap` (a trap's first issue, or null), `trap_issues` (all of them, or empty), `seconds`, the workflow's final `status` (`not_deployed` when the engine rejected the definition), `steps` (each step's `status` and `runs`), and `problems`
 - Readers treat a file without `trap_issues` as having `[trap]`, so older results files still read
 
 Each run ends as one of four results:
@@ -57,6 +57,8 @@ Each run ends as one of four results:
 | broken       | It didn't, and it isn't a trap                           | Yes            |
 | known broken | A trap that still shows its bug                          | No             |
 | fixed        | A trap that now passes: take the trap label off its card | No             |
+
+**A workflow the engine won't deploy** is a result too, not a crash. When `POST /api/v1/workflow_definitions` rejects a machine's `workflow.yaml`, each of its runs ends with the workflow `not_deployed`, every step `absent`, and the validator's message as the problem: known broken for a trap, broken otherwise. The other machines still run. A bug can show this way: the ferris wheel's valid loop fails validation on an engine that picks the back-edge by key order (#26).
 
 ## A machine
 
