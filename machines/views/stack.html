@@ -9,9 +9,13 @@
   The Stack: the machine shop as a stack of cards, one card per machine,
   in homage to HyperCard (the look, not Apple's artwork, names or fonts).
 
-  A prototype, to compare with floor.html. The runner fills in the data
-  marker below and writes this page next to the results; see
-  machines/README.md. Everything is in this file: no network, no build.
+  For electrical and old-school engineers: each machine card has a
+  datasheet, a ladder-logic sheet and a logic-analyzer timing sheet, each
+  with a drafting title block, and a legend card explains the symbols.
+
+  The runner fills in the data marker below and writes this page next to
+  the results; see machines/README.md. Everything is in this file: no
+  network, no build.
 -->
 <style>
   /* Layout: one card in a window on a dithered desk; a tool bar under it. 1-bit: ink on paper, inverted in dark mode. */
@@ -177,10 +181,55 @@
   .tools input { width: 160px; }
   .message { font-size: 12px; min-height: 1.4em; padding: 0 12px 8px; }
 
+  /* sheets: each machine card has four, picked with buttons like the tool bar's */
+  .sheets { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }
+  .sheets button {
+    background: var(--paper); border: 2px solid var(--ink); border-radius: 8px;
+    padding: 2px 10px; cursor: pointer; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .sheets button[aria-current="true"] { background: var(--ink); color: var(--paper); }
+  .pick { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 10px; }
+  .pick label { display: grid; gap: 3px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; min-width: 0; }
+  .caption { font-size: 12px; margin: 6px 0 0; max-width: 70ch; }
+  .none { font-family: var(--mono); font-size: 12px; margin: 0; padding: 8px 0; }
+
+  /* diagrams: wide ones scroll inside their own box */
+  .diagram { overflow-x: auto; overflow-y: hidden; border: 1px solid var(--ink); background: var(--paper); }
+  .diagram svg { display: block; color: var(--ink); }
+  .diagram svg path, .legend-sym path { fill: none; stroke: currentColor; stroke-width: 1.5; }
+  .diagram svg .rail { stroke-width: 3; }
+  .diagram svg .thin { stroke-width: 1; }
+  .diagram svg .grid { stroke-width: 1; stroke-dasharray: 1 3; }
+  .diagram svg .z { stroke-dasharray: 3 2; }
+  .diagram svg .solid { fill: currentColor; stroke: none; }
+  .diagram svg text, .legend-sym text { font: 10px var(--mono); fill: currentColor; stroke: none; }
+  .diagram svg text.d, .legend-sym text.d { font-size: 9px; }
+  .diagram svg text.b { font-weight: bold; }
+  .diagram svg text.c { font: italic 10px var(--body); }
+  .legend-sym { display: block; color: var(--ink); }
+  .run-trace + .run-trace { margin-top: 16px; }
+  .run-trace h3 { font-size: 13px; margin: 0 0 6px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+  /* datasheet */
+  .ds-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; border-bottom: 3px solid var(--ink); padding-bottom: 8px; margin-bottom: 14px; }
+  .ds-head .part { font-family: var(--mono); font-size: 12px; }
+  table.ds td.num { text-align: right; font-family: var(--mono); }
+  .foot { font-size: 11px; margin: 6px 0 0; }
+
+  /* the drafting title block, at the foot of every machine sheet */
+  .titleblock {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    margin-top: 20px; border: 2px solid var(--ink); font: 11px/1.3 var(--mono);
+  }
+  .titleblock > div { border: 1px solid var(--ink); padding: 4px 6px; min-width: 0; overflow-wrap: anywhere; }
+  .titleblock .k { display: block; font: 9px/1.3 var(--body); letter-spacing: 0.12em; text-transform: uppercase; }
+  .titleblock .wide { grid-column: span 2; font-weight: bold; }
+
   .empty { max-width: 56ch; }
   .empty code { font-family: var(--mono); font-size: 12px; }
   @media (max-width: 520px) {
     .card > .inner { padding: 14px; }
+    .titleblock { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .tools form { margin-left: 0; width: 100%; }
     .tools input { flex: 1; width: auto; }
   }
@@ -381,10 +430,533 @@ function picture(dir, size) {
 }
 
 // ---------------------------------------------------------------------------
+// Sheets for engineers: ladder logic, timing diagrams, a datasheet, and a
+// drafting title block. The runner works out the rungs, pins and ratings
+// from workflow.yaml (machine_shop_stack.rs); this page draws them.
+// ---------------------------------------------------------------------------
+
+const SHEETS = [
+  { id: "card", name: "Card" },
+  { id: "datasheet", name: "Datasheet" },
+  { id: "ladder", name: "Ladder" },
+  { id: "timing", name: "Timing" },
+];
+let sheet = "card";
+/** The result set the sheets show: null picks the newest that ran the machine */
+let chosenSet = null;
+/** The run the datasheet's timing diagram shows, per machine */
+const chosenRun = {};
+
+function setsFor(m) { return SETS.filter(s => s.runs.some(r => r.machine === m.dir)); }
+function setFor(m) {
+  const sets = setsFor(m);
+  if (chosenSet !== null) { const s = sets.find(x => x.id === chosenSet); if (s) return s; }
+  return sets.length ? sets[sets.length - 1] : null;
+}
+function setPicker(m, s) {
+  const sets = setsFor(m);
+  if (!sets.length) return "";
+  const opts = sets.map(x => `<option value="${x.id}"${s && x.id === s.id ? " selected" : ""}>${esc(setName(x))}${x.runs.some(r => r.machine === m.dir && Array.isArray(r.timeline)) ? "" : " (no timeline)"}</option>`).join("");
+  return `<label for="sheet-set">Result set<select id="sheet-set">${opts}</select></label>`;
+}
+
+function sheetTabs(m) {
+  return `<nav class="sheets" aria-label="Sheets">${SHEETS.map(x =>
+    `<button type="button" data-sheet="${x.id}"${x.id === sheet ? ' aria-current="true"' : ""}>${esc(x.name)}</button>`).join("")}</nav>`;
+}
+
+function isoDay(iso) { const d = new Date(iso); return isNaN(d) ? "" : d.toISOString().slice(0, 10); }
+
+/** A drafting title block: drawing number, revision, drawn and checked by, date */
+function titleBlock(m) {
+  const s = setFor(m);
+  const n = SHEETS.findIndex(x => x.id === sheet) + 1;
+  const what = SHEETS[n - 1].name;
+  return `<div class="titleblock" aria-label="Title block">
+    <div class="wide"><span class="k">Title</span>${esc(m.card.name)}: ${esc(what.toLowerCase())}</div>
+    <div><span class="k">Dwg no.</span>${esc(m.drawing || "")}</div>
+    <div><span class="k">Sheet</span>${n} of ${SHEETS.length}</div>
+    <div><span class="k">Rev</span>${s ? `${esc(s.tree.label)} @ ${esc(s.tree.commit)}` : "unreleased"}</div>
+    <div><span class="k">Drawn by</span>the Stack, from ${esc(m.workflow.name || "workflow.yaml")}</div>
+    <div><span class="k">Checked by</span>${s ? `${esc(setName(s))}, ${esc(s.runner)} runner` : "not checked: no results"}</div>
+    <div><span class="k">Date</span>${s ? esc(isoDay(s.started_at)) : "&mdash;"}</div>
+  </div>`;
+}
+
+// --- SVG helpers -----------------------------------------------------------
+
+const CH = 6.2;   // width of a 10px monospace character
+const LH = 11;    // label line height
+let svgSeq = 0;
+function txt(x, y, s, cls, anchor) {
+  return `<text x="${+x.toFixed(1)}" y="${+y.toFixed(1)}" text-anchor="${anchor || "middle"}"${cls ? ` class="${cls}"` : ""}>${esc(s)}</text>`;
+}
+function wrap(s, max) {
+  const lines = []; let cur = "";
+  for (let w of String(s).split(/\s+/)) {
+    while (w.length > max) { if (cur) { lines.push(cur); cur = ""; } lines.push(w.slice(0, max)); w = w.slice(max); }
+    if (!w) continue;
+    if (!cur) cur = w; else if ((cur + " " + w).length <= max) cur += " " + w; else { lines.push(cur); cur = w; }
+  }
+  if (cur || !lines.length) lines.push(cur);
+  return lines;
+}
+function textW(lines) { return Math.max(0, ...lines.map(l => l.length)) * CH; }
+
+// --- Ladder ----------------------------------------------------------------
+
+const PP = 10;  // the stub at each end of a parallel branch
+const BG = 6;   // the gap between parallel branches
+const ACTION_TEXT = { run: "run", continue: "run, no signal", skip: "skip", fail: "fail" };
+
+/** A drawable symbol for one rung element: a contact, coil, box or wire */
+function symbol(el) {
+  switch (el.type) {
+    case "contact": return { kind: "contact", tag: [el.step], desc: el.state };
+    case "condition": return { kind: "contact", tag: wrap(el.expr, 26), desc: "condition", mark: "cond" };
+    case "first_round": return { kind: "contact", tag: ["1ST"], desc: "first round" };
+    case "seal_in": return { kind: "contact", tag: [el.step], desc: "seal-in", mark: "seal" };
+    case "shunt": return { kind: "wire", tag: [], desc: "shunt" };
+    case "counter": return { kind: "box", title: "CTU", pv: `PV ${el.preset}`, tag: [`${el.step}.CTU`], desc: el.default ? "engine default" : "iteration_limit", q: "/Q" };
+    case "delay": return { kind: "box", title: "TON", pv: `PT ${el.preset}`, tag: [`${el.step}.DLY`], desc: "delay", q: "Q" };
+    case "interrupt": return { kind: "contact", tag: [`SIGNAL ${el.event}`], desc: "interrupt", mark: "int" };
+    case "timer_done": return { kind: "contact", tag: [`${el.step}.TON`], desc: "done (DN)" };
+    case "coil": return { kind: "coil", tag: [el.step], desc: ACTION_TEXT[el.action] || el.action };
+    case "timer": return { kind: "box", title: "TON", pv: `PT ${el.seconds} s`, tag: [`${el.step}.TON`], desc: `waits for ${el.event}` };
+    default: return { kind: "wire", tag: [], desc: el.type || "" };
+  }
+}
+function measureSym(y) {
+  const descW = y.desc.length * CH * 0.9 + 10;
+  if (y.kind === "box") return { w: Math.max(76, textW(y.tag) + 14, descW), top: 22 + LH * y.tag.length, bot: 32 };
+  if (y.kind === "wire") return { w: Math.max(44, descW), top: 8, bot: 24 };
+  return { w: Math.max(60, textW(y.tag) + 14, descW), top: 14 + LH * y.tag.length, bot: 24 };
+}
+function drawSym(y, x, cy, w) {
+  const cx = x + w / 2;
+  let out = "";
+  const tags = (above) => y.tag.map((t, i) => txt(cx, cy - above - LH * (y.tag.length - 1 - i), t)).join("");
+  const desc = (below) => y.desc ? txt(cx, cy + below, y.desc, "d") : "";
+  if (y.kind === "wire") return `<path d="M${x} ${cy}H${x + w}"/>` + desc(20);
+  if (y.kind === "box") {
+    const bx = cx - 30;
+    out += `<path d="M${x} ${cy}H${bx}M${bx + 60} ${cy}H${x + w}"/><path d="M${bx} ${cy - 16}h60v32h-60z"/>`;
+    out += txt(cx, cy - 4, y.title, "b") + txt(cx, cy + 10, y.pv, "d");
+    if (y.q) out += txt(bx + 62, cy - 3, y.q, "d", "start");
+    return out + tags(22) + desc(28);
+  }
+  if (y.kind === "coil") {
+    out += `<path d="M${x} ${cy}H${cx - 9}M${cx + 9} ${cy}H${x + w}"/>`;
+    out += `<path d="M${cx - 4} ${cy - 9}Q${cx - 12} ${cy} ${cx - 4} ${cy + 9}M${cx + 4} ${cy - 9}Q${cx + 12} ${cy} ${cx + 4} ${cy + 9}"/>`;
+    return out + tags(14) + desc(21);
+  }
+  // a normally open contact: ─┤ ├─
+  out += `<path d="M${x} ${cy}H${cx - 6}M${cx + 6} ${cy}H${x + w}M${cx - 6} ${cy - 9}V${cy + 9}M${cx + 6} ${cy - 9}V${cy + 9}"/>`;
+  if (y.mark === "int") out += `<path class="thin" d="M${cx - 2} ${cy - 8}l3 5h-3l3 5"/>`;
+  if (y.mark === "seal") out += `<path class="thin" d="M${cx - 3} ${cy}h6"/>`;
+  if (y.mark === "cond") out += txt(cx, cy + 3.5, "?", "d");
+  return out + tags(14) + desc(21);
+}
+
+function measure(el) {
+  if (el.type === "parallel") {
+    const bs = el.branches.map(measureSeries);
+    let bot = bs[0].bot;
+    for (let i = 1; i < bs.length; i++) bot += BG + bs[i].top + bs[i].bot;
+    return { w: Math.max(...bs.map(b => b.w)) + 2 * PP, top: bs[0].top, bot, bs };
+  }
+  return measureSym(symbol(el));
+}
+function measureSeries(list) {
+  if (!list.length) return { w: 24, top: 8, bot: 8 };
+  let w = 0, top = 0, bot = 0;
+  for (const e of list) { const k = measure(e); w += k.w; top = Math.max(top, k.top); bot = Math.max(bot, k.bot); }
+  return { w, top, bot };
+}
+function drawSeries(list, x, cy, w) {
+  let out = "", at = x;
+  for (const e of list) { const k = measure(e); out += draw(e, at, cy, k); at += k.w; }
+  if (at < x + w) out += `<path d="M${at} ${cy}H${x + w}"/>`;
+  return out;
+}
+function draw(el, x, cy, k) {
+  if (el.type !== "parallel") return drawSym(symbol(el), x, cy, k.w);
+  let out = "", by = cy, last = cy;
+  el.branches.forEach((b, i) => {
+    if (i) by += k.bs[i - 1].bot + BG + k.bs[i].top;
+    last = by;
+    out += `<path d="M${x} ${by}H${x + PP}M${x + k.w - PP} ${by}H${x + k.w}"/>`;
+    out += drawSeries(b, x + PP, by, k.w - 2 * PP);
+  });
+  return out + `<path d="M${x} ${cy}V${last}M${x + k.w} ${cy}V${last}"/>`;
+}
+
+/** The machine's ladder: one rung per step, between two rails */
+function ladderDiagram(m) {
+  const rungs = m.ladder || [];
+  if (!rungs.length) return `<p class="none">No rungs: the workflow has no steps.</p>`;
+  const X0 = 44, GAP = 14;
+  const laid = rungs.map(r => {
+    const s = measureSeries(r.series);
+    const outs = r.outputs.map(o => {
+      const c = o.contacts.length ? measureSeries(o.contacts) : { w: 0, top: 0, bot: 0 };
+      const e = measureSym(symbol(o.end));
+      return { c, e, w: c.w + e.w + 16, top: Math.max(c.top, e.top), bot: Math.max(c.bot, e.bot) };
+    });
+    let obot = outs[0].bot;
+    for (let i = 1; i < outs.length; i++) obot += BG + outs[i].top + outs[i].bot;
+    return { r, s, outs, w: s.w + GAP + Math.max(...outs.map(o => o.w)), top: Math.max(s.top, outs[0].top), bot: Math.max(s.bot, obot) };
+  });
+  const RX = X0 + Math.max(...laid.map(l => l.w)) + 12;
+  let y = 8, body = "";
+  laid.forEach((l, i) => {
+    body += txt(X0 + 6, y + 10, `${l.r.step}: ${l.r.activity || "activity"}`, "c", "start");
+    const cy = y + 18 + l.top;
+    body += txt(X0 - 8, cy + 3, String(i).padStart(3, "0"), "d", "end");
+    body += drawSeries(l.r.series, X0, cy, l.s.w);
+    const jx = X0 + l.s.w;
+    let oy = cy, lastY = cy;
+    l.outs.forEach((o, j) => {
+      if (j) oy += l.outs[j - 1].bot + BG + o.top;
+      lastY = oy;
+      const cs = l.r.outputs[j].contacts;
+      if (!j) body += `<path d="M${jx} ${oy}H${jx + GAP}"/>`;
+      if (cs.length) body += drawSeries(cs, jx + GAP, oy, o.c.w);
+      const ex = RX - o.e.w;
+      body += `<path d="M${jx + GAP + o.c.w} ${oy}H${ex}"/>` + drawSym(symbol(l.r.outputs[j].end), ex, oy, o.e.w);
+    });
+    if (l.outs.length > 1) body += `<path d="M${jx + GAP} ${cy}V${lastY}"/>`;
+    y = cy + l.bot + 14;
+  });
+  const H = y;
+  const rails = `<path class="rail" d="M${X0} 4V${H - 4}M${RX} 4V${H - 4}"/>`;
+  return `<div class="diagram"><svg viewBox="0 0 ${RX + 8} ${H}" width="${RX + 8}" height="${H}" role="img" aria-label="Ladder diagram of ${esc(m.card.name)}">${rails}${body}</svg></div>`;
+}
+
+function ladderSheet(m) {
+  return `<div class="field"><h2>Ladder logic</h2>
+      <p class="caption">One rung per step, read from <code>workflow.yaml</code>. Contacts in series must all close: each <code>depends_on</code> entry is one, so a fan-in is an AND. Conditions sit on their own branches, in parallel where the engine runs a step when any entry applies. The coil is the step. <a href="#legend">The legend card</a> explains every symbol.</p></div>
+    <div class="field">${ladderDiagram(m)}</div>`;
+}
+
+// --- Timing ----------------------------------------------------------------
+
+/** One step's trace from its events: levels (H running, Z waiting for a signal, L idle) and marks */
+function trace(events) {
+  const segs = [], marks = [];
+  let level = "L", since = 0;
+  const go = (t, lv) => { if (lv === level) return; segs.push({ from: since, to: t, level }); level = lv; since = t; };
+  for (const e of events) {
+    switch (e.event) {
+      case "ActivityScheduled":
+        go(e.ms, "H");
+        marks.push({ t: e.ms, kind: "start", round: e.round, attempt: e.attempt });
+        break;
+      case "ActivityWaiting": go(e.ms, "Z"); break;
+      case "ActivitySignaled":
+        if (e.reason === "timeout") {
+          marks.push({ t: e.ms, kind: "timeout", text: e.on_timeout });
+          if (e.on_timeout === "skip") go(e.ms, "L");
+        } else marks.push({ t: e.ms, kind: "signal" });
+        break;
+      case "ActivityCompleted": go(e.ms, "L"); break;
+      case "ActivityFailed":
+        go(e.ms, "L");
+        marks.push({ t: e.ms, kind: e.will_retry ? "retry" : "fail", text: e.reason });
+        break;
+      default: break;
+    }
+  }
+  segs.push({ from: since, to: null, level });
+  return { segs, marks };
+}
+
+/** A tick spacing near `target` ms: 1, 2 or 5 times a power of ten */
+function niceStep(target) {
+  const p = Math.pow(10, Math.floor(Math.log10(target)));
+  for (const f of [1, 2, 5, 10]) if (f * p >= target) return f * p;
+  return 10 * p;
+}
+function fmtTime(ms, step) {
+  if (step >= 1000) return `${(ms / 1000).toFixed(step % 1000 ? (step % 100 ? 2 : 1) : 0)} s`;
+  return `${ms.toFixed(step >= 1 ? 0 : step >= 0.1 ? 1 : 2)} ms`;
+}
+
+/** A run as a logic analyzer shows it: one channel per step, a run line, and an interrupt line for signals */
+function timingDiagram(m, r) {
+  if (!r) return `<p class="none">This run isn't in the result set.</p>`;
+  if (!Array.isArray(r.timeline)) return `<p class="none">No timeline in this result set.</p>`;
+  if (!r.timeline.length) return `<p class="none">No events: nothing ran.</p>`;
+  const T = r.timeline;
+  // A little past the last event, so a level that holds to the end shows it
+  const end = Math.max(1, ...T.map(e => e.ms)) * 1.04;
+  const keys = m.workflow.steps.map(s => s.key);
+  for (const e of T) if (e.step && !keys.includes(e.step)) keys.push(e.step);
+  const traces = keys.map(k => ({ key: k, ...trace(T.filter(e => e.step === k)) }));
+  const waits = (m.pins || []).filter(p => p.kind === "signal");
+  const signals = traces.flatMap(t => t.marks.filter(x => x.kind === "signal").map(x => ({ ...x, step: t.key })));
+
+  // Scale: thin pulses get a few pixels each, within reason
+  const widths = traces.flatMap(t => t.segs.filter(s => s.level === "H" && s.to !== null).map(s => s.to - s.from)).filter(w => w > 0);
+  const minW = widths.length ? Math.min(...widths) : end;
+  const k = Math.max(440 / end, Math.min(3 / minW, 3000 / end));
+  const LW = 110, RW = 100, PW = end * k;
+  const X = t => LW + t * k;
+  const CHH = 34;
+  const id = `dither${++svgSeq}`;
+  let y = 14, body = "";
+
+  const channel = (label, sub, segs, marks, right) => {
+    const yc = y + CHH / 2, hi = yc - 9, lo = yc + 9;
+    const lv = l => (l === "H" ? hi : l === "L" ? lo : yc);
+    let out = txt(8, yc - 1, label, "b", "start") + (sub ? txt(8, yc + 10, sub, "d", "start") : "");
+    let prev = null;
+    for (const s of segs) {
+      const x1 = X(s.from), x2 = s.to === null ? X(end) : Math.max(X(s.to), s.level === "H" ? X(s.from) + 2 : X(s.to));
+      if (prev !== null && prev !== s.level) out += `<path d="M${x1} ${lv(prev)}V${lv(s.level)}"/>`;
+      if (s.level === "H") out += `<rect x="${x1}" y="${hi}" width="${x2 - x1}" height="${lo - hi}" fill="url(#${id})"/>`;
+      out += `<path${s.level === "Z" ? ' class="z"' : ""} d="M${x1} ${lv(s.level)}H${x2}"/>`;
+      prev = s.level;
+    }
+    let free = -Infinity;  // where the last round label ends: a dense train labels what fits
+    for (const mk of marks) {
+      const x = X(mk.t);
+      if (mk.kind === "start" && mk.label && x >= free) { out += txt(x + 1, hi - 3, mk.label, "d", "start"); free = x + mk.label.length * CH * 0.9 + 6; }
+      if (mk.kind === "signal") out += `<path class="solid" d="M${x - 4} ${hi - 9}h8l-4 7z"/>`;
+      if (mk.kind === "timeout") out += `<path class="thin" d="M${x} ${hi - 4}V${lo + 4}"/>` + txt(x + 2, hi - 3, "T/O", "d", "start");
+      if (mk.kind === "fail" || mk.kind === "retry") {
+        out += `<path d="M${x - 5} ${yc - 5}l10 10m0 -10l-10 10"/>` + txt(x + 7, lo + 9, mk.kind === "retry" ? "retry" : (mk.text === "SIGNAL_TIMEOUT" ? "T/O fail" : "fail"), "d", "start");
+      }
+    }
+    if (right) out += txt(LW + PW + 10, yc + 3, right, "d", "start");
+    body += out;
+    y += CHH;
+  };
+
+  // Run line: the workflow, from created to completed or failed
+  const wf = T.filter(e => !e.step);
+  const wsegs = [], wmarks = [];
+  { let since = 0, level = "H";
+    for (const e of wf) {
+      if (e.event === "WorkflowCompleted" || e.event === "WorkflowFailed") {
+        wsegs.push({ from: since, to: e.ms, level }); level = "L"; since = e.ms;
+        if (e.event === "WorkflowFailed") wmarks.push({ t: e.ms, kind: "fail" });
+      }
+    }
+    wsegs.push({ from: since, to: null, level });
+  }
+  channel("RUN", "workflow", wsegs, wmarks, r.status);
+
+  // Interrupt line, active low: a dip for each signal the step took
+  if (waits.length || signals.length) {
+    const isegs = [], imarks = [];
+    let since = 0;
+    for (const sg of signals) {
+      isegs.push({ from: since, to: sg.t, level: "H" });
+      isegs.push({ from: sg.t, to: sg.t + 3 / k, level: "L" });
+      since = sg.t + 3 / k;
+      imarks.push({ t: sg.t, kind: "start", label: sg.step });
+    }
+    isegs.push({ from: since, to: null, level: "H" });
+    channel("/INT", "signals", isegs, imarks, `${signals.length} taken`);
+  }
+
+  for (const t of traces) {
+    const starts = t.marks.filter(x => x.kind === "start");
+    starts.forEach((x, i) => {
+      const parts = [];
+      if (starts.length > 1) parts.push(`#${x.round != null ? x.round + 1 : i + 1}`);
+      if (x.attempt > 1) parts.push(`try ${x.attempt}`);
+      x.label = parts.join(" ");
+    });
+    const st = r.steps && r.steps[t.key];
+    channel(t.key, "", t.segs, t.marks, st ? `${st.status} ×${st.runs}` : "");
+  }
+
+  // Time axis, with a grid through every channel
+  const step = niceStep(end / Math.max(2, PW / 90));
+  const top = 10, axis = y + 6;
+  let grid = "";
+  for (let t = 0; t <= end + 1e-9; t += step) {
+    const x = X(t);
+    grid += `<path class="grid" d="M${x} ${top}V${axis}"/><path class="thin" d="M${x} ${axis}v5"/>` + txt(x, axis + 16, fmtTime(t, step));
+  }
+  grid += `<path class="thin" d="M${LW} ${axis}H${LW + PW}"/>`;
+  const H = axis + 24, W = LW + PW + RW;
+  const defs = `<defs><pattern id="${id}" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="1" height="1" fill="currentColor"/></pattern></defs>`;
+  return `<div class="diagram"><svg viewBox="0 0 ${W.toFixed(0)} ${H}" width="${W.toFixed(0)}" height="${H}" role="img" aria-label="Timing diagram of ${esc(m.card.name)}, ${esc(r.run)}">${defs}${grid}${body}</svg></div>`;
+}
+
+function timingSheet(m) {
+  const s = setFor(m);
+  if (!s) return `<div class="field"><h2>Timing</h2><p>No results yet.</p></div>`;
+  const runs = m.card.runs.map(run => {
+    const r = runIn(s, m.dir, run.name);
+    return `<div class="run-trace"><h3>${esc(run.name)} ${stamp(r)}${r ? `<span class="secs">${Number(r.seconds).toFixed(2)} s</span>` : ""}</h3>${timingDiagram(m, r)}</div>`;
+  }).join("");
+  return `<div class="field"><h2>Timing diagrams</h2>
+      <div class="pick">${setPicker(m, s)}</div>
+      <p class="caption">From the run's events in <code>workflow_events</code>, as the engine timed them; zero is the workflow's <code>created_at</code>. A step's line is high from scheduled to completed or failed, dashed in the middle while it waits for a signal. ▼ is a signal taken, T/O a wait that timed out, ✕ a failed attempt. A loop's rounds are a pulse train, numbered.</p></div>
+    <div class="field">${runs}</div>`;
+}
+
+// --- Datasheet -------------------------------------------------------------
+
+function stats(xs) {
+  const s = xs.filter(x => Number.isFinite(x)).sort((a, b) => a - b);
+  if (!s.length) return null;
+  const n = s.length, mid = Math.floor(n / 2);
+  return { min: s[0], typ: n % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2, max: s[n - 1], n };
+}
+/** Durations of a step's levels in a run's timeline: H (scheduled to done) and Z (waiting) */
+function levelTimes(r, key, level) {
+  if (!r || !Array.isArray(r.timeline)) return [];
+  return trace(r.timeline.filter(e => e.step === key)).segs.filter(s => s.level === level && s.to !== null).map(s => s.to - s.from);
+}
+
+function pinout(m) {
+  const pins = m.pins || [];
+  const left = pins.filter(p => p.dir === "in"), right = pins.filter(p => p.dir === "out");
+  const n = Math.max(left.length, right.length, 2);
+  const name = p => p.kind === "input" ? `INPUT.${p.name}` : p.kind === "secret" ? `SECRET.${p.name}` : p.kind === "signal" ? `/INT ${p.name}` : `${p.step}.${p.name}`;
+  const lw = Math.max(40, ...left.map(p => name(p).length * CH)) + 8;
+  const rw = Math.max(40, ...right.map(p => name(p).length * CH)) + 8;
+  const BW = 120, STUB = 22, PITCH = 22;
+  const bx = lw + STUB, H = n * PITCH + 24, W = bx + BW + STUB + rw;
+  let out = `<path d="M${bx} 8h${BW}v${H - 16}h-${BW}z"/><path d="M${bx + BW / 2 - 8} 8a8 8 0 0 0 16 0"/>`;
+  out += txt(bx + BW / 2, H / 2 - 2, m.drawing || "", "b") + txt(bx + BW / 2, H / 2 + 11, m.workflow.name || "", "d");
+  const table = [];
+  for (let i = 0; i < n; i++) {
+    const yy = 20 + i * PITCH + PITCH / 2;
+    const p = left[i];
+    const no = i + 1;
+    out += `<path d="M${bx - STUB} ${yy}H${bx}"/>` + txt(bx + 4, yy + 3, String(no), "d", "start");
+    out += txt(bx - STUB - 4, yy + 3, p ? name(p) : "NC", p ? "" : "d", "end");
+    if (p) table.push({ no, p });
+  }
+  for (let i = 0; i < n; i++) {
+    const yy = 20 + (n - 1 - i) * PITCH + PITCH / 2;
+    const p = right[i];
+    const no = n + i + 1;
+    out += `<path d="M${bx + BW} ${yy}H${bx + BW + STUB}"/>` + txt(bx + BW - 4, yy + 3, String(no), "d", "end");
+    out += txt(bx + BW + STUB + 4, yy + 3, p ? name(p) : "NC", p ? "" : "d", "start");
+    if (p) table.push({ no, p });
+  }
+  const svg = `<div class="diagram"><svg viewBox="0 0 ${W.toFixed(0)} ${H}" width="${W.toFixed(0)}" height="${H}" role="img" aria-label="Pinout">${out}</svg></div>`;
+  const values = key => {
+    const seen = [];
+    for (const run of m.card.runs) {
+      const v = run.input && run.input[key];
+      if (v !== undefined) { const j = JSON.stringify(v); if (!seen.includes(j)) seen.push(j); }
+    }
+    return seen;
+  };
+  const rows = table.sort((a, b) => a.no - b.no).map(({ no, p }) => {
+    const type = { input: "In", signal: "In, interrupt", secret: "Supply", output: "Out" }[p.kind] || p.kind;
+    let fn = "";
+    if (p.kind === "input") { const v = values(p.name); fn = v.length ? `The workflow's input. Runs give ${v.join(", ")}` : "The workflow's input"; }
+    if (p.kind === "signal") fn = `A signal named ${p.name}, taken by ${p.step} while it waits`;
+    if (p.kind === "secret") fn = "A secret the orchestrator holds";
+    if (p.kind === "output") fn = `Output of ${p.step}, which nothing depends on`;
+    return `<tr><td class="num">${no}</td><td><code>${esc(name(p))}</code></td><td>${esc(type)}</td><td>${esc(fn)}</td></tr>`;
+  }).join("");
+  return svg + `<div class="scroll section"><table class="ds"><thead><tr><th>Pin</th><th>Name</th><th>Type</th><th>Function</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function ratingsTable(m) {
+  const rs = m.ratings || [];
+  if (!rs.length) return `<p>The workflow sets no limits of its own.</p>`;
+  const rows = rs.map(x => `<tr><td>${esc(x.parameter)}</td><td><code>${esc(x.symbol)}</code></td><td class="num">${esc(x.value)}</td><td>${esc(x.unit)}</td><td>${esc(x.note || "")}</td></tr>`).join("");
+  return `<div class="scroll"><table class="ds"><thead><tr><th>Parameter</th><th>Symbol</th><th>Value</th><th>Unit</th><th>Note</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="foot">Limits the workflow sets. Past one, the engine ends the loop, ends the wait as <code>on_timeout</code> says, stops retrying, or stops on the budget.</p>`;
+}
+
+function characteristics(m) {
+  const sets = setsFor(m);
+  const all = sets.flatMap(s => s.runs.filter(r => r.machine === m.dir && r.status !== "not_deployed"));
+  if (!all.length) return `<p>No results yet.</p>`;
+  const rows = [];
+  const row = (param, sym, st, unit, digits) => {
+    if (!st) return;
+    const f = v => v.toFixed(digits);
+    rows.push(`<tr><td>${esc(param)}</td><td><code>${esc(sym)}</code></td><td class="num">${f(st.min)}</td><td class="num">${f(st.typ)}</td><td class="num">${f(st.max)}</td><td>${esc(unit)}</td><td class="num">${st.n}</td></tr>`);
+  };
+  m.card.runs.forEach((run, i) => row(`Run time, ${run.name}`, `t(${i + 1})`, stats(all.filter(r => r.run === run.name).map(r => Number(r.seconds))), "s", 2));
+  for (const st of m.workflow.steps) {
+    row(`Rounds, ${st.key}`, `N(${st.key})`, stats(all.map(r => r.steps && r.steps[st.key] ? Number(r.steps[st.key].runs) : NaN)), "rounds", 0);
+  }
+  for (const st of m.workflow.steps) {
+    row(`Pulse width, ${st.key}`, `tH(${st.key})`, stats(all.flatMap(r => levelTimes(r, st.key, "H"))), "ms", 1);
+    row(`Signal wait, ${st.key}`, `tZ(${st.key})`, stats(all.flatMap(r => levelTimes(r, st.key, "Z"))), "ms", 1);
+  }
+  const timed = all.filter(r => Array.isArray(r.timeline)).length;
+  return `<div class="scroll"><table class="ds"><thead><tr><th>Parameter</th><th>Symbol</th><th>Min</th><th>Typ</th><th>Max</th><th>Unit</th><th>N</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>
+    <p class="foot">Over ${all.length} run${all.length === 1 ? "" : "s"} of this machine in ${sets.length} result set${sets.length === 1 ? "" : "s"}; typ is the median, N the samples. Rounds count completions. Pulse widths and waits come from the ${timed} run${timed === 1 ? "" : "s"} with a timeline: a pulse is scheduled to completed or failed, so it includes queueing and any <code>delay</code>.</p>`;
+}
+
+function datasheetSheet(m) {
+  const c = m.card;
+  const s = setFor(m);
+  const runName = chosenRun[m.dir] && c.runs.some(r => r.name === chosenRun[m.dir]) ? chosenRun[m.dir] : c.runs[0].name;
+  const runOpts = c.runs.map(r => `<option${r.name === runName ? " selected" : ""}>${esc(r.name)}</option>`).join("");
+  const r = s ? runIn(s, m.dir, runName) : null;
+  return `<div class="ds-head"><div>${pixelText(c.name, 2)}<div class="part">${esc(m.drawing || "")} · ${esc(m.workflow.name || "")}</div></div>
+      <div class="part">${esc(c.kind)} machine${c.trap ? ` · trap ${esc(issueText(trapIssues(c.trap), " "))}` : ""}<br>Kruxia Flow machine shop</div></div>
+    <div class="field"><h2>Features</h2><ul class="functions">${c.functions.map(f => `<li>${esc(f)}</li>`).join("")}</ul></div>
+    <div class="field"><h2>Pinout</h2>${pinout(m)}</div>
+    <div class="field"><h2>Absolute maximum ratings</h2>${ratingsTable(m)}</div>
+    <div class="field"><h2>Characteristics</h2>${characteristics(m)}</div>
+    <div class="field"><h2>Timing diagram</h2>
+      <div class="pick">${setPicker(m, s)}<label for="sheet-run">Run<select id="sheet-run">${runOpts}</select></label></div>
+      ${s ? timingDiagram(m, r) : "<p>No results yet.</p>"}</div>`;
+}
+
+// --- Legend ----------------------------------------------------------------
+
+function legendSymbol(el) {
+  const k = measure(el);
+  const w = k.w + 20, h = k.top + k.bot + 6;
+  const body = `<path d="M0 ${k.top + 2}H10"/>` + draw(el, 10, k.top + 2, k) + `<path d="M${10 + k.w} ${k.top + 2}H${w}"/>`;
+  return `<svg class="legend-sym" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-hidden="true">${body}</svg>`;
+}
+function legendCard() {
+  const rows = [
+    [{ type: "contact", step: "dial", state: "completed" }, "Contact", "A <code>depends_on</code> entry with no conditions. Closed once that step has completed. Contacts in series must all close, so a fan-in is an AND."],
+    [{ type: "contact", step: "lever", state: "finished" }, "Finished contact", "A <code>depends_on</code> entry with conditions. Closed once that step has finished: completed, failed or skipped. The step waits for every entry to finish before it decides."],
+    [{ type: "condition", step: "lever", expr: "lever.echo.track == 'left'" }, "Condition", "A condition on a <code>depends_on</code> entry, labelled with its expression. Several on one entry are in series (AND)."],
+    [{ type: "parallel", branches: [[{ type: "condition", step: "a", expr: "a.ok" }], [{ type: "condition", step: "b", expr: "b.ok" }]] }, "Branches in parallel", "Entries with conditions: the engine runs the step when any of them applies, so their conditions are in parallel (OR)."],
+    [{ type: "shunt" }, "Shunt", "Beside an unconditional <code>depends_on</code> entry, the conditions on the others don't gate the step. The shunt shows that the OR is always closed."],
+    [{ type: "first_round" }, "First round", "Closed only in a loop step's first round: the way into the loop."],
+    [{ type: "seal_in", step: "heater" }, "Seal-in", "A loop's back-edge: the <code>depends_on</code> entry that closes the loop. Closed once that step has completed a round, so the coil runs again while its conditions hold. On a self-loop it is the coil's own contact."],
+    [{ type: "counter", step: "heater", preset: 10, default: false }, "Counter (CTU)", "Counts a loop step's rounds. Its inverted output opens at the preset: <code>iteration_limit</code>, or the engine's default of 100."],
+    [{ type: "delay", step: "butter", preset: "2s" }, "On-delay (TON)", "<code>settings.delay</code>: the step is scheduled once the delay has run."],
+    [{ type: "timer", step: "toast", seconds: 2, event: "pop" }, "Signal wait timer (TON)", "<code>wait_for_signal</code>'s <code>timeout_seconds</code>. It times while the step waits."],
+    [{ type: "interrupt", event: "pop" }, "Interrupt contact", "Closed by the signal the step waits for. It drives the coil with the signal's data."],
+    [{ type: "timer_done", step: "toast" }, "Timer done", "Closed when the wait's time runs out. It drives what <code>on_timeout</code> says: run with no signal (<code>continue</code>), <code>skip</code> or <code>fail</code>."],
+    [{ type: "coil", step: "heater", action: "run" }, "Coil", "The step itself. Energized, it is scheduled to run."],
+  ].map(([el, name, what]) => `<tr><td>${legendSymbol(el)}</td><th scope="row">${esc(name)}</th><td>${what}</td></tr>`).join("");
+  const traceRows = [
+    ["High", "The step is scheduled, queued or running: from <code>ActivityScheduled</code> to <code>ActivityCompleted</code> or <code>ActivityFailed</code>. A loop's rounds are a pulse train, numbered #1, #2."],
+    ["Dashed, middle", "Waiting for a signal (high impedance): from <code>ActivityWaiting</code> until the signal or the timeout."],
+    ["Low", "Idle: not yet scheduled, done, or skipped."],
+    ["▼", "A signal taken (<code>ActivitySignaled</code>). The /INT line dips for each one."],
+    ["T/O", "A signal wait that timed out; the step then does what <code>on_timeout</code> says."],
+    ["✕", "A failed attempt: <em>retry</em> when the engine tries again, <em>fail</em> when it doesn't."],
+    ["RUN", "The workflow: high from <code>created_at</code> until <code>WorkflowCompleted</code> or <code>WorkflowFailed</code>."],
+  ].map(([s, what]) => `<tr><th scope="row">${esc(s)}</th><td>${what}</td></tr>`).join("");
+  return `${pixelText("Legend", 3)}
+    <div class="field section"><h2>Ladder symbols</h2>
+      <p class="caption">Each step is a rung between two rails, ending in its coil. Power flows left to right through closed contacts. The rungs follow the engine's dependency rules in <code>docs/conditional-branching.md</code> and <code>docs/loops-guide.md</code>: the drawing is what the workflow should do, and the timing diagrams show what it did.</p>
+      <div class="scroll"><table><tbody>${rows}</tbody></table></div></div>
+    <div class="field"><h2>Timing diagrams</h2><div class="scroll"><table><tbody>${traceRows}</tbody></table></div></div>
+    <div class="field"><h2>Title block</h2><p class="story">Every machine sheet carries one. The drawing number stays with the machine. The revision is the tree and commit of the result set shown, which is the checker; drawn by is the Stack, from the machine's <code>workflow.yaml</code>.</p></div>`;
+}
+
+// ---------------------------------------------------------------------------
 // Cards
 // ---------------------------------------------------------------------------
 
-const CARDS = ["home", ...MACHINES.map(m => m.dir), "compare"];
+const CARDS = ["home", ...MACHINES.map(m => m.dir), "compare", "legend"];
 let current = 0;
 
 function homeCard() {
@@ -413,12 +985,18 @@ function homeCard() {
     </button>`).join("");
   return `
     <div class="hero">${pixelText("Machine shop", 3)}
-      <p>Small workflows, each inspired by a physical machine, that test the Kruxia Flow engine. One card per machine. Flip through with the arrows, or pick one below.</p></div>
+      <p>Small workflows, each inspired by a physical machine, that test the Kruxia Flow engine. One card per machine. Flip through with the arrows, or pick one below.</p>
+      <p>Each machine has four sheets: its card, a datasheet, its ladder logic, and a timing diagram per run. <a href="#legend">The legend card</a> explains the symbols.</p></div>
     <section class="section"><h2>Machines</h2><div class="machines">${buttons}</div></section>
     <section class="section"><h2>Results sets</h2><div class="tiles">${tiles}</div></section>`;
 }
 
 function machineCard(m) {
+  const body = sheet === "datasheet" ? datasheetSheet(m) : sheet === "ladder" ? ladderSheet(m) : sheet === "timing" ? timingSheet(m) : machineFront(m);
+  return sheetTabs(m) + body + titleBlock(m);
+}
+
+function machineFront(m) {
   const c = m.card;
   const shown = SETS.slice(-4);
   const head = shown.map(s => `<th>${esc(setName(s))}<span class="sub">${esc(s.tree.commit)}</span></th>`).join("");
@@ -494,14 +1072,26 @@ function show(i, focus, still) {
   const id = CARDS[current];
   const m = MACHINES.find(x => x.dir === id);
   cardEl.className = "card" + (m && m.card.trap ? " trap" : "");
-  cardEl.innerHTML = `<div class="inner">${id === "home" ? homeCard() : id === "compare" ? compareCard() : machineCard(m)}</div>`;
+  cardEl.innerHTML = `<div class="inner">${id === "home" ? homeCard() : id === "compare" ? compareCard() : id === "legend" ? legendCard() : machineCard(m)}</div>`;
   if (!still) { void cardEl.offsetWidth; cardEl.classList.add("flip"); }
   document.getElementById("where").textContent = `Card ${current + 1} of ${CARDS.length}`;
-  if (location.hash.slice(1) !== id) history.replaceState(null, "", "#" + id);
+  const hash = m && sheet !== "card" ? `${id}/${sheet}` : id;
+  if (location.hash.slice(1) !== hash) history.replaceState(null, "", "#" + hash);
   if (focus) cardEl.focus({ preventScroll: true });
   const a = document.getElementById("cmp-a"), b = document.getElementById("cmp-b");
   if (a) a.onchange = () => { cmpA = Number(a.value); show(current, false, true); };
   if (b) b.onchange = () => { cmpB = Number(b.value); show(current, false, true); };
+  const ss = document.getElementById("sheet-set"), sr = document.getElementById("sheet-run");
+  if (ss) ss.onchange = () => { chosenSet = Number(ss.value); show(current, false, true); };
+  if (sr && m) sr.onchange = () => { chosenRun[m.dir] = sr.value; show(current, false, true); };
+}
+
+/** `#thermostat/ladder` as the card's index, choosing the sheet */
+function fromHash() {
+  const [id, sh] = decodeURIComponent(location.hash.slice(1)).split("/");
+  if (SHEETS.some(x => x.id === sh)) sheet = sh;
+  else if (id) sheet = "card";
+  return CARDS.indexOf(id);
 }
 
 document.getElementById("title").innerHTML = pixelText("Machine shop", 2);
@@ -514,6 +1104,8 @@ document.getElementById("home").onclick = () => show(0, true);
 cardEl.addEventListener("click", e => {
   const go = e.target.closest("[data-go]");
   if (go) show(Number(go.dataset.go), true);
+  const sh = e.target.closest("[data-sheet]");
+  if (sh) { sheet = sh.dataset.sheet; show(current, false, true); }
 });
 document.addEventListener("keydown", e => {
   if (e.target.closest("input, select, textarea")) return;
@@ -522,16 +1114,18 @@ document.addEventListener("keydown", e => {
   else if (e.key === "Home") show(0);
 });
 window.addEventListener("hashchange", () => {
-  const i = CARDS.indexOf(location.hash.slice(1));
-  if (i >= 0 && i !== current) show(i);
+  const before = sheet;
+  const i = fromHash();
+  if (i >= 0 && (i !== current || sheet !== before)) show(i);
 });
 
 // Find: the next card, after this one, whose words include the text
 function words(id) {
   const m = MACHINES.find(x => x.dir === id);
+  if (id === "legend") return "legend symbols ladder contact condition shunt seal-in counter CTU TON timer interrupt coil timing title block";
   if (!m) return id;
   const c = m.card;
-  return [c.name, c.kind, c.picture, ...(c.functions || []), ...c.runs.map(r => r.name),
+  return [c.name, c.kind, c.picture, m.drawing || "", ...(c.functions || []), ...c.runs.map(r => r.name),
     ...m.workflow.steps.map(s => s.key), c.trap ? `${issueText(trapIssues(c.trap), " ")} ${c.trap.broken_looks_like}` : ""].join(" ");
 }
 document.getElementById("find").addEventListener("submit", e => {
@@ -543,14 +1137,14 @@ document.getElementById("find").addEventListener("submit", e => {
     const i = (current + k) % CARDS.length;
     if (words(CARDS[i]).toLowerCase().includes(q)) {
       show(i);
-      msg.textContent = `Found “${q}” on ${i === 0 ? "the home card" : CARDS[i] === "compare" ? "the compare card" : MACHINES[i - 1].card.name}.`;
+      msg.textContent = `Found “${q}” on ${i === 0 ? "the home card" : CARDS[i] === "compare" ? "the compare card" : CARDS[i] === "legend" ? "the legend card" : MACHINES[i - 1].card.name}.`;
       return;
     }
   }
   msg.textContent = `“${q}” isn't on any card.`;
 });
 
-show(Math.max(0, CARDS.indexOf(location.hash.slice(1))), false, true);
+show(Math.max(0, fromHash()), false, true);
 </script>
 </body>
 </html>

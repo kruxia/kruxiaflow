@@ -55,6 +55,9 @@ use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+/// What the Stack draws for engineers: timelines, ladder rungs, datasheets
+mod machine_shop_stack;
+
 // ---------------------------------------------------------------------------
 // Spec cards
 // ---------------------------------------------------------------------------
@@ -1049,6 +1052,46 @@ impl Engine {
         rows.into_iter().collect()
     }
 
+    /// The run's events from `workflow_events`, timed from the workflow's
+    /// `created_at`, as the engine stored them
+    async fn timeline(&self, id: Uuid) -> Vec<Value> {
+        type Row = (
+            String,
+            Option<String>,
+            Option<i32>,
+            Value,
+            chrono::DateTime<chrono::Utc>,
+        );
+        let (start,): (chrono::DateTime<chrono::Utc>,) =
+            sqlx::query_as("SELECT created_at FROM workflows WHERE id = $1")
+                .bind(id)
+                .fetch_one(&self.pool)
+                .await
+                .expect("workflow row");
+        let rows: Vec<Row> = sqlx::query_as(
+            "SELECT event_type::text, activity_key, iteration, payload, timestamp
+             FROM workflow_events WHERE workflow_id = $1
+             ORDER BY timestamp, position NULLS LAST, id",
+        )
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await
+        .expect("workflow events");
+        let rows: Vec<machine_shop_stack::EventRow> = rows
+            .into_iter()
+            .map(
+                |(event, step, round, payload, at)| machine_shop_stack::EventRow {
+                    event,
+                    step,
+                    round,
+                    payload,
+                    at,
+                },
+            )
+            .collect();
+        machine_shop_stack::timeline(&rows, start)
+    }
+
     /// One named output of a step, through the public output API
     async fn step_output(&self, id: Uuid, step: &str, output: &str) -> Result<Value, String> {
         let r = self
@@ -1159,6 +1202,7 @@ struct Observed {
     /// completed: its value, or `{"error": ...}` when it couldn't be read
     outputs: BTreeMap<String, Value>,
     problems: Vec<String>,
+    timeline: Option<Vec<Value>>,
 }
 
 /// What a run cost the engine, read from the test database when it ended
@@ -1241,6 +1285,7 @@ async fn check(engine: &Engine, id: Uuid, status: &str, spec: &RunSpec) -> Obser
         steps,
         outputs,
         problems,
+        timeline: Some(engine.timeline(id).await),
     }
 }
 
@@ -1372,6 +1417,7 @@ async fn run_one(
                 steps,
                 outputs: BTreeMap::new(),
                 problems: vec![e.clone()],
+                timeline: None,
             };
             return judge(machine, run, observed, 0.0);
         }
@@ -2333,7 +2379,7 @@ fn write_results(
         .map(|r| {
             // `trap` is the first issue, as before; `trap_issues` is all
             let issues = r.outcome.trap_issues();
-            json!({
+            let mut run = json!({
                 "machine": r.machine,
                 "run": r.run,
                 "result": r.outcome.key(),
@@ -2345,7 +2391,12 @@ fn write_results(
                 "problems": r.observed.problems,
                 "footprint": r.footprint.as_ref().map(footprint_json),
                 "twin": r.twin.as_ref().map(twin_json),
-            })
+            });
+            // Optional: older results files have no timeline
+            if let Some(t) = &r.observed.timeline {
+                run["timeline"] = json!(t);
+            }
+            run
         })
         .collect();
     let machine_footprints: BTreeMap<String, Value> = machine_footprints(
@@ -2402,7 +2453,8 @@ fn write_results(
 
 /// A machine as the views see it: its card, plus its steps and what each
 /// one depends on (with `dependency_of` folded into `depends_on`, as the
-/// engine normalizes it)
+/// engine normalizes it), and for the Stack its drawing number, ladder
+/// rungs, pins and ratings
 fn machine_view(dir: &str) -> Value {
     let base = machines_dir().join(dir);
     let card: Value =
@@ -2459,6 +2511,10 @@ fn machine_view(dir: &str) -> Value {
         "dir": dir,
         "card": card,
         "workflow": { "name": wf["name"], "steps": steps },
+        "drawing": machine_shop_stack::drawing_number(dir),
+        "ladder": machine_shop_stack::ladder(&wf),
+        "pins": machine_shop_stack::pins(&wf),
+        "ratings": machine_shop_stack::ratings(&wf),
     })
 }
 
@@ -2643,6 +2699,7 @@ fn observed(status: &str, steps: &[(&str, &str, i64)], outputs: &[(&str, Value)]
             .map(|(k, v)| (k.to_string(), v.clone()))
             .collect(),
         problems: Vec::new(),
+        timeline: None,
     }
 }
 
