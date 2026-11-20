@@ -75,7 +75,7 @@ Each twin ends as one of four outcomes:
 | hung      | The uninterrupted run finished, and the twin hadn't within its card's timeout plus the grace     |
 | missed    | The plug wasn't pulled mid-run: the twin had already finished                                    |
 
-A twin of a run that never finished waits only its card's timeout plus five seconds, and is compared as it stands. A different or hung twin doesn't fail the test: it's a candidate engine finding, printed as a `PLUG:` line and listed in the scoreboard.
+A twin that hasn't finished but doesn't match yet is read again until it matches, ends, or its card's timeout plus the grace passes; this matters most for a twin of a run that never finished, which stops waiting for the workflow to end five seconds past the card's timeout. A different or hung twin doesn't fail the test: it's a candidate engine finding, printed as a `PLUG:` line and listed in the scoreboard, with the twin's activity queue rows added to its differences.
 
 **Recovery takes time, and the twin's footprint shows it.** A step whose worker was stopped mid-activity keeps its claim on the queue row until the activity's timeout runs out (the engine's default is 60 seconds), and only then runs again. So a twin can come out identical and still take a minute longer, and the grace is 75 seconds by default.
 

@@ -472,9 +472,12 @@ async fn start_engine(
             .with_poll_interval(Duration::from_millis(1), Duration::from_millis(10))
             .with_timeout_check_interval(Duration::from_secs(1))
             .with_secrets(secrets);
-        run_orchestrator(events, queue, subscriptions, config, Some(shutdown))
-            .await
-            .expect("orchestrator");
+        // An error stops the orchestrator; say so, since twins then hang.
+        // Shutting the runtime down can also end it this way.
+        if let Err(e) = run_orchestrator(events, queue, subscriptions, config, Some(shutdown)).await
+        {
+            eprintln!("machine shop: the orchestrator stopped with an error: {e}");
+        }
         // No connection may outlive the test, or its database can't be
         // dropped
         let _ = tokio::time::timeout(Duration::from_secs(5), pool.close()).await;
@@ -523,6 +526,10 @@ async fn wait_healthy(http: &reqwest::Client, url: &str) {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
+
+/// An activity queue row: key, round, status, retries, retries allowed,
+/// and when it was claimed
+type QueueRow = (String, Option<i32>, String, i32, i32, Option<String>);
 
 /// What the database held once the plug was pulled
 struct Pulled {
@@ -699,6 +706,28 @@ impl Engine {
         rows.into_iter()
             .filter(|(_, status)| is_settled(status))
             .map(|(id, _)| id)
+            .collect()
+    }
+
+    /// The workflow's activity queue rows, as readable lines
+    async fn queue_rows(&self, id: Uuid) -> Vec<String> {
+        let rows: Vec<QueueRow> = sqlx::query_as(
+            "SELECT activity_key, iteration, status::text, retry_count, max_retries,
+                    to_char(claimed_at, 'HH24:MI:SS.MS')
+             FROM activity_queue WHERE workflow_id = $1 ORDER BY created_at",
+        )
+        .bind(id)
+        .fetch_all(&self.pool)
+        .await
+        .expect("activity queue rows");
+        rows.into_iter()
+            .map(|(key, round, status, retries, max, claimed)| {
+                format!(
+                    "queue row {key} (round {}): {status}, {retries} of {max} retries{}",
+                    round.unwrap_or(0),
+                    claimed.map_or(String::new(), |c| format!(", claimed at {c}"))
+                )
+            })
             .collect()
     }
 
@@ -1390,8 +1419,9 @@ struct Plug {
 /// timeout checker runs every second
 const DEFAULT_PLUG_GRACE_SECONDS: u64 = 75;
 
-/// A twin of a run that never finished gets only this much past the card's
-/// timeout: enough for the restart
+/// A twin of a run that never finished stops waiting for the workflow to
+/// end this long past the card's timeout. It then has until the grace runs
+/// out to reach the same state as the uninterrupted run.
 const UNSETTLED_TWIN_SLACK: Duration = Duration::from_secs(5);
 
 /// `MACHINE_SHOP_PLUG`: off when unset, empty, `0`, `off`, `false` or `no`;
@@ -1583,24 +1613,44 @@ fn twin_timeout(run: &RunSpec, original: &Observed, plug: &Plug) -> Duration {
     Duration::from_secs(run.timeout_seconds) + extra
 }
 
-/// Read what the twin did and compare it with the uninterrupted run
+/// Read what the twin did and compare it with the uninterrupted run. A
+/// twin still running that doesn't match yet is read again until it does,
+/// it ends, or `settle_by` passes: a step whose worker was stopped
+/// mid-activity runs again only once its claim times out.
+#[allow(clippy::too_many_arguments)]
 async fn finish_twin(
     engine: &Engine,
     id: Uuid,
     run: &RunSpec,
-    (status, mut problems): (String, Vec<String>),
-    seconds: f64,
+    (status, signal_problems): (String, Vec<String>),
+    started: Instant,
+    settle_by: Instant,
     original: &Observed,
     plug: Option<PlugPoint>,
 ) -> Twin {
-    let mut observed = check(engine, id, &status, run).await;
+    let mut status = status;
+    let (mut observed, mut differences) = loop {
+        let observed = check(engine, id, &status, run).await;
+        let differences = differences(original, &observed);
+        if differences.is_empty() || observed.settled || Instant::now() >= settle_by {
+            break (observed, differences);
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        status = engine.stored_status(id).await;
+    };
+    let seconds = started.elapsed().as_secs_f64();
+    let mut problems = signal_problems;
     problems.append(&mut observed.problems);
     observed.problems = problems;
     let footprint = engine.footprint(id).await;
-    let differences = differences(original, &observed);
     let mid_run = plug.as_ref().is_some_and(|p| !p.settled_before);
+    let outcome = twin_outcome(original, &observed, mid_run, &differences);
+    // What the queue holds is the first thing to look at in a finding
+    if matches!(outcome, TwinOutcome::Different | TwinOutcome::Hung) {
+        differences.extend(engine.queue_rows(id).await);
+    }
     Twin {
-        outcome: twin_outcome(original, &observed, mid_run, &differences),
+        outcome,
         differences,
         plug,
         seconds,
@@ -1643,7 +1693,6 @@ async fn twin_bench(
         None
     };
     let (driven, pulled) = tokio::join!(driving, watching);
-    let seconds = started.elapsed().as_secs_f64();
     let point = pulled.map(|p| PlugPoint {
         after_event: Some(k),
         events_at_plug: p.events.get(&id).copied().unwrap_or(0),
@@ -1651,7 +1700,18 @@ async fn twin_bench(
         down_seconds: p.down_seconds,
         settled_before: p.settled.contains(&id),
     });
-    Some(finish_twin(engine, id, run, driven, seconds, &original.observed, point).await)
+    let settle_by = started + Duration::from_secs(run.timeout_seconds) + plug.grace;
+    let twin = finish_twin(
+        engine,
+        id,
+        run,
+        driven,
+        started,
+        settle_by,
+        &original.observed,
+        point,
+    );
+    Some(twin.await)
 }
 
 /// Shop mode: start a twin of every run at once, and pull the plug once,
@@ -1704,7 +1764,7 @@ async fn twins_shop(
         async move {
             let r = drive(engine, t.id, t.run, t.deadline).await;
             running.set(running.get() - 1);
-            (r, t.started.elapsed().as_secs_f64())
+            r
         }
     }));
     let watching = async {
@@ -1719,8 +1779,9 @@ async fn twins_shop(
     };
     let (driven, pulled) = tokio::join!(driving, watching);
 
-    let mut out: Vec<Option<Twin>> = rows.iter().map(|_| None).collect();
-    for (t, (driven, seconds)) in twins.iter().zip(driven) {
+    // Read them all at once, so one twin catching up doesn't add to
+    // another's time
+    let finishing = twins.iter().zip(driven).map(|(t, driven)| {
         let original = &rows[t.row];
         let point = pulled.as_ref().map(|p| PlugPoint {
             after_event: None,
@@ -1729,16 +1790,22 @@ async fn twins_shop(
             down_seconds: p.down_seconds,
             settled_before: p.settled.contains(&t.id),
         });
-        let twin = finish_twin(
+        let settle_by = t.started + Duration::from_secs(t.run.timeout_seconds) + plug.grace;
+        finish_twin(
             engine,
             t.id,
             t.run,
             driven,
-            seconds,
+            t.started,
+            settle_by,
             &original.observed,
             point,
-        );
-        out[t.row] = Some(twin.await);
+        )
+    });
+    let finished = futures::future::join_all(finishing).await;
+    let mut out: Vec<Option<Twin>> = rows.iter().map(|_| None).collect();
+    for (t, twin) in twins.iter().zip(finished) {
+        out[t.row] = Some(twin);
     }
     out
 }
