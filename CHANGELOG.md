@@ -29,6 +29,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not a crash. Each run writes a results file, and two prototype views of the
   results (the Stack and the Shop Floor) are written next to it, to open from
   disk.
+- **The machine shop pulls the plug.** `MACHINE_SHOP_PLUG=on` gives every run
+  a twin: partway through, the engine's in-process tasks are aborted (which
+  drops their connections and rolls back their open transactions), the
+  engine restarts on the same database, and the twin's outcome is compared
+  with the uninterrupted run's: identical, different or hung. Each run also
+  records a footprint (wall time, workflow events, event payload bytes,
+  activity queue rows, and the engine's connections in bench mode) and a
+  host label (`MACHINE_SHOP_HOST`, or `<os>/<arch>`), in results format
+  `machine-shop-results/2`. Every card has an edge reading, and the Shop
+  Floor shows the edge readings, footprints, hosts and plug outcomes.
 
 ## [0.12.1] - 2026-11-17
 

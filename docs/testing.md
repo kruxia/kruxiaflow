@@ -52,7 +52,14 @@ Kruxia Flow uses a unified test script at `scripts/test.sh` for all testing need
 cargo test -p kruxiaflow-api --test machine_shop -- --nocapture
 ```
 
-Each run also writes a results file and two views of the results, `stack.html` and `floor.html`, under `target/tmp/machine-shop/`. The card format, the modes, the results file and the views are described in [`machines/README.md`](../machines/README.md).
+Each run also writes a results file and two views of the results, `stack.html` and `floor.html`, under `target/tmp/machine-shop/`. Each run records a footprint (wall time, workflow events, event payload bytes, activity queue rows and, in bench mode, the engine's connections) and the host it ran on (`MACHINE_SHOP_HOST`, or `<os>/<arch>`).
+
+```bash
+# Give every run a twin that has the plug pulled partway through
+MACHINE_SHOP_PLUG=on cargo test -p kruxiaflow-api --test machine_shop -- --nocapture
+```
+
+Pulling the plug aborts the engine's in-process tasks, which drops their connections and rolls back their open transactions; it is not a process kill and not a database power loss. The twin runs to the end on a restarted engine, and its outcome is compared with the uninterrupted run's. The card format, the modes, plug mode, the results file and the views are described in [`machines/README.md`](../machines/README.md).
 
 ### Debugging Tests
 
