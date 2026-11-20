@@ -17,14 +17,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     succeeded, the activity with the bad template never ran or failed, and the
     workflow stayed `running` indefinitely.
   - **Now:** that activity fails with
-    `TEMPLATE_ERROR: Failed to resolve templates in activity <key>: …`, through
-    a terminal `ActivityFailed` like any other failure. Its `status == 'failed'`
+    `TEMPLATE_ERROR: Failed to resolve templates in activity <key>: …` (for
+    `delay` / `scheduled_for`, `TEMPLATE_ERROR: Failed to resolve delay
+    template for activity <key>: …` and similar), through a terminal
+    `ActivityFailed` like any other failure. Its `status == 'failed'`
     branches run, its other dependents are skipped, and the workflow fails.
   - **Conditions too:** a `conditions:` template on a dependency that can't
     be evaluated fails the activity that carries it in the same way, instead
     of poisoning the upstream completion. That includes a condition that only
     becomes evaluable when its dependency is skipped, such as a condition on
-    a skipped step's result.
+    a skipped step's result. A condition is evaluated only once every
+    dependency of its activity is terminal, so a condition that reads a
+    sibling dependency doesn't fail when that sibling completes last.
+  - **Retries too:** an LLM activity's retry resolves its parameters again
+    for the budget check. If they no longer resolve (a secret removed, for
+    example), the queued retry is cancelled and the activity fails with
+    `TEMPLATE_ERROR`, instead of poisoning the failure event.
   - **No misleading event:** no `ActivityScheduled` is recorded for an
     activity that failed this way, since it was never queued.
 - **Skipped activities cascade (#19).** Skipping was a single pass over the

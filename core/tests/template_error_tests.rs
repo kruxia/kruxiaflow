@@ -2,12 +2,8 @@
 // Template errors fail the activity whose template is bad (#19 [template-hang])
 //
 // A template that cannot be resolved (here: a reference to a step that has
-// not run, under strict undefined) used to be returned as an error from
-// processing the *upstream* step's completion event. The event was retried
-// five times, declared poison, and the upstream step (which had succeeded)
-// was marked failed; the step with the bad template never ran or failed, a
-// single-pass skip left later steps NotScheduled, and the workflow stayed
-// running forever.
+// not run, under strict undefined) fails its own activity, not the upstream
+// completion event, and skips cascade so the workflow ends.
 // ============================================================================
 
 mod common;
@@ -194,8 +190,7 @@ activities:
     );
 }
 
-/// Skips cascade down a chain in one go: before, only the first dependent was
-/// skipped and the rest stayed NotScheduled, so the workflow never completed
+/// Skips cascade down a chain in one pass
 #[sqlx::test(migrations = "../migrations")]
 async fn test_skips_cascade_down_a_chain(pool: PgPool) {
     let state = run_workflow(
@@ -320,12 +315,13 @@ activities:
 
     assert_eq!(status(&state, "first"), WorkflowActivityStatus::Completed);
     assert_eq!(status(&state, "wait"), WorkflowActivityStatus::Failed);
+    let error = state.activities["wait"]
+        .error
+        .as_deref()
+        .unwrap_or_default();
     assert!(
-        state.activities["wait"]
-            .error
-            .as_deref()
-            .unwrap_or_default()
-            .starts_with("TEMPLATE_ERROR:")
+        error.starts_with("TEMPLATE_ERROR: Failed to resolve delay template for activity wait:"),
+        "one prefix, naming the activity: {error}"
     );
     assert_eq!(status(&state, "never"), WorkflowActivityStatus::Skipped);
     assert_eq!(state.status, WorkflowStatus::Failed);
@@ -524,4 +520,154 @@ activities:
     assert!(error.starts_with("TEMPLATE_ERROR:"), "{error}");
     assert_eq!(state.activities["head"].iteration, 2, "failed in round 2");
     assert_eq!(state.status, WorkflowStatus::Failed);
+}
+
+/// A condition may read a sibling dependency that completes later. It is
+/// evaluated only once every dependency is terminal, so the order the
+/// dependencies complete in does not matter: here `a` completes a round
+/// before `b`, and `target` runs once `b` has.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_condition_on_a_later_sibling_dependency_waits_for_it(pool: PgPool) {
+    let state = run_workflow(
+        &pool,
+        r#"
+name: condition_on_a_later_sibling
+activities:
+  - key: a
+    worker: test
+    activity_name: echo
+  - key: slow
+    worker: test
+    activity_name: echo
+  - key: b
+    worker: test
+    activity_name: echo
+    depends_on: [slow]
+  - key: target
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: a
+        conditions: ["{{ b.result.value == 1 }}"]
+      - b
+"#,
+    )
+    .await;
+
+    assert_eq!(
+        status(&state, "target"),
+        WorkflowActivityStatus::Completed,
+        "error: {:?}",
+        state.activities["target"].error
+    );
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// The budget check on an LLM activity's retry resolves its parameters
+/// again. If they no longer resolve (here the secret they use is gone, as
+/// after an orchestrator restart without it), the activity fails with
+/// `TEMPLATE_ERROR` and its queued retry is cancelled; the failure event
+/// itself processes cleanly.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_retry_whose_template_no_longer_resolves_fails_the_activity(pool: PgPool) {
+    let definition = WorkflowDefinition::from_yaml(
+        r#"
+name: retry_template_error
+activities:
+  - key: ask
+    worker: test
+    activity_name: llm_prompt
+    parameters:
+      prompt: "Token {{ SECRET.token }}"
+"#,
+    )
+    .expect("valid definition");
+    let definition_id = insert_workflow_definition(&pool, &definition).await;
+    let workflow_id = Uuid::now_v7();
+
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
+    let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
+        Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
+    let mut with_secret = OrchestratorConfig::new(pool.clone());
+    with_secret
+        .secrets
+        .insert("token".to_string(), "t0ken".to_string());
+    let without_secret = OrchestratorConfig::new(pool.clone());
+
+    let process_all = |config: &OrchestratorConfig| {
+        let event_source = event_source.clone();
+        let activity_queue = activity_queue.clone();
+        let subscription_service = subscription_service.clone();
+        let config = config.clone();
+        async move {
+            loop {
+                let events = event_source.poll("orchestrator").await.unwrap();
+                if events.is_empty() {
+                    break;
+                }
+                for event in events {
+                    kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
+                        &event,
+                        &event_source,
+                        &activity_queue,
+                        &subscription_service,
+                        &config,
+                    )
+                    .await
+                    .unwrap_or_else(|e| {
+                        panic!("{:?} must process cleanly, got: {e}", event.event_type)
+                    });
+                    event_source
+                        .update_position("orchestrator", event.cursor())
+                        .await
+                        .unwrap();
+                }
+            }
+        }
+    };
+
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id,
+            event_type: WorkflowEventType::WorkflowCreated,
+            activity_key: None,
+            payload: json!({
+                "definition_name": definition.name,
+                "workflow_definition_id": definition_id,
+            }),
+            iteration: None,
+        })
+        .await
+        .unwrap();
+    process_all(&with_secret).await;
+
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id,
+            event_type: WorkflowEventType::ActivityFailed,
+            activity_key: Some("ask".to_string()),
+            payload: json!({"error_message": "rate limited", "will_retry": true, "attempt": 1}),
+            iteration: None,
+        })
+        .await
+        .unwrap();
+    process_all(&without_secret).await;
+
+    let mut tx = pool.begin().await.unwrap();
+    let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(status(&state, "ask"), WorkflowActivityStatus::Failed);
+    let error = state.activities["ask"].error.as_deref().unwrap_or_default();
+    assert!(error.starts_with("TEMPLATE_ERROR:"), "{error}");
+    assert_eq!(state.status, WorkflowStatus::Failed);
+    let queued: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM activity_queue WHERE workflow_id = $1 AND status = 'pending'",
+    )
+    .bind(workflow_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(queued, 0, "the queued retry is cancelled");
 }
