@@ -1,8 +1,8 @@
 use super::{
     ConsumerPacing, OrchestratorConfig, Result,
     dependency_evaluator::{
-        find_ready_activities, find_skipped_activities, is_workflow_complete, is_workflow_failed,
-        status_to_string,
+        find_ready_or_unresolvable_activities, find_skipped_or_unresolvable_activities,
+        is_workflow_complete, is_workflow_failed, status_to_string,
     },
     window::InFlightWindow,
     workflow_state::{
@@ -731,7 +731,10 @@ fn build_template_context(
 /// activities, cancelling the queued attempt if the budget is exhausted; on
 /// terminal failure it returns false so the caller applies the failure to state
 /// and the workflow can complete as failed without any restart.
-/// Returns true if the activity will be retried, false if it fails permanently.
+/// A retry whose parameters no longer resolve is cancelled and the activity
+/// fails with `TEMPLATE_ERROR` through a new terminal `ActivityFailed`.
+/// Returns true if this event is fully handled (the activity will be retried,
+/// or its template failure is in flight), false if it fails permanently.
 async fn handle_activity_failed(
     state: &mut super::workflow_state::WorkflowState,
     definition: &crate::workflow::WorkflowDefinition,
@@ -834,15 +837,31 @@ async fn handle_activity_failed(
         let resolved_params = match resolve_template_value(&params_value, &template_context) {
             Ok(resolved) => resolved,
             Err(e) => {
-                tracing::error!(
-                    "Template resolution failed for activity retry {}: {}",
-                    activity_key,
-                    e
-                );
-                return Err(super::OrchestratorError::TemplateFailed(format!(
-                    "Failed to resolve templates in activity {}: {}",
-                    activity_key, e
-                )));
+                // The budget cannot be checked: cancel the retry and fail the
+                // activity with the template error, not this event (#19).
+                // A worker may have claimed the retry before this cancel; the
+                // outcome then depends on which event is processed first:
+                // - the TEMPLATE_ERROR failure published here: the activity
+                //   fails, and the retry's completion or failure is ignored
+                //   (if that failure requeued another attempt, the row stays
+                //   claimable and its result is ignored too);
+                // - the retry's completion: the activity completes with its
+                //   outputs, and the TEMPLATE_ERROR failure is ignored;
+                // - the retry's failure: the activity fails. A retryable one
+                //   comes back to this branch, which withdraws the attempt the
+                //   queue requeued (if this cancel has not already) and
+                //   publishes this failure again; the event dedup drops the copy.
+                activity_queue
+                    .cancel_pending(state.workflow_id, activity_key, event.iteration)
+                    .await?;
+                fail_unresolvable_activity(
+                    state,
+                    activity_def,
+                    &format!("Failed to resolve templates in activity {activity_key}: {e}"),
+                    event_source,
+                )
+                .await?;
+                return Ok(true); // Handled: the terminal failure is in flight
             }
         };
 
@@ -1034,7 +1053,8 @@ async fn handle_activity_failed(
 ///    - `{{INPUT.topic}}` → actual input value
 ///    - `{{search.results | last}}` → latest iteration result
 ///    - `{{ACTIVITY.iteration}}` → current iteration number
-/// 3. Handle template errors → fail workflow
+/// 3. A template error fails that activity (terminal `ActivityFailed`,
+///    `TEMPLATE_ERROR`), not the event; see `fail_unresolvable_activity`
 ///
 /// #### 9b. Budget Enrichment (LLM Activities Only)
 /// For `llm_prompt` and `embedding` activities:
@@ -1401,7 +1421,8 @@ pub async fn process_workflow_event(
         .await?;
 
         if retry_handled {
-            // Activity will be retried - save state and exit early
+            // Retry scheduled, or a template failure in flight - save state
+            // and exit early
             tracing::trace!(
                 "Activity retry scheduled in {:?} for workflow {}",
                 retry_start.elapsed(),
@@ -1627,8 +1648,19 @@ pub async fn process_workflow_event(
                 .unwrap_or(&0)
         );
 
-        find_ready_activities(&definition, &state)?
+        find_ready_or_unresolvable_activities(&definition, &state)?
     };
+    let (ready_activities, unresolvable_activities) = ready_activities;
+
+    // Ready activities failed below for a template error (#19): not
+    // scheduled, and no ActivityScheduled is published for them
+    let mut template_failed: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // Dependency conditions that cannot be evaluated fail their activity, not
+    // this event (#19)
+    for (activity, error) in &unresolvable_activities {
+        fail_unresolvable_activity(&mut state, activity, error, event_source).await?;
+    }
     tracing::trace!(
         "Dependencies evaluated in {:?} for workflow {} ({} ready)",
         eval_start.elapsed(),
@@ -1740,11 +1772,19 @@ pub async fn process_workflow_event(
                         resolved
                     }
                     Err(e) => {
-                        tracing::error!("Template resolution failed for activity {}: {}", a.key, e);
-                        return Err(super::OrchestratorError::TemplateFailed(format!(
-                            "Failed to resolve templates in activity {}: {}",
-                            a.key, e
-                        )));
+                        // This activity fails, not the event being processed
+                        // (#19): retrying cannot change a template, and the
+                        // upstream activity whose completion is being handled
+                        // did succeed
+                        fail_unresolvable_activity(
+                            &mut state,
+                            a,
+                            &format!("Failed to resolve templates in activity {}: {}", a.key, e),
+                            event_source,
+                        )
+                        .await?;
+                        template_failed.insert(a.key.clone());
+                        continue;
                     }
                 };
 
@@ -1845,8 +1885,17 @@ pub async fn process_workflow_event(
                     continue;
                 }
 
-                // Compute scheduled_for based on activity settings
-                let scheduled_for = compute_scheduled_for(a, &template_context, iteration)?;
+                // Compute scheduled_for based on activity settings (a `delay`
+                // or `scheduled_for` template can fail like parameters, #19)
+                let scheduled_for = match compute_scheduled_for(a, &template_context, iteration) {
+                    Ok(scheduled_for) => scheduled_for,
+                    Err(super::OrchestratorError::TemplateFailed(error)) => {
+                        fail_unresolvable_activity(&mut state, a, &error, event_source).await?;
+                        template_failed.insert(a.key.clone());
+                        continue;
+                    }
+                    Err(other) => return Err(other),
+                };
 
                 // Get signal_data from activity state if present
                 let signal_data = state
@@ -1894,6 +1943,10 @@ pub async fn process_workflow_event(
             // This prevents race condition where activity completes before ActivityScheduled event is processed
             // (Only for activities that were actually scheduled, not those entering Waiting state)
             for activity in &ready_activities {
+                // Failed for a template error: its failure is already in flight
+                if template_failed.contains(&activity.key) {
+                    continue;
+                }
                 if let Some(activity_state) = state.activities.get_mut(&activity.key) {
                     // Skip activities that entered Waiting state (already handled above)
                     if activity_state.status == WorkflowActivityStatus::Waiting {
@@ -1942,6 +1995,10 @@ pub async fn process_workflow_event(
             // Publish ActivityScheduled events (for external observers)
             // Note: Orchestrator skips these events to avoid duplicate processing
             for activity in &ready_activities {
+                // Never queued: failed for a template error (#19)
+                if template_failed.contains(&activity.key) {
+                    continue;
+                }
                 // Skip activities that entered Waiting state (they got ActivityWaiting events instead)
                 if let Some(activity_state) = state.activities.get(&activity.key) {
                     if activity_state.status == WorkflowActivityStatus::Waiting {
@@ -1994,9 +2051,20 @@ pub async fn process_workflow_event(
         );
     }
 
-    // 5.5. Mark activities as Skipped if they can never be scheduled
-    let skipped_activities = find_skipped_activities(&definition, &state)?;
-    if !skipped_activities.is_empty() {
+    // 5.5. Mark activities as Skipped if they can never be scheduled. Repeat
+    // until nothing changes: skipping one activity can make its dependents
+    // skippable (#19). A skip can also make a dependent's condition
+    // evaluable for the first time, and unresolvable (a condition on a
+    // skipped step's result): that activity is failed, like in step 4
+    loop {
+        let (skipped_activities, unresolvable_activities) =
+            find_skipped_or_unresolvable_activities(&definition, &state)?;
+        for (activity, error) in &unresolvable_activities {
+            fail_unresolvable_activity(&mut state, activity, error, event_source).await?;
+        }
+        if skipped_activities.is_empty() {
+            break;
+        }
         tracing::debug!(
             "Marking {} activities as skipped for workflow {}: [{}]",
             skipped_activities.len(),
@@ -2737,6 +2805,65 @@ async fn record_reported_activity_cost(
     );
 
     Ok(totals)
+}
+
+/// Fail an activity whose templates (parameters, `delay`, `scheduled_for`)
+/// cannot be resolved, instead of failing the event being processed (#19).
+///
+/// A template error is deterministic: retrying the event cannot fix it, and
+/// the event being processed (usually an upstream activity's completion) did
+/// succeed.
+///
+/// Instead the failure goes the way a worker's failure does: the activity is
+/// marked `Pending` (a failure is in flight, so nothing schedules it again or
+/// skips it meanwhile) and a terminal `ActivityFailed` is published. When
+/// that event is processed the activity becomes `Failed` with the template
+/// error as its message, and the normal failure handling applies: dependents
+/// are evaluated (a `status == 'failed'` branch runs, others are skipped) and
+/// the workflow fails if nothing else is left to run.
+async fn fail_unresolvable_activity(
+    state: &mut super::workflow_state::WorkflowState,
+    activity_def: &crate::workflow::ActivityDefinition,
+    error: &str,
+    event_source: &Arc<dyn EventSource>,
+) -> Result<()> {
+    let activity_key = &activity_def.key;
+    let workflow_id = state.workflow_id;
+    let activity_state = state.activities.get_mut(activity_key).ok_or_else(|| {
+        super::OrchestratorError::ActivityNotFound(format!(
+            "Activity state not found: {}",
+            activity_key
+        ))
+    })?;
+    let message = format!("TEMPLATE_ERROR: {error}");
+    tracing::error!(
+        workflow_id = %workflow_id,
+        activity_key = %activity_key,
+        error = %error,
+        "Template resolution failed; failing the activity"
+    );
+    activity_state.status = WorkflowActivityStatus::Pending;
+
+    // For looping activities, include iteration to avoid unique constraint violation
+    let iteration = if activity_def.is_loop_activity {
+        Some(activity_state.iteration as i32)
+    } else {
+        None
+    };
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id,
+            event_type: WorkflowEventType::ActivityFailed,
+            activity_key: Some(activity_key.clone()),
+            payload: json!({
+                "error": message,
+                "error_code": "TEMPLATE_ERROR",
+                "will_retry": false,
+            }),
+            iteration,
+        })
+        .await?;
+    Ok(())
 }
 
 /// Publish a failure event when a poison message is detected
