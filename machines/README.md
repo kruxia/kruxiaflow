@@ -40,14 +40,40 @@ There are two views of the same results, built to compare before choosing one. N
 
 | Page         | What it is                                                                                                                                                                                                                                                                                                                                                  |
 |--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `stack.html` | **The Stack:** one card per machine, in homage to HyperCard. A 1-bit look, a pixel picture and pixel title for each machine, its story and functions, and a stamp for each run in each results set. Arrow keys flip cards; Find searches the stack; a compare card lists runs whose result changed.                                                         |
+| `stack.html` | **The Stack:** one card per machine, in homage to HyperCard. A 1-bit look, a pixel picture and pixel title for each machine, its story and functions, and a stamp for each run in each results set. Datasheet, ladder and timing sheets too (below). Arrow keys flip cards; Find searches the stack; a compare card lists runs whose result changed.        |
 | `floor.html` | **The Shop Floor:** every machine on one page, each drawn as a schematic of its own workflow, with every step lit by what it did: completed, skipped, never ran or failed. A red mark shows a step that didn't do what the card expects; a blue mark shows a step that changed since the results set you compare with. Uses the engine dashboard's colours. |
+
+#### The Stack's sheets for engineers
+
+Each machine card has four sheets, picked with the buttons at its top; the arrow keys keep the sheet while they flip machines, and the URL names it (`stack.html#thermostat/ladder`). A legend card, after the compare card, explains every symbol.
+
+| Sheet     | What it shows                                                                                                                                                                                                                                                          |
+|-----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Card      | The story, functions, runs and notes                                                                                                                                                                                                                                   |
+| Datasheet | Features (the card's functions), a pinout, absolute maximum ratings, min/typ/max characteristics over every run in every results set, and one run's timing diagram                                                                                                     |
+| Ladder    | One rung per step, drawn from `workflow.yaml`                                                                                                                                                                                                                          |
+| Timing    | A logic-analyzer trace per run of one results set: a channel per step, high from `ActivityScheduled` to `ActivityCompleted` or `ActivityFailed`, dashed mid-level while it waits for a signal, an active-low `/INT` line for signals taken, and a time axis in ms or s |
+
+The ladder follows the engine's dependency rules (`docs/conditional-branching.md`, `docs/loops-guide.md`), so it shows what the workflow should do, and the timing diagram what it did:
+
+- **A `depends_on` entry with no conditions** is a contact, closed once its step completes. Contacts in series all have to close, so a fan-in is an AND.
+- **An entry with conditions** is a "finished" contact in series (completed, failed or skipped), and its conditions sit on a branch of their own. The engine runs a step when any entry applies, so those branches are in parallel (OR). Beside an unconditional entry they don't gate the step, and a shunt across them shows it.
+- **A loop's back-edge** (the `depends_on` entry that closes the loop, found by walking `depends_on` from the steps with none, in file order) is a seal-in branch, in parallel with the way in, which carries a first-round contact. A loop step's rounds pass through a CTU counter preset to `iteration_limit`, or the engine's default of 100.
+- **`settings.delay`** is an on-delay (TON) in series.
+- **A signal wait** drives a TON timer preset to `timeout_seconds`, and the coil through the signal's interrupt contact; the timer's done contact drives what `on_timeout` says.
+
+The pinout's inputs are the `INPUT` fields and secrets the workflow reads, and each signal it waits for, as an interrupt pin. Its outputs are the declared outputs of the steps nothing depends on. The ratings are the limits the workflow sets: `iteration_limit`, signal timeouts, activity timeouts, retry attempts, delays and budgets.
+
+Every sheet carries a drafting title block: a drawing number that stays with the machine (`MS-` and five digits of a hash of its directory name), the revision (the tree label and commit of the results set shown), drawn by (the Stack, from the workflow), checked by (that results set) and its date. The sheets show the newest results set that ran the machine, or the one picked on the datasheet or timing sheet. A results set without timelines says "no timeline in this result set".
+
+#### The results file
 
 The results file (`machine-shop-results/1`) is the contract between runners and views:
 
 - `runner`, `mode`, `engine_version`, `tree` (`label`, `branch`, `commit`), `started_at`, `seconds`
-- `runs`: one entry per run, with `machine`, `run`, `result` (`works`, `broken`, `known_broken` or `fixed`), `trap` (a trap's first issue, or null), `trap_issues` (all of them, or empty), `seconds`, the workflow's final `status` (`not_deployed` when the engine rejected the definition), `steps` (each step's `status` and `runs`), and `problems`
-- Readers treat a file without `trap_issues` as having `[trap]`, so older results files still read
+- `runs`: one entry per run, with `machine`, `run`, `result` (`works`, `broken`, `known_broken` or `fixed`), `trap` (a trap's first issue, or null), `trap_issues` (all of them, or empty), `seconds`, the workflow's final `status` (`not_deployed` when the engine rejected the definition), `steps` (each step's `status` and `runs`), `problems`, and optionally `timeline`
+- `timeline`: the run's events from `workflow_events`, in order, each with `ms` (milliseconds after the workflow's `created_at`, from the event's stored `timestamp`), `event` (the engine's event type, such as `ActivityScheduled`), and when the event has them: `step`, `round` (the event's `iteration`), `attempt`, `reason` (`timeout` for a signal wait that timed out, or a failure's `error_code`), `on_timeout` and `will_retry`. A run whose workflow wasn't deployed has none
+- Readers treat a file without `trap_issues` as having `[trap]`, and a run without `timeline` as having no timeline, so older results files still read
 
 Each run ends as one of four results:
 
