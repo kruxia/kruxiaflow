@@ -12,6 +12,10 @@
 //! event in the test's database is deliverable, then reads through the real
 //! `PostgresEventSource`. Tests of the delivery predicate itself use
 //! `PostgresEventSource` directly.
+//!
+//! Waiting on other tests' transactions is only safe if those transactions
+//! always end, and with the pool `sqlx::test` hands out they need not: every
+//! test that uses this module first replaces it with [`unshared_pool`].
 #![allow(dead_code)]
 
 use async_trait::async_trait;
@@ -20,6 +24,7 @@ use kruxiaflow_core::events::{
     WorkflowEvent,
 };
 use sqlx::PgPool;
+use sqlx::postgres::PgPoolOptions;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
@@ -27,9 +32,59 @@ use uuid::Uuid;
 /// its own assertions, with the stall visible in the elapsed time)
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// A pool for this test alone, to the same database and of the same size as
+/// the one `sqlx::test` gave it, but outside the test binary's shared
+/// connection budget. Tests that read events, run orchestrator handlers, or
+/// hold transactions call it first, as `let pool = unshared_pool(&pool).await`.
+///
+/// **Why:** every `sqlx::test` pool (5 connections) draws its connections from
+/// one parent pool of 20 per test binary (`MASTER_POOL` in sqlx-postgres), and
+/// keeps each slot it has drawn until the test ends. An orchestrator handler
+/// holds its transaction, with an xid once it has written, while it takes a
+/// second connection to publish (`OrchestratorConfig::effective_partitions`
+/// sizes the partitions for this, but only against the test's own pool). With
+/// enough tests running at once, the binary deadlocks until a timeout:
+///
+/// - test A's handler has written (`INSERT INTO workflows`) and waits for a
+///   connection, while other tests hold all 20 slots;
+/// - those tests are in [`settle_events`], waiting for A's xid to leave the
+///   instance's horizon, and keep their slots while they wait;
+/// - nothing moves until a [`SETTLE_TIMEOUT`] expires and its test fails on an
+///   empty poll (seen in the loop tests: 4 handlers idle in transaction for
+///   10 s, 5 tests timing out).
+///
+/// A pool of its own has no parent, so a test's connections wait only on that
+/// test. The waits cannot be narrowed to the test's own database instead,
+/// because the production poll's horizon is instance-wide (see
+/// [`settle_events`]). Reserving a test's 5 slots up front does not work
+/// either: `sqlx::test` has already drawn one slot per test before the test
+/// body runs, so tests queued for a reservation hold the slots the reserving
+/// test waits for.
+///
+/// The cost is connections: up to 5 per running test on top of the idle one
+/// `sqlx::test` keeps, so the server needs `max_connections` of at least
+/// 6 x test threads plus 20.
+pub async fn unshared_pool(pool: &PgPool) -> PgPool {
+    PgPoolOptions::new()
+        .max_connections(pool.options().get_max_connections())
+        .idle_timeout(Some(Duration::from_secs(1)))
+        .connect_with((*pool.connect_options()).clone())
+        .await
+        .expect("connect the test's own pool")
+}
+
 /// Wait until no committed event in this database belongs to a transaction
 /// at or above the instance's xmin, i.e. until a poll can return every
 /// committed event.
+///
+/// The horizon is deliberately the instance-wide one, the predicate the poll
+/// that follows uses (`tx < pg_snapshot_xmin(pg_current_snapshot())`).
+/// **Why not only this database's transactions:** waiting less than the poll
+/// does cannot make the poll return more. Settling would return while another
+/// database's transaction still holds the horizon, and the real poll would
+/// then come back empty: the same failure as a timeout, only sooner. What keeps
+/// this wait short is that no test holds a writing transaction for long, which
+/// [`unshared_pool`] makes sure of.
 pub async fn settle_events(pool: &PgPool) {
     let start = Instant::now();
     while start.elapsed() < SETTLE_TIMEOUT {

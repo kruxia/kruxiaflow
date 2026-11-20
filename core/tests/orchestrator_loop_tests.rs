@@ -39,6 +39,7 @@ async fn insert_workflow_definition(pool: &PgPool, definition: &WorkflowDefiniti
 /// Pattern: process -> check -> loop back if not done
 #[sqlx::test(migrations = "../migrations")]
 async fn test_simple_loop_workflow(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create a loop workflow definition (manually validated with metadata set)
     let definition = WorkflowDefinition {
         name: "simple_loop".to_string(),
@@ -254,6 +255,7 @@ async fn test_simple_loop_workflow(pool: PgPool) {
 /// Test iteration limit enforcement
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_max_iterations_enforced(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create a loop workflow with iteration_limit = 2
     let definition = WorkflowDefinition {
         name: "limited_loop".to_string(),
@@ -426,6 +428,7 @@ async fn test_loop_max_iterations_enforced(pool: PgPool) {
 /// Test iteration counter for non-iteration_scoped loops
 #[sqlx::test(migrations = "../migrations")]
 async fn test_iteration_counter_without_scoping(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create a loop workflow without iteration_scoped
     let definition = WorkflowDefinition {
         name: "non_scoped_loop".to_string(),
@@ -557,6 +560,7 @@ async fn test_iteration_counter_without_scoping(pool: PgPool) {
 /// Test budget accumulation across iterations
 #[sqlx::test(migrations = "../migrations")]
 async fn test_iteration_budget_accumulation(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create a loop workflow with budget limit that spans multiple iterations
     let definition = WorkflowDefinition {
         name: "budget_loop".to_string(),
@@ -762,6 +766,7 @@ async fn test_iteration_budget_accumulation(pool: PgPool) {
 /// Test Pattern 1: Fixed iterations only (no condition)
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_pattern_1_fixed_iterations(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create a loop with only iteration_limit (no condition on back-edge)
     let definition = WorkflowDefinition {
         name: "fixed_iterations".to_string(),
@@ -906,6 +911,7 @@ async fn test_loop_pattern_1_fixed_iterations(pool: PgPool) {
 /// Test Pattern 2: Condition only (with default limit)
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_pattern_2_condition_only(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create a loop with only condition (no explicit iteration_limit)
     // Should use DEFAULT_MAX_ITERATIONS = 100
     let definition = WorkflowDefinition {
