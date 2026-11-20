@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The MCP `send_workflow_signal` tool delivers signals the way the REST
+  endpoint does** ([#39](https://github.com/kruxia/kruxiaflow/issues/39)). It
+  published the caller's `data` as the whole `ActivitySignaled` payload, so
+  the data never reached the step (`{{SIGNAL.*}}` was null) and keys in it
+  were read as event fields: `{"on_timeout": "skip"}` skipped the step. A
+  failed publish was reported as success, although nothing else delivers the
+  signal. The REST endpoint and the tool now share one function,
+  `deliver_signal`, which validates the request, marks the subscription and
+  publishes `{"event_name", "signal_data"}`, and fails when the publish
+  fails. The tool's result now has `"signaled": true/false`, drops the
+  per-activity `event_published` flag, and its description no longer claims
+  REST has a workflow-level signal.
+
 ## [0.12.1] - 2026-11-17
 
 ### Fixed

@@ -157,9 +157,19 @@ publishes the port on `127.0.0.1` only).
 
 | Tool                     | Purpose                                                       |
 |--------------------------|---------------------------------------------------------------|
-| `send_workflow_signal`   | Deliver a signal (whole workflow, or one activity)            |
+| `send_workflow_signal`   | Signal one waiting activity, or every one waiting for a name  |
 | `list_waiting_workflows` | Find workflows blocked on signals (approval gates)            |
 | `invalidate_cache`       | Drop cached activity results by key or pattern                |
+
+`send_workflow_signal` with an `activity_key` does exactly what
+`POST /api/v1/workflows/{workflow_id}/signal` does, through the same code
+path: the activity must be waiting for `signal_name` and not yet signaled,
+its subscription is marked signaled, and the `ActivitySignaled` event carries
+`data` as the step's signal data (`{{SIGNAL.*}}`). A second signal for the
+same wait is refused (`"signaled": false`, with `isError` set). Without an
+`activity_key`, the tool signals every activity in the workflow waiting for
+`signal_name`, each one the same way; REST has no such mode. If the event
+can't be published, the tool returns an error instead of reporting success.
 
 `cancel_workflow` is intentionally absent until the engine gains a cancel
 endpoint.
