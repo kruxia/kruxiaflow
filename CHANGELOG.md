@@ -23,7 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each round's after the first as a duplicate, while the API still answered
   `"signaled": true`; the workflow then waited for good. Subscriptions now
   record the loop round (migration `20261119000001` adds
-  `activity_event_subscriptions.iteration`) and their events carry it.
+  `activity_event_subscriptions.iteration`); the events the signal endpoint
+  and the expiry checker publish carry it, and the orchestrator acts only on
+  a signal for the round that is waiting.
 
 ## [0.12.1] - 2026-11-17
 

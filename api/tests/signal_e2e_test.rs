@@ -129,7 +129,8 @@ impl Stack {
                 activity_queue,
                 subscriptions,
                 OrchestratorConfig::new(orch_pool)
-                    .with_poll_interval(Duration::from_millis(1), Duration::from_millis(10)),
+                    .with_poll_interval(Duration::from_millis(1), Duration::from_millis(10))
+                    .with_timeout_check_interval(Duration::from_millis(100)),
                 Some(orch_shutdown),
             )
             .await
@@ -380,14 +381,14 @@ activities:
 
 /// The loop head waits for a signal each round
 #[sqlx::test(migrations = "../migrations")]
-#[ignore = "needs #18 (fix/loop-tail-rerun): on main the step closing a two-step loop re-runs every pass"]
+#[ignore = "needs #18"]
 async fn test_signal_in_loop_head(pool: PgPool) {
     signal_in_loop(pool, "head").await;
 }
 
 /// The step that closes the loop waits for a signal each round
 #[sqlx::test(migrations = "../migrations")]
-#[ignore = "needs #18 (fix/loop-tail-rerun): on main the step closing a two-step loop re-runs every pass"]
+#[ignore = "needs #18"]
 async fn test_signal_in_loop_tail(pool: PgPool) {
     signal_in_loop(pool, "tail").await;
 }
@@ -423,6 +424,48 @@ activities:
     let (status, activities, signals) = stack.drive(id, "poll").await;
     assert_eq!(status, "completed", "{activities:#}");
     assert_eq!(signals, 3, "{activities:#}");
+    assert_eq!(activities["poll"]["iteration"], 3, "{activities:#}");
+    stack.stop().await;
+}
+
+/// A self-loop whose wait times out and continues each round: three rounds
+/// with no signal
+#[sqlx::test(migrations = "../migrations")]
+async fn test_timeout_continue_in_self_loop(pool: PgPool) {
+    let stack = Stack::start(pool).await;
+    let get = http_get(&stack.api_url);
+    let id = stack
+        .submit(&format!(
+            r#"
+name: signal_timeout_self_loop
+activities:
+  - key: start
+{get}
+  - key: poll
+{get}
+    settings:
+      wait_for_signal:
+        event_name: go
+        timeout_seconds: 1
+        on_timeout: continue
+    iteration_limit: 3
+    depends_on:
+      - start
+      - activity_key: poll
+        conditions: ["{{{{ poll.status == 'completed' }}}}"]
+"#
+        ))
+        .await;
+
+    let start = Instant::now();
+    let (status, activities) = loop {
+        let (status, activities) = stack.workflow(id).await;
+        if status == "completed" || status == "failed" || start.elapsed() > TIMEOUT {
+            break (status, activities);
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    assert_eq!(status, "completed", "{activities:#}");
     assert_eq!(activities["poll"]["iteration"], 3, "{activities:#}");
     stack.stop().await;
 }

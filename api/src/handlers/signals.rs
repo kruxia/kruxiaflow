@@ -301,6 +301,13 @@ mod tests {
         ) -> kruxiaflow_core::subscription::Result<()> {
             Ok(())
         }
+
+        async fn delete_subscription_by_id(
+            &self,
+            _id: Uuid,
+        ) -> kruxiaflow_core::subscription::Result<()> {
+            Ok(())
+        }
     }
 
     fn setup_test_state_with_found_subscription(pool: PgPool) -> AppState {
@@ -415,6 +422,13 @@ mod tests {
             &self,
             _workflow_id: Uuid,
             _activity_key: &str,
+        ) -> kruxiaflow_core::subscription::Result<()> {
+            Ok(())
+        }
+
+        async fn delete_subscription_by_id(
+            &self,
+            _id: Uuid,
         ) -> kruxiaflow_core::subscription::Result<()> {
             Ok(())
         }

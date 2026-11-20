@@ -2871,12 +2871,16 @@ events are guarded no-ops.
 **Signal waits** (`settings.wait_for_signal`): scheduling such an activity
 creates one row in `activity_event_subscriptions` (one per activity, holding
 the loop round in `iteration`) and marks the activity `Waiting` instead of
-queueing it. The signal API marks the row and publishes `ActivitySignaled`
-stamped with the row's `iteration`; the expiry checker does the same for a
-timeout. The orchestrator handles an `ActivitySignaled` for a `Waiting`
-activity by deleting the row and queueing the activity in the same pass,
-without evaluating its dependencies again (they held when the wait began). In
-the next loop round the activity waits again, on a new row.
+queueing it. The REST signal endpoint marks the row and publishes
+`ActivitySignaled` stamped with the row's `iteration`; the expiry checker does
+the same for a timeout, then deletes the row by id (by then the next round may
+have its own row for the same activity). The orchestrator handles an
+`ActivitySignaled` for an activity that is `Waiting` in the round the event
+carries by deleting the row and queueing the activity in the same pass,
+without evaluating its dependencies again (they held when the wait began). An
+event for another round, such as a replay of an earlier round's signal,
+changes nothing. In the next loop round the activity waits again, on a new
+row.
 
 **Why**: The orchestrator used to evaluate the signaled activity like any
 other and, finding `wait_for_signal`, create its subscription again. The row

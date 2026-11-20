@@ -209,6 +209,14 @@ impl SubscriptionService for PostgresSubscriptionService {
 
         Ok(())
     }
+
+    async fn delete_subscription_by_id(&self, id: Uuid) -> Result<()> {
+        sqlx::query!("DELETE FROM activity_event_subscriptions WHERE id = $1", id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
 }
 
 fn parse_on_timeout(s: &str) -> OnTimeout {

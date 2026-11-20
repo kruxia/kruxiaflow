@@ -85,6 +85,14 @@ impl ActivityState {
         self.accumulated_cost_usd += cost;
     }
 
+    /// Whether a signal for loop round `round` ends this activity's wait: it
+    /// is waiting, and in that round. A signal with no round (outside a loop)
+    /// is checked on the status alone.
+    pub fn ends_wait(&self, round: Option<i32>) -> bool {
+        self.status == WorkflowActivityStatus::Waiting
+            && round.is_none_or(|r| i64::from(r) == i64::from(self.iteration))
+    }
+
     /// Increment iteration counter (for ALL looping activities, regardless of iteration_scoped)
     /// NOTE: accumulated_cost_usd is NOT reset - it tracks total across all iterations
     pub fn increment_iteration(&mut self) {
@@ -507,10 +515,10 @@ pub fn apply_event_to_state(state: &mut WorkflowState, event: &WorkflowEvent) ->
                 .ok_or(OrchestratorError::MissingActivityKey)?;
 
             if let Some(activity) = state.activities.get_mut(activity_key) {
-                // Only process if activity is still waiting — a duplicate event
-                // (e.g., from crash recovery) should not revert an activity that
-                // has already moved past the Waiting state.
-                if activity.status == WorkflowActivityStatus::Waiting {
+                // Only a signal for the open wait counts: a duplicate or replayed
+                // event (crash recovery) must not revert an activity that has
+                // moved past the wait, or end a later loop round's wait.
+                if activity.ends_wait(event.iteration) {
                     let on_timeout = event.payload.get("on_timeout").and_then(|v| v.as_str());
                     if on_timeout == Some("skip") {
                         activity.status = WorkflowActivityStatus::Skipped;
