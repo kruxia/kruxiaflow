@@ -2343,10 +2343,7 @@ mod tests {
     }
 
     // ============================================================================
-    // An activity after a loop waits for the loop to end
-    // Regression tests for #40 [loop-dependent-runs-early]: a step that
-    // depends on a loop step ran after the loop's first round, on that
-    // round's output, and never again
+    // An activity after a loop waits for the loop to end (#40)
     // ============================================================================
 
     /// start → head ⇄ tail (head holds the back-edge, limit 3), and `after`,

@@ -83,7 +83,7 @@ Before this was fixed, the step after the head re-ran after each of its own comp
 - **No redeploy needed.** Definitions deployed before this fix marked only the two ends of a back-edge as loop activities. The orchestrator completes the marking each time it loads a definition, from the back-edges stored with it, so existing definitions and runs already in flight get every step of a longer loop running each round.
 - **Middle steps now count iterations.** They are loop activities now, so `{{ACTIVITY.iteration}}` and `{{step.iteration}}` count up for them, and `iteration_scoped: true` stores their per-round outputs. Before, they stayed at 0.
 
-**Parallel branches inside a loop.** When a loop splits into branches of different lengths that join again (`head → a → b → join` alongside `head → c → join`), the join runs once per round, after every branch has finished that round. A step waits while anything upstream of it in the same loop is still running, or is about to run on this round's input. A branch whose condition is false this round doesn't hold the join back: it won't run, so the join runs on that branch's output from the last round it ran. Steps of another loop never hold a step back, even when that loop is upstream (two loops in sequence). Before this was fixed, the join ran as soon as the short branch finished, on the long branch's output from the previous round, and then again (#28).
+**Parallel branches inside a loop.** When a loop splits into branches of different lengths that join again (`head → a → b → join` alongside `head → c → join`), the join runs once per round, after every branch has finished that round. A step waits while anything upstream of it in the same loop is still running, or is about to run on this round's input. A branch whose condition is false this round doesn't hold the join back: it won't run, so the join runs on that branch's output from the last round it ran. Inside a loop, a step waits only for steps of its own loop; the head of a later loop waits for an earlier loop to end (see [Steps After a Loop](#steps-after-a-loop)). Before this was fixed, the join ran as soon as the short branch finished, on the long branch's output from the previous round, and then again (#28).
 
 ### Steps After a Loop
 
@@ -783,6 +783,8 @@ Kruxia Flow uses precomputed metadata for loop detection:
 - Assign the completion's sequence number: O(V), a scan for the highest `completion_seq` among the workflow's activities (V is small, and this is in memory)
 - Check a completed loop activity for new input: O(D), its dependencies' `completion_seq`
 - Check a completed loop activity, otherwise ready, for unfinished work upstream in its loop: O(V + E), three walks of the definition's dependencies. Only done while such an activity is otherwise ready to run again, not on every evaluation
+- Check an activity after a loop, never scheduled and otherwise ready, for a step of that loop still running: O(V × (V + E)) at worst per loop dependency, a walk from the dependency plus one per loop member to test that it shares the loop. Only done while such an activity is otherwise ready
+- Decide whether a never-scheduled loop activity that depends on a loop step may be skipped yet: O(V + E) per such dependency, a walk to test whether the two share a loop. Only done for activities whose dependencies are all terminal and that would otherwise be skipped
 - **No graph traversal in orchestrator hot path** otherwise
 
 ### Storage Efficiency

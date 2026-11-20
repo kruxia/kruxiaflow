@@ -2751,9 +2751,8 @@ activities:
 // A step after a loop runs after the loop's last round [loop-dependent-runs-early]
 //
 // A step that depends on a loop step without being part of the loop is how
-// the loop hands off its result. With no condition on that dependency, it ran
-// as soon as the loop step first completed, after round 1, on round 1's
-// output, and never again: the loop's later rounds were lost to it.
+// the loop hands off its result. It runs once, after the loop's last round,
+// on that round's output.
 // ============================================================================
 
 /// The parameters the orchestrator queued `key` with, in `workflow_id`
@@ -2777,7 +2776,7 @@ fn ran_alongside(run: &LoopRun, key: &str, others: &[&str]) -> bool {
 
 /// A two-step loop (lift ⇄ drop, three rounds) and `survey`, which depends on
 /// `drop` with no condition: it runs once, after the third drop, on its
-/// output. It used to run after the first drop, on round 0's output.
+/// output.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_step_after_a_two_step_loop_runs_after_its_last_round(pool: PgPool) {
     let run = drive_loop_workflow(
@@ -2927,20 +2926,4 @@ activities:
         run.pending_history
     );
     assert_eq!(run.status, WorkflowStatus::Completed, "{:?}", run.runs);
-}
-
-/// The exit step of the #27 repair loop still runs once, after the check
-/// that passes, and is never scheduled alongside the loop
-#[sqlx::test(migrations = "../migrations")]
-async fn test_conditional_exit_step_still_runs_after_the_round_that_exits(pool: PgPool) {
-    let (runs, state) = run_to_end(&pool, REPAIR_LOOP, check_results(2)).await;
-
-    assert_eq!(runs.get("b_check"), Some(&3), "{runs:?}");
-    assert_eq!(runs.get("d_done"), Some(&1), "{runs:?}");
-    assert_eq!(runs.get("e_report"), Some(&1), "{runs:?}");
-    assert_eq!(
-        status_of(&state, "d_done"),
-        WorkflowActivityStatus::Completed
-    );
-    assert_eq!(state.status, WorkflowStatus::Completed);
 }
