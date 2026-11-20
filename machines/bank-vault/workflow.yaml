@@ -1,0 +1,75 @@
+# Bank vault: dual control. The manager and the teller each hold a key, and
+# the vault door opens only when both have turned theirs; meanwhile the
+# guard writes the opening in the log. The two keys are turned in either
+# order. If the teller never comes, their key's wait times out and fails,
+# and the door stays shut.
+#
+# manager_key and teller_key wait in parallel branches, for the same
+# event_name: a signal names its step, so it ends only that step's wait.
+# vault_door depends on both keys and the log with no conditions, so it
+# waits for all three and runs once.
+name: machine_bank_vault
+
+activities:
+  - key: arrive
+    worker: std
+    activity_name: echo
+    parameters:
+      vault: "{{ INPUT.vault }}"
+    outputs:
+      - echo
+
+  - key: manager_key
+    worker: std
+    activity_name: echo
+    parameters:
+      turned_by: "{{ SIGNAL.name }}"
+    settings:
+      wait_for_signal:
+        event_name: turn
+        timeout_seconds: 3
+        on_timeout: fail
+    outputs:
+      - echo
+    depends_on:
+      - arrive
+
+  - key: teller_key
+    worker: std
+    activity_name: echo
+    parameters:
+      turned_by: "{{ SIGNAL.name }}"
+    settings:
+      wait_for_signal:
+        event_name: turn
+        timeout_seconds: 3
+        on_timeout: fail
+    outputs:
+      - echo
+    depends_on:
+      - arrive
+
+  - key: log_entry
+    worker: std
+    activity_name: echo
+    parameters:
+      entry: "opening {{ arrive.echo.vault }}"
+    outputs:
+      - echo
+    depends_on:
+      - arrive
+
+  - key: vault_door
+    worker: std
+    activity_name: echo
+    parameters:
+      opened: "{{ arrive.echo.vault }}"
+      manager: "{{ manager_key.echo.turned_by }}"
+      teller: "{{ teller_key.echo.turned_by }}"
+      log: "{{ log_entry.echo.entry }}"
+    outputs:
+      - echo
+    depends_on:
+      - manager_key
+      - teller_key
+      - log_entry

@@ -1,0 +1,62 @@
+name: Pull-start mower
+kind: compound
+picture: >
+  Prime the carburettor, then pull the cord until the engine catches. On a
+  good day it catches on the first pull; on a cold one, the third. A flooded
+  engine doesn't catch in three pulls, so nobody mows and the mechanic is
+  called, told it took three pulls.
+functions:
+  - "settings.retry: a step that fails is run again, up to max_attempts in all, after a fixed backoff"
+  - a step that fails and then succeeds within its retries completes once, with the successful attempt's output
+  - a step that exhausts its retries fails, and so does the workflow
+  - a step after it with no condition is skipped; one whose condition picks the failure runs
+  - "postgres_query on the test's own database, through {{SECRET.shop_db_url}}"
+runs:
+  - name: catches on the first pull
+    input: { catches_on: 1 }
+    timeout_seconds: 15
+    expect:
+      status: completed
+      steps:
+        prime: { status: completed, runs: 1 }
+        pull_cord: { status: completed, runs: 1 }
+        mow: { status: completed, runs: 1 }
+        call_mechanic: { status: skipped, runs: 0 }
+      outputs:
+        - step: pull_cord
+          output: result
+          equals: { rows: [{ pull: 1, caught: 1 }] }
+        - step: mow
+          output: echo
+          equals: { pulls: 1 }
+  - name: catches on the third pull
+    input: { catches_on: 3 }
+    timeout_seconds: 15
+    expect:
+      status: completed
+      steps:
+        prime: { status: completed, runs: 1 }
+        pull_cord: { status: completed, runs: 1 }
+        mow: { status: completed, runs: 1 }
+        call_mechanic: { status: skipped, runs: 0 }
+      outputs:
+        - step: pull_cord
+          output: result
+          equals: { rows: [{ pull: 3, caught: 1 }] }
+        - step: mow
+          output: echo
+          equals: { pulls: 3 }
+  - name: flooded, never catches
+    input: { catches_on: 9 }
+    timeout_seconds: 15
+    expect:
+      status: failed
+      steps:
+        prime: { status: completed, runs: 1 }
+        pull_cord: { status: failed, runs: 0 }
+        mow: { status: skipped, runs: 0 }
+        call_mechanic: { status: completed, runs: 1 }
+      outputs:
+        - step: call_mechanic
+          output: result
+          equals: { rows: [{ pulls: 3 }] }

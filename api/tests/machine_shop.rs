@@ -27,7 +27,7 @@
 //! and `MACHINE_SHOP_TREE` to label the tree in the results (default: the
 //! branch name).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -116,7 +116,9 @@ struct RunSpec {
 
 /// A signal the runner sends through the public API once `step` is
 /// waiting. Without `data` the request has no `data` field; `data: null`
-/// sends an explicit null.
+/// sends an explicit null. An `early` signal is sent at once, before the
+/// step waits, and a `late` one once the step has stopped waiting without
+/// one (its wait timed out); the API must refuse both.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SignalSpec {
@@ -124,6 +126,10 @@ struct SignalSpec {
     event: String,
     #[serde(default, deserialize_with = "present")]
     data: Option<Value>,
+    #[serde(default)]
+    early: bool,
+    #[serde(default)]
+    late: bool,
 }
 
 /// A field that is present, even as null, is `Some`; only a missing one is
@@ -256,6 +262,11 @@ fn lint_card(dir: &str, card: &Card, workflow_yaml: &str) {
         }
         for s in &run.signals {
             assert!(
+                !(s.early && s.late),
+                "machines/{dir}, run '{}': a signal is early or late, not both",
+                run.name
+            );
+            assert!(
                 keys.contains(&s.step),
                 "machines/{dir}, run '{}': signal to unknown step {}",
                 run.name,
@@ -299,6 +310,23 @@ async fn create_oauth_client(pool: &PgPool, client_id: &str, client_secret: &str
     .execute(pool)
     .await
     .expect("create OAuth client");
+}
+
+/// The URL of this test's database, which `#[sqlx::test]` created on the
+/// server `DATABASE_URL` names
+fn test_db_url(pool: &PgPool) -> String {
+    let base = std::env::var("DATABASE_URL").expect("DATABASE_URL");
+    let name = pool
+        .connect_options()
+        .get_database()
+        .expect("the test pool names its database")
+        .to_string();
+    let (url, query) = match base.split_once('?') {
+        Some((url, query)) => (url, format!("?{query}")),
+        None => (base.as_str(), String::new()),
+    };
+    let path = url.rfind('/').expect("DATABASE_URL has a database path");
+    format!("{}/{name}{query}", &url[..path])
 }
 
 impl Engine {
@@ -346,6 +374,9 @@ impl Engine {
             axum::serve(listener, app).await.expect("API server");
         })];
 
+        // {{SECRET.shop_db_url}} is the test's own database, for machines
+        // that keep state across attempts in it (postgres_query)
+        let secrets = HashMap::from([("shop_db_url".to_string(), test_db_url(&pool))]);
         let orchestrator = {
             let (events, queue, subscriptions, pool, shutdown) = (
                 events.clone(),
@@ -360,7 +391,8 @@ impl Engine {
                 // would take half a minute
                 let config = OrchestratorConfig::new(pool)
                     .with_poll_interval(Duration::from_millis(1), Duration::from_millis(10))
-                    .with_timeout_check_interval(Duration::from_secs(1));
+                    .with_timeout_check_interval(Duration::from_secs(1))
+                    .with_secrets(secrets);
                 run_orchestrator(events, queue, subscriptions, config, Some(shutdown))
                     .await
                     .expect("orchestrator");
@@ -506,8 +538,22 @@ impl Engine {
 
     /// Wait until the signal's step is waiting, then send the signal, all
     /// through the public API. Gives up at `deadline`, when the workflow
-    /// ends first, or when the step gets past waiting without one.
-    async fn signal(&self, id: Uuid, s: &SignalSpec, deadline: Instant) -> Result<(), String> {
+    /// ends first, or when the step gets past waiting without one. `again`
+    /// is a later signal to a step already signaled in this run, a loop
+    /// step waiting in its next round: it waits through the round running.
+    async fn signal(
+        &self,
+        id: Uuid,
+        s: &SignalSpec,
+        again: bool,
+        deadline: Instant,
+    ) -> Result<(), String> {
+        if s.early {
+            return self.early_signal(id, s).await;
+        }
+        if s.late {
+            return self.late_signal(id, s, deadline).await;
+        }
         let what = format!("signal '{}' to {}", s.event, s.step);
         loop {
             let wf = self.workflow(id).await;
@@ -521,23 +567,7 @@ impl Engine {
             let mut last = step.to_string();
             match step {
                 "waiting" => {
-                    let mut body = json!({ "activity_key": s.step, "event_name": s.event });
-                    if let Some(data) = &s.data {
-                        body["data"] = data.clone();
-                    }
-                    let r = self
-                        .http
-                        .post(format!("{}/api/v1/workflows/{id}/signal", self.url))
-                        .bearer_auth(&self.token)
-                        .json(&body)
-                        .send()
-                        .await
-                        .map_err(|e| format!("{what}: {e}"))?;
-                    let status = r.status();
-                    let reply: Value = r.json().await.unwrap_or(Value::Null);
-                    if !status.is_success() {
-                        return Err(format!("{what}: signal API {status}: {reply}"));
-                    }
+                    let reply = self.post_signal(id, s, &what).await?;
                     if reply["signaled"] == true {
                         return Ok(());
                     }
@@ -549,6 +579,7 @@ impl Engine {
                     );
                 }
                 "not_scheduled" | "absent" => {}
+                "pending" | "running" | "completed" if again => {}
                 other => {
                     return Err(format!(
                         "{what} not sent: {} is {other} and never waited",
@@ -565,6 +596,87 @@ impl Engine {
             if Instant::now() >= deadline {
                 return Err(format!(
                     "{what} not sent before the run's timeout: {} is {last}",
+                    s.step
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// `POST /api/v1/workflows/{id}/signal`; the reply, when the API
+    /// answers with a success status
+    async fn post_signal(&self, id: Uuid, s: &SignalSpec, what: &str) -> Result<Value, String> {
+        let mut body = json!({ "activity_key": s.step, "event_name": s.event });
+        if let Some(data) = &s.data {
+            body["data"] = data.clone();
+        }
+        let r = self
+            .http
+            .post(format!("{}/api/v1/workflows/{id}/signal", self.url))
+            .bearer_auth(&self.token)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| format!("{what}: {e}"))?;
+        let status = r.status();
+        let reply: Value = r.json().await.unwrap_or(Value::Null);
+        if !status.is_success() {
+            return Err(format!("{what}: signal API {status}: {reply}"));
+        }
+        Ok(reply)
+    }
+
+    /// Send the signal at once, while the step isn't waiting yet. The API
+    /// must refuse it (`signaled: false`): a signal isn't kept for a wait
+    /// that hasn't begun.
+    async fn early_signal(&self, id: Uuid, s: &SignalSpec) -> Result<(), String> {
+        let what = format!("early signal '{}' to {}", s.event, s.step);
+        let wf = self.workflow(id).await;
+        let step = wf["activities"]
+            .as_array()
+            .and_then(|list| list.iter().find(|a| a["activity_key"] == s.step.as_str()))
+            .and_then(|a| a["status"].as_str())
+            .unwrap_or("absent");
+        if !matches!(step, "not_scheduled" | "absent") {
+            return Err(format!("{what} not sent: {} is already {step}", s.step));
+        }
+        let reply = self.post_signal(id, s, &what).await?;
+        if reply["signaled"] == false {
+            return Ok(());
+        }
+        Err(format!(
+            "{what} was accepted with {} {step}: {reply}",
+            s.step
+        ))
+    }
+
+    /// Wait until the step has waited and stopped waiting without a signal,
+    /// or the workflow has ended, then send the signal once. The API must
+    /// refuse it (`signaled: false`): a wait that timed out takes no signal.
+    async fn late_signal(&self, id: Uuid, s: &SignalSpec, deadline: Instant) -> Result<(), String> {
+        let what = format!("late signal '{}' to {}", s.event, s.step);
+        loop {
+            let wf = self.workflow(id).await;
+            let workflow = wf["status"].as_str().unwrap_or("unknown");
+            let step = wf["activities"]
+                .as_array()
+                .and_then(|list| list.iter().find(|a| a["activity_key"] == s.step.as_str()))
+                .and_then(|a| a["status"].as_str())
+                .unwrap_or("absent");
+            let past_waiting = !matches!(step, "waiting" | "not_scheduled" | "absent");
+            if past_waiting || matches!(workflow, "completed" | "failed" | "cancelled") {
+                let reply = self.post_signal(id, s, &what).await?;
+                if reply["signaled"] == false {
+                    return Ok(());
+                }
+                return Err(format!(
+                    "{what} was accepted with {} {step}: {reply}",
+                    s.step
+                ));
+            }
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "{what} not sent before the run's timeout: {} is {step}",
                     s.step
                 ));
             }
@@ -836,8 +948,10 @@ async fn run_one(
     let id = engine.submit(&def.0, &def.1, &input).await;
     // A signal that can't be sent is a problem; the ones after it aren't sent
     let mut signal_problems = Vec::new();
+    let mut signaled = BTreeSet::new();
     for s in &run.signals {
-        if let Err(p) = engine.signal(id, s, deadline).await {
+        let again = !signaled.insert(s.step.as_str());
+        if let Err(p) = engine.signal(id, s, again, deadline).await {
             signal_problems.push(p);
             break;
         }

@@ -111,12 +111,20 @@ A step with `settings.wait_for_signal` waits until it is signaled or its wait ti
 2. It sends `POST /api/v1/workflows/{id}/signal` with `activity_key`, `event_name` and, when the card gives one, `data`. It tries again while the step is still waiting and the API answers `signaled: false`.
 3. Then it goes on to the next signal, or waits for the workflow to finish.
 
-| Field   | What it is                                                                                         |
-|---------|----------------------------------------------------------------------------------------------------|
-| `step`  | The step to signal; it must exist and have `settings.wait_for_signal`                              |
-| `event` | The `event_name` to send                                                                           |
-| `data`  | Optional. Left out, the request has no `data` field; `data: null` sends an explicit null           |
+| Field   | What it is                                                                                                                                                             |
+|---------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `step`  | The step to signal; it must exist and have `settings.wait_for_signal`                                                                                                  |
+| `event` | The `event_name` to send                                                                                                                                               |
+| `data`  | Optional. Left out, the request has no `data` field; `data: null` sends an explicit null                                                                               |
+| `early` | Optional. `true` sends the signal at once, before the step waits; the API must answer `signaled: false`                                                                |
+| `late`  | Optional. `true` sends the signal once the step has stopped waiting without one (its wait timed out), or the workflow has ended; the API must answer `signaled: false` |
 
-A signal that can't be sent is one of the run's problems: the workflow finished first, the step got past waiting without one, or the run's timeout passed. The signals after it aren't sent. A run with no `signals` relies on the step's own timeout and `on_timeout`.
+A later signal to a step already signaled in the run is for the step's next round in a loop: the runner waits through the round's `pending`, `running` and `completed` until the step is `waiting` again.
+
+A signal that can't be sent is one of the run's problems: the workflow finished first, the step got past waiting without one, or the run's timeout passed. So is an `early` or `late` signal the API accepts. The signals after it aren't sent. A run with no `signals` relies on the step's own timeout and `on_timeout`.
 
 The runner's orchestrator checks for expired waits every second (the engine's default is 30 seconds), so a run that waits out a short signal timeout finishes in a few seconds. Give such a run a `timeout_seconds` above the wait's own timeout.
+
+### State across attempts
+
+A machine that needs state outside the workflow, such as a step that fails on its first attempts and succeeds on a retry, keeps it in the test's own database with the std worker's `postgres_query`. The runner gives the orchestrator one secret, `{{SECRET.shop_db_url}}`, the URL of the database `#[sqlx::test]` created for the run. Name anything a machine creates there after `{{WORKFLOW.id}}`, so runs of the same machine don't share it. The pull-start mower counts pulls in a sequence: `nextval` isn't rolled back when the query fails, so each retry sees the count go up.

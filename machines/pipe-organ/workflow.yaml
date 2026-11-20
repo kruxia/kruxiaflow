@@ -1,0 +1,219 @@
+# Pipe organ: the organist plays a chord on the keyboard, and each of the
+# twelve pipes of the octave sounds only if its key is held down. The wind
+# chest gathers every pipe that sounded into one chord.
+#
+# Each pipe depends on the keyboard with a condition on the keys held, so
+# the pipes whose keys aren't held are skipped. chord depends on all twelve,
+# each with a status condition, so it waits for every pipe to sound or be
+# skipped, then runs once, and reads each pipe's note (null for a silent
+# pipe). With no key held, every pipe is skipped and so is the chord.
+name: machine_pipe_organ
+
+activities:
+  - key: keyboard
+    worker: std
+    activity_name: echo
+    parameters:
+      keys: "{{ INPUT.keys }}"
+    outputs:
+      - echo
+
+  - key: c
+    worker: std
+    activity_name: echo
+    parameters:
+      note: "C"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: keyboard
+        conditions:
+          - "{{ 'C' in keyboard.echo.keys }}"
+
+  - key: c_sharp
+    worker: std
+    activity_name: echo
+    parameters:
+      note: "C#"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: keyboard
+        conditions:
+          - "{{ 'C#' in keyboard.echo.keys }}"
+
+  - key: d
+    worker: std
+    activity_name: echo
+    parameters:
+      note: "D"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: keyboard
+        conditions:
+          - "{{ 'D' in keyboard.echo.keys }}"
+
+  - key: d_sharp
+    worker: std
+    activity_name: echo
+    parameters:
+      note: "D#"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: keyboard
+        conditions:
+          - "{{ 'D#' in keyboard.echo.keys }}"
+
+  - key: e
+    worker: std
+    activity_name: echo
+    parameters:
+      note: "E"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: keyboard
+        conditions:
+          - "{{ 'E' in keyboard.echo.keys }}"
+
+  - key: f
+    worker: std
+    activity_name: echo
+    parameters:
+      note: "F"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: keyboard
+        conditions:
+          - "{{ 'F' in keyboard.echo.keys }}"
+
+  - key: f_sharp
+    worker: std
+    activity_name: echo
+    parameters:
+      note: "F#"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: keyboard
+        conditions:
+          - "{{ 'F#' in keyboard.echo.keys }}"
+
+  - key: g
+    worker: std
+    activity_name: echo
+    parameters:
+      note: "G"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: keyboard
+        conditions:
+          - "{{ 'G' in keyboard.echo.keys }}"
+
+  - key: g_sharp
+    worker: std
+    activity_name: echo
+    parameters:
+      note: "G#"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: keyboard
+        conditions:
+          - "{{ 'G#' in keyboard.echo.keys }}"
+
+  - key: a
+    worker: std
+    activity_name: echo
+    parameters:
+      note: "A"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: keyboard
+        conditions:
+          - "{{ 'A' in keyboard.echo.keys }}"
+
+  - key: a_sharp
+    worker: std
+    activity_name: echo
+    parameters:
+      note: "A#"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: keyboard
+        conditions:
+          - "{{ 'A#' in keyboard.echo.keys }}"
+
+  - key: b
+    worker: std
+    activity_name: echo
+    parameters:
+      note: "B"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: keyboard
+        conditions:
+          - "{{ 'B' in keyboard.echo.keys }}"
+
+  - key: chord
+    worker: std
+    activity_name: echo
+    parameters:
+      c: "{{ c.echo.note if c.status == 'completed' else none }}"
+      c_sharp: "{{ c_sharp.echo.note if c_sharp.status == 'completed' else none }}"
+      d: "{{ d.echo.note if d.status == 'completed' else none }}"
+      d_sharp: "{{ d_sharp.echo.note if d_sharp.status == 'completed' else none }}"
+      e: "{{ e.echo.note if e.status == 'completed' else none }}"
+      f: "{{ f.echo.note if f.status == 'completed' else none }}"
+      f_sharp: "{{ f_sharp.echo.note if f_sharp.status == 'completed' else none }}"
+      g: "{{ g.echo.note if g.status == 'completed' else none }}"
+      g_sharp: "{{ g_sharp.echo.note if g_sharp.status == 'completed' else none }}"
+      a: "{{ a.echo.note if a.status == 'completed' else none }}"
+      a_sharp: "{{ a_sharp.echo.note if a_sharp.status == 'completed' else none }}"
+      b: "{{ b.echo.note if b.status == 'completed' else none }}"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: c
+        conditions:
+          - "{{ c.status == 'completed' }}"
+      - activity_key: c_sharp
+        conditions:
+          - "{{ c_sharp.status == 'completed' }}"
+      - activity_key: d
+        conditions:
+          - "{{ d.status == 'completed' }}"
+      - activity_key: d_sharp
+        conditions:
+          - "{{ d_sharp.status == 'completed' }}"
+      - activity_key: e
+        conditions:
+          - "{{ e.status == 'completed' }}"
+      - activity_key: f
+        conditions:
+          - "{{ f.status == 'completed' }}"
+      - activity_key: f_sharp
+        conditions:
+          - "{{ f_sharp.status == 'completed' }}"
+      - activity_key: g
+        conditions:
+          - "{{ g.status == 'completed' }}"
+      - activity_key: g_sharp
+        conditions:
+          - "{{ g_sharp.status == 'completed' }}"
+      - activity_key: a
+        conditions:
+          - "{{ a.status == 'completed' }}"
+      - activity_key: a_sharp
+        conditions:
+          - "{{ a_sharp.status == 'completed' }}"
+      - activity_key: b
+        conditions:
+          - "{{ b.status == 'completed' }}"

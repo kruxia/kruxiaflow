@@ -1,0 +1,86 @@
+# Printing press: four colour plates, cyan, magenta, yellow and black, print
+# their impressions in parallel, and the press puts the page together once
+# all four are down. The yellow plate smudges until the impression the
+# input names; it may be printed three times in all (retry.max_attempts: 3).
+# If yellow never takes, there's no page.
+#
+# The yellow plate is a postgres_query on the test's own database that
+# counts its impressions in a sequence ink creates for this run, and fails
+# (division by zero) until the count reaches INPUT.yellow_takes. press
+# depends on all four plates with no conditions: it must wait while yellow
+# is retried, run once, and read yellow's successful impression.
+name: machine_printing_press
+
+activities:
+  - key: ink
+    worker: std
+    activity_name: postgres_query
+    parameters:
+      db_url: "{{ SECRET.shop_db_url }}"
+      query: CREATE SEQUENCE "shop_press_{{ WORKFLOW.id }}"
+    outputs:
+      - result
+
+  - key: cyan
+    worker: std
+    activity_name: echo
+    parameters:
+      plate: cyan
+    outputs:
+      - echo
+    depends_on:
+      - ink
+
+  - key: magenta
+    worker: std
+    activity_name: echo
+    parameters:
+      plate: magenta
+    outputs:
+      - echo
+    depends_on:
+      - ink
+
+  - key: yellow
+    worker: std
+    activity_name: postgres_query
+    parameters:
+      db_url: "{{ SECRET.shop_db_url }}"
+      query: >-
+        WITH plate AS (SELECT nextval('"shop_press_{{ WORKFLOW.id }}"') AS impression)
+        SELECT 'yellow' AS plate, impression,
+          1 / (CASE WHEN impression >= {{ INPUT.yellow_takes }} THEN 1 ELSE 0 END) AS clean
+        FROM plate
+    settings:
+      retry:
+        max_attempts: 3
+        strategy: fixed
+        base_seconds: 1
+    outputs:
+      - result
+    depends_on:
+      - ink
+
+  - key: black
+    worker: std
+    activity_name: echo
+    parameters:
+      plate: black
+    outputs:
+      - echo
+    depends_on:
+      - ink
+
+  - key: press
+    worker: std
+    activity_name: echo
+    parameters:
+      page: "{{ cyan.echo.plate }}+{{ magenta.echo.plate }}+{{ yellow.result.rows[0].plate }}+{{ black.echo.plate }}"
+      yellow_impression: "{{ yellow.result.rows[0].impression }}"
+    outputs:
+      - echo
+    depends_on:
+      - cyan
+      - magenta
+      - yellow
+      - black

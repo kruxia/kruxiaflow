@@ -1,0 +1,64 @@
+# Pull-start mower: prime the carburettor, then pull the cord until the
+# engine catches. The input says which pull it catches on. The cord may be
+# pulled three times in all (retry.max_attempts: 3); a flooded engine that
+# never catches fails, and the mechanic is called instead of mowing.
+#
+# Each pull is a postgres_query on the test's own database
+# ({{SECRET.shop_db_url}}), counting pulls in a sequence that prime creates
+# for this run. A retry runs the same query again, and nextval keeps
+# counting across failed attempts, so the query fails (division by zero)
+# until the count reaches INPUT.catches_on. call_mechanic reads the count
+# after the last failed pull.
+name: machine_pull_start_mower
+
+activities:
+  - key: prime
+    worker: std
+    activity_name: postgres_query
+    parameters:
+      db_url: "{{ SECRET.shop_db_url }}"
+      query: CREATE SEQUENCE "shop_mower_{{ WORKFLOW.id }}"
+    outputs:
+      - result
+
+  - key: pull_cord
+    worker: std
+    activity_name: postgres_query
+    parameters:
+      db_url: "{{ SECRET.shop_db_url }}"
+      query: >-
+        WITH cord AS (SELECT nextval('"shop_mower_{{ WORKFLOW.id }}"') AS pull)
+        SELECT pull, 1 / (CASE WHEN pull >= {{ INPUT.catches_on }} THEN 1 ELSE 0 END) AS caught
+        FROM cord
+    settings:
+      retry:
+        max_attempts: 3
+        strategy: fixed
+        base_seconds: 1
+    outputs:
+      - result
+    depends_on:
+      - prime
+
+  - key: mow
+    worker: std
+    activity_name: echo
+    parameters:
+      pulls: "{{ pull_cord.result.rows[0].pull }}"
+    outputs:
+      - echo
+    depends_on:
+      - pull_cord
+
+  - key: call_mechanic
+    worker: std
+    activity_name: postgres_query
+    parameters:
+      db_url: "{{ SECRET.shop_db_url }}"
+      query: SELECT last_value AS pulls FROM "shop_mower_{{ WORKFLOW.id }}"
+    outputs:
+      - result
+    depends_on:
+      - activity_key: pull_cord
+        conditions:
+          - "{{ pull_cord.status == 'failed' }}"

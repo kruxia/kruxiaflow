@@ -1,0 +1,72 @@
+name: Toaster
+kind: simple
+picture: >
+  Bread goes in, and the toast waits for someone to pop it. Popped by hand,
+  it comes out at the shade they chose. Left alone, the timer pops it,
+  golden. Then it's buttered. Someone who reaches for the lever after the
+  timer has popped it finds nothing to pop: the toast is made once, as the
+  timer made it.
+functions:
+  - "on_timeout: continue: the step runs with {{SIGNAL}} null, and the step after it reads its output"
+  - a signal that arrives after the wait has timed out and continued is refused, and doesn't run the step again
+trap:
+  issues: [29, 37]
+  broken_looks_like: >
+    Before #37's fix, the toast's {{SIGNAL.*}} templates are undefined when
+    it becomes ready, so it never waits. On main that template error lands
+    on load, which is marked failed although it ran (#19); the toast is
+    skipped without waiting or timing out, butter stays not_scheduled, and
+    the workflow stays running. Before #29's fix, a toast popped by hand
+    fails as soon as it's signaled.
+runs:
+  - name: popped by hand, dark
+    input: { bread: rye }
+    timeout_seconds: 10
+    signals:
+      - step: toast
+        event: pop
+        data: { shade: dark, by: Ravi }
+    expect:
+      status: completed
+      steps:
+        load: { status: completed, runs: 1 }
+        toast: { status: completed, runs: 1 }
+        butter: { status: completed, runs: 1 }
+      outputs:
+        - step: butter
+          output: echo
+          equals: { buttered: rye, shade: dark, popped_by: Ravi }
+  - name: the timer pops it
+    input: { bread: sourdough }
+    timeout_seconds: 10
+    expect:
+      status: completed
+      steps:
+        load: { status: completed, runs: 1 }
+        toast: { status: completed, runs: 1 }
+        butter: { status: completed, runs: 1 }
+      outputs:
+        - step: butter
+          output: echo
+          equals: { buttered: sourdough, shade: golden, popped_by: timer }
+  - name: a hand on the lever too late
+    input: { bread: brioche }
+    timeout_seconds: 10
+    signals:
+      - step: toast
+        event: pop
+        data: { shade: dark, by: Ravi }
+        late: true
+    expect:
+      status: completed
+      steps:
+        load: { status: completed, runs: 1 }
+        toast: { status: completed, runs: 1 }
+        butter: { status: completed, runs: 1 }
+      outputs:
+        - step: toast
+          output: echo
+          equals: { bread: brioche, shade: golden, popped_by: timer }
+        - step: butter
+          output: echo
+          equals: { buttered: brioche, shade: golden, popped_by: timer }

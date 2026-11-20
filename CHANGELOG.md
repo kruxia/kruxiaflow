@@ -16,12 +16,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   drawbridge that traps #29 and #37. Nine more traps: a water pump (#18), a
   jammed gear (#19), a ferris wheel (#26), a kiln (#27), a twin grindstone
   mill (#28), a thermostat (#30 and #38), a taxi meter (#32), a revolving
-  door (#38) and a pile driver (#40). A run can send
-  signals: the runner waits for the step to be waiting, then signals it
-  through the public API. A trap can name several issues. A definition the
-  engine rejects is reported as each of its runs' result, not a crash. Each
-  run writes a results file, and two prototype views of the results (the
-  Stack and the Shop Floor) are written next to it, to open from disk.
+  door (#38) and a pile driver (#40). Ten more for signal timeouts, retries,
+  wide fan-in and parallel waits: a dead man's switch, a parcel locker, a
+  toaster, a bank vault and a vending machine (#29, #37), a snooze alarm
+  (#27, #29, #32, #37), a pipe organ (#19), a pull-start mower, a printing
+  press and a galley. A run can send signals: the runner waits for the step
+  to be waiting, then signals it through the public API; an early or late
+  signal must be refused, and a later signal to the same step waits for its
+  next round. Machines can keep state across retries in the test's own
+  database, through `{{SECRET.shop_db_url}}`. A trap can name several issues.
+  A definition the engine rejects is reported as each of its runs' result,
+  not a crash. Each run writes a results file, and two prototype views of the
+  results (the Stack and the Shop Floor) are written next to it, to open from
+  disk.
 
 ## [0.12.1] - 2026-11-17
 

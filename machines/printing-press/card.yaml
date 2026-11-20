@@ -1,0 +1,44 @@
+name: Printing press
+kind: compound
+picture: >
+  Four colour plates, cyan, magenta, yellow and black, print in parallel,
+  and the press puts the page together once all four are down. The yellow
+  plate smudges and is printed again; on a good run it takes on the second
+  impression. If it never takes, the other three are printed but there's
+  no page.
+functions:
+  - "fan-out to four branches, one with settings.retry"
+  - a join with no conditions waits while a branch is retried, and runs once with the retried branch's successful output
+  - a branch that exhausts its retries fails, the join is skipped, the other branches still complete, and the workflow fails
+runs:
+  - name: yellow takes on the second impression
+    input: { yellow_takes: 2 }
+    timeout_seconds: 15
+    expect:
+      status: completed
+      steps:
+        ink: { status: completed, runs: 1 }
+        cyan: { status: completed, runs: 1 }
+        magenta: { status: completed, runs: 1 }
+        yellow: { status: completed, runs: 1 }
+        black: { status: completed, runs: 1 }
+        press: { status: completed, runs: 1 }
+      outputs:
+        - step: yellow
+          output: result
+          equals: { rows: [{ plate: yellow, impression: 2, clean: 1 }] }
+        - step: press
+          output: echo
+          equals: { page: cyan+magenta+yellow+black, yellow_impression: 2 }
+  - name: yellow never takes
+    input: { yellow_takes: 9 }
+    timeout_seconds: 15
+    expect:
+      status: failed
+      steps:
+        ink: { status: completed, runs: 1 }
+        cyan: { status: completed, runs: 1 }
+        magenta: { status: completed, runs: 1 }
+        yellow: { status: failed, runs: 0 }
+        black: { status: completed, runs: 1 }
+        press: { status: skipped, runs: 0 }
