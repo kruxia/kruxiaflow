@@ -17,8 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failed publish was reported as success, although nothing else delivers the
   signal. The REST endpoint and the tool now share one function,
   `deliver_signal`, which validates the request, marks the subscription and
-  publishes `{"event_name", "signal_data"}`, and fails when the publish
-  fails. The tool's result now has `"signaled": true/false`, drops the
+  publishes `{"event_name", "signal_data"}`. When the publish fails it
+  reopens the wait and returns an error, so the signal can be retried and
+  the timeout still applies. The tool's result now has `"signaled": true/false`, drops the
   per-activity `event_published` flag, and its description no longer claims
   REST has a workflow-level signal.
 

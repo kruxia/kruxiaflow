@@ -35,6 +35,11 @@ pub trait SubscriptionService: Send + Sync {
     async fn signal_activity(&self, request: SignalRequest)
     -> Result<Option<ActivitySubscription>>;
 
+    /// Undo a signal whose ActivitySignaled event could not be published, so
+    /// the wait is open again: a retried signal is accepted, and the expiry
+    /// checker can time the wait out
+    async fn release_signal(&self, subscription_id: Uuid) -> Result<()>;
+
     /// Get signal data for an activity (if it was signaled)
     async fn get_signal_data(&self, workflow_id: Uuid, activity_key: &str)
     -> Result<Option<Value>>;

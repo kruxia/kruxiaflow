@@ -520,6 +520,13 @@ pub mod tests {
         ) -> kruxiaflow_core::subscription::Result<()> {
             Ok(())
         }
+
+        async fn release_signal(
+            &self,
+            _subscription_id: Uuid,
+        ) -> kruxiaflow_core::subscription::Result<()> {
+            Ok(())
+        }
     }
 
     #[async_trait]

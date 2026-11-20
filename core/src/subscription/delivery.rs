@@ -82,8 +82,8 @@ pub fn activity_signaled_event(
             "event_name": request.event_name,
             "signal_data": request.data,
         }),
-        // The subscription carries no loop round yet; when it does, the event
-        // must carry it, or the event dedup index drops later rounds' signals
+        // With loop rounds on subscriptions (#29), set this from the
+        // subscription: the dedup index drops a later round's signal otherwise
         iteration: None,
     }
 }
@@ -96,7 +96,9 @@ pub fn activity_signaled_event(
 /// Returns `Ok(Some(subscription))` when the activity was signaled, and
 /// `Ok(None)` when no subscription matched (no such activity, a different
 /// event name, already signaled, or not waiting). A publish failure is an
-/// error: nothing else delivers the signal to the orchestrator.
+/// error: nothing else delivers the signal to the orchestrator, so the
+/// subscription's mark is undone first ([`SubscriptionService::release_signal`])
+/// and the signal can be retried.
 pub async fn deliver_signal(
     subscriptions: &dyn SubscriptionService,
     events: &dyn EventSource,
@@ -108,9 +110,19 @@ pub async fn deliver_signal(
         return Ok(None);
     };
 
-    events
+    if let Err(e) = events
         .publish(activity_signaled_event(&subscription, &request))
-        .await?;
+        .await
+    {
+        if let Err(release) = subscriptions.release_signal(subscription.id).await {
+            tracing::error!(
+                subscription_id = %subscription.id,
+                "Failed to reopen the wait after a failed publish: {:?}",
+                release
+            );
+        }
+        return Err(SignalDeliveryError::Publish(e));
+    }
 
     Ok(Some(subscription))
 }
@@ -196,6 +208,10 @@ mod tests {
             _workflow_id: Uuid,
             _activity_key: &str,
         ) -> crate::subscription::Result<()> {
+            Ok(())
+        }
+
+        async fn release_signal(&self, _subscription_id: Uuid) -> crate::subscription::Result<()> {
             Ok(())
         }
     }
@@ -286,7 +302,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_deliver_signal_publishes_once() {
+    async fn test_deliver_signal_publishes_only_when_signaled() {
         let subs = OnceSubscriptions::new();
         let events = RecordingEvents::new(false);
         let req = request("approve", "go", Some(json!({"approved": true})));
@@ -334,5 +350,99 @@ mod tests {
         let events = RecordingEvents::new(true);
         let result = deliver_signal(&subs, &events, request("approve", "go", None)).await;
         assert!(matches!(result, Err(SignalDeliveryError::Publish(_))));
+    }
+
+    /// A running workflow whose `approve` step waits for `go`
+    async fn waiting_workflow(pool: &sqlx::PgPool) -> Uuid {
+        let def_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO workflow_definitions (name, activities) VALUES ('w', '[]') RETURNING id",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        let workflow_id = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO workflows (id, definition_name, workflow_definition_id, input, status, activities, state_data) \
+             VALUES ($1, 'w', $2, '{}', 'running', '{}', '{}')",
+        )
+        .bind(workflow_id)
+        .bind(def_id)
+        .execute(pool)
+        .await
+        .unwrap();
+        crate::subscription::PostgresSubscriptionService::new(pool.clone())
+            .create_subscription(NewSubscription {
+                workflow_id,
+                activity_key: "approve".to_string(),
+                event_name: "go".to_string(),
+                on_timeout: OnTimeout::Fail,
+                timeout_seconds: 300,
+            })
+            .await
+            .unwrap();
+        workflow_id
+    }
+
+    fn approve(workflow_id: Uuid, data: Option<Value>) -> SignalRequest {
+        SignalRequest {
+            workflow_id,
+            activity_key: "approve".to_string(),
+            event_name: "go".to_string(),
+            data,
+        }
+    }
+
+    /// Against PostgreSQL: the second signal for a wait matches nothing and
+    /// publishes nothing
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_deliver_signal_once_against_postgres(pool: sqlx::PgPool) {
+        let workflow_id = waiting_workflow(&pool).await;
+        let subs = crate::subscription::PostgresSubscriptionService::new(pool.clone());
+        let events = RecordingEvents::new(false);
+
+        let first = deliver_signal(&subs, &events, approve(workflow_id, Some(json!({"n": 1}))))
+            .await
+            .unwrap();
+        assert!(first.is_some());
+        let second = deliver_signal(&subs, &events, approve(workflow_id, Some(json!({"n": 2}))))
+            .await
+            .unwrap();
+        assert!(second.is_none());
+        assert_eq!(events.published.lock().unwrap().len(), 1);
+    }
+
+    /// A signal whose event fails to publish leaves the wait open: a retry is
+    /// accepted and publishes the event
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_deliver_signal_publish_failure_reopens_the_wait(pool: sqlx::PgPool) {
+        let workflow_id = waiting_workflow(&pool).await;
+        let subs = crate::subscription::PostgresSubscriptionService::new(pool.clone());
+        let data = Some(json!({"approved": true}));
+
+        let failed = deliver_signal(
+            &subs,
+            &RecordingEvents::new(true),
+            approve(workflow_id, data.clone()),
+        )
+        .await;
+        assert!(matches!(failed, Err(SignalDeliveryError::Publish(_))));
+        let stored: Option<Value> = sqlx::query_scalar(
+            "SELECT signal_data FROM activity_event_subscriptions WHERE workflow_id = $1",
+        )
+        .bind(workflow_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(stored, None, "the wait is still marked signaled");
+
+        let events = RecordingEvents::new(false);
+        let retry = deliver_signal(&subs, &events, approve(workflow_id, data))
+            .await
+            .unwrap();
+        assert!(
+            retry.is_some(),
+            "a retry after a failed publish was refused"
+        );
+        assert_eq!(events.published.lock().unwrap().len(), 1);
     }
 }

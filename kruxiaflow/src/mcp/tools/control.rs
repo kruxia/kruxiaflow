@@ -14,6 +14,7 @@ use super::{AnyJson, error_response, parse_uuid, text_response};
 
 use kruxiaflow_core::{
     PostgresEventSource, PostgresSubscriptionService, SignalRequest, deliver_signal,
+    subscription::SignalDeliveryError,
 };
 
 // ============================================================================
@@ -149,6 +150,30 @@ pub async fn run_send_workflow_signal(
     params: &SendWorkflowSignal,
 ) -> Result<CallToolResult, CallToolError> {
     let workflow_id = parse_uuid(&params.workflow_id)?;
+
+    // Check the fields before resolving targets: with activity_key omitted, an
+    // empty signal_name would match no subscription and read as "not waiting"
+    let check = SignalRequest {
+        workflow_id,
+        activity_key: params.activity_key.clone().unwrap_or_default(),
+        event_name: params.signal_name.clone(),
+        data: None,
+    };
+    if let Err(errors) = check.validate() {
+        let errors: Vec<_> = errors
+            .into_iter()
+            .filter(|e| params.activity_key.is_some() || e.field != "activity_key")
+            .collect();
+        if !errors.is_empty() {
+            return error_response(&serde_json::json!({
+                "error": SignalDeliveryError::Invalid(errors).to_string(),
+                "signaled": false,
+                "workflow_id": params.workflow_id,
+                "activity_key": params.activity_key,
+                "signal_name": params.signal_name,
+            }));
+        }
+    }
 
     // Resolve the target activity keys: the explicit one, or every activity in
     // the workflow with an open subscription for this signal name.
@@ -418,7 +443,7 @@ mod tests {
 
     // These tests need DATABASE_URL. Other tests in this binary remove it from
     // the process environment, so run them with cargo nextest (a process per
-    // test, as CI does) or filtered: cargo test --features mcp-server mcp::
+    // test) or filtered: cargo test --features mcp-server mcp::
 
     fn extract_json(result: &CallToolResult) -> serde_json::Value {
         let text_content = result.content[0].as_text_content().unwrap();
@@ -585,6 +610,21 @@ mod tests {
         assert_eq!(result.is_error, Some(true));
         let body = extract_json(&result);
         assert!(body["error"].as_str().unwrap().contains("activity_key"));
+        assert!(signaled_events(&pool, workflow_id).await.is_empty());
+    }
+
+    /// With activity_key omitted, an empty signal_name is a field error, not
+    /// "nothing is waiting"
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_send_signal_empty_signal_name_is_invalid(pool: PgPool) {
+        let workflow_id = waiting_workflow(&pool, &["approve"]).await;
+        let mut params = signal(workflow_id, None, None);
+        params.signal_name = String::new();
+
+        let result = run_send_workflow_signal(&pool, &params).await.unwrap();
+        assert_eq!(result.is_error, Some(true));
+        let error = extract_json(&result)["error"].as_str().unwrap().to_string();
+        assert!(error.contains("event_name"), "{error}");
         assert!(signaled_events(&pool, workflow_id).await.is_empty());
     }
 

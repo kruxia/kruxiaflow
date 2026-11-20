@@ -169,7 +169,9 @@ its subscription is marked signaled, and the `ActivitySignaled` event carries
 same wait is refused (`"signaled": false`, with `isError` set). Without an
 `activity_key`, the tool signals every activity in the workflow waiting for
 `signal_name`, each one the same way; REST has no such mode. If the event
-can't be published, the tool returns an error instead of reporting success.
+can't be published, the tool reopens the wait and returns an error instead
+of reporting success, so the signal can be sent again. An empty
+`signal_name` or `activity_key` is a field error.
 
 `cancel_workflow` is intentionally absent until the engine gains a cancel
 endpoint.
