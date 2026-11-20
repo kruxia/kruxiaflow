@@ -120,3 +120,4 @@ docker compose down -v     # delete data volumes too
 - [Architecture](architecture.md) - Understand the system design
 - [Budget Configuration](budget-configuration.md) - Set up cost controls
 - [Loops Guide](loops-guide.md) - Build iterative workflows
+- [Signals](signals.md) - Pause a workflow for human approval

@@ -405,7 +405,7 @@ Authorization: Bearer <token>
 }
 ```
 
-**Activity Status Values**: `not_scheduled`, `pending`, `running`, `completed`, `failed`
+**Activity Status Values**: `not_scheduled`, `waiting` (for a signal, see [Signals](signals.md)), `pending`, `running`, `completed`, `failed`, `skipped`
 
 Each activity's `error` holds the message from its most recent failure; the
 workflow-level `error_message` surfaces a failed activity's error directly.
@@ -544,7 +544,9 @@ Authorization: Bearer <token>
 Content-Type: application/json
 ```
 
-Sends a signal to a waiting activity within a workflow.
+Sends a signal to a waiting activity within a workflow. For the
+`wait_for_signal` setting, timeouts, and how the activity reads the data
+(`{{SIGNAL}}`), see [Signals: Human-in-the-Loop Waits](signals.md).
 
 **Request Body**:
 ```json
@@ -560,7 +562,7 @@ Sends a signal to a waiting activity within a workflow.
 
 - `activity_key` - Required, not empty
 - `event_name` - Required, not empty
-- `data` - Optional, any JSON object
+- `data` - Optional, any JSON value; omitted or `null` means no data
 
 **Response** (200 OK):
 ```json
@@ -574,6 +576,8 @@ One signal ends one wait: the activity then runs (with `data` as its signal
 data). An activity inside a loop waits again in each round, and each round
 takes its own signal; `"signaled": false` means the activity is not waiting
 for `event_name` right now (not yet, or this round's signal already arrived).
+The same `200` with `"signaled": false` answers a wrong `event_name` and an
+unknown activity or workflow; the signal is not kept for later.
 
 ---
 

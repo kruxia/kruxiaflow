@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A guide to signal waits** (`docs/signals.md`, #36). `wait_for_signal`
+  had no reference in `docs/`. The new page covers the setting
+  (`event_name`, `timeout_seconds`, `on_timeout`), what a waiting step and
+  its workflow look like, the signal endpoint and its responses, using the
+  signal's data through `{{SIGNAL}}` (including templates that work when it
+  is `null`), timeouts, waits inside loops, and known limits. Every example on
+  the page was run against a local server. It is linked from the
+  README's approval-gate section, whose example now names a worker and an
+  activity (without them the step never ran after its signal), from the API
+  reference, and from the book's table of contents. The API reference now
+  lists the `waiting` and `skipped` activity statuses.
+
 ### Fixed
 
 - **A signaled activity runs.** After `POST /api/v1/workflows/{id}/signal`

@@ -164,6 +164,12 @@ publishes the port on `127.0.0.1` only).
 `cancel_workflow` is intentionally absent until the engine gains a cancel
 endpoint.
 
+For signal waits (approval gates), see [Signals](signals.md). Its
+[known limits](signals.md#known-limits) include one for `send_workflow_signal`:
+the data it sends doesn't reach the activity's `{{SIGNAL}}`, and inside a loop
+it loses every round's signal after the first. Send signals with the REST
+endpoint for now.
+
 ## A budget-governed session, end to end
 
 What an agent connected over MCP typically does with a request like *"research

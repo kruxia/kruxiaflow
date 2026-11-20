@@ -199,6 +199,10 @@ decision — then resume when signaled, even days later, surviving restarts in b
 ```yaml
 activities:
   - key: await_approval
+    worker: std
+    activity_name: echo
+    parameters:
+      approved: "{{SIGNAL.approved}}"   # the signal's data
     settings:
       wait_for_signal:
         event_name: approval
@@ -214,6 +218,8 @@ curl -X POST http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/signal \
 ```
 
 Inside a loop, the activity waits again in each round, for that round's signal.
+See [Signals: Human-in-the-Loop Waits](docs/signals.md) for timeouts, the
+signal's data, finding waiting workflows, and known limits.
 
 ### Result Caching
 
