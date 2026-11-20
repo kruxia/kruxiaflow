@@ -93,7 +93,8 @@
     padding: 2px 8px; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
     text-decoration: none;
   }
-  .traplabel:hover { text-decoration: underline; }
+  .traplabel a { color: inherit; text-decoration: none; }
+  .traplabel a:hover { text-decoration: underline; }
 
   /* a "shadow" field, as HyperCard drew them */
   .field {
@@ -214,6 +215,24 @@ try { DATA = JSON.parse(document.getElementById("shop-data").textContent); } cat
 const MACHINES = DATA ? DATA.machines : [];
 const SETS = DATA ? DATA.results.map((s, i) => ({ ...s, id: i })) : [];
 const ISSUE_URL = "https://github.com/kruxia/kruxiaflow/issues/";
+/** Every issue a card's trap names: `issues: [29, 37]`, or `issue: 25` */
+function trapIssues(t) {
+  if (!t) return [];
+  if (Array.isArray(t.issues) && t.issues.length) return t.issues;
+  return t.issue != null ? [t.issue] : [];
+}
+/** A run's trap issues: `trap_issues`, or the single `trap` of older results files */
+function runIssues(r) {
+  if (!r) return [];
+  if (Array.isArray(r.trap_issues) && r.trap_issues.length) return r.trap_issues;
+  return r.trap ? [r.trap] : [];
+}
+/** #29, #37 as plain text */
+function issueText(ns, sep) { return ns.map(n => `#${n}`).join(sep); }
+/** Each issue as a link to it */
+function issueLinks(ns) {
+  return ns.map(n => `<a href="${ISSUE_URL}${encodeURIComponent(n)}" target="_blank" rel="noopener">#${esc(n)}</a>`).join(", ");
+}
 
 const RESULT_TEXT = { works: "Works", broken: "Broken", known_broken: "Known broken", fixed: "Fixed" };
 const RESULT_RANK = { broken: 3, known_broken: 2, fixed: 1, works: 0 };
@@ -246,7 +265,8 @@ function latestFor(dir) {
 }
 function stamp(r) {
   if (!r) return `<span class="stamp none">not run</span>`;
-  const text = esc(RESULT_TEXT[r.result] || r.result) + (r.trap ? ` #${r.trap}` : "");
+  const issues = runIssues(r);
+  const text = esc(RESULT_TEXT[r.result] || r.result) + (issues.length ? ` ${issueText(issues, " ")}` : "");
   return r.result === "known_broken"
     ? `<span class="stamp known_broken"><span>${text}</span></span>`
     : `<span class="stamp ${esc(r.result)}">${text}</span>`;
@@ -416,8 +436,9 @@ function machineCard(m) {
       for (const p of r.problems) notes.push(`<li><b>${esc(setName(s))}</b>, ${esc(run.name)}: ${esc(p)}</li>`);
     }
   }
-  const trap = c.trap
-    ? `<a class="traplabel" href="${ISSUE_URL}${c.trap.issue}" target="_blank" rel="noopener">Trap · issue #${c.trap.issue}</a>`
+  const issues = trapIssues(c.trap);
+  const trap = issues.length
+    ? `<span class="traplabel">Trap · ${issues.length > 1 ? "issues" : "issue"} ${issueLinks(issues)}</span>`
     : "";
   return `
     <div class="head">
@@ -511,7 +532,7 @@ function words(id) {
   if (!m) return id;
   const c = m.card;
   return [c.name, c.kind, c.picture, ...(c.functions || []), ...c.runs.map(r => r.name),
-    ...m.workflow.steps.map(s => s.key), c.trap ? `#${c.trap.issue} ${c.trap.broken_looks_like}` : ""].join(" ");
+    ...m.workflow.steps.map(s => s.key), c.trap ? `${issueText(trapIssues(c.trap), " ")} ${c.trap.broken_looks_like}` : ""].join(" ");
 }
 document.getElementById("find").addEventListener("submit", e => {
   e.preventDefault();

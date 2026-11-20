@@ -69,11 +69,35 @@ enum Kind {
     Compound,
 }
 
+/// A trap names the issue it reproduces as `issue: 25`, or several as
+/// `issues: [29, 37]` when it needs them all fixed
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Trap {
-    issue: u32,
+    #[serde(default)]
+    issue: Option<u32>,
+    #[serde(default)]
+    issues: Vec<u32>,
     broken_looks_like: String,
+}
+
+impl Trap {
+    /// Every issue it names, in card order
+    fn issues(&self) -> Vec<u32> {
+        self.issue
+            .into_iter()
+            .chain(self.issues.iter().copied())
+            .collect()
+    }
+}
+
+/// `#29, #37`
+fn issue_list(issues: &[u32]) -> String {
+    issues
+        .iter()
+        .map(|n| format!("#{n}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,7 +108,28 @@ struct RunSpec {
     input: Option<Value>,
     #[serde(default = "default_timeout")]
     timeout_seconds: u64,
+    /// Signals to send, in order, each once its step is waiting
+    #[serde(default)]
+    signals: Vec<SignalSpec>,
     expect: Expect,
+}
+
+/// A signal the runner sends through the public API once `step` is
+/// waiting. Without `data` the request has no `data` field; `data: null`
+/// sends an explicit null.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SignalSpec {
+    step: String,
+    event: String,
+    #[serde(default, deserialize_with = "present")]
+    data: Option<Value>,
+}
+
+/// A field that is present, even as null, is `Some`; only a missing one is
+/// `None` (through `#[serde(default)]`)
+fn present<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    Value::deserialize(d).map(Some)
 }
 
 fn default_timeout() -> u64 {
@@ -166,13 +211,34 @@ fn load_machines() -> Vec<Machine> {
 fn lint_card(dir: &str, card: &Card, workflow_yaml: &str) {
     let wf: serde_yaml::Value = serde_yaml::from_str(workflow_yaml)
         .unwrap_or_else(|e| panic!("machines/{dir}/workflow.yaml: {e}"));
-    let keys: BTreeSet<String> = wf["activities"]
+    let activities = wf["activities"]
         .as_sequence()
-        .unwrap_or_else(|| panic!("machines/{dir}/workflow.yaml: no activities"))
+        .unwrap_or_else(|| panic!("machines/{dir}/workflow.yaml: no activities"));
+    let keys: BTreeSet<String> = activities
         .iter()
         .filter_map(|a| a["key"].as_str().map(str::to_string))
         .collect();
+    // Steps that wait for a signal
+    let waits: BTreeSet<String> = activities
+        .iter()
+        .filter(|a| a["settings"]["wait_for_signal"].is_mapping())
+        .filter_map(|a| a["key"].as_str().map(str::to_string))
+        .collect();
     assert!(!card.runs.is_empty(), "machines/{dir}: card has no runs");
+    if let Some(t) = &card.trap {
+        let issues = t.issues();
+        assert!(
+            t.issue.is_none() || t.issues.is_empty(),
+            "machines/{dir}: a trap names `issue` or `issues`, not both"
+        );
+        assert!(!issues.is_empty(), "machines/{dir}: a trap names its issue");
+        let unique: BTreeSet<u32> = issues.iter().copied().collect();
+        assert_eq!(
+            unique.len(),
+            issues.len(),
+            "machines/{dir}: a trap names each issue once"
+        );
+    }
     for run in &card.runs {
         let named: BTreeSet<String> = run.expect.steps.keys().cloned().collect();
         assert_eq!(
@@ -186,6 +252,20 @@ fn lint_card(dir: &str, card: &Card, workflow_yaml: &str) {
                 "machines/{dir}, run '{}': output check names unknown step {}",
                 run.name,
                 o.step
+            );
+        }
+        for s in &run.signals {
+            assert!(
+                keys.contains(&s.step),
+                "machines/{dir}, run '{}': signal to unknown step {}",
+                run.name,
+                s.step
+            );
+            assert!(
+                waits.contains(&s.step),
+                "machines/{dir}, run '{}': signal to {}, which has no settings.wait_for_signal",
+                run.name,
+                s.step
             );
         }
     }
@@ -275,8 +355,12 @@ impl Engine {
                 shutdown.clone(),
             );
             tokio::spawn(async move {
+                // The timeout checker also ends expired signal waits; at the
+                // default 30s, a run that waits out a short signal timeout
+                // would take half a minute
                 let config = OrchestratorConfig::new(pool)
-                    .with_poll_interval(Duration::from_millis(1), Duration::from_millis(10));
+                    .with_poll_interval(Duration::from_millis(1), Duration::from_millis(10))
+                    .with_timeout_check_interval(Duration::from_secs(1));
                 run_orchestrator(events, queue, subscriptions, config, Some(shutdown))
                     .await
                     .expect("orchestrator");
@@ -391,9 +475,10 @@ impl Engine {
         body["workflow_id"].as_str().unwrap().parse().unwrap()
     }
 
-    async fn workflow_status(&self, id: Uuid) -> String {
-        let body: Value = self
-            .http
+    /// The workflow, through the public API: `status`, and `activities`
+    /// with each step's `activity_key` and `status`
+    async fn workflow(&self, id: Uuid) -> Value {
+        self.http
             .get(format!("{}/api/v1/workflows/{id}", self.url))
             .bearer_auth(&self.token)
             .send()
@@ -401,18 +486,89 @@ impl Engine {
             .expect("status request")
             .json()
             .await
-            .unwrap_or(Value::Null);
+            .unwrap_or(Value::Null)
+    }
+
+    async fn workflow_status(&self, id: Uuid) -> String {
+        let body = self.workflow(id).await;
         body["status"].as_str().unwrap_or("unknown").to_string()
     }
 
+    /// Wait until the signal's step is waiting, then send the signal, all
+    /// through the public API. Gives up at `deadline`, when the workflow
+    /// ends first, or when the step gets past waiting without one.
+    async fn signal(&self, id: Uuid, s: &SignalSpec, deadline: Instant) -> Result<(), String> {
+        let what = format!("signal '{}' to {}", s.event, s.step);
+        loop {
+            let wf = self.workflow(id).await;
+            let workflow = wf["status"].as_str().unwrap_or("unknown");
+            let step = wf["activities"]
+                .as_array()
+                .and_then(|list| list.iter().find(|a| a["activity_key"] == s.step.as_str()))
+                .and_then(|a| a["status"].as_str())
+                .unwrap_or("absent");
+            // What the step was doing, for the message if this goes wrong
+            let mut last = step.to_string();
+            match step {
+                "waiting" => {
+                    let mut body = json!({ "activity_key": s.step, "event_name": s.event });
+                    if let Some(data) = &s.data {
+                        body["data"] = data.clone();
+                    }
+                    let r = self
+                        .http
+                        .post(format!("{}/api/v1/workflows/{id}/signal", self.url))
+                        .bearer_auth(&self.token)
+                        .json(&body)
+                        .send()
+                        .await
+                        .map_err(|e| format!("{what}: {e}"))?;
+                    let status = r.status();
+                    let reply: Value = r.json().await.unwrap_or(Value::Null);
+                    if !status.is_success() {
+                        return Err(format!("{what}: signal API {status}: {reply}"));
+                    }
+                    if reply["signaled"] == true {
+                        return Ok(());
+                    }
+                    // Not delivered: the wait may not be visible yet, so try
+                    // again while the step still shows waiting
+                    last = format!(
+                        "waiting, but the signal wasn't delivered: {}",
+                        reply["message"]
+                    );
+                }
+                "not_scheduled" | "absent" => {}
+                other => {
+                    return Err(format!(
+                        "{what} not sent: {} is {other} and never waited",
+                        s.step
+                    ));
+                }
+            }
+            if matches!(workflow, "completed" | "failed" | "cancelled") {
+                return Err(format!(
+                    "{what} not sent: the workflow {workflow} first, with {} {last}",
+                    s.step
+                ));
+            }
+            if Instant::now() >= deadline {
+                return Err(format!(
+                    "{what} not sent before the run's timeout: {} is {last}",
+                    s.step
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
     /// Poll until the workflow is completed, failed or cancelled, or the
-    /// timeout passes. Returns the last status seen.
-    async fn wait(&self, id: Uuid, timeout: Duration) -> String {
-        let started = Instant::now();
+    /// deadline passes. Returns the last status seen.
+    async fn wait(&self, id: Uuid, deadline: Instant) -> String {
         loop {
             let status = self.workflow_status(id).await;
             if matches!(status.as_str(), "completed" | "failed" | "cancelled")
-                || started.elapsed() >= timeout
+                || Instant::now() >= deadline
             {
                 return status;
             }
@@ -500,11 +656,12 @@ impl Mode {
     }
 }
 
+/// A trap's outcome carries every issue the trap names
 enum Outcome {
     Works,
     Broken,
-    KnownBroken(u32),
-    Fixed(u32),
+    KnownBroken(Vec<u32>),
+    Fixed(Vec<u32>),
 }
 
 impl Outcome {
@@ -512,8 +669,16 @@ impl Outcome {
         match self {
             Outcome::Works => "works".to_string(),
             Outcome::Broken => "BROKEN".to_string(),
-            Outcome::KnownBroken(n) => format!("known broken (#{n})"),
-            Outcome::Fixed(n) => format!("fixed (#{n})"),
+            Outcome::KnownBroken(n) => format!("known broken ({})", issue_list(n)),
+            Outcome::Fixed(n) => format!("fixed ({})", issue_list(n)),
+        }
+    }
+
+    /// The trap's issues, or none for a machine that isn't a trap
+    fn trap_issues(&self) -> &[u32] {
+        match self {
+            Outcome::KnownBroken(n) | Outcome::Fixed(n) => n,
+            _ => &[],
         }
     }
 }
@@ -611,7 +776,7 @@ async fn check(engine: &Engine, id: Uuid, status: &str, spec: &RunSpec) -> Obser
 }
 
 fn judge(machine: &Machine, run: &RunSpec, observed: Observed, seconds: f64) -> Row {
-    let trap = machine.card.trap.as_ref().map(|t| t.issue);
+    let trap = machine.card.trap.as_ref().map(Trap::issues);
     let outcome = match (observed.problems.is_empty(), trap) {
         (true, None) => Outcome::Works,
         (true, Some(n)) => Outcome::Fixed(n),
@@ -634,12 +799,21 @@ fn judge(machine: &Machine, run: &RunSpec, observed: Observed, seconds: f64) -> 
 async fn run_one(engine: &Engine, machine: &Machine, def: &(String, String), run: &RunSpec) -> Row {
     let input = run.input.clone().unwrap_or_else(|| json!({}));
     let started = Instant::now();
+    let deadline = started + Duration::from_secs(run.timeout_seconds);
     let id = engine.submit(&def.0, &def.1, &input).await;
-    let status = engine
-        .wait(id, Duration::from_secs(run.timeout_seconds))
-        .await;
+    // A signal that can't be sent is a problem; the ones after it aren't sent
+    let mut signal_problems = Vec::new();
+    for s in &run.signals {
+        if let Err(p) = engine.signal(id, s, deadline).await {
+            signal_problems.push(p);
+            break;
+        }
+    }
+    let status = engine.wait(id, deadline).await;
     let seconds = started.elapsed().as_secs_f64();
-    let observed = check(engine, id, &status, run).await;
+    let mut observed = check(engine, id, &status, run).await;
+    signal_problems.append(&mut observed.problems);
+    observed.problems = signal_problems;
     judge(machine, run, observed, seconds)
 }
 
@@ -739,9 +913,9 @@ fn scoreboard(mode: Mode, rows: &[Row], machines: &[Machine], total: f64) -> Str
         for m in traps {
             let t = m.card.trap.as_ref().unwrap();
             out.push_str(&format!(
-                "- **{}** (#{}): broken looks like: {}\n",
+                "- **{}** ({}): broken looks like: {}\n",
                 m.card.name,
-                t.issue,
+                issue_list(&t.issues()),
                 t.broken_looks_like.trim()
             ));
         }
@@ -798,10 +972,11 @@ async fn run_shop(pool: PgPool, mode: Mode) {
     }
 
     for r in &rows {
-        if let Outcome::Fixed(n) = r.outcome {
+        if let Outcome::Fixed(n) = &r.outcome {
             println!(
-                "NOTE: trap {} (#{n}) now passes: take the trap label off its card",
-                r.machine
+                "NOTE: trap {} ({}) now passes: take the trap label off its card",
+                r.machine,
+                issue_list(n)
             );
         }
     }
@@ -864,15 +1039,14 @@ fn write_results(
     let runs: Vec<Value> = rows
         .iter()
         .map(|r| {
-            let trap = match r.outcome {
-                Outcome::KnownBroken(n) | Outcome::Fixed(n) => Some(n),
-                _ => None,
-            };
+            // `trap` is the first issue, as before; `trap_issues` is all
+            let issues = r.outcome.trap_issues();
             json!({
                 "machine": r.machine,
                 "run": r.run,
                 "result": r.outcome.key(),
-                "trap": trap,
+                "trap": issues.first(),
+                "trap_issues": issues,
                 "seconds": r.seconds,
                 "status": r.status,
                 "steps": r.steps,

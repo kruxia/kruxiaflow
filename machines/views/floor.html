@@ -231,6 +231,24 @@ try { DATA = JSON.parse(document.getElementById("shop-data").textContent); } cat
 const MACHINES = DATA ? DATA.machines : [];
 const SETS = DATA ? DATA.results.map((s, i) => ({ ...s, id: i })) : [];
 const ISSUE_URL = "https://github.com/kruxia/kruxiaflow/issues/";
+/** Every issue a card's trap names: `issues: [29, 37]`, or `issue: 25` */
+function trapIssues(t) {
+  if (!t) return [];
+  if (Array.isArray(t.issues) && t.issues.length) return t.issues;
+  return t.issue != null ? [t.issue] : [];
+}
+/** A run's trap issues: `trap_issues`, or the single `trap` of older results files */
+function runIssues(r) {
+  if (!r) return [];
+  if (Array.isArray(r.trap_issues) && r.trap_issues.length) return r.trap_issues;
+  return r.trap ? [r.trap] : [];
+}
+/** #29, #37 as plain text */
+function issueText(ns, sep) { return ns.map(n => `#${n}`).join(sep); }
+/** Each issue as a link to it */
+function issueLinks(ns) {
+  return ns.map(n => `<a href="${ISSUE_URL}${encodeURIComponent(n)}" target="_blank" rel="noopener">#${esc(n)}</a>`).join(", ");
+}
 
 const RESULT_TEXT = { works: "Works", broken: "Broken", known_broken: "Known broken", fixed: "Fixed" };
 const RESULT_RANK = { broken: 3, known_broken: 2, fixed: 1, works: 0 };
@@ -249,7 +267,11 @@ function setName(s) {
 }
 function runIn(set, dir, run) { return set ? set.runs.find(r => r.machine === dir && r.run === run) : undefined; }
 function worst(rs) { return rs.length ? rs.reduce((a, b) => (RESULT_RANK[b.result] > RESULT_RANK[a.result] ? b : a)) : null; }
-function resultLabel(r) { return r ? (RESULT_TEXT[r.result] || r.result) + (r.trap ? ` · #${r.trap}` : "") : "Not run"; }
+function resultLabel(r) {
+  if (!r) return "Not run";
+  const issues = runIssues(r);
+  return (RESULT_TEXT[r.result] || r.result) + (issues.length ? ` · ${issueText(issues, ", ")}` : "");
+}
 
 // ---------------------------------------------------------------------------
 // State
@@ -308,7 +330,8 @@ function stateClass(status) {
   if (status === "completed") return "completed";
   if (status === "failed") return "failed";
   if (status === "skipped") return "skipped";
-  if (status === "running" || status === "scheduled") return "running";
+  // In flight: queued, running, or waiting for a signal
+  if (["running", "scheduled", "pending", "waiting"].includes(status)) return "running";
   return "idle";
 }
 function stateText(st) {
@@ -429,7 +452,7 @@ function bay(m) {
   let findings = "";
   if (!run) findings = `<p class="ok">Not run in ${esc(setName(cur()))}.</p>`;
   else if (run.problems.length) findings = `<ul class="problems${run.result === "known_broken" ? " known" : ""}">${run.problems.map(p => `<li>${esc(p)}</li>`).join("")}</ul>`;
-  else findings = `<p class="ok">Did what its card says.${run.result === "fixed" ? ` Trap #${run.trap} now passes: take the trap label off.` : ""}</p>`;
+  else findings = `<p class="ok">Did what its card says.${run.result === "fixed" ? ` Trap ${esc(issueText(runIssues(run), ", "))} now passes: take the trap label off.` : ""}</p>`;
   const prev = runIn(cmp(), m.dir, spec.name);
   if (run && prev && prev.result !== run.result) {
     findings += `<p class="changes">Δ ${esc(setName(cmp()))}: ${esc(resultLabel(prev))} → ${esc(setName(cur()))}: ${esc(resultLabel(run))}</p>`;
@@ -449,7 +472,7 @@ function bay(m) {
       <span class="lamp ${run ? run.result : ""}" title="${esc(resultLabel(run))}"></span>
       <div class="names"><h2>${esc(c.name)}</h2><span class="kind">${esc(c.kind)} machine · ${m.workflow.steps.length} steps</span></div>
       <div class="verdict"><span>${esc(resultLabel(run))}</span>${run ? `<span class="secs">${Number(run.seconds).toFixed(2)}s</span>` : ""}
-        ${c.trap ? `<a class="trapchip" href="${ISSUE_URL}${c.trap.issue}" target="_blank" rel="noopener">Trap · #${c.trap.issue}</a>` : ""}</div>
+        ${trapIssues(c.trap).length ? `<span class="trapchip">Trap · ${issueLinks(trapIssues(c.trap))}</span>` : ""}</div>
     </div>
     ${tabs}
     <div class="schematic">${schematic(m, run, spec)}</div>

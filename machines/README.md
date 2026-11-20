@@ -4,7 +4,7 @@ Small workflows, called **machines**, each inspired by a physical machine: a dom
 
 - **Simple machines** exercise one engine function.
 - **Compound machines** combine about three. Interactions are where bugs hide.
-- **A trap** is a machine of either kind that reproduces a known bug, labelled with its issue number. It's expected to fail until the fix lands. When it passes, take the label off.
+- **A trap** is a machine of either kind that reproduces a known bug, labelled with its issue number, or several when it needs them all fixed. It's expected to fail until the fix lands. When it passes, take the label off.
 
 ## Running
 
@@ -46,7 +46,8 @@ There are two views of the same results, built to compare before choosing one. N
 The results file (`machine-shop-results/1`) is the contract between runners and views:
 
 - `runner`, `mode`, `engine_version`, `tree` (`label`, `branch`, `commit`), `started_at`, `seconds`
-- `runs`: one entry per run, with `machine`, `run`, `result` (`works`, `broken`, `known_broken` or `fixed`), `trap`, `seconds`, the workflow's final `status`, `steps` (each step's `status` and `runs`), and `problems`
+- `runs`: one entry per run, with `machine`, `run`, `result` (`works`, `broken`, `known_broken` or `fixed`), `trap` (a trap's first issue, or null), `trap_issues` (all of them, or empty), `seconds`, the workflow's final `status`, `steps` (each step's `status` and `runs`), and `problems`
+- Readers treat a file without `trap_issues` as having `[trap]`, so older results files still read
 
 Each run ends as one of four results:
 
@@ -72,13 +73,17 @@ picture: >
 functions:                  # the engine functions it exercises
   - a condition on a dependency, reading the dependency's output
 trap:                       # only for a trap
-  issue: 25
+  issue: 25                 # or issues: [29, 37], when it needs them all fixed
   broken_looks_like: >
     what the bug does to this machine
 runs:                       # one or more runs, each with its own input
   - name: lever to the left
     input: { track: left }
-    timeout_seconds: 15     # optional; default 15
+    timeout_seconds: 15     # optional; default 15; covers the whole run
+    signals:                # optional; see "Signals" below
+      - step: approve
+        event: go
+        data: { approved: true }
     expect:
       status: completed     # the workflow's final status
       steps:                # every step, with its final status and run count
@@ -95,3 +100,21 @@ Rules:
 - **Write expectations from the docs and the intended behaviour,** never by running the machine and copying what it did.
 - **Use real activities and their real output names.** For example, `echo` returns its parameters as the output `echo`.
 - **Keep a machine correct whatever else is running.** Use its own inputs, and depend on nothing outside it.
+
+### Signals
+
+A step with `settings.wait_for_signal` waits until it is signaled or its wait times out. A run's `signals` are sent in order, each one like this:
+
+1. The runner polls `GET /api/v1/workflows/{id}` until the step's status is `waiting`.
+2. It sends `POST /api/v1/workflows/{id}/signal` with `activity_key`, `event_name` and, when the card gives one, `data`. It tries again while the step is still waiting and the API answers `signaled: false`.
+3. Then it goes on to the next signal, or waits for the workflow to finish.
+
+| Field   | What it is                                                                                         |
+|---------|----------------------------------------------------------------------------------------------------|
+| `step`  | The step to signal; it must exist and have `settings.wait_for_signal`                              |
+| `event` | The `event_name` to send                                                                           |
+| `data`  | Optional. Left out, the request has no `data` field; `data: null` sends an explicit null           |
+
+A signal that can't be sent is one of the run's problems: the workflow finished first, the step got past waiting without one, or the run's timeout passed. The signals after it aren't sent. A run with no `signals` relies on the step's own timeout and `on_timeout`.
+
+The runner's orchestrator checks for expired waits every second (the engine's default is 30 seconds), so a run that waits out a short signal timeout finishes in a few seconds. Give such a run a `timeout_seconds` above the wait's own timeout.
