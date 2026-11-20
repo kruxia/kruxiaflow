@@ -217,7 +217,7 @@ curl -X POST http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/signal \
   -d '{"activity_key": "await_approval", "event_name": "approval", "data": {"approved": true}}'
 ```
 
-The signal endpoint is described in the [API reference](docs/api-reference.md).
+The signal endpoint is described in the [API reference](docs/api-reference.md#signal-an-activity).
 
 ### Result Caching
 

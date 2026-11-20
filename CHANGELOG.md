@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **The README's approval-gate example** (#35) now works as written:
+- **The README's approval-gate example** (#35) uses the real syntax:
   `wait_for_signal` is an object with `event_name` and `timeout_seconds`, and
   the signal request sends JSON with `activity_key`, `event_name` and `data`.
 
