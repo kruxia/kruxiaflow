@@ -50,16 +50,12 @@ const SETTLE_TIMEOUT: Duration = Duration::from_secs(10);
 /// - those tests are in [`settle_events`], waiting for A's xid to leave the
 ///   instance's horizon, and keep their slots while they wait;
 /// - nothing moves until a [`SETTLE_TIMEOUT`] expires and its test fails on an
-///   empty poll (seen in the loop tests: 4 handlers idle in transaction for
-///   10 s, 5 tests timing out).
+///   empty poll.
 ///
 /// A pool of its own has no parent, so a test's connections wait only on that
 /// test. The waits cannot be narrowed to the test's own database instead,
 /// because the production poll's horizon is instance-wide (see
-/// [`settle_events`]). Reserving a test's 5 slots up front does not work
-/// either: `sqlx::test` has already drawn one slot per test before the test
-/// body runs, so tests queued for a reservation hold the slots the reserving
-/// test waits for.
+/// [`settle_events`]).
 ///
 /// The cost is connections: up to 5 per running test on top of the idle one
 /// `sqlx::test` keeps, so the server needs `max_connections` of at least
