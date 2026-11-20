@@ -141,6 +141,13 @@ impl TemplateContext {
         self
     }
 
+    /// Set `{{SIGNAL}}` for the activity whose templates are resolved next:
+    /// the data its signal carried (null for none), or `None` to leave
+    /// `SIGNAL` undefined, as it is for an activity that doesn't wait.
+    pub fn set_signal(&mut self, signal: Option<Value>) {
+        self.signal = signal;
+    }
+
     /// Convert TemplateContext to minijinja Value for template evaluation
     fn to_minijinja_value(&self) -> MiniValue {
         let mut context_map = HashMap::new();
