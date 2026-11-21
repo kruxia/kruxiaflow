@@ -1732,3 +1732,144 @@ activities:
         "the tail gets no spurious new input"
     );
 }
+
+/// #26 [loop-backedge-by-name]: the repair loop `run → check → fix → run`
+/// starts with `run`, the step written first, and runs each step once per
+/// round.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_repair_loop_starts_with_its_first_written_step(pool: PgPool) {
+    let definition = WorkflowDefinition::from_yaml(
+        r#"
+name: repair_loop_regression
+activities:
+  - key: run
+    worker: test
+    activity_name: echo
+    iteration_limit: 5
+    depends_on:
+      - activity_key: fix
+        conditions: ["{{ fix.status == 'completed' }}"]
+  - key: check
+    worker: test
+    activity_name: echo
+    depends_on: [run]
+  - key: fix
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: check
+        conditions: ["{{ check.result == 'fail' }}"]
+  - key: done
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: check
+        conditions: ["{{ check.result == 'pass' }}"]
+"#,
+    )
+    .expect("valid loop definition");
+    let definition_id = insert_workflow_definition(&pool, &definition).await;
+    let workflow_id = Uuid::now_v7();
+
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
+    let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
+        Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
+    let config = OrchestratorConfig::new(pool.clone());
+
+    let process_all = || async {
+        loop {
+            let events = event_source.poll("orchestrator").await.unwrap();
+            if events.is_empty() {
+                break;
+            }
+            for event in events {
+                kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
+                    &event,
+                    &event_source,
+                    &activity_queue,
+                    &subscription_service,
+                    &config,
+                )
+                .await
+                .expect("process event");
+                event_source
+                    .update_position("orchestrator", event.cursor())
+                    .await
+                    .unwrap();
+            }
+        }
+    };
+
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id,
+            event_type: WorkflowEventType::WorkflowCreated,
+            activity_key: None,
+            payload: json!({
+                "definition_name": definition.name,
+                "workflow_definition_id": definition_id,
+            }),
+            iteration: None,
+        })
+        .await
+        .unwrap();
+
+    // The check fails twice, then passes
+    let mut order: Vec<String> = Vec::new();
+    let mut checks = 0;
+    for _ in 0..50 {
+        process_all().await;
+        let mut tx = pool.begin().await.unwrap();
+        let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let pending: Vec<(String, u32)> = state
+            .activities
+            .values()
+            .filter(|a| a.status == WorkflowActivityStatus::Pending)
+            .map(|a| (a.key.clone(), a.iteration))
+            .collect();
+        if pending.is_empty() {
+            break;
+        }
+        assert_eq!(
+            pending.len(),
+            1,
+            "only one step should be pending at a time, got {pending:?} (order so far {order:?})"
+        );
+        let (key, iteration) = pending.into_iter().next().unwrap();
+        let result = if key == "check" {
+            checks += 1;
+            if checks < 3 { "fail" } else { "pass" }
+        } else {
+            "ok"
+        };
+        order.push(key.clone());
+        event_source
+            .publish(NewWorkflowEvent {
+                workflow_id,
+                event_type: WorkflowEventType::ActivityCompleted,
+                activity_key: Some(key),
+                payload: json!({"outputs": {"result": result}}),
+                iteration: Some(iteration as i32),
+            })
+            .await
+            .unwrap();
+    }
+    process_all().await;
+
+    // Only the loop's own steps: whether `done` runs after the loop is not
+    // what this test is about
+    let loop_steps: Vec<&str> = order
+        .iter()
+        .map(String::as_str)
+        .filter(|key| *key != "done")
+        .collect();
+    assert_eq!(
+        loop_steps,
+        ["run", "check", "fix", "run", "check", "fix", "run", "check"],
+        "each round runs run, check, then fix while the check fails"
+    );
+}
