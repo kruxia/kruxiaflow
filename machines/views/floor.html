@@ -541,8 +541,16 @@ function legend() {
     ${hasTwins(cur()) ? Object.keys(TWIN_TEXT).map(k => `<span>${plugMark(k, TWIN_TEXT[k])} ${esc(TWIN_MEANS[k])}</span>`).join("") : ""}`;
 }
 
+/** Shop mode pulls the plug once for every twin: when, and for how long */
+function shopPull(s) {
+  if (!s || s.mode !== "shop" || !s.plug) return "";
+  const p = s.runs.map(r => r.twin && r.twin.plug).find(Boolean);
+  const share = s.plug.shop_fraction != null ? `, when they together had ${Math.round(s.plug.shop_fraction * 100)}% of the uninterrupted runs' events in` : "";
+  return ` In shop mode the twins ran together, and the plug was pulled once for all of them${share}${p ? `; the engine was down for ${secs(p.down_seconds)}` : ""}.`;
+}
+
 function notes() {
-  return (hasTwins(cur()) ? `<p><b>Pull the plug.</b> Each run has a twin, and partway through it the engine was stopped and restarted on the same database. ${esc(PLUG_SIMULATES)}</p>` : "") +
+  return (hasTwins(cur()) ? `<p><b>Pull the plug.</b> Each run has a twin, and partway through it the engine was stopped and restarted on the same database.${esc(shopPull(cur()))} ${esc(PLUG_SIMULATES)}</p>` : "") +
     `<p><b>Works offline.</b> This page loads nothing from the network: the machines and every results set are inside the file.</p>
     <p><b>Only PostgreSQL.</b> The engine under test needs nothing else: these runs used its API server, orchestrator and std worker, with no cache, broker or other service.</p>`;
 }
@@ -559,7 +567,7 @@ function twinBlock(set, run) {
   let where;
   if (!p) where = "The plug was never pulled: the twin finished first.";
   else if (p.after_event != null) where = `Pulled the plug after event ${p.after_event} of ${p.of_events}; ${plural(p.events_at_plug, "event was", "events were")} in when the engine stopped, and it was down for ${secs(p.down_seconds)}.`;
-  else where = `Pulled the plug once for the whole shop; this twin had ${p.events_at_plug} of the uninterrupted run's ${p.of_events} events in, and the engine was down for ${secs(p.down_seconds)}.`;
+  else where = `When the plug was pulled, this twin had ${p.events_at_plug} of the uninterrupted run's ${p.of_events} events in.`;
   if (p && p.settled_before) where += " The twin had already finished.";
   const came = `The twin took ${secs(t.seconds)}, against ${secs(run.seconds)} uninterrupted: ${TWIN_TEXT[t.outcome] || t.outcome}, ${TWIN_MEANS[t.outcome] || ""}.`;
   const diffs = t.differences && t.differences.length ? `<ul>${t.differences.map(d => `<li>${esc(d)}</li>`).join("")}</ul>` : "";
