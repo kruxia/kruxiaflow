@@ -51,6 +51,7 @@ fn wait(workflow_id: Uuid, key: &str, timeout_seconds: u64) -> NewSubscription {
         event_name: "go".to_string(),
         on_timeout: OnTimeout::Fail,
         timeout_seconds,
+        iteration: None,
     }
 }
 

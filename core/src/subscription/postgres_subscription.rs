@@ -34,15 +34,16 @@ impl SubscriptionService for PostgresSubscriptionService {
         let row = sqlx::query!(
             r#"
             INSERT INTO activity_event_subscriptions
-                (workflow_id, activity_key, event_name, on_timeout, timeout_at)
-            VALUES ($1, $2, $3, $4, $5)
+                (workflow_id, activity_key, event_name, on_timeout, timeout_at, iteration)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING id
             "#,
             subscription.workflow_id,
             subscription.activity_key,
             subscription.event_name,
             on_timeout_str,
-            timeout_at
+            timeout_at,
+            subscription.iteration
         )
         .fetch_one(&self.pool)
         .await
@@ -77,7 +78,7 @@ impl SubscriptionService for PostgresSubscriptionService {
               AND event_name = $3
               AND signaled_at IS NULL
               AND expired_at IS NULL
-            RETURNING id, workflow_id, activity_key, event_name, on_timeout, timeout_at, signal_data, created_at
+            RETURNING id, workflow_id, activity_key, event_name, on_timeout, timeout_at, signal_data, created_at, iteration
             "#,
             request.workflow_id,
             request.activity_key,
@@ -97,6 +98,7 @@ impl SubscriptionService for PostgresSubscriptionService {
                 timeout_at: r.timeout_at,
                 signal_data: r.signal_data,
                 created_at: r.created_at,
+                iteration: r.iteration,
             })),
             None => Ok(None),
         }
@@ -148,7 +150,7 @@ impl SubscriptionService for PostgresSubscriptionService {
             )
               AND signaled_at IS NULL
               AND expired_at IS NULL
-            RETURNING id, workflow_id, activity_key, event_name, on_timeout
+            RETURNING id, workflow_id, activity_key, event_name, on_timeout, iteration
             "#,
             now,
             limit
@@ -164,6 +166,7 @@ impl SubscriptionService for PostgresSubscriptionService {
                 activity_key: r.activity_key,
                 event_name: r.event_name,
                 on_timeout: parse_on_timeout(&r.on_timeout),
+                iteration: r.iteration,
             })
             .collect())
     }
@@ -176,7 +179,7 @@ impl SubscriptionService for PostgresSubscriptionService {
         // still processing its own freshly-expired batch.
         let rows = sqlx::query!(
             r#"
-            SELECT id, workflow_id, activity_key, event_name, on_timeout
+            SELECT id, workflow_id, activity_key, event_name, on_timeout, iteration
             FROM activity_event_subscriptions
             WHERE expired_at IS NOT NULL
               AND expired_at <= $1
@@ -197,6 +200,7 @@ impl SubscriptionService for PostgresSubscriptionService {
                 activity_key: r.activity_key,
                 event_name: r.event_name,
                 on_timeout: parse_on_timeout(&r.on_timeout),
+                iteration: r.iteration,
             })
             .collect())
     }
@@ -227,6 +231,14 @@ impl SubscriptionService for PostgresSubscriptionService {
         )
         .execute(&self.pool)
         .await?;
+
+        Ok(())
+    }
+
+    async fn delete_subscription_by_id(&self, id: Uuid) -> Result<()> {
+        sqlx::query!("DELETE FROM activity_event_subscriptions WHERE id = $1", id)
+            .execute(&self.pool)
+            .await?;
 
         Ok(())
     }
@@ -287,6 +299,7 @@ mod tests {
             event_name: "approval".to_string(),
             on_timeout: OnTimeout::Continue,
             timeout_seconds: 300,
+            iteration: None,
         };
         assert_eq!(sub.activity_key, "step_1");
         assert_eq!(sub.event_name, "approval");
@@ -333,6 +346,7 @@ mod tests {
             activity_key: "step_2".to_string(),
             event_name: "timeout_event".to_string(),
             on_timeout: OnTimeout::Skip,
+            iteration: None,
         };
         assert_eq!(expired.activity_key, "step_2");
         assert!(matches!(expired.on_timeout, OnTimeout::Skip));
@@ -349,6 +363,7 @@ mod tests {
             timeout_at: Utc::now(),
             signal_data: Some(json!({"key": "value"})),
             created_at: Utc::now(),
+            iteration: None,
         };
 
         let json_str = serde_json::to_string(&sub).unwrap();
@@ -369,6 +384,7 @@ mod tests {
             timeout_at: Utc::now(),
             signal_data: None,
             created_at: Utc::now(),
+            iteration: None,
         };
 
         let json_str = serde_json::to_string(&sub).unwrap();
@@ -412,6 +428,7 @@ mod tests {
             activity_key: "step_1".to_string(),
             event_name: "event".to_string(),
             on_timeout: OnTimeout::Fail,
+            iteration: None,
         };
         let cloned = expired.clone();
         assert_eq!(cloned.activity_key, expired.activity_key);

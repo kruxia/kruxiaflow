@@ -153,6 +153,7 @@ impl Api {
                 event_name: "go".to_string(),
                 on_timeout: OnTimeout::Fail,
                 timeout_seconds,
+                iteration: None,
             })
             .await
             .unwrap();

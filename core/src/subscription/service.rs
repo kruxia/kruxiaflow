@@ -54,6 +54,11 @@ pub trait SubscriptionService: Send + Sync {
     /// (e.g., server crashed after expire_subscriptions but before events were published).
     async fn recover_expired(&self, limit: i64) -> Result<Vec<ExpiredSubscription>>;
 
-    /// Delete a subscription (called after the expiration/signal event is successfully published)
+    /// Delete an activity's subscription (the orchestrator, once a signal ends its wait)
     async fn delete_subscription(&self, workflow_id: Uuid, activity_key: &str) -> Result<()>;
+
+    /// Delete one subscription by id (the expiry checker, once its timeout event
+    /// is published). By id, so a later loop round's subscription for the same
+    /// activity, opened in the meantime, is left alone.
+    async fn delete_subscription_by_id(&self, id: Uuid) -> Result<()>;
 }

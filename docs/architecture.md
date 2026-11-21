@@ -1789,6 +1789,22 @@ condition: "{{find_data.status == 'completed'}}"
 
 **How it works**: MiniJinja's `and` operator short-circuits. If the left side (`status == 'completed'`) is `false`, the right side is never evaluated, so the undefined `result` is never accessed.
 
+Use the same guard in **parameters** that reference a step which may not have run, for example `{% if fix.status == 'completed' %}{{ fix.result.message }}{% endif %}`. Every activity is in the template context with a `status`, so `{% if fix is defined %}` is always true and guards nothing.
+
+#### When a Template Cannot Be Resolved
+
+Templates use strict undefined: referring to a value that does not exist is an error, not an empty string. When an activity's parameters, `delay`, `scheduled_for`, or the `conditions` on its dependencies cannot be resolved as it is about to be scheduled, **that activity fails**:
+
+- Its error starts with `TEMPLATE_ERROR:` and names the activity (or the condition) and the reason. It is not retried, because the template would fail the same way.
+- It fails through a terminal `ActivityFailed` event, like a worker failure. It was never queued, so no `ActivityScheduled` is recorded for it.
+- Normal failure handling follows. Dependents on a `status == 'failed'` branch run, other dependents are skipped (and their dependents, all the way down), and the workflow fails if nothing else can run.
+- The upstream activity whose completion triggered the scheduling is unaffected.
+- Conditions are evaluated only once every forward dependency of the activity is terminal, so a condition may read any of them, whatever order they complete in.
+- An LLM activity's retry resolves its parameters again for the budget check. If they no longer resolve, the queued retry is cancelled and the activity fails the same way. If a worker has already claimed the retry and its completion is processed before that failure, the activity completes with the retry's outputs instead.
+- The same applies when a skip makes a condition evaluable for the first time. For example, a condition on `classify.result` cannot be resolved once `classify` has been skipped, so the activity that carries it fails rather than waiting forever. To branch on a step that may be skipped, guard the reference: `{% if classify.status == 'completed' %}…{% endif %}`, or test `classify.status` itself.
+
+Before this was fixed (#19), the error was retried as an event-processing failure until the upstream activity's completion event was dropped as poison. That marked the upstream activity failed and left the workflow `running` indefinitely.
+
 #### Activity Status Values
 
 The `{{activity.status}}` variable returns one of:
@@ -1873,10 +1889,13 @@ activities:
 
 **Loop Features**:
 
-- **Back-edge detection**: Loops are detected when an activity depends on another activity that appears later in execution order
+- **Back-edge detection**: Loops are detected when an activity depends on another activity that appears later in execution order. When the dependency graph has a cycle, the validator finds back-edges by a depth-first search that starts from the activities in written (list) order and visits dependents in written order; a dependency leading back to an activity on the current path is a back-edge. In a two-step loop, if only the other dependency has conditions, that one is the back-edge. Loop metadata (`is_back_edge`, `is_loop_activity`) is always recomputed at validation, never taken from the input, and `normalize` keeps `is_back_edge` on dependencies converted from `dependency_of`. **Why** (#26): the search used to start from the alphabetically first key, so renaming a step could move the back-edge, starting a loop at the wrong step or failing validation of a valid loop. Written order is what the author controls and what reads as "later" in the definition. Stored definitions keep their persisted back-edges (runs load the definition they started with); a redeploy stores a new version, since the content hash includes `is_back_edge`
 - **Iteration-scoped storage**: Activities with `iteration_scoped: true` store results as arrays, with each iteration appending to the array
 - **Iteration limits**: `iteration_limit` prevents infinite loops by enforcing a maximum number of iterations
 - **Conditional exit**: Loop exits when the back-edge condition evaluates to false
+- **Loop membership**: every activity on the cycle is a loop activity (`is_loop_activity`), not only the two ends of the back-edge, so every step of a longer loop runs each round. Membership is computed at validation and stored with the definition, and completed again from the stored back-edges whenever the orchestrator loads a definition (`WorkflowDefinition::mark_loop_members`), so definitions stored before #18 was fixed need no redeploy. **Limitation:** a join of parallel branches inside a loop runs when any input is new, not all (see the loops guide)
+- **New input only**: a completed loop activity is scheduled again only when one of its dependencies completed after it last did (a self back-edge counts as new input; a dependency that completes only once, such as a step before the loop, never triggers a round). Each completion gets a per-workflow sequence number, `completion_seq`, in the activity's materialized state for this comparison. **Why** (#18): without it, a dependency still `Completed` from an earlier round re-triggered the activity, so a loop's tail re-ran on stale input until the iteration cap
+- **Stale completions**: a completion whose `iteration` does not match the activity's current iteration (a re-delivery from an earlier round) is ignored, since a re-scheduled loop activity is `Pending` again and passes the status-based duplicate guard
 
 **Iteration Context Variables**:
 
@@ -2868,8 +2887,29 @@ event handler is replay-idempotent: duplicate `WorkflowCreated` /
 `ActivityCompleted` / `ActivityFailed` / `ActivityWaiting` / `ActivitySignaled`
 events are guarded no-ops.
 
-**Signal waits** (`settings.wait_for_signal`): a waiting activity has one row
-in `activity_event_subscriptions`. Its `signaled_at` marks that the wait took
+**Signal waits** (`settings.wait_for_signal`): scheduling such an activity
+creates one row in `activity_event_subscriptions` (one per activity, holding
+the loop round in `iteration`) and marks the activity `Waiting` instead of
+queueing it. The REST signal endpoint marks the row and publishes
+`ActivitySignaled` stamped with the row's `iteration`; the expiry checker does
+the same for a timeout, then deletes the row by id (by then the next round may
+have its own row for the same activity). The orchestrator handles an
+`ActivitySignaled` for an activity that is `Waiting` in the round the event
+carries by deleting the row and queueing the activity in the same pass,
+without evaluating its dependencies again (they held when the wait began). An
+event for another round, such as a replay of an earlier round's signal,
+changes nothing. In the next loop round the activity waits again, on a new
+row.
+
+**Why**: The orchestrator used to evaluate the signaled activity like any
+other and, finding `wait_for_signal`, create its subscription again. The row
+was still there, so every signaled activity failed with "Subscription already
+exists", in or out of a loop. Deleting the row lets a loop round wait again,
+and the round's `iteration` on the event keeps the dedup index
+`(workflow_id, event_type, activity_key, iteration, attempt)` from dropping
+every signal after the first as a duplicate.
+
+**One signal per wait**: the row's `signaled_at` marks that the wait took
 its signal and `expired_at` that it timed out; `signal_data` is only the
 signal's payload, NULL when the signal had none. The signal API accepts a
 signal (`"signaled": true`) only while both markers are NULL, and the expiry

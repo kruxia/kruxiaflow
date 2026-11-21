@@ -24,6 +24,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a retry is accepted and the timeout still applies. The MCP tools
   `send_workflow_signal` and `list_waiting_workflows` use the same test.
 
+## [0.12.3] - 2026-11-21
+
+### Fixed
+
+- **A template error fails the activity whose template is bad (#19).**
+  - **Before:** when an activity's parameters (or `delay` / `scheduled_for`)
+    referenced an undefined value, the error surfaced while processing the
+    upstream activity's completion. That event was retried five times and
+    dropped as poison, the upstream activity was marked failed although it had
+    succeeded, the activity with the bad template never ran or failed, and the
+    workflow stayed `running` indefinitely.
+  - **Now:** that activity fails with
+    `TEMPLATE_ERROR: Failed to resolve templates in activity <key>: …` (for
+    `delay` / `scheduled_for`, `TEMPLATE_ERROR: Failed to resolve delay
+    template for activity <key>: …` and similar), through a terminal
+    `ActivityFailed` like any other failure. Its `status == 'failed'`
+    branches run, its other dependents are skipped, and the workflow fails.
+  - **Conditions too:** a `conditions:` template on a dependency that can't
+    be evaluated fails the activity that carries it in the same way, instead
+    of poisoning the upstream completion. That includes a condition that only
+    becomes evaluable when its dependency is skipped, such as a condition on
+    a skipped step's result. A condition is evaluated only once every
+    dependency of its activity is terminal, so a condition that reads a
+    sibling dependency doesn't fail when that sibling completes last.
+  - **Retries too:** an LLM activity's retry resolves its parameters again
+    for the budget check. If they no longer resolve (a secret removed, for
+    example), the queued retry is cancelled and the activity fails with
+    `TEMPLATE_ERROR`, instead of poisoning the failure event.
+  - **No misleading event:** no `ActivityScheduled` is recorded for an
+    activity that failed this way, since it was never queued.
+- **Skipped activities cascade (#19).** Skipping was a single pass over the
+  state, so in a chain after a failed or skipped activity only the first
+  dependent was skipped and the rest stayed `not_scheduled`, which kept the
+  workflow from ever completing. Skipping now repeats until nothing changes.
+- **Loop steps run once per round, on new input (#18).** In a two-step loop
+  (the shape of examples 07a and 07b), the step after the loop head re-ran
+  after every one of its own completions, on the head's previous output,
+  until the default cap of 100 iterations. The head also re-ran on the other
+  step's previous result. Paid LLM steps were called far more often than
+  intended. A completed loop activity is now scheduled again only when a
+  dependency has completed since it last did (a self-loop counts its own
+  completion).
+  - **Sequence numbers:** workflow state records a per-workflow completion
+    sequence number for this (`completion_seq`, default 0). Activities
+    completed before the upgrade keep the old behaviour, so workflows in
+    flight are not stalled.
+- **Loops of three or more steps run every step each round (#18).** Only the
+  two ends of a back-edge were marked as loop activities, so a middle step
+  ran once and never again. Every activity on the cycle is now a loop
+  activity.
+  - **No redeploy needed:** the orchestrator completes the loop marking of
+    every definition it loads, from the stored back-edges, so definitions
+    deployed before the fix and runs already in flight are fixed too.
+  - **Known limitation:** a join of parallel branches inside a loop still
+    runs when any of its inputs is new, so it can run on a branch's output
+    from the previous round. See the loops guide.
+  - **Behaviour change:** middle steps of such loops now count iterations
+    (`{{ACTIVITY.iteration}}`), and with `iteration_scoped: true` they store
+    per-round outputs.
+- **A re-delivered completion from an earlier loop round is ignored (#18).**
+  Event delivery is at-least-once. A loop activity already re-scheduled for
+  its next round passed the status-based duplicate guard, so a re-delivered
+  completion of its previous round was applied as new, advancing its
+  iteration and giving its dependents spurious input. Completions whose
+  iteration doesn't match the activity's current iteration are now ignored.
+- **A loop's back-edge follows the order activities are written, not their
+  keys (#26).** The search for the back-edge started from the alphabetically
+  first key, so renaming steps could change how a loop ran. In the repair loop
+  `run → check → fix → run`, `check` started before `run`. A loop with two
+  branches could fail validation. The search now starts from the first written
+  activity, so a loop starts at its first written step.
+  - **Loops written with `dependency_of`** now get their back-edge marked when
+    parsed, and conditions written there count as the loop's exit condition.
+  - **Markings in the input are recomputed.** `is_back_edge` and
+    `is_loop_activity` in a submitted definition (for example an exported one)
+    are ignored, not kept alongside the computed ones.
+  - **Deployed definitions are unchanged.** They and runs in flight keep the
+    back-edge they were stored with. Redeploying an affected definition stores
+    a new version. Examples 07a, 07b and 08a keep the same back-edge.
+
+## [0.12.2] - 2026-11-21
+
+### Fixed
+
+- **A signaled activity runs.** After `POST /api/v1/workflows/{id}/signal`
+  the orchestrator evaluated the activity again, found `wait_for_signal`,
+  and tried to create its subscription a second time. The first row was
+  still there, so every `wait_for_signal` activity failed with "Subscription
+  already exists" as soon as it was signaled, inside a loop or not. A
+  timeout with `on_timeout: continue` made the activity wait again instead
+  of running. The orchestrator now queues the activity whose wait the event
+  ended, and deletes its subscription.
+- **A signal wait inside a loop takes a signal every round.** The signal API
+  and the expiry checker published `ActivitySignaled` (and the timeout
+  `ActivityFailed`) without an iteration, so the event dedup index dropped
+  each round's after the first as a duplicate, while the API still answered
+  `"signaled": true`; the workflow then waited for good. Subscriptions now
+  record the loop round (migration `20261119000001` adds
+  `activity_event_subscriptions.iteration`); the events the signal endpoint
+  and the expiry checker publish carry it, and the orchestrator acts only on
+  a signal for the round that is waiting.
+
 ## [0.12.1] - 2026-11-17
 
 ### Fixed
