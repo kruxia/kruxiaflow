@@ -1,10 +1,10 @@
 # Sandboxed Code (`run_code`)
 
-`std.run_code` runs Python that nobody reviewed, typically code an LLM step just wrote, in a [Pydantic Monty](https://github.com/pydantic/monty) sandbox. The code has no filesystem, network or environment access. It can call only the host functions ("capabilities") the step names, and it runs under hard limits on memory, time, recursion and host calls. Every run records what it was allowed to use and what it used.
+`std.run_code` runs Python that hasn't been reviewed, typically code an LLM step just wrote, in a [Pydantic Monty](https://github.com/pydantic/monty) sandbox. The code has no filesystem, network or environment access. It can call only the host functions ("capabilities") the step names, and it runs under hard limits on memory, time, recursion and host calls. Every run records what it was allowed to use and what it used.
 
 This is "governed code mode": the model writes the step, Kruxia Flow runs it sandboxed and on budget.
 
-> **`run_code` is not `script`.** The py-std worker's `script` activity runs CPython with all builtins inside the worker process, with no sandbox. Use it for trusted, developer-written work that needs pandas, DuckDB and similar libraries. Never point model-written or customer-written code at `script`; use `run_code`.
+> **`run_code` and `script` serve different code.** The py-std worker's `script` activity runs full CPython, with all builtins, inside the worker process. That is what gives it pandas, DuckDB and similar libraries, and it is built for trusted, developer-written work. Model-written and customer-written code belongs in `run_code`, which runs it sandboxed.
 
 ## When to use it
 
@@ -85,7 +85,7 @@ All settings are environment variables with matching CLI flags (`--monty-binary`
 | `type_check`   | no       | Type-check the code against the inputs and the granted capabilities' signatures before running it (default `true`). Wrong calls then fail before anything runs                                                                                 |
 | `limits`       | no       | Per-run limits. A missing limit takes the worker's ceiling                                                                                                                                                                                     |
 
-Unknown parameters, including a misspelled limit, are rejected. (Activity `settings` silently ignore unknown keys, which is why limits live in `parameters`.)
+Unknown parameters, including a misspelled limit, are rejected. (Activity `settings` accept any key, so limits live in `parameters`, where a typo is caught.)
 
 **Templates and literal code.** Parameters are templates. Literal code that contains `{{` or `{%` must be wrapped in `{% raw %}` … `{% endraw %}`. Single braces (dicts, f-strings) are fine. Code inserted with `{{write_rule.result.content}}` is not templated again.
 
@@ -132,7 +132,7 @@ On failure, `ok` is `false`, `value` is absent, and `error` says what happened, 
 
 **Values.** Results convert to JSON as `None` → `null`, `bool`, `int` (64-bit), finite `float`, `str`, `list`/`tuple` → array, `dict` with `str` or `int` keys → object, and `Decimal` → its exact string (so money keeps its precision). `stdout` holds `print()` output, up to 64 KB.
 
-**The activity fails** (and its retry policy applies) only for infrastructure problems: no worker process could be started, the pool was exhausted, or the worker broke the protocol. Invalid parameters also fail the activity. Today these are retried like other failures, because built-in activities cannot yet mark an error as permanent.
+**The activity fails** (and its retry policy applies) only for infrastructure problems: no worker process could be started, the pool was exhausted, or the worker broke the protocol. Invalid parameters also fail the activity. Today these are retried like other failures; once built-in activities can mark an error as permanent, invalid parameters can skip the retries.
 
 **Determinism.** The clock is frozen at the step's start (`datetime.now()` and `now()` return the same instant throughout), and `random` is seeded from the workflow id and activity key, so a retried step behaves the same way.
 
@@ -206,11 +206,11 @@ Monty is a language-level sandbox. The code cannot express an operation that tou
 - The worker binary path is explicit and version-checked.
 - Limits always apply, with `KRUXIAFLOW_MONTY_REQUEST_TIMEOUT_SECS` as a host-side kill switch behind them.
 
-For stronger isolation, run `run_code` on a separate `kruxiaflow worker` in its own container: no database credentials, a read-only filesystem, network access only to the API server. (`kruxiaflow worker` registers all built-in activities today. Its `--activity-types` flag is meant to limit that, for example to `std.run_code`, but the filtering is not yet implemented.)
+For stronger isolation, run `run_code` on a separate `kruxiaflow worker` in its own container: no database credentials, a read-only filesystem, network access only to the API server. (`kruxiaflow worker` registers every built-in activity today. Its `--activity-types` flag is where that will be narrowed, for example to `std.run_code`, once the filtering is implemented.)
 
 ## Known issues
 
-- **Loop tails re-run on their own** ([#18](https://github.com/kruxia/kruxiaflow/issues/18); fix pending review). In a two-step loop like the repair loop, the step that depends on the loop head (`run_rule` here, `evaluate` in example 07a) re-runs after every completion until the default iteration cap of 100, without waiting for the head to produce new output. For `run_code` the final result is still that of the latest code, but the step runs far more often than it should, and a step that is an LLM call costs money each time. This is an engine issue in loop evaluation, not specific to `run_code`.
+- **Loop tails re-run on their own** ([#18](https://github.com/kruxia/kruxiaflow/issues/18); fix pending review). In a two-step loop like the repair loop, the step that depends on the loop head (`run_rule` here, `evaluate` in example 07a) re-runs after every completion until the default iteration cap of 100, without waiting for the head to produce new output. For `run_code` the final result is still that of the latest code; the extra runs cost time, and money when the step is an LLM call. The fix ([#21](https://github.com/kruxia/kruxiaflow/pull/21)) runs the step once per new output of the head. It is in loop evaluation, so it applies to every loop, not only `run_code`.
 - **A template error can hang a workflow** ([#19](https://github.com/kruxia/kruxiaflow/issues/19); fix pending review). If a step's parameters reference an undefined value (for example `run_rule.result` before `run_rule` has run), the orchestrator retries the triggering event, drops it as poison, marks the upstream step failed, and leaves the workflow `running` instead of failing it. Guard references as shown above.
 
 ## Measurements

@@ -878,5 +878,5 @@ describe → write_rule ⇄ run_rule → done
 
 **Known issue ([#18](https://github.com/kruxia/kruxiaflow/issues/18), fix pending review):** the engine re-runs the loop's tail step (`run_rule`) after each completion
 until the default cap of 100 iterations, instead of only when `write_rule` produces new code.
-The final result is correct, but `run_rule` runs far more often than it should (see
-[Known issues](../docs/run-code.md#known-issues)).
+The final result is correct; the fix ([#21](https://github.com/kruxia/kruxiaflow/pull/21))
+runs `run_rule` once per new rule (see [Known issues](../docs/run-code.md#known-issues)).

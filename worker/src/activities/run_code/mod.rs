@@ -81,8 +81,8 @@ const PYTHON_KEYWORDS: &[&str] = &[
     "with", "yield",
 ];
 
-/// `run_code` parameters. Unknown keys are rejected (unlike settings, which
-/// silently ignore them) so a misplaced limit fails loudly.
+/// `run_code` parameters. Unknown keys are rejected, so a misplaced limit is
+/// reported at once. (Activity settings accept any key.)
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RunCodeParams {

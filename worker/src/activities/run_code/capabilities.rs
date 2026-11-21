@@ -389,8 +389,7 @@ mod tests {
 
     #[test]
     fn test_walk_rejects_malformed_paths_even_when_data_is_missing() {
-        // Regression: the path used to be checked only as far as the data
-        // went, so a bad index after a missing key returned None
+        // The whole path is checked, even past where the data ends
         assert!(walk(&json!({}), "a[x]").is_err());
         assert!(walk(&json!({}), "missing.[0").is_err());
     }
