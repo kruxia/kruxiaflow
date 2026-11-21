@@ -1893,6 +1893,9 @@ activities:
 - **Iteration-scoped storage**: Activities with `iteration_scoped: true` store results as arrays, with each iteration appending to the array
 - **Iteration limits**: `iteration_limit` prevents infinite loops by enforcing a maximum number of iterations
 - **Conditional exit**: Loop exits when the back-edge condition evaluates to false
+- **Loop membership**: every activity on the cycle is a loop activity (`is_loop_activity`), not only the two ends of the back-edge, so every step of a longer loop runs each round. Membership is computed at validation and stored with the definition, and completed again from the stored back-edges whenever the orchestrator loads a definition (`WorkflowDefinition::mark_loop_members`), so definitions stored before #18 was fixed need no redeploy. **Limitation:** a join of parallel branches inside a loop runs when any input is new, not all (see the loops guide)
+- **New input only**: a completed loop activity is scheduled again only when one of its dependencies completed after it last did (a self back-edge counts as new input; a dependency that completes only once, such as a step before the loop, never triggers a round). Each completion gets a per-workflow sequence number, `completion_seq`, in the activity's materialized state for this comparison. **Why** (#18): without it, a dependency still `Completed` from an earlier round re-triggered the activity, so a loop's tail re-ran on stale input until the iteration cap
+- **Stale completions**: a completion whose `iteration` does not match the activity's current iteration (a re-delivery from an earlier round) is ignored, since a re-scheduled loop activity is `Pending` again and passes the status-based duplicate guard
 
 **Iteration Context Variables**:
 
@@ -2883,6 +2886,28 @@ write replays the batch; orchestrators sharing a consumer id race), so every
 event handler is replay-idempotent: duplicate `WorkflowCreated` /
 `ActivityCompleted` / `ActivityFailed` / `ActivityWaiting` / `ActivitySignaled`
 events are guarded no-ops.
+
+**Signal waits** (`settings.wait_for_signal`): scheduling such an activity
+creates one row in `activity_event_subscriptions` (one per activity, holding
+the loop round in `iteration`) and marks the activity `Waiting` instead of
+queueing it. The REST signal endpoint marks the row and publishes
+`ActivitySignaled` stamped with the row's `iteration`; the expiry checker does
+the same for a timeout, then deletes the row by id (by then the next round may
+have its own row for the same activity). The orchestrator handles an
+`ActivitySignaled` for an activity that is `Waiting` in the round the event
+carries by deleting the row and queueing the activity in the same pass,
+without evaluating its dependencies again (they held when the wait began). An
+event for another round, such as a replay of an earlier round's signal,
+changes nothing. In the next loop round the activity waits again, on a new
+row.
+
+**Why**: The orchestrator used to evaluate the signaled activity like any
+other and, finding `wait_for_signal`, create its subscription again. The row
+was still there, so every signaled activity failed with "Subscription already
+exists", in or out of a loop. Deleting the row lets a loop round wait again,
+and the round's `iteration` on the event keeps the dedup index
+`(workflow_id, event_type, activity_key, iteration, attempt)` from dropping
+every signal after the first as a duplicate.
 
 **WebSocket replay** resolves `from_event_id` to that event's `(tx, position)`
 and reads with the same predicate, so a reconnecting client cannot miss an

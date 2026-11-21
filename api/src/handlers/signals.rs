@@ -264,6 +264,7 @@ mod tests {
                 timeout_at: chrono::Utc::now() + chrono::Duration::hours(1),
                 signal_data: request.data,
                 created_at: chrono::Utc::now(),
+                iteration: None,
             }))
         }
 
@@ -297,6 +298,13 @@ mod tests {
             &self,
             _workflow_id: Uuid,
             _activity_key: &str,
+        ) -> kruxiaflow_core::subscription::Result<()> {
+            Ok(())
+        }
+
+        async fn delete_subscription_by_id(
+            &self,
+            _id: Uuid,
         ) -> kruxiaflow_core::subscription::Result<()> {
             Ok(())
         }
@@ -417,6 +425,13 @@ mod tests {
         ) -> kruxiaflow_core::subscription::Result<()> {
             Ok(())
         }
+
+        async fn delete_subscription_by_id(
+            &self,
+            _id: Uuid,
+        ) -> kruxiaflow_core::subscription::Result<()> {
+            Ok(())
+        }
     }
 
     #[sqlx::test(migrations = "../migrations")]
@@ -522,7 +537,9 @@ pub async fn signal_activity(
                     "event_name": request.event_name,
                     "signal_data": request.data,
                 }),
-                iteration: None,
+                // The round this wait belongs to: without it, the event dedup
+                // index drops every round's signal after the first
+                iteration: sub.iteration,
             };
 
             state.event_source.publish(event).await.map_err(|e| {

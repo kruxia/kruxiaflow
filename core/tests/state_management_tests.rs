@@ -60,6 +60,7 @@ fn test_apply_activity_scheduled_event() {
                 iteration: 0,
                 iteration_outputs: None,
                 signal_data: None,
+                completion_seq: 0,
             },
         )]
         .into_iter()
@@ -110,6 +111,7 @@ fn test_apply_activity_completed_event() {
                 iteration: 0,
                 iteration_outputs: None,
                 signal_data: None,
+                completion_seq: 0,
             },
         )]
         .into_iter()
@@ -168,6 +170,7 @@ fn test_apply_activity_failed_event() {
                 iteration: 0,
                 iteration_outputs: None,
                 signal_data: None,
+                completion_seq: 0,
             },
         )]
         .into_iter()
@@ -280,6 +283,7 @@ fn test_apply_multiple_events_sequential() {
                     iteration: 0,
                     iteration_outputs: None,
                     signal_data: None,
+                    completion_seq: 0,
                 },
             ),
             (
@@ -297,6 +301,7 @@ fn test_apply_multiple_events_sequential() {
                     iteration: 0,
                     iteration_outputs: None,
                     signal_data: None,
+                    completion_seq: 0,
                 },
             ),
         ]

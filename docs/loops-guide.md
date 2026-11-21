@@ -38,8 +38,26 @@ Loops are detected during workflow validation (at registration time):
 
 1. Workflow definition is submitted via `POST /api/v1/workflow_definitions`
 2. Validator performs topological sort to identify back-edges
-3. Metadata (`is_loop_activity`, `is_back_edge`) computed and cached in database
+3. Metadata (`is_loop_activity`, `is_back_edge`) computed and cached in database. Every activity on the cycle is a loop activity, not only the two ends of the back-edge, so loops of three or more steps run every step each round
 4. Orchestrator uses O(1) lookups (no runtime graph traversal needed)
+
+### How a Round Runs
+
+Each step in a loop runs **once per round, and only on new input**. A completed loop activity is scheduled again only when one of its dependencies has completed since it last did:
+
+- **The step after the loop head** waits for the head to complete again. It does not re-run on the head's previous output.
+- **The loop head** re-runs when the step its back-edge points to has completed again, and the back-edge's conditions hold.
+- **A self-loop** (an activity whose back-edge is on itself) counts its own completion as new input.
+- **A dependency that completes only once** (for example an `initialize` step that ran before the loop) still has to be satisfied, but never triggers another round. A dependency that completes again, such as a step of an earlier loop, counts as new input each time it does.
+
+Before this was fixed, the step after the head re-ran after each of its own completions, on stale input, until the default cap of 100 iterations (#18).
+
+**Upgrading:**
+
+- **No redeploy needed.** Definitions deployed before this fix marked only the two ends of a back-edge as loop activities. The orchestrator completes the marking each time it loads a definition, from the back-edges stored with it, so existing definitions and runs already in flight get every step of a longer loop running each round.
+- **Middle steps now count iterations.** They are loop activities now, so `{{ACTIVITY.iteration}}` and `{{step.iteration}}` count up for them, and `iteration_scoped: true` stores their per-round outputs. Before, they stayed at 0.
+
+**Known limitation: parallel branches inside a loop.** When a loop splits into branches of different lengths that join again (`head → a → b → join` alongside `head → c → join`), the join runs as soon as *any* of its inputs is new. It can therefore run once the short branch finishes, using the long branch's output from the previous round, and then again when the long branch finishes. Keep each loop a single chain of steps, or join the branches outside the loop. Requiring *every* input to be new would make the join wait forever whenever a branch's condition is false in a later round, so this needs a fuller design.
 
 ---
 
@@ -685,6 +703,8 @@ Kruxia Flow uses precomputed metadata for loop detection:
 **Execution Time** (every activity completion):
 - Check if activity is in loop: O(1) (cached metadata lookup)
 - Check if dependency is back-edge: O(1) (cached metadata lookup)
+- Assign the completion's sequence number: O(V), a scan for the highest `completion_seq` among the workflow's activities (V is small, and this is in memory)
+- Check a completed loop activity for new input: O(D), its dependencies' `completion_seq`
 - **No graph traversal in orchestrator hot path**
 
 ### Storage Efficiency

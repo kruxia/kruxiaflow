@@ -570,6 +570,11 @@ Sends a signal to a waiting activity within a workflow.
 }
 ```
 
+One signal ends one wait: the activity then runs (with `data` as its signal
+data). An activity inside a loop waits again in each round, and each round
+takes its own signal; `"signaled": false` means the activity is not waiting
+for `event_name` right now (not yet, or this round's signal already arrived).
+
 ---
 
 ## Workflow Output
