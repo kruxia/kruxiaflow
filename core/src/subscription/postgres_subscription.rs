@@ -66,15 +66,18 @@ impl SubscriptionService for PostgresSubscriptionService {
         &self,
         request: SignalRequest,
     ) -> Result<Option<ActivitySubscription>> {
-        // Update the subscription with signal data if event_name matches
+        // Take the signal if the wait is still open: not signaled (signaled_at,
+        // not signal_data, which stays NULL for a signal without data) and not
+        // expired (the timeout already ended the wait)
         let row = sqlx::query!(
             r#"
             UPDATE activity_event_subscriptions
-            SET signal_data = $4
+            SET signal_data = $4, signaled_at = NOW()
             WHERE workflow_id = $1
               AND activity_key = $2
               AND event_name = $3
-              AND signal_data IS NULL
+              AND signaled_at IS NULL
+              AND expired_at IS NULL
             RETURNING id, workflow_id, activity_key, event_name, on_timeout, timeout_at, signal_data, created_at, iteration
             "#,
             request.workflow_id,
@@ -128,6 +131,11 @@ impl SubscriptionService for PostgresSubscriptionService {
         // We SET expired_at rather than DELETE so that if the server crashes before
         // the orchestrator publishes the corresponding events, recovery can find
         // these rows and re-process them.
+        //
+        // The outer WHERE repeats the open-wait test: if a signal commits after
+        // the subquery picked a row, PostgreSQL re-checks the outer conditions
+        // on the row's new version (but not the subquery's), so the signal wins
+        // and the row is skipped instead of being both signaled and expired.
         let rows = sqlx::query!(
             r#"
             UPDATE activity_event_subscriptions
@@ -135,11 +143,13 @@ impl SubscriptionService for PostgresSubscriptionService {
             WHERE id IN (
                 SELECT id FROM activity_event_subscriptions
                 WHERE timeout_at <= $1
-                  AND signal_data IS NULL
+                  AND signaled_at IS NULL
                   AND expired_at IS NULL
                 ORDER BY timeout_at
                 LIMIT $2
             )
+              AND signaled_at IS NULL
+              AND expired_at IS NULL
             RETURNING id, workflow_id, activity_key, event_name, on_timeout, iteration
             "#,
             now,
@@ -193,6 +203,21 @@ impl SubscriptionService for PostgresSubscriptionService {
                 iteration: r.iteration,
             })
             .collect())
+    }
+
+    async fn release_signal(&self, subscription_id: Uuid) -> Result<()> {
+        sqlx::query!(
+            r#"
+            UPDATE activity_event_subscriptions
+            SET signaled_at = NULL, signal_data = NULL
+            WHERE id = $1
+            "#,
+            subscription_id
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 
     async fn delete_subscription(&self, workflow_id: Uuid, activity_key: &str) -> Result<()> {

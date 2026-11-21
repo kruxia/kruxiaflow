@@ -3888,6 +3888,7 @@ mod tests {
             async fn expire_subscriptions(&self, limit: i64) -> std::result::Result<Vec<ExpiredSubscription>, crate::subscription::SubscriptionError>;
             async fn recover_expired(&self, limit: i64) -> std::result::Result<Vec<ExpiredSubscription>, crate::subscription::SubscriptionError>;
             async fn delete_subscription(&self, workflow_id: Uuid, activity_key: &str) -> std::result::Result<(), crate::subscription::SubscriptionError>;
+            async fn release_signal(&self, subscription_id: Uuid) -> std::result::Result<(), crate::subscription::SubscriptionError>;
             async fn delete_subscription_by_id(&self, id: Uuid) -> std::result::Result<(), crate::subscription::SubscriptionError>;
         }
     }

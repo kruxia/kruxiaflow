@@ -2909,6 +2909,29 @@ and the round's `iteration` on the event keeps the dedup index
 `(workflow_id, event_type, activity_key, iteration, attempt)` from dropping
 every signal after the first as a duplicate.
 
+**One signal per wait**: the row's `signaled_at` marks that the wait took
+its signal and `expired_at` that it timed out; `signal_data` is only the
+signal's payload, NULL when the signal had none. The signal API accepts a
+signal (`"signaled": true`) only while both markers are NULL, and the expiry
+checker (`expire_subscriptions`) only picks rows whose `signaled_at` is NULL,
+so a wait ends once: by its signal or by its timeout. Each is a single
+`UPDATE` of the row, so concurrent signals and the checker serialize on its
+row lock. The checker repeats its conditions outside its `id IN (subquery)`,
+because PostgreSQL re-checks only those on a row changed under it. The mark
+and the `ActivitySignaled` publish are two statements: if the publish fails,
+the API clears the mark again (`release_signal`) and answers 500, so the
+client can retry and the timeout still applies.
+
+**Why**: the "signaled" marker used to be `signal_data IS NULL`. A signal
+without `data` left the row looking unsignaled until the orchestrator deleted
+it, so a second signal was accepted (its event dropped by the dedup index, its
+data lost) and the expiry checker could still expire the wait, failing a step
+with `on_timeout: fail` whose signal had arrived in time (#33). A signal was
+also accepted after its wait had expired. Migration `20261119000002` adds
+`signaled_at` and backfills it where `signal_data` is set; its down migration
+turns a data-less signal's NULL into JSON `null` so the old marker still sees
+it as signaled.
+
 **WebSocket replay** resolves `from_event_id` to that event's `(tx, position)`
 and reads with the same predicate, so a reconnecting client cannot miss an
 event that committed late. An unknown id yields an empty replay (logged at
