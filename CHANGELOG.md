@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Loop steps run once per round, on new input (#18).** In a two-step loop
+  (the shape of examples 07a and 07b), the step after the loop head re-ran
+  after every one of its own completions, on the head's previous output,
+  until the default cap of 100 iterations. The head also re-ran on the other
+  step's previous result. Paid LLM steps were called far more often than
+  intended. A completed loop activity is now scheduled again only when a
+  dependency has completed since it last did (a self-loop counts its own
+  completion).
+  - **Sequence numbers:** workflow state records a per-workflow completion
+    sequence number for this (`completion_seq`, default 0). Activities
+    completed before the upgrade keep the old behaviour, so workflows in
+    flight are not stalled.
+- **Loops of three or more steps run every step each round (#18).** Only the
+  two ends of a back-edge were marked as loop activities, so a middle step
+  ran once and never again. Every activity on the cycle is now a loop
+  activity.
+  - **No redeploy needed:** the orchestrator completes the loop marking of
+    every definition it loads, from the stored back-edges, so definitions
+    deployed before the fix and runs already in flight are fixed too.
+  - **Known limitation:** a join of parallel branches inside a loop still
+    runs when any of its inputs is new, so it can run on a branch's output
+    from the previous round. See the loops guide.
+  - **Behaviour change:** middle steps of such loops now count iterations
+    (`{{ACTIVITY.iteration}}`), and with `iteration_scoped: true` they store
+    per-round outputs.
+- **A re-delivered completion from an earlier loop round is ignored (#18).**
+  Event delivery is at-least-once. A loop activity already re-scheduled for
+  its next round passed the status-based duplicate guard, so a re-delivered
+  completion of its previous round was applied as new, advancing its
+  iteration and giving its dependents spurious input. Completions whose
+  iteration doesn't match the activity's current iteration are now ignored.
+
 ## [0.12.2] - 2026-11-21
 
 ### Fixed

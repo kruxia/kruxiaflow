@@ -62,6 +62,14 @@ pub struct ActivityState {
     /// Signal data received when activity was signaled (only for activities with wait_for_signal)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signal_data: Option<Value>,
+
+    /// Workflow-wide sequence number of this activity's latest completion:
+    /// one more than the highest sequence number in the workflow at the time.
+    /// 0 means never completed, or loaded from state saved without one.
+    /// Lets loop members tell new input from input left over from an earlier
+    /// round (see `dependency_evaluator::has_new_input`).
+    #[serde(default)]
+    pub completion_seq: u64,
 }
 
 fn default_attempt() -> u32 {
@@ -162,11 +170,15 @@ pub async fn load_workflow_definition(
         .transpose()
         .map_err(|e| OrchestratorError::StateDeserialization(e.to_string()))?;
 
-    Ok(WorkflowDefinition {
+    let mut definition = WorkflowDefinition {
         name: row.name,
         activities,
         settings,
-    })
+    };
+    // A stored definition may mark only each back-edge's two ends; mark
+    // every step on the cycle
+    definition.mark_loop_members();
+    Ok(definition)
 }
 
 /// Load workflow definition by definition ID (for WorkflowCreated events in tests)
@@ -194,11 +206,15 @@ pub async fn load_workflow_definition_by_id(
         .transpose()
         .map_err(|e| OrchestratorError::StateDeserialization(e.to_string()))?;
 
-    Ok(WorkflowDefinition {
+    let mut definition = WorkflowDefinition {
         name: row.name,
         activities,
         settings,
-    })
+    };
+    // A stored definition may mark only each back-edge's two ends; mark
+    // every step on the cycle
+    definition.mark_loop_members();
+    Ok(definition)
 }
 
 /// Load materialized state from workflows table (O(1))
@@ -291,6 +307,7 @@ pub async fn initialize_workflow_state(
                     None
                 },
                 signal_data: None,
+                completion_seq: 0,
             },
         );
     }
@@ -396,8 +413,19 @@ pub fn apply_event_to_state(state: &mut WorkflowState, event: &WorkflowEvent) ->
                 .as_ref()
                 .ok_or(OrchestratorError::MissingActivityKey)?;
 
+            // Order completions across the workflow, so a loop member can tell
+            // whether a dependency completed again since it last ran
+            let completion_seq = state
+                .activities
+                .values()
+                .map(|a| a.completion_seq)
+                .max()
+                .unwrap_or(0)
+                + 1;
+
             if let Some(activity) = state.activities.get_mut(activity_key) {
                 activity.status = WorkflowActivityStatus::Completed;
+                activity.completion_seq = completion_seq;
 
                 // Convert flat outputs object to Vec<ActivityOutput>
                 // Event payload has: {"outputs": {"response": {...}, "data": {...}}}
@@ -560,6 +588,7 @@ mod tests {
             iteration: 0,
             iteration_outputs: Some(HashMap::new()),
             signal_data: None,
+            completion_seq: 0,
         };
 
         assert_eq!(state.iteration, 0);
@@ -587,6 +616,7 @@ mod tests {
             iteration: 0,
             iteration_outputs: Some(HashMap::new()),
             signal_data: None,
+            completion_seq: 0,
         };
 
         // Archive first iteration
@@ -625,6 +655,7 @@ mod tests {
             iteration: 0,
             iteration_outputs: Some(HashMap::new()),
             signal_data: None,
+            completion_seq: 0,
         };
 
         state.archive_iteration_outputs(vec![ActivityOutput::value(
@@ -655,6 +686,7 @@ mod tests {
             iteration: 0,
             iteration_outputs: Some(HashMap::new()),
             signal_data: None,
+            completion_seq: 0,
         };
 
         state.archive_iteration_outputs(vec![ActivityOutput::value(
@@ -685,6 +717,7 @@ mod tests {
             iteration: 0,
             iteration_outputs: None, // Not iteration-scoped
             signal_data: None,
+            completion_seq: 0,
         };
 
         // Archive should do nothing for non-iteration-scoped activities
@@ -725,6 +758,7 @@ mod tests {
                     iteration: 0,
                     iteration_outputs: None,
                     signal_data: None,
+                    completion_seq: 0,
                 },
             )]),
             state_data: json!({}),
@@ -771,6 +805,7 @@ mod tests {
                     iteration: 0,
                     iteration_outputs: None,
                     signal_data: None,
+                    completion_seq: 0,
                 },
             )]),
             state_data: json!({}),
@@ -817,6 +852,7 @@ mod tests {
                     iteration: 0,
                     iteration_outputs: None,
                     signal_data: None,
+                    completion_seq: 0,
                 },
             )]),
             state_data: json!({}),
@@ -862,6 +898,7 @@ mod tests {
                     iteration: 0,
                     iteration_outputs: None,
                     signal_data: None,
+                    completion_seq: 0,
                 },
             )]),
             state_data: json!({}),
@@ -909,6 +946,7 @@ mod tests {
                     iteration: 0,
                     iteration_outputs: None,
                     signal_data: None,
+                    completion_seq: 0,
                 },
             )]),
             state_data: json!({}),
@@ -955,6 +993,7 @@ mod tests {
                     iteration: 0,
                     iteration_outputs: None,
                     signal_data: None,
+                    completion_seq: 0,
                 },
             )]),
             state_data: json!({}),
@@ -1005,6 +1044,7 @@ mod tests {
                     iteration: 0,
                     iteration_outputs: None,
                     signal_data: None,
+                    completion_seq: 0,
                 },
             )]),
             state_data: json!({}),
@@ -1053,6 +1093,7 @@ mod tests {
                     iteration: 0,
                     iteration_outputs: None,
                     signal_data: None,
+                    completion_seq: 0,
                 },
             )]),
             state_data: json!({}),
@@ -1216,6 +1257,7 @@ mod tests {
                     iteration: 0,
                     iteration_outputs: None,
                     signal_data: None,
+                    completion_seq: 0,
                 },
             )]),
             state_data: json!({}),
@@ -1284,6 +1326,7 @@ mod tests {
             iteration: 0,
             iteration_outputs: None,
             signal_data: None,
+            completion_seq: 0,
         };
 
         state.set_error("something went wrong".to_string());
@@ -1306,6 +1349,7 @@ mod tests {
             iteration: 0,
             iteration_outputs: None,
             signal_data: None,
+            completion_seq: 0,
         };
 
         state.add_cost(Decimal::new(15, 3)); // 0.015
@@ -1330,6 +1374,7 @@ mod tests {
             iteration: 0,
             iteration_outputs: None,
             signal_data: None,
+            completion_seq: 0,
         };
 
         state.increment_attempt();
@@ -1381,6 +1426,7 @@ mod tests {
             iteration: 0,
             iteration_outputs: None, // Not iteration-scoped
             signal_data: None,
+            completion_seq: 0,
         };
 
         // Iteration counter should still work even without iteration_outputs
@@ -1388,6 +1434,72 @@ mod tests {
         assert_eq!(state.iteration, 1);
 
         state.increment_iteration();
+        assert_eq!(state.iteration, 2);
+    }
+
+    /// #18: every completion gets the next workflow-wide sequence number, so a
+    /// loop member can tell a dependency's new completion from an old one
+    #[test]
+    fn test_completions_get_increasing_sequence_numbers() {
+        let running = |key: &str| ActivityState {
+            key: key.to_string(),
+            status: WorkflowActivityStatus::Running,
+            outputs: None,
+            error: None,
+            started_at: Some(Utc::now()),
+            completed_at: None,
+            attempt: 1,
+            last_error: None,
+            accumulated_cost_usd: Decimal::ZERO,
+            iteration: 0,
+            iteration_outputs: None,
+            signal_data: None,
+            completion_seq: 0,
+        };
+        let mut state = WorkflowState {
+            workflow_id: Uuid::now_v7(),
+            definition_name: "test".to_string(),
+            status: WorkflowStatus::Running,
+            activities: HashMap::from([
+                ("head".to_string(), running("head")),
+                ("tail".to_string(), running("tail")),
+            ]),
+            state_data: json!({}),
+            input: json!({}),
+            error_message: None,
+        };
+        let completed = |key: &str| WorkflowEvent {
+            id: Uuid::now_v7(),
+            position: 0,
+            tx: 0,
+            workflow_id: Uuid::nil(),
+            event_type: WorkflowEventType::ActivityCompleted,
+            activity_key: Some(key.to_string()),
+            payload: json!({"outputs": {}}),
+            timestamp: Utc::now(),
+            iteration: None,
+        };
+
+        apply_event_to_state(&mut state, &completed("head")).unwrap();
+        apply_event_to_state(&mut state, &completed("tail")).unwrap();
+        state.activities.get_mut("head").unwrap().status = WorkflowActivityStatus::Running;
+        apply_event_to_state(&mut state, &completed("head")).unwrap();
+
+        assert_eq!(state.activities["head"].completion_seq, 3);
+        assert_eq!(state.activities["tail"].completion_seq, 2);
+    }
+
+    /// State without `completion_seq` loads, with 0
+    #[test]
+    fn test_activity_state_without_completion_seq_deserializes() {
+        let json = json!({
+            "key": "a", "status": "completed", "outputs": null, "error": null,
+            "started_at": null, "completed_at": null, "attempt": 1, "last_error": null,
+            "accumulated_cost_usd": "0", "iteration": 2, "iteration_outputs": null,
+            "signal_data": null
+        });
+        let state: ActivityState = serde_json::from_value(json).unwrap();
+        assert_eq!(state.completion_seq, 0);
         assert_eq!(state.iteration, 2);
     }
 }
