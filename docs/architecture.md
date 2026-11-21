@@ -1789,6 +1789,22 @@ condition: "{{find_data.status == 'completed'}}"
 
 **How it works**: MiniJinja's `and` operator short-circuits. If the left side (`status == 'completed'`) is `false`, the right side is never evaluated, so the undefined `result` is never accessed.
 
+Use the same guard in **parameters** that reference a step which may not have run, for example `{% if fix.status == 'completed' %}{{ fix.result.message }}{% endif %}`. Every activity is in the template context with a `status`, so `{% if fix is defined %}` is always true and guards nothing.
+
+#### When a Template Cannot Be Resolved
+
+Templates use strict undefined: referring to a value that does not exist is an error, not an empty string. When an activity's parameters, `delay`, `scheduled_for`, or the `conditions` on its dependencies cannot be resolved as it is about to be scheduled, **that activity fails**:
+
+- Its error starts with `TEMPLATE_ERROR:` and names the activity (or the condition) and the reason. It is not retried, because the template would fail the same way.
+- It fails through a terminal `ActivityFailed` event, like a worker failure. It was never queued, so no `ActivityScheduled` is recorded for it.
+- Normal failure handling follows. Dependents on a `status == 'failed'` branch run, other dependents are skipped (and their dependents, all the way down), and the workflow fails if nothing else can run.
+- The upstream activity whose completion triggered the scheduling is unaffected.
+- Conditions are evaluated only once every forward dependency of the activity is terminal, so a condition may read any of them, whatever order they complete in.
+- An LLM activity's retry resolves its parameters again for the budget check. If they no longer resolve, the queued retry is cancelled and the activity fails the same way. If a worker has already claimed the retry and its completion is processed before that failure, the activity completes with the retry's outputs instead.
+- The same applies when a skip makes a condition evaluable for the first time. For example, a condition on `classify.result` cannot be resolved once `classify` has been skipped, so the activity that carries it fails rather than waiting forever. To branch on a step that may be skipped, guard the reference: `{% if classify.status == 'completed' %}…{% endif %}`, or test `classify.status` itself.
+
+Before this was fixed (#19), the error was retried as an event-processing failure until the upstream activity's completion event was dropped as poison. That marked the upstream activity failed and left the workflow `running` indefinitely.
+
 #### Activity Status Values
 
 The `{{activity.status}}` variable returns one of:
