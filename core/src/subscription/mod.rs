@@ -5,10 +5,14 @@
 //! it enters a "waiting" state instead of being scheduled immediately. A signal API
 //! allows external systems to send signals that transition activities to "pending".
 
+mod delivery;
 mod models;
 mod postgres_subscription;
 mod service;
 
+pub use delivery::{
+    SignalDeliveryError, SignalFieldError, activity_signaled_event, deliver_signal,
+};
 pub use models::{ActivitySubscription, ExpiredSubscription, NewSubscription, SignalRequest};
 pub use postgres_subscription::PostgresSubscriptionService;
 pub use service::{Result, SubscriptionError, SubscriptionService};

@@ -4,10 +4,8 @@ use crate::error::{ApiResult, AppError, ValidationErrors};
 use crate::middleware::auth::ValidatedClaims;
 use crate::state::AppState;
 use axum::{Extension, Json, extract::Path, extract::State};
-use kruxiaflow_core::events::{NewWorkflowEvent, WorkflowEventType};
-use kruxiaflow_core::subscription::SignalRequest;
+use kruxiaflow_core::subscription::{SignalDeliveryError, SignalRequest, deliver_signal};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -28,23 +26,30 @@ pub struct SignalActivityRequest {
 }
 
 impl SignalActivityRequest {
-    fn validate(&self) -> Result<(), ValidationErrors> {
-        let mut errors = ValidationErrors::new();
-
-        if self.activity_key.is_empty() {
-            errors.add("activity_key", "Activity key cannot be empty");
-        }
-
-        if self.event_name.is_empty() {
-            errors.add("event_name", "Event name cannot be empty");
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
+    fn to_signal_request(&self, workflow_id: Uuid) -> SignalRequest {
+        SignalRequest {
+            workflow_id,
+            activity_key: self.activity_key.clone(),
+            event_name: self.event_name.clone(),
+            data: self.data.clone(),
         }
     }
+
+    /// The same validation `deliver_signal` applies, as field errors
+    #[cfg(test)]
+    fn validate(&self) -> Result<(), ValidationErrors> {
+        self.to_signal_request(Uuid::nil())
+            .validate()
+            .map_err(field_errors)
+    }
+}
+
+fn field_errors(errors: Vec<kruxiaflow_core::subscription::SignalFieldError>) -> ValidationErrors {
+    let mut out = ValidationErrors::new();
+    for e in errors {
+        out.add(e.field, e.message);
+    }
+    out
 }
 
 /// Signal activity response
@@ -66,6 +71,7 @@ mod tests {
     use crate::state::tests::*;
     use axum::extract::State;
     use kruxiaflow_oauth::Claims;
+    use serde_json::json;
     use sqlx::PgPool;
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
@@ -512,9 +518,6 @@ pub async fn signal_activity(
     Path(workflow_id): Path<Uuid>,
     Json(request): Json<SignalActivityRequest>,
 ) -> ApiResult<Json<SignalActivityResponse>> {
-    // Validate request
-    request.validate().map_err(AppError::ValidationError)?;
-
     tracing::info!(
         workflow_id = %workflow_id,
         activity_key = %request.activity_key,
@@ -522,54 +525,24 @@ pub async fn signal_activity(
         "Signaling activity"
     );
 
-    // Create signal request
-    let signal_request = SignalRequest {
-        workflow_id,
-        activity_key: request.activity_key.clone(),
-        event_name: request.event_name.clone(),
-        data: request.data.clone(),
-    };
-
-    // Try to signal the subscription
-    let subscription = state
-        .subscription_service
-        .signal_activity(signal_request)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error signaling activity: {:?}", e);
-            AppError::InternalError(anyhow::anyhow!(e))
-        })?;
+    // Shared with the MCP send_workflow_signal tool: validates, marks the
+    // subscription and publishes the ActivitySignaled event
+    let subscription = deliver_signal(
+        state.subscription_service.as_ref(),
+        state.event_source.as_ref(),
+        request.to_signal_request(workflow_id),
+    )
+    .await
+    .map_err(|e| match e {
+        SignalDeliveryError::Invalid(errors) => AppError::ValidationError(field_errors(errors)),
+        other => {
+            tracing::error!("Error signaling activity: {:?}", other);
+            AppError::InternalError(anyhow::anyhow!(other))
+        }
+    })?;
 
     match subscription {
         Some(sub) => {
-            // Subscription found and signaled - publish ActivitySignaled event
-            let event = NewWorkflowEvent {
-                workflow_id,
-                event_type: WorkflowEventType::ActivitySignaled,
-                activity_key: Some(request.activity_key.clone()),
-                payload: json!({
-                    "event_name": request.event_name,
-                    "signal_data": request.data,
-                }),
-                // The round this wait belongs to: without it, the event dedup
-                // index drops every round's signal after the first
-                iteration: sub.iteration,
-            };
-
-            // The row is marked signaled, so without the event the wait would
-            // take no retry and never time out: on a failed publish, reopen it
-            if let Err(e) = state.event_source.publish(event).await {
-                tracing::error!("Failed to publish ActivitySignaled event: {:?}", e);
-                if let Err(release) = state.subscription_service.release_signal(sub.id).await {
-                    tracing::error!(
-                        subscription_id = %sub.id,
-                        "Failed to reopen the wait after a failed publish: {:?}",
-                        release
-                    );
-                }
-                return Err(AppError::InternalError(anyhow::anyhow!(e)));
-            }
-
             tracing::info!(
                 workflow_id = %workflow_id,
                 activity_key = %request.activity_key,
