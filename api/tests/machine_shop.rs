@@ -537,6 +537,10 @@ type QueueRow = (String, Option<i32>, String, i32, i32, Option<String>);
 
 /// What the database held once the plug was pulled
 struct Pulled {
+    /// When the plug was pulled, by the database's clock
+    at: chrono::DateTime<chrono::Utc>,
+    /// When the restarted API answered, by the database's clock
+    back: chrono::DateTime<chrono::Utc>,
     /// From pulling the plug to the restarted API answering
     down_seconds: f64,
     /// Each workflow's events
@@ -660,6 +664,7 @@ impl Engine {
         let mut plant = self.plant.lock().await;
         let started = Instant::now();
         let port = plant.as_ref().expect("the engine is running").port;
+        let at = self.db_now().await;
         // Dropping the plant drops every task the engine spawned
         drop(plant.take());
         loop {
@@ -680,10 +685,29 @@ impl Engine {
         wait_healthy(&http, &self.url).await;
         *self.http.lock().expect("http client lock") = http;
         Pulled {
+            at,
+            back: self.db_now().await,
             down_seconds: started.elapsed().as_secs_f64(),
             events,
             settled,
         }
+    }
+
+    /// The database's clock, which stamps workflows and their events
+    async fn db_now(&self) -> chrono::DateTime<chrono::Utc> {
+        sqlx::query_scalar("SELECT clock_timestamp()")
+            .fetch_one(&self.pool)
+            .await
+            .expect("database clock")
+    }
+
+    /// When the workflow was created, which its timeline counts from
+    async fn created_at(&self, id: Uuid) -> chrono::DateTime<chrono::Utc> {
+        sqlx::query_scalar("SELECT created_at FROM workflows WHERE id = $1")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await
+            .expect("workflow row")
     }
 
     /// How many events each workflow has
@@ -1063,12 +1087,7 @@ impl Engine {
             Value,
             chrono::DateTime<chrono::Utc>,
         );
-        let (start,): (chrono::DateTime<chrono::Utc>,) =
-            sqlx::query_as("SELECT created_at FROM workflows WHERE id = $1")
-                .bind(id)
-                .fetch_one(&self.pool)
-                .await
-                .expect("workflow row");
+        let start = self.created_at(id).await;
         let rows: Vec<Row> = sqlx::query_as(
             "SELECT event_type::text, activity_key, iteration, payload, timestamp
              FROM workflow_events WHERE workflow_id = $1
@@ -1573,6 +1592,10 @@ struct PlugPoint {
     down_seconds: f64,
     /// The twin had already finished when the plug was pulled
     settled_before: bool,
+    /// When the plug was pulled and when the API answered again, by the
+    /// database's clock
+    at: chrono::DateTime<chrono::Utc>,
+    back: chrono::DateTime<chrono::Utc>,
 }
 
 struct Twin {
@@ -1584,6 +1607,8 @@ struct Twin {
     seconds: f64,
     observed: Observed,
     footprint: Footprint,
+    /// When the twin's workflow was created, which its timeline counts from
+    created_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// How the twin differs from the uninterrupted run: the workflow's status,
@@ -1709,6 +1734,7 @@ async fn finish_twin(
         seconds,
         observed,
         footprint,
+        created_at: engine.created_at(id).await,
     }
 }
 
@@ -1752,6 +1778,8 @@ async fn twin_bench(
         of_events,
         down_seconds: p.down_seconds,
         settled_before: p.settled.contains(&id),
+        at: p.at,
+        back: p.back,
     });
     let settle_by = started + Duration::from_secs(run.timeout_seconds) + plug.grace;
     let twin = finish_twin(
@@ -1843,6 +1871,8 @@ async fn twins_shop(
             of_events: original.footprint.map_or(0, |f| f.events),
             down_seconds: p.down_seconds,
             settled_before: p.settled.contains(&t.id),
+            at: p.at,
+            back: p.back,
         });
         let settle_by = t.started + Duration::from_secs(t.run.timeout_seconds) + plug.grace;
         finish_twin(
@@ -2356,6 +2386,8 @@ fn twin_json(t: &Twin) -> Value {
             "of_events": p.of_events,
             "down_seconds": p.down_seconds,
             "settled_before": p.settled_before,
+            "at_ms": machine_shop_stack::ms_after(p.at, t.created_at),
+            "back_ms": machine_shop_stack::ms_after(p.back, t.created_at),
         })),
         "seconds": t.seconds,
         "status": t.observed.status,
@@ -2363,6 +2395,7 @@ fn twin_json(t: &Twin) -> Value {
         "differences": t.differences,
         "problems": t.observed.problems,
         "footprint": footprint_json(&t.footprint),
+        "timeline": t.observed.timeline,
     })
 }
 

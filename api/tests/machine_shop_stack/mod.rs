@@ -30,6 +30,12 @@ pub struct EventRow {
     pub at: DateTime<Utc>,
 }
 
+/// Milliseconds from `start` to `at`, to a tenth, as the timelines use
+pub fn ms_after(at: DateTime<Utc>, start: DateTime<Utc>) -> f64 {
+    let micros = (at - start).num_microseconds().unwrap_or(0);
+    (micros as f64 / 100.0).round() / 10.0
+}
+
 /// A run's timeline: each event as `ms` after `start` (the workflow's
 /// `created_at`), with its step, type, round and attempt, and why a signal
 /// wait ended or an attempt failed. Fields the event doesn't carry are left
@@ -37,11 +43,8 @@ pub struct EventRow {
 pub fn timeline(rows: &[EventRow], start: DateTime<Utc>) -> Vec<Value> {
     rows.iter()
         .map(|r| {
-            let micros = (r.at - start).num_microseconds().unwrap_or(0);
-            // Tenths of a millisecond
-            let ms = (micros as f64 / 100.0).round() / 10.0;
             let mut e = serde_json::Map::new();
-            e.insert("ms".into(), json!(ms));
+            e.insert("ms".into(), json!(ms_after(r.at, start)));
             if let Some(step) = &r.step {
                 e.insert("step".into(), json!(step));
             }

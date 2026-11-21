@@ -209,6 +209,10 @@
   .legend-sym { display: block; color: var(--ink); }
   .run-trace + .run-trace { margin-top: 16px; }
   .run-trace h3 { font-size: 13px; margin: 0 0 6px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .twin-trace { margin: 10px 0 0 12px; padding-left: 10px; border-left: 3px double var(--ink); }
+  .twin-trace h4 { font-size: 12px; margin: 0 0 4px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .twin-trace .caption { margin: 0 0 6px; }
+  .twin-trace .notes { margin-top: 6px; }
 
   /* datasheet */
   .ds-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; border-bottom: 3px solid var(--ink); padding-bottom: 8px; margin-bottom: 14px; }
@@ -320,6 +324,20 @@ function stamp(r) {
     ? `<span class="stamp known_broken"><span>${text}</span></span>`
     : `<span class="stamp ${esc(r.result)}">${text}</span>`;
 }
+
+// Pull the plug: each run's twin, and how it came out
+const TWIN_TEXT = { identical: "Identical", different: "Different", hung: "Hung", missed: "Missed" };
+const TWIN_MEANS = {
+  identical: "the twin came out the same as the uninterrupted run",
+  different: "the twin came out differently",
+  hung: "the twin never finished, though the uninterrupted run did",
+  missed: "the twin finished before the plug was pulled",
+};
+const TWIN_STAMP = { identical: "", different: "broken", hung: "broken", missed: "none" };
+function twinStamp(t) {
+  return `<span class="stamp ${TWIN_STAMP[t.outcome] || ""}" title="${esc(TWIN_MEANS[t.outcome] || "")}">Plug: ${esc(TWIN_TEXT[t.outcome] || t.outcome)}</span>`;
+}
+function secs(n) { return `${Number(n).toFixed(2)} s`; }
 
 // ---------------------------------------------------------------------------
 // Pixel type: a 5×7 bitmap face drawn for this page
@@ -682,14 +700,15 @@ function fmtTime(ms, step) {
   return `${ms.toFixed(step >= 1 ? 0 : step >= 0.1 ? 1 : 2)} ms`;
 }
 
-/** A run as a logic analyzer shows it: one channel per step, a run line, and an interrupt line for signals */
-function timingDiagram(m, r) {
+/** A run as a logic analyzer shows it: one channel per step, a run line, and an interrupt line for signals.
+ *  `plug`, for a twin: `{at, back, down}`, when the plug was pulled and the API answered again, in ms on its timeline */
+function timingDiagram(m, r, plug) {
   if (!r) return `<p class="none">This run isn't in the result set.</p>`;
   if (!Array.isArray(r.timeline)) return `<p class="none">No timeline in this result set.</p>`;
   if (!r.timeline.length) return `<p class="none">No events: nothing ran.</p>`;
   const T = r.timeline;
   // A little past the last event, so a level that holds to the end shows it
-  const end = Math.max(1, ...T.map(e => e.ms)) * 1.04;
+  const end = Math.max(1, ...T.map(e => e.ms), plug ? plug.back : 0) * 1.04;
   const keys = m.workflow.steps.map(s => s.key);
   for (const e of T) if (e.step && !keys.includes(e.step)) keys.push(e.step);
   const traces = keys.map(k => ({ key: k, ...trace(T.filter(e => e.step === k)) }));
@@ -703,8 +722,8 @@ function timingDiagram(m, r) {
   const LW = 110, RW = 100, PW = end * k;
   const X = t => LW + t * k;
   const CHH = 34;
-  const id = `dither${++svgSeq}`;
-  let y = 14, body = "";
+  const id = `dither${++svgSeq}`, hatch = `hatch${svgSeq}`;
+  let y = plug ? 26 : 14, body = "";
 
   const channel = (label, sub, segs, marks, right) => {
     const yc = y + CHH / 2, hi = yc - 9, lo = yc + 9;
@@ -782,9 +801,36 @@ function timingDiagram(m, r) {
     grid += `<path class="grid" d="M${x} ${top}V${axis}"/><path class="thin" d="M${x} ${axis}v5"/>` + txt(x, axis + 16, fmtTime(t, step));
   }
   grid += `<path class="thin" d="M${LW} ${axis}H${LW + PW}"/>`;
+  // The engine down: hatched from the plug pulled to the API answering again
+  if (plug) {
+    const x1 = X(plug.at), x2 = Math.max(X(plug.back), x1 + 2);
+    grid += `<rect x="${x1}" y="${top}" width="${x2 - x1}" height="${axis - top}" fill="url(#${hatch})"/>` +
+      `<path d="M${x1} ${top}V${axis}"/>` + txt(x1 + 3, top + 9, `PLUG · down ${secs(plug.down)}`, "b", "start");
+  }
   const H = axis + 24, W = LW + PW + RW;
-  const defs = `<defs><pattern id="${id}" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="1" height="1" fill="currentColor"/></pattern></defs>`;
-  return `<div class="diagram"><svg viewBox="0 0 ${W.toFixed(0)} ${H}" width="${W.toFixed(0)}" height="${H}" role="img" aria-label="Timing diagram of ${esc(m.card.name)}, ${esc(r.run)}">${defs}${grid}${body}</svg></div>`;
+  const defs = `<defs><pattern id="${id}" width="2" height="2" patternUnits="userSpaceOnUse"><rect width="1" height="1" fill="currentColor"/></pattern>` +
+    `<pattern id="${hatch}" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="1" height="5" fill="currentColor"/></pattern></defs>`;
+  const label = `Timing diagram of ${m.card.name}, ${r.run}${plug ? `, with the plug pulled at ${plug.at.toFixed(1)} ms` : ""}`;
+  return `<div class="diagram"><svg viewBox="0 0 ${W.toFixed(0)} ${H}" width="${W.toFixed(0)}" height="${H}" role="img" aria-label="${esc(label)}">${defs}${grid}${body}</svg></div>`;
+}
+
+/** A run's twin, drawn under it: where the plug was pulled, how it came out, and its own timeline */
+function twinTrace(m, r) {
+  const t = r && r.twin;
+  if (!t) return "";
+  const p = t.plug;
+  let where;
+  if (!p) where = "The plug was never pulled: the twin finished first.";
+  else if (p.after_event != null) where = `Pulled after event ${p.after_event} of ${p.of_events}; ${p.events_at_plug} ${p.events_at_plug === 1 ? "event was" : "events were"} in when the engine stopped.`;
+  else where = `When the plug was pulled, this twin had ${p.events_at_plug} of the uninterrupted run's ${p.of_events} events in.`;
+  if (p && p.settled_before) where += " The twin had already finished.";
+  const band = p && p.at_ms != null ? { at: p.at_ms, back: p.back_ms, down: p.down_seconds } : null;
+  const diagram = Array.isArray(t.timeline)
+    ? timingDiagram(m, { run: `${r.run}, twin`, timeline: t.timeline, steps: t.steps, status: t.status }, band)
+    : `<p class="none">This result set doesn't record the twin's timeline.</p>`;
+  const diffs = t.differences && t.differences.length ? `<ul class="notes">${t.differences.map(d => `<li>${esc(d)}</li>`).join("")}</ul>` : "";
+  return `<div class="twin-trace"><h4>Its twin ${twinStamp(t)}<span class="secs">${secs(t.seconds)}</span></h4>
+    <p class="caption">${esc(where)}</p>${diagram}${diffs}</div>`;
 }
 
 function timingSheet(m) {
@@ -792,11 +838,15 @@ function timingSheet(m) {
   if (!s) return `<div class="field"><h2>Timing</h2><p>No results yet.</p></div>`;
   const runs = m.card.runs.map(run => {
     const r = runIn(s, m.dir, run.name);
-    return `<div class="run-trace"><h3>${esc(run.name)} ${stamp(r)}${r ? `<span class="secs">${Number(r.seconds).toFixed(2)} s</span>` : ""}</h3>${timingDiagram(m, r)}</div>`;
+    return `<div class="run-trace"><h3>${esc(run.name)} ${stamp(r)}${r ? `<span class="secs">${Number(r.seconds).toFixed(2)} s</span>` : ""}</h3>${timingDiagram(m, r)}${twinTrace(m, r)}</div>`;
   }).join("");
+  const twins = s.runs.some(r => r.twin);
+  const shopPull = twins && s.mode === "shop" && s.plug && s.plug.shop_fraction != null
+    ? ` In shop mode the twins ran together, and the plug was pulled once for all of them, when they together had ${Math.round(s.plug.shop_fraction * 100)}% of the uninterrupted runs' events in.` : "";
+  const plugNote = twins ? ` With the plug pulled, each run's twin is drawn under it: the engine was stopped partway through and restarted on the same database, and the hatched band is the engine down, from the plug pulled to the API answering again.${shopPull}` : "";
   return `<div class="field"><h2>Timing diagrams</h2>
       <div class="pick">${setPicker(m, s)}</div>
-      <p class="caption">From the run's events in <code>workflow_events</code>, as the engine timed them; zero is the workflow's <code>created_at</code>. A step's line is high from scheduled to completed or failed, dashed in the middle while it waits for a signal. ▼ is a signal taken, T/O a wait that timed out, ✕ a failed attempt. A loop's rounds are a pulse train, numbered.</p></div>
+      <p class="caption">From the run's events in <code>workflow_events</code>, as the engine timed them; zero is the workflow's <code>created_at</code>. A step's line is high from scheduled to completed or failed, dashed in the middle while it waits for a signal. ▼ is a signal taken, T/O a wait that timed out, ✕ a failed attempt. A loop's rounds are a pulse train, numbered.${esc(plugNote)}</p></div>
     <div class="field">${runs}</div>`;
 }
 
@@ -943,6 +993,7 @@ function legendCard() {
     ["T/O", "A signal wait that timed out; the step then does what <code>on_timeout</code> says."],
     ["✕", "A failed attempt: <em>retry</em> when the engine tries again, <em>fail</em> when it doesn't."],
     ["RUN", "The workflow: high from <code>created_at</code> until <code>WorkflowCompleted</code> or <code>WorkflowFailed</code>."],
+    ["PLUG", "On a twin's trace, hatched: the engine down, from the plug pulled to the restarted API answering. The stamp beside the twin says how it came out: identical, different, hung, or missed when it finished first."],
   ].map(([s, what]) => `<tr><th scope="row">${esc(s)}</th><td>${what}</td></tr>`).join("");
   return `${pixelText("Legend", 3)}
     <div class="field section"><h2>Ladder symbols</h2>
