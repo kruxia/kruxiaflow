@@ -1,5 +1,6 @@
 //! The machine shop: small workflows inspired by physical machines, run
-//! against a real engine (API server, orchestrator and std worker).
+//! against a real engine (API server, orchestrator and std worker). It's an
+//! R&D exploration of how the engine behaves, alone and under contention.
 //!
 //! Each machine lives in `machines/<name>/` as a `workflow.yaml` and a
 //! `card.yaml` (its spec card: the story, the engine functions it

@@ -2,8 +2,10 @@
 
 Small workflows, called **machines**, each inspired by a physical machine: a domino run, a prism, a railway switch. Each one makes sense on its own and exercises one or a few engine functions. They run against a real engine: the API server, the orchestrator and the std worker, with real activities.
 
+The shop is an R&D exploration. Its opportunity and value are still being discovered: which machines, modes and views earn a place, and what they show about the engine that nothing else does.
+
 - **Simple machines** exercise one engine function.
-- **Compound machines** combine about three. Interactions are where bugs hide.
+- **Compound machines** combine about three. Interactions are where the most interesting behaviour shows up.
 - **A trap** is a machine of either kind that reproduces a known bug, labelled with its issue number, or several when it needs them all fixed. It's expected to fail until the fix lands. When it passes, take the label off.
 
 ## Running
