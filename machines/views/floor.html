@@ -178,6 +178,11 @@
   .story { margin: 0 0 8px; max-width: 62ch; color: var(--ink-secondary); }
   .functions { margin: 0 0 10px; padding-left: 18px; font-size: 13px; }
   .scroll { overflow-x: auto; }
+  details + details { margin-top: 8px; }
+  .bay details { min-width: 0; max-width: 100%; }
+  .source { box-sizing: border-box; max-width: 100%; margin: 0; padding: 10px 12px; overflow-x: auto; max-height: 28rem; overflow-y: auto;
+    font-family: var(--mono); font-size: 12px; line-height: 1.5; tab-size: 2;
+    background: var(--page); border: 1px solid var(--border); border-radius: 4px; }
   table { border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; width: 100%; }
   th, td { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--grid); vertical-align: top; white-space: nowrap; }
   th { font-weight: 600; color: var(--ink-secondary); }
@@ -639,6 +644,9 @@ function bay(m) {
       <ul class="functions">${c.functions.map(f => `<li>${esc(f)}</li>`).join("")}</ul>
       ${matrix}
     </details>
+    <details data-part="source"><summary>Workflow source: machines/${esc(m.dir)}/workflow.yaml</summary>
+      <pre class="source"><code>${esc(m.workflow.source || "")}</code></pre>
+    </details>
   </section>`;
 }
 
@@ -648,7 +656,7 @@ function render() {
       <p><code>cargo test -p kruxiaflow-api --test machine_shop</code></p><p>The page is written to <code>target/tmp/machine-shop/floor.html</code>.</p></div>`;
     return;
   }
-  const open = new Set([...document.querySelectorAll(".bay details[open]")].map(d => d.closest(".bay").id));
+  const open = new Set([...document.querySelectorAll(".bay details[open]")].map(d => `${d.closest(".bay").id}|${d.dataset.part || "card"}`));
   document.getElementById("controls").innerHTML = controls();
   document.getElementById("tally").innerHTML = tally();
   document.getElementById("meta").innerHTML = meta();
@@ -657,7 +665,11 @@ function render() {
   document.getElementById("notes").innerHTML = notes();
   uid = 0;
   document.getElementById("floor").innerHTML = MACHINES.map(bay).join("");
-  open.forEach(id => { const d = document.querySelector(`#${CSS.escape(id)} details`); if (d) d.open = true; });
+  open.forEach(key => {
+    const [id, part] = key.split("|");
+    const d = document.querySelector(`#${CSS.escape(id)} details${part === "card" ? ":not([data-part])" : `[data-part="${part}"]`}`);
+    if (d) d.open = true;
+  });
 
   const ps = document.getElementById("pick-set"), pc = document.getElementById("pick-cmp"), oc = document.getElementById("only-changed");
   if (ps) ps.onchange = () => { state.set = Number(ps.value); render(); };

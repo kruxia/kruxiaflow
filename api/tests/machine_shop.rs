@@ -2461,10 +2461,8 @@ fn machine_view(dir: &str) -> Value {
     let card: Value =
         serde_yaml::from_str(&std::fs::read_to_string(base.join("card.yaml")).expect("card.yaml"))
             .expect("card.yaml parses");
-    let wf: Value = serde_yaml::from_str(
-        &std::fs::read_to_string(base.join("workflow.yaml")).expect("workflow.yaml"),
-    )
-    .expect("workflow.yaml parses");
+    let source = std::fs::read_to_string(base.join("workflow.yaml")).expect("workflow.yaml");
+    let wf: Value = serde_yaml::from_str(&source).expect("workflow.yaml parses");
     let acts = wf["activities"].as_array().cloned().unwrap_or_default();
 
     // A dependency is a bare key or `{activity_key, conditions}`
@@ -2511,7 +2509,7 @@ fn machine_view(dir: &str) -> Value {
     json!({
         "dir": dir,
         "card": card,
-        "workflow": { "name": wf["name"], "steps": steps },
+        "workflow": { "name": wf["name"], "steps": steps, "source": source },
         "drawing": machine_shop_stack::drawing_number(dir),
         "ladder": machine_shop_stack::ladder(&wf),
         "pins": machine_shop_stack::pins(&wf),
