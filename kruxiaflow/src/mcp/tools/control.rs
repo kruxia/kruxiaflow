@@ -181,7 +181,8 @@ pub async fn run_send_workflow_signal(
         Some(key) => vec![key.clone()],
         None => sqlx::query_scalar(
             "SELECT activity_key FROM activity_event_subscriptions \
-             WHERE workflow_id = $1 AND event_name = $2 AND signal_data IS NULL \
+             WHERE workflow_id = $1 AND event_name = $2 \
+               AND signaled_at IS NULL AND expired_at IS NULL \
              ORDER BY created_at",
         )
         .bind(workflow_id)
@@ -290,14 +291,14 @@ pub async fn run_list_waiting_workflows(
              FROM activity_event_subscriptions s \
              JOIN workflows w ON w.id = s.workflow_id \
              WHERE w.status = 'running' \
-               AND s.signal_data IS NULL \
+               AND s.signaled_at IS NULL AND s.expired_at IS NULL \
                AND s.event_name = $1 \
              ORDER BY s.created_at DESC \
              LIMIT $2 OFFSET $3",
             "SELECT COUNT(*) FROM activity_event_subscriptions s \
              JOIN workflows w ON w.id = s.workflow_id \
              WHERE w.status = 'running' \
-               AND s.signal_data IS NULL \
+               AND s.signaled_at IS NULL AND s.expired_at IS NULL \
                AND s.event_name = $1",
         )
     } else {
@@ -307,13 +308,13 @@ pub async fn run_list_waiting_workflows(
              FROM activity_event_subscriptions s \
              JOIN workflows w ON w.id = s.workflow_id \
              WHERE w.status = 'running' \
-               AND s.signal_data IS NULL \
+               AND s.signaled_at IS NULL AND s.expired_at IS NULL \
              ORDER BY s.created_at DESC \
              LIMIT $1 OFFSET $2",
             "SELECT COUNT(*) FROM activity_event_subscriptions s \
              JOIN workflows w ON w.id = s.workflow_id \
              WHERE w.status = 'running' \
-               AND s.signal_data IS NULL",
+               AND s.signaled_at IS NULL AND s.expired_at IS NULL",
         )
     };
 
@@ -481,6 +482,7 @@ mod tests {
                 event_name: "go".to_string(),
                 on_timeout: OnTimeout::Fail,
                 timeout_seconds: 300,
+                iteration: None,
             })
             .await
             .unwrap();

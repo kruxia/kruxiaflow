@@ -270,6 +270,7 @@ mod tests {
                 timeout_at: chrono::Utc::now() + chrono::Duration::hours(1),
                 signal_data: request.data,
                 created_at: chrono::Utc::now(),
+                iteration: None,
             }))
         }
 
@@ -310,6 +311,13 @@ mod tests {
         async fn release_signal(
             &self,
             _subscription_id: Uuid,
+        ) -> kruxiaflow_core::subscription::Result<()> {
+            Ok(())
+        }
+
+        async fn delete_subscription_by_id(
+            &self,
+            _id: Uuid,
         ) -> kruxiaflow_core::subscription::Result<()> {
             Ok(())
         }
@@ -434,6 +442,13 @@ mod tests {
         async fn release_signal(
             &self,
             _subscription_id: Uuid,
+        ) -> kruxiaflow_core::subscription::Result<()> {
+            Ok(())
+        }
+
+        async fn delete_subscription_by_id(
+            &self,
+            _id: Uuid,
         ) -> kruxiaflow_core::subscription::Result<()> {
             Ok(())
         }

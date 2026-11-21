@@ -562,6 +562,12 @@ Sends a signal to a waiting activity within a workflow.
 - `event_name` - Required, not empty
 - `data` - Optional, any JSON object
 
+A wait takes one signal, with or without `data`. Once a signal has been
+accepted, another signal for the same wait gets `"signaled": false` (its
+`data` is not used), and so does a signal for a wait whose timeout has
+already expired. A 500 response means the signal was not taken (the wait is
+still open), so it can be retried.
+
 **Response** (200 OK):
 ```json
 {
@@ -569,6 +575,11 @@ Sends a signal to a waiting activity within a workflow.
   "message": "Activity signaled successfully"
 }
 ```
+
+One signal ends one wait: the activity then runs (with `data` as its signal
+data). An activity inside a loop waits again in each round, and each round
+takes its own signal; `"signaled": false` means the activity is not waiting
+for `event_name` right now (not yet, or this round's signal already arrived).
 
 ---
 

@@ -82,9 +82,9 @@ pub fn activity_signaled_event(
             "event_name": request.event_name,
             "signal_data": request.data,
         }),
-        // With loop rounds on subscriptions (#29), set this from the
-        // subscription: the dedup index drops a later round's signal otherwise
-        iteration: None,
+        // The loop round this wait belongs to: without it, the event dedup
+        // index drops every round's signal after the first (#29)
+        iteration: subscription.iteration,
     }
 }
 
@@ -178,6 +178,7 @@ mod tests {
                 timeout_at: chrono::Utc::now(),
                 signal_data: request.data,
                 created_at: chrono::Utc::now(),
+                iteration: None,
             }))
         }
 
@@ -212,6 +213,10 @@ mod tests {
         }
 
         async fn release_signal(&self, _subscription_id: Uuid) -> crate::subscription::Result<()> {
+            Ok(())
+        }
+
+        async fn delete_subscription_by_id(&self, _id: Uuid) -> crate::subscription::Result<()> {
             Ok(())
         }
     }
@@ -289,6 +294,8 @@ mod tests {
             timeout_at: chrono::Utc::now(),
             signal_data: Some(data.clone()),
             created_at: chrono::Utc::now(),
+            // The wait's loop round, which the event must carry (#29)
+            iteration: Some(2),
         };
         let event = activity_signaled_event(&sub, &req);
         assert_eq!(event.workflow_id, req.workflow_id);
@@ -298,7 +305,7 @@ mod tests {
             event.payload,
             json!({"event_name": "go", "signal_data": data})
         );
-        assert_eq!(event.iteration, None);
+        assert_eq!(event.iteration, Some(2));
     }
 
     #[tokio::test]
@@ -377,6 +384,7 @@ mod tests {
                 event_name: "go".to_string(),
                 on_timeout: OnTimeout::Fail,
                 timeout_seconds: 300,
+                iteration: None,
             })
             .await
             .unwrap();
