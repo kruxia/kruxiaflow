@@ -1523,9 +1523,37 @@ pub async fn process_workflow_event(
         }
     }
 
+    // A signal (or a timeout that continues) ends the activity's current wait.
+    // It runs now, in this pass, instead of waiting again, and its subscription
+    // is deleted so that the next wait (a later loop round) can create one.
+    // Only a signal for the wait that is open counts: the activity is waiting,
+    // in the loop round the event carries. A replay of an earlier round's
+    // signal, or a duplicate once the activity has moved on, changes nothing.
+    let signaled_activity = (event.event_type == WorkflowEventType::ActivitySignaled)
+        .then_some(event.activity_key.as_ref())
+        .flatten()
+        .filter(|key| {
+            state
+                .activities
+                .get(key.as_str())
+                .is_some_and(|a| a.ends_wait(event.iteration))
+        })
+        .cloned();
+
     {
         let _enter = apply_span.enter();
         apply_event_to_state(&mut state, event)?;
+    }
+
+    if let Some(key) = &signaled_activity {
+        subscription_service
+            .delete_subscription(event.workflow_id, key)
+            .await
+            .map_err(|e| {
+                super::OrchestratorError::InternalError(format!(
+                    "Failed to delete signal subscription for activity {key}: {e}"
+                ))
+            })?;
     }
     tracing::trace!(
         "Event applied to state in {:?} for workflow {}",
@@ -1653,7 +1681,23 @@ pub async fn process_workflow_event(
                 .unwrap_or(&0)
         );
 
-        find_ready_activities(&definition, &state)?
+        let mut ready = find_ready_activities(&definition, &state)?;
+
+        // The activity whose wait this event ended was already scheduled: its
+        // dependencies were evaluated when the wait began. It runs now, without
+        // re-evaluating them against state its own wait has changed (a
+        // self-loop's `{{self.status == 'completed'}}` no longer holds).
+        if let Some(key) = &signaled_activity
+            && state
+                .activities
+                .get(key)
+                .is_some_and(|a| a.status == WorkflowActivityStatus::NotScheduled)
+            && !ready.iter().any(|a| &a.key == key)
+            && let Some(activity) = definition.activities.iter().find(|a| &a.key == key)
+        {
+            ready.push(activity);
+        }
+        ready
     };
     tracing::trace!(
         "Dependencies evaluated in {:?} for workflow {} ({} ready)",
@@ -1806,9 +1850,11 @@ pub async fn process_workflow_event(
                     None
                 };
 
-                // Check if activity has wait_for_signal setting
+                // Check if activity has wait_for_signal setting, and is not the
+                // activity whose wait this event just ended
                 if let Some(wait_settings) =
                     a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref())
+                    && signaled_activity.as_deref() != Some(a.key.as_str())
                 {
                     // Activity needs to wait for an external signal before executing
                     // Create a subscription instead of scheduling to queue
@@ -1818,6 +1864,7 @@ pub async fn process_workflow_event(
                         event_name: wait_settings.event_name.clone(),
                         on_timeout: wait_settings.on_timeout.clone(),
                         timeout_seconds: wait_settings.timeout_seconds,
+                        iteration,
                     };
 
                     match subscription_service.create_subscription(new_sub).await {
@@ -3124,7 +3171,7 @@ async fn process_expired_subscriptions(
                         "reason": "timeout",
                         "on_timeout": "continue",
                     }),
-                    iteration: None,
+                    iteration: sub.iteration,
                 }
             }
             OnTimeout::Skip => {
@@ -3143,7 +3190,7 @@ async fn process_expired_subscriptions(
                         "reason": "timeout",
                         "on_timeout": "skip",
                     }),
-                    iteration: None,
+                    iteration: sub.iteration,
                 }
             }
             OnTimeout::Fail => {
@@ -3164,19 +3211,26 @@ async fn process_expired_subscriptions(
                         "on_timeout": "fail",
                         "will_retry": false,
                     }),
-                    iteration: None,
+                    iteration: sub.iteration,
                 }
             }
         };
 
         // Only delete the subscription after the event is successfully published.
         // If publish fails, the subscription stays marked as expired and will be
-        // retried on the next cycle via recover_expired.
+        // retried on the next cycle via recover_expired. Deleted by id: once the
+        // event is out, the step can run and open its next loop round's wait
+        // under the same key before this delete runs.
         match event_source.publish(event).await {
             Ok(_) => {
-                let _ = subscription_service
-                    .delete_subscription(sub.workflow_id, &sub.activity_key)
-                    .await;
+                if let Err(e) = subscription_service.delete_subscription_by_id(sub.id).await {
+                    tracing::error!(
+                        workflow_id = %sub.workflow_id,
+                        activity_key = %sub.activity_key,
+                        "Failed to delete expired subscription after publishing its timeout event: {}",
+                        e
+                    );
+                }
             }
             Err(e) => {
                 tracing::error!(
@@ -3703,6 +3757,7 @@ mod tests {
             async fn expire_subscriptions(&self, limit: i64) -> std::result::Result<Vec<ExpiredSubscription>, crate::subscription::SubscriptionError>;
             async fn recover_expired(&self, limit: i64) -> std::result::Result<Vec<ExpiredSubscription>, crate::subscription::SubscriptionError>;
             async fn delete_subscription(&self, workflow_id: Uuid, activity_key: &str) -> std::result::Result<(), crate::subscription::SubscriptionError>;
+            async fn delete_subscription_by_id(&self, id: Uuid) -> std::result::Result<(), crate::subscription::SubscriptionError>;
         }
     }
 
@@ -3983,6 +4038,7 @@ mod tests {
                     activity_key: "recovered_step".to_string(),
                     event_name: "approval".to_string(),
                     on_timeout: OnTimeout::Fail,
+                    iteration: None,
                 }])
             });
 
@@ -3998,14 +4054,15 @@ mod tests {
                     activity_key: "new_expired".to_string(),
                     event_name: "signal".to_string(),
                     on_timeout: OnTimeout::Continue,
+                    iteration: None,
                 }])
             });
 
-        // delete_subscription called once per successful publish
+        // delete_subscription_by_id called once per successful publish
         mock_sub
-            .expect_delete_subscription()
+            .expect_delete_subscription_by_id()
             .times(2)
-            .returning(|_, _| Ok(()));
+            .returning(|_| Ok(()));
 
         let mut mock_es = MockEventSrc::new();
         // Two publishes: one for recovered, one for newly expired
@@ -4028,13 +4085,14 @@ mod tests {
         let wf_id = Uuid::now_v7();
         let mut mock_sub = MockSubSvc::new();
         mock_sub
-            .expect_delete_subscription()
+            .expect_delete_subscription_by_id()
             .times(1)
-            .returning(|_, _| Ok(()));
+            .returning(|_| Ok(()));
 
         let mut mock_es = MockEventSrc::new();
         mock_es.expect_publish().times(1).returning(|event| {
             assert_eq!(event.event_type, WorkflowEventType::ActivitySignaled);
+            assert_eq!(event.iteration, Some(2));
             assert_eq!(event.payload["on_timeout"].as_str().unwrap(), "continue");
             assert_eq!(event.payload["reason"].as_str().unwrap(), "timeout");
             Ok(())
@@ -4049,6 +4107,7 @@ mod tests {
             activity_key: "wait_step".to_string(),
             event_name: "approval".to_string(),
             on_timeout: OnTimeout::Continue,
+            iteration: Some(2),
         }];
 
         process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
@@ -4058,13 +4117,14 @@ mod tests {
     async fn test_process_expired_skip() {
         let mut mock_sub = MockSubSvc::new();
         mock_sub
-            .expect_delete_subscription()
+            .expect_delete_subscription_by_id()
             .times(1)
-            .returning(|_, _| Ok(()));
+            .returning(|_| Ok(()));
 
         let mut mock_es = MockEventSrc::new();
         mock_es.expect_publish().times(1).returning(|event| {
             assert_eq!(event.event_type, WorkflowEventType::ActivitySignaled);
+            assert_eq!(event.iteration, Some(2));
             assert_eq!(event.payload["on_timeout"].as_str().unwrap(), "skip");
             Ok(())
         });
@@ -4078,6 +4138,7 @@ mod tests {
             activity_key: "skip_step".to_string(),
             event_name: "signal".to_string(),
             on_timeout: OnTimeout::Skip,
+            iteration: Some(2),
         }];
 
         process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
@@ -4087,13 +4148,14 @@ mod tests {
     async fn test_process_expired_fail() {
         let mut mock_sub = MockSubSvc::new();
         mock_sub
-            .expect_delete_subscription()
+            .expect_delete_subscription_by_id()
             .times(1)
-            .returning(|_, _| Ok(()));
+            .returning(|_| Ok(()));
 
         let mut mock_es = MockEventSrc::new();
         mock_es.expect_publish().times(1).returning(|event| {
             assert_eq!(event.event_type, WorkflowEventType::ActivityFailed);
+            assert_eq!(event.iteration, Some(2));
             assert_eq!(
                 event.payload["error_code"].as_str().unwrap(),
                 "SIGNAL_TIMEOUT"
@@ -4112,6 +4174,7 @@ mod tests {
             activity_key: "fail_step".to_string(),
             event_name: "required_signal".to_string(),
             on_timeout: OnTimeout::Fail,
+            iteration: Some(2),
         }];
 
         process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
@@ -4121,7 +4184,7 @@ mod tests {
     async fn test_process_expired_publish_error_skips_delete() {
         let mut mock_sub = MockSubSvc::new();
         // delete should NOT be called when publish fails
-        mock_sub.expect_delete_subscription().times(0);
+        mock_sub.expect_delete_subscription_by_id().times(0);
 
         let mut mock_es = MockEventSrc::new();
         mock_es.expect_publish().times(1).returning(|_| {
@@ -4139,6 +4202,7 @@ mod tests {
             activity_key: "step".to_string(),
             event_name: "signal".to_string(),
             on_timeout: OnTimeout::Fail,
+            iteration: None,
         }];
 
         // Should not panic — error is logged and subscription is retained for retry
@@ -4149,9 +4213,9 @@ mod tests {
     async fn test_process_expired_multiple_subscriptions() {
         let mut mock_sub = MockSubSvc::new();
         mock_sub
-            .expect_delete_subscription()
+            .expect_delete_subscription_by_id()
             .times(3)
-            .returning(|_, _| Ok(()));
+            .returning(|_| Ok(()));
 
         let mut mock_es = MockEventSrc::new();
         mock_es.expect_publish().times(3).returning(|_| Ok(()));
@@ -4166,6 +4230,7 @@ mod tests {
                 activity_key: "a".to_string(),
                 event_name: "sig".to_string(),
                 on_timeout: OnTimeout::Continue,
+                iteration: None,
             },
             ExpiredSubscription {
                 id: Uuid::now_v7(),
@@ -4173,6 +4238,7 @@ mod tests {
                 activity_key: "b".to_string(),
                 event_name: "sig".to_string(),
                 on_timeout: OnTimeout::Skip,
+                iteration: None,
             },
             ExpiredSubscription {
                 id: Uuid::now_v7(),
@@ -4180,10 +4246,108 @@ mod tests {
                 activity_key: "c".to_string(),
                 event_name: "sig".to_string(),
                 on_timeout: OnTimeout::Fail,
+                iteration: None,
             },
         ];
 
         process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
+    }
+
+    /// An event source whose publish does what the orchestrator does with a
+    /// loop step's timeout that continues: it ends that round's wait (deleting
+    /// its row) and the step's next round opens a new one
+    struct NextRoundOnPublish {
+        subs: crate::subscription::PostgresSubscriptionService,
+    }
+
+    #[async_trait]
+    impl EventSource for NextRoundOnPublish {
+        async fn publish(
+            &self,
+            event: NewWorkflowEvent,
+        ) -> std::result::Result<(), crate::events::EventError> {
+            let key = event.activity_key.clone().unwrap_or_default();
+            self.subs
+                .delete_subscription(event.workflow_id, &key)
+                .await
+                .expect("delete the ended wait");
+            self.subs
+                .create_subscription(NewSubscription {
+                    workflow_id: event.workflow_id,
+                    activity_key: key,
+                    event_name: "go".to_string(),
+                    on_timeout: OnTimeout::Continue,
+                    timeout_seconds: 3600,
+                    iteration: event.iteration.map(|r| r + 1),
+                })
+                .await
+                .expect("open the next round's wait");
+            Ok(())
+        }
+        async fn poll(
+            &self,
+            _consumer_id: &str,
+        ) -> std::result::Result<Vec<WorkflowEvent>, crate::events::EventError> {
+            Ok(Vec::new())
+        }
+        async fn update_position(
+            &self,
+            _consumer_id: &str,
+            _cursor: EventCursor,
+        ) -> std::result::Result<(), crate::events::EventError> {
+            Ok(())
+        }
+    }
+
+    /// The expiry checker removes only the subscription it expired: a later
+    /// round's wait, opened before the checker gets to its delete, stays open
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_expiry_keeps_next_rounds_subscription(pool: sqlx::PgPool) {
+        let def_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO workflow_definitions (name, activities) VALUES ('w', '[]') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let wf = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO workflows (id, definition_name, workflow_definition_id, input, status, activities, state_data) \
+             VALUES ($1, 'w', $2, '{}', 'running', '{}', '{}')",
+        )
+        .bind(wf)
+        .bind(def_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let subs = crate::subscription::PostgresSubscriptionService::new(pool.clone());
+        subs.create_subscription(NewSubscription {
+            workflow_id: wf,
+            activity_key: "poll".to_string(),
+            event_name: "go".to_string(),
+            on_timeout: OnTimeout::Continue,
+            timeout_seconds: 0,
+            iteration: Some(0),
+        })
+        .await
+        .unwrap();
+
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(subs);
+        let arc_es: Arc<dyn EventSource> = Arc::new(NextRoundOnPublish {
+            subs: crate::subscription::PostgresSubscriptionService::new(pool.clone()),
+        });
+        check_and_handle_expired_subscriptions(&arc_sub, &arc_es)
+            .await
+            .unwrap();
+
+        let rounds: Vec<Option<i32>> = sqlx::query_scalar(
+            "SELECT iteration FROM activity_event_subscriptions WHERE workflow_id = $1",
+        )
+        .bind(wf)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rounds, vec![Some(1)]);
     }
 
     // =========================================================================
