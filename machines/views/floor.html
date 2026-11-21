@@ -180,6 +180,14 @@
   .scroll { overflow-x: auto; }
   details + details { margin-top: 8px; }
   .bay details { min-width: 0; max-width: 100%; }
+  .part[data-step] { cursor: pointer; }
+  .part[data-step]:hover rect.body, .part[data-step]:focus-visible rect.body { stroke-width: 2.4; }
+  .part[data-step]:focus { outline: none; }
+  .source { position: relative; }
+  .source code { display: inline-block; min-width: 100%; }
+  .source .ln { display: block; padding: 0 6px; margin: 0 -6px; }
+  .source .ln.hl { background: color-mix(in srgb, var(--series) 16%, var(--page)); box-shadow: inset 3px 0 var(--series); }
+  .src-hint { margin: 0 0 6px; font-size: 12px; color: var(--ink-secondary); }
   .source { box-sizing: border-box; max-width: 100%; margin: 0; padding: 10px 12px; overflow-x: auto; max-height: 28rem; overflow-y: auto;
     font-family: var(--mono); font-size: 12px; line-height: 1.5; tab-size: 2;
     background: var(--page); border: 1px solid var(--border); border-radius: 4px; }
@@ -467,7 +475,8 @@ function schematic(m, run, spec) {
     let badges = "", bx = p.x + W - 8;
     if (miss) { badges += `<circle class="badge-bg miss" cx="${bx}" cy="${p.y}" r="7"/><text class="badge badge-text" x="${bx}" y="${p.y + 3.5}" text-anchor="middle">!</text>`; bx -= 16; }
     if (delta) { badges += `<circle class="badge-bg delta" cx="${bx}" cy="${p.y}" r="7"/><text class="badge badge-text" x="${bx}" y="${p.y + 3.5}" text-anchor="middle">Δ</text>`; }
-    parts += `<g class="part ${cls}"><title>${esc(tip)}</title>
+    parts += `<g class="part ${cls}" data-step="${esc(s.key)}" tabindex="0" role="button" aria-label="${esc(`${s.key}: show its source`)}"><title>${esc(tip)}
+Click to see its source</title>
       ${delta ? `<rect class="delta" x="${p.x - 4}" y="${p.y - 4}" width="${W + 8}" height="${H + 8}" rx="8"/>` : ""}
       <rect class="body" x="${p.x}" y="${p.y}" width="${W}" height="${H}" rx="5"/>
       ${miss ? `<rect class="miss" x="${p.x}" y="${p.y}" width="${W}" height="${H}" rx="5"/>` : ""}
@@ -653,10 +662,58 @@ function bay(m) {
       ${matrix}
     </details>
     <details data-part="source"><summary>Workflow source: machines/${esc(m.dir)}/workflow.yaml</summary>
-      <pre class="source"><code>${esc(m.workflow.source || "")}</code></pre>
+      <p class="src-hint">Click a step in the schematic to highlight its activity here.</p>
+      <pre class="source"><code>${sourceLines(m.workflow.source || "")}</code></pre>
     </details>
   </section>`;
 }
+
+/** The lines of one activity in workflow.yaml, [start, end): its `- key:` line, any comment
+ *  lines just above it, and everything indented under it */
+function stepLines(src, step) {
+  const lines = src.split("\n");
+  const indentOf = l => l.match(/^ */)[0].length;
+  let start = lines.findIndex(l => {
+    const m = l.match(/^\s*- key:\s*["']?([^"'\s#]+)["']?\s*(#.*)?$/);
+    return m && m[1] === step;
+  });
+  if (start < 0) return null;
+  const indent = indentOf(lines[start]);
+  let end = start + 1;
+  for (; end < lines.length; end++) {
+    const l = lines[end];
+    if (!l.trim()) continue;
+    if (indentOf(l) <= indent) break;
+  }
+  while (end - 1 > start && !lines[end - 1].trim()) end--;
+  while (start > 0 && /^\s*#/.test(lines[start - 1]) && indentOf(lines[start - 1]) === indent) start--;
+  return [start, end];
+}
+function sourceLines(src) {
+  return src.replace(/\n$/, "").split("\n").map(l => `<span class="ln">${esc(l) || " "}</span>`).join("");
+}
+/** Open a bay's source and highlight one step's activity in it */
+function showStepSource(bay, step) {
+  const d = bay.querySelector('details[data-part="source"]');
+  const m = MACHINES.find(x => x.dir === bay.id);
+  if (!d || !m) return;
+  d.open = true;
+  const range = stepLines(m.workflow.source || "", step);
+  const lines = [...d.querySelectorAll(".source .ln")];
+  lines.forEach((ln, i) => ln.classList.toggle("hl", !!range && i >= range[0] && i < range[1]));
+  const pre = d.querySelector(".source"), first = range && lines[range[0]];
+  if (first) pre.scrollTop = Math.max(0, first.offsetTop - 24);
+  d.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+document.addEventListener("click", e => {
+  const g = e.target.closest && e.target.closest(".bay [data-step]");
+  if (g) showStepSource(g.closest(".bay"), g.dataset.step);
+});
+document.addEventListener("keydown", e => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const g = e.target.closest && e.target.closest(".bay [data-step]");
+  if (g) { e.preventDefault(); showStepSource(g.closest(".bay"), g.dataset.step); }
+});
 
 function render() {
   if (!DATA) {

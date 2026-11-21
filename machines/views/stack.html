@@ -209,6 +209,18 @@
   .legend-sym { display: block; color: var(--ink); }
   .run-trace + .run-trace { margin-top: 16px; }
   .run-trace h3 { font-size: 13px; margin: 0 0 6px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .diagram svg .hit { fill: transparent; stroke: none; }
+  .diagram svg .src-link { cursor: pointer; }
+  .diagram svg .src-link:hover .hit, .diagram svg .src-link:focus-visible .hit { fill: url(#src-dots); }
+  .diagram svg .src-link:focus { outline: none; }
+  dialog.src { max-width: min(92vw, 760px); width: 100%; padding: 0; border: 3px double var(--ink); background: var(--paper); color: var(--ink); }
+  dialog.src::backdrop { background: color-mix(in srgb, var(--ink) 35%, transparent); }
+  dialog.src header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 2px solid var(--ink); font: bold 12px var(--mono); }
+  dialog.src header button { font: bold 12px var(--body); border: 2px solid var(--ink); background: var(--paper); color: var(--ink); padding: 2px 10px; cursor: pointer; }
+  dialog.src pre { margin: 0; padding: 10px 12px; max-height: 70vh; overflow: auto; position: relative; font: 12px/1.5 var(--mono); }
+  dialog.src pre code { display: inline-block; min-width: 100%; }
+  dialog.src .ln { display: block; padding: 0 6px; margin: 0 -6px; }
+  dialog.src .ln.hl { background: var(--ink); color: var(--paper); }
   .twin-trace { margin: 10px 0 0 12px; padding-left: 10px; border-left: 3px double var(--ink); }
   .twin-trace h4 { font-size: 12px; margin: 0 0 4px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .twin-trace .caption { margin: 0 0 6px; }
@@ -242,6 +254,7 @@
 <body>
 <div class="window">
   <div class="titlebar"><span class="box" aria-hidden="true"></span><span class="label" id="title"></span></div>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><pattern id="src-dots" width="3" height="3" patternUnits="userSpaceOnUse"><rect width="1" height="1" fill="currentColor"/></pattern></defs></svg>
   <main class="card" id="card" tabindex="-1"></main>
   <div class="tools">
     <button type="button" id="prev" aria-label="Previous card"></button>
@@ -539,7 +552,7 @@ function symbol(el) {
     case "delay": return { kind: "box", title: "TON", pv: `PT ${el.preset}`, tag: [`${el.step}.DLY`], desc: "delay", q: "Q" };
     case "interrupt": return { kind: "contact", tag: [`SIGNAL ${el.event}`], desc: "interrupt", mark: "int" };
     case "timer_done": return { kind: "contact", tag: [`${el.step}.TON`], desc: "done (DN)" };
-    case "coil": return { kind: "coil", tag: [el.step], desc: ACTION_TEXT[el.action] || el.action };
+    case "coil": return { kind: "coil", step: el.step, tag: [el.step], desc: ACTION_TEXT[el.action] || el.action };
     case "timer": return { kind: "box", title: "TON", pv: `PT ${el.seconds} s`, tag: [`${el.step}.TON`], desc: `waits for ${el.event}` };
     default: return { kind: "wire", tag: [], desc: el.type || "" };
   }
@@ -566,7 +579,8 @@ function drawSym(y, x, cy, w) {
   if (y.kind === "coil") {
     out += `<path d="M${x} ${cy}H${cx - 9}M${cx + 9} ${cy}H${x + w}"/>`;
     out += `<path d="M${cx - 4} ${cy - 9}Q${cx - 12} ${cy} ${cx - 4} ${cy + 9}M${cx + 4} ${cy - 9}Q${cx + 12} ${cy} ${cx + 4} ${cy + 9}"/>`;
-    return out + tags(14) + desc(21);
+    out += tags(14) + desc(21);
+    return y.step ? srcLink(y.step, cx - w / 2 + 4, cy - 14 - LH * y.tag.length, w - 8, 14 + LH * y.tag.length + 26, out) : out;
   }
   // a normally open contact: ─┤ ├─
   out += `<path d="M${x} ${cy}H${cx - 6}M${cx + 6} ${cy}H${x + w}M${cx - 6} ${cy - 9}V${cy + 9}M${cx + 6} ${cy - 9}V${cy + 9}"/>`;
@@ -653,8 +667,57 @@ function ladderDiagram(m) {
 
 function ladderSheet(m) {
   return `<div class="field"><h2>Ladder logic</h2>
-      <p class="caption">One rung per step, read from <code>workflow.yaml</code>. Contacts in series must all close: each <code>depends_on</code> entry is one, so a fan-in is an AND. Conditions sit on their own branches, in parallel where the engine runs a step when any entry applies. The coil is the step. <a href="#legend">The legend card</a> explains every symbol.</p></div>
+      <p class="caption">One rung per step, read from <code>workflow.yaml</code>. Contacts in series must all close: each <code>depends_on</code> entry is one, so a fan-in is an AND. Conditions sit on their own branches, in parallel where the engine runs a step when any entry applies. The coil is the step: click one to see its activity in <code>workflow.yaml</code>. <a href="#legend">The legend card</a> explains every symbol.</p></div>
     <div class="field">${ladderDiagram(m)}</div>`;
+}
+
+// --- Source ----------------------------------------------------------------
+
+/** A step's mark in a diagram, as a link to its activity in workflow.yaml: `inner`, over a hit area */
+function srcLink(step, x, y, w, h, inner) {
+  return `<g class="src-link" data-step="${esc(step)}" tabindex="0" role="button" aria-label="${esc(`${step}: show its source`)}"><title>${esc(step)}: click to see its source</title>` +
+    `<rect class="hit" x="${+x.toFixed(1)}" y="${+y.toFixed(1)}" width="${+w.toFixed(1)}" height="${+h.toFixed(1)}"/>${inner}</g>`;
+}
+
+/** The lines of one activity in workflow.yaml, [start, end): its `- key:` line, any comment
+ *  lines just above it, and everything indented under it */
+function stepLines(src, step) {
+  const lines = src.split("\n");
+  const indentOf = l => l.match(/^ */)[0].length;
+  let start = lines.findIndex(l => {
+    const m = l.match(/^\s*- key:\s*["']?([^"'\s#]+)["']?\s*(#.*)?$/);
+    return m && m[1] === step;
+  });
+  if (start < 0) return null;
+  const indent = indentOf(lines[start]);
+  let end = start + 1;
+  for (; end < lines.length; end++) {
+    const l = lines[end];
+    if (!l.trim()) continue;
+    if (indentOf(l) <= indent) break;
+  }
+  while (end - 1 > start && !lines[end - 1].trim()) end--;
+  while (start > 0 && /^\s*#/.test(lines[start - 1]) && indentOf(lines[start - 1]) === indent) start--;
+  return [start, end];
+}
+
+/** A panel with the machine's workflow.yaml, one step's activity highlighted */
+function showSource(m, step) {
+  let dlg = document.getElementById("src-panel");
+  if (!dlg) {
+    dlg = document.createElement("dialog");
+    dlg.id = "src-panel"; dlg.className = "src";
+    dlg.addEventListener("click", e => { if (e.target === dlg || e.target.closest("[data-close]")) dlg.close(); });
+    document.body.appendChild(dlg);
+  }
+  const src = (m.workflow.source || "").replace(/\n$/, "");
+  const range = stepLines(src, step);
+  const lines = src.split("\n").map((l, i) => `<span class="ln${range && i >= range[0] && i < range[1] ? " hl" : ""}">${esc(l) || " "}</span>`).join("");
+  dlg.innerHTML = `<header><span>machines/${esc(m.dir)}/workflow.yaml · ${esc(step)}</span><button type="button" data-close>Close</button></header><pre><code>${lines}</code></pre>`;
+  dlg.setAttribute("aria-label", `${m.card.name}: ${step} in workflow.yaml`);
+  if (!dlg.open) dlg.showModal();
+  const first = dlg.querySelector(".ln.hl"), pre = dlg.querySelector("pre");
+  if (first) pre.scrollTop = Math.max(0, first.offsetTop - 24);
 }
 
 // --- Timing ----------------------------------------------------------------
@@ -725,10 +788,11 @@ function timingDiagram(m, r, plug) {
   const id = `dither${++svgSeq}`, hatch = `hatch${svgSeq}`;
   let y = plug ? 26 : 14, body = "";
 
-  const channel = (label, sub, segs, marks, right) => {
+  const channel = (label, sub, segs, marks, right, step) => {
     const yc = y + CHH / 2, hi = yc - 9, lo = yc + 9;
     const lv = l => (l === "H" ? hi : l === "L" ? lo : yc);
-    let out = txt(8, yc - 1, label, "b", "start") + (sub ? txt(8, yc + 10, sub, "d", "start") : "");
+    const name = txt(8, yc - 1, label, "b", "start") + (sub ? txt(8, yc + 10, sub, "d", "start") : "");
+    let out = step ? srcLink(step, 2, y + 2, LW - 8, CHH - 4, name) : name;
     let prev = null;
     for (const s of segs) {
       const x1 = X(s.from), x2 = s.to === null ? X(end) : Math.max(X(s.to), s.level === "H" ? X(s.from) + 2 : X(s.to));
@@ -789,7 +853,7 @@ function timingDiagram(m, r, plug) {
       x.label = parts.join(" ");
     });
     const st = r.steps && r.steps[t.key];
-    channel(t.key, "", t.segs, t.marks, st ? `${st.status} ×${st.runs}` : "");
+    channel(t.key, "", t.segs, t.marks, st ? `${st.status} ×${st.runs}` : "", m.workflow.steps.some(x => x.key === t.key) ? t.key : null);
   }
 
   // Time axis, with a grid through every channel
@@ -846,7 +910,7 @@ function timingSheet(m) {
   const plugNote = twins ? ` With the plug pulled, each run's twin is drawn under it: the engine was stopped partway through and restarted on the same database, and the hatched band is the engine down, from the plug pulled to the API answering again.${shopPull}` : "";
   return `<div class="field"><h2>Timing diagrams</h2>
       <div class="pick">${setPicker(m, s)}</div>
-      <p class="caption">From the run's events in <code>workflow_events</code>, as the engine timed them; zero is the workflow's <code>created_at</code>. A step's line is high from scheduled to completed or failed, dashed in the middle while it waits for a signal. ▼ is a signal taken, T/O a wait that timed out, ✕ a failed attempt. A loop's rounds are a pulse train, numbered.${esc(plugNote)}</p></div>
+      <p class="caption">From the run's events in <code>workflow_events</code>, as the engine timed them; zero is the workflow's <code>created_at</code>. A step's line is high from scheduled to completed or failed, dashed in the middle while it waits for a signal. ▼ is a signal taken, T/O a wait that timed out, ✕ a failed attempt. A loop's rounds are a pulse train, numbered. Click a step's name to see its activity in <code>workflow.yaml</code>.${esc(plugNote)}</p></div>
     <div class="field">${runs}</div>`;
 }
 
@@ -1153,6 +1217,8 @@ document.getElementById("prev").onclick = () => show(current - 1, true);
 document.getElementById("next").onclick = () => show(current + 1, true);
 document.getElementById("home").onclick = () => show(0, true);
 cardEl.addEventListener("click", e => {
+  const link = e.target.closest("[data-step]");
+  if (link) { const m = MACHINES.find(x => x.dir === CARDS[current]); if (m) showSource(m, link.dataset.step); return; }
   const go = e.target.closest("[data-go]");
   if (go) show(Number(go.dataset.go), true);
   const sh = e.target.closest("[data-sheet]");
@@ -1160,6 +1226,15 @@ cardEl.addEventListener("click", e => {
 });
 document.addEventListener("keydown", e => {
   if (e.target.closest("input, select, textarea")) return;
+  const panel = document.getElementById("src-panel");
+  if (panel && panel.open) return;
+  const link = e.target.closest("[data-step]");
+  if (link && (e.key === "Enter" || e.key === " ")) {
+    e.preventDefault();
+    const m = MACHINES.find(x => x.dir === CARDS[current]);
+    if (m) showSource(m, link.dataset.step);
+    return;
+  }
   if (e.key === "ArrowRight") show(current + 1);
   else if (e.key === "ArrowLeft") show(current - 1);
   else if (e.key === "Home") show(0);
