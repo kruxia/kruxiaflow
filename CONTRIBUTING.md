@@ -142,6 +142,10 @@ cargo test -p kruxiaflow-core
 - Use meaningful test names that describe the scenario
 - Tests should not depend on external services (only local Docker services)
 
+### Sandboxed Code (`run_code`, `monty` feature)
+
+The default CI jobs build default features, so they do not compile `run_code`. When you change it, or anything it uses, run its clippy and tests with the feature on, as the `Monty (run_code)` CI job does. See [docs/testing.md](docs/testing.md#sandboxed-code-run_code-tests).
+
 ### Database Queries (sqlx offline cache)
 
 CI compiles with `SQLX_OFFLINE=true` and `--all-targets`, so every

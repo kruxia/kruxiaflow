@@ -8,6 +8,7 @@
 /// - search_llm_models: model catalog with live pricing
 /// - list_llm_providers: configured providers and capabilities
 /// - check_system_health: readiness of database, event source, and queue
+/// - get_run_code_contract: what sandboxed run_code steps may use (when enabled)
 use rust_decimal::prelude::*;
 use rust_mcp_sdk::macros::{JsonSchema, mcp_tool};
 use rust_mcp_sdk::schema::{CallToolResult, TextContent, schema_utils::CallToolError};
@@ -78,7 +79,8 @@ pub struct GetWorkflowDefinition {
         All activities support template expressions like {{INPUT.field}} for dynamic values.\n\
         \n\
         When to use: When authoring a workflow and need to know what activities exist and \
-        what parameters they accept.",
+        what parameters they accept. On servers with sandboxed code enabled the catalog \
+        includes run_code; call get_run_code_contract for its full contract.",
     read_only_hint = true,
     idempotent_hint = true
 )]
@@ -93,8 +95,15 @@ impl ListActivities {
     /// NOTE: This catalog is manually maintained. When activities are added to
     /// or removed from the worker, this list and its "total" count must be
     /// updated to match. See worker/src/activities/ for the source of truth.
-    pub fn call_tool(&self) -> Result<CallToolResult, CallToolError> {
-        let activities = serde_json::json!([
+    ///
+    /// `run_code` (sandboxed Python) is appended when this server's built-in
+    /// worker has it enabled; its entry is built from the worker's own
+    /// contract, so it cannot drift.
+    pub fn call_tool(
+        &self,
+        run_code: Option<&serde_json::Value>,
+    ) -> Result<CallToolResult, CallToolError> {
+        let mut activities = serde_json::json!([
             {
                 "name": "echo",
                 "worker": "std",
@@ -212,6 +221,7 @@ impl ListActivities {
                 "name": "script",
                 "worker": "python",
                 "description": "Execute a Python script. Multiple worker pools are available with different pre-installed packages.",
+                "security": "NOT sandboxed: runs CPython with all builtins inside the worker process, so the code can read the worker's environment and reach the network. Use only for trusted, developer-written code. Never pass model-written or customer-supplied code to script; use run_code where it is available.",
                 "parameters": {
                     "code": "Python source code to execute",
                     "globals": "Optional dict of variables injected into global scope",
@@ -231,7 +241,9 @@ impl ListActivities {
             }
         ]);
 
-        let activity_list = activities.as_array().expect("activities must be an array");
+        let activity_list = activities
+            .as_array_mut()
+            .expect("activities must be an array");
         debug_assert_eq!(
             activity_list.len(),
             ACTIVITY_CATALOG_COUNT,
@@ -240,10 +252,14 @@ impl ListActivities {
             ACTIVITY_CATALOG_COUNT,
             activity_list.len(),
         );
+        if let Some(contract) = run_code {
+            activity_list.push(run_code_catalog_entry(contract));
+        }
+        let total = activity_list.len();
 
         let response = serde_json::json!({
             "activities": activities,
-            "total": activity_list.len(),
+            "total": total,
             "note": "All activities support template expressions like {{INPUT.field}} and {{activity_key.output_name}} for dynamic parameter values"
         });
 
@@ -278,8 +294,11 @@ impl GetWorkflowAuthoringGuide {
     /// NOTE: This guide is manually maintained. Model names in examples
     /// (e.g. anthropic/claude-sonnet-4-5-20250929) will become stale as models change.
     /// Update examples when new models are released.
-    pub fn call_tool(&self) -> Result<CallToolResult, CallToolError> {
-        let guide = serde_json::json!({
+    pub fn call_tool(
+        &self,
+        run_code: Option<&serde_json::Value>,
+    ) -> Result<CallToolResult, CallToolError> {
+        let mut guide = serde_json::json!({
             "note": "Model identifiers in the examples below may be outdated. Call \
                      search_llm_models for the current model catalog with live pricing \
                      before choosing a model, and estimate_workflow_cost before \
@@ -412,6 +431,11 @@ impl GetWorkflowAuthoringGuide {
             }
         });
 
+        add_template_guard_practice(&mut guide);
+        if let Some(contract) = run_code {
+            guide["sandboxed_code"] = run_code_guide_section(contract);
+        }
+
         Ok(CallToolResult::text_content(vec![TextContent::from(
             serde_json::to_string_pretty(&guide)
                 .map_err(|e| CallToolError::from_message(e.to_string()))?,
@@ -491,6 +515,84 @@ pub struct ListLlmProviders {}
 pub struct CheckSystemHealth {}
 
 // ============================================================================
+// Tool: get_run_code_contract
+// ============================================================================
+
+#[mcp_tool(
+    name = "get_run_code_contract",
+    description = "Get the contract for writing sandboxed run_code steps on this server.\n\
+        \n\
+        run_code runs untrusted Python (typically code an LLM step just wrote) in a \
+        Pydantic Monty sandbox: no filesystem, network or environment, only the \
+        capabilities a step grants, under hard limits. Returns the capabilities with \
+        their Python signatures, the importable standard-library modules, this \
+        server's limit ceilings, the result shape, the error kinds and the rules the \
+        code must follow (for example: the last line's value is the result).\n\
+        \n\
+        When to use: Before writing a run_code step or the prompt of an llm_prompt \
+        step that writes code for one. Returns an error if run_code is not enabled \
+        on this server.",
+    read_only_hint = true,
+    idempotent_hint = true
+)]
+#[derive(Debug, serde::Deserialize, serde::Serialize, JsonSchema)]
+pub struct GetRunCodeContract {}
+
+/// The run_code entry for list_activities, from the worker's contract
+fn run_code_catalog_entry(contract: &serde_json::Value) -> serde_json::Value {
+    let capability_names: Vec<serde_json::Value> = contract["capabilities"]
+        .as_array()
+        .map(|caps| caps.iter().map(|c| c["name"].clone()).collect())
+        .unwrap_or_default();
+    serde_json::json!({
+        "name": "run_code",
+        "worker": "std",
+        "description": "Run untrusted Python (typically code an LLM step just wrote) in a Pydantic Monty sandbox: no filesystem, network or environment, only the capabilities the step grants, under hard limits on memory, time, recursion and host calls. Code errors COMPLETE the step with result.ok == false and an error written for the model, so a loop can let it repair the code. Call get_run_code_contract for the full contract.",
+        "parameters": {
+            "code": "(required) Python source; a single surrounding Markdown code fence is stripped, so {{writer.result.content}} works. The last line's value is the result",
+            "inputs": "Object; each key becomes a global variable (keys must be Python identifiers)",
+            "capabilities": "Names of host functions the code may call, from the server's list",
+            "type_check": "Type-check against inputs and capability signatures before running (default: true)",
+            "limits": "max_memory, max_feed_duration_secs, max_recursion_depth, max_suspensions, max_total_sleep_secs; each at most the server's ceiling"
+        },
+        "outputs": ["result"],
+        "result": contract["result"].clone(),
+        "available_capabilities": capability_names,
+        "settings": {
+            "retry": "Only infrastructure failures fail (and retry) the activity; code errors complete it with result.ok == false"
+        }
+    })
+}
+
+/// The authoring guide's sandboxed-code section, from the worker's contract
+fn run_code_guide_section(contract: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "description": "run_code runs Python that an LLM wrote, safely. Use it for model-written business rules, transforms and glue code. Use the python worker's script activity only for trusted, developer-written code: it is not sandboxed.",
+        "rules": contract["rules"].clone(),
+        "available_modules": contract["available_modules"].clone(),
+        "capabilities": contract["capabilities"].clone(),
+        "limit_ceilings": contract["limit_ceilings"].clone(),
+        "error_kinds": contract["error_kinds"].clone(),
+        "patterns": {
+            "branch_on_outcome": "depends_on: [{activity_key: run, conditions: [\"{{ run.result.ok }}\"]}]",
+            "repair_loop": contract["repair_loop"].clone()
+        },
+        "example": "name: llm-rule-with-repair\nactivities:\n  - key: write\n    worker: std\n    activity_name: llm_prompt\n    iteration_limit: 3\n    parameters:\n      model: anthropic/claude-sonnet-5\n      prompt: |\n        Write Python that flags orders over $500. A variable `orders` holds a list of dicts with keys id and total.\n        The last line must be an expression: the list of flagged ids. Reply with only the code in one ```python block.\n        {% if run.status == 'completed' %}Your previous code failed: {{ run.result.error.message }}{% endif %}\n    depends_on:\n      - activity_key: run\n        conditions: [\"{{ run.result.ok == false }}\"]\n  - key: run\n    worker: std\n    activity_name: run_code\n    parameters:\n      code: \"{{ write.result.content }}\"\n      inputs: {orders: \"{{ INPUT.orders }}\"}\n      limits: {max_feed_duration_secs: 2}\n    depends_on: [write]\n  - key: use_result\n    worker: std\n    activity_name: echo\n    parameters: {flagged: \"{{ run.result.value }}\"}\n    depends_on:\n      - activity_key: run\n        conditions: [\"{{ run.result.ok }}\"]",
+        "safety": "A sandbox makes code safe, not correct: for rules that matter, add a wait_for_signal approval step before the generated code is used in production."
+    })
+}
+
+/// A template lesson for every workflow: guard references to steps that may
+/// not have run by their status. Added in code, not in the guide literal.
+fn add_template_guard_practice(guide: &mut serde_json::Value) {
+    if let Some(list) = guide["best_practices"]["template_expressions"].as_array_mut() {
+        list.push(serde_json::json!(
+            "Guard references to a step that may not have run (a loop's first pass, an optional branch) with {% if step.status == 'completed' %}...{% endif %}. Every activity is in the template context with a status, so {% if step is defined %} is always true; an unguarded step.result reference fails the activity with TEMPLATE_ERROR"
+        ));
+    }
+}
+
+// ============================================================================
 // Enum + routing glue (generated by tool_box! macro)
 // ============================================================================
 
@@ -503,7 +605,8 @@ tool_box!(
         GetWorkflowAuthoringGuide,
         SearchLlmModels,
         ListLlmProviders,
-        CheckSystemHealth
+        CheckSystemHealth,
+        GetRunCodeContract
     ]
 );
 
@@ -625,15 +728,34 @@ pub async fn run_get_workflow_definition(
 }
 
 /// Wrapper for ListActivities — uniform run_* dispatch pattern.
-pub fn run_list_activities(params: &ListActivities) -> Result<CallToolResult, CallToolError> {
-    params.call_tool()
+pub fn run_list_activities(
+    params: &ListActivities,
+    run_code: Option<&serde_json::Value>,
+) -> Result<CallToolResult, CallToolError> {
+    params.call_tool(run_code)
 }
 
 /// Wrapper for GetWorkflowAuthoringGuide — uniform run_* dispatch pattern.
 pub fn run_get_workflow_authoring_guide(
     params: &GetWorkflowAuthoringGuide,
+    run_code: Option<&serde_json::Value>,
 ) -> Result<CallToolResult, CallToolError> {
-    params.call_tool()
+    params.call_tool(run_code)
+}
+
+/// get_run_code_contract: the contract, or an error explaining how to enable it
+pub fn run_get_run_code_contract(
+    _params: &GetRunCodeContract,
+    run_code: Option<&serde_json::Value>,
+) -> Result<CallToolResult, CallToolError> {
+    match run_code {
+        Some(contract) => text_response(contract),
+        None => error_response(&serde_json::json!({
+            "error": "run_code is not enabled on this server",
+            "how_to_enable": "Use the Docker image (it ships the Monty worker and enables run_code), or build with --features monty and set KRUXIAFLOW_MONTY_BINARY",
+            "note": "This server reports its own built-in worker. If run_code runs on separate `kruxiaflow worker` processes, their configuration is not visible here.",
+        })),
+    }
 }
 
 /// Search llm_models with live pricing, filtered by provider, name substring,
@@ -802,7 +924,7 @@ mod tests {
     #[test]
     fn test_list_activities_returns_correct_count() {
         let tool = ListActivities {};
-        let result = tool.call_tool().unwrap();
+        let result = tool.call_tool(None).unwrap();
         let content = &result.content[0];
         {
             let text = content.as_text_content().unwrap();
@@ -817,7 +939,7 @@ mod tests {
     #[test]
     fn test_list_activities_all_have_required_fields() {
         let tool = ListActivities {};
-        let result = tool.call_tool().unwrap();
+        let result = tool.call_tool(None).unwrap();
         let content = &result.content[0];
         {
             let text = content.as_text_content().unwrap();
@@ -847,7 +969,7 @@ mod tests {
     #[test]
     fn test_list_activities_unique_names() {
         let tool = ListActivities {};
-        let result = tool.call_tool().unwrap();
+        let result = tool.call_tool(None).unwrap();
         let content = &result.content[0];
         {
             let text = content.as_text_content().unwrap();
@@ -866,7 +988,7 @@ mod tests {
     #[test]
     fn test_get_workflow_authoring_guide_returns_content() {
         let tool = GetWorkflowAuthoringGuide {};
-        let result = tool.call_tool().unwrap();
+        let result = tool.call_tool(None).unwrap();
         let content = &result.content[0];
         {
             let text = content.as_text_content().unwrap();
@@ -877,6 +999,210 @@ mod tests {
             assert!(parsed.get("settings_configuration").is_some());
             assert!(parsed.get("complete_examples").is_some());
             assert!(parsed.get("best_practices").is_some());
+        }
+    }
+
+    // =========================================================================
+    // run_code (sandboxed Python) discovery
+    // =========================================================================
+
+    fn json_of(result: &CallToolResult) -> serde_json::Value {
+        serde_json::from_str(&result.content[0].as_text_content().unwrap().text).unwrap()
+    }
+
+    /// A contract shaped like kruxiaflow_std_worker::run_code_contract's,
+    /// so these tests run without the `monty` feature
+    fn sample_contract() -> serde_json::Value {
+        serde_json::json!({
+            "activity": "std.run_code",
+            "monty_version": "1.6.0",
+            "capabilities": [
+                {"name": "log", "stub": "def log(message: str) -> None: ..."},
+                {"name": "now", "stub": "def now() -> str: ..."}
+            ],
+            "available_modules": ["json", "re"],
+            "limit_ceilings": {"max_memory": 1000},
+            "rules": ["The last line's value is the result"],
+            "result": {"ok": "...", "value": "...", "error": "...", "run": "..."},
+            "error_kinds": {"type": "...", "runtime": "..."},
+            "repair_loop": "back-edge on ok == false"
+        })
+    }
+
+    fn activity<'a>(catalog: &'a serde_json::Value, name: &str) -> Option<&'a serde_json::Value> {
+        catalog["activities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["name"] == name)
+    }
+
+    #[test]
+    fn test_run_code_hidden_when_not_enabled() {
+        let catalog = json_of(&ListActivities {}.call_tool(None).unwrap());
+        assert!(activity(&catalog, "run_code").is_none());
+        assert_eq!(catalog["total"], ACTIVITY_CATALOG_COUNT);
+
+        let guide = json_of(&GetWorkflowAuthoringGuide {}.call_tool(None).unwrap());
+        assert!(guide.get("sandboxed_code").is_none());
+
+        let result = run_get_run_code_contract(&GetRunCodeContract {}, None).unwrap();
+        assert_eq!(result.is_error, Some(true));
+        let body = json_of(&result);
+        assert!(body["error"].as_str().unwrap().contains("not enabled"));
+        assert!(
+            body["how_to_enable"]
+                .as_str()
+                .unwrap()
+                .contains("KRUXIAFLOW_MONTY_BINARY")
+        );
+    }
+
+    #[test]
+    fn test_run_code_listed_when_enabled() {
+        let contract = sample_contract();
+        let catalog = json_of(&ListActivities {}.call_tool(Some(&contract)).unwrap());
+        assert_eq!(catalog["total"], ACTIVITY_CATALOG_COUNT + 1);
+        let run_code = activity(&catalog, "run_code").expect("run_code listed");
+        assert_eq!(run_code["worker"], "std");
+        assert_eq!(
+            run_code["available_capabilities"],
+            serde_json::json!(["log", "now"])
+        );
+        assert_eq!(run_code["result"], contract["result"]);
+        for param in ["code", "inputs", "capabilities", "type_check", "limits"] {
+            assert!(
+                run_code["parameters"].get(param).is_some(),
+                "missing {param}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_script_is_marked_unsandboxed() {
+        let catalog = json_of(&ListActivities {}.call_tool(None).unwrap());
+        let script = activity(&catalog, "script").unwrap();
+        assert!(
+            script["security"]
+                .as_str()
+                .unwrap()
+                .contains("NOT sandboxed")
+        );
+    }
+
+    #[test]
+    fn test_guide_sandboxed_code_section_when_enabled() {
+        let contract = sample_contract();
+        let guide = json_of(
+            &GetWorkflowAuthoringGuide {}
+                .call_tool(Some(&contract))
+                .unwrap(),
+        );
+        let section = &guide["sandboxed_code"];
+        assert_eq!(section["available_modules"], contract["available_modules"]);
+        assert_eq!(section["capabilities"], contract["capabilities"]);
+        assert_eq!(section["rules"], contract["rules"]);
+        assert!(
+            section["safety"]
+                .as_str()
+                .unwrap()
+                .contains("safe, not correct")
+        );
+    }
+
+    /// The guide's run_code example must be a valid workflow, or agents copy a
+    /// broken one
+    #[test]
+    fn test_guide_run_code_example_is_a_valid_workflow() {
+        let contract = sample_contract();
+        let guide = json_of(
+            &GetWorkflowAuthoringGuide {}
+                .call_tool(Some(&contract))
+                .unwrap(),
+        );
+        let yaml = guide["sandboxed_code"]["example"].as_str().unwrap();
+        let definition = kruxiaflow_core::workflow::WorkflowDefinition::from_yaml(yaml)
+            .unwrap_or_else(|e| panic!("example does not validate: {e:?}\n{yaml}"));
+        let keys: Vec<&str> = definition
+            .activities
+            .iter()
+            .map(|a| a.key.as_str())
+            .collect();
+        assert_eq!(keys, vec!["write", "run", "use_result"]);
+        let write = &definition.activities[0];
+        assert!(write.is_loop_activity, "write is the loop head");
+        assert_eq!(write.iteration_limit, Some(3));
+    }
+
+    #[test]
+    fn test_guide_teaches_the_status_guard() {
+        let guide = json_of(&GetWorkflowAuthoringGuide {}.call_tool(None).unwrap());
+        let practices = guide["best_practices"]["template_expressions"]
+            .as_array()
+            .unwrap();
+        assert!(
+            practices
+                .iter()
+                .any(|p| p.as_str().unwrap().contains("step.status == 'completed'"))
+        );
+    }
+
+    #[test]
+    fn test_get_run_code_contract_returns_it_when_enabled() {
+        let contract = sample_contract();
+        let result = run_get_run_code_contract(&GetRunCodeContract {}, Some(&contract)).unwrap();
+        assert_ne!(result.is_error, Some(true));
+        assert_eq!(json_of(&result), contract);
+    }
+
+    #[test]
+    fn test_get_run_code_contract_is_registered() {
+        let names: Vec<String> = DiscoveryTools::tools()
+            .into_iter()
+            .map(|t| t.name)
+            .collect();
+        assert!(
+            names.iter().any(|n| n == "get_run_code_contract"),
+            "{names:?}"
+        );
+    }
+
+    /// With the real worker contract: the catalog reflects the server's
+    /// actual capabilities, modules and ceilings
+    #[cfg(feature = "monty")]
+    #[test]
+    fn test_real_contract_flows_into_the_catalog() {
+        let config = kruxiaflow_std_worker::MontyConfig {
+            binary: std::path::PathBuf::from("/monty"),
+            min_processes: 1,
+            max_processes: 2,
+            request_timeout: std::time::Duration::from_secs(30),
+            recycle_after: 1,
+            max_memory_bytes: 12_345_678,
+            max_duration: std::time::Duration::from_secs(4),
+            max_recursion_depth: 500,
+        };
+        let contract = kruxiaflow_std_worker::run_code_contract(&config);
+        assert_eq!(contract["limit_ceilings"]["max_memory"], 12_345_678);
+        assert_eq!(contract["limit_ceilings"]["max_feed_duration_secs"], 4.0);
+        assert_eq!(contract["limit_ceilings"]["max_recursion_depth"], 500);
+        let modules = contract["available_modules"].as_array().unwrap();
+        assert!(modules.iter().any(|m| m == "json"));
+        assert!(!modules.iter().any(|m| m == "statistics"));
+
+        let catalog = json_of(&ListActivities {}.call_tool(Some(&contract)).unwrap());
+        assert_eq!(
+            activity(&catalog, "run_code").unwrap()["available_capabilities"],
+            serde_json::json!(["fail", "json_path", "log", "now"])
+        );
+        for cap in contract["capabilities"].as_array().unwrap() {
+            let name = cap["name"].as_str().unwrap();
+            assert!(
+                cap["stub"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with(&format!("def {name}("))
+            );
         }
     }
 }

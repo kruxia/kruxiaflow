@@ -11,6 +11,7 @@
 - [Architecture](architecture.md)
 - [Workflow Loops](loops-guide.md)
 - [Conditional Branching](conditional-branching.md)
+- [Sandboxed Code (`run_code`)](run-code.md)
 
 # Python SDK
 
@@ -27,6 +28,7 @@
 - [Ollama Deployment](ollama-deployment.md)
 - [Raspberry Pi Deployment](raspberry-pi-deployment.md)
 - [Testing](testing.md)
+- [Development Setup](dev-setup.md)
 
 # Implementation Plans
 

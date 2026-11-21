@@ -108,8 +108,11 @@ jobs:
         with:
           tool: cross
 
-      # --features redis-cache matches the Docker image build (Dockerfile
-      # build stage) so released binaries and images have identical features.
+      # Released binaries build with --features redis-cache only. The Docker
+      # image (Dockerfile build stage) also builds mcp-server and monty, and
+      # ships the `monty` worker binary that run_code needs; a standalone
+      # binary would need that worker installed separately, so run_code is an
+      # image (or build-from-source) feature for now.
       - name: Build
         run: |
           if [ "${{ matrix.use-cross }}" = "true" ]; then

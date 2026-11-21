@@ -1,5 +1,6 @@
 # == DEVELOP ==
-FROM rust:1.97-bookworm AS develop
+# Rust 1.98+ is required by monty-pool (the run_code sandbox); CI builds on stable.
+FROM rust:1.100-bookworm AS develop
 
 # Install dependencies for profiling
 RUN apt-get update && apt-get install -y \
@@ -16,6 +17,15 @@ WORKDIR /opt
 # version; unpinned installs drift (sqlx-cli 0.9.0 requires a newer rustc
 # than older base images and can mismatch the workspace's sqlx 0.8 metadata)
 RUN cargo install sqlx-cli@0.8.6 --locked --no-default-features --features postgres,rustls
+
+# Monty sandbox worker binary for the run_code activity (`monty` feature).
+# Pinned to exactly the version of the workspace's monty-pool/monty-types pins:
+# the worker checks `monty --version` at start-up and refuses a mismatch.
+# Stripped at install (~40 MB unstripped). Its own layer, so it stays cached
+# across source changes.
+ARG MONTY_VERSION=1.6.0
+RUN CARGO_PROFILE_RELEASE_STRIP=symbols cargo install monty-runtime@${MONTY_VERSION} --locked
+ENV KRUXIAFLOW_MONTY_BINARY=/usr/local/cargo/bin/monty
 
 COPY ./docker-entrypoint-develop.sh /opt/docker-entrypoint-develop.sh
 ENTRYPOINT [ "/opt/docker-entrypoint-develop.sh" ]
@@ -43,18 +53,24 @@ FROM chef AS build
 ARG SQLX_OFFLINE=true
 COPY --from=planner /opt/recipe.json recipe.json
 # Dependencies only — same flags as the real build so features/profile match
-RUN cargo chef cook --release --features redis-cache,mcp-server --recipe-path recipe.json
+RUN cargo chef cook --release --features redis-cache,mcp-server,monty --recipe-path recipe.json
 COPY ./ ./
-RUN cargo build --release --features redis-cache,mcp-server
+RUN cargo build --release --features redis-cache,mcp-server,monty
 
 # == DEPLOY ==
-# Minimal production image - distroless with single binary
+# Minimal production image - distroless with the server binary plus the Monty
+# sandbox worker binary that the run_code activity spawns
 # Migrations are embedded at compile time, no shell or external tools needed
 # Uses cc variant for glibc compatibility (static-debian12 for pure static builds)
 FROM gcr.io/distroless/cc-debian12:nonroot AS deploy
 
-# Copy single binary (migrations embedded at compile time)
+# Copy the server binary (migrations embedded at compile time)
 COPY --from=build /opt/target/release/kruxiaflow /kruxiaflow
+
+# Monty worker for run_code (sandboxed Python). Setting the path enables the
+# activity; unset KRUXIAFLOW_MONTY_BINARY (e.g. to an empty value) to disable.
+COPY --from=build /usr/local/cargo/bin/monty /monty
+ENV KRUXIAFLOW_MONTY_BINARY=/monty
 
 EXPOSE 8080
 
@@ -68,7 +84,7 @@ CMD ["serve", "--migrate", "--seed-client", "--seed-llm", "/config/llm_models.ya
 # == PROFILING ==
 # Profiling environment for Kruxia Flow
 # This provides a Linux environment where jemalloc profiling works correctly
-FROM rust:1.97-bookworm AS profiling
+FROM rust:1.100-bookworm AS profiling
 
 # Install dependencies for profiling
 RUN apt-get update && apt-get install -y \

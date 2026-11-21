@@ -49,6 +49,13 @@ tracing = { workspace = true }
 kruxiaflow-core = { path = "../core", features = ["redis-cache"] }
 kruxiaflow-worker = { path = "../worker-sdk" }
 
+# Sandboxed Python (run_code activity, `monty` feature). Exact pins: Monty's
+# crates pin each other exactly, and the host must match the `monty` worker
+# binary's version (checked at start-up). monty-pool needs Rust 1.98+.
+monty-pool = { version = "=1.6.0", optional = true }
+monty-types = { version = "=1.6.0", optional = true }
+sha2 = { workspace = true, optional = true }
+
 [dev-dependencies]
 tokio-test = "0.4"
 mockall = { workspace = true }
@@ -70,3 +77,6 @@ flate2 = "1.0"
 profiling = []
 # Enable Redis caching support (for tests and production)
 redis-cache = ["kruxiaflow-core/redis-cache"]
+# Sandboxed Python execution: the std.run_code activity on Pydantic Monty
+# (runs code in pooled `monty` worker subprocesses)
+monty = ["dep:monty-pool", "dep:monty-types", "dep:sha2"]

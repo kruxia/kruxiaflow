@@ -111,7 +111,7 @@ The same loopback guard applies: a non-loopback MCP bind requires the explicit
 `--insecure-dev-allow-nonloopback` opt-in (the compose file sets it and
 publishes the port on `127.0.0.1` only).
 
-## Tools (23)
+## Tools (24)
 
 **Discovery**
 
@@ -124,6 +124,7 @@ publishes the port on `127.0.0.1` only).
 | `search_llm_models`            | Model catalog with live pricing (the engine's own numbers) |
 | `list_llm_providers`           | Configured providers and capabilities                      |
 | `check_system_health`          | Readiness of database, event source, queue                 |
+| `get_run_code_contract`        | What sandboxed `run_code` steps may use (when enabled)     |
 
 **Execution**
 
@@ -163,6 +164,18 @@ publishes the port on `127.0.0.1` only).
 
 `cancel_workflow` is intentionally absent until the engine gains a cancel
 endpoint.
+
+## Sandboxed code (`run_code`)
+
+On a server where the sandboxed `run_code` activity is enabled (the Docker image, or a build with `--features monty` and `KRUXIAFLOW_MONTY_BINARY`), the discovery tools tell agents about it:
+
+- `list_activities` includes `run_code` and its capabilities. The `script` entry is marked as **not sandboxed**, so agents don't send model-written code to it.
+- `get_workflow_authoring_guide` gains a `sandboxed_code` section: the rules the code must follow (the last line's value is the result, inputs become globals), the importable modules, the capabilities with their Python signatures, this server's limit ceilings, the error kinds, and a validated repair-loop example.
+- `get_run_code_contract` returns that contract on its own. It is generated from the worker's own capability registry and configuration, so it matches what the sandbox enforces.
+
+Where `run_code` is not enabled, it is absent from the catalog and the guide, and `get_run_code_contract` returns an error saying how to enable it. The server reports **its own built-in worker**: with `serve --no-worker` and separate `kruxiaflow worker` processes, it cannot see their configuration and reports `run_code` as not enabled.
+
+See [Sandboxed Code](run-code.md) for the activity itself.
 
 ## A budget-governed session, end to end
 

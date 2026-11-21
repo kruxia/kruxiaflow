@@ -145,6 +145,11 @@ Example: --poll-max-activities 5"
     /// Workflow file storage provider
     #[command(flatten)]
     pub storage: StorageArgs,
+
+    /// Sandboxed code execution (run_code)
+    #[cfg(feature = "monty")]
+    #[command(flatten)]
+    pub monty: crate::config::MontyArgs,
 }
 
 impl WorkerCommand {
@@ -240,14 +245,27 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
     cache_config.log_config();
     let cache_service = cache_config.create_cache_service().await;
 
-    // Create activity registry with built-in activities
-    let registry = if let Some(ref types_str) = cmd.activity_types {
+    // Create the full activity registry first (built-in activities, plus
+    // run_code when configured), then apply the requested activity types, so
+    // every registered activity goes through the same selection
+    let registry = kruxiaflow_std_worker::register_std_activities(cache_service);
+
+    // Sandboxed code execution, when configured
+    #[cfg(feature = "monty")]
+    let registry = {
+        let mut registry = registry;
+        if let Some(monty) = cmd.monty.to_config(cmd.max_activities)? {
+            kruxiaflow_std_worker::register_run_code(&mut registry, monty).await?;
+        }
+        registry
+    };
+
+    if let Some(ref types_str) = cmd.activity_types {
         // Filter registry to only specified types
         let requested_types: Vec<&str> = types_str.split(',').map(|s| s.trim()).collect();
-        let full_registry = kruxiaflow_std_worker::register_std_activities(cache_service);
 
         // Log which types are available vs requested
-        let available_types = full_registry.activity_types();
+        let available_types = registry.activity_types();
         tracing::info!(
             requested = ?requested_types,
             available = ?available_types,
@@ -256,10 +274,7 @@ pub async fn execute(mut cmd: WorkerCommand, database_url: String) -> Result<()>
 
         // For MVP, use full registry (filtering can be added later)
         // TODO: Implement registry filtering in kruxiaflow_worker
-        full_registry
-    } else {
-        kruxiaflow_std_worker::register_std_activities(cache_service)
-    };
+    }
 
     tracing::info!(
         activity_types = ?registry.activity_types(),
@@ -333,6 +348,8 @@ mod tests {
             db_pool: DbPoolArgs::default(),
             worker_wake: WorkerWakeArgs::default(),
             storage: StorageArgs::default(),
+            #[cfg(feature = "monty")]
+            monty: crate::config::MontyArgs::default(),
         }
     }
 

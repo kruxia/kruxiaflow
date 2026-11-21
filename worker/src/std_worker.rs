@@ -67,6 +67,28 @@ pub fn register_std_activities(cache_service: Arc<dyn CacheService>) -> Activity
     registry
 }
 
+/// Register the sandboxed `std.run_code` activity (`monty` feature)
+///
+/// Kept separate from [`register_std_activities`] because it needs
+/// configuration (the `monty` worker binary and the limit ceilings) and can
+/// fail: the configuration and the worker binary's version are checked here,
+/// so a misconfigured worker refuses to start instead of failing every
+/// `run_code` activity later. The Monty worker pool itself starts on first
+/// use.
+#[cfg(feature = "monty")]
+pub async fn register_run_code(
+    registry: &mut ActivityRegistry,
+    config: crate::activities::run_code::MontyConfig,
+) -> anyhow::Result<()> {
+    let activity = crate::activities::run_code::RunCodeActivity::new(config).await?;
+    tracing::info!(
+        capabilities = ?activity.capability_names(),
+        "run_code enabled (Monty sandbox)"
+    );
+    registry.register(Arc::new(activity));
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
