@@ -95,6 +95,9 @@ struct Trap {
     issue: Option<u32>,
     #[serde(default)]
     issues: Vec<u32>,
+    /// The runs that show the bug; empty means every run
+    #[serde(default)]
+    runs: Vec<String>,
     broken_looks_like: String,
 }
 
@@ -105,6 +108,11 @@ impl Trap {
             .into_iter()
             .chain(self.issues.iter().copied())
             .collect()
+    }
+
+    /// The trap covers this run: it names it, or names no runs
+    fn covers(&self, run: &str) -> bool {
+        self.runs.is_empty() || self.runs.iter().any(|r| r == run)
     }
 }
 
@@ -1310,7 +1318,12 @@ async fn check(engine: &Engine, id: Uuid, status: &str, spec: &RunSpec) -> Obser
 }
 
 fn judge(machine: &Machine, run: &RunSpec, observed: Observed, seconds: f64) -> Row {
-    let trap = machine.card.trap.as_ref().map(Trap::issues);
+    let trap = machine
+        .card
+        .trap
+        .as_ref()
+        .filter(|t| t.covers(&run.name))
+        .map(Trap::issues);
     let outcome = match (observed.problems.is_empty(), trap) {
         (true, None) => Outcome::Works,
         (true, Some(n)) => Outcome::Fixed(n),
@@ -2633,7 +2646,29 @@ fn machine_cards_are_valid() {
             "{}: no edge reading",
             m.dir
         );
+        for r in m.card.trap.iter().flat_map(|t| &t.runs) {
+            assert!(
+                m.card.runs.iter().any(|x| &x.name == r),
+                "{}: the trap names a run the card doesn't have: {r}",
+                m.dir
+            );
+        }
     }
+}
+
+/// A trap that names its runs covers only those
+#[test]
+fn trap_covers_only_the_runs_it_names() {
+    let text = CARD_WITHOUT_EDGE.replace(
+        "runs:\n",
+        "trap:\n  issue: 7\n  runs: [once]\n  broken_looks_like: it breaks\nruns:\n",
+    );
+    let card: Card = serde_yaml::from_str(&text).unwrap();
+    let trap = card.trap.as_ref().unwrap();
+    assert!(trap.covers("once"));
+    assert!(!trap.covers("twice"));
+    let every: Trap = serde_yaml::from_str("issue: 7\nbroken_looks_like: it breaks").unwrap();
+    assert!(every.covers("once") && every.covers("twice"));
 }
 
 const CARD_WITHOUT_EDGE: &str = r#"

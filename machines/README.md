@@ -6,7 +6,7 @@ The shop is an R&D exploration. Its opportunity and value are still being discov
 
 - **Simple machines** exercise one engine function.
 - **Compound machines** combine about three. Interactions are where the most interesting behaviour shows up.
-- **A trap** is a machine of either kind that reproduces a known bug, labelled with its issue number, or several when it needs them all fixed. It's expected to fail until the fix lands. When it passes, take the label off.
+- **A trap** is a machine of either kind that reproduces a known bug, labelled with its issue number, or several when it needs them all fixed. It's expected to fail until the fix lands. When it passes, take the label off. A trap can name the runs that show its bug; the card's other runs are judged as works or broken.
 
 ## Running
 
@@ -157,6 +157,7 @@ functions:                  # the engine functions it exercises
   - a condition on a dependency, reading the dependency's output
 trap:                       # only for a trap
   issue: 25                 # or issues: [29, 37], when it needs them all fixed
+  runs: [lever to the left] # optional: the runs that show the bug; default every run
   broken_looks_like: >
     what the bug does to this machine
 runs:                       # one or more runs, each with its own input
