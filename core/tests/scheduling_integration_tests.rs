@@ -1,6 +1,6 @@
 mod common;
 
-use chrono::{Duration as ChronoDuration, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use kruxiaflow_core::events::{
     ActivityDefinition, DependencyEdge, EventSource, NewWorkflowEvent, WorkflowDefinition,
     WorkflowEventType,
@@ -48,6 +48,25 @@ async fn insert_workflow(
     .execute(pool)
     .await
     .expect("Failed to insert workflow");
+}
+
+/// Asserts that `scheduled_for`, computed as "now plus `delay_ms`" while the
+/// events were processed, lies within the processing window shifted by the
+/// delay. Anchoring to the time of the assertion instead would count any slow
+/// processing against the delay.
+fn assert_scheduled_within(
+    scheduled_for: DateTime<Utc>,
+    (started, finished): (DateTime<Utc>, DateTime<Utc>),
+    delay_ms: i64,
+    what: &str,
+) {
+    let slack = ChronoDuration::milliseconds(50);
+    let min = started + ChronoDuration::milliseconds(delay_ms) - slack;
+    let max = finished + ChronoDuration::milliseconds(delay_ms) + slack;
+    assert!(
+        scheduled_for >= min && scheduled_for <= max,
+        "{what}: expected now + {delay_ms}ms while processing; scheduled_for={scheduled_for}, window=[{min}, {max}]"
+    );
 }
 
 #[sqlx::test(migrations = "../migrations")]
@@ -108,6 +127,7 @@ async fn test_delayed_activity_execution(pool: PgPool) {
         .await
         .expect("Failed to poll");
 
+    let processing_started = Utc::now();
     for event in &events {
         kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
@@ -119,6 +139,7 @@ async fn test_delayed_activity_execution(pool: PgPool) {
         .await
         .expect("Failed to process event");
     }
+    let processing = (processing_started, Utc::now());
 
     // Verify activity was scheduled with future scheduled_for
     let queued = sqlx::query!(
@@ -131,16 +152,8 @@ async fn test_delayed_activity_execution(pool: PgPool) {
 
     assert_eq!(queued.activity_key, "delayed_task");
 
-    let scheduled_for = queued.scheduled_for;
-    let now = Utc::now();
-
-    // Verify scheduled_for is approximately 2 seconds in the future
-    let diff = (scheduled_for - now).num_milliseconds();
-    assert!(
-        diff > 1500 && diff < 2500,
-        "Expected delay ~2000ms, got {}ms",
-        diff
-    );
+    // Verify scheduled_for is 2 seconds after it was processed
+    assert_scheduled_within(queued.scheduled_for, processing, 2000, "delayed_task");
 }
 
 #[sqlx::test(migrations = "../migrations")]
@@ -300,6 +313,7 @@ async fn test_immediate_activity_unaffected(pool: PgPool) {
         .await
         .expect("Failed to poll");
 
+    let processing_started = Utc::now();
     for event in &events {
         kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
@@ -311,6 +325,7 @@ async fn test_immediate_activity_unaffected(pool: PgPool) {
         .await
         .expect("Failed to process event");
     }
+    let processing = (processing_started, Utc::now());
 
     // Verify activity was scheduled with NO scheduled_for (immediate)
     let queued = sqlx::query!(
@@ -324,14 +339,7 @@ async fn test_immediate_activity_unaffected(pool: PgPool) {
     assert_eq!(queued.activity_key, "immediate_task");
 
     // Immediate activities should have scheduled_for set to NOW (not in the future)
-    let scheduled_for = queued.scheduled_for;
-    let now = Utc::now();
-    let diff = (scheduled_for - now).num_milliseconds().abs();
-    assert!(
-        diff < 1000,
-        "Immediate activities should have scheduled_for approximately NOW, diff: {}ms",
-        diff
-    );
+    assert_scheduled_within(queued.scheduled_for, processing, 0, "immediate_task");
 }
 
 #[sqlx::test(migrations = "../migrations")]
@@ -392,6 +400,7 @@ async fn test_worker_respects_scheduled_for(pool: PgPool) {
         .await
         .expect("Failed to poll");
 
+    let processing_started = Utc::now();
     for event in &events {
         kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
@@ -403,6 +412,7 @@ async fn test_worker_respects_scheduled_for(pool: PgPool) {
         .await
         .expect("Failed to process event");
     }
+    let processing = (processing_started, Utc::now());
 
     // Try to claim the activity immediately - should return empty Vec
     let claimed = activity_queue
@@ -427,14 +437,7 @@ async fn test_worker_respects_scheduled_for(pool: PgPool) {
     assert_eq!(queued.activity_key, "future_task");
 
     // Verify scheduled_for is in the future
-    let scheduled_for = queued.scheduled_for;
-    let now = Utc::now();
-    let diff = (scheduled_for - now).num_milliseconds();
-    assert!(
-        diff > 4000,
-        "Activity should be scheduled in the future, diff: {}ms",
-        diff
-    );
+    assert_scheduled_within(queued.scheduled_for, processing, 5000, "future_task");
 
     assert_eq!(queued.status.as_ref().unwrap(), "pending");
 }
@@ -536,6 +539,7 @@ async fn test_multiple_delayed_activities(pool: PgPool) {
         .await
         .expect("Failed to poll");
 
+    let first_pass_started = Utc::now();
     for event in &events {
         kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
@@ -547,6 +551,7 @@ async fn test_multiple_delayed_activities(pool: PgPool) {
         .await
         .expect("Failed to process event");
     }
+    let first_pass = (first_pass_started, Utc::now());
 
     // Verify only call_1 is scheduled (no delay)
     let queued = sqlx::query!(
@@ -561,14 +566,7 @@ async fn test_multiple_delayed_activities(pool: PgPool) {
     assert_eq!(queued[0].activity_key, "call_1");
 
     // Verify call_1 has scheduled_for approximately NOW (immediate execution)
-    let scheduled_for = queued[0].scheduled_for;
-    let now = Utc::now();
-    let diff = (scheduled_for - now).num_milliseconds().abs();
-    assert!(
-        diff < 1000,
-        "call_1 should be scheduled immediately, diff: {}ms",
-        diff
-    );
+    assert_scheduled_within(queued[0].scheduled_for, first_pass, 0, "call_1");
 
     // Complete call_1
     event_source
@@ -592,6 +590,7 @@ async fn test_multiple_delayed_activities(pool: PgPool) {
         .await
         .expect("Failed to poll");
 
+    let second_pass_started = Utc::now();
     for event in &events {
         kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
@@ -603,6 +602,7 @@ async fn test_multiple_delayed_activities(pool: PgPool) {
         .await
         .expect("Failed to process event");
     }
+    let second_pass = (second_pass_started, Utc::now());
 
     // Verify call_2 is scheduled with delay
     let queued = sqlx::query!(
@@ -616,15 +616,8 @@ async fn test_multiple_delayed_activities(pool: PgPool) {
     assert!(queued.iter().any(|a| a.activity_key == "call_2"));
     let call_2 = queued.iter().find(|a| a.activity_key == "call_2").unwrap();
 
-    // Verify delay is approximately 2 seconds
-    let scheduled_for = call_2.scheduled_for;
-    let now = Utc::now();
-    let diff = (scheduled_for - now).num_milliseconds();
-    assert!(
-        diff > 1500 && diff < 2500,
-        "Expected delay ~2000ms for call_2, got {}ms",
-        diff
-    );
+    // Verify call_2 is 2 seconds after it was processed
+    assert_scheduled_within(call_2.scheduled_for, second_pass, 2000, "call_2");
 }
 
 #[sqlx::test(migrations = "../migrations")]
@@ -680,7 +673,7 @@ async fn test_delay_with_all_duration_units(pool: PgPool) {
         .unwrap();
 
     let events = event_source.poll("test_orch").await.unwrap();
-    let process_started = Utc::now();
+    let processing_started = Utc::now();
     for event in &events {
         kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
             event,
@@ -692,7 +685,7 @@ async fn test_delay_with_all_duration_units(pool: PgPool) {
         .await
         .unwrap();
     }
-    let process_finished = Utc::now();
+    let processing = (processing_started, Utc::now());
 
     // Verify millisecond precision
     let queued = sqlx::query!(
@@ -703,15 +696,5 @@ async fn test_delay_with_all_duration_units(pool: PgPool) {
     .await
     .unwrap();
 
-    let scheduled_for = queued.scheduled_for;
-
-    // scheduled_for is computed as now + 500ms during event processing, so
-    // bound it by timestamps captured around the processing step (anchoring
-    // to assertion time instead would be load-sensitive under parallel runs)
-    let min_expected = process_started + chrono::Duration::milliseconds(450);
-    let max_expected = process_finished + chrono::Duration::milliseconds(550);
-    assert!(
-        scheduled_for >= min_expected && scheduled_for <= max_expected,
-        "Expected ~500ms delay from processing time; scheduled_for={scheduled_for}, window=[{min_expected}, {max_expected}]"
-    );
+    assert_scheduled_within(queued.scheduled_for, processing, 500, "500ms delay");
 }
