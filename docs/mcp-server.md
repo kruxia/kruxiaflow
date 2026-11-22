@@ -157,12 +157,41 @@ publishes the port on `127.0.0.1` only).
 
 | Tool                     | Purpose                                                       |
 |--------------------------|---------------------------------------------------------------|
-| `send_workflow_signal`   | Deliver a signal (whole workflow, or one activity)            |
+| `send_workflow_signal`   | Signal one waiting activity, or every one waiting for a name  |
 | `list_waiting_workflows` | Find workflows blocked on signals (approval gates)            |
 | `invalidate_cache`       | Drop cached activity results by key or pattern                |
 
+`send_workflow_signal` with an `activity_key` does exactly what
+`POST /api/v1/workflows/{workflow_id}/signal` does, through the same code
+path: the activity must be waiting for `signal_name` and not yet signaled,
+its subscription is marked signaled, and the `ActivitySignaled` event carries
+`data` as the step's signal data, which the step's worker receives as
+`signal_data` (templates can't read it:
+[#37](https://github.com/kruxia/kruxiaflow/issues/37)). A second signal for the
+same wait is refused (`"signaled": false`, with `isError` set and the reason
+per activity in `reasons`), unless the activity's wait sets `hold_early`: the
+signal is then held for its next wait and reported in `held_activities`
+(`"held": true`). Without an
+`activity_key`, the tool signals every activity in the workflow waiting for
+`signal_name`, each one the same way; REST has no such mode. If the event
+can't be published, the tool reopens the wait and returns an error instead
+of reporting success, so the signal can be sent again. An empty
+`signal_name` or `activity_key` is a field error.
+
 `cancel_workflow` is intentionally absent until the engine gains a cancel
 endpoint.
+
+## Keeping the catalog honest
+
+`list_activities` and `get_workflow_authoring_guide` are maintained by hand in `kruxiaflow/src/mcp/tools/discovery.rs`. Tests guard them:
+
+- every example in the guide must parse as a workflow, without dropping any settings key, and with `{{ }}` conditions;
+- examples may use only real activity fields (not `output_definitions`, not `streaming` under settings) and each activity's real parameters;
+- `WORKFLOW` references must exist;
+- the catalog's parameter and output names must match the activities', in both directions, and every catalog entry must be in the test's table;
+- the approval example must route both low- and high-value requests, checked with the orchestrator's own readiness evaluation.
+
+The table is `ACTIVITY_TRUTH` in the test module. It's a second hand-written copy, so when you change an activity's parameters or outputs, update the catalog entry and `ACTIVITY_TRUTH` together. It doesn't check `output_shape` text or output paths inside templates; review those by hand. The tests compile only with `--features mcp-server`; CI runs them in its `MCP server` job (`cargo nextest run -p kruxiaflow --features mcp-server --bins -E 'test(mcp)'`).
 
 ## A budget-governed session, end to end
 

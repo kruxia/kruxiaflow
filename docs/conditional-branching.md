@@ -132,6 +132,7 @@ single edge are AND'd.
 | `condition:` (singular) at activity level | Activity-level gate | Silently ignored — no such field. Use `conditions:` under `depends_on:` |
 | `conditions: ["{{x == true}}", "{{y == true}}"]` on one edge | Either condition gates | Both must be true (AND within edge) |
 | Multiple `depends_on` edges, each with conditions | Both conditions must hold | Either condition is enough (OR across edges) |
+| `{% if step is defined %}` around `{{ step.result... }}` | Guards a step that hasn't run | Always true: every activity is in the context. Use `{% if step.status == 'completed' %}`; an unguarded reference fails the activity with `TEMPLATE_ERROR` |
 
 ## See also
 
