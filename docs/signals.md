@@ -6,17 +6,19 @@ another system. The signal can carry data, which the step reads as
 `{{SIGNAL}}`. If no signal arrives in time, the step fails, is skipped, or
 runs anyway, as you choose.
 
-> **Which version this describes.** This page describes the engine with three
-> fixes that are not yet in a release (v0.12.1 and earlier don't have them):
+> **Which version this describes.** This page describes the engine with two
+> fixes that are not yet in a release (v0.12.4 and earlier don't have them):
 >
-> - [#29](https://github.com/kruxia/kruxiaflow/issues/29): a signaled step
->   runs. Without it, every `wait_for_signal` step fails with "Subscription
->   already exists" as soon as it is signaled.
 > - [#37](https://github.com/kruxia/kruxiaflow/issues/37): `{{SIGNAL}}` holds
 >   the signal's data. Without it, `SIGNAL` is never set, and a step that uses
 >   `{{SIGNAL.*}}` fails before it can wait.
 > - [#32](https://github.com/kruxia/kruxiaflow/issues/32): `{{ACTIVITY.*}}`
 >   resolves (used in the loop example below).
+>
+> Before v0.12.2, every `wait_for_signal` step failed with "Subscription
+> already exists" as soon as it was signaled
+> ([#29](https://github.com/kruxia/kruxiaflow/issues/29)). `hold_early` is new
+> in v0.12.4.
 
 ---
 
@@ -177,11 +179,12 @@ curl -s http://localhost:8080/api/v1/workflows/$WORKFLOW_ID | \
 `wait_for_signal` goes under the step's `settings`. It is an object with these
 fields:
 
-| Field             | Required | Meaning                                                                          |
-|-------------------|----------|----------------------------------------------------------------------------------|
-| `event_name`      | yes      | The name a signal must carry. A signal with another name doesn't end the wait.   |
-| `timeout_seconds` | yes      | How long to wait, in seconds, counted from when the step starts waiting.         |
-| `on_timeout`      | no       | What happens when the time runs out: `fail` (the default), `skip` or `continue`. |
+| Field             | Required | Meaning                                                                                                                                                            |
+|-------------------|----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `event_name`      | yes      | The name a signal must carry. A signal with another name doesn't end the wait.                                                                                     |
+| `timeout_seconds` | yes      | How long to wait, in seconds, counted from when the step starts waiting.                                                                                           |
+| `on_timeout`      | no       | What happens when the time runs out: `fail` (the default), `skip` or `continue`.                                                                                   |
+| `hold_early`      | no       | `true` keeps a signal that arrives while the step isn't waiting, for its next wait (see [Signals that arrive early](#signals-that-arrive-early)). Default `false`. |
 
 | `on_timeout`     | The step                                                                     | The workflow                                    |
 |------------------|------------------------------------------------------------------------------|-------------------------------------------------|
@@ -274,24 +277,57 @@ The body must be sent as JSON: `curl -d` alone sends a form body, which the
 endpoint refuses. The full reference is in the
 [API reference](api-reference.md#signal-an-activity).
 
-| Situation                                                               | Status | Body                                                                                                                      |
-|-------------------------------------------------------------------------|--------|---------------------------------------------------------------------------------------------------------------------------|
-| The step is waiting for this `event_name`                               | 200    | `{"signaled": true, "message": "Activity signaled successfully"}`                                                         |
-| Wrong `event_name`, the step isn't waiting, or no such step or workflow | 200    | `{"signaled": false, "message": "No waiting activity found for workflow <id> with key '<key>' and event '<event_name>'"}` |
-| `activity_key` or `event_name` is empty                                 | 422    | `VALIDATION_ERROR`, with the field in `details.field_errors`                                                              |
-| `activity_key` or `event_name` is missing                               | 422    | `Failed to deserialize the JSON body into the target type: missing field ...` (plain text)                                |
-| No `Content-Type: application/json`                                     | 415    | ``Expected request with `Content-Type: application/json` `` (plain text)                                                  |
-| `workflow_id` is not a UUID                                             | 400    | `Invalid URL: UUID parsing failed: ...` (plain text)                                                                      |
-| Bad or expired token                                                    | 401    | `UNAUTHORIZED`                                                                                                            |
+| Situation                                              | Status | Body                                                                                                                                                                             |
+|--------------------------------------------------------|--------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| The step is waiting for this `event_name`              | 200    | `{"signaled": true, "held": false, "message": "Activity signaled successfully"}`                                                                                                 |
+| The step isn't waiting, or no such step or workflow    | 200    | `{"signaled": false, "held": false, "reason": "not_waiting", "message": "Activity '<key>' in workflow <id> is not waiting for '<event_name>' right now"}`; see the reasons below |
+| The step isn't waiting, and its wait sets `hold_early` | 200    | `{"signaled": false, "held": true, "message": "Activity '<key>' is not waiting; the signal is held and will be delivered when it next waits"}`                                   |
+| `activity_key` or `event_name` is empty                | 422    | `VALIDATION_ERROR`, with the field in `details.field_errors`                                                                                                                     |
+| `activity_key` or `event_name` is missing              | 422    | `Failed to deserialize the JSON body into the target type: missing field ...` (plain text)                                                                                       |
+| No `Content-Type: application/json`                    | 415    | ``Expected request with `Content-Type: application/json` `` (plain text)                                                                                                         |
+| `workflow_id` is not a UUID                            | 400    | `Invalid URL: UUID parsing failed: ...` (plain text)                                                                                                                             |
+| Bad or expired token                                   | 401    | `UNAUTHORIZED`                                                                                                                                                                   |
 
-A `200` doesn't mean the signal was used: check `signaled`. "Isn't waiting"
-covers a step whose wait hasn't begun, was already signaled, or timed out. A
-signal that doesn't match a waiting step is not stored for later; send it
-again once the step is waiting.
+A `200` doesn't mean the signal was used: check `signaled`, then `held`.
+"Isn't waiting" covers a step whose wait hasn't begun, was already signaled,
+or timed out. Unless the step's wait sets `hold_early`, a signal that doesn't
+match a waiting step is not stored for later; send it again once the step is
+waiting. When `signaled` and `held` are both `false`, `reason` says why:
 
-One signal ends one wait. A second signal for the same wait gets
-`"signaled": false` (but see [Known Limits](#known-limits) for signals
-without data).
+| `reason`           | Meaning                                                                        |
+|--------------------|--------------------------------------------------------------------------------|
+| `not_waiting`      | The step waits for `event_name`, but not right now; a later signal can succeed |
+| `unknown_workflow` | No such workflow                                                               |
+| `unknown_activity` | The workflow has no step `activity_key` that waits for `event_name`            |
+| `workflow_ended`   | The workflow has completed or failed                                           |
+| `hold_limit`       | The step already holds 100 signals for `event_name`                            |
+
+One signal ends one wait, with or without `data`. A second signal for the
+same wait gets `"signaled": false`, and so does a signal for a wait that has
+already timed out.
+
+### Signals that arrive early
+
+A sender often can't tell whether the step is waiting yet: the step may not
+have been reached, or a loop may be busy with its previous round. Set
+`hold_early: true` on the wait to keep such a signal instead of refusing it:
+
+```yaml
+settings:
+  wait_for_signal:
+    event_name: message
+    timeout_seconds: 3600
+    hold_early: true
+```
+
+The answer is then `"held": true`. When the step next would wait and a signal
+is held for it, it takes the oldest one and runs at once, with that signal's
+data as `{{SIGNAL}}`, without waiting (so its timeout never starts). Its
+events show `ActivitySignaled` with `"held": true` in the payload, and no
+`ActivityWaiting`. With nothing held, it waits as usual. A step holds at most
+100 signals per event name, and signals still held when the workflow ends are
+discarded. The [API reference](api-reference.md#signal-an-activity) has the
+details.
 
 ---
 
@@ -471,7 +507,9 @@ templates must handle that ([see above](#writing-templates-that-work-when-signal
 A waiting step inside a loop waits again in every round, and each round takes
 its own signal. The signal request is the same in every round: it ends
 whichever round's wait is open. Between rounds, while the step runs, there is
-no open wait, and a signal gets `"signaled": false`.
+no open wait, and a signal gets `"signaled": false`, unless the wait sets
+`hold_early` (see [Signals that arrive early](#signals-that-arrive-early)): then
+it is held for the next round.
 
 This step loops on itself until a reviewer approves, at most five rounds:
 
@@ -550,21 +588,6 @@ re-runs without new input), which is still open.
 
 ## Known Limits
 
-- **A signal without data can be accepted twice**
-  ([#33](https://github.com/kruxia/kruxiaflow/issues/33)). Until the
-  orchestrator takes the first signal, a wait signaled without `data` accepts
-  another: two signals sent at once can both get `"signaled": true`. Only the
-  first is used, and if the second carried data, that data is lost. Such a
-  wait can also still time out if the timeout check runs first. To avoid both,
-  always send `data`, even `{}`.
-- **The MCP tool `send_workflow_signal` doesn't pass the data to the step.**
-  It publishes the data in place of the signal event's payload, so `SIGNAL` is
-  `null` (a `signal_data` or `on_timeout` key in the data is read as part of
-  the event), and in a loop it loses every round's signal after the first:
-  the tool answers `signaled` but the step keeps waiting. If its event fails
-  to publish, it still answers success (`event_published: false`), and a wait
-  signaled with data then never runs and never times out.
-  Use the REST endpoint to send signals.
 - **Timeouts are checked periodically**, not at the exact second (see
   [Timeouts](#timeouts)).
 - **One step, one event name.** A step waits for a single `event_name`, and
