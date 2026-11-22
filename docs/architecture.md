@@ -2911,7 +2911,8 @@ every signal after the first as a duplicate.
 
 **Signal data** is `{{SIGNAL}}` in the templates of the activity it resumed:
 its `parameters`, `delay` and `scheduled_for`, and its parameters again on a
-retry. It is the signal's `data`, or `null` when the signal carried none or
+retry. It is the signal's `data` (or a held signal's, when a `hold_early` wait
+takes one instead of waiting), or `null` when the signal carried none or
 the wait timed out with `on_timeout: continue`. On an activity without
 `wait_for_signal`, `SIGNAL` is undefined. Whether an activity waits is decided
 from its settings before any of its templates are resolved; they are resolved

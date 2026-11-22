@@ -319,13 +319,22 @@ activities:
 "#,
     )
     .await;
-    let err = run
-        .try_process_all()
-        .await
-        .expect_err("a step without a wait resolved {{SIGNAL.approved}}");
+    run.process_all().await;
+    // A template error fails the activity whose template it is (#19)
+    let state = run.state().await;
+    assert_eq!(
+        state.activities["step"].status,
+        WorkflowActivityStatus::Failed,
+        "a step without a wait resolved {{SIGNAL.approved}}"
+    );
+    let error = state.activities["step"]
+        .error
+        .as_deref()
+        .unwrap_or_default();
+    assert!(error.starts_with("TEMPLATE_ERROR:"), "{error}");
     assert!(
-        err.contains("Failed to resolve templates in activity step"),
-        "{err}"
+        error.contains("Failed to resolve templates in activity step"),
+        "{error}"
     );
 }
 
