@@ -2,7 +2,7 @@ use super::{OrchestratorError, Result, WorkflowActivityStatus, WorkflowState};
 use crate::workflow::template::{TemplateContext, resolve_template_value};
 use crate::workflow::{ActivityDefinition, ActivityRelationship, WorkflowDefinition};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Default maximum iterations if not specified
 /// Provides safety bound for Pattern 2 (conditional-only) loops
@@ -14,6 +14,10 @@ const DEFAULT_MAX_ITERATIONS: u32 = 100;
 /// - Status is Completed and should loop back
 /// - All activities in `depends_on` list are Completed
 /// - All conditions on `depends_on` relationships are satisfied
+/// - For a completed loop member: nothing upstream of it in the same loop is
+///   still able to run this round (see [`is_upstream_of_round_unsettled`])
+/// - For an activity after a loop (it depends on a step of a loop it isn't
+///   part of): that loop has ended (see [`waits_for_a_running_loop`])
 pub fn find_ready_activities<'a>(
     definition: &'a WorkflowDefinition,
     state: &WorkflowState,
@@ -27,7 +31,128 @@ pub fn find_ready_activities<'a>(
         }
     }
 
+    hold_back_unsettled_loop_members(definition, state, &mut ready);
+    hold_back_steps_after_running_loops(definition, state, &mut ready);
     Ok(ready)
+}
+
+/// A completed loop member waits for the rest of its round upstream (#28):
+/// drop it from `ready` while something upstream of it in the same loop can
+/// still run this round (see [`is_upstream_of_round_unsettled`]). The graph is
+/// only built while such a member is otherwise ready to run again, not on
+/// every evaluation. Used by both readiness functions, so the orchestrator's
+/// path ([`find_ready_or_unresolvable_activities`]) applies it too.
+fn hold_back_unsettled_loop_members<'a>(
+    definition: &'a WorkflowDefinition,
+    state: &WorkflowState,
+    ready: &mut Vec<&'a ActivityDefinition>,
+) {
+    if ready
+        .iter()
+        .any(|a| a.is_loop_activity && is_completed(state, &a.key))
+    {
+        let graph = DependencyGraph::new(definition);
+        let ready_keys: HashSet<&str> = ready.iter().map(|a| a.key.as_str()).collect();
+        ready.retain(|a| !is_upstream_of_round_unsettled(a, &graph, state, &ready_keys));
+    }
+}
+
+/// An activity after a loop waits for the loop to end (#40): drop it from
+/// `ready` while the loop it depends on can still go another round (see
+/// [`waits_for_a_running_loop`]). The graph is only built while such an
+/// activity is otherwise ready. Used by both readiness functions, after
+/// [`hold_back_unsettled_loop_members`], so `ready` holds the loop steps that
+/// are actually scheduled in this pass.
+fn hold_back_steps_after_running_loops<'a>(
+    definition: &'a WorkflowDefinition,
+    state: &WorkflowState,
+    ready: &mut Vec<&'a ActivityDefinition>,
+) {
+    let depends_on_a_loop = |activity: &ActivityDefinition| {
+        is_never_scheduled(state, &activity.key)
+            && get_dependencies(activity)
+                .iter()
+                .any(|dep| !dep.is_back_edge && is_loop_member(definition, &dep.activity_key))
+    };
+    if ready.iter().any(|a| depends_on_a_loop(a)) {
+        let graph = DependencyGraph::new(definition);
+        let ready_keys: HashSet<&str> = ready.iter().map(|a| a.key.as_str()).collect();
+        ready.retain(|a| !waits_for_a_running_loop(a, definition, &graph, state, &ready_keys));
+    }
+}
+
+/// Whether an activity after a loop, otherwise ready, must wait because the
+/// loop it depends on is still running (#40).
+///
+/// An activity after a loop depends on a step of a loop it isn't part of: a
+/// loop's exit step, a step that takes the loop's result, or the head of a
+/// later loop. That loop step completes once per round, and every completion
+/// but the last is followed by another round. Run after an earlier round,
+/// the activity would take that round's output, and since it runs once (or,
+/// as the head of a later loop, starts its own loop once) it would never see
+/// the rounds after it. So it waits until the loop has ended, and then runs
+/// (or is skipped) on the loop's last round, conditions or not. The skip side
+/// already waited for this (#27, #38); this is the run side.
+///
+/// The loop is still running while any of its steps is in flight (`Pending`,
+/// `Running`, `Waiting`) or is being scheduled in this pass (`ready_keys`).
+/// Its steps are the dependency and every activity on a cycle with it.
+/// Activities of other loops, and steps of the same loop the activity is
+/// itself part of, never hold it back.
+///
+/// Only an activity that has never been scheduled waits, like on the skip
+/// side: it is decided once. A later loop's head that has started its own
+/// loop (it can only have done so once the earlier loop ended) follows its
+/// back-edge from then on.
+///
+/// Cannot hang a workflow: the activity is held back only by a loop step that
+/// is in flight (its completion or failure is a later event, which evaluates
+/// the activity again) or that is scheduled in this same pass.
+fn waits_for_a_running_loop(
+    activity: &ActivityDefinition,
+    definition: &WorkflowDefinition,
+    graph: &DependencyGraph<'_>,
+    state: &WorkflowState,
+    ready_keys: &HashSet<&str>,
+) -> bool {
+    if !is_never_scheduled(state, &activity.key) {
+        return false;
+    }
+    for dep in get_dependencies(activity) {
+        let dep_key = dep.activity_key.as_str();
+        if dep.is_back_edge
+            || !is_loop_member(definition, dep_key)
+            || (activity.is_loop_activity && in_same_loop(graph, &activity.key, dep_key))
+        {
+            continue;
+        }
+        let downstream_of_dep = reach_from(graph, dep_key);
+        let running = definition.activities.iter().find(|member| {
+            let key = member.key.as_str();
+            member.is_loop_activity
+                && (key == dep_key
+                    || (downstream_of_dep.contains(key) && in_same_loop(graph, key, dep_key)))
+                && (ready_keys.contains(key)
+                    || state.activities.get(key).is_some_and(|s| {
+                        matches!(
+                            s.status,
+                            WorkflowActivityStatus::Pending
+                                | WorkflowActivityStatus::Running
+                                | WorkflowActivityStatus::Waiting
+                        )
+                    }))
+        });
+        if let Some(running) = running {
+            tracing::trace!(
+                "Activity {} not ready: {} of the loop it depends on (through {}) can still run",
+                activity.key,
+                running.key,
+                dep_key
+            );
+            return true;
+        }
+    }
+    false
 }
 
 /// Activities ready to schedule, and activities whose conditions could not
@@ -56,7 +181,144 @@ pub fn find_ready_or_unresolvable_activities<'a>(
             Err(other) => return Err(other),
         }
     }
+    hold_back_unsettled_loop_members(definition, state, &mut ready);
+    hold_back_steps_after_running_loops(definition, state, &mut ready);
     Ok((ready, unresolvable))
+}
+
+/// Whether `key` has never been scheduled (`NotScheduled`, or no state yet)
+fn is_never_scheduled(state: &WorkflowState, key: &str) -> bool {
+    state
+        .activities
+        .get(key)
+        .is_none_or(|s| s.status == WorkflowActivityStatus::NotScheduled)
+}
+
+fn is_completed(state: &WorkflowState, key: &str) -> bool {
+    state
+        .activities
+        .get(key)
+        .is_some_and(|s| s.status == WorkflowActivityStatus::Completed)
+}
+
+/// The definition's dependency graph, for the traversals loop rounds need
+struct DependencyGraph<'a> {
+    /// Activity → its forward (non-back-edge) dependencies
+    forward_deps: HashMap<&'a str, Vec<&'a str>>,
+    /// Activity → activities that depend on it through a forward dependency
+    forward_dependents: HashMap<&'a str, Vec<&'a str>>,
+    /// Activity → activities that depend on it through any dependency,
+    /// back-edges included
+    all_dependents: HashMap<&'a str, Vec<&'a str>>,
+}
+
+impl<'a> DependencyGraph<'a> {
+    fn new(definition: &'a WorkflowDefinition) -> Self {
+        let mut graph = DependencyGraph {
+            forward_deps: HashMap::new(),
+            forward_dependents: HashMap::new(),
+            all_dependents: HashMap::new(),
+        };
+        for activity in &definition.activities {
+            for dep in get_dependencies(activity) {
+                let (to, from) = (activity.key.as_str(), dep.activity_key.as_str());
+                graph.all_dependents.entry(from).or_default().push(to);
+                if !dep.is_back_edge {
+                    graph.forward_deps.entry(to).or_default().push(from);
+                    graph.forward_dependents.entry(from).or_default().push(to);
+                }
+            }
+        }
+        graph
+    }
+
+    /// Every key reachable from `start` along `edges`, `start` excluded
+    fn reach(edges: &HashMap<&'a str, Vec<&'a str>>, start: &'a str) -> HashSet<&'a str> {
+        let mut seen = HashSet::new();
+        let mut stack = vec![start];
+        while let Some(node) = stack.pop() {
+            for &next in edges.get(node).into_iter().flatten() {
+                if next != start && seen.insert(next) {
+                    stack.push(next);
+                }
+            }
+        }
+        seen
+    }
+}
+
+/// Whether a completed loop member, otherwise ready to run again, must wait
+/// because its round is still unfolding upstream (#28).
+///
+/// [`has_new_input`] lets a member run when *any* dependency is new. For a
+/// join of parallel branches of different lengths that is too early: the
+/// short branch finishes, and the join would run on the long branch's output
+/// from the previous round, then again. Requiring *every* input to be new is
+/// wrong too: a branch whose condition is false this round stays `Completed`
+/// from an earlier one and never becomes new, so the join would wait forever.
+///
+/// The rule tells "not finished this round yet" from "won't run this round"
+/// by what can still happen upstream, not by what has happened. The member
+/// waits while any **upstream activity of the same loop** is in flight
+/// (`Pending`, `Running`, `Waiting`) or is itself ready to be scheduled now
+/// (`ready_keys`): either can still deliver new input to it this round. A
+/// branch whose condition is false is neither, so it never blocks.
+///
+/// - **Upstream:** reachable backwards through forward (non-back-edge)
+///   dependencies, and not also downstream through them. The second part
+///   only matters if a definition's back-edge marking left a forward cycle;
+///   it keeps "is upstream of" a strict order, so two activities can never
+///   wait on each other.
+/// - **Same loop:** reachable from the member going forward through any
+///   dependency, back-edges included (on a cycle with it). Activities of an
+///   earlier, separate loop and activities outside every loop never block.
+///
+/// Cannot hang a workflow: a member is held back only by an activity that is
+/// in flight (its completion or failure is a later event, which evaluates the
+/// member again) or that is ready now. A ready blocker is either scheduled in
+/// this same pass, or held back itself by one further upstream in the same
+/// loop; "upstream" is a strict order on a finite set, so the chain ends at
+/// an activity that is in flight or being scheduled now.
+fn is_upstream_of_round_unsettled(
+    activity: &ActivityDefinition,
+    graph: &DependencyGraph<'_>,
+    state: &WorkflowState,
+    ready_keys: &HashSet<&str>,
+) -> bool {
+    if !activity.is_loop_activity || !is_completed(state, &activity.key) {
+        return false;
+    }
+    let key = activity.key.as_str();
+    let upstream = DependencyGraph::reach(&graph.forward_deps, key);
+    if upstream.is_empty() {
+        return false;
+    }
+    let downstream = DependencyGraph::reach(&graph.forward_dependents, key);
+    let same_loop = DependencyGraph::reach(&graph.all_dependents, key);
+
+    let blocker = upstream
+        .iter()
+        .filter(|k| same_loop.contains(*k) && !downstream.contains(*k))
+        .find(|k| {
+            ready_keys.contains(**k)
+                || state.activities.get(**k).is_some_and(|s| {
+                    matches!(
+                        s.status,
+                        WorkflowActivityStatus::Pending
+                            | WorkflowActivityStatus::Running
+                            | WorkflowActivityStatus::Waiting
+                    )
+                })
+        });
+    if let Some(blocker) = blocker {
+        tracing::trace!(
+            "Activity {} not ready: {} upstream in the same loop can still run this round",
+            key,
+            blocker
+        );
+        return true;
+    }
+    false
 }
 
 /// Check if an activity is ready to be scheduled.
@@ -91,6 +353,9 @@ pub fn find_ready_or_unresolvable_activities<'a>(
 ///
 /// ### 4a. Root Activities (No Dependencies)
 /// - No `depends_on` relationships → **Accept** (always ready)
+/// - An activity that has never been scheduled leaves its back-edges out
+///   ([`deciding_dependencies`], #38), so a loop with no dependency outside it
+///   is a root activity on its first round
 ///
 /// ### 4b. Every Forward Dependency Terminal
 /// - Any forward dependency not `Completed`, `Failed` or `Skipped` →
@@ -102,7 +367,8 @@ pub fn find_ready_or_unresolvable_activities<'a>(
 ///
 /// #### Back-Edge Dependencies (`is_back_edge = true`):
 /// Loop back-edges that create iterative execution:
-/// - **Iteration 0**: Automatically satisfied (allows first loop entry)
+/// - **First round** (never scheduled): left out; the other dependencies
+///   decide whether the loop is entered or skipped (#38)
 /// - **Iteration 1+**: Evaluate loop conditions:
 ///   - If conditions exist → All must evaluate to `true`
 ///   - Dependency must be `Completed`
@@ -136,8 +402,11 @@ pub fn find_ready_or_unresolvable_activities<'a>(
 /// # Loop Behavior
 ///
 /// **First Execution** (iteration 0):
-/// - Root activity or all forward dependencies satisfied → Schedule
-/// - Back-edge dependencies automatically satisfied → Allows loop entry
+/// - Back-edge dependencies left out: they point at a loop step that hasn't
+///   run yet (#38)
+/// - Root activity, or the forward dependencies applicable → Schedule
+/// - No forward dependency applicable → not ready; skipped once they are all
+///   terminal (see [`find_skipped_activities`])
 ///
 /// **Subsequent Iterations** (iteration 1+):
 /// - Check iteration limit
@@ -222,10 +491,12 @@ fn is_activity_ready(
         return Ok(false);
     }
 
-    // Get list of dependencies from definition
-    let dependencies = get_dependencies(activity);
+    // The dependencies that decide: a loop step entering its loop for the
+    // first time leaves its back-edges out (#38)
+    let dependencies = deciding_dependencies(activity, activity_state);
 
-    // If no dependencies, it's a root activity (always ready initially)
+    // If no dependencies, it's a root activity (always ready initially), or a
+    // loop that starts with the workflow
     if dependencies.is_empty() {
         tracing::trace!(
             "Activity {} is a root activity (no dependencies)",
@@ -289,11 +560,7 @@ fn is_activity_ready(
             );
 
             // For back-edges, evaluate loop condition
-            // Activity state should always exist if we're evaluating its dependencies
-            let current_activity_state = activity_state
-                .ok_or_else(|| OrchestratorError::ActivityNotFound(activity.key.clone()))?;
-
-            if !evaluate_loop_condition(dep_rel, dependency_state, state, current_activity_state)? {
+            if !evaluate_loop_condition(activity, dep_rel, dependency_state, state)? {
                 tracing::trace!(
                     "Activity {} not ready: back-edge condition not met for {}",
                     activity.key,
@@ -309,8 +576,10 @@ fn is_activity_ready(
 
             // Check conditions (if any)
             if let Some(condition_list) = &dep_rel.conditions {
-                // Build template context for condition evaluation
-                let context = build_condition_context(state);
+                // Build template context for condition evaluation;
+                // {{ACTIVITY.*}} is the activity these conditions gate
+                let mut context = build_condition_context(state);
+                context.set_current_activity(activity);
 
                 // Check if conditions are satisfied
                 let mut conditions_satisfied = true;
@@ -448,22 +717,16 @@ fn is_max_iterations_exceeded(
 
 /// Evaluate loop exit/continuation condition
 fn evaluate_loop_condition(
+    activity: &ActivityDefinition,
     dep: &ActivityRelationship,
     dep_state: &super::workflow_state::ActivityState,
     state: &WorkflowState,
-    activity_state: &super::workflow_state::ActivityState,
 ) -> Result<bool> {
-    // For the first iteration (iteration 0), back-edge dependencies are automatically satisfied
-    // This allows the activity to enter the loop for the first time
-    if activity_state.iteration == 0 {
-        tracing::trace!(
-            "Back-edge dependency satisfied for {} (first iteration)",
-            activity_state.key
-        );
-        return Ok(true);
-    }
+    // Only an activity that has run gets here: entering its loop for the
+    // first time, its back-edges are left out (see `deciding_dependencies`),
+    // so its other dependencies decide whether it runs (#38)
 
-    // For subsequent iterations, check if dependency has completed at least once
+    // Check if dependency has completed at least once
     // We need the dependency to have run before we can evaluate conditions that reference its outputs
     if dep_state.status != WorkflowActivityStatus::Completed && dep_state.iteration == 0 {
         // Dependency hasn't run yet in this loop cycle, can't loop back
@@ -479,7 +742,9 @@ fn evaluate_loop_condition(
     // Exit conditions should evaluate to false to stop looping
 
     if let Some(conditions) = &dep.conditions {
-        let context = build_condition_context(state);
+        // {{ACTIVITY.*}} is the looping activity these conditions gate
+        let mut context = build_condition_context(state);
+        context.set_current_activity(activity);
 
         for condition in conditions {
             if !evaluate_condition(condition, &context)? {
@@ -504,6 +769,30 @@ fn get_dependencies(activity: &ActivityDefinition) -> Vec<&ActivityRelationship>
     }
 }
 
+/// The dependencies that decide whether `activity` runs or is skipped now.
+///
+/// A loop step entering its loop for the first time (it has never been
+/// scheduled) leaves its back-edges out (#38). A back-edge points at a step of
+/// the loop that hasn't run yet, for a self-loop the step itself, so it can
+/// neither let the step in nor keep it waiting. The step's other dependencies
+/// (those from outside the loop, for the loop's head) decide round 0, like any
+/// other step's: a false condition, or an unconditional dependency on a
+/// skipped step, skips it, and the skip cascades. A step with nothing but
+/// back-edges has no dependency left, so its loop starts with the workflow.
+///
+/// Once the step has run, its back-edges decide the later rounds, through
+/// [`evaluate_loop_condition`].
+fn deciding_dependencies<'a>(
+    activity: &'a ActivityDefinition,
+    activity_state: Option<&super::workflow_state::ActivityState>,
+) -> Vec<&'a ActivityRelationship> {
+    let entering = activity_state.is_none_or(|s| s.status == WorkflowActivityStatus::NotScheduled);
+    get_dependencies(activity)
+        .into_iter()
+        .filter(|dep| !(entering && dep.is_back_edge))
+        .collect()
+}
+
 /// Convert WorkflowActivityStatus to snake_case string for template context
 pub fn status_to_string(status: WorkflowActivityStatus) -> String {
     match status {
@@ -521,14 +810,15 @@ pub fn status_to_string(status: WorkflowActivityStatus) -> String {
 pub fn build_condition_context(state: &WorkflowState) -> TemplateContext {
     let mut context = TemplateContext::new();
 
-    // Add workflow inputs from state_data
-    if let Value::Object(state_obj) = &state.state_data {
-        let inputs: HashMap<String, Value> = state_obj
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-        context = context.with_inputs(inputs);
+    // INPUT is the workflow's submitted input, as in parameter templates.
+    // state_data is merged underneath it for callers that seed state_data.
+    let mut inputs: HashMap<String, Value> = HashMap::new();
+    for source in [&state.state_data, &state.input] {
+        if let Value::Object(obj) = source {
+            inputs.extend(obj.iter().map(|(k, v)| (k.clone(), v.clone())));
+        }
     }
+    context = context.with_inputs(inputs);
 
     // Add activity outputs, iteration outputs, and status
     for (activity_key, activity_state) in &state.activities {
@@ -620,8 +910,14 @@ pub fn is_workflow_failed(state: &WorkflowState) -> bool {
 ///
 /// An activity should be skipped when:
 /// - Status is NotScheduled (not yet processed)
-/// - All dependencies are in terminal states (Completed, Failed, or Skipped)
+/// - All dependencies are in terminal states (Completed, Failed, or Skipped);
+///   a loop step's back-edges don't count, since it has never been scheduled
+///   (#38, see [`deciding_dependencies`])
 /// - No applicable dependencies exist (all conditional dependencies have false conditions)
+/// - It is not an activity after a loop whose loop is still running: one that
+///   depends on a step of a loop it isn't part of (an exit step, or the head
+///   of a later loop) waits until no loop member is scheduled, running or
+///   waiting (#27, #38)
 pub fn find_skipped_activities<'a>(
     definition: &'a WorkflowDefinition,
     state: &WorkflowState,
@@ -640,12 +936,19 @@ pub type SkippedOrUnresolvable<'a> = ReadyOrUnresolvable<'a>;
 /// skipped earlier in the same skip pass, such as a condition on a skipped
 /// step's result. Left out, the activity stays NotScheduled with nothing to
 /// wake it, and the workflow hangs.
+///
+/// Skipping one activity can decide others (what depends on it); the
+/// orchestrator calls this again after marking them, until it finds none.
 pub fn find_skipped_or_unresolvable_activities<'a>(
     definition: &'a WorkflowDefinition,
     state: &WorkflowState,
 ) -> Result<SkippedOrUnresolvable<'a>> {
     let mut skipped = Vec::new();
     let mut unresolvable = Vec::new();
+    // Computed at most once, only when an activity after a loop would be skipped
+    let mut loop_running: Option<bool> = None;
+    // Built at most once, only when a loop step depends on a loop step
+    let mut graph: Option<DependencyGraph<'a>> = None;
 
     for activity in &definition.activities {
         // Only consider NotScheduled activities
@@ -655,10 +958,14 @@ pub fn find_skipped_or_unresolvable_activities<'a>(
             continue;
         }
 
-        // Get dependencies
-        let dependencies = get_dependencies(activity);
+        // Get the dependencies that decide: an activity here has never been
+        // scheduled, so a loop step's back-edges are left out. They point at
+        // a step of its loop that hasn't run, which would never be terminal
+        // and would keep a loop behind a skipped step waiting for ever (#38)
+        let dependencies = deciding_dependencies(activity, state.activities.get(&activity.key));
 
-        // If no dependencies, it's a root activity and should not be skipped
+        // If no dependencies, it's a root activity (or a loop that starts with
+        // the workflow) and should not be skipped
         if dependencies.is_empty() {
             continue;
         }
@@ -688,14 +995,86 @@ pub fn find_skipped_or_unresolvable_activities<'a>(
         // An activity whose conditions can't be evaluated is not skippable:
         // it is returned to be failed instead
         match is_activity_ready(activity, definition, state) {
-            Ok(false) => skipped.push(activity),
-            Ok(true) => {}
-            Err(OrchestratorError::TemplateFailed(error)) => unresolvable.push((activity, error)),
+            Ok(false) => {}
+            Ok(true) => continue,
+            Err(OrchestratorError::TemplateFailed(error)) => {
+                unresolvable.push((activity, error));
+                continue;
+            }
             Err(other) => return Err(other),
         }
+
+        // An activity after a loop (it depends on a step of a loop it isn't
+        // part of, like the loop's exit step, or the head of a later loop)
+        // waits while the loop still runs: a later round completes that
+        // dependency again and may satisfy its condition. Skipped is
+        // terminal, so skipping it now would be for good (#27, #38). Once no
+        // loop member is scheduled, running or waiting, the loop is over and
+        // the activity is skipped as usual.
+        if dependencies.iter().any(|dep| {
+            is_loop_member(definition, &dep.activity_key)
+                && !(activity.is_loop_activity
+                    && in_same_loop(
+                        graph.get_or_insert_with(|| DependencyGraph::new(definition)),
+                        &activity.key,
+                        &dep.activity_key,
+                    ))
+        }) && *loop_running.get_or_insert_with(|| is_a_loop_running(definition, state))
+        {
+            tracing::trace!(
+                "Activity {} not skipped yet: a loop it depends on is still running",
+                activity.key
+            );
+            continue;
+        }
+
+        skipped.push(activity);
     }
 
     Ok((skipped, unresolvable))
+}
+
+/// Whether loop step `key` is on a cycle with its dependency `dep`: `key` can
+/// reach `dep` going forward through any dependency, back-edges included
+/// (`dep` reaches `key` directly). False for a dependency in an earlier,
+/// separate loop.
+fn in_same_loop(graph: &DependencyGraph<'_>, key: &str, dep: &str) -> bool {
+    key == dep || reach_from(graph, key).contains(dep)
+}
+
+fn reach_from<'a>(graph: &DependencyGraph<'a>, key: &str) -> HashSet<&'a str> {
+    match graph.all_dependents.get_key_value(key) {
+        Some((&start, _)) => DependencyGraph::reach(&graph.all_dependents, start),
+        None => HashSet::new(),
+    }
+}
+
+/// Whether `key` names a loop member (`is_loop_activity`, set on every
+/// activity of a cycle by validation and on load)
+fn is_loop_member(definition: &WorkflowDefinition, key: &str) -> bool {
+    definition
+        .activities
+        .iter()
+        .any(|a| a.key == key && a.is_loop_activity)
+}
+
+/// Whether any loop member is scheduled, running or waiting: the loop can
+/// still go another round. The orchestrator schedules the next step of a
+/// loop in the same pass that handles the previous step's completion, before
+/// it looks for activities to skip, so a loop that goes on always has a
+/// member in one of these states, and one that has ended has none.
+fn is_a_loop_running(definition: &WorkflowDefinition, state: &WorkflowState) -> bool {
+    definition.activities.iter().any(|a| {
+        a.is_loop_activity
+            && state.activities.get(&a.key).is_some_and(|s| {
+                matches!(
+                    s.status,
+                    WorkflowActivityStatus::Pending
+                        | WorkflowActivityStatus::Running
+                        | WorkflowActivityStatus::Waiting
+                )
+            })
+    })
 }
 
 #[cfg(test)]
@@ -1305,6 +1684,59 @@ mod tests {
     }
 
     #[test]
+    fn test_build_condition_context_input_is_workflow_input() {
+        // Submission stores the input in `input` and leaves state_data empty;
+        // conditions must see it as INPUT, as parameter templates do
+        let mut state = make_workflow_state(vec![make_activity_state(
+            "step1",
+            WorkflowActivityStatus::Completed,
+        )]);
+        state.input = serde_json::json!({"num_pages": 2});
+
+        let context = build_condition_context(&state);
+        assert!(evaluate_condition("{{ INPUT.num_pages == 2 }}", &context).unwrap());
+    }
+
+    #[test]
+    fn test_build_condition_context_ignores_input_that_is_not_an_object() {
+        // The API accepts any JSON as a workflow's input. Only an object's
+        // fields can be INPUT fields; anything else adds none, and state_data
+        // is still read
+        for input in [
+            serde_json::json!(null),
+            serde_json::json!([1, 2]),
+            serde_json::json!(5),
+            serde_json::json!("text"),
+        ] {
+            let mut state = make_workflow_state(vec![]);
+            state.state_data = serde_json::json!({"mode": "fast"});
+            state.input = input.clone();
+
+            let context = build_condition_context(&state);
+            assert_eq!(
+                context.inputs.keys().collect::<Vec<_>>(),
+                vec!["mode"],
+                "input {input}"
+            );
+            assert!(
+                evaluate_condition("{{ INPUT.mode == 'fast' }}", &context).unwrap(),
+                "input {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_build_condition_context_exposes_activity_iteration() {
+        let (key, mut activity) = make_activity_state("fetch", WorkflowActivityStatus::Completed);
+        activity.iteration = 2;
+        let state = make_workflow_state(vec![(key, activity)]);
+
+        let context = build_condition_context(&state);
+        assert!(evaluate_condition("{{ fetch.iteration == 2 }}", &context).unwrap());
+        assert!(!evaluate_condition("{{ fetch.iteration >= 3 }}", &context).unwrap());
+    }
+
+    #[test]
     fn test_get_dependencies_with_none() {
         let activity = make_activity_def("a", None);
         let deps = get_dependencies(&activity);
@@ -1494,14 +1926,20 @@ mod tests {
     #[test]
     fn test_state_without_sequence_numbers_counts_as_new_input() {
         // All `completion_seq` 0: no ordering information, so every completed
-        // loop member counts as having new input
+        // loop member counts as having new input. The tail still waits while the head, upstream of it in the same
+        // loop, is ready to run (#28); it runs on the head's next completion.
         let definition = two_step_loop();
         let state = make_workflow_state(vec![
             completed("start", 0, 0),
             completed("head", 0, 1),
             completed("tail", 0, 1),
         ]);
-        assert_eq!(ready_keys(&definition, &state), vec!["head", "tail"]);
+        assert_eq!(ready_keys(&definition, &state), vec!["head"]);
+        let mut state = state;
+        let head = state.activities.get_mut("head").unwrap();
+        head.completion_seq = 1;
+        head.iteration = 2;
+        assert_eq!(ready_keys(&definition, &state), vec!["tail"]);
     }
 
     #[test]
@@ -1517,5 +1955,583 @@ mod tests {
             ("tail".to_string(), tail.clone()),
         ]);
         assert!(!has_new_input(tail_def, &tail, &state));
+    }
+
+    // ============================================================================
+    // Activities after a loop wait for the loop to end before being skipped (#27)
+    // ============================================================================
+
+    /// A condition that is false here (`check` is never skipped in these tests)
+    fn rel_false(key: &str) -> ActivityRelationship {
+        ActivityRelationship {
+            activity_key: key.to_string(),
+            conditions: Some(vec![format!("{{{{ {key}.status == 'skipped' }}}}")]),
+            is_back_edge: false,
+        }
+    }
+
+    /// run ⇄ check (run holds the back-edge), and `done` after the loop,
+    /// conditional on `check`
+    fn loop_with_exit_step() -> WorkflowDefinition {
+        WorkflowDefinition {
+            name: "loop_exit".to_string(),
+            settings: None,
+            activities: vec![
+                loop_def("run", vec![rel("check", true)]),
+                loop_def("check", vec![rel("run", false)]),
+                make_activity_def("done", Some(vec![rel_false("check")])),
+            ],
+        }
+    }
+
+    fn with_status(
+        key: &str,
+        seq: u64,
+        status: WorkflowActivityStatus,
+    ) -> (String, super::super::workflow_state::ActivityState) {
+        let (key, mut state) = completed(key, seq, 1);
+        state.status = status;
+        (key, state)
+    }
+
+    #[test]
+    fn test_exit_step_is_not_skipped_while_the_loop_runs() {
+        let definition = loop_with_exit_step();
+        // check completed (condition false for done), run is going again
+        let state = make_workflow_state(vec![
+            with_status("run", 1, WorkflowActivityStatus::Pending),
+            completed("check", 2, 1),
+            make_activity_state("done", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert!(
+            find_skipped_activities(&definition, &state)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn test_exit_step_is_skipped_once_the_loop_has_ended() {
+        let definition = loop_with_exit_step();
+        // Nothing in the loop is scheduled, running or waiting: it is over
+        let state = make_workflow_state(vec![
+            completed("run", 1, 1),
+            completed("check", 2, 1),
+            make_activity_state("done", WorkflowActivityStatus::NotScheduled),
+        ]);
+        let skipped: Vec<&str> = find_skipped_activities(&definition, &state)
+            .unwrap()
+            .iter()
+            .map(|a| a.key.as_str())
+            .collect();
+        assert_eq!(skipped, vec!["done"]);
+    }
+
+    #[test]
+    fn test_loop_member_is_skipped_while_its_loop_runs() {
+        // Inside the loop nothing changes: a member whose condition is false is
+        // skipped at once, so the steps after it in the same round can proceed.
+        // `done` is on the loop here: `run` also loops back on it.
+        let mut definition = loop_with_exit_step();
+        definition.activities[0] = loop_def("run", vec![rel("check", true), rel("done", true)]);
+        definition.activities[2] = loop_def("done", vec![rel_false("check")]);
+        let state = make_workflow_state(vec![
+            with_status("run", 1, WorkflowActivityStatus::Running),
+            completed("check", 2, 1),
+            make_activity_state("done", WorkflowActivityStatus::NotScheduled),
+        ]);
+        let skipped: Vec<&str> = find_skipped_activities(&definition, &state)
+            .unwrap()
+            .iter()
+            .map(|a| a.key.as_str())
+            .collect();
+        assert_eq!(skipped, vec!["done"]);
+    }
+
+    #[test]
+    fn test_conditional_skip_without_a_loop_is_immediate() {
+        // No loop: skipped at once, even while another activity still runs
+        let definition = WorkflowDefinition {
+            name: "branch".to_string(),
+            settings: None,
+            activities: vec![
+                make_activity_def("check", None),
+                make_activity_def("slow", Some(vec![rel("check", false)])),
+                make_activity_def("done", Some(vec![rel_false("check")])),
+            ],
+        };
+        let state = make_workflow_state(vec![
+            completed("check", 1, 0),
+            with_status("slow", 0, WorkflowActivityStatus::Running),
+            make_activity_state("done", WorkflowActivityStatus::NotScheduled),
+        ]);
+        let skipped: Vec<&str> = find_skipped_activities(&definition, &state)
+            .unwrap()
+            .iter()
+            .map(|a| a.key.as_str())
+            .collect();
+        assert_eq!(skipped, vec!["done"]);
+    }
+
+    // ============================================================================
+    // A completed loop member waits for the rest of its round upstream (#28)
+    // ============================================================================
+
+    /// The issue's diamond: start → a_head → (b_long1 → c_long2 | d_short)
+    /// → e_join → a_head. `d_short`'s dependency on the head takes `cond`.
+    fn diamond_loop(cond: Option<&str>) -> WorkflowDefinition {
+        WorkflowDefinition {
+            name: "diamond".to_string(),
+            settings: None,
+            activities: vec![
+                make_activity_def("start", None),
+                loop_def("a_head", vec![rel("start", false), rel("e_join", true)]),
+                loop_def("b_long1", vec![rel("a_head", false)]),
+                loop_def("c_long2", vec![rel("b_long1", false)]),
+                loop_def(
+                    "d_short",
+                    vec![ActivityRelationship {
+                        conditions: cond.map(|c| vec![c.to_string()]),
+                        ..rel("a_head", false)
+                    }],
+                ),
+                loop_def("e_join", vec![rel("c_long2", false), rel("d_short", false)]),
+            ],
+        }
+    }
+
+    fn with_round_status(
+        (key, mut state): (String, super::super::workflow_state::ActivityState),
+        status: WorkflowActivityStatus,
+    ) -> (String, super::super::workflow_state::ActivityState) {
+        state.status = status;
+        (key, state)
+    }
+
+    #[test]
+    fn test_loop_join_waits_while_a_branch_is_running() {
+        // Round 2: the head completed (6), the short branch too (7); the long
+        // branch is still running, so the join (5) must not run on c_long2's
+        // round-1 output (4)
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("a_head", 6, 2),
+            with_round_status(completed("b_long1", 2, 1), WorkflowActivityStatus::Running),
+            completed("c_long2", 4, 1),
+            completed("d_short", 7, 2),
+            completed("e_join", 5, 1),
+        ]);
+        assert!(ready_keys(&diamond_loop(None), &state).is_empty());
+    }
+
+    #[test]
+    fn test_loop_join_waits_for_a_branch_step_about_to_run() {
+        // b_long1 just completed round 2 (8): c_long2 (4) is about to run on
+        // it, so the join still waits; only c_long2 is ready
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("a_head", 6, 2),
+            completed("b_long1", 8, 2),
+            completed("c_long2", 4, 1),
+            completed("d_short", 7, 2),
+            completed("e_join", 5, 1),
+        ]);
+        assert_eq!(ready_keys(&diamond_loop(None), &state), vec!["c_long2"]);
+    }
+
+    #[test]
+    fn test_loop_join_runs_once_the_round_is_done() {
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("a_head", 6, 2),
+            completed("b_long1", 8, 2),
+            completed("c_long2", 9, 2),
+            completed("d_short", 7, 2),
+            completed("e_join", 5, 1),
+        ]);
+        assert_eq!(ready_keys(&diamond_loop(None), &state), vec!["e_join"]);
+    }
+
+    #[test]
+    fn test_loop_join_does_not_wait_for_a_branch_whose_condition_is_false() {
+        // d_short ran in round 1 (3) but its condition is false now: it stays
+        // Completed from round 1 and won't run, so it doesn't hold the join
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("a_head", 6, 2),
+            completed("b_long1", 7, 2),
+            completed("c_long2", 8, 2),
+            completed("d_short", 3, 1),
+            completed("e_join", 5, 1),
+        ]);
+        let definition = diamond_loop(Some("{{ a_head.status == 'skipped' }}"));
+        assert_eq!(ready_keys(&definition, &state), vec!["e_join"]);
+    }
+
+    #[test]
+    fn test_activities_of_another_loop_never_hold_a_member_back() {
+        // Loop 1 (a_head ⇄ b_tail) is upstream of loop 2 (c_head ⇄ d_tail),
+        // but not in it: loop 1's head running must not hold loop 2's head
+        let definition = WorkflowDefinition {
+            name: "sequential".to_string(),
+            settings: None,
+            activities: vec![
+                make_activity_def("start", None),
+                loop_def("a_head", vec![rel("start", false), rel("b_tail", true)]),
+                loop_def("b_tail", vec![rel("a_head", false)]),
+                loop_def("c_head", vec![rel("b_tail", false), rel("d_tail", true)]),
+                loop_def("d_tail", vec![rel("c_head", false)]),
+            ],
+        };
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            with_round_status(completed("a_head", 2, 2), WorkflowActivityStatus::Pending),
+            completed("b_tail", 4, 2),
+            completed("c_head", 3, 1),
+            completed("d_tail", 5, 1),
+        ]);
+        assert_eq!(ready_keys(&definition, &state), vec!["c_head"]);
+    }
+
+    #[test]
+    fn test_members_on_a_forward_cycle_never_hold_each_other_back() {
+        // A definition whose back-edge marking left a forward cycle (x ⇄ y,
+        // neither marked): each is upstream of the other, so neither may hold
+        // the other back, or both would wait forever
+        let definition = WorkflowDefinition {
+            name: "forward_cycle".to_string(),
+            settings: None,
+            activities: vec![
+                loop_def("x", vec![rel("y", false), rel("x", true)]),
+                loop_def("y", vec![rel("x", false), rel("y", true)]),
+            ],
+        };
+        let state = make_workflow_state(vec![completed("x", 1, 1), completed("y", 2, 1)]);
+        assert_eq!(ready_keys(&definition, &state), vec!["x", "y"]);
+    }
+
+    // ============================================================================
+    // A loop whose way in is closed is skipped (#38)
+    // ============================================================================
+
+    fn rel_if(key: &str, condition: &str) -> ActivityRelationship {
+        ActivityRelationship {
+            activity_key: key.to_string(),
+            conditions: Some(vec![condition.to_string()]),
+            is_back_edge: false,
+        }
+    }
+
+    /// gate → porter (conditional, a self-loop) → lobby
+    fn gated_self_loop() -> WorkflowDefinition {
+        WorkflowDefinition {
+            name: "gated".to_string(),
+            settings: None,
+            activities: vec![
+                make_activity_def("gate", None),
+                loop_def(
+                    "porter",
+                    vec![
+                        rel_if("gate", "{{ gate.status == 'skipped' }}"),
+                        rel("porter", true),
+                    ],
+                ),
+                make_activity_def("lobby", Some(vec![rel("porter", false)])),
+            ],
+        }
+    }
+
+    fn skipped_keys(definition: &WorkflowDefinition, state: &WorkflowState) -> Vec<String> {
+        let mut keys: Vec<String> = find_skipped_activities(definition, state)
+            .unwrap()
+            .into_iter()
+            .map(|a| a.key.clone())
+            .collect();
+        keys.sort();
+        keys
+    }
+
+    #[test]
+    fn test_back_edge_does_not_let_a_loop_in_on_its_first_round() {
+        // gate completed, so the condition on it is false
+        let definition = gated_self_loop();
+        let state = make_workflow_state(vec![
+            completed("gate", 1, 0),
+            make_activity_state("porter", WorkflowActivityStatus::NotScheduled),
+            make_activity_state("lobby", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert!(ready_keys(&definition, &state).is_empty());
+        assert_eq!(skipped_keys(&definition, &state), vec!["porter"]);
+    }
+
+    #[test]
+    fn test_back_edge_does_not_keep_a_loop_behind_a_skipped_step_waiting() {
+        // porter depends on gate without a condition, and gate was skipped
+        let mut definition = gated_self_loop();
+        definition.activities[1] =
+            loop_def("porter", vec![rel("gate", false), rel("porter", true)]);
+        let state = make_workflow_state(vec![
+            make_activity_state("gate", WorkflowActivityStatus::Skipped),
+            make_activity_state("porter", WorkflowActivityStatus::NotScheduled),
+            make_activity_state("lobby", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert!(ready_keys(&definition, &state).is_empty());
+        assert_eq!(skipped_keys(&definition, &state), vec!["porter"]);
+    }
+
+    #[test]
+    fn test_loop_with_an_open_entry_runs_its_first_round() {
+        let mut definition = gated_self_loop();
+        definition.activities[1] = loop_def(
+            "porter",
+            vec![
+                rel_if("gate", "{{ gate.status == 'completed' }}"),
+                rel("porter", true),
+            ],
+        );
+        let state = make_workflow_state(vec![
+            completed("gate", 1, 0),
+            make_activity_state("porter", WorkflowActivityStatus::NotScheduled),
+            make_activity_state("lobby", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(ready_keys(&definition, &state), vec!["porter"]);
+    }
+
+    #[test]
+    fn test_loop_with_only_back_edges_starts_with_the_workflow() {
+        // head ⇄ tail and nothing outside: the head is ready at once, the
+        // tail waits for it, and neither is skipped
+        let definition = WorkflowDefinition {
+            name: "from_start".to_string(),
+            settings: None,
+            activities: vec![
+                loop_def("head", vec![rel("tail", true)]),
+                loop_def("tail", vec![rel("head", false)]),
+            ],
+        };
+        let state = make_workflow_state(vec![
+            make_activity_state("head", WorkflowActivityStatus::NotScheduled),
+            make_activity_state("tail", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(ready_keys(&definition, &state), vec!["head"]);
+        assert!(skipped_keys(&definition, &state).is_empty());
+    }
+
+    #[test]
+    fn test_skipped_loop_head_cascades_to_its_tail() {
+        // The head was skipped on its way in: the tail, depending on the head
+        // inside the same loop, is skipped at once
+        let definition = WorkflowDefinition {
+            name: "cascade".to_string(),
+            settings: None,
+            activities: vec![
+                make_activity_def("gate", None),
+                loop_def("head", vec![rel("gate", false), rel("tail", true)]),
+                loop_def("tail", vec![rel("head", false)]),
+            ],
+        };
+        let state = make_workflow_state(vec![
+            make_activity_state("gate", WorkflowActivityStatus::Skipped),
+            make_activity_state("head", WorkflowActivityStatus::Skipped),
+            make_activity_state("tail", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(skipped_keys(&definition, &state), vec!["tail"]);
+    }
+
+    #[test]
+    fn test_loop_head_after_another_loop_waits_for_it_before_being_skipped() {
+        // counter is a self-loop going round again; spender's entry condition
+        // on it is false for now, but a later round may make it true
+        let definition = WorkflowDefinition {
+            name: "loop_after_loop".to_string(),
+            settings: None,
+            activities: vec![
+                loop_def("counter", vec![rel("counter", true)]),
+                loop_def(
+                    "spender",
+                    vec![
+                        rel_if("counter", "{{ counter.status == 'skipped' }}"),
+                        rel("spender", true),
+                    ],
+                ),
+            ],
+        };
+        let running = make_workflow_state(vec![
+            with_status("counter", 1, WorkflowActivityStatus::Pending),
+            make_activity_state("spender", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert!(skipped_keys(&definition, &running).is_empty());
+
+        let ended = make_workflow_state(vec![
+            completed("counter", 3, 3),
+            make_activity_state("spender", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(skipped_keys(&definition, &ended), vec!["spender"]);
+    }
+
+    #[test]
+    fn test_later_rounds_still_follow_the_back_edge() {
+        // porter has run a round: its back-edge decides, whatever its entry
+        // condition says now
+        let definition = gated_self_loop();
+        let state = make_workflow_state(vec![
+            completed("gate", 1, 0),
+            completed("porter", 2, 1),
+            make_activity_state("lobby", WorkflowActivityStatus::NotScheduled),
+        ]);
+        let ready = ready_keys(&definition, &state);
+        assert!(ready.contains(&"porter".to_string()), "{ready:?}");
+    }
+
+    // ============================================================================
+    // An activity after a loop waits for the loop to end (#40)
+    // ============================================================================
+
+    /// start → head ⇄ tail (head holds the back-edge, limit 3), and `after`,
+    /// which depends on the tail with no condition
+    fn loop_with_step_after() -> WorkflowDefinition {
+        let mut definition = two_step_loop();
+        definition.activities[1].iteration_limit = Some(3);
+        definition
+            .activities
+            .push(make_activity_def("after", Some(vec![rel("tail", false)])));
+        definition
+    }
+
+    #[test]
+    fn test_step_after_a_loop_waits_while_the_loop_goes_another_round() {
+        let definition = loop_with_step_after();
+        // Round 1 is done: the head is about to go again, so `after` waits
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("head", 2, 1),
+            completed("tail", 3, 1),
+            make_activity_state("after", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(ready_keys(&definition, &state), vec!["head"]);
+    }
+
+    #[test]
+    fn test_step_after_a_loop_waits_while_a_loop_step_is_in_flight() {
+        let definition = loop_with_step_after();
+        for status in [
+            WorkflowActivityStatus::Pending,
+            WorkflowActivityStatus::Running,
+            WorkflowActivityStatus::Waiting,
+        ] {
+            let state = make_workflow_state(vec![
+                completed("start", 1, 0),
+                with_status("head", 4, status),
+                completed("tail", 3, 1),
+                make_activity_state("after", WorkflowActivityStatus::NotScheduled),
+            ]);
+            assert!(
+                ready_keys(&definition, &state).is_empty(),
+                "head {status:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_step_after_a_loop_runs_once_the_loop_has_ended() {
+        let definition = loop_with_step_after();
+        // The head has used its iteration_limit: the loop is over
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("head", 6, 3),
+            completed("tail", 7, 3),
+            make_activity_state("after", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(ready_keys(&definition, &state), vec!["after"]);
+    }
+
+    #[test]
+    fn test_step_after_a_self_loop_waits_for_its_last_round() {
+        let definition = WorkflowDefinition {
+            name: "self_loop".to_string(),
+            settings: None,
+            activities: vec![
+                ActivityDefinition {
+                    iteration_limit: Some(2),
+                    ..loop_def("spinner", vec![rel("spinner", true)])
+                },
+                make_activity_def("after", Some(vec![rel("spinner", false)])),
+            ],
+        };
+        let going = make_workflow_state(vec![
+            completed("spinner", 1, 1),
+            make_activity_state("after", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(ready_keys(&definition, &going), vec!["spinner"]);
+
+        let ended = make_workflow_state(vec![
+            completed("spinner", 2, 2),
+            make_activity_state("after", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(ready_keys(&definition, &ended), vec!["after"]);
+    }
+
+    #[test]
+    fn test_another_loop_never_holds_a_step_after_a_loop_back() {
+        // `poller` is a separate self-loop, still running: `after` follows
+        // the head ⇄ tail loop only, which has ended
+        let mut definition = loop_with_step_after();
+        definition
+            .activities
+            .push(loop_def("poller", vec![rel("poller", true)]));
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("head", 6, 3),
+            completed("tail", 7, 3),
+            make_activity_state("after", WorkflowActivityStatus::NotScheduled),
+            with_status("poller", 8, WorkflowActivityStatus::Running),
+        ]);
+        assert_eq!(ready_keys(&definition, &state), vec!["after"]);
+    }
+
+    #[test]
+    fn test_loop_head_after_a_loop_waits_for_it_to_end() {
+        // A later loop's head that depends on this loop's tail with no
+        // condition starts once this loop has ended, not after its first round
+        let mut definition = loop_with_step_after();
+        definition.activities[3] =
+            loop_def("after", vec![rel("tail", false), rel("after_tail", true)]);
+        definition
+            .activities
+            .push(loop_def("after_tail", vec![rel("after", false)]));
+        let going = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("head", 2, 1),
+            completed("tail", 3, 1),
+            make_activity_state("after", WorkflowActivityStatus::NotScheduled),
+            make_activity_state("after_tail", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(ready_keys(&definition, &going), vec!["head"]);
+
+        let ended = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("head", 6, 3),
+            completed("tail", 7, 3),
+            make_activity_state("after", WorkflowActivityStatus::NotScheduled),
+            make_activity_state("after_tail", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(ready_keys(&definition, &ended), vec!["after"]);
+    }
+
+    #[test]
+    fn test_held_step_after_a_loop_is_not_skipped() {
+        // Held back while the loop runs, `after` is ready, not skippable
+        let definition = loop_with_step_after();
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("head", 2, 1),
+            completed("tail", 3, 1),
+            make_activity_state("after", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert!(
+            find_skipped_activities(&definition, &state)
+                .unwrap()
+                .is_empty()
+        );
     }
 }

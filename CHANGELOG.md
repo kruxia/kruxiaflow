@@ -55,6 +55,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so the merge can be gated separately.
 ### Fixed
 
+- **`INPUT` in a condition is the workflow input.** Conditions read `INPUT`
+  from `state_data`, which submission leaves empty, so every `INPUT.*` in a
+  `depends_on` condition was undefined: it failed the workflow, or with a
+  `default(...)` silently ignored the submitted value. Conditions now see
+  the submitted input, as parameter templates do.
+- **`{{activity_key.iteration}}` resolves.** The rounds an activity has
+  completed were tracked but not in the template context, so a parameter or
+  condition using them failed with "undefined value". An output named
+  `iteration` still takes precedence.
+- **Example 08a runs.** It failed scheduling its first activity. Besides the
+  two fixes above, its conditions were two templates joined by `<`/`>=`,
+  which render to a non-empty string and so were always true (the loop ran
+  to `iteration_limit`), and its email body used `{{fetch_page[*].result}}`,
+  which is not template syntax. The conditions are now single expressions,
+  and the body uses `{{fetch_page.response}}`, the array of every round's
+  response (`http_request`'s output is `response`, not `result`, which the
+  example also declared). A new test runs the example through the
+  orchestrator. Its header and README described a 5-second delay between
+  requests; `settings.delay` applies only to an activity's first round, so
+  it holds back the first request and the later ones are not spaced out.
+  They now say so.
+- **`{{ACTIVITY.*}}` resolves.** `ACTIVITY.iteration`,
+  `ACTIVITY.accumulated_cost_usd` and `ACTIVITY.remaining_budget_usd` were
+  documented but never set, so any template using them failed with
+  "undefined value" (#32). `ACTIVITY` is now the activity whose templates
+  are being resolved: its parameters, `delay` and `scheduled_for`, and the
+  conditions on its own `depends_on`.
+- **`{{SIGNAL.*}}` resolves** (#37). The data a signal carries was never put
+  in the template context, and parameters were resolved before the activity
+  started waiting, so an activity using `{{SIGNAL.*}}` failed with
+  "undefined value" before it could wait. Its templates are now resolved when
+  its wait ends, with `SIGNAL` set to the signal's `data`, or `null` when it
+  carried none or the wait timed out with `on_timeout: continue`. A budget
+  check for a waiting activity happens then too, not when the wait begins.
 - **The MCP activity catalog and authoring guide match the engine.** Both are
   hand-written, had drifted from the activities and the parser, and agents
   copy them verbatim. Because activity settings ignore unknown keys, several
@@ -95,10 +129,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `iteration_limit` stops a loop rather than failing it.
   - **Signals:** the guide's `wait_for_signal` section now covers
     `hold_early`, the `on_timeout` default, and waiting again in each round
-    of a loop. `send_workflow_signal` and `docs/mcp-server.md` said the
-    signal's data is `{{SIGNAL.*}}`; no template can read it
-    ([#37](https://github.com/kruxia/kruxiaflow/issues/37)), and the worker
-    receives it as `signal_data`.
+    of a loop. The guide lists `SIGNAL` among the template sources.
   - **README:** the approval-gate example had no `activity_name`, so it did
     not parse.
   - **CI now lints and tests the MCP server.** Its code is behind the
@@ -113,6 +144,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     activity's real parameters, must give its required parameters, and the
     approval example is run through the
     orchestrator's readiness evaluation for both kinds of request.
+- **A step after a loop runs after the loop's last round (#40).** A step
+  that depends on a loop step without being part of the loop ran as soon as
+  that step first completed: with no condition, after the loop's first
+  round, on that round's output, and never again. Now it waits while a step
+  of that loop is still running or about to start another round, and runs
+  (or is skipped) once the loop has ended, on its last round. A loop running
+  elsewhere in the workflow doesn't hold it back.
+  - **Loops in sequence:** a loop whose way in is a step of an earlier loop
+    now starts once that loop has ended, condition or not. It used to start
+    after the earlier loop's first round and run alongside it.
+  - **Conditions on a step after a loop** are decided by the last round: a
+    condition that held after an earlier round but not after the last no
+    longer runs the step.
+- **A loop whose way in is closed is skipped (#38).** The first time a loop
+  was reached, its back-edge (the head's dependency on itself, or on the
+  loop's last step) counted although that step hadn't run. A loop behind a
+  false condition ran anyway, to its `iteration_limit`, and a loop behind a
+  skipped step stayed `not_scheduled`, so the workflow stayed `running`
+  forever. Now the loop's dependencies from outside it decide its first
+  round, like any other step's: a false condition, or an unconditional
+  dependency on a skipped step, skips the loop, and the skip cascades to what
+  follows. Later rounds follow the back-edge as before, and a loop with no
+  dependency outside it still starts with the workflow.
+  - **Loops in sequence:** a loop whose way in is a condition on an earlier
+    loop's step now waits for that loop to end before it's skipped, like a
+    step after a loop (#27); it starts only once that loop has ended (#40).
+- **A join of parallel branches inside a loop waits for every branch of the
+  round (#28).** With a loop split into branches of different lengths that
+  join again, the join ran as soon as the short branch finished, on the long
+  branch's output from the previous round, and then again. A completed loop
+  activity now also waits while anything upstream of it in the same loop is
+  still running or about to run. A branch whose condition is false that round
+  doesn't hold the join back, and steps of another loop never hold back a
+  step inside this one (a loop after a loop waits for it to end, #40).
+- **A loop's exit step runs when a later round exits (#27).** A step after a
+  loop, conditional on a loop step (such as "finish when the check passes"),
+  was skipped for good when its condition was false in the first round, and
+  the workflow completed without it. It now waits while the loop runs, and is
+  skipped only once the loop has ended without satisfying it.
+- **A step that runs because another was skipped now runs (#25).** A branch
+  such as `conditions: ["{{ maybe.status == 'skipped' }}"]` became ready only
+  after `maybe` was skipped, but skips were applied after scheduling and
+  publish no event, so nothing scheduled it and the workflow stayed `running`
+  forever. Scheduling and skipping now repeat until a pass skips nothing.
+
+### Changed
+
+- **`ACTIVITY` costs are numbers.** `accumulated_cost_usd` and
+  `remaining_budget_usd` were strings such as `"7.50"`, which compare greater
+  than every number, so `{{ACTIVITY.accumulated_cost_usd < 5}}` was always
+  false. With no `settings.budget` on the activity, `remaining_budget_usd`
+  is `null` rather than `"0.00"`, which read as an exhausted budget.
 
 ## [0.12.4] - 2026-11-21
 
@@ -218,9 +301,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **No redeploy needed:** the orchestrator completes the loop marking of
     every definition it loads, from the stored back-edges, so definitions
     deployed before the fix and runs already in flight are fixed too.
-  - **Known limitation:** a join of parallel branches inside a loop still
-    runs when any of its inputs is new, so it can run on a branch's output
-    from the previous round. See the loops guide.
   - **Behaviour change:** middle steps of such loops now count iterations
     (`{{ACTIVITY.iteration}}`), and with `iteration_scoped: true` they store
     per-round outputs.
@@ -263,9 +343,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each round's after the first as a duplicate, while the API still answered
   `"signaled": true`; the workflow then waited for good. Subscriptions now
   record the loop round (migration `20261119000001` adds
-  `activity_event_subscriptions.iteration`); the events the signal endpoint
-  and the expiry checker publish carry it, and the orchestrator acts only on
-  a signal for the round that is waiting.
+  `activity_event_subscriptions.iteration`) and their events carry it.
 
 ## [0.12.1] - 2026-11-17
 

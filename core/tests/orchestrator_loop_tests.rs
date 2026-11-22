@@ -1733,6 +1733,1170 @@ activities:
     );
 }
 
+/// Drive a workflow through the real orchestrator to the end: complete every
+/// pending activity (with the outputs `outputs(key, run)` gives for its
+/// `run`-th execution, counting from 1), round after round, until nothing is
+/// pending. Completions carry the activity's iteration, as the worker does.
+/// Returns how often each activity ran and the final state.
+async fn run_to_end(
+    pool: &PgPool,
+    yaml: &str,
+    outputs: impl Fn(&str, u32) -> serde_json::Value,
+) -> (
+    std::collections::BTreeMap<String, u32>,
+    kruxiaflow_core::orchestrator::WorkflowState,
+) {
+    let definition = WorkflowDefinition::from_yaml(yaml).expect("valid definition");
+    let definition_id = insert_workflow_definition(pool, &definition).await;
+    let workflow_id = Uuid::now_v7();
+
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
+    let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
+        Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
+    let config = OrchestratorConfig::new(pool.clone());
+
+    let process_all = || async {
+        loop {
+            let events = event_source.poll("orchestrator").await.unwrap();
+            if events.is_empty() {
+                break;
+            }
+            for event in events {
+                kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
+                    &event,
+                    &event_source,
+                    &activity_queue,
+                    &subscription_service,
+                    &config,
+                )
+                .await
+                .expect("process event");
+                event_source
+                    .update_position("orchestrator", event.cursor())
+                    .await
+                    .unwrap();
+            }
+        }
+    };
+    let load = || async {
+        let mut tx = pool.begin().await.unwrap();
+        let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
+        tx.commit().await.unwrap();
+        state
+    };
+
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id,
+            event_type: WorkflowEventType::WorkflowCreated,
+            activity_key: None,
+            payload: json!({
+                "definition_name": definition.name,
+                "workflow_definition_id": definition_id,
+            }),
+            iteration: None,
+        })
+        .await
+        .unwrap();
+
+    let mut runs: std::collections::BTreeMap<String, u32> = Default::default();
+    for _ in 0..100 {
+        process_all().await;
+        let state = load().await;
+        let mut pending: Vec<(String, u32)> = state
+            .activities
+            .values()
+            .filter(|a| a.status == WorkflowActivityStatus::Pending)
+            .map(|a| (a.key.clone(), a.iteration))
+            .collect();
+        if pending.is_empty() {
+            break;
+        }
+        pending.sort();
+        for (key, iteration) in pending {
+            let run = runs.entry(key.clone()).or_default();
+            *run += 1;
+            let payload = json!({ "outputs": outputs(&key, *run) });
+            event_source
+                .publish(NewWorkflowEvent {
+                    workflow_id,
+                    event_type: WorkflowEventType::ActivityCompleted,
+                    activity_key: Some(key),
+                    payload,
+                    iteration: Some(iteration as i32),
+                })
+                .await
+                .unwrap();
+        }
+    }
+    process_all().await;
+    (runs, load().await)
+}
+
+/// The repair loop of #27: run, check, fix while the check fails, and finish
+/// when it passes. Keys sort in written order, so the back-edge is
+/// `a_run`'s dependency on `c_fix` whether the back-edge search goes by key
+/// or by written order (#26).
+const REPAIR_LOOP: &str = r#"
+name: repair
+activities:
+  - key: a_run
+    worker: test
+    activity_name: echo
+    iteration_limit: 5
+    depends_on:
+      - activity_key: c_fix
+        conditions: ["{{ c_fix.status == 'completed' }}"]
+  - key: b_check
+    worker: test
+    activity_name: echo
+    depends_on: [a_run]
+  - key: c_fix
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: b_check
+        conditions: ["{{ b_check.result == 'fail' }}"]
+  - key: d_done
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: b_check
+        conditions: ["{{ b_check.result == 'pass' }}"]
+  - key: e_report
+    worker: test
+    activity_name: echo
+    depends_on: [d_done]
+  - key: f_give_up
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: d_done
+        conditions: ["{{ d_done.status == 'skipped' }}"]
+"#;
+
+/// `b_check` results: `fail` for its first `fails` runs, then `pass`
+fn check_results(fails: u32) -> impl Fn(&str, u32) -> serde_json::Value {
+    move |key, run| {
+        if key == "b_check" {
+            json!({ "result": if run <= fails { "fail" } else { "pass" } })
+        } else {
+            json!({ "result": key })
+        }
+    }
+}
+
+fn status_of(
+    state: &kruxiaflow_core::orchestrator::WorkflowState,
+    key: &str,
+) -> WorkflowActivityStatus {
+    state.activities[key].status
+}
+
+/// #27 [loop-exit-skipped]: the loop's exit step runs when a later round
+/// exits.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_loop_exit_step_runs_when_a_later_round_exits(pool: PgPool) {
+    let (runs, state) = run_to_end(&pool, REPAIR_LOOP, check_results(2)).await;
+
+    assert_eq!(runs.get("a_run"), Some(&3), "{runs:?}");
+    assert_eq!(runs.get("b_check"), Some(&3), "{runs:?}");
+    assert_eq!(runs.get("c_fix"), Some(&2), "{runs:?}");
+    assert_eq!(
+        runs.get("d_done"),
+        Some(&1),
+        "exit step runs once: {runs:?}"
+    );
+    assert_eq!(runs.get("e_report"), Some(&1), "{runs:?}");
+    assert_eq!(
+        status_of(&state, "d_done"),
+        WorkflowActivityStatus::Completed
+    );
+    assert_eq!(
+        status_of(&state, "f_give_up"),
+        WorkflowActivityStatus::Skipped
+    );
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// #27: when the loop exits in its first round, the exit step runs then
+#[sqlx::test(migrations = "../migrations")]
+async fn test_loop_exit_step_runs_when_the_first_round_exits(pool: PgPool) {
+    let (runs, state) = run_to_end(&pool, REPAIR_LOOP, check_results(0)).await;
+
+    assert_eq!(runs.get("a_run"), Some(&1), "{runs:?}");
+    assert_eq!(runs.get("b_check"), Some(&1), "{runs:?}");
+    assert_eq!(runs.get("c_fix"), None, "{runs:?}");
+    assert_eq!(runs.get("d_done"), Some(&1), "{runs:?}");
+    assert_eq!(status_of(&state, "c_fix"), WorkflowActivityStatus::Skipped);
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// #27: when the loop reaches its iteration limit without passing, the exit
+/// step is skipped once the loop has ended, what depends on it is decided in
+/// the same pass (`e_report` skipped, `f_give_up` run), and the workflow
+/// completes instead of waiting for it.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_loop_exit_step_is_skipped_when_the_iteration_limit_is_reached(pool: PgPool) {
+    let (runs, state) = run_to_end(&pool, REPAIR_LOOP, check_results(u32::MAX)).await;
+
+    assert_eq!(runs.get("a_run"), Some(&5), "{runs:?}");
+    assert_eq!(runs.get("b_check"), Some(&5), "{runs:?}");
+    assert_eq!(runs.get("c_fix"), Some(&5), "{runs:?}");
+    assert_eq!(runs.get("d_done"), None, "{runs:?}");
+    assert_eq!(status_of(&state, "d_done"), WorkflowActivityStatus::Skipped);
+    assert_eq!(
+        status_of(&state, "e_report"),
+        WorkflowActivityStatus::Skipped
+    );
+    assert_eq!(runs.get("f_give_up"), Some(&1), "{runs:?}");
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// #27: a conditional step outside any loop is still skipped as soon as its
+/// condition is false, even while other activities are still running
+#[sqlx::test(migrations = "../migrations")]
+async fn test_conditional_skip_outside_a_loop_is_immediate(pool: PgPool) {
+    let yaml = r#"
+name: branch
+activities:
+  - key: a_start
+    worker: test
+    activity_name: echo
+  - key: b_slow
+    worker: test
+    activity_name: echo
+    depends_on: [a_start]
+  - key: c_never
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: a_start
+        conditions: ["{{ a_start.result == 'other' }}"]
+"#;
+    let definition = WorkflowDefinition::from_yaml(yaml).expect("valid definition");
+    let definition_id = insert_workflow_definition(&pool, &definition).await;
+    let workflow_id = Uuid::now_v7();
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
+    let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
+        Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
+    let config = OrchestratorConfig::new(pool.clone());
+    let process_all = || async {
+        loop {
+            let events = event_source.poll("orchestrator").await.unwrap();
+            if events.is_empty() {
+                break;
+            }
+            for event in events {
+                kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
+                    &event,
+                    &event_source,
+                    &activity_queue,
+                    &subscription_service,
+                    &config,
+                )
+                .await
+                .expect("process event");
+                event_source
+                    .update_position("orchestrator", event.cursor())
+                    .await
+                    .unwrap();
+            }
+        }
+    };
+    for (event_type, key) in [
+        (WorkflowEventType::WorkflowCreated, None),
+        (WorkflowEventType::ActivityCompleted, Some("a_start")),
+    ] {
+        event_source
+            .publish(NewWorkflowEvent {
+                workflow_id,
+                event_type,
+                activity_key: key.map(str::to_string),
+                payload: if key.is_some() {
+                    json!({"outputs": {"result": "ok"}})
+                } else {
+                    json!({
+                        "definition_name": definition.name,
+                        "workflow_definition_id": definition_id,
+                    })
+                },
+                iteration: None,
+            })
+            .await
+            .unwrap();
+        process_all().await;
+    }
+
+    let mut tx = pool.begin().await.unwrap();
+    let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(status_of(&state, "b_slow"), WorkflowActivityStatus::Pending);
+    assert_eq!(
+        status_of(&state, "c_never"),
+        WorkflowActivityStatus::Skipped,
+        "skipped right away, not when the workflow ends"
+    );
+}
+
+/// What [`drive_loop_workflow`] saw: how often each activity ran, the set of
+/// pending activities at every step, and the workflow's final status.
+struct LoopRun {
+    workflow_id: Uuid,
+    runs: std::collections::BTreeMap<String, u32>,
+    pending_history: Vec<Vec<String>>,
+    status: kruxiaflow_core::events::models::WorkflowStatus,
+}
+
+/// Drive a workflow through the real orchestrator, acting as the worker:
+/// at every step, complete the pending activities listed in `first` if any
+/// are pending, otherwise every pending activity. Completions carry the loop
+/// activity's iteration, and output it as `round`. Stops when nothing is pending (done, or hung).
+async fn drive_loop_workflow(pool: &PgPool, yaml: &str, first: &[&str]) -> LoopRun {
+    let definition = WorkflowDefinition::from_yaml(yaml).expect("valid loop definition");
+    let definition_id = insert_workflow_definition(pool, &definition).await;
+    let workflow_id = Uuid::now_v7();
+
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
+    let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
+        Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
+    let config = OrchestratorConfig::new(pool.clone());
+
+    let process_all = || async {
+        loop {
+            let events = event_source.poll("orchestrator").await.unwrap();
+            if events.is_empty() {
+                break;
+            }
+            for event in events {
+                kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
+                    &event,
+                    &event_source,
+                    &activity_queue,
+                    &subscription_service,
+                    &config,
+                )
+                .await
+                .expect("process event");
+                event_source
+                    .update_position("orchestrator", event.cursor())
+                    .await
+                    .unwrap();
+            }
+        }
+    };
+    let load = || async {
+        let mut tx = pool.begin().await.unwrap();
+        let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
+        tx.commit().await.unwrap();
+        state
+    };
+
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id,
+            event_type: WorkflowEventType::WorkflowCreated,
+            activity_key: None,
+            payload: json!({
+                "definition_name": definition.name,
+                "workflow_definition_id": definition_id,
+            }),
+            iteration: None,
+        })
+        .await
+        .unwrap();
+
+    let mut runs: std::collections::BTreeMap<String, u32> = Default::default();
+    let mut pending_history = Vec::new();
+    for _ in 0..100 {
+        process_all().await;
+        let state = load().await;
+        let mut pending: Vec<(String, u32)> = state
+            .activities
+            .values()
+            .filter(|a| a.status == WorkflowActivityStatus::Pending)
+            .map(|a| (a.key.clone(), a.iteration))
+            .collect();
+        if pending.is_empty() {
+            break;
+        }
+        pending.sort();
+        pending_history.push(pending.iter().map(|(k, _)| k.clone()).collect());
+        let preferred: Vec<(String, u32)> = pending
+            .iter()
+            .filter(|(k, _)| first.contains(&k.as_str()))
+            .cloned()
+            .collect();
+        let to_complete = if preferred.is_empty() {
+            pending
+        } else {
+            preferred
+        };
+        for (key, iteration) in to_complete {
+            *runs.entry(key.clone()).or_default() += 1;
+            event_source
+                .publish(NewWorkflowEvent {
+                    workflow_id,
+                    event_type: WorkflowEventType::ActivityCompleted,
+                    activity_key: Some(key),
+                    // `round` lets conditions tell rounds apart (0-based)
+                    payload: json!({"outputs": {"result": "ok", "round": iteration}}),
+                    iteration: Some(iteration as i32),
+                })
+                .await
+                .unwrap();
+        }
+    }
+    process_all().await;
+    let status = load().await.status;
+    LoopRun {
+        workflow_id,
+        runs,
+        pending_history,
+        status,
+    }
+}
+
+/// #28 [loop-join-stale-input]: a join of parallel branches of different
+/// lengths inside a loop runs once per round, after both branches finished
+/// that round.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_loop_join_waits_for_every_branch_of_the_round(pool: PgPool) {
+    let run = drive_loop_workflow(
+        &pool,
+        r#"
+name: diamond_loop
+activities:
+  - key: start
+    worker: test
+    activity_name: echo
+  - key: a_head
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - start
+      - activity_key: e_join
+        conditions: ["{{ e_join.status == 'completed' }}"]
+  - key: b_long1
+    worker: test
+    activity_name: echo
+    depends_on: [a_head]
+  - key: c_long2
+    worker: test
+    activity_name: echo
+    depends_on: [b_long1]
+  - key: d_short
+    worker: test
+    activity_name: echo
+    depends_on: [a_head]
+  - key: e_join
+    worker: test
+    activity_name: echo
+    depends_on: [c_long2, d_short]
+"#,
+        &["d_short"],
+    )
+    .await;
+
+    for pending in &run.pending_history {
+        let long_branch_busy = pending.iter().any(|k| k == "b_long1" || k == "c_long2");
+        assert!(
+            !(pending.iter().any(|k| k == "e_join") && long_branch_busy),
+            "e_join scheduled while the long branch is still running its round: {pending:?} \
+             (history {:?})",
+            run.pending_history
+        );
+    }
+    for key in ["a_head", "b_long1", "c_long2", "d_short", "e_join"] {
+        assert_eq!(
+            run.runs.get(key),
+            Some(&3),
+            "{key} runs once per round: {:?}",
+            run.runs
+        );
+    }
+    assert_eq!(
+        run.status,
+        kruxiaflow_core::events::models::WorkflowStatus::Completed,
+        "{:?}",
+        run.runs
+    );
+}
+
+/// #28: a branch that runs in round 1 but whose condition is false from
+/// round 2 on stays `Completed` from round 1. The join must not wait for it
+/// (it will not run again), so the join still runs every round and the
+/// workflow completes instead of hanging.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_loop_join_does_not_wait_for_a_branch_that_will_not_run(pool: PgPool) {
+    let run = drive_loop_workflow(
+        &pool,
+        r#"
+name: diamond_loop_conditional_branch
+activities:
+  - key: start
+    worker: test
+    activity_name: echo
+  - key: a_head
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - start
+      - activity_key: e_join
+        conditions: ["{{ e_join.status == 'completed' }}"]
+  - key: b_long1
+    worker: test
+    activity_name: echo
+    depends_on: [a_head]
+  - key: c_long2
+    worker: test
+    activity_name: echo
+    depends_on: [b_long1]
+  - key: d_cond
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: a_head
+        conditions: ["{{ a_head.round == 0 }}"]
+  - key: e_join
+    worker: test
+    activity_name: echo
+    depends_on: [c_long2, d_cond]
+"#,
+        &["d_cond"],
+    )
+    .await;
+
+    assert_eq!(
+        run.runs.get("d_cond"),
+        Some(&1),
+        "d_cond runs in round 1 only: {:?}",
+        run.runs
+    );
+    for key in ["a_head", "b_long1", "c_long2", "e_join"] {
+        assert_eq!(
+            run.runs.get(key),
+            Some(&3),
+            "{key} runs once per round: {:?} (history {:?})",
+            run.runs,
+            run.pending_history
+        );
+    }
+    assert_eq!(
+        run.status,
+        kruxiaflow_core::events::models::WorkflowStatus::Completed,
+        "the workflow completes, it doesn't hang: {:?} (history {:?})",
+        run.runs,
+        run.pending_history
+    );
+}
+
+/// #28: two loops in sequence (loop 2's head depends on loop 1's tail). Each
+/// loop's steps belong to that loop only: loop 1's steps are upstream of
+/// loop 2's head but never hold its later rounds back (#28's hold), and both
+/// loops complete. Loop 2 starts once loop 1 has ended (#40): its head is a
+/// step after loop 1.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_two_sequential_loops_both_complete(pool: PgPool) {
+    let run = drive_loop_workflow(
+        &pool,
+        r#"
+name: sequential_loops
+activities:
+  - key: start
+    worker: test
+    activity_name: echo
+  - key: a_head
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - start
+      - activity_key: b_tail
+        conditions: ["{{ b_tail.status == 'completed' }}"]
+  - key: b_tail
+    worker: test
+    activity_name: echo
+    depends_on: [a_head]
+  - key: c_head
+    worker: test
+    activity_name: echo
+    iteration_limit: 2
+    depends_on:
+      - b_tail
+      - activity_key: d_tail
+        conditions: ["{{ d_tail.status == 'completed' }}"]
+  - key: d_tail
+    worker: test
+    activity_name: echo
+    depends_on: [c_head]
+"#,
+        &[],
+    )
+    .await;
+
+    assert_eq!(run.runs.get("start"), Some(&1), "{:?}", run.runs);
+    for (key, limit) in [("a_head", 3), ("b_tail", 3), ("c_head", 2), ("d_tail", 2)] {
+        assert_eq!(
+            run.runs.get(key),
+            Some(&limit),
+            "{key} runs its loop's iteration_limit: {:?} (history {:?})",
+            run.runs,
+            run.pending_history
+        );
+    }
+    // Loop 2 starts after loop 1's last round, not alongside its first ones
+    // (#40); its second round then follows its own first, with nothing of
+    // loop 1 left to hold it back
+    let overlapping = run
+        .pending_history
+        .iter()
+        .filter(|p| {
+            p.iter().any(|k| k == "c_head" || k == "d_tail")
+                && p.iter().any(|k| k == "a_head" || k == "b_tail")
+        })
+        .count();
+    assert_eq!(
+        overlapping, 0,
+        "loop 2 starts once loop 1 has ended: {:?}",
+        run.pending_history
+    );
+    assert_eq!(
+        run.status,
+        kruxiaflow_core::events::models::WorkflowStatus::Completed,
+        "{:?}",
+        run.runs
+    );
+}
+
+// ============================================================================
+// A loop whose way in is closed is skipped [loop-entry-not-skipped]
+//
+// Entering a loop for the first time, a step's back-edge points at a loop step
+// that hasn't run (for a self-loop, the step itself), so it is left out on
+// round 0 and the loop's other dependencies decide.
+// ============================================================================
+
+/// `gate` echoes `open` from `open_gate`; everything else echoes its key
+fn gate_outputs(open_gate: bool) -> impl Fn(&str, u32) -> serde_json::Value {
+    move |key, run| match key {
+        "gate" => json!({ "open": open_gate }),
+        _ => json!({ "step": key, "run": run }),
+    }
+}
+
+/// A self-loop behind a conditional entry, and a step after it
+const GATED_SELF_LOOP: &str = r#"
+name: gated_self_loop
+activities:
+  - key: gate
+    worker: test
+    activity_name: echo
+  - key: porter
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - activity_key: gate
+        conditions: ["{{ gate.open }}"]
+      - porter
+  - key: lobby
+    worker: test
+    activity_name: echo
+    depends_on: [porter]
+"#;
+
+/// The entry condition is false: the self-loop is skipped, and so is the step
+/// after it; the workflow completes.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_self_loop_with_a_false_entry_condition_is_skipped(pool: PgPool) {
+    let (runs, state) = run_to_end(&pool, GATED_SELF_LOOP, gate_outputs(false)).await;
+
+    assert_eq!(runs.get("gate"), Some(&1), "{runs:?}");
+    assert_eq!(runs.get("porter"), None, "the loop never starts: {runs:?}");
+    assert_eq!(runs.get("lobby"), None, "{runs:?}");
+    assert_eq!(status_of(&state, "porter"), WorkflowActivityStatus::Skipped);
+    assert_eq!(status_of(&state, "lobby"), WorkflowActivityStatus::Skipped);
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// The entry condition is true: the loop runs to its iteration_limit
+#[sqlx::test(migrations = "../migrations")]
+async fn test_self_loop_with_a_true_entry_condition_runs(pool: PgPool) {
+    let (runs, state) = run_to_end(&pool, GATED_SELF_LOOP, gate_outputs(true)).await;
+
+    assert_eq!(runs.get("porter"), Some(&3), "{runs:?}");
+    assert_eq!(runs.get("lobby"), Some(&1), "{runs:?}");
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// The entry is a skipped step: the self-loop is skipped too, and the skip
+/// cascades past it; the workflow completes.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_self_loop_behind_a_skipped_step_is_skipped(pool: PgPool) {
+    let yaml = r#"
+name: skipped_entry_self_loop
+activities:
+  - key: gate
+    worker: test
+    activity_name: echo
+  - key: bell
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: gate
+        conditions: ["{{ gate.open }}"]
+  - key: ringer
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on: [bell, ringer]
+  - key: lobby
+    worker: test
+    activity_name: echo
+    depends_on: [ringer]
+"#;
+    let (runs, state) = run_to_end(&pool, yaml, gate_outputs(false)).await;
+
+    assert_eq!(runs.get("ringer"), None, "{runs:?}");
+    assert_eq!(status_of(&state, "bell"), WorkflowActivityStatus::Skipped);
+    assert_eq!(status_of(&state, "ringer"), WorkflowActivityStatus::Skipped);
+    assert_eq!(status_of(&state, "lobby"), WorkflowActivityStatus::Skipped);
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// A two-step loop (head and tail) behind a conditional entry, and a step
+/// after it that runs only when the loop was skipped
+const GATED_TWO_STEP_LOOP: &str = r#"
+name: gated_two_step_loop
+activities:
+  - key: gate
+    worker: test
+    activity_name: echo
+  - key: a_head
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - activity_key: gate
+        conditions: ["{{ gate.open }}"]
+      - activity_key: b_tail
+        conditions: ["{{ b_tail.status == 'completed' }}"]
+  - key: b_tail
+    worker: test
+    activity_name: echo
+    depends_on: [a_head]
+  - key: c_closed
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: b_tail
+        conditions: ["{{ b_tail.status == 'skipped' }}"]
+"#;
+
+/// The head's entry condition is false: head and tail are skipped, and the
+/// step that handles a skipped loop runs.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_two_step_loop_with_a_false_entry_condition_is_skipped(pool: PgPool) {
+    let (runs, state) = run_to_end(&pool, GATED_TWO_STEP_LOOP, gate_outputs(false)).await;
+
+    assert_eq!(runs.get("a_head"), None, "{runs:?}");
+    assert_eq!(runs.get("b_tail"), None, "{runs:?}");
+    assert_eq!(status_of(&state, "a_head"), WorkflowActivityStatus::Skipped);
+    assert_eq!(status_of(&state, "b_tail"), WorkflowActivityStatus::Skipped);
+    assert_eq!(runs.get("c_closed"), Some(&1), "{runs:?}");
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// The head's entry condition is true: three rounds, and the skipped-loop
+/// step is skipped
+#[sqlx::test(migrations = "../migrations")]
+async fn test_two_step_loop_with_a_true_entry_condition_runs(pool: PgPool) {
+    let (runs, state) = run_to_end(&pool, GATED_TWO_STEP_LOOP, gate_outputs(true)).await;
+
+    assert_eq!(runs.get("a_head"), Some(&3), "{runs:?}");
+    assert_eq!(runs.get("b_tail"), Some(&3), "{runs:?}");
+    assert_eq!(
+        status_of(&state, "c_closed"),
+        WorkflowActivityStatus::Skipped
+    );
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// A two-step loop whose head depends on a skipped step: head and tail are
+/// skipped and the workflow completes.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_two_step_loop_behind_a_skipped_step_is_skipped(pool: PgPool) {
+    let yaml = r#"
+name: skipped_entry_two_step_loop
+activities:
+  - key: gate
+    worker: test
+    activity_name: echo
+  - key: bell
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: gate
+        conditions: ["{{ gate.open }}"]
+  - key: c_head
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - bell
+      - activity_key: d_tail
+        conditions: ["{{ d_tail.status == 'completed' }}"]
+  - key: d_tail
+    worker: test
+    activity_name: echo
+    depends_on: [c_head]
+"#;
+    let (runs, state) = run_to_end(&pool, yaml, gate_outputs(false)).await;
+
+    assert_eq!(runs.get("c_head"), None, "{runs:?}");
+    assert_eq!(status_of(&state, "c_head"), WorkflowActivityStatus::Skipped);
+    assert_eq!(status_of(&state, "d_tail"), WorkflowActivityStatus::Skipped);
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// Two entry dependencies decide like any step's: the loop runs when one of
+/// them applies, and is skipped when neither does
+#[sqlx::test(migrations = "../migrations")]
+async fn test_loop_with_two_entry_dependencies(pool: PgPool) {
+    let yaml = |second_open: bool| {
+        format!(
+            r#"
+name: two_entries_{second_open}
+activities:
+  - key: gate
+    worker: test
+    activity_name: echo
+  - key: side_gate
+    worker: test
+    activity_name: echo
+  - key: porter
+    worker: test
+    activity_name: echo
+    iteration_limit: 2
+    depends_on:
+      - activity_key: gate
+        conditions: ["{{{{ gate.open }}}}"]
+      - activity_key: side_gate
+        conditions: ["{{{{ {second_open} }}}}"]
+      - porter
+"#
+        )
+    };
+
+    let (runs, state) = run_to_end(&pool, &yaml(true), gate_outputs(false)).await;
+    assert_eq!(runs.get("porter"), Some(&2), "one way in is open: {runs:?}");
+    assert_eq!(state.status, WorkflowStatus::Completed);
+
+    let (runs, state) = run_to_end(&pool, &yaml(false), gate_outputs(false)).await;
+    assert_eq!(runs.get("porter"), None, "both ways in are shut: {runs:?}");
+    assert_eq!(status_of(&state, "porter"), WorkflowActivityStatus::Skipped);
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// The entry written with `dependency_of` on the gate decides the same way
+#[sqlx::test(migrations = "../migrations")]
+async fn test_loop_entry_written_with_dependency_of_is_skipped(pool: PgPool) {
+    let yaml = r#"
+name: dependency_of_entry
+activities:
+  - key: gate
+    worker: test
+    activity_name: echo
+    dependency_of:
+      - activity_key: porter
+        conditions: ["{{ gate.open }}"]
+  - key: porter
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on: [porter]
+"#;
+    let (runs, state) = run_to_end(&pool, yaml, gate_outputs(false)).await;
+
+    assert_eq!(runs.get("porter"), None, "{runs:?}");
+    assert_eq!(status_of(&state, "porter"), WorkflowActivityStatus::Skipped);
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// A loop with no dependency outside it starts with the workflow:
+/// its back-edge neither lets it in nor keeps it out
+#[sqlx::test(migrations = "../migrations")]
+async fn test_loop_entered_from_the_workflow_start_runs(pool: PgPool) {
+    let yaml = r#"
+name: loop_from_start
+activities:
+  - key: a_step_in
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - activity_key: b_alight
+        conditions: ["{{ b_alight.status == 'completed' }}"]
+  - key: b_alight
+    worker: test
+    activity_name: echo
+    depends_on: [a_step_in]
+  - key: spinner
+    worker: test
+    activity_name: echo
+    iteration_limit: 2
+    depends_on: [spinner]
+"#;
+    let (runs, state) = run_to_end(&pool, yaml, gate_outputs(true)).await;
+
+    assert_eq!(runs.get("a_step_in"), Some(&3), "{runs:?}");
+    assert_eq!(runs.get("b_alight"), Some(&3), "{runs:?}");
+    assert_eq!(runs.get("spinner"), Some(&2), "{runs:?}");
+    assert_eq!(state.status, WorkflowStatus::Completed);
+}
+
+/// A loop whose entry condition reads an earlier loop's step waits for that
+/// loop to end before it is skipped, like a step after a loop (#27): the
+/// condition is false after the counter's first rounds and true after its
+/// last, so the second loop starts then, not before.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_loop_entry_on_an_earlier_loop_waits_for_it(pool: PgPool) {
+    let run = drive_loop_workflow(
+        &pool,
+        r#"
+name: loop_after_loop
+activities:
+  - key: counter
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on: [counter]
+  - key: spender
+    worker: test
+    activity_name: echo
+    iteration_limit: 2
+    depends_on:
+      - activity_key: counter
+        conditions: ["{{ counter.round >= 2 }}"]
+      - spender
+"#,
+        &[],
+    )
+    .await;
+
+    assert_eq!(run.runs.get("counter"), Some(&3), "{:?}", run.runs);
+    assert_eq!(
+        run.runs.get("spender"),
+        Some(&2),
+        "starts once the counter's last round is done: {:?} (history {:?})",
+        run.runs,
+        run.pending_history
+    );
+    assert!(
+        !run.pending_history
+            .iter()
+            .any(|p| p.iter().any(|k| k == "counter") && p.iter().any(|k| k == "spender")),
+        "spender never runs alongside counter: {:?}",
+        run.pending_history
+    );
+    assert_eq!(
+        run.status,
+        kruxiaflow_core::events::models::WorkflowStatus::Completed,
+        "{:?}",
+        run.runs
+    );
+}
+
+// ============================================================================
+// A step after a loop runs after the loop's last round [loop-dependent-runs-early]
+//
+// A step that depends on a loop step without being part of the loop is how
+// the loop hands off its result. It runs once, after the loop's last round,
+// on that round's output.
+// ============================================================================
+
+/// The parameters the orchestrator queued `key` with, in `workflow_id`
+async fn queued_parameters(pool: &PgPool, workflow_id: Uuid, key: &str) -> serde_json::Value {
+    sqlx::query_scalar::<_, serde_json::Value>(
+        "SELECT parameters FROM activity_queue WHERE workflow_id = $1 AND activity_key = $2",
+    )
+    .bind(workflow_id)
+    .bind(key)
+    .fetch_one(pool)
+    .await
+    .expect("queued activity")
+}
+
+/// Whether `key` was ever pending alongside one of `others`
+fn ran_alongside(run: &LoopRun, key: &str, others: &[&str]) -> bool {
+    run.pending_history
+        .iter()
+        .any(|p| p.iter().any(|k| k == key) && p.iter().any(|k| others.contains(&k.as_str())))
+}
+
+/// A two-step loop (lift ⇄ drop, three rounds) and `survey`, which depends on
+/// `drop` with no condition: it runs once, after the third drop, on its
+/// output.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_step_after_a_two_step_loop_runs_after_its_last_round(pool: PgPool) {
+    let run = drive_loop_workflow(
+        &pool,
+        r#"
+name: step_after_two_step_loop
+activities:
+  - key: crane
+    worker: test
+    activity_name: echo
+  - key: lift
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - crane
+      - activity_key: drop
+        conditions: ["{{ drop.status == 'completed' }}"]
+  - key: drop
+    worker: test
+    activity_name: echo
+    depends_on: [lift]
+  - key: survey
+    worker: test
+    activity_name: echo
+    parameters:
+      depth: "{{ drop.round }}"
+    depends_on: [drop]
+"#,
+        &[],
+    )
+    .await;
+
+    for (key, expected) in [("crane", 1), ("lift", 3), ("drop", 3), ("survey", 1)] {
+        assert_eq!(
+            run.runs.get(key),
+            Some(&expected),
+            "{key}: {:?} (history {:?})",
+            run.runs,
+            run.pending_history
+        );
+    }
+    assert!(
+        !ran_alongside(&run, "survey", &["lift", "drop"]),
+        "survey waits for the loop to end: {:?}",
+        run.pending_history
+    );
+    assert_eq!(
+        queued_parameters(&pool, run.workflow_id, "survey").await,
+        json!({ "depth": 2 }),
+        "survey takes the last round's output (round 2, 0-based)"
+    );
+    assert_eq!(run.status, WorkflowStatus::Completed, "{:?}", run.runs);
+}
+
+/// A self-loop (three rounds) and a step after it with no condition: the
+/// step runs once, after the last round, on its output
+#[sqlx::test(migrations = "../migrations")]
+async fn test_step_after_a_self_loop_runs_after_its_last_round(pool: PgPool) {
+    let run = drive_loop_workflow(
+        &pool,
+        r#"
+name: step_after_self_loop
+activities:
+  - key: tamper
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on: [tamper]
+  - key: sign_off
+    worker: test
+    activity_name: echo
+    parameters:
+      tamps: "{{ tamper.round }}"
+    depends_on: [tamper]
+"#,
+        &[],
+    )
+    .await;
+
+    assert_eq!(run.runs.get("tamper"), Some(&3), "{:?}", run.runs);
+    assert_eq!(run.runs.get("sign_off"), Some(&1), "{:?}", run.runs);
+    assert!(
+        !ran_alongside(&run, "sign_off", &["tamper"]),
+        "sign_off waits for the loop to end: {:?}",
+        run.pending_history
+    );
+    assert_eq!(
+        queued_parameters(&pool, run.workflow_id, "sign_off").await,
+        json!({ "tamps": 2 })
+    );
+    assert_eq!(run.status, WorkflowStatus::Completed, "{:?}", run.runs);
+}
+
+/// A step after one loop doesn't wait for another loop that runs alongside
+/// it: `survey` runs once `lift ⇄ drop` has ended, while `poller` (a
+/// separate self-loop with more rounds) is still going
+#[sqlx::test(migrations = "../migrations")]
+async fn test_step_after_a_loop_does_not_wait_for_another_loop(pool: PgPool) {
+    let run = drive_loop_workflow(
+        &pool,
+        r#"
+name: step_after_loop_beside_another
+activities:
+  - key: lift
+    worker: test
+    activity_name: echo
+    iteration_limit: 2
+    depends_on:
+      - activity_key: drop
+        conditions: ["{{ drop.status == 'completed' }}"]
+  - key: drop
+    worker: test
+    activity_name: echo
+    depends_on: [lift]
+  - key: survey
+    worker: test
+    activity_name: echo
+    depends_on: [drop]
+  - key: poller
+    worker: test
+    activity_name: echo
+    iteration_limit: 8
+    depends_on: [poller]
+"#,
+        &[],
+    )
+    .await;
+
+    for (key, expected) in [("lift", 2), ("drop", 2), ("survey", 1), ("poller", 8)] {
+        assert_eq!(
+            run.runs.get(key),
+            Some(&expected),
+            "{key}: {:?} (history {:?})",
+            run.runs,
+            run.pending_history
+        );
+    }
+    assert!(
+        !ran_alongside(&run, "survey", &["lift", "drop"]),
+        "{:?}",
+        run.pending_history
+    );
+    assert!(
+        ran_alongside(&run, "survey", &["poller"]),
+        "survey runs while the other loop still goes: {:?}",
+        run.pending_history
+    );
+    assert_eq!(run.status, WorkflowStatus::Completed, "{:?}", run.runs);
+}
+
 /// #26 [loop-backedge-by-name]: the repair loop `run → check → fix → run`
 /// starts with `run`, the step written first, and runs each step once per
 /// round.

@@ -72,7 +72,12 @@ impl Run {
     /// Store the definition, submit a workflow and process `WorkflowCreated`:
     /// `open` is queued, nothing waits yet
     async fn submit(pool: PgPool) -> Run {
-        let def = WorkflowDefinition::from_yaml(LOOP).expect("definition parses");
+        Run::submit_yaml(pool, LOOP).await
+    }
+
+    /// As `submit`, for another definition
+    async fn submit_yaml(pool: PgPool, yaml: &str) -> Run {
+        let def = WorkflowDefinition::from_yaml(yaml).expect("definition parses");
         WorkflowDefinitionRepository::new(pool.clone())
             .store(def.clone())
             .await
@@ -187,6 +192,20 @@ impl Run {
              WHERE workflow_id = $1 AND activity_key = 'receive' ORDER BY iteration",
         )
         .bind(self.wf)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap()
+    }
+
+    /// The parameter `name` that `key` was queued with, per loop round, in order
+    async fn queued_param(&self, key: &str, name: &str) -> Vec<Value> {
+        sqlx::query_scalar(
+            "SELECT parameters -> $3 FROM activity_queue \
+             WHERE workflow_id = $1 AND activity_key = $2 ORDER BY iteration",
+        )
+        .bind(self.wf)
+        .bind(key)
+        .bind(name)
         .fetch_all(&self.pool)
         .await
         .unwrap()
@@ -606,4 +625,40 @@ fn test_hold_early_defaults_to_false() {
     assert!(stored.get("hold_early").is_none(), "{stored}");
     let stored = serde_json::to_value(wait("receive")).unwrap();
     assert_eq!(stored["hold_early"], json!(true));
+}
+
+/// `open`, then `receive`, which holds early signals and reads the signal's
+/// data in its parameters
+const HELD_SIGNAL_PARAMETERS: &str = r#"
+name: held_signal_parameters
+activities:
+  - key: open
+    activity_name: http_request
+  - key: receive
+    activity_name: http_request
+    parameters:
+      text: "{{SIGNAL.text}}"
+    settings:
+      wait_for_signal:
+        event_name: message
+        timeout_seconds: 3600
+        hold_early: true
+    depends_on:
+      - open
+"#;
+
+/// A step that takes a held signal instead of waiting resolves `{{SIGNAL}}`
+/// with that signal's data, as it would after a wait
+#[sqlx::test(migrations = "../migrations")]
+async fn test_held_signal_data_is_signal_in_parameters(pool: PgPool) {
+    let run = Run::submit_yaml(pool, HELD_SIGNAL_PARAMETERS).await;
+
+    assert!(run.message("early").await.is_held());
+    run.complete("open", None).await;
+
+    assert_eq!(run.status("receive").await, WorkflowActivityStatus::Pending);
+    assert_eq!(
+        run.queued_param("receive", "text").await,
+        vec![json!("early")]
+    );
 }
