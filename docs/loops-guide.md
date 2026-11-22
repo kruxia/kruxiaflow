@@ -77,6 +77,32 @@ Each step in a loop runs **once per round, and only on new input**. A completed 
 - **A self-loop** (an activity whose back-edge is on itself) counts its own completion as new input.
 - **A dependency that completes only once** (for example an `initialize` step that ran before the loop) still has to be satisfied, but never triggers another round. A dependency that completes again, such as a step of an earlier loop, counts as new input each time it does.
 
+**Entering the loop.** The first time a loop is reached, its back-edge points at a step that hasn't run yet (for a self-loop, the step itself), so it neither lets the loop in nor keeps it waiting. The loop head's dependencies from outside the loop decide whether round 0 runs, exactly as for any other step:
+
+```yaml
+activities:
+  - key: gate
+    activity_name: echo
+    parameters: { open: false }
+  - key: porter              # a self-loop behind a condition
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - activity_key: gate
+        conditions: ["{{ gate.echo.open }}"]
+      - porter               # the back-edge
+  - key: lobby
+    activity_name: echo
+    depends_on: [porter]
+```
+
+- **The condition is true:** `porter` runs its first round, and from then on its back-edge decides, as described above.
+- **The condition is false,** or `gate` was itself skipped and `porter` depends on it without a condition: `porter` is skipped, and so is everything that depends on it unconditionally (`lobby`; in a longer loop, the rest of the loop). The workflow completes. A step with `{{ porter.status == 'skipped' }}` runs then.
+- **Several dependencies outside the loop** combine like any step's: the loop runs when at least one applies, and all unconditional ones must have completed.
+- **No dependency outside the loop:** the loop starts with the workflow, as a step with no dependencies does. The back-edge's conditions are first checked when the first round has completed.
+
+Before this was fixed, the back-edge counted the first time too: a loop behind a false condition ran anyway, and a loop behind a skipped step stayed `not_scheduled` while the workflow stayed `running` forever (#38).
+
 Before this was fixed, the step after the head re-ran after each of its own completions, on stale input, until the default cap of 100 iterations (#18).
 
 **Upgrading:**
@@ -84,7 +110,58 @@ Before this was fixed, the step after the head re-ran after each of its own comp
 - **No redeploy needed.** Definitions deployed before this fix marked only the two ends of a back-edge as loop activities. The orchestrator completes the marking each time it loads a definition, from the back-edges stored with it, so existing definitions and runs already in flight get every step of a longer loop running each round.
 - **Middle steps now count iterations.** They are loop activities now, so `{{ACTIVITY.iteration}}` and `{{step.iteration}}` count up for them, and `iteration_scoped: true` stores their per-round outputs. Before, they stayed at 0.
 
-**Known limitation: parallel branches inside a loop.** When a loop splits into branches of different lengths that join again (`head → a → b → join` alongside `head → c → join`), the join runs as soon as *any* of its inputs is new. It can therefore run once the short branch finishes, using the long branch's output from the previous round, and then again when the long branch finishes. Keep each loop a single chain of steps, or join the branches outside the loop. Requiring *every* input to be new would make the join wait forever whenever a branch's condition is false in a later round, so this needs a fuller design.
+**Parallel branches inside a loop.** When a loop splits into branches of different lengths that join again (`head → a → b → join` alongside `head → c → join`), the join runs once per round, after every branch has finished that round. A step waits while anything upstream of it in the same loop is still running, or is about to run on this round's input. A branch whose condition is false this round doesn't hold the join back: it won't run, so the join runs on that branch's output from the last round it ran. Inside a loop, a step waits only for steps of its own loop; the head of a later loop waits for an earlier loop to end (see [Steps After a Loop](#steps-after-a-loop)). Before this was fixed, the join ran as soon as the short branch finished, on the long branch's output from the previous round, and then again (#28).
+
+### Steps After a Loop
+
+A step that depends on a loop step, without being part of the loop, is how a loop hands off its result. The usual shape is a repair loop: run, check, fix while the check fails, and finish when it passes.
+
+```yaml
+activities:
+  - key: a_run
+    activity_name: echo
+    iteration_limit: 5
+    depends_on:
+      - activity_key: c_fix
+        conditions: ["{{ c_fix.status == 'completed' }}"]
+  - key: b_check
+    activity_name: echo
+    depends_on: [a_run]
+  - key: c_fix
+    activity_name: echo
+    depends_on:
+      - activity_key: b_check
+        conditions: ["{{ b_check.result == 'fail' }}"]
+  - key: d_done            # runs once, after the check that passes
+    activity_name: echo
+    depends_on:
+      - activity_key: b_check
+        conditions: ["{{ b_check.result == 'pass' }}"]
+```
+
+- **While the loop runs**, `d_done` waits. A failed check doesn't skip it, because a later round runs `b_check` again and may pass.
+- **When the loop exits through its condition**, `d_done` runs if its own condition holds.
+- **When the loop ends without passing** (here, after 5 rounds), `d_done` is skipped, and so is everything that depends on it unconditionally. A step with a condition such as `{{ d_done.status == 'skipped' }}` runs then, which suits a "give up" step. The workflow completes.
+
+**A step after a loop with no condition** runs once, after the loop's last round, on that round's output. In the repair loop above, a report on the checks:
+
+```yaml
+  - key: report            # runs once, after the last check, pass or not
+    activity_name: echo
+    parameters:
+      last_check: "{{ b_check.result }}"
+    depends_on: [b_check]
+```
+
+`report` runs after the check that passes or, if none does, once the loop has ended after its fifth round. It never runs after an earlier check, so `{{ b_check.result }}` is always the last one. This is also how to follow a loop with fixed iterations (Pattern 1), which has no condition to wait on.
+
+**When a step after a loop is decided:**
+
+- **It runs** once no step of the loop it depends on is pending, running or waiting for a signal, or about to start another round. Its conditions are evaluated then, on the last round's output: a condition that held after an earlier round but not after the last doesn't run it. Only that loop counts; another loop running elsewhere in the workflow doesn't hold it back. Before this was fixed, a step after a loop ran as soon as its loop step first completed with its conditions true: with no condition, after the first round, on that round's output, and never again (#40).
+- **It's skipped** once no loop step in the workflow is pending, running or waiting for a signal. Before this was fixed, `d_done` was skipped as soon as the first check failed, and the workflow completed without it (#27).
+- **A loop that starts after another loop** is a step after that loop too: the head of the second loop, which depends on a step of the first, starts or is skipped once the first loop has ended, on its last round (#38, #40). The two loops run one after the other. Before #40, a second loop whose way in had no condition, or a condition true in an earlier round, started then, and ran alongside the first.
+
+**Known limitation:** another loop running elsewhere in the workflow holds back the *skip* of a step after a loop, not its run. It is skipped when that loop ends too, which only delays it.
 
 ---
 
@@ -288,20 +365,41 @@ Template access:
 
 ### Special Context Variables
 
+`ACTIVITY` is the activity whose templates are being resolved: in its
+`parameters`, `delay` and `scheduled_for`, and in the conditions on its own
+`depends_on`. In a condition it is the activity the condition gates, not the
+activity the condition names (use `{{<key>.iteration}}` for that one).
+
+| Variable                            | Type           | Value                                                                                            |
+|-------------------------------------|----------------|--------------------------------------------------------------------------------------------------|
+| `{{ACTIVITY.iteration}}`            | integer        | The round being scheduled: 0, 1, 2, ... (the same as `{{<its key>.iteration}}`)                  |
+| `{{ACTIVITY.accumulated_cost_usd}}` | number         | USD this activity has spent in earlier rounds and failed attempts                                |
+| `{{ACTIVITY.remaining_budget_usd}}` | number or null | Its own `settings.budget.limit` minus `accumulated_cost_usd`, never below 0; null with no budget |
+| `{{ACTIVITY.status}}`               | string         | Its status, as in `{{<key>.status}}`                                                             |
+
 **Current Iteration Number** (0-based):
 ```yaml
 "{{ACTIVITY.iteration}}"  # 0, 1, 2, ...
 ```
 
-**Accumulated Cost** (across all iterations):
+**Accumulated Cost** (earlier rounds and attempts of this activity):
 ```yaml
-"{{ACTIVITY.accumulated_cost_usd}}"  # "7.50"
+"{{ACTIVITY.accumulated_cost_usd}}"  # 7.5
 ```
 
-**Remaining Budget**:
+**Remaining Budget** (this activity's `settings.budget.limit` minus its cost so far):
 ```yaml
-"{{ACTIVITY.remaining_budget_usd}}"  # "2.50"
+"{{ACTIVITY.remaining_budget_usd}}"                    # 2.5, or null with no budget
+"{{ACTIVITY.remaining_budget_usd | coalesce('n/a')}}"  # "n/a" with no budget
 ```
+
+Costs are numbers, so they compare and add as numbers
+(`{{ACTIVITY.accumulated_cost_usd < 5}}`). Embedded in text they print as
+numbers do: `7.5`, and `0.0` before anything is spent. A null
+`remaining_budget_usd` compares below every number, so
+`{{ACTIVITY.remaining_budget_usd < 1}}` is true for an activity without a
+budget: give the activity a budget, or `coalesce` the value, before using it
+in a condition. The workflow-level budget is not included.
 
 ### Conditions in Loops
 
@@ -323,12 +421,13 @@ depends_on:
 
 **Multiple Conditions** (all must be true):
 ```yaml
-depends_on:
-  - activity_key: check
-    conditions:
-      - "{{check.ready | last == false}}"      # Not ready yet
-      - "{{ACTIVITY.iteration < 10}}"           # Less than 10 iterations
-      - "{{ACTIVITY.accumulated_cost_usd < 5}}" # Under $5 spent
+- key: poll                                     # ACTIVITY is poll here
+  depends_on:
+    - activity_key: check
+      conditions:
+        - "{{check.ready | last == false}}"      # Not ready yet
+        - "{{ACTIVITY.iteration < 10}}"           # poll has run fewer than 10 rounds
+        - "{{ACTIVITY.accumulated_cost_usd < 5}}" # poll has spent under $5
 ```
 
 ---
@@ -361,10 +460,11 @@ Budget limits apply to the **total accumulated cost across all iterations**, not
 - Loop terminates
 - Orchestrator marks workflow as failed
 
-**`action: warn`**:
-- Log warning but continue execution
-- Budget can be exceeded
-- Use for soft limits
+**`action: continue`**:
+- The activity is not stopped before it runs
+- An LLM activity's worker still skips any model whose estimated cost would
+  exceed the limit, and the activity fails if no model is left
+- Use when a condition, not the budget, should end the loop
 
 ### Budget-Aware Loop Design
 
@@ -385,12 +485,13 @@ Loop stops at whichever limit is reached first.
   settings:
     budget:
       limit: 10.00
-      action: warn             # Don't abort, just warn
+      action: continue         # Don't stop it before it runs
   depends_on:
     - activity_key: evaluate
       conditions:
-        # Exit if sufficient OR budget running low
-        - "{{evaluate.sufficient | last == true || ACTIVITY.remaining_budget_usd < 1}}"
+        # Loop again only while not sufficient AND at least $1 of
+        # research_loop's budget is left
+        - "{{ evaluate.sufficient | last == false and ACTIVITY.remaining_budget_usd >= 1 }}"
 ```
 
 ---
@@ -422,7 +523,7 @@ Loop stops at whichever limit is reached first.
 ```yaml
 parameters:
   issue_number: "{{ACTIVITY.iteration + 1}}"  # 1, 2, 3 (not 0, 1, 2)
-  status: "Processing iteration {{ACTIVITY.iteration + 1}} of {{settings.iteration_limit}}"
+  status: "Processing iteration {{ACTIVITY.iteration + 1}} of 10"  # iteration_limit: 10
 ```
 
 ### 3. Set Appropriate Iteration Limits
@@ -732,7 +833,10 @@ Kruxia Flow uses precomputed metadata for loop detection:
 - Check if dependency is back-edge: O(1) (cached metadata lookup)
 - Assign the completion's sequence number: O(V), a scan for the highest `completion_seq` among the workflow's activities (V is small, and this is in memory)
 - Check a completed loop activity for new input: O(D), its dependencies' `completion_seq`
-- **No graph traversal in orchestrator hot path**
+- Check a completed loop activity, otherwise ready, for unfinished work upstream in its loop: O(V + E), three walks of the definition's dependencies. Only done while such an activity is otherwise ready to run again, not on every evaluation
+- Check an activity after a loop, never scheduled and otherwise ready, for a step of that loop still running: O(V × (V + E)) at worst per loop dependency, a walk from the dependency plus one per loop member to test that it shares the loop. Only done while such an activity is otherwise ready
+- Decide whether a never-scheduled loop activity that depends on a loop step may be skipped yet: O(V + E) per such dependency, a walk to test whether the two share a loop. Only done for activities whose dependencies are all terminal and that would otherwise be skipped
+- **No graph traversal in orchestrator hot path** otherwise
 
 ### Storage Efficiency
 

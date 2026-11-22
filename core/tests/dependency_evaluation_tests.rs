@@ -1412,8 +1412,9 @@ fn test_loop_activity_not_ready_when_max_iterations_exceeded() {
 }
 
 #[test]
-fn test_back_edge_first_iteration_auto_satisfied() {
-    // On first iteration (iteration 0), back-edge dependencies should be auto-satisfied
+fn test_back_edge_left_out_on_first_round() {
+    // An activity that has never been scheduled leaves its back-edges out, so
+    // a self-loop with no other dependency is a root activity
     let definition = WorkflowDefinition {
         name: "test_workflow".to_string(),
         settings: None,
@@ -1473,7 +1474,7 @@ fn test_back_edge_first_iteration_auto_satisfied() {
     assert_eq!(
         ready.len(),
         1,
-        "Loop activity should be ready on first iteration (back-edge auto-satisfied)"
+        "Loop activity should be ready on its first round (back-edge left out)"
     );
     assert_eq!(ready[0].key, "process");
 }

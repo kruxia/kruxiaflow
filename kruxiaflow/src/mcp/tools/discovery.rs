@@ -318,7 +318,8 @@ impl GetWorkflowAuthoringGuide {
                     "INPUT": "The input payload provided when the workflow is submitted (e.g. {{INPUT.user_id}})",
                     "<activity_key>": "Output of a completed activity: {{<key>.<output_name>.<path>}}, e.g. {{fetch.response.body}} (http_request), {{summarise.result.content}} (llm_prompt), {{query.result.rows}} (postgres_query). See each activity's outputs and output_shape in list_activities. The activity must be in depends_on (directly or transitively), and {{<key>.status}} is always available",
                     "SECRET": "Secrets injected at runtime (e.g. {{SECRET.api_key}}). Not stored in the definition.",
-                    "WORKFLOW": "Workflow-level metadata: {{WORKFLOW.id}} (the workflow's UUID) and {{WORKFLOW.status}}"
+                    "WORKFLOW": "Workflow-level metadata: {{WORKFLOW.id}} (the workflow's UUID) and {{WORKFLOW.status}}",
+                    "SIGNAL": "Only in the templates of an activity with wait_for_signal: the data of the signal that ended its wait (e.g. {{SIGNAL.approved}}). Null when the signal carried no data or the wait timed out with on_timeout: continue. Other activities cannot read it"
                 },
                 "examples": [
                     "{{INPUT.query}} — value of 'query' key from workflow input",
