@@ -802,9 +802,6 @@ pub fn is_workflow_failed(state: &WorkflowState) -> bool {
 ///   depends on a step of a loop it isn't part of (an exit step, or the head
 ///   of a later loop) waits until no loop member is scheduled, running or
 ///   waiting (#27, #38)
-///
-/// Skipping one activity can decide others (what depends on it); the
-/// orchestrator calls this again after marking them, until it finds none.
 pub fn find_skipped_activities<'a>(
     definition: &'a WorkflowDefinition,
     state: &WorkflowState,
@@ -823,6 +820,9 @@ pub type SkippedOrUnresolvable<'a> = ReadyOrUnresolvable<'a>;
 /// skipped earlier in the same skip pass, such as a condition on a skipped
 /// step's result. Left out, the activity stays NotScheduled with nothing to
 /// wake it, and the workflow hangs.
+///
+/// Skipping one activity can decide others (what depends on it); the
+/// orchestrator calls this again after marking them, until it finds none.
 pub fn find_skipped_or_unresolvable_activities<'a>(
     definition: &'a WorkflowDefinition,
     state: &WorkflowState,
@@ -1755,10 +1755,9 @@ mod tests {
     }
 
     #[test]
-    fn test_state_without_sequence_numbers_keeps_previous_behaviour() {
-        // Saved before completion_seq existed (all 0): no ordering
-        // information, so a completed loop member may run again as before.
-        // The tail still waits while the head, upstream of it in the same
+    fn test_state_without_sequence_numbers_counts_as_new_input() {
+        // All `completion_seq` 0: no ordering information, so every completed
+        // loop member counts as having new input. The tail still waits while the head, upstream of it in the same
         // loop, is ready to run (#28); it runs on the head's next completion.
         let definition = two_step_loop();
         let state = make_workflow_state(vec![
@@ -1768,10 +1767,9 @@ mod tests {
         ]);
         assert_eq!(ready_keys(&definition, &state), vec!["head"]);
         let mut state = state;
-        if let Some(head) = state.activities.get_mut("head") {
-            head.completion_seq = 1;
-            head.iteration = 2;
-        }
+        let head = state.activities.get_mut("head").unwrap();
+        head.completion_seq = 1;
+        head.iteration = 2;
         assert_eq!(ready_keys(&definition, &state), vec!["tail"]);
     }
 
@@ -1791,9 +1789,7 @@ mod tests {
     }
 
     // ============================================================================
-    // Activities after a loop wait for the loop to end before being skipped
-    // Regression tests for #27 [loop-exit-skipped]: the exit step was skipped
-    // for good when the loop's first round did not exit
+    // Activities after a loop wait for the loop to end before being skipped (#27)
     // ============================================================================
 
     /// A condition that is false here (`check` is never skipped in these tests)
@@ -1875,10 +1871,12 @@ mod tests {
             completed("check", 2, 1),
             make_activity_state("done", WorkflowActivityStatus::NotScheduled),
         ]);
-        assert_eq!(
-            find_skipped_activities(&definition, &state).unwrap().len(),
-            1
-        );
+        let skipped: Vec<&str> = find_skipped_activities(&definition, &state)
+            .unwrap()
+            .iter()
+            .map(|a| a.key.as_str())
+            .collect();
+        assert_eq!(skipped, vec!["done"]);
     }
 
     #[test]
@@ -1907,9 +1905,7 @@ mod tests {
     }
 
     // ============================================================================
-    // A completed loop member waits for the rest of its round upstream
-    // Regression tests for #28 [loop-join-stale-input]: a join of parallel
-    // branches inside a loop ran as soon as the short branch finished
+    // A completed loop member waits for the rest of its round upstream (#28)
     // ============================================================================
 
     /// The issue's diamond: start → a_head → (b_long1 → c_long2 | d_short)
