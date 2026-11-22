@@ -67,6 +67,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     activity's real parameters, must give its required parameters, and the
     approval example is run through the
     orchestrator's readiness evaluation for both kinds of request.
+- **A step that runs because another was skipped now runs (#25).** A branch
+  such as `conditions: ["{{ maybe.status == 'skipped' }}"]` became ready only
+  after `maybe` was skipped, but skips were applied after scheduling and
+  publish no event, so nothing scheduled it and the workflow stayed `running`
+  forever. Scheduling and skipping now repeat until a pass skips nothing.
 
 ## [0.12.4] - 2026-11-21
 
