@@ -165,9 +165,8 @@ publishes the port on `127.0.0.1` only).
 `POST /api/v1/workflows/{workflow_id}/signal` does, through the same code
 path: the activity must be waiting for `signal_name` and not yet signaled,
 its subscription is marked signaled, and the `ActivitySignaled` event carries
-`data` as the step's signal data, which the step's worker receives as
-`signal_data` (templates can't read it:
-[#37](https://github.com/kruxia/kruxiaflow/issues/37)). A second signal for the
+`data` as the step's signal data: `{{SIGNAL.*}}` in the step's own templates,
+and `signal_data` for its worker. A second signal for the
 same wait is refused (`"signaled": false`, with `isError` set and the reason
 per activity in `reasons`), unless the activity's wait sets `hold_early`: the
 signal is then held for its next wait and reported in `held_activities`

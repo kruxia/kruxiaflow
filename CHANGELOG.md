@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "undefined value" (#32). `ACTIVITY` is now the activity whose templates
   are being resolved: its parameters, `delay` and `scheduled_for`, and the
   conditions on its own `depends_on`.
+- **`{{SIGNAL.*}}` resolves** (#37). The data a signal carries was never put
+  in the template context, and parameters were resolved before the activity
+  started waiting, so an activity using `{{SIGNAL.*}}` failed with
+  "undefined value" before it could wait. Its templates are now resolved when
+  its wait ends, with `SIGNAL` set to the signal's `data`, or `null` when it
+  carried none or the wait timed out with `on_timeout: continue`. A budget
+  check for a waiting activity happens then too, not when the wait begins.
 - **The MCP activity catalog and authoring guide match the engine.** Both are
   hand-written, had drifted from the activities and the parser, and agents
   copy them verbatim. Because activity settings ignore unknown keys, several
@@ -76,10 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `iteration_limit` stops a loop rather than failing it.
   - **Signals:** the guide's `wait_for_signal` section now covers
     `hold_early`, the `on_timeout` default, and waiting again in each round
-    of a loop. `send_workflow_signal` and `docs/mcp-server.md` said the
-    signal's data is `{{SIGNAL.*}}`; no template can read it
-    ([#37](https://github.com/kruxia/kruxiaflow/issues/37)), and the worker
-    receives it as `signal_data`.
+    of a loop. The guide lists `SIGNAL` among the template sources.
   - **README:** the approval-gate example had no `activity_name`, so it did
     not parse.
   - **CI now lints and tests the MCP server.** Its code is behind the
@@ -315,9 +319,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each round's after the first as a duplicate, while the API still answered
   `"signaled": true`; the workflow then waited for good. Subscriptions now
   record the loop round (migration `20261119000001` adds
-  `activity_event_subscriptions.iteration`); the events the signal endpoint
-  and the expiry checker publish carry it, and the orchestrator acts only on
-  a signal for the round that is waiting.
+  `activity_event_subscriptions.iteration`) and their events carry it.
 
 ## [0.12.1] - 2026-11-17
 

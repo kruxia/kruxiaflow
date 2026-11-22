@@ -2936,6 +2936,22 @@ and the round's `iteration` on the event keeps the dedup index
 `(workflow_id, event_type, activity_key, iteration, attempt)` from dropping
 every signal after the first as a duplicate.
 
+**Signal data** is `{{SIGNAL}}` in the templates of the activity it resumed:
+its `parameters`, `delay` and `scheduled_for`, and its parameters again on a
+retry. It is the signal's `data` (or a held signal's, when a `hold_early` wait
+takes one instead of waiting), or `null` when the signal carried none or
+the wait timed out with `on_timeout: continue`. On an activity without
+`wait_for_signal`, `SIGNAL` is undefined. Whether an activity waits is decided
+from its settings before any of its templates are resolved; they are resolved
+only when the wait ends, so a budget check also happens then. Later steps read
+the data through the resumed activity's outputs.
+
+**Why**: `TemplateContext::signal` existed but nothing outside a unit test set
+it (#37), and parameters were resolved before the wait was decided and then
+thrown away. So `{{SIGNAL.*}}` was undefined in every run, and an activity
+using it failed with "undefined value" as soon as it became ready, before it
+could wait.
+
 **One signal per wait**: the row's `signaled_at` marks that the wait took
 its signal and `expired_at` that it timed out; `signal_data` is only the
 signal's payload, NULL when the signal had none. The signal API accepts a

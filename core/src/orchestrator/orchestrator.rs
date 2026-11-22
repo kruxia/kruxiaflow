@@ -723,6 +723,29 @@ fn build_template_context(
     context
 }
 
+/// `{{SIGNAL}}` for an activity: when it waits for a signal, the data the
+/// signal carried, or null when it carried none (or the wait timed out with
+/// `on_timeout: continue`). Undefined for an activity that doesn't wait.
+///
+/// An activity's templates are resolved only once its wait is over, so the
+/// data in state is this round's.
+fn signal_for(
+    state: &super::workflow_state::WorkflowState,
+    activity: &crate::workflow::ActivityDefinition,
+) -> Option<serde_json::Value> {
+    activity
+        .settings
+        .as_ref()
+        .and_then(|s| s.wait_for_signal.as_ref())?;
+    Some(
+        state
+            .activities
+            .get(&activity.key)
+            .and_then(|s| s.signal_data.clone())
+            .unwrap_or(serde_json::Value::Null),
+    )
+}
+
 /// Handle ActivityFailed event.
 ///
 /// The queue is the single retry authority: it decided retry-vs-terminal from
@@ -800,9 +823,11 @@ async fn handle_activity_failed(
     }
 
     // Build template context for resolving parameters (before mutating state);
-    // {{ACTIVITY.*}} is the activity being retried
+    // {{ACTIVITY.*}} is the activity being retried, and {{SIGNAL}} the data
+    // that ended its wait, if it waits
     let mut template_context = build_template_context(state, state.workflow_id, secrets);
     template_context.set_current_activity(activity_def);
+    template_context.set_signal(signal_for(state, activity_def));
 
     // Bookkeeping: mirror in state what the queue already did to its row.
     let activity_state = state.activities.get_mut(activity_key).ok_or_else(|| {
@@ -1812,8 +1837,149 @@ pub async fn process_workflow_event(
                 // Resolve templates in activity parameters
                 let mut activities_to_schedule = Vec::new();
                 for a in &ready_activities {
-                    // {{ACTIVITY.*}} is the activity being scheduled
+                    // {{ACTIVITY.*}} is the activity being scheduled, and {{SIGNAL}}
+                    // the data that ended its wait, if it waits
                     template_context.set_current_activity(a);
+                    template_context.set_signal(signal_for(&state, a));
+
+                    // Compute iteration for loop activities
+                    let iteration = if a.is_loop_activity {
+                        state.activities.get(&a.key).map(|s| s.iteration as i32)
+                    } else {
+                        None
+                    };
+
+                    // A wait that holds early signals (`hold_early`, #42) first
+                    // takes the oldest signal held for it: the activity then runs
+                    // with that signal's data, without waiting. Taken on this
+                    // pass's transaction, so the held signal is consumed only if
+                    // this state is saved, and a signal sent meanwhile is held
+                    // back until then (see `take_held_signal`).
+                    let held_signal =
+                        match a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref()) {
+                            Some(wait_settings)
+                                if wait_settings.hold_early
+                                    && signaled_activity.as_deref() != Some(a.key.as_str()) =>
+                            {
+                                take_held_signal(
+                                    &mut tx,
+                                    event.workflow_id,
+                                    &a.key,
+                                    &wait_settings.event_name,
+                                )
+                                .await?
+                            }
+                            _ => None,
+                        };
+                    if let (Some(data), Some(wait_settings)) = (
+                        &held_signal,
+                        a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref()),
+                    ) {
+                        tracing::info!(
+                            workflow_id = %event.workflow_id,
+                            activity_key = %a.key,
+                            "Activity takes a held signal instead of waiting"
+                        );
+                        if let Some(activity_state) = state.activities.get_mut(&a.key) {
+                            activity_state.signal_data = Some(data.clone());
+                        }
+                        // {{SIGNAL}} is the held signal's data
+                        template_context.set_signal(signal_for(&state, a));
+
+                        // The signal's event, for the workflow's history and its
+                        // observers, as when a waiting activity is signaled. The
+                        // orchestrator has already acted on this signal: when it
+                        // reads the event back, the activity is not waiting, so
+                        // the event changes nothing. If this pass fails and is
+                        // retried, the dedup index drops the second copy.
+                        event_source
+                            .publish(NewWorkflowEvent {
+                                workflow_id: event.workflow_id,
+                                event_type: WorkflowEventType::ActivitySignaled,
+                                activity_key: Some(a.key.clone()),
+                                payload: json!({
+                                    "event_name": wait_settings.event_name,
+                                    "signal_data": data,
+                                    "held": true,
+                                }),
+                                iteration,
+                            })
+                            .await?;
+                    }
+
+                    // An activity that begins to wait for a signal is not resolved
+                    // now: its parameters (and `{{SIGNAL}}`) are resolved when the
+                    // wait ends, so a template can use the signal's data, and a
+                    // budget is checked when it runs. Waiting is decided from its
+                    // settings, before any of its templates. Not for the activity
+                    // whose wait this event just ended, or one that just took a
+                    // held signal.
+                    if let Some(wait_settings) =
+                        a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref())
+                        && signaled_activity.as_deref() != Some(a.key.as_str())
+                        && held_signal.is_none()
+                    {
+                        // Activity needs to wait for an external signal before executing
+                        // Create a subscription instead of scheduling to queue
+                        let new_sub = NewSubscription {
+                            workflow_id: event.workflow_id,
+                            activity_key: a.key.clone(),
+                            event_name: wait_settings.event_name.clone(),
+                            on_timeout: wait_settings.on_timeout.clone(),
+                            timeout_seconds: wait_settings.timeout_seconds,
+                            iteration,
+                        };
+
+                        match subscription_service.create_subscription(new_sub).await {
+                            Ok(sub_id) => {
+                                tracing::info!(
+                                    workflow_id = %event.workflow_id,
+                                    activity_key = %a.key,
+                                    event_name = %wait_settings.event_name,
+                                    timeout_seconds = wait_settings.timeout_seconds,
+                                    subscription_id = %sub_id,
+                                    "Activity now waiting for signal"
+                                );
+
+                                // Mark activity as Waiting in state
+                                if let Some(activity_state) = state.activities.get_mut(&a.key) {
+                                    activity_state.status = WorkflowActivityStatus::Waiting;
+                                    activity_state.started_at = Some(chrono::Utc::now());
+                                }
+
+                                // Publish ActivityWaiting event
+                                let waiting_event = NewWorkflowEvent {
+                                    workflow_id: event.workflow_id,
+                                    event_type: WorkflowEventType::ActivityWaiting,
+                                    activity_key: Some(a.key.clone()),
+                                    payload: json!({
+                                        "event_name": wait_settings.event_name,
+                                        "timeout_seconds": wait_settings.timeout_seconds,
+                                        "on_timeout": format!("{:?}", wait_settings.on_timeout),
+                                    }),
+                                    iteration,
+                                };
+                                event_source.publish(waiting_event).await?;
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    workflow_id = %event.workflow_id,
+                                    activity_key = %a.key,
+                                    "Failed to create subscription: {}",
+                                    e
+                                );
+                                // Mark activity as failed
+                                if let Some(activity_state) = state.activities.get_mut(&a.key) {
+                                    activity_state.status = WorkflowActivityStatus::Failed;
+                                    activity_state.set_error(format!(
+                                        "Failed to create signal subscription: {}",
+                                        e
+                                    ));
+                                }
+                            }
+                        }
+                        continue;
+                    }
 
                     // Resolve template expressions in parameters
                     let params_value =
@@ -1926,139 +2092,6 @@ pub async fn process_workflow_event(
                             activity_state.status = WorkflowActivityStatus::Failed;
                             activity_state
                                 .set_error("Budget exceeded before execution".to_string());
-                        }
-                        continue;
-                    }
-
-                    // Compute iteration for loop activities
-                    let iteration = if a.is_loop_activity {
-                        state.activities.get(&a.key).map(|s| s.iteration as i32)
-                    } else {
-                        None
-                    };
-
-                    // A wait that holds early signals (`hold_early`, #42) first
-                    // takes the oldest signal held for it: the activity then runs
-                    // with that signal's data, without waiting. Taken on this
-                    // pass's transaction, so the held signal is consumed only if
-                    // this state is saved, and a signal sent meanwhile is held
-                    // back until then (see `take_held_signal`).
-                    let held_signal =
-                        match a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref()) {
-                            Some(wait_settings)
-                                if wait_settings.hold_early
-                                    && signaled_activity.as_deref() != Some(a.key.as_str()) =>
-                            {
-                                take_held_signal(
-                                    &mut tx,
-                                    event.workflow_id,
-                                    &a.key,
-                                    &wait_settings.event_name,
-                                )
-                                .await?
-                            }
-                            _ => None,
-                        };
-                    if let (Some(data), Some(wait_settings)) = (
-                        &held_signal,
-                        a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref()),
-                    ) {
-                        tracing::info!(
-                            workflow_id = %event.workflow_id,
-                            activity_key = %a.key,
-                            "Activity takes a held signal instead of waiting"
-                        );
-                        if let Some(activity_state) = state.activities.get_mut(&a.key) {
-                            activity_state.signal_data = Some(data.clone());
-                        }
-
-                        // The signal's event, for the workflow's history and its
-                        // observers, as when a waiting activity is signaled. The
-                        // orchestrator has already acted on this signal: when it
-                        // reads the event back, the activity is not waiting, so
-                        // the event changes nothing. If this pass fails and is
-                        // retried, the dedup index drops the second copy.
-                        event_source
-                            .publish(NewWorkflowEvent {
-                                workflow_id: event.workflow_id,
-                                event_type: WorkflowEventType::ActivitySignaled,
-                                activity_key: Some(a.key.clone()),
-                                payload: json!({
-                                    "event_name": wait_settings.event_name,
-                                    "signal_data": data,
-                                    "held": true,
-                                }),
-                                iteration,
-                            })
-                            .await?;
-                    }
-
-                    // Check if activity has wait_for_signal setting, and is not the
-                    // activity whose wait this event just ended or one that just
-                    // took a held signal
-                    if let Some(wait_settings) =
-                        a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref())
-                        && signaled_activity.as_deref() != Some(a.key.as_str())
-                        && held_signal.is_none()
-                    {
-                        // Activity needs to wait for an external signal before executing
-                        // Create a subscription instead of scheduling to queue
-                        let new_sub = NewSubscription {
-                            workflow_id: event.workflow_id,
-                            activity_key: a.key.clone(),
-                            event_name: wait_settings.event_name.clone(),
-                            on_timeout: wait_settings.on_timeout.clone(),
-                            timeout_seconds: wait_settings.timeout_seconds,
-                            iteration,
-                        };
-
-                        match subscription_service.create_subscription(new_sub).await {
-                            Ok(sub_id) => {
-                                tracing::info!(
-                                    workflow_id = %event.workflow_id,
-                                    activity_key = %a.key,
-                                    event_name = %wait_settings.event_name,
-                                    timeout_seconds = wait_settings.timeout_seconds,
-                                    subscription_id = %sub_id,
-                                    "Activity now waiting for signal"
-                                );
-
-                                // Mark activity as Waiting in state
-                                if let Some(activity_state) = state.activities.get_mut(&a.key) {
-                                    activity_state.status = WorkflowActivityStatus::Waiting;
-                                    activity_state.started_at = Some(chrono::Utc::now());
-                                }
-
-                                // Publish ActivityWaiting event
-                                let waiting_event = NewWorkflowEvent {
-                                    workflow_id: event.workflow_id,
-                                    event_type: WorkflowEventType::ActivityWaiting,
-                                    activity_key: Some(a.key.clone()),
-                                    payload: json!({
-                                        "event_name": wait_settings.event_name,
-                                        "timeout_seconds": wait_settings.timeout_seconds,
-                                        "on_timeout": format!("{:?}", wait_settings.on_timeout),
-                                    }),
-                                    iteration,
-                                };
-                                event_source.publish(waiting_event).await?;
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    workflow_id = %event.workflow_id,
-                                    activity_key = %a.key,
-                                    "Failed to create subscription: {}",
-                                    e
-                                );
-                                // Mark activity as failed
-                                if let Some(activity_state) = state.activities.get_mut(&a.key) {
-                                    activity_state.status = WorkflowActivityStatus::Failed;
-                                    activity_state.set_error(format!(
-                                        "Failed to create signal subscription: {}",
-                                        e
-                                    ));
-                                }
-                            }
                         }
                         continue;
                     }
