@@ -67,6 +67,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     activity's real parameters, must give its required parameters, and the
     approval example is run through the
     orchestrator's readiness evaluation for both kinds of request.
+- **A loop whose way in is closed is skipped (#38).** The first time a loop
+  was reached, its back-edge (the head's dependency on itself, or on the
+  loop's last step) counted although that step hadn't run. A loop behind a
+  false condition ran anyway, to its `iteration_limit`, and a loop behind a
+  skipped step stayed `not_scheduled`, so the workflow stayed `running`
+  forever. Now the loop's dependencies from outside it decide its first
+  round, like any other step's: a false condition, or an unconditional
+  dependency on a skipped step, skips the loop, and the skip cascades to what
+  follows. Later rounds follow the back-edge as before, and a loop with no
+  dependency outside it still starts with the workflow.
+  - **Loops in sequence:** a loop whose way in is a condition on an earlier
+    loop's step now waits for that loop to end before it's skipped, like a
+    step after a loop (#27). It used to start after the earlier loop's first
+    round, whatever the condition said.
 - **A join of parallel branches inside a loop waits for every branch of the
   round (#28).** With a loop split into branches of different lengths that
   join again, the join ran as soon as the short branch finished, on the long
