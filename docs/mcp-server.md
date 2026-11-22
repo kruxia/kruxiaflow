@@ -157,9 +157,26 @@ publishes the port on `127.0.0.1` only).
 
 | Tool                     | Purpose                                                       |
 |--------------------------|---------------------------------------------------------------|
-| `send_workflow_signal`   | Deliver a signal (whole workflow, or one activity)            |
+| `send_workflow_signal`   | Signal one waiting activity, or every one waiting for a name  |
 | `list_waiting_workflows` | Find workflows blocked on signals (approval gates)            |
 | `invalidate_cache`       | Drop cached activity results by key or pattern                |
+
+`send_workflow_signal` with an `activity_key` does exactly what
+`POST /api/v1/workflows/{workflow_id}/signal` does, through the same code
+path: the activity must be waiting for `signal_name` and not yet signaled,
+its subscription is marked signaled, and the `ActivitySignaled` event carries
+`data` as the step's signal data, which the step's worker receives as
+`signal_data` (templates can't read it:
+[#37](https://github.com/kruxia/kruxiaflow/issues/37)). A second signal for the
+same wait is refused (`"signaled": false`, with `isError` set and the reason
+per activity in `reasons`), unless the activity's wait sets `hold_early`: the
+signal is then held for its next wait and reported in `held_activities`
+(`"held": true`). Without an
+`activity_key`, the tool signals every activity in the workflow waiting for
+`signal_name`, each one the same way; REST has no such mode. If the event
+can't be published, the tool reopens the wait and returns an error instead
+of reporting success, so the signal can be sent again. An empty
+`signal_name` or `activity_key` is a field error.
 
 `cancel_workflow` is intentionally absent until the engine gains a cancel
 endpoint.

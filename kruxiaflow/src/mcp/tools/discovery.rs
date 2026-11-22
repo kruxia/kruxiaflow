@@ -375,8 +375,12 @@ impl GetWorkflowAuthoringGuide {
                     "example": "settings:\n  delay: 60s  # Wait 60 s after dependencies finish"
                 },
                 "signals": {
-                    "description": "Pause the activity until an external signal is received (send it with send_workflow_signal). event_name and timeout_seconds are required; on_timeout is continue, skip or fail",
-                    "example": "settings:\n  wait_for_signal:\n    event_name: approval\n    timeout_seconds: 3600\n    on_timeout: fail  # Fail after 1 hour if no signal"
+                    "description": "Pause the activity until an external signal is received (send it with send_workflow_signal). event_name and timeout_seconds are required; on_timeout is fail (default), continue or skip. Each wait takes one signal. In a loop the activity waits again in every round, for that round's signal",
+                    "example": "settings:\n  wait_for_signal:\n    event_name: approval\n    timeout_seconds: 3600\n    on_timeout: fail  # Fail after 1 hour if no signal",
+                    "hold_early": {
+                        "description": "A signal sent while the activity is not waiting (too early, or while a loop is busy with the previous round) is refused, with reason not_waiting. With hold_early: true it is held instead (up to 100 per event name) and delivered, oldest first, when the activity next waits: the activity then runs at once with that signal's data. Signals still held when the workflow ends are discarded",
+                        "example": "settings:\n  wait_for_signal:\n    event_name: message\n    timeout_seconds: 3600\n    hold_early: true  # Keep signals that arrive between waits"
+                    }
                 }
             },
             "complete_examples": {
@@ -1261,6 +1265,8 @@ mod tests {
                     iteration: 0,
                     iteration_outputs: None,
                     signal_data: None,
+                    // only the step with output has completed
+                    completion_seq: u64::from(content.is_some()),
                 },
             )
         }

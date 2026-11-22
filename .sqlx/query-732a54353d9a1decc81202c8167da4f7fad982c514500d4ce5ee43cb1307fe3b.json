@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM held_signals\n        WHERE id = (\n            SELECT id\n            FROM held_signals\n            WHERE workflow_id = $1 AND activity_key = $2 AND event_name = $3\n            ORDER BY created_at, id\n            LIMIT 1\n        )\n        RETURNING signal_data\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "signal_data",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "732a54353d9a1decc81202c8167da4f7fad982c514500d4ce5ee43cb1307fe3b"
+}
