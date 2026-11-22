@@ -2,6 +2,10 @@
 
 Small workflows, called **machines**, each inspired by a physical machine: a domino run, a prism, a railway switch. Each one makes sense on its own and exercises one or a few engine functions. They run against a real engine: the API server, the orchestrator and the std worker, with real activities.
 
+**The inspiration is Rube Goldberg machines:** contraptions that do a simple job through a chain of parts, each one setting off the next. A marble rolls down a ramp, tips a lever, knocks over a row of dominoes, and rings a bell. A workflow is that chain: each step starts when the steps it `depends_on` finish. A fault anywhere along it shows up the way it does in a contraption: the bell never rings, or rings twice. The simplest machines here are a Rube Goldberg machine's parts (the domino run, the funnel, the switch), and the others borrow how real machines behave (a pump's strokes, a thermostat's cycles, a revolving door's turns). So what a workflow should do is plain from the picture, and a bug looks like a jam.
+
+The name is still open. "Machine shop" was the first one. "Makerspace" may fit better: it's where people build contraptions like these from shared parts, and it invites anyone to build a machine of their own.
+
 The shop is an R&D exploration. Its opportunity and value are still being discovered: which machines, modes and views earn a place, and what they show about the engine that nothing else does.
 
 - **Simple machines** exercise one engine function.
