@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE activity_event_subscriptions\n            SET signaled_at = NULL, signal_data = NULL\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3c79d2270ede47e67afd7908ac65378a8c426bfa0ab376fba2f81a0ac4b7c7e1"
+}

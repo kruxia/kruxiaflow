@@ -1799,6 +1799,8 @@ Templates use strict undefined: referring to a value that does not exist is an e
 - It fails through a terminal `ActivityFailed` event, like a worker failure. It was never queued, so no `ActivityScheduled` is recorded for it.
 - Normal failure handling follows. Dependents on a `status == 'failed'` branch run, other dependents are skipped (and their dependents, all the way down), and the workflow fails if nothing else can run.
 - The upstream activity whose completion triggered the scheduling is unaffected.
+- Conditions are evaluated only once every forward dependency of the activity is terminal, so a condition may read any of them, whatever order they complete in.
+- An LLM activity's retry resolves its parameters again for the budget check. If they no longer resolve, the queued retry is cancelled and the activity fails the same way. If a worker has already claimed the retry and its completion is processed before that failure, the activity completes with the retry's outputs instead.
 - The same applies when a skip makes a condition evaluable for the first time. For example, a condition on `classify.result` cannot be resolved once `classify` has been skipped, so the activity that carries it fails rather than waiting forever. To branch on a step that may be skipped, guard the reference: `{% if classify.status == 'completed' %}…{% endif %}`, or test `classify.status` itself.
 
 Before this was fixed (#19), the error was retried as an event-processing failure until the upstream activity's completion event was dropped as poison. That marked the upstream activity failed and left the workflow `running` indefinitely.
@@ -1902,10 +1904,13 @@ activities:
 
 **Loop Features**:
 
-- **Back-edge detection**: Loops are detected when an activity depends on another activity that appears later in execution order
+- **Back-edge detection**: Loops are detected when an activity depends on another activity that appears later in execution order. When the dependency graph has a cycle, the validator finds back-edges by a depth-first search that starts from the activities in written (list) order and visits dependents in written order; a dependency leading back to an activity on the current path is a back-edge. In a two-step loop, if only the other dependency has conditions, that one is the back-edge. Loop metadata (`is_back_edge`, `is_loop_activity`) is always recomputed at validation, never taken from the input, and `normalize` keeps `is_back_edge` on dependencies converted from `dependency_of`. **Why** (#26): the search used to start from the alphabetically first key, so renaming a step could move the back-edge, starting a loop at the wrong step or failing validation of a valid loop. Written order is what the author controls and what reads as "later" in the definition. Stored definitions keep their persisted back-edges (runs load the definition they started with); a redeploy stores a new version, since the content hash includes `is_back_edge`
 - **Iteration-scoped storage**: Activities with `iteration_scoped: true` store results as arrays, with each iteration appending to the array
 - **Iteration limits**: `iteration_limit` prevents infinite loops by enforcing a maximum number of iterations
 - **Conditional exit**: Loop exits when the back-edge condition evaluates to false
+- **Loop membership**: every activity on the cycle is a loop activity (`is_loop_activity`), not only the two ends of the back-edge, so every step of a longer loop runs each round. Membership is computed at validation and stored with the definition, and completed again from the stored back-edges whenever the orchestrator loads a definition (`WorkflowDefinition::mark_loop_members`), so definitions stored before #18 was fixed need no redeploy. **Limitation:** a join of parallel branches inside a loop runs when any input is new, not all (see the loops guide)
+- **New input only**: a completed loop activity is scheduled again only when one of its dependencies completed after it last did (a self back-edge counts as new input; a dependency that completes only once, such as a step before the loop, never triggers a round). Each completion gets a per-workflow sequence number, `completion_seq`, in the activity's materialized state for this comparison. **Why** (#18): without it, a dependency still `Completed` from an earlier round re-triggered the activity, so a loop's tail re-ran on stale input until the iteration cap
+- **Stale completions**: a completion whose `iteration` does not match the activity's current iteration (a re-delivery from an earlier round) is ignored, since a re-scheduled loop activity is `Pending` again and passes the status-based duplicate guard
 
 **Iteration Context Variables**:
 
@@ -2896,6 +2901,86 @@ write replays the batch; orchestrators sharing a consumer id race), so every
 event handler is replay-idempotent: duplicate `WorkflowCreated` /
 `ActivityCompleted` / `ActivityFailed` / `ActivityWaiting` / `ActivitySignaled`
 events are guarded no-ops.
+
+**Signal waits** (`settings.wait_for_signal`): scheduling such an activity
+creates one row in `activity_event_subscriptions` (one per activity, holding
+the loop round in `iteration`) and marks the activity `Waiting` instead of
+queueing it. The REST signal endpoint marks the row and publishes
+`ActivitySignaled` stamped with the row's `iteration`; the expiry checker does
+the same for a timeout, then deletes the row by id (by then the next round may
+have its own row for the same activity). The orchestrator handles an
+`ActivitySignaled` for an activity that is `Waiting` in the round the event
+carries by deleting the row and queueing the activity in the same pass,
+without evaluating its dependencies again (they held when the wait began). An
+event for another round, such as a replay of an earlier round's signal,
+changes nothing. In the next loop round the activity waits again, on a new
+row.
+
+**Why**: The orchestrator used to evaluate the signaled activity like any
+other and, finding `wait_for_signal`, create its subscription again. The row
+was still there, so every signaled activity failed with "Subscription already
+exists", in or out of a loop. Deleting the row lets a loop round wait again,
+and the round's `iteration` on the event keeps the dedup index
+`(workflow_id, event_type, activity_key, iteration, attempt)` from dropping
+every signal after the first as a duplicate.
+
+**One signal per wait**: the row's `signaled_at` marks that the wait took
+its signal and `expired_at` that it timed out; `signal_data` is only the
+signal's payload, NULL when the signal had none. The signal API accepts a
+signal (`"signaled": true`) only while both markers are NULL, and the expiry
+checker (`expire_subscriptions`) only picks rows whose `signaled_at` is NULL,
+so a wait ends once: by its signal or by its timeout. Each is a single
+`UPDATE` of the row, so concurrent signals and the checker serialize on its
+row lock. The checker repeats its conditions outside its `id IN (subquery)`,
+because PostgreSQL re-checks only those on a row changed under it. The mark
+and the `ActivitySignaled` publish are two statements: if the publish fails,
+the API clears the mark again (`release_signal`) and answers 500, so the
+client can retry and the timeout still applies.
+
+**Why**: the "signaled" marker used to be `signal_data IS NULL`. A signal
+without `data` left the row looking unsignaled until the orchestrator deleted
+it, so a second signal was accepted (its event dropped by the dedup index, its
+data lost) and the expiry checker could still expire the wait, failing a step
+with `on_timeout: fail` whose signal had arrived in time (#33). A signal was
+also accepted after its wait had expired. Migration `20261119000002` adds
+`signaled_at` and backfills it where `signal_data` is set; its down migration
+turns a data-less signal's NULL into JSON `null` so the old marker still sees
+it as signaled.
+
+**Held signals** (`wait_for_signal.hold_early`, #42): a signal that no open
+wait takes is refused, unless the activity's wait in the workflow's
+definition sets `hold_early`. Then `deliver_signal` stores it in
+`held_signals` (`SubscriptionService::hold_signal`) and publishes nothing yet.
+When the orchestrator is about to open that activity's wait, it first takes
+the oldest held signal for it (`take_held_signal`); if there is one, the
+activity is queued in that pass with the signal's data and never enters
+`Waiting`, so there is no subscription row and no timeout. The take runs on
+the pass's own transaction, so a held signal is consumed only if the state
+that queued the activity is saved; a failed pass leaves it held.
+
+Taking a held signal publishes its `ActivitySignaled` event, with the
+activity's loop round and `"held": true` in the payload beside `event_name`
+and `signal_data`, so the workflow's history shows the signal as it does for
+a waiting activity. The orchestrator has already acted on it: when it reads
+the event back the activity is not waiting, so the event is a no-op, and a
+retried pass's second copy is dropped by the dedup index.
+
+Both sides take a transaction advisory lock on `(workflow_id, activity_key)`:
+`hold_signal` before it re-checks for an open wait and inserts, the
+orchestrator before it looks for a held signal, keeping it until the pass
+commits. A signal therefore either reaches the wait the pass opened or is
+held where the next wait finds it. Without the lock, a signal could be held
+just after its wait opened and stay held while the activity waited.
+
+An activity holds at most 100 signals per event name (`MAX_HELD_SIGNALS`);
+`WorkflowCompleted` / `WorkflowFailed` discard what is still held, and the
+rows cascade with the workflow.
+
+**Why**: a loop that waits for input each round is not waiting while the
+round's other steps run, and a sender cannot see that window. Refusing its
+signal left the sender to poll and retry, racing the orchestrator. Holding is
+opt-in on the wait, not on the request, so only activities declared this way
+accumulate signals and senders need no change.
 
 **WebSocket replay** resolves `from_event_id` to that event's `(tx, position)`
 and reads with the same predicate, so a reconnecting client cannot miss an
