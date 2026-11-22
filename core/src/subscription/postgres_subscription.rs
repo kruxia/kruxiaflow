@@ -1,12 +1,15 @@
 //! PostgreSQL implementation of the subscription service.
 
-use super::models::{ActivitySubscription, ExpiredSubscription, NewSubscription, SignalRequest};
+use super::models::{
+    ActivitySubscription, ExpiredSubscription, MAX_HELD_SIGNALS, NewSubscription, SignalOutcome,
+    SignalRefusal, SignalRequest,
+};
 use super::service::{Result, SubscriptionError, SubscriptionService};
-use crate::workflow::OnTimeout;
+use crate::workflow::{OnTimeout, WaitForSignalSettings};
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
 use serde_json::Value;
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgExecutor, PgPool};
 use uuid::Uuid;
 
 /// PostgreSQL-based subscription service
@@ -34,15 +37,16 @@ impl SubscriptionService for PostgresSubscriptionService {
         let row = sqlx::query!(
             r#"
             INSERT INTO activity_event_subscriptions
-                (workflow_id, activity_key, event_name, on_timeout, timeout_at)
-            VALUES ($1, $2, $3, $4, $5)
+                (workflow_id, activity_key, event_name, on_timeout, timeout_at, iteration)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING id
             "#,
             subscription.workflow_id,
             subscription.activity_key,
             subscription.event_name,
             on_timeout_str,
-            timeout_at
+            timeout_at,
+            subscription.iteration
         )
         .fetch_one(&self.pool)
         .await
@@ -65,38 +69,85 @@ impl SubscriptionService for PostgresSubscriptionService {
         &self,
         request: SignalRequest,
     ) -> Result<Option<ActivitySubscription>> {
-        // Update the subscription with signal data if event_name matches
+        mark_signaled(&self.pool, &request).await
+    }
+
+    async fn hold_signal(&self, request: SignalRequest) -> Result<SignalOutcome> {
+        let mut tx = self.pool.begin().await?;
+        lock_wait(&mut tx, request.workflow_id, &request.activity_key).await?;
+
+        // The wait may have opened since the caller's signal_activity
+        if let Some(subscription) = mark_signaled(&mut *tx, &request).await? {
+            tx.commit().await?;
+            return Ok(SignalOutcome::Signaled(subscription));
+        }
+
+        // What the workflow's definition says about this activity's wait
         let row = sqlx::query!(
             r#"
-            UPDATE activity_event_subscriptions
-            SET signal_data = $4
-            WHERE workflow_id = $1
-              AND activity_key = $2
-              AND event_name = $3
-              AND signal_data IS NULL
-            RETURNING id, workflow_id, activity_key, event_name, on_timeout, timeout_at, signal_data, created_at
+            SELECT w.status::text AS "status!",
+                   (SELECT a.value -> 'settings' -> 'wait_for_signal'
+                    FROM jsonb_array_elements(d.activities) AS a
+                    WHERE a.value ->> 'key' = $2
+                    LIMIT 1) AS wait
+            FROM workflows w
+            JOIN workflow_definitions d ON d.id = w.workflow_definition_id
+            WHERE w.id = $1
+            "#,
+            request.workflow_id,
+            request.activity_key
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+
+        let Some(row) = row else {
+            return Ok(SignalOutcome::Refused(SignalRefusal::UnknownWorkflow));
+        };
+        if matches!(row.status.as_str(), "completed" | "failed") {
+            return Ok(SignalOutcome::Refused(SignalRefusal::WorkflowEnded));
+        }
+        let wait = row
+            .wait
+            .and_then(|settings| serde_json::from_value::<WaitForSignalSettings>(settings).ok())
+            .filter(|wait| wait.event_name == request.event_name);
+        let Some(wait) = wait else {
+            return Ok(SignalOutcome::Refused(SignalRefusal::UnknownActivity));
+        };
+        if !wait.hold_early {
+            return Ok(SignalOutcome::Refused(SignalRefusal::NotWaiting));
+        }
+
+        let held = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) AS "count!"
+            FROM held_signals
+            WHERE workflow_id = $1 AND activity_key = $2 AND event_name = $3
+            "#,
+            request.workflow_id,
+            request.activity_key,
+            request.event_name
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+        if held >= MAX_HELD_SIGNALS {
+            return Ok(SignalOutcome::Refused(SignalRefusal::HoldLimit));
+        }
+
+        sqlx::query!(
+            r#"
+            INSERT INTO held_signals (workflow_id, activity_key, event_name, signal_data)
+            VALUES ($1, $2, $3, $4)
             "#,
             request.workflow_id,
             request.activity_key,
             request.event_name,
             request.data
         )
-        .fetch_optional(&self.pool)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
 
-        match row {
-            Some(r) => Ok(Some(ActivitySubscription {
-                id: r.id,
-                workflow_id: r.workflow_id,
-                activity_key: r.activity_key,
-                event_name: r.event_name,
-                on_timeout: parse_on_timeout(&r.on_timeout),
-                timeout_at: r.timeout_at,
-                signal_data: r.signal_data,
-                created_at: r.created_at,
-            })),
-            None => Ok(None),
-        }
+        Ok(SignalOutcome::Held)
     }
 
     async fn get_signal_data(
@@ -126,6 +177,11 @@ impl SubscriptionService for PostgresSubscriptionService {
         // We SET expired_at rather than DELETE so that if the server crashes before
         // the orchestrator publishes the corresponding events, recovery can find
         // these rows and re-process them.
+        //
+        // The outer WHERE repeats the open-wait test: if a signal commits after
+        // the subquery picked a row, PostgreSQL re-checks the outer conditions
+        // on the row's new version (but not the subquery's), so the signal wins
+        // and the row is skipped instead of being both signaled and expired.
         let rows = sqlx::query!(
             r#"
             UPDATE activity_event_subscriptions
@@ -133,12 +189,14 @@ impl SubscriptionService for PostgresSubscriptionService {
             WHERE id IN (
                 SELECT id FROM activity_event_subscriptions
                 WHERE timeout_at <= $1
-                  AND signal_data IS NULL
+                  AND signaled_at IS NULL
                   AND expired_at IS NULL
                 ORDER BY timeout_at
                 LIMIT $2
             )
-            RETURNING id, workflow_id, activity_key, event_name, on_timeout
+              AND signaled_at IS NULL
+              AND expired_at IS NULL
+            RETURNING id, workflow_id, activity_key, event_name, on_timeout, iteration
             "#,
             now,
             limit
@@ -154,6 +212,7 @@ impl SubscriptionService for PostgresSubscriptionService {
                 activity_key: r.activity_key,
                 event_name: r.event_name,
                 on_timeout: parse_on_timeout(&r.on_timeout),
+                iteration: r.iteration,
             })
             .collect())
     }
@@ -166,7 +225,7 @@ impl SubscriptionService for PostgresSubscriptionService {
         // still processing its own freshly-expired batch.
         let rows = sqlx::query!(
             r#"
-            SELECT id, workflow_id, activity_key, event_name, on_timeout
+            SELECT id, workflow_id, activity_key, event_name, on_timeout, iteration
             FROM activity_event_subscriptions
             WHERE expired_at IS NOT NULL
               AND expired_at <= $1
@@ -187,8 +246,24 @@ impl SubscriptionService for PostgresSubscriptionService {
                 activity_key: r.activity_key,
                 event_name: r.event_name,
                 on_timeout: parse_on_timeout(&r.on_timeout),
+                iteration: r.iteration,
             })
             .collect())
+    }
+
+    async fn release_signal(&self, subscription_id: Uuid) -> Result<()> {
+        sqlx::query!(
+            r#"
+            UPDATE activity_event_subscriptions
+            SET signaled_at = NULL, signal_data = NULL
+            WHERE id = $1
+            "#,
+            subscription_id
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 
     async fn delete_subscription(&self, workflow_id: Uuid, activity_key: &str) -> Result<()> {
@@ -205,6 +280,133 @@ impl SubscriptionService for PostgresSubscriptionService {
 
         Ok(())
     }
+
+    async fn delete_subscription_by_id(&self, id: Uuid) -> Result<()> {
+        sqlx::query!("DELETE FROM activity_event_subscriptions WHERE id = $1", id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+}
+
+/// Mark an activity's open wait signaled, if it has one for this event.
+///
+/// Takes the signal only while the wait is still open: not signaled
+/// (`signaled_at`, not `signal_data`, which stays NULL for a signal without
+/// data) and not expired (the timeout already ended the wait).
+async fn mark_signaled<'e, E>(
+    executor: E,
+    request: &SignalRequest,
+) -> Result<Option<ActivitySubscription>>
+where
+    E: PgExecutor<'e>,
+{
+    let row = sqlx::query!(
+        r#"
+        UPDATE activity_event_subscriptions
+        SET signal_data = $4, signaled_at = NOW()
+        WHERE workflow_id = $1
+          AND activity_key = $2
+          AND event_name = $3
+          AND signaled_at IS NULL
+          AND expired_at IS NULL
+        RETURNING id, workflow_id, activity_key, event_name, on_timeout, timeout_at, signal_data, created_at, iteration
+        "#,
+        request.workflow_id,
+        request.activity_key,
+        request.event_name,
+        request.data
+    )
+    .fetch_optional(executor)
+    .await?;
+
+    Ok(row.map(|r| ActivitySubscription {
+        id: r.id,
+        workflow_id: r.workflow_id,
+        activity_key: r.activity_key,
+        event_name: r.event_name,
+        on_timeout: parse_on_timeout(&r.on_timeout),
+        timeout_at: r.timeout_at,
+        signal_data: r.signal_data,
+        created_at: r.created_at,
+        iteration: r.iteration,
+    }))
+}
+
+/// Serialize, until the transaction ends, everything that decides between
+/// "this activity's wait takes the signal" and "the signal is held for its
+/// next wait": the signal API holding a signal ([`SubscriptionService::hold_signal`])
+/// and the orchestrator opening the wait ([`take_held_signal`]). Without it a
+/// signal could be held just after the wait that should have taken it opened,
+/// and stay held while the activity waits.
+async fn lock_wait(
+    conn: &mut PgConnection,
+    workflow_id: Uuid,
+    activity_key: &str,
+) -> std::result::Result<(), sqlx::Error> {
+    // Not a query! macro: the function returns void
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::uuid::text || ':' || $2, 0))")
+        .bind(workflow_id)
+        .bind(activity_key)
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
+/// Take the oldest signal held for an activity that is about to wait
+/// (`wait_for_signal.hold_early`), if there is one (#42).
+///
+/// Returns the signal's data (JSON null when it had none). The caller runs
+/// the activity with it instead of opening a wait.
+///
+/// Call it on the transaction that saves the workflow's state: the held
+/// signal is then consumed only if that state is saved, and the advisory lock
+/// taken here is held until then, so a signal sent meanwhile waits and finds
+/// either the wait this pass opens or nothing to race with.
+pub async fn take_held_signal(
+    conn: &mut PgConnection,
+    workflow_id: Uuid,
+    activity_key: &str,
+    event_name: &str,
+) -> std::result::Result<Option<Value>, sqlx::Error> {
+    lock_wait(conn, workflow_id, activity_key).await?;
+
+    let row = sqlx::query!(
+        r#"
+        DELETE FROM held_signals
+        WHERE id = (
+            SELECT id
+            FROM held_signals
+            WHERE workflow_id = $1 AND activity_key = $2 AND event_name = $3
+            ORDER BY created_at, id
+            LIMIT 1
+        )
+        RETURNING signal_data
+        "#,
+        workflow_id,
+        activity_key,
+        event_name
+    )
+    .fetch_optional(conn)
+    .await?;
+
+    Ok(row.map(|r| r.signal_data.unwrap_or(Value::Null)))
+}
+
+/// Discard every signal still held for a workflow that has ended.
+/// Returns how many were discarded.
+pub async fn discard_held_signals(
+    conn: &mut PgConnection,
+    workflow_id: Uuid,
+) -> std::result::Result<u64, sqlx::Error> {
+    let result = sqlx::query!(
+        "DELETE FROM held_signals WHERE workflow_id = $1",
+        workflow_id
+    )
+    .execute(conn)
+    .await?;
+    Ok(result.rows_affected())
 }
 
 fn parse_on_timeout(s: &str) -> OnTimeout {
@@ -262,6 +464,7 @@ mod tests {
             event_name: "approval".to_string(),
             on_timeout: OnTimeout::Continue,
             timeout_seconds: 300,
+            iteration: None,
         };
         assert_eq!(sub.activity_key, "step_1");
         assert_eq!(sub.event_name, "approval");
@@ -308,6 +511,7 @@ mod tests {
             activity_key: "step_2".to_string(),
             event_name: "timeout_event".to_string(),
             on_timeout: OnTimeout::Skip,
+            iteration: None,
         };
         assert_eq!(expired.activity_key, "step_2");
         assert!(matches!(expired.on_timeout, OnTimeout::Skip));
@@ -324,6 +528,7 @@ mod tests {
             timeout_at: Utc::now(),
             signal_data: Some(json!({"key": "value"})),
             created_at: Utc::now(),
+            iteration: None,
         };
 
         let json_str = serde_json::to_string(&sub).unwrap();
@@ -344,6 +549,7 @@ mod tests {
             timeout_at: Utc::now(),
             signal_data: None,
             created_at: Utc::now(),
+            iteration: None,
         };
 
         let json_str = serde_json::to_string(&sub).unwrap();
@@ -387,6 +593,7 @@ mod tests {
             activity_key: "step_1".to_string(),
             event_name: "event".to_string(),
             on_timeout: OnTimeout::Fail,
+            iteration: None,
         };
         let cloned = expired.clone();
         assert_eq!(cloned.activity_key, expired.activity_key);

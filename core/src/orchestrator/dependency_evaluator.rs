@@ -30,6 +30,35 @@ pub fn find_ready_activities<'a>(
     Ok(ready)
 }
 
+/// Activities ready to schedule, and activities whose conditions could not
+/// be evaluated (with the error)
+pub type ReadyOrUnresolvable<'a> = (
+    Vec<&'a ActivityDefinition>,
+    Vec<(&'a ActivityDefinition, String)>,
+);
+
+/// Like [`find_ready_activities`], but an activity whose dependency
+/// conditions cannot be evaluated (a template error, such as a reference to
+/// an undefined value) is returned separately with the error, instead of
+/// failing the whole evaluation (#19). The orchestrator fails that activity;
+/// a deterministic template error must not fail the event being processed.
+pub fn find_ready_or_unresolvable_activities<'a>(
+    definition: &'a WorkflowDefinition,
+    state: &WorkflowState,
+) -> Result<ReadyOrUnresolvable<'a>> {
+    let mut ready = Vec::new();
+    let mut unresolvable = Vec::new();
+    for activity in &definition.activities {
+        match is_activity_ready(activity, definition, state) {
+            Ok(true) => ready.push(activity),
+            Ok(false) => {}
+            Err(OrchestratorError::TemplateFailed(error)) => unresolvable.push((activity, error)),
+            Err(other) => return Err(other),
+        }
+    }
+    Ok((ready, unresolvable))
+}
+
 /// Check if an activity is ready to be scheduled.
 ///
 /// # Methodology
@@ -46,6 +75,8 @@ pub fn find_ready_activities<'a>(
 /// ## Phase 2: Loop Back Eligibility
 /// For `Completed` activities marked with `is_loop_activity = true`:
 /// - If iteration limit exceeded → **Reject**
+/// - If no dependency completed since this activity last did (no new input,
+///   see [`has_new_input`]; a self back-edge counts) → **Reject** (#18)
 /// - If back-edge conditions will be checked → Proceed to Phase 3
 /// - Otherwise → **Reject** (loop is done)
 ///
@@ -61,7 +92,13 @@ pub fn find_ready_activities<'a>(
 /// ### 4a. Root Activities (No Dependencies)
 /// - No `depends_on` relationships → **Accept** (always ready)
 ///
-/// ### 4b. For Each Dependency:
+/// ### 4b. Every Forward Dependency Terminal
+/// - Any forward dependency not `Completed`, `Failed` or `Skipped` →
+///   **Reject** (waiting for it), before any condition is evaluated. A
+///   condition may read any dependency's result, so the order dependencies
+///   complete in must not decide whether it can be evaluated.
+///
+/// ### 4c. For Each Dependency:
 ///
 /// #### Back-Edge Dependencies (`is_back_edge = true`):
 /// Loop back-edges that create iterative execution:
@@ -73,9 +110,7 @@ pub fn find_ready_activities<'a>(
 /// - Mark as applicable dependency (participates in AND gate)
 ///
 /// #### Forward Dependencies (`is_back_edge = false`):
-/// Standard sequential dependencies:
-/// - **Terminal State Check**: Dependency must be `Completed` or `Failed`
-///   - If not terminal → **Reject** (waiting for dependency)
+/// Standard sequential dependencies (all terminal, see 4b):
 /// - **Condition Evaluation** (if conditions specified):
 ///   - Build template context with all activity outputs
 ///   - Evaluate each condition expression via MiniJinja
@@ -86,7 +121,7 @@ pub fn find_ready_activities<'a>(
 ///   - Dependency must be `Completed` (not just `Failed`)
 ///   - If `Failed` → **Reject**
 ///
-/// ### 4c. Applicable Dependency Check
+/// ### 4d. Applicable Dependency Check
 /// After evaluating all dependencies:
 /// - If activity has dependencies but **none are applicable** (all conditions false) → **Reject**
 /// - This prevents orphaned activities from running when all paths are conditional
@@ -143,12 +178,21 @@ fn is_activity_ready(
     let activity_state = state.activities.get(&activity.key);
 
     // Check current status
-    if let Some(state) = activity_state {
-        match state.status {
+    if let Some(current) = activity_state {
+        match current.status {
             WorkflowActivityStatus::Completed => {
                 // Check if this is a loop that should continue
-                if !should_loop_back(activity, state, definition, activity_state)? {
+                if !should_loop_back(activity, current, definition, activity_state)? {
                     return Ok(false); // Already completed, don't re-execute
+                }
+                // Run again only on new input: a dependency that is still
+                // Completed from an earlier round must not re-trigger it
+                if !has_new_input(activity, current, state) {
+                    tracing::trace!(
+                        "Activity {} not ready: no dependency completed since it last ran",
+                        activity.key
+                    );
+                    return Ok(false);
                 }
                 // Fall through to check loop conditions and iteration limits
             }
@@ -201,6 +245,31 @@ fn is_activity_ready(
             .join(", ")
     );
 
+    // Every forward dependency must be terminal (Completed, Failed or
+    // Skipped) before any condition is evaluated: a condition may read
+    // another dependency's result, which a dependency still running doesn't
+    // have yet
+    for dep_rel in dependencies.iter().filter(|dep| !dep.is_back_edge) {
+        let dependency_state = state
+            .activities
+            .get(&dep_rel.activity_key)
+            .ok_or_else(|| OrchestratorError::ActivityNotFound(dep_rel.activity_key.clone()))?;
+        if !matches!(
+            dependency_state.status,
+            WorkflowActivityStatus::Completed
+                | WorkflowActivityStatus::Failed
+                | WorkflowActivityStatus::Skipped
+        ) {
+            tracing::trace!(
+                "Activity {} not ready: dependency {} is in state {:?}",
+                activity.key,
+                dep_rel.activity_key,
+                dependency_state.status
+            );
+            return Ok(false);
+        }
+    }
+
     // Check all dependencies are satisfied (ALL must be satisfied - AND semantics)
     // Track if we found at least one dependency that needs to be satisfied
     let mut found_applicable_dependency = false;
@@ -236,27 +305,9 @@ fn is_activity_ready(
             // Back-edge condition satisfied
             found_applicable_dependency = true;
         } else {
-            // Standard forward dependency check
+            // Standard forward dependency check (terminal, checked above)
 
-            // Check if dependency is in terminal state FIRST
-            // (must check this before evaluating conditions since conditions may reference outputs)
-            // Terminal states: Completed, Failed, or Skipped (all are final states)
-            if !matches!(
-                dependency_state.status,
-                WorkflowActivityStatus::Completed
-                    | WorkflowActivityStatus::Failed
-                    | WorkflowActivityStatus::Skipped
-            ) {
-                tracing::trace!(
-                    "Activity {} not ready: dependency {} is in state {:?}",
-                    activity.key,
-                    dep_rel.activity_key,
-                    dependency_state.status
-                );
-                return Ok(false); // Dependency not in terminal state yet
-            }
-
-            // Now check conditions (if any)
+            // Check conditions (if any)
             if let Some(condition_list) = &dep_rel.conditions {
                 // Build template context for condition evaluation
                 let context = build_condition_context(state);
@@ -344,6 +395,38 @@ fn should_loop_back(
     }
 
     Ok(false)
+}
+
+/// Whether a completed loop activity has new input to run on: at least one of
+/// its dependencies completed after it last did (#18).
+///
+/// A dependency still `Completed` from an earlier round is not new input, so a
+/// loop member never runs twice on the same input.
+///
+/// - A self back-edge (`depends_on` itself) counts as new input: the
+///   activity's own completion is what it loops on.
+/// - Any dependency that completed after this activity counts, wherever it
+///   is. A dependency that completes only once, before the loop starts (an
+///   `initialize` step), never counts as new, but doesn't block either; the
+///   back-edge or an in-loop dependency does. A step of an earlier loop
+///   completes again each round of that loop, so it does count.
+/// - `completion_seq == 0` carries no ordering (state saved without it), so
+///   it counts as new input rather than stalling the activity.
+fn has_new_input(
+    activity: &ActivityDefinition,
+    activity_state: &super::workflow_state::ActivityState,
+    state: &WorkflowState,
+) -> bool {
+    if activity_state.completion_seq == 0 {
+        return true;
+    }
+    get_dependencies(activity).iter().any(|dep| {
+        dep.activity_key == activity.key
+            || state.activities.get(&dep.activity_key).is_some_and(|d| {
+                d.status == WorkflowActivityStatus::Completed
+                    && d.completion_seq > activity_state.completion_seq
+            })
+    })
 }
 
 /// Check if max iterations has been exceeded
@@ -544,7 +627,26 @@ pub fn find_skipped_activities<'a>(
     definition: &'a WorkflowDefinition,
     state: &WorkflowState,
 ) -> Result<Vec<&'a ActivityDefinition>> {
+    Ok(find_skipped_or_unresolvable_activities(definition, state)?.0)
+}
+
+/// Activities to skip, and activities whose dependency conditions could not
+/// be evaluated (with the error)
+pub type SkippedOrUnresolvable<'a> = ReadyOrUnresolvable<'a>;
+
+/// Like [`find_skipped_activities`], but an activity whose dependencies are
+/// all terminal and whose conditions cannot be evaluated is returned
+/// separately with the error, so the orchestrator can fail it (#19). A
+/// condition can first be evaluated here: when its dependency was itself
+/// skipped earlier in the same skip pass, such as a condition on a skipped
+/// step's result. Left out, the activity stays NotScheduled with nothing to
+/// wake it, and the workflow hangs.
+pub fn find_skipped_or_unresolvable_activities<'a>(
+    definition: &'a WorkflowDefinition,
+    state: &WorkflowState,
+) -> Result<SkippedOrUnresolvable<'a>> {
     let mut skipped = Vec::new();
+    let mut unresolvable = Vec::new();
 
     for activity in &definition.activities {
         // Only consider NotScheduled activities
@@ -583,13 +685,18 @@ pub fn find_skipped_activities<'a>(
         }
 
         // Check if activity is ready (has applicable dependencies)
-        // If not ready and all dependencies are terminal, it should be skipped
-        if !is_activity_ready(activity, definition, state)? {
-            skipped.push(activity);
+        // If not ready and all dependencies are terminal, it should be skipped.
+        // An activity whose conditions can't be evaluated is not skippable:
+        // it is returned to be failed instead
+        match is_activity_ready(activity, definition, state) {
+            Ok(false) => skipped.push(activity),
+            Ok(true) => {}
+            Err(OrchestratorError::TemplateFailed(error)) => unresolvable.push((activity, error)),
+            Err(other) => return Err(other),
         }
     }
 
-    Ok(skipped)
+    Ok((skipped, unresolvable))
 }
 
 #[cfg(test)]
@@ -618,6 +725,7 @@ mod tests {
                 iteration: 0,
                 iteration_outputs: None,
                 signal_data: None,
+                completion_seq: 0,
             },
         )
     }
@@ -1296,5 +1404,144 @@ mod tests {
 
         let skipped = find_skipped_activities(&definition, &state).unwrap();
         assert!(skipped.is_empty());
+    }
+
+    // ============================================================================
+    // Loop members run again only on new input (#18)
+    // ============================================================================
+
+    fn rel(key: &str, is_back_edge: bool) -> ActivityRelationship {
+        ActivityRelationship {
+            activity_key: key.to_string(),
+            conditions: None,
+            is_back_edge,
+        }
+    }
+
+    fn loop_def(key: &str, deps: Vec<ActivityRelationship>) -> ActivityDefinition {
+        ActivityDefinition {
+            is_loop_activity: true,
+            ..make_activity_def(key, Some(deps))
+        }
+    }
+
+    /// The 07a shape: start → head ⇄ tail (head holds the back-edge)
+    fn two_step_loop() -> WorkflowDefinition {
+        WorkflowDefinition {
+            name: "loop".to_string(),
+            settings: None,
+            activities: vec![
+                make_activity_def("start", None),
+                loop_def("head", vec![rel("start", false), rel("tail", true)]),
+                loop_def("tail", vec![rel("head", false)]),
+            ],
+        }
+    }
+
+    /// A completed activity with a completion sequence number and iteration
+    fn completed(
+        key: &str,
+        seq: u64,
+        iteration: u32,
+    ) -> (String, super::super::workflow_state::ActivityState) {
+        let (key, mut state) = make_activity_state(key, WorkflowActivityStatus::Completed);
+        state.completion_seq = seq;
+        state.iteration = iteration;
+        (key, state)
+    }
+
+    fn ready_keys(definition: &WorkflowDefinition, state: &WorkflowState) -> Vec<String> {
+        let mut keys: Vec<String> = find_ready_activities(definition, state)
+            .unwrap()
+            .into_iter()
+            .map(|a| a.key.clone())
+            .collect();
+        keys.sort();
+        keys
+    }
+
+    #[test]
+    fn test_loop_tail_waits_for_the_head_to_complete_again() {
+        let definition = two_step_loop();
+        // start(1) → head(2) → tail(3): the tail just completed; the head's
+        // completion (2) is older than the tail's (3), so the tail has no new
+        // input. The head does: the tail completed after it.
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("head", 2, 1),
+            completed("tail", 3, 1),
+        ]);
+        assert_eq!(ready_keys(&definition, &state), vec!["head"]);
+    }
+
+    #[test]
+    fn test_loop_head_waits_for_the_tail_to_complete_again() {
+        let definition = two_step_loop();
+        // The head just completed its second round (4); the tail's completion
+        // (3) belongs to the previous round. Only the tail has new input.
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("head", 4, 2),
+            completed("tail", 3, 1),
+        ]);
+        assert_eq!(ready_keys(&definition, &state), vec!["tail"]);
+    }
+
+    #[test]
+    fn test_loop_outside_dependency_is_not_new_input() {
+        // `start` completed once, before the loop: it satisfies the head's
+        // forward dependency but never counts as new input on its own
+        let definition = two_step_loop();
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("head", 2, 1),
+            (
+                "tail".to_string(),
+                make_activity_state("tail", WorkflowActivityStatus::Running).1,
+            ),
+        ]);
+        assert!(ready_keys(&definition, &state).is_empty());
+    }
+
+    #[test]
+    fn test_self_loop_is_its_own_new_input() {
+        let definition = WorkflowDefinition {
+            name: "self".to_string(),
+            settings: None,
+            activities: vec![ActivityDefinition {
+                iteration_limit: Some(5),
+                ..loop_def("poll", vec![rel("poll", true)])
+            }],
+        };
+        let state = make_workflow_state(vec![completed("poll", 7, 2)]);
+        assert_eq!(ready_keys(&definition, &state), vec!["poll"]);
+    }
+
+    #[test]
+    fn test_state_without_sequence_numbers_counts_as_new_input() {
+        // All `completion_seq` 0: no ordering information, so every completed
+        // loop member counts as having new input
+        let definition = two_step_loop();
+        let state = make_workflow_state(vec![
+            completed("start", 0, 0),
+            completed("head", 0, 1),
+            completed("tail", 0, 1),
+        ]);
+        assert_eq!(ready_keys(&definition, &state), vec!["head", "tail"]);
+    }
+
+    #[test]
+    fn test_has_new_input_needs_a_completed_dependency() {
+        let definition = two_step_loop();
+        let tail_def = &definition.activities[2];
+        let (_, tail) = completed("tail", 3, 1);
+        // The head is running again (a newer seq would come with its completion)
+        let (_, mut head) = completed("head", 5, 2);
+        head.status = WorkflowActivityStatus::Running;
+        let state = make_workflow_state(vec![
+            ("head".to_string(), head),
+            ("tail".to_string(), tail.clone()),
+        ]);
+        assert!(!has_new_input(tail_def, &tail, &state));
     }
 }
