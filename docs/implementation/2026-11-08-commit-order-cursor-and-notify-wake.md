@@ -373,6 +373,8 @@ The plan removes the post-batch sleep in favour of drain-then-wait. With no slee
 
 Integration tests that read events go through `core/tests/common::SettledEventSource`, which waits before each read until every committed event in the test's database is below xmin. Tests of the delivery predicate use `PostgresEventSource` directly and settle explicitly, asserting "nothing delivered" only where one of the test's own open transactions is what blocks delivery. `test_run_orchestrator_loop` had fixed 500 ms sleeps; it now waits on the condition.
 
+Settling can deadlock inside one test binary (found 2026-11-19, when the loop tests failed in most full runs). Every `sqlx::test` pool (5 connections) draws its connections from one parent pool of 20 per binary, and keeps each slot it has drawn until the test ends. An orchestrator handler holds its transaction, with an xid once it has written, while it takes a second connection to publish. With enough tests running at once, handlers sat idle in transaction waiting for a slot, while the tests holding every slot were settling, waiting for those xids, until their 10 s timeout. Narrowing the settle to the test's own database cannot help, because the real poll that follows uses the instance-wide horizon. Instead, every test that uses `core/tests/common` first replaces its pool with `common::unshared_pool`, a pool of the same size with no parent, so a test's connections wait only on that test. Tests of this kind need up to 6 server connections each while they run.
+
 ### 7.13 Documentation found stale
 
 - `docs/api-reference.md` had no section for `GET /api/v1/workflow_events/ws`; one was added (parameters, message shape, replay semantics, `position`).

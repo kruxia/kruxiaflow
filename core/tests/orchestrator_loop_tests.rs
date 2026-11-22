@@ -39,6 +39,7 @@ async fn insert_workflow_definition(pool: &PgPool, definition: &WorkflowDefiniti
 /// Pattern: process -> check -> loop back if not done
 #[sqlx::test(migrations = "../migrations")]
 async fn test_simple_loop_workflow(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create a loop workflow definition (manually validated with metadata set)
     let definition = WorkflowDefinition {
         name: "simple_loop".to_string(),
@@ -254,6 +255,7 @@ async fn test_simple_loop_workflow(pool: PgPool) {
 /// Test iteration limit enforcement
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_max_iterations_enforced(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create a loop workflow with iteration_limit = 2
     let definition = WorkflowDefinition {
         name: "limited_loop".to_string(),
@@ -426,6 +428,7 @@ async fn test_loop_max_iterations_enforced(pool: PgPool) {
 /// Test iteration counter for non-iteration_scoped loops
 #[sqlx::test(migrations = "../migrations")]
 async fn test_iteration_counter_without_scoping(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create a loop workflow without iteration_scoped
     let definition = WorkflowDefinition {
         name: "non_scoped_loop".to_string(),
@@ -557,6 +560,7 @@ async fn test_iteration_counter_without_scoping(pool: PgPool) {
 /// Test budget accumulation across iterations
 #[sqlx::test(migrations = "../migrations")]
 async fn test_iteration_budget_accumulation(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create a loop workflow with budget limit that spans multiple iterations
     let definition = WorkflowDefinition {
         name: "budget_loop".to_string(),
@@ -762,6 +766,7 @@ async fn test_iteration_budget_accumulation(pool: PgPool) {
 /// Test Pattern 1: Fixed iterations only (no condition)
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_pattern_1_fixed_iterations(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create a loop with only iteration_limit (no condition on back-edge)
     let definition = WorkflowDefinition {
         name: "fixed_iterations".to_string(),
@@ -906,6 +911,7 @@ async fn test_loop_pattern_1_fixed_iterations(pool: PgPool) {
 /// Test Pattern 2: Condition only (with default limit)
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_pattern_2_condition_only(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create a loop with only condition (no explicit iteration_limit)
     // Should use DEFAULT_MAX_ITERATIONS = 100
     let definition = WorkflowDefinition {
@@ -1158,6 +1164,7 @@ async fn test_loop_pattern_2_condition_only(pool: PgPool) {
 /// round, until nothing is, and counts the runs.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_two_step_loop_runs_each_step_once_per_round(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let definition = WorkflowDefinition::from_yaml(
         r#"
 name: loop_tail_regression
@@ -1288,6 +1295,7 @@ activities:
 /// runs once per round.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_three_step_loop_runs_each_step_once_per_round(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let definition = WorkflowDefinition::from_yaml(
         r#"
 name: three_step_loop_regression
@@ -1428,6 +1436,7 @@ activities:
 /// loads it.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_three_step_loop_stored_with_endpoint_marking_runs_every_round(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let definition = WorkflowDefinition::from_yaml(
         r#"
 name: three_step_loop_endpoint_marking
@@ -1581,6 +1590,7 @@ activities:
 /// test re-processes the original event, as a re-delivery does.)
 #[sqlx::test(migrations = "../migrations")]
 async fn test_redelivered_completion_from_an_earlier_round_is_ignored(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let definition = WorkflowDefinition::from_yaml(
         r#"
 name: loop_replay_regression
@@ -1899,6 +1909,7 @@ fn status_of(
 /// exits.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_exit_step_runs_when_a_later_round_exits(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let (runs, state) = run_to_end(&pool, REPAIR_LOOP, check_results(2)).await;
 
     assert_eq!(runs.get("a_run"), Some(&3), "{runs:?}");
@@ -1924,6 +1935,7 @@ async fn test_loop_exit_step_runs_when_a_later_round_exits(pool: PgPool) {
 /// #27: when the loop exits in its first round, the exit step runs then
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_exit_step_runs_when_the_first_round_exits(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let (runs, state) = run_to_end(&pool, REPAIR_LOOP, check_results(0)).await;
 
     assert_eq!(runs.get("a_run"), Some(&1), "{runs:?}");
@@ -1940,6 +1952,7 @@ async fn test_loop_exit_step_runs_when_the_first_round_exits(pool: PgPool) {
 /// completes instead of waiting for it.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_exit_step_is_skipped_when_the_iteration_limit_is_reached(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let (runs, state) = run_to_end(&pool, REPAIR_LOOP, check_results(u32::MAX)).await;
 
     assert_eq!(runs.get("a_run"), Some(&5), "{runs:?}");
@@ -1959,6 +1972,7 @@ async fn test_loop_exit_step_is_skipped_when_the_iteration_limit_is_reached(pool
 /// condition is false, even while other activities are still running
 #[sqlx::test(migrations = "../migrations")]
 async fn test_conditional_skip_outside_a_loop_is_immediate(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let yaml = r#"
 name: branch
 activities:
@@ -2168,6 +2182,7 @@ async fn drive_loop_workflow(pool: &PgPool, yaml: &str, first: &[&str]) -> LoopR
 /// that round.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_join_waits_for_every_branch_of_the_round(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = drive_loop_workflow(
         &pool,
         r#"
@@ -2236,6 +2251,7 @@ activities:
 /// workflow completes instead of hanging.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_join_does_not_wait_for_a_branch_that_will_not_run(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = drive_loop_workflow(
         &pool,
         r#"
@@ -2306,6 +2322,7 @@ activities:
 /// step after loop 1.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_two_sequential_loops_both_complete(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = drive_loop_workflow(
         &pool,
         r#"
@@ -2418,6 +2435,7 @@ activities:
 /// after it; the workflow completes.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_self_loop_with_a_false_entry_condition_is_skipped(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let (runs, state) = run_to_end(&pool, GATED_SELF_LOOP, gate_outputs(false)).await;
 
     assert_eq!(runs.get("gate"), Some(&1), "{runs:?}");
@@ -2431,6 +2449,7 @@ async fn test_self_loop_with_a_false_entry_condition_is_skipped(pool: PgPool) {
 /// The entry condition is true: the loop runs to its iteration_limit
 #[sqlx::test(migrations = "../migrations")]
 async fn test_self_loop_with_a_true_entry_condition_runs(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let (runs, state) = run_to_end(&pool, GATED_SELF_LOOP, gate_outputs(true)).await;
 
     assert_eq!(runs.get("porter"), Some(&3), "{runs:?}");
@@ -2442,6 +2461,7 @@ async fn test_self_loop_with_a_true_entry_condition_runs(pool: PgPool) {
 /// cascades past it; the workflow completes.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_self_loop_behind_a_skipped_step_is_skipped(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let yaml = r#"
 name: skipped_entry_self_loop
 activities:
@@ -2506,6 +2526,7 @@ activities:
 /// step that handles a skipped loop runs.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_two_step_loop_with_a_false_entry_condition_is_skipped(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let (runs, state) = run_to_end(&pool, GATED_TWO_STEP_LOOP, gate_outputs(false)).await;
 
     assert_eq!(runs.get("a_head"), None, "{runs:?}");
@@ -2520,6 +2541,7 @@ async fn test_two_step_loop_with_a_false_entry_condition_is_skipped(pool: PgPool
 /// step is skipped
 #[sqlx::test(migrations = "../migrations")]
 async fn test_two_step_loop_with_a_true_entry_condition_runs(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let (runs, state) = run_to_end(&pool, GATED_TWO_STEP_LOOP, gate_outputs(true)).await;
 
     assert_eq!(runs.get("a_head"), Some(&3), "{runs:?}");
@@ -2535,6 +2557,7 @@ async fn test_two_step_loop_with_a_true_entry_condition_runs(pool: PgPool) {
 /// skipped and the workflow completes.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_two_step_loop_behind_a_skipped_step_is_skipped(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let yaml = r#"
 name: skipped_entry_two_step_loop
 activities:
@@ -2572,6 +2595,7 @@ activities:
 /// them applies, and is skipped when neither does
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_with_two_entry_dependencies(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let yaml = |second_open: bool| {
         format!(
             r#"
@@ -2610,6 +2634,7 @@ activities:
 /// The entry written with `dependency_of` on the gate decides the same way
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_entry_written_with_dependency_of_is_skipped(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let yaml = r#"
 name: dependency_of_entry
 activities:
@@ -2636,6 +2661,7 @@ activities:
 /// its back-edge neither lets it in nor keeps it out
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_entered_from_the_workflow_start_runs(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let yaml = r#"
 name: loop_from_start
 activities:
@@ -2670,6 +2696,7 @@ activities:
 /// last, so the second loop starts then, not before.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_entry_on_an_earlier_loop_waits_for_it(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = drive_loop_workflow(
         &pool,
         r#"
@@ -2748,6 +2775,7 @@ fn ran_alongside(run: &LoopRun, key: &str, others: &[&str]) -> bool {
 /// output.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_step_after_a_two_step_loop_runs_after_its_last_round(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = drive_loop_workflow(
         &pool,
         r#"
@@ -2805,6 +2833,7 @@ activities:
 /// step runs once, after the last round, on its output
 #[sqlx::test(migrations = "../migrations")]
 async fn test_step_after_a_self_loop_runs_after_its_last_round(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = drive_loop_workflow(
         &pool,
         r#"
@@ -2845,6 +2874,7 @@ activities:
 /// separate self-loop with more rounds) is still going
 #[sqlx::test(migrations = "../migrations")]
 async fn test_step_after_a_loop_does_not_wait_for_another_loop(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = drive_loop_workflow(
         &pool,
         r#"
@@ -2902,6 +2932,7 @@ activities:
 /// round.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_repair_loop_starts_with_its_first_written_step(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let definition = WorkflowDefinition::from_yaml(
         r#"
 name: repair_loop_regression

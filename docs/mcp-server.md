@@ -192,6 +192,8 @@ endpoint.
 
 The table is `ACTIVITY_TRUTH` in the test module. It's a second hand-written copy, so when you change an activity's parameters or outputs, update the catalog entry and `ACTIVITY_TRUTH` together. It doesn't check `output_shape` text or output paths inside templates; review those by hand. The tests compile only with `--features mcp-server`; CI runs them in its `MCP server` job (`cargo nextest run -p kruxiaflow --features mcp-server --bins -E 'test(mcp)'`).
 
+For signal waits (approval gates), see [Signals](signals.md).
+
 ## A budget-governed session, end to end
 
 What an agent connected over MCP typically does with a request like *"research

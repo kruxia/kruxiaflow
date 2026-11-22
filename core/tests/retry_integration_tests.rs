@@ -154,6 +154,7 @@ async fn insert_workflow(
 #[sqlx::test(migrations = "../migrations")]
 #[ignore = "Requires full orchestrator loop for reliable multi-retry event sequencing"]
 async fn test_activity_retry_with_exponential_backoff(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create workflow with retry settings using exponential backoff
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -341,6 +342,7 @@ async fn test_activity_retry_with_exponential_backoff(pool: PgPool) {
 #[sqlx::test(migrations = "../migrations")]
 #[ignore = "Requires full orchestrator loop for reliable event sequencing"]
 async fn test_activity_retry_max_attempts_reached(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create workflow with max_attempts = 2
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -497,6 +499,7 @@ async fn test_activity_retry_max_attempts_reached(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_activity_retry_with_fixed_backoff(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create workflow with fixed backoff strategy
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -626,6 +629,7 @@ async fn test_activity_retry_with_fixed_backoff(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_activity_without_retry_fails_immediately(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create workflow WITHOUT retry settings
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -749,6 +753,7 @@ async fn test_activity_without_retry_fails_immediately(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_retry_state_tracking_with_cost_accumulation(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create workflow with retry and budget tracking
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),

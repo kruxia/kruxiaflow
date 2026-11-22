@@ -381,14 +381,12 @@ activities:
 
 /// The loop head waits for a signal each round
 #[sqlx::test(migrations = "../migrations")]
-#[ignore = "needs #18"]
 async fn test_signal_in_loop_head(pool: PgPool) {
     signal_in_loop(pool, "head").await;
 }
 
 /// The step that closes the loop waits for a signal each round
 #[sqlx::test(migrations = "../migrations")]
-#[ignore = "needs #18"]
 async fn test_signal_in_loop_tail(pool: PgPool) {
     signal_in_loop(pool, "tail").await;
 }
