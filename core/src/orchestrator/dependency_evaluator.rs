@@ -2,7 +2,7 @@ use super::{OrchestratorError, Result, WorkflowActivityStatus, WorkflowState};
 use crate::workflow::template::{TemplateContext, resolve_template_value};
 use crate::workflow::{ActivityDefinition, ActivityRelationship, WorkflowDefinition};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Default maximum iterations if not specified
 /// Provides safety bound for Pattern 2 (conditional-only) loops
@@ -14,6 +14,8 @@ const DEFAULT_MAX_ITERATIONS: u32 = 100;
 /// - Status is Completed and should loop back
 /// - All activities in `depends_on` list are Completed
 /// - All conditions on `depends_on` relationships are satisfied
+/// - For a completed loop member: nothing upstream of it in the same loop is
+///   still able to run this round (see [`is_upstream_of_round_unsettled`])
 pub fn find_ready_activities<'a>(
     definition: &'a WorkflowDefinition,
     state: &WorkflowState,
@@ -27,7 +29,29 @@ pub fn find_ready_activities<'a>(
         }
     }
 
+    hold_back_unsettled_loop_members(definition, state, &mut ready);
     Ok(ready)
+}
+
+/// A completed loop member waits for the rest of its round upstream (#28):
+/// drop it from `ready` while something upstream of it in the same loop can
+/// still run this round (see [`is_upstream_of_round_unsettled`]). The graph is
+/// only built while such a member is otherwise ready to run again, not on
+/// every evaluation. Used by both readiness functions, so the orchestrator's
+/// path ([`find_ready_or_unresolvable_activities`]) applies it too.
+fn hold_back_unsettled_loop_members<'a>(
+    definition: &'a WorkflowDefinition,
+    state: &WorkflowState,
+    ready: &mut Vec<&'a ActivityDefinition>,
+) {
+    if ready
+        .iter()
+        .any(|a| a.is_loop_activity && is_completed(state, &a.key))
+    {
+        let graph = DependencyGraph::new(definition);
+        let ready_keys: HashSet<&str> = ready.iter().map(|a| a.key.as_str()).collect();
+        ready.retain(|a| !is_upstream_of_round_unsettled(a, &graph, state, &ready_keys));
+    }
 }
 
 /// Activities ready to schedule, and activities whose conditions could not
@@ -56,7 +80,135 @@ pub fn find_ready_or_unresolvable_activities<'a>(
             Err(other) => return Err(other),
         }
     }
+    hold_back_unsettled_loop_members(definition, state, &mut ready);
     Ok((ready, unresolvable))
+}
+
+fn is_completed(state: &WorkflowState, key: &str) -> bool {
+    state
+        .activities
+        .get(key)
+        .is_some_and(|s| s.status == WorkflowActivityStatus::Completed)
+}
+
+/// The definition's dependency graph, for the traversals loop rounds need
+struct DependencyGraph<'a> {
+    /// Activity → its forward (non-back-edge) dependencies
+    forward_deps: HashMap<&'a str, Vec<&'a str>>,
+    /// Activity → activities that depend on it through a forward dependency
+    forward_dependents: HashMap<&'a str, Vec<&'a str>>,
+    /// Activity → activities that depend on it through any dependency,
+    /// back-edges included
+    all_dependents: HashMap<&'a str, Vec<&'a str>>,
+}
+
+impl<'a> DependencyGraph<'a> {
+    fn new(definition: &'a WorkflowDefinition) -> Self {
+        let mut graph = DependencyGraph {
+            forward_deps: HashMap::new(),
+            forward_dependents: HashMap::new(),
+            all_dependents: HashMap::new(),
+        };
+        for activity in &definition.activities {
+            for dep in get_dependencies(activity) {
+                let (to, from) = (activity.key.as_str(), dep.activity_key.as_str());
+                graph.all_dependents.entry(from).or_default().push(to);
+                if !dep.is_back_edge {
+                    graph.forward_deps.entry(to).or_default().push(from);
+                    graph.forward_dependents.entry(from).or_default().push(to);
+                }
+            }
+        }
+        graph
+    }
+
+    /// Every key reachable from `start` along `edges`, `start` excluded
+    fn reach(edges: &HashMap<&'a str, Vec<&'a str>>, start: &'a str) -> HashSet<&'a str> {
+        let mut seen = HashSet::new();
+        let mut stack = vec![start];
+        while let Some(node) = stack.pop() {
+            for &next in edges.get(node).into_iter().flatten() {
+                if next != start && seen.insert(next) {
+                    stack.push(next);
+                }
+            }
+        }
+        seen
+    }
+}
+
+/// Whether a completed loop member, otherwise ready to run again, must wait
+/// because its round is still unfolding upstream (#28).
+///
+/// [`has_new_input`] lets a member run when *any* dependency is new. For a
+/// join of parallel branches of different lengths that is too early: the
+/// short branch finishes, and the join would run on the long branch's output
+/// from the previous round, then again. Requiring *every* input to be new is
+/// wrong too: a branch whose condition is false this round stays `Completed`
+/// from an earlier one and never becomes new, so the join would wait forever.
+///
+/// The rule tells "not finished this round yet" from "won't run this round"
+/// by what can still happen upstream, not by what has happened. The member
+/// waits while any **upstream activity of the same loop** is in flight
+/// (`Pending`, `Running`, `Waiting`) or is itself ready to be scheduled now
+/// (`ready_keys`): either can still deliver new input to it this round. A
+/// branch whose condition is false is neither, so it never blocks.
+///
+/// - **Upstream:** reachable backwards through forward (non-back-edge)
+///   dependencies, and not also downstream through them. The second part
+///   only matters if a definition's back-edge marking left a forward cycle;
+///   it keeps "is upstream of" a strict order, so two activities can never
+///   wait on each other.
+/// - **Same loop:** reachable from the member going forward through any
+///   dependency, back-edges included (on a cycle with it). Activities of an
+///   earlier, separate loop and activities outside every loop never block.
+///
+/// Cannot hang a workflow: a member is held back only by an activity that is
+/// in flight (its completion or failure is a later event, which evaluates the
+/// member again) or that is ready now. A ready blocker is either scheduled in
+/// this same pass, or held back itself by one further upstream in the same
+/// loop; "upstream" is a strict order on a finite set, so the chain ends at
+/// an activity that is in flight or being scheduled now.
+fn is_upstream_of_round_unsettled(
+    activity: &ActivityDefinition,
+    graph: &DependencyGraph<'_>,
+    state: &WorkflowState,
+    ready_keys: &HashSet<&str>,
+) -> bool {
+    if !activity.is_loop_activity || !is_completed(state, &activity.key) {
+        return false;
+    }
+    let key = activity.key.as_str();
+    let upstream = DependencyGraph::reach(&graph.forward_deps, key);
+    if upstream.is_empty() {
+        return false;
+    }
+    let downstream = DependencyGraph::reach(&graph.forward_dependents, key);
+    let same_loop = DependencyGraph::reach(&graph.all_dependents, key);
+
+    let blocker = upstream
+        .iter()
+        .filter(|k| same_loop.contains(*k) && !downstream.contains(*k))
+        .find(|k| {
+            ready_keys.contains(**k)
+                || state.activities.get(**k).is_some_and(|s| {
+                    matches!(
+                        s.status,
+                        WorkflowActivityStatus::Pending
+                            | WorkflowActivityStatus::Running
+                            | WorkflowActivityStatus::Waiting
+                    )
+                })
+        });
+    if let Some(blocker) = blocker {
+        tracing::trace!(
+            "Activity {} not ready: {} upstream in the same loop can still run this round",
+            key,
+            blocker
+        );
+        return true;
+    }
+    false
 }
 
 /// Check if an activity is ready to be scheduled.
@@ -1554,14 +1706,20 @@ mod tests {
     #[test]
     fn test_state_without_sequence_numbers_counts_as_new_input() {
         // All `completion_seq` 0: no ordering information, so every completed
-        // loop member counts as having new input
+        // loop member counts as having new input. The tail still waits while the head, upstream of it in the same
+        // loop, is ready to run (#28); it runs on the head's next completion.
         let definition = two_step_loop();
         let state = make_workflow_state(vec![
             completed("start", 0, 0),
             completed("head", 0, 1),
             completed("tail", 0, 1),
         ]);
-        assert_eq!(ready_keys(&definition, &state), vec!["head", "tail"]);
+        assert_eq!(ready_keys(&definition, &state), vec!["head"]);
+        let mut state = state;
+        let head = state.activities.get_mut("head").unwrap();
+        head.completion_seq = 1;
+        head.iteration = 2;
+        assert_eq!(ready_keys(&definition, &state), vec!["tail"]);
     }
 
     #[test]
@@ -1691,5 +1849,142 @@ mod tests {
             .map(|a| a.key.as_str())
             .collect();
         assert_eq!(skipped, vec!["done"]);
+    }
+
+    // ============================================================================
+    // A completed loop member waits for the rest of its round upstream (#28)
+    // ============================================================================
+
+    /// The issue's diamond: start → a_head → (b_long1 → c_long2 | d_short)
+    /// → e_join → a_head. `d_short`'s dependency on the head takes `cond`.
+    fn diamond_loop(cond: Option<&str>) -> WorkflowDefinition {
+        WorkflowDefinition {
+            name: "diamond".to_string(),
+            settings: None,
+            activities: vec![
+                make_activity_def("start", None),
+                loop_def("a_head", vec![rel("start", false), rel("e_join", true)]),
+                loop_def("b_long1", vec![rel("a_head", false)]),
+                loop_def("c_long2", vec![rel("b_long1", false)]),
+                loop_def(
+                    "d_short",
+                    vec![ActivityRelationship {
+                        conditions: cond.map(|c| vec![c.to_string()]),
+                        ..rel("a_head", false)
+                    }],
+                ),
+                loop_def("e_join", vec![rel("c_long2", false), rel("d_short", false)]),
+            ],
+        }
+    }
+
+    fn with_round_status(
+        (key, mut state): (String, super::super::workflow_state::ActivityState),
+        status: WorkflowActivityStatus,
+    ) -> (String, super::super::workflow_state::ActivityState) {
+        state.status = status;
+        (key, state)
+    }
+
+    #[test]
+    fn test_loop_join_waits_while_a_branch_is_running() {
+        // Round 2: the head completed (6), the short branch too (7); the long
+        // branch is still running, so the join (5) must not run on c_long2's
+        // round-1 output (4)
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("a_head", 6, 2),
+            with_round_status(completed("b_long1", 2, 1), WorkflowActivityStatus::Running),
+            completed("c_long2", 4, 1),
+            completed("d_short", 7, 2),
+            completed("e_join", 5, 1),
+        ]);
+        assert!(ready_keys(&diamond_loop(None), &state).is_empty());
+    }
+
+    #[test]
+    fn test_loop_join_waits_for_a_branch_step_about_to_run() {
+        // b_long1 just completed round 2 (8): c_long2 (4) is about to run on
+        // it, so the join still waits; only c_long2 is ready
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("a_head", 6, 2),
+            completed("b_long1", 8, 2),
+            completed("c_long2", 4, 1),
+            completed("d_short", 7, 2),
+            completed("e_join", 5, 1),
+        ]);
+        assert_eq!(ready_keys(&diamond_loop(None), &state), vec!["c_long2"]);
+    }
+
+    #[test]
+    fn test_loop_join_runs_once_the_round_is_done() {
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("a_head", 6, 2),
+            completed("b_long1", 8, 2),
+            completed("c_long2", 9, 2),
+            completed("d_short", 7, 2),
+            completed("e_join", 5, 1),
+        ]);
+        assert_eq!(ready_keys(&diamond_loop(None), &state), vec!["e_join"]);
+    }
+
+    #[test]
+    fn test_loop_join_does_not_wait_for_a_branch_whose_condition_is_false() {
+        // d_short ran in round 1 (3) but its condition is false now: it stays
+        // Completed from round 1 and won't run, so it doesn't hold the join
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("a_head", 6, 2),
+            completed("b_long1", 7, 2),
+            completed("c_long2", 8, 2),
+            completed("d_short", 3, 1),
+            completed("e_join", 5, 1),
+        ]);
+        let definition = diamond_loop(Some("{{ a_head.status == 'skipped' }}"));
+        assert_eq!(ready_keys(&definition, &state), vec!["e_join"]);
+    }
+
+    #[test]
+    fn test_activities_of_another_loop_never_hold_a_member_back() {
+        // Loop 1 (a_head ⇄ b_tail) is upstream of loop 2 (c_head ⇄ d_tail),
+        // but not in it: loop 1's head running must not hold loop 2's head
+        let definition = WorkflowDefinition {
+            name: "sequential".to_string(),
+            settings: None,
+            activities: vec![
+                make_activity_def("start", None),
+                loop_def("a_head", vec![rel("start", false), rel("b_tail", true)]),
+                loop_def("b_tail", vec![rel("a_head", false)]),
+                loop_def("c_head", vec![rel("b_tail", false), rel("d_tail", true)]),
+                loop_def("d_tail", vec![rel("c_head", false)]),
+            ],
+        };
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            with_round_status(completed("a_head", 2, 2), WorkflowActivityStatus::Pending),
+            completed("b_tail", 4, 2),
+            completed("c_head", 3, 1),
+            completed("d_tail", 5, 1),
+        ]);
+        assert_eq!(ready_keys(&definition, &state), vec!["c_head"]);
+    }
+
+    #[test]
+    fn test_members_on_a_forward_cycle_never_hold_each_other_back() {
+        // A definition whose back-edge marking left a forward cycle (x ⇄ y,
+        // neither marked): each is upstream of the other, so neither may hold
+        // the other back, or both would wait forever
+        let definition = WorkflowDefinition {
+            name: "forward_cycle".to_string(),
+            settings: None,
+            activities: vec![
+                loop_def("x", vec![rel("y", false), rel("x", true)]),
+                loop_def("y", vec![rel("x", false), rel("y", true)]),
+            ],
+        };
+        let state = make_workflow_state(vec![completed("x", 1, 1), completed("y", 2, 1)]);
+        assert_eq!(ready_keys(&definition, &state), vec!["x", "y"]);
     }
 }
