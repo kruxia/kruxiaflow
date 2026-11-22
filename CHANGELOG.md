@@ -39,6 +39,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   host label (`MACHINE_SHOP_HOST`, or `<os>/<arch>`), in results format
   `machine-shop-results/2`. Every card has an edge reading, and the Shop
   Floor shows the edge readings, footprints, hosts and plug outcomes.
+
+### Changed
+
+- **The CI pipeline (`main-ci.yml`) overlaps its slow jobs.** The tests
+  (including the MCP server job) now start alongside clippy and rustfmt
+  instead of waiting for them, on pull requests as on every other run. Release
+  binaries and the per-platform Docker builds likewise start alongside the
+  Rust checks. The two publish steps, the Docker manifest-list merge (which
+  applies the image tags) and the crates.io publish, run alongside each other
+  once the checks and every build have passed. Nothing publishes on a failed
+  check or a failed build: until then the builds have produced only run
+  artifacts and untagged image digests.
+  The Docker workflow is split into `docker-build.yml` and `docker-merge.yml`
+  so the merge can be gated separately.
 ### Fixed
 
 - **The MCP activity catalog and authoring guide match the engine.** Both are
