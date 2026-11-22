@@ -17,7 +17,10 @@ use crate::events::{
     WorkflowEventType, WorkflowStatus,
 };
 use crate::queue::{Activity, ActivityQueue, StaleActivityAction};
-use crate::subscription::{ExpiredSubscription, NewSubscription, SubscriptionService};
+use crate::subscription::{
+    ExpiredSubscription, NewSubscription, SubscriptionService, discard_held_signals,
+    take_held_signal,
+};
 use crate::workflow::template::{TemplateContext, resolve_template_value};
 use crate::workflow::{BudgetAction, OnTimeout, apply_duration, parse_scheduled_for};
 use chrono::{DateTime, Utc};
@@ -731,7 +734,10 @@ fn build_template_context(
 /// activities, cancelling the queued attempt if the budget is exhausted; on
 /// terminal failure it returns false so the caller applies the failure to state
 /// and the workflow can complete as failed without any restart.
-/// Returns true if the activity will be retried, false if it fails permanently.
+/// A retry whose parameters no longer resolve is cancelled and the activity
+/// fails with `TEMPLATE_ERROR` through a new terminal `ActivityFailed`.
+/// Returns true if this event is fully handled (the activity will be retried,
+/// or its template failure is in flight), false if it fails permanently.
 async fn handle_activity_failed(
     state: &mut super::workflow_state::WorkflowState,
     definition: &crate::workflow::WorkflowDefinition,
@@ -834,15 +840,31 @@ async fn handle_activity_failed(
         let resolved_params = match resolve_template_value(&params_value, &template_context) {
             Ok(resolved) => resolved,
             Err(e) => {
-                tracing::error!(
-                    "Template resolution failed for activity retry {}: {}",
-                    activity_key,
-                    e
-                );
-                return Err(super::OrchestratorError::TemplateFailed(format!(
-                    "Failed to resolve templates in activity {}: {}",
-                    activity_key, e
-                )));
+                // The budget cannot be checked: cancel the retry and fail the
+                // activity with the template error, not this event (#19).
+                // A worker may have claimed the retry before this cancel; the
+                // outcome then depends on which event is processed first:
+                // - the TEMPLATE_ERROR failure published here: the activity
+                //   fails, and the retry's completion or failure is ignored
+                //   (if that failure requeued another attempt, the row stays
+                //   claimable and its result is ignored too);
+                // - the retry's completion: the activity completes with its
+                //   outputs, and the TEMPLATE_ERROR failure is ignored;
+                // - the retry's failure: the activity fails. A retryable one
+                //   comes back to this branch, which withdraws the attempt the
+                //   queue requeued (if this cancel has not already) and
+                //   publishes this failure again; the event dedup drops the copy.
+                activity_queue
+                    .cancel_pending(state.workflow_id, activity_key, event.iteration)
+                    .await?;
+                fail_unresolvable_activity(
+                    state,
+                    activity_def,
+                    &format!("Failed to resolve templates in activity {activity_key}: {e}"),
+                    event_source,
+                )
+                .await?;
+                return Ok(true); // Handled: the terminal failure is in flight
             }
         };
 
@@ -1034,7 +1056,8 @@ async fn handle_activity_failed(
 ///    - `{{INPUT.topic}}` → actual input value
 ///    - `{{search.results | last}}` → latest iteration result
 ///    - `{{ACTIVITY.iteration}}` → current iteration number
-/// 3. Handle template errors → fail workflow
+/// 3. A template error fails that activity (terminal `ActivityFailed`,
+///    `TEMPLATE_ERROR`), not the event; see `fail_unresolvable_activity`
 ///
 /// #### 9b. Budget Enrichment (LLM Activities Only)
 /// For `llm_prompt` and `embedding` activities:
@@ -1406,7 +1429,8 @@ pub async fn process_workflow_event(
         .await?;
 
         if retry_handled {
-            // Activity will be retried - save state and exit early
+            // Retry scheduled, or a template failure in flight - save state
+            // and exit early
             tracing::trace!(
                 "Activity retry scheduled in {:?} for workflow {}",
                 retry_start.elapsed(),
@@ -1528,9 +1552,37 @@ pub async fn process_workflow_event(
         }
     }
 
+    // A signal (or a timeout that continues) ends the activity's current wait.
+    // It runs now, in this pass, instead of waiting again, and its subscription
+    // is deleted so that the next wait (a later loop round) can create one.
+    // Only a signal for the wait that is open counts: the activity is waiting,
+    // in the loop round the event carries. A replay of an earlier round's
+    // signal, or a duplicate once the activity has moved on, changes nothing.
+    let signaled_activity = (event.event_type == WorkflowEventType::ActivitySignaled)
+        .then_some(event.activity_key.as_ref())
+        .flatten()
+        .filter(|key| {
+            state
+                .activities
+                .get(key.as_str())
+                .is_some_and(|a| a.ends_wait(event.iteration))
+        })
+        .cloned();
+
     {
         let _enter = apply_span.enter();
         apply_event_to_state(&mut state, event)?;
+    }
+
+    if let Some(key) = &signaled_activity {
+        subscription_service
+            .delete_subscription(event.workflow_id, key)
+            .await
+            .map_err(|e| {
+                super::OrchestratorError::InternalError(format!(
+                    "Failed to delete signal subscription for activity {key}: {e}"
+                ))
+            })?;
     }
     tracing::trace!(
         "Event applied to state in {:?} for workflow {}",
@@ -1622,6 +1674,23 @@ pub async fn process_workflow_event(
             }
         }
 
+        // Signals still held for this workflow's waits (`hold_early`, #42)
+        // can never be delivered now. Gated on the event that ends the
+        // workflow, so replays of other events don't repeat the delete.
+        if matches!(
+            event.event_type,
+            WorkflowEventType::WorkflowCompleted | WorkflowEventType::WorkflowFailed
+        ) {
+            let discarded = discard_held_signals(&mut tx, event.workflow_id).await?;
+            if discarded > 0 {
+                tracing::info!(
+                    workflow_id = %event.workflow_id,
+                    discarded = discarded,
+                    "Discarded held signals for ended workflow"
+                );
+            }
+        }
+
         // Save the terminal state and return early
         save_materialized_state(&mut tx, event.workflow_id, &state).await?;
         tx.commit().await?;
@@ -1665,7 +1734,27 @@ pub async fn process_workflow_event(
                     .unwrap_or(&0)
             );
 
-            find_ready_or_unresolvable_activities(&definition, &state)?
+            let (mut ready, mut unresolvable) =
+                find_ready_or_unresolvable_activities(&definition, &state)?;
+
+            // The activity whose wait this event ended was already scheduled: its
+            // dependencies were evaluated when the wait began. It runs now, without
+            // re-evaluating them against state its own wait has changed (a
+            // self-loop's `{{self.status == 'completed'}}` no longer holds). For
+            // the same reason a condition that no longer resolves does not fail it.
+            if let Some(key) = &signaled_activity
+                && state
+                    .activities
+                    .get(key)
+                    .is_some_and(|a| a.status == WorkflowActivityStatus::NotScheduled)
+                && let Some(activity) = definition.activities.iter().find(|a| &a.key == key)
+            {
+                unresolvable.retain(|(a, _)| &a.key != key);
+                if !ready.iter().any(|a| &a.key == key) {
+                    ready.push(activity);
+                }
+            }
+            (ready, unresolvable)
         };
         let (ready_activities, unresolvable_activities) = ready_activities;
 
@@ -1678,7 +1767,6 @@ pub async fn process_workflow_event(
         // this event (#19)
         for (activity, error) in &unresolvable_activities {
             fail_unresolvable_activity(&mut state, activity, error, event_source).await?;
-            template_failed.insert(activity.key.clone());
         }
         tracing::trace!(
             "Dependencies evaluated in {:?} for workflow {} ({} ready)",
@@ -1844,9 +1932,69 @@ pub async fn process_workflow_event(
                         None
                     };
 
-                    // Check if activity has wait_for_signal setting
+                    // A wait that holds early signals (`hold_early`, #42) first
+                    // takes the oldest signal held for it: the activity then runs
+                    // with that signal's data, without waiting. Taken on this
+                    // pass's transaction, so the held signal is consumed only if
+                    // this state is saved, and a signal sent meanwhile is held
+                    // back until then (see `take_held_signal`).
+                    let held_signal =
+                        match a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref()) {
+                            Some(wait_settings)
+                                if wait_settings.hold_early
+                                    && signaled_activity.as_deref() != Some(a.key.as_str()) =>
+                            {
+                                take_held_signal(
+                                    &mut tx,
+                                    event.workflow_id,
+                                    &a.key,
+                                    &wait_settings.event_name,
+                                )
+                                .await?
+                            }
+                            _ => None,
+                        };
+                    if let (Some(data), Some(wait_settings)) = (
+                        &held_signal,
+                        a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref()),
+                    ) {
+                        tracing::info!(
+                            workflow_id = %event.workflow_id,
+                            activity_key = %a.key,
+                            "Activity takes a held signal instead of waiting"
+                        );
+                        if let Some(activity_state) = state.activities.get_mut(&a.key) {
+                            activity_state.signal_data = Some(data.clone());
+                        }
+
+                        // The signal's event, for the workflow's history and its
+                        // observers, as when a waiting activity is signaled. The
+                        // orchestrator has already acted on this signal: when it
+                        // reads the event back, the activity is not waiting, so
+                        // the event changes nothing. If this pass fails and is
+                        // retried, the dedup index drops the second copy.
+                        event_source
+                            .publish(NewWorkflowEvent {
+                                workflow_id: event.workflow_id,
+                                event_type: WorkflowEventType::ActivitySignaled,
+                                activity_key: Some(a.key.clone()),
+                                payload: json!({
+                                    "event_name": wait_settings.event_name,
+                                    "signal_data": data,
+                                    "held": true,
+                                }),
+                                iteration,
+                            })
+                            .await?;
+                    }
+
+                    // Check if activity has wait_for_signal setting, and is not the
+                    // activity whose wait this event just ended or one that just
+                    // took a held signal
                     if let Some(wait_settings) =
                         a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref())
+                        && signaled_activity.as_deref() != Some(a.key.as_str())
+                        && held_signal.is_none()
                     {
                         // Activity needs to wait for an external signal before executing
                         // Create a subscription instead of scheduling to queue
@@ -1856,6 +2004,7 @@ pub async fn process_workflow_event(
                             event_name: wait_settings.event_name.clone(),
                             on_timeout: wait_settings.on_timeout.clone(),
                             timeout_seconds: wait_settings.timeout_seconds,
+                            iteration,
                         };
 
                         match subscription_service.create_subscription(new_sub).await {
@@ -1914,12 +2063,12 @@ pub async fn process_workflow_event(
                     let scheduled_for = match compute_scheduled_for(a, &template_context, iteration)
                     {
                         Ok(scheduled_for) => scheduled_for,
-                        Err(e) => {
-                            fail_unresolvable_activity(&mut state, a, &e.to_string(), event_source)
-                                .await?;
+                        Err(super::OrchestratorError::TemplateFailed(error)) => {
+                            fail_unresolvable_activity(&mut state, a, &error, event_source).await?;
                             template_failed.insert(a.key.clone());
                             continue;
                         }
+                        Err(other) => return Err(other),
                     };
 
                     // Get signal_data from activity state if present
@@ -2081,8 +2230,7 @@ pub async fn process_workflow_event(
 
         // 5.5. Mark activities as Skipped if they can never be scheduled. Repeat
         // until nothing changes: skipping one activity can make its dependents
-        // skippable, and a single pass left them NotScheduled, so the workflow
-        // never completed (#19). A skip can also make a dependent's condition
+        // skippable (#19). A skip can also make a dependent's condition
         // evaluable for the first time, and unresolvable (a condition on a
         // skipped step's result): that activity is failed, like in step 4
         let mut skipped_any = false;
@@ -2845,11 +2993,9 @@ async fn record_reported_activity_cost(
 /// Fail an activity whose templates (parameters, `delay`, `scheduled_for`)
 /// cannot be resolved, instead of failing the event being processed (#19).
 ///
-/// A template error is deterministic: retrying the event cannot fix it.
-/// Returning it as an event-processing error used to retry the upstream
-/// activity's completion event until it was declared poison, which then
-/// failed the upstream activity (which had succeeded), never ran or failed
-/// this one, and left the workflow running.
+/// A template error is deterministic: retrying the event cannot fix it, and
+/// the event being processed (usually an upstream activity's completion) did
+/// succeed.
 ///
 /// Instead the failure goes the way a worker's failure does: the activity is
 /// marked `Pending` (a failure is in flight, so nothing schedules it again or
@@ -2865,16 +3011,20 @@ async fn fail_unresolvable_activity(
     event_source: &Arc<dyn EventSource>,
 ) -> Result<()> {
     let activity_key = &activity_def.key;
+    let workflow_id = state.workflow_id;
+    let activity_state = state.activities.get_mut(activity_key).ok_or_else(|| {
+        super::OrchestratorError::ActivityNotFound(format!(
+            "Activity state not found: {}",
+            activity_key
+        ))
+    })?;
     let message = format!("TEMPLATE_ERROR: {error}");
     tracing::error!(
-        workflow_id = %state.workflow_id,
+        workflow_id = %workflow_id,
         activity_key = %activity_key,
         error = %error,
         "Template resolution failed; failing the activity"
     );
-    let Some(activity_state) = state.activities.get_mut(activity_key) else {
-        return Ok(());
-    };
     activity_state.status = WorkflowActivityStatus::Pending;
 
     // For looping activities, include iteration to avoid unique constraint violation
@@ -2885,7 +3035,7 @@ async fn fail_unresolvable_activity(
     };
     event_source
         .publish(NewWorkflowEvent {
-            workflow_id: state.workflow_id,
+            workflow_id,
             event_type: WorkflowEventType::ActivityFailed,
             activity_key: Some(activity_key.clone()),
             payload: json!({
@@ -3258,7 +3408,7 @@ async fn process_expired_subscriptions(
                         "reason": "timeout",
                         "on_timeout": "continue",
                     }),
-                    iteration: None,
+                    iteration: sub.iteration,
                 }
             }
             OnTimeout::Skip => {
@@ -3277,7 +3427,7 @@ async fn process_expired_subscriptions(
                         "reason": "timeout",
                         "on_timeout": "skip",
                     }),
-                    iteration: None,
+                    iteration: sub.iteration,
                 }
             }
             OnTimeout::Fail => {
@@ -3298,19 +3448,26 @@ async fn process_expired_subscriptions(
                         "on_timeout": "fail",
                         "will_retry": false,
                     }),
-                    iteration: None,
+                    iteration: sub.iteration,
                 }
             }
         };
 
         // Only delete the subscription after the event is successfully published.
         // If publish fails, the subscription stays marked as expired and will be
-        // retried on the next cycle via recover_expired.
+        // retried on the next cycle via recover_expired. Deleted by id: once the
+        // event is out, the step can run and open its next loop round's wait
+        // under the same key before this delete runs.
         match event_source.publish(event).await {
             Ok(_) => {
-                let _ = subscription_service
-                    .delete_subscription(sub.workflow_id, &sub.activity_key)
-                    .await;
+                if let Err(e) = subscription_service.delete_subscription_by_id(sub.id).await {
+                    tracing::error!(
+                        workflow_id = %sub.workflow_id,
+                        activity_key = %sub.activity_key,
+                        "Failed to delete expired subscription after publishing its timeout event: {}",
+                        e
+                    );
+                }
             }
             Err(e) => {
                 tracing::error!(
@@ -3837,6 +3994,8 @@ mod tests {
             async fn expire_subscriptions(&self, limit: i64) -> std::result::Result<Vec<ExpiredSubscription>, crate::subscription::SubscriptionError>;
             async fn recover_expired(&self, limit: i64) -> std::result::Result<Vec<ExpiredSubscription>, crate::subscription::SubscriptionError>;
             async fn delete_subscription(&self, workflow_id: Uuid, activity_key: &str) -> std::result::Result<(), crate::subscription::SubscriptionError>;
+            async fn release_signal(&self, subscription_id: Uuid) -> std::result::Result<(), crate::subscription::SubscriptionError>;
+            async fn delete_subscription_by_id(&self, id: Uuid) -> std::result::Result<(), crate::subscription::SubscriptionError>;
         }
     }
 
@@ -4117,6 +4276,7 @@ mod tests {
                     activity_key: "recovered_step".to_string(),
                     event_name: "approval".to_string(),
                     on_timeout: OnTimeout::Fail,
+                    iteration: None,
                 }])
             });
 
@@ -4132,14 +4292,15 @@ mod tests {
                     activity_key: "new_expired".to_string(),
                     event_name: "signal".to_string(),
                     on_timeout: OnTimeout::Continue,
+                    iteration: None,
                 }])
             });
 
-        // delete_subscription called once per successful publish
+        // delete_subscription_by_id called once per successful publish
         mock_sub
-            .expect_delete_subscription()
+            .expect_delete_subscription_by_id()
             .times(2)
-            .returning(|_, _| Ok(()));
+            .returning(|_| Ok(()));
 
         let mut mock_es = MockEventSrc::new();
         // Two publishes: one for recovered, one for newly expired
@@ -4162,13 +4323,14 @@ mod tests {
         let wf_id = Uuid::now_v7();
         let mut mock_sub = MockSubSvc::new();
         mock_sub
-            .expect_delete_subscription()
+            .expect_delete_subscription_by_id()
             .times(1)
-            .returning(|_, _| Ok(()));
+            .returning(|_| Ok(()));
 
         let mut mock_es = MockEventSrc::new();
         mock_es.expect_publish().times(1).returning(|event| {
             assert_eq!(event.event_type, WorkflowEventType::ActivitySignaled);
+            assert_eq!(event.iteration, Some(2));
             assert_eq!(event.payload["on_timeout"].as_str().unwrap(), "continue");
             assert_eq!(event.payload["reason"].as_str().unwrap(), "timeout");
             Ok(())
@@ -4183,6 +4345,7 @@ mod tests {
             activity_key: "wait_step".to_string(),
             event_name: "approval".to_string(),
             on_timeout: OnTimeout::Continue,
+            iteration: Some(2),
         }];
 
         process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
@@ -4192,13 +4355,14 @@ mod tests {
     async fn test_process_expired_skip() {
         let mut mock_sub = MockSubSvc::new();
         mock_sub
-            .expect_delete_subscription()
+            .expect_delete_subscription_by_id()
             .times(1)
-            .returning(|_, _| Ok(()));
+            .returning(|_| Ok(()));
 
         let mut mock_es = MockEventSrc::new();
         mock_es.expect_publish().times(1).returning(|event| {
             assert_eq!(event.event_type, WorkflowEventType::ActivitySignaled);
+            assert_eq!(event.iteration, Some(2));
             assert_eq!(event.payload["on_timeout"].as_str().unwrap(), "skip");
             Ok(())
         });
@@ -4212,6 +4376,7 @@ mod tests {
             activity_key: "skip_step".to_string(),
             event_name: "signal".to_string(),
             on_timeout: OnTimeout::Skip,
+            iteration: Some(2),
         }];
 
         process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
@@ -4221,13 +4386,14 @@ mod tests {
     async fn test_process_expired_fail() {
         let mut mock_sub = MockSubSvc::new();
         mock_sub
-            .expect_delete_subscription()
+            .expect_delete_subscription_by_id()
             .times(1)
-            .returning(|_, _| Ok(()));
+            .returning(|_| Ok(()));
 
         let mut mock_es = MockEventSrc::new();
         mock_es.expect_publish().times(1).returning(|event| {
             assert_eq!(event.event_type, WorkflowEventType::ActivityFailed);
+            assert_eq!(event.iteration, Some(2));
             assert_eq!(
                 event.payload["error_code"].as_str().unwrap(),
                 "SIGNAL_TIMEOUT"
@@ -4246,6 +4412,7 @@ mod tests {
             activity_key: "fail_step".to_string(),
             event_name: "required_signal".to_string(),
             on_timeout: OnTimeout::Fail,
+            iteration: Some(2),
         }];
 
         process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
@@ -4255,7 +4422,7 @@ mod tests {
     async fn test_process_expired_publish_error_skips_delete() {
         let mut mock_sub = MockSubSvc::new();
         // delete should NOT be called when publish fails
-        mock_sub.expect_delete_subscription().times(0);
+        mock_sub.expect_delete_subscription_by_id().times(0);
 
         let mut mock_es = MockEventSrc::new();
         mock_es.expect_publish().times(1).returning(|_| {
@@ -4273,6 +4440,7 @@ mod tests {
             activity_key: "step".to_string(),
             event_name: "signal".to_string(),
             on_timeout: OnTimeout::Fail,
+            iteration: None,
         }];
 
         // Should not panic — error is logged and subscription is retained for retry
@@ -4283,9 +4451,9 @@ mod tests {
     async fn test_process_expired_multiple_subscriptions() {
         let mut mock_sub = MockSubSvc::new();
         mock_sub
-            .expect_delete_subscription()
+            .expect_delete_subscription_by_id()
             .times(3)
-            .returning(|_, _| Ok(()));
+            .returning(|_| Ok(()));
 
         let mut mock_es = MockEventSrc::new();
         mock_es.expect_publish().times(3).returning(|_| Ok(()));
@@ -4300,6 +4468,7 @@ mod tests {
                 activity_key: "a".to_string(),
                 event_name: "sig".to_string(),
                 on_timeout: OnTimeout::Continue,
+                iteration: None,
             },
             ExpiredSubscription {
                 id: Uuid::now_v7(),
@@ -4307,6 +4476,7 @@ mod tests {
                 activity_key: "b".to_string(),
                 event_name: "sig".to_string(),
                 on_timeout: OnTimeout::Skip,
+                iteration: None,
             },
             ExpiredSubscription {
                 id: Uuid::now_v7(),
@@ -4314,10 +4484,108 @@ mod tests {
                 activity_key: "c".to_string(),
                 event_name: "sig".to_string(),
                 on_timeout: OnTimeout::Fail,
+                iteration: None,
             },
         ];
 
         process_expired_subscriptions(&expired, &arc_sub, &arc_es).await;
+    }
+
+    /// An event source whose publish does what the orchestrator does with a
+    /// loop step's timeout that continues: it ends that round's wait (deleting
+    /// its row) and the step's next round opens a new one
+    struct NextRoundOnPublish {
+        subs: crate::subscription::PostgresSubscriptionService,
+    }
+
+    #[async_trait]
+    impl EventSource for NextRoundOnPublish {
+        async fn publish(
+            &self,
+            event: NewWorkflowEvent,
+        ) -> std::result::Result<(), crate::events::EventError> {
+            let key = event.activity_key.clone().unwrap_or_default();
+            self.subs
+                .delete_subscription(event.workflow_id, &key)
+                .await
+                .expect("delete the ended wait");
+            self.subs
+                .create_subscription(NewSubscription {
+                    workflow_id: event.workflow_id,
+                    activity_key: key,
+                    event_name: "go".to_string(),
+                    on_timeout: OnTimeout::Continue,
+                    timeout_seconds: 3600,
+                    iteration: event.iteration.map(|r| r + 1),
+                })
+                .await
+                .expect("open the next round's wait");
+            Ok(())
+        }
+        async fn poll(
+            &self,
+            _consumer_id: &str,
+        ) -> std::result::Result<Vec<WorkflowEvent>, crate::events::EventError> {
+            Ok(Vec::new())
+        }
+        async fn update_position(
+            &self,
+            _consumer_id: &str,
+            _cursor: EventCursor,
+        ) -> std::result::Result<(), crate::events::EventError> {
+            Ok(())
+        }
+    }
+
+    /// The expiry checker removes only the subscription it expired: a later
+    /// round's wait, opened before the checker gets to its delete, stays open
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_expiry_keeps_next_rounds_subscription(pool: sqlx::PgPool) {
+        let def_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO workflow_definitions (name, activities) VALUES ('w', '[]') RETURNING id",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let wf = Uuid::now_v7();
+        sqlx::query(
+            "INSERT INTO workflows (id, definition_name, workflow_definition_id, input, status, activities, state_data) \
+             VALUES ($1, 'w', $2, '{}', 'running', '{}', '{}')",
+        )
+        .bind(wf)
+        .bind(def_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let subs = crate::subscription::PostgresSubscriptionService::new(pool.clone());
+        subs.create_subscription(NewSubscription {
+            workflow_id: wf,
+            activity_key: "poll".to_string(),
+            event_name: "go".to_string(),
+            on_timeout: OnTimeout::Continue,
+            timeout_seconds: 0,
+            iteration: Some(0),
+        })
+        .await
+        .unwrap();
+
+        let arc_sub: Arc<dyn SubscriptionService> = Arc::new(subs);
+        let arc_es: Arc<dyn EventSource> = Arc::new(NextRoundOnPublish {
+            subs: crate::subscription::PostgresSubscriptionService::new(pool.clone()),
+        });
+        check_and_handle_expired_subscriptions(&arc_sub, &arc_es)
+            .await
+            .unwrap();
+
+        let rounds: Vec<Option<i32>> = sqlx::query_scalar(
+            "SELECT iteration FROM activity_event_subscriptions WHERE workflow_id = $1",
+        )
+        .bind(wf)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rounds, vec![Some(1)]);
     }
 
     // =========================================================================
