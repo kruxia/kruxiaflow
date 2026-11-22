@@ -199,14 +199,13 @@ decision — then resume when signaled, even days later, surviving restarts in b
 ```yaml
 activities:
   - key: await_approval
-    worker: std
     activity_name: echo
     parameters:
       request: Approve the Q3 budget?
     settings:
       wait_for_signal:
         event_name: approval
-        timeout_seconds: 259200   # three days; then on_timeout: fail (the default), skip or continue
+        timeout_seconds: 604800   # then on_timeout: fail (default), continue or skip
 ```
 
 ```bash
@@ -216,6 +215,8 @@ curl -X POST http://localhost:8080/api/v1/workflows/$WORKFLOW_ID/signal \
   -H "Content-Type: application/json" \
   -d '{"activity_key": "await_approval", "event_name": "approval", "data": {"approved": true}}'
 ```
+
+Inside a loop, the activity waits again in each round, for that round's signal.
 
 The signal endpoint is described in the [API reference](docs/api-reference.md#signal-an-activity).
 
