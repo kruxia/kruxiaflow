@@ -231,6 +231,24 @@
   .legend svg { vertical-align: middle; margin-right: 4px; }
   .empty { max-width: 60ch; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
   .empty code { font-family: var(--mono); font-size: 12px; }
+  /* one machine maximized: the bay fills the floor; its card and source sit beside it when there's room */
+  .maxbtn { flex: none; width: 28px; height: 28px; padding: 0; display: inline-grid; place-items: center; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 6px; background: var(--page); color: var(--ink-secondary); }
+  .maxbtn:hover, .maxbtn:focus-visible { border-color: var(--ink-secondary); color: var(--ink); }
+  .maxbtn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .bay-main, .panels { display: grid; gap: 10px; min-width: 0; align-content: start; }
+  .panels { gap: 0; }
+  .panels:empty { display: none; }
+  .back { margin: 0 0 10px; font-size: 13px; color: var(--ink-secondary); }
+  .back kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+  .bay.max { grid-column: 1 / -1; }
+  .floor > .back { grid-column: 1 / -1; }
+  .bay.max .bay-head h2 { font-size: 19px; }
+  .bay.max .schematic svg { width: min(100%, calc(var(--w) * 2px)); }
+  .bay.max .source { max-height: calc(100vh - 220px); }
+  @media (min-width: 1100px) {
+    .bay.max { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); column-gap: 20px; align-items: start; }
+  }
   @media (max-width: 560px) {
     header { position: static; }
     .controls { margin-left: 0; }
@@ -378,7 +396,7 @@ function machineFoot(set, dir) {
 // State
 // ---------------------------------------------------------------------------
 
-const state = { set: null, compare: null, onlyChanged: false, run: {} };
+const state = { set: null, compare: null, onlyChanged: false, run: {}, max: null };
 if (SETS.length) {
   const last = SETS[SETS.length - 1];
   state.set = last.id;
@@ -484,7 +502,7 @@ Click to see its source</title>
       <text class="state" x="${p.x + 9}" y="${p.y + 31}">${esc(stateText(got))}</text>
       ${badges}</g>`;
   }
-  return `<svg viewBox="-2 -9 ${width + 4} ${height + 11}" width="${width + 4}" role="img" aria-label="Schematic of ${esc(m.card.name)}">
+  return `<svg viewBox="-2 -9 ${width + 4} ${height + 11}" width="${width + 4}" style="--w:${width + 4}" role="img" aria-label="Schematic of ${esc(m.card.name)}">
     <defs>
       <marker id="${id}-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0 0 L8 4 L0 8 Z"/></marker>
     </defs>${links}${parts}</svg>`;
@@ -534,7 +552,7 @@ function andon() {
   return MACHINES.map(m => {
     const rs = (cur() ? cur().runs : []).filter(x => x.machine === m.dir);
     const r = worst(rs), t = worstTwin(rs);
-    return `<a class="lamp-link" href="#${esc(m.dir)}" title="${esc(resultLabel(r))}"><span class="lamp ${r ? r.result : ""}"></span>${esc(m.card.name)}${t ? plugMark(t.outcome, twinLabel(t)) : ""}</a>`;
+    return `<a class="lamp-link" href="#${state.max ? "max-" : ""}${esc(m.dir)}" title="${esc(resultLabel(r))}"><span class="lamp ${r ? r.result : ""}"></span>${esc(m.card.name)}${t ? plugMark(t.outcome, twinLabel(t)) : ""}</a>`;
   }).join("");
 }
 
@@ -641,12 +659,17 @@ function bay(m) {
     }).join("")}</tr>`).join("")}</tbody></table></div>`;
 
   const wide = layout(m.workflow.steps).width > 370;
-  return `<section class="bay${wide ? " wide" : ""}${c.trap ? " trap" : ""}${state.onlyChanged && cmp() && !anyChanged ? " dim" : ""}" id="${esc(m.dir)}" aria-label="${esc(c.name)}">
+  const isMax = state.max === m.dir;
+  const maxBtn = `<button type="button" class="maxbtn" data-max="${esc(m.dir)}" aria-label="${isMax ? "Back to the floor" : `Maximize ${esc(c.name)}`}" title="${isMax ? "Back to the floor (Esc)" : "Maximize this machine"}">${isMax ? ICON_RESTORE : ICON_MAX}</button>`;
+  const fsBtn = isMax && document.fullscreenEnabled ? `<button type="button" class="maxbtn" data-fullscreen aria-label="Full screen" title="Full screen (F)">${ICON_FULL}</button>` : "";
+  return `<section class="bay${wide ? " wide" : ""}${isMax ? " max" : ""}${c.trap ? " trap" : ""}${state.onlyChanged && cmp() && !anyChanged && !isMax ? " dim" : ""}" id="${esc(m.dir)}" aria-label="${esc(c.name)}">
+    <div class="bay-main">
     <div class="bay-head">
       <span class="lamp ${run ? run.result : ""}" title="${esc(resultLabel(run))}"></span>
       <div class="names"><h2>${esc(c.name)}</h2><span class="kind">${esc(c.kind)} machine · ${m.workflow.steps.length} steps</span></div>
       <div class="verdict"><span>${esc(resultLabel(run))}</span>${run ? `<span class="secs">${Number(run.seconds).toFixed(2)}s</span>` : ""}
         ${trapIssues(c.trap).length ? `<span class="trapchip">Trap · ${issueLinks(trapIssues(c.trap))}</span>` : ""}</div>
+      ${fsBtn}${maxBtn}
     </div>
     ${c.edge ? `<p class="edge"><b>At the edge</b>${esc(c.edge)}</p>` : ""}
     ${hostsBlock(m)}
@@ -655,6 +678,8 @@ function bay(m) {
     ${findings}
     ${twinBlock(cur(), run)}
     ${footBlock(cur(), m, run)}
+    </div>
+    <div class="panels">
     <details><summary>Card: story, engine functions, recent results</summary>
       <p class="story">${esc(c.picture)}</p>
       ${c.trap ? `<p class="story"><b>When the bug is there:</b> ${esc(c.trap.broken_looks_like)}</p>` : ""}
@@ -665,6 +690,7 @@ function bay(m) {
       <p class="src-hint">Click a step in the schematic to highlight its activity here.</p>
       <pre class="source"><code>${sourceLines(m.workflow.source || "")}</code></pre>
     </details>
+    </div>
   </section>`;
 }
 
@@ -715,6 +741,53 @@ document.addEventListener("keydown", e => {
   if (g) { e.preventDefault(); showStepSource(g.closest(".bay"), g.dataset.step); }
 });
 
+// ---------------------------------------------------------------------------
+// One machine maximized: `#max-<machine>` in the URL, so a link opens it
+// ---------------------------------------------------------------------------
+
+const ICON_MAX = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M9.5 2h4.5v4.5M14 2l-5 5M6.5 14H2V9.5M2 14l5-5"/></svg>`;
+const ICON_RESTORE = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 6.5H9.5V2.5M9.5 6.5l5-5M2.5 9.5h4v4M6.5 9.5l-5 5"/></svg>`;
+const ICON_FULL = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg>`;
+const MAX_PREFIX = "max-";
+let floorScroll = 0;
+
+function maxFromHash() {
+  let h = "";
+  try { h = decodeURIComponent(location.hash.slice(1)); } catch (_) { h = ""; }
+  const dir = h.startsWith(MAX_PREFIX) ? h.slice(MAX_PREFIX.length) : "";
+  return MACHINES.some(m => m.dir === dir) ? dir : null;
+}
+/** A newly maximized bay opens its source, unless one of its panels is already open */
+function openMaxSource() {
+  const b = state.max && document.getElementById(state.max);
+  const src = b && b.querySelector('details[data-part="source"]');
+  if (src && !b.querySelector("details[open]")) src.open = true;
+}
+function applyHash() {
+  const next = maxFromHash();
+  if (next === state.max) return;
+  const was = state.max;
+  if (!was) floorScroll = window.scrollY;
+  state.max = next;
+  render();
+  if (next) { openMaxSource(); window.scrollTo(0, 0); return; }
+  const b = was && document.getElementById(was);
+  if (floorScroll) window.scrollTo(0, floorScroll);
+  else if (b) b.scrollIntoView({ block: "start" });
+}
+function toggleFullscreen() {
+  try {
+    const p = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    if (p && p.catch) p.catch(() => {});
+  } catch (_) { /* full screen isn't available here */ }
+}
+window.addEventListener("hashchange", applyHash);
+document.addEventListener("keydown", e => {
+  if (!state.max || (e.target.closest && e.target.closest("input, select, textarea"))) return;
+  if (e.key === "Escape" && !document.fullscreenElement) location.hash = "";
+  else if ((e.key === "f" || e.key === "F") && !e.metaKey && !e.ctrlKey && !e.altKey) toggleFullscreen();
+});
+
 function render() {
   if (!DATA) {
     document.getElementById("floor").innerHTML = `<div class="empty"><p>This is the page template, with no results in it yet. Run the machine shop and open the page it writes:</p>
@@ -729,7 +802,10 @@ function render() {
   document.getElementById("legend").innerHTML = legend();
   document.getElementById("notes").innerHTML = notes();
   uid = 0;
-  document.getElementById("floor").innerHTML = MACHINES.map(bay).join("");
+  const shown = state.max ? MACHINES.filter(m => m.dir === state.max) : MACHINES;
+  document.getElementById("floor").innerHTML =
+    (state.max ? `<p class="back"><a href="#">← Back to the floor</a> · or press <kbd>Esc</kbd>${document.fullscreenEnabled ? "; <kbd>F</kbd> for full screen" : ""}</p>` : "") +
+    shown.map(bay).join("");
   open.forEach(key => {
     const [id, part] = key.split("|");
     const d = document.querySelector(`#${CSS.escape(id)} details${part === "card" ? ":not([data-part])" : `[data-part="${part}"]`}`);
@@ -743,13 +819,18 @@ function render() {
 }
 
 document.getElementById("floor").addEventListener("click", e => {
+  const mx = e.target.closest("button[data-max]");
+  if (mx) { location.hash = state.max === mx.dataset.max ? "" : MAX_PREFIX + mx.dataset.max; return; }
+  if (e.target.closest("button[data-fullscreen]")) { toggleFullscreen(); return; }
   const b = e.target.closest("button[data-run]");
   if (!b) return;
   state.run[b.dataset.machine] = b.dataset.run;
   render();
 });
 
+state.max = maxFromHash();
 render();
+openMaxSource();
 </script>
 </body>
 </html>

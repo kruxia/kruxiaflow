@@ -181,7 +181,7 @@
   .tools input { width: 160px; }
   .message { font-size: 12px; min-height: 1.4em; padding: 0 12px 8px; }
 
-  /* sheets: each machine card has four, picked with buttons like the tool bar's */
+  /* sheets: each machine card has five, picked with buttons like the tool bar's */
   .sheets { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }
   .sheets button {
     background: var(--paper); border: 2px solid var(--ink); border-radius: 8px;
@@ -221,6 +221,14 @@
   dialog.src pre code { display: inline-block; min-width: 100%; }
   dialog.src .ln { display: block; padding: 0 6px; margin: 0 -6px; }
   dialog.src .ln.hl { background: var(--ink); color: var(--paper); }
+  dialog.src header .acts { display: flex; gap: 6px; }
+  /* the code sheet: the machine's whole workflow.yaml, one block per activity */
+  pre.code { position: relative; margin: 0; padding: 10px 12px; max-height: 75vh; overflow: auto; border: 1px solid var(--ink); background: var(--paper); font: 12px/1.5 var(--mono); tab-size: 2; }
+  pre.code code { display: inline-block; min-width: 100%; }
+  pre.code .ln { display: block; padding: 0 6px; margin: 0 -6px; }
+  pre.code .act { display: block; }
+  pre.code .act:hover .ln { box-shadow: inset 3px 0 var(--ink); }
+  pre.code .act.hl .ln { background: var(--ink); color: var(--paper); }
   .twin-trace { margin: 10px 0 0 12px; padding-left: 10px; border-left: 3px double var(--ink); }
   .twin-trace h4 { font-size: 12px; margin: 0 0 4px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .twin-trace .caption { margin: 0 0 6px; }
@@ -471,8 +479,11 @@ const SHEETS = [
   { id: "datasheet", name: "Datasheet" },
   { id: "ladder", name: "Ladder" },
   { id: "timing", name: "Timing" },
+  { id: "code", name: "Code" },
 ];
 let sheet = "card";
+/** The step the code sheet highlights: { dir, step }, set from a step's source panel */
+let codeFocus = null;
 /** The result set the sheets show: null picks the newest that ran the machine */
 let chosenSet = null;
 /** The run the datasheet's timing diagram shows, per machine */
@@ -707,17 +718,56 @@ function showSource(m, step) {
   if (!dlg) {
     dlg = document.createElement("dialog");
     dlg.id = "src-panel"; dlg.className = "src";
-    dlg.addEventListener("click", e => { if (e.target === dlg || e.target.closest("[data-close]")) dlg.close(); });
+    dlg.addEventListener("click", e => {
+      const code = e.target.closest("[data-code]");
+      if (code) {
+        dlg.close();
+        codeFocus = { dir: CARDS[current], step: code.dataset.code };
+        sheet = "code";
+        show(current, false, true);
+        return;
+      }
+      if (e.target === dlg || e.target.closest("[data-close]")) dlg.close();
+    });
     document.body.appendChild(dlg);
   }
   const src = (m.workflow.source || "").replace(/\n$/, "");
   const range = stepLines(src, step);
   const lines = src.split("\n").map((l, i) => `<span class="ln${range && i >= range[0] && i < range[1] ? " hl" : ""}">${esc(l) || " "}</span>`).join("");
-  dlg.innerHTML = `<header><span>machines/${esc(m.dir)}/workflow.yaml · ${esc(step)}</span><button type="button" data-close>Close</button></header><pre><code>${lines}</code></pre>`;
+  dlg.innerHTML = `<header><span>machines/${esc(m.dir)}/workflow.yaml · ${esc(step)}</span><span class="acts"><button type="button" data-code="${esc(step)}">Code sheet</button><button type="button" data-close>Close</button></span></header><pre><code>${lines}</code></pre>`;
   dlg.setAttribute("aria-label", `${m.card.name}: ${step} in workflow.yaml`);
   if (!dlg.open) dlg.showModal();
   const first = dlg.querySelector(".ln.hl"), pre = dlg.querySelector("pre");
   if (first) pre.scrollTop = Math.max(0, first.offsetTop - 24);
+}
+
+// --- Code ------------------------------------------------------------------
+
+/** The code sheet: the machine's whole workflow.yaml, each activity a block that lights on hover */
+function codeSheet(m) {
+  const src = (m.workflow.source || "").replace(/\n$/, "");
+  const lines = src.split("\n");
+  const starts = {};
+  for (const st of m.workflow.steps) {
+    const r = stepLines(src, st.key);
+    if (r) starts[r[0]] = { key: st.key, end: r[1] };
+  }
+  const focus = codeFocus && codeFocus.dir === m.dir ? codeFocus.step : null;
+  let html = "";
+  for (let i = 0; i < lines.length;) {
+    const a = starts[i];
+    if (a) {
+      const body = lines.slice(i, a.end).map(l => `<span class="ln">${esc(l) || " "}</span>`).join("");
+      html += `<span class="act${a.key === focus ? " hl" : ""}" data-act="${esc(a.key)}" title="${esc(a.key)}">${body}</span>`;
+      i = a.end;
+    } else {
+      html += `<span class="ln">${esc(lines[i]) || " "}</span>`;
+      i++;
+    }
+  }
+  return `<div class="field"><h2>machines/${esc(m.dir)}/workflow.yaml</h2>
+      <p class="caption">The workflow as the runner deploys it. Each step's activity starts at its <code>- key:</code> line; pointing at one marks its block. Clicking a coil on the ladder, or a step's name on a timing diagram, opens the same file at that activity, with a button to come back here.</p></div>
+    <div class="field"><pre class="code"><code>${html}</code></pre></div>`;
 }
 
 // --- Timing ----------------------------------------------------------------
@@ -1101,13 +1151,13 @@ function homeCard() {
   return `
     <div class="hero">${pixelText("Machine shop", 3)}
       <p>Small workflows, each inspired by a physical machine, that test the Kruxia Flow engine. One card per machine. Flip through with the arrows, or pick one below.</p>
-      <p>Each machine has four sheets: its card, a datasheet, its ladder logic, and a timing diagram per run. <a href="#legend">The legend card</a> explains the symbols.</p></div>
+      <p>Each machine has five sheets: its card, a datasheet, its ladder logic, a timing diagram per run, and its code, the <code>workflow.yaml</code> it runs. <a href="#legend">The legend card</a> explains the symbols.</p></div>
     <section class="section"><h2>Machines</h2><div class="machines">${buttons}</div></section>
     <section class="section"><h2>Results sets</h2><div class="tiles">${tiles}</div></section>`;
 }
 
 function machineCard(m) {
-  const body = sheet === "datasheet" ? datasheetSheet(m) : sheet === "ladder" ? ladderSheet(m) : sheet === "timing" ? timingSheet(m) : machineFront(m);
+  const body = sheet === "datasheet" ? datasheetSheet(m) : sheet === "ladder" ? ladderSheet(m) : sheet === "timing" ? timingSheet(m) : sheet === "code" ? codeSheet(m) : machineFront(m);
   return sheetTabs(m) + body + titleBlock(m);
 }
 
@@ -1193,6 +1243,8 @@ function show(i, focus, still) {
   const hash = m && sheet !== "card" ? `${id}/${sheet}` : id;
   if (location.hash.slice(1) !== hash) history.replaceState(null, "", "#" + hash);
   if (focus) cardEl.focus({ preventScroll: true });
+  const hl = m && sheet === "code" && cardEl.querySelector("pre.code .act.hl");
+  if (hl) { const pre = hl.closest("pre"); pre.scrollTop = Math.max(0, hl.offsetTop - 24); pre.scrollIntoView({ block: "nearest" }); }
   const a = document.getElementById("cmp-a"), b = document.getElementById("cmp-b");
   if (a) a.onchange = () => { cmpA = Number(a.value); show(current, false, true); };
   if (b) b.onchange = () => { cmpB = Number(b.value); show(current, false, true); };
