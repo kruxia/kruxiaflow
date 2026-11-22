@@ -17,7 +17,10 @@ use crate::events::{
     WorkflowEventType, WorkflowStatus,
 };
 use crate::queue::{Activity, ActivityQueue, StaleActivityAction};
-use crate::subscription::{ExpiredSubscription, NewSubscription, SubscriptionService};
+use crate::subscription::{
+    ExpiredSubscription, NewSubscription, SubscriptionService, discard_held_signals,
+    take_held_signal,
+};
 use crate::workflow::template::{TemplateContext, resolve_template_value};
 use crate::workflow::{BudgetAction, OnTimeout, apply_duration, parse_scheduled_for};
 use chrono::{DateTime, Utc};
@@ -1666,6 +1669,23 @@ pub async fn process_workflow_event(
             }
         }
 
+        // Signals still held for this workflow's waits (`hold_early`, #42)
+        // can never be delivered now. Gated on the event that ends the
+        // workflow, so replays of other events don't repeat the delete.
+        if matches!(
+            event.event_type,
+            WorkflowEventType::WorkflowCompleted | WorkflowEventType::WorkflowFailed
+        ) {
+            let discarded = discard_held_signals(&mut tx, event.workflow_id).await?;
+            if discarded > 0 {
+                tracing::info!(
+                    workflow_id = %event.workflow_id,
+                    discarded = discarded,
+                    "Discarded held signals for ended workflow"
+                );
+            }
+        }
+
         // Save the terminal state and return early
         save_materialized_state(&mut tx, event.workflow_id, &state).await?;
         tx.commit().await?;
@@ -1894,11 +1914,69 @@ pub async fn process_workflow_event(
                     None
                 };
 
+                // A wait that holds early signals (`hold_early`, #42) first
+                // takes the oldest signal held for it: the activity then runs
+                // with that signal's data, without waiting. Taken on this
+                // pass's transaction, so the held signal is consumed only if
+                // this state is saved, and a signal sent meanwhile is held
+                // back until then (see `take_held_signal`).
+                let held_signal = match a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref())
+                {
+                    Some(wait_settings)
+                        if wait_settings.hold_early
+                            && signaled_activity.as_deref() != Some(a.key.as_str()) =>
+                    {
+                        take_held_signal(
+                            &mut tx,
+                            event.workflow_id,
+                            &a.key,
+                            &wait_settings.event_name,
+                        )
+                        .await?
+                    }
+                    _ => None,
+                };
+                if let (Some(data), Some(wait_settings)) = (
+                    &held_signal,
+                    a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref()),
+                ) {
+                    tracing::info!(
+                        workflow_id = %event.workflow_id,
+                        activity_key = %a.key,
+                        "Activity takes a held signal instead of waiting"
+                    );
+                    if let Some(activity_state) = state.activities.get_mut(&a.key) {
+                        activity_state.signal_data = Some(data.clone());
+                    }
+
+                    // The signal's event, for the workflow's history and its
+                    // observers, as when a waiting activity is signaled. The
+                    // orchestrator has already acted on this signal: when it
+                    // reads the event back, the activity is not waiting, so
+                    // the event changes nothing. If this pass fails and is
+                    // retried, the dedup index drops the second copy.
+                    event_source
+                        .publish(NewWorkflowEvent {
+                            workflow_id: event.workflow_id,
+                            event_type: WorkflowEventType::ActivitySignaled,
+                            activity_key: Some(a.key.clone()),
+                            payload: json!({
+                                "event_name": wait_settings.event_name,
+                                "signal_data": data,
+                                "held": true,
+                            }),
+                            iteration,
+                        })
+                        .await?;
+                }
+
                 // Check if activity has wait_for_signal setting, and is not the
-                // activity whose wait this event just ended
+                // activity whose wait this event just ended or one that just
+                // took a held signal
                 if let Some(wait_settings) =
                     a.settings.as_ref().and_then(|s| s.wait_for_signal.as_ref())
                     && signaled_activity.as_deref() != Some(a.key.as_str())
+                    && held_signal.is_none()
                 {
                     // Activity needs to wait for an external signal before executing
                     // Create a subscription instead of scheduling to queue

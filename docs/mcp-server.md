@@ -166,7 +166,10 @@ publishes the port on `127.0.0.1` only).
 path: the activity must be waiting for `signal_name` and not yet signaled,
 its subscription is marked signaled, and the `ActivitySignaled` event carries
 `data` as the step's signal data (`{{SIGNAL.*}}`). A second signal for the
-same wait is refused (`"signaled": false`, with `isError` set). Without an
+same wait is refused (`"signaled": false`, with `isError` set and the reason
+per activity in `reasons`), unless the activity's wait sets `hold_early`: the
+signal is then held for its next wait and reported in `held_activities`
+(`"held": true`). Without an
 `activity_key`, the tool signals every activity in the workflow waiting for
 `signal_name`, each one the same way; REST has no such mode. If the event
 can't be published, the tool reopens the wait and returns an error instead

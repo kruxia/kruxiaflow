@@ -14,7 +14,7 @@ use super::{AnyJson, error_response, parse_uuid, text_response};
 
 use kruxiaflow_core::{
     PostgresEventSource, PostgresSubscriptionService, SignalRequest, deliver_signal,
-    subscription::SignalDeliveryError,
+    subscription::{SignalDeliveryError, SignalOutcome},
 };
 
 // ============================================================================
@@ -35,7 +35,10 @@ use kruxiaflow_core::{
         the signal is delivered to every activity in the workflow currently waiting \
         for signal_name (a convenience of this tool; REST signals one activity). \
         The activity receives data as its signal data ({{SIGNAL.*}}). Each activity \
-        can be signaled once per wait: a second signal is refused.\n\
+        can be signaled once per wait: a second signal is refused, unless the \
+        activity's wait_for_signal sets hold_early: true. Such an activity, named \
+        by activity_key, holds a signal that arrives while it is not waiting and \
+        takes it when it next waits (reported as held).\n\
         \n\
         When to use: After list_waiting_workflows identifies a workflow waiting \
         for a specific signal — for example, an approval gate waiting for a human \
@@ -212,7 +215,9 @@ pub async fn run_send_workflow_signal(
     let sub_svc = PostgresSubscriptionService::new(pool.clone());
     let event_source = PostgresEventSource::new(pool.clone());
     let mut signaled: Vec<serde_json::Value> = Vec::new();
+    let mut held: Vec<String> = Vec::new();
     let mut not_signaled: Vec<String> = Vec::new();
+    let mut refusals = serde_json::Map::new();
 
     for activity_key in &target_keys {
         let request = SignalRequest {
@@ -223,13 +228,19 @@ pub async fn run_send_workflow_signal(
         };
 
         match deliver_signal(&sub_svc, &event_source, request).await {
-            Ok(Some(subscription)) => signaled.push(serde_json::json!({
+            Ok(SignalOutcome::Signaled(subscription)) => signaled.push(serde_json::json!({
                 "activity_key": activity_key,
                 "subscription_id": subscription.id.to_string(),
             })),
-            // No matching subscription: another signaler won the race, or the
-            // activity is not waiting for this signal
-            Ok(None) => not_signaled.push(activity_key.clone()),
+            // Not waiting, but its wait holds early signals (`hold_early`):
+            // kept, and delivered when the activity next waits
+            Ok(SignalOutcome::Held) => held.push(activity_key.clone()),
+            // Not delivered and not held: another signaler won the race, or
+            // the activity is not waiting for this signal
+            Ok(SignalOutcome::Refused(refusal)) => {
+                refusals.insert(activity_key.clone(), refusal.code().into());
+                not_signaled.push(activity_key.clone());
+            }
             Err(e) => {
                 tracing::error!("send_workflow_signal error: {e:?}");
                 return error_response(&serde_json::json!({
@@ -238,15 +249,17 @@ pub async fn run_send_workflow_signal(
                         activity_key, params.workflow_id
                     ),
                     "signaled": !signaled.is_empty(),
+                    "held": !held.is_empty(),
                     "workflow_id": params.workflow_id,
                     "signal_name": params.signal_name,
                     "signaled_activities": signaled,
+                    "held_activities": held,
                 }));
             }
         }
     }
 
-    if signaled.is_empty() {
+    if signaled.is_empty() && held.is_empty() {
         return error_response(&serde_json::json!({
             "error": format!(
                 "No active subscription found for signal '{}' in workflow '{}'. \
@@ -254,6 +267,8 @@ pub async fn run_send_workflow_signal(
                 params.signal_name, params.workflow_id
             ),
             "signaled": false,
+            "held": false,
+            "reasons": refusals,
             "workflow_id": params.workflow_id,
             "activity_key": params.activity_key,
             "signal_name": params.signal_name,
@@ -261,11 +276,13 @@ pub async fn run_send_workflow_signal(
     }
 
     text_response(&serde_json::json!({
-        "status": "signaled",
-        "signaled": true,
+        "status": if signaled.is_empty() { "held" } else { "signaled" },
+        "signaled": !signaled.is_empty(),
+        "held": !held.is_empty(),
         "workflow_id": params.workflow_id,
         "signal_name": params.signal_name,
         "signaled_activities": signaled,
+        "held_activities": held,
         "already_signaled_or_not_waiting": not_signaled,
     }))
 }
