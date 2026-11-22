@@ -777,9 +777,6 @@ pub fn is_workflow_failed(state: &WorkflowState) -> bool {
 /// - It is not an activity after a loop whose loop is still running: one that
 ///   depends on a loop member without being one waits until no loop member is
 ///   scheduled, running or waiting (#27)
-///
-/// Skipping one activity can decide others (what depends on it); the
-/// orchestrator calls this again after marking them, until it finds none.
 pub fn find_skipped_activities<'a>(
     definition: &'a WorkflowDefinition,
     state: &WorkflowState,
@@ -798,6 +795,9 @@ pub type SkippedOrUnresolvable<'a> = ReadyOrUnresolvable<'a>;
 /// skipped earlier in the same skip pass, such as a condition on a skipped
 /// step's result. Left out, the activity stays NotScheduled with nothing to
 /// wake it, and the workflow hangs.
+///
+/// Skipping one activity can decide others (what depends on it); the
+/// orchestrator calls this again after marking them, until it finds none.
 pub fn find_skipped_or_unresolvable_activities<'a>(
     definition: &'a WorkflowDefinition,
     state: &WorkflowState,
@@ -1738,9 +1738,7 @@ mod tests {
     }
 
     // ============================================================================
-    // Activities after a loop wait for the loop to end before being skipped
-    // Regression tests for #27 [loop-exit-skipped]: the exit step was skipped
-    // for good when the loop's first round did not exit
+    // Activities after a loop wait for the loop to end before being skipped (#27)
     // ============================================================================
 
     /// A condition that is false here (`check` is never skipped in these tests)
@@ -1820,10 +1818,12 @@ mod tests {
             completed("check", 2, 1),
             make_activity_state("done", WorkflowActivityStatus::NotScheduled),
         ]);
-        assert_eq!(
-            find_skipped_activities(&definition, &state).unwrap().len(),
-            1
-        );
+        let skipped: Vec<&str> = find_skipped_activities(&definition, &state)
+            .unwrap()
+            .iter()
+            .map(|a| a.key.as_str())
+            .collect();
+        assert_eq!(skipped, vec!["done"]);
     }
 
     #[test]
