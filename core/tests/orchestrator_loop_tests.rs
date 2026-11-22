@@ -1152,9 +1152,7 @@ async fn test_loop_pattern_2_condition_only(pool: PgPool) {
 }
 
 /// #18 [loop-tail-rerun]: in a two-step loop (the 07a shape: start → head ⇄
-/// tail) each step runs once per round. The tail used to re-run after every
-/// one of its own completions, on the head's stale output, until the default
-/// cap of 100 iterations, and the head re-ran on the tail's stale output.
+/// tail) each step runs once per round.
 ///
 /// Drives the real orchestrator: completes whatever is pending, round after
 /// round, until nothing is, and counts the runs.
@@ -1280,11 +1278,14 @@ activities:
         Some(&3),
         "tail runs once per head round: {runs:?}"
     );
+    let mut tx = pool.begin().await.unwrap();
+    let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(state.status, WorkflowStatus::Completed, "{runs:?}");
 }
 
 /// #18: in a three-step loop (start → head → middle → tail → head) every step
-/// runs once per round. The middle step used to be left out of the loop (only
-/// a back-edge's endpoints were marked as loop members), so it never ran again.
+/// runs once per round.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_three_step_loop_runs_each_step_once_per_round(pool: PgPool) {
     let definition = WorkflowDefinition::from_yaml(
@@ -1407,21 +1408,29 @@ activities:
         "head runs its iteration_limit: {runs:?}"
     );
     assert_eq!(
+        runs.get("middle"),
+        Some(&3),
+        "middle runs every round: {runs:?}"
+    );
+    assert_eq!(
         runs.get("tail"),
         Some(&3),
         "tail runs once per head round: {runs:?}"
     );
+    let mut tx = pool.begin().await.unwrap();
+    let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(state.status, WorkflowStatus::Completed, "{runs:?}");
 }
 
-/// A definition stored before the fix marks only the back-edge's two ends as
-/// loop activities. Loaded by the orchestrator, it must still run every step
-/// once per round (it used to stop after the head's second run), without a
-/// redeploy.
+/// A stored definition that marks only the back-edge's two ends as loop
+/// activities still runs every step once per round when the orchestrator
+/// loads it.
 #[sqlx::test(migrations = "../migrations")]
-async fn test_three_step_loop_stored_with_the_old_marking_runs_every_round(pool: PgPool) {
+async fn test_three_step_loop_stored_with_endpoint_marking_runs_every_round(pool: PgPool) {
     let definition = WorkflowDefinition::from_yaml(
         r#"
-name: three_step_loop_old_marking
+name: three_step_loop_endpoint_marking
 activities:
   - key: start
     worker: test
@@ -1445,7 +1454,7 @@ activities:
 "#,
     )
     .expect("valid loop definition");
-    // Stored as before the fix: only the back-edge's two ends are marked
+    // Only the back-edge's two ends marked
     let mut definition = definition;
     for activity in &mut definition.activities {
         if activity.key == "middle" {
@@ -1546,21 +1555,30 @@ activities:
         "head runs its iteration_limit: {runs:?}"
     );
     assert_eq!(
+        runs.get("middle"),
+        Some(&3),
+        "middle runs every round: {runs:?}"
+    );
+    assert_eq!(
         runs.get("tail"),
         Some(&3),
         "tail runs once per head round: {runs:?}"
     );
+    let mut tx = pool.begin().await.unwrap();
+    let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(state.status, WorkflowStatus::Completed, "{runs:?}");
 }
 
 /// #18: a re-delivered completion from an earlier loop round is ignored.
 /// Delivery is at-least-once: after a restart, events whose effects were
 /// already saved can be delivered again (the durable cursor trails the
 /// processed events). Once the head is Pending for round 1 it passes the
-/// status-based duplicate guard, so before the iteration check a re-delivered
-/// round-0 completion was applied as new: the head's iteration advanced and the
-/// tail got spurious new input. (Re-publishing would not show this: the event
-/// table's dedup index drops an identical event, so the test re-processes the
-/// original event, as a re-delivery does.)
+/// status-based duplicate guard, so without the iteration check a re-delivered
+/// round-0 completion would be applied as new: the head's iteration would
+/// advance and the tail would get spurious new input. (Re-publishing would not
+/// show this: the event table's dedup index drops an identical event, so the
+/// test re-processes the original event, as a re-delivery does.)
 #[sqlx::test(migrations = "../migrations")]
 async fn test_redelivered_completion_from_an_earlier_round_is_ignored(pool: PgPool) {
     let definition = WorkflowDefinition::from_yaml(
@@ -2733,5 +2751,146 @@ activities:
         kruxiaflow_core::events::models::WorkflowStatus::Completed,
         "{:?}",
         run.runs
+    );
+}
+
+/// #26 [loop-backedge-by-name]: the repair loop `run → check → fix → run`
+/// starts with `run`, the step written first, and runs each step once per
+/// round.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_repair_loop_starts_with_its_first_written_step(pool: PgPool) {
+    let definition = WorkflowDefinition::from_yaml(
+        r#"
+name: repair_loop_regression
+activities:
+  - key: run
+    worker: test
+    activity_name: echo
+    iteration_limit: 5
+    depends_on:
+      - activity_key: fix
+        conditions: ["{{ fix.status == 'completed' }}"]
+  - key: check
+    worker: test
+    activity_name: echo
+    depends_on: [run]
+  - key: fix
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: check
+        conditions: ["{{ check.result == 'fail' }}"]
+  - key: done
+    worker: test
+    activity_name: echo
+    depends_on:
+      - activity_key: check
+        conditions: ["{{ check.result == 'pass' }}"]
+"#,
+    )
+    .expect("valid loop definition");
+    let definition_id = insert_workflow_definition(&pool, &definition).await;
+    let workflow_id = Uuid::now_v7();
+
+    let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
+    let activity_queue: Arc<dyn kruxiaflow_core::queue::ActivityQueue> =
+        Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
+    let subscription_service: Arc<dyn SubscriptionService> =
+        Arc::new(PostgresSubscriptionService::new(pool.clone()));
+    let config = OrchestratorConfig::new(pool.clone());
+
+    let process_all = || async {
+        loop {
+            let events = event_source.poll("orchestrator").await.unwrap();
+            if events.is_empty() {
+                break;
+            }
+            for event in events {
+                kruxiaflow_core::orchestrator::orchestrator::process_workflow_event(
+                    &event,
+                    &event_source,
+                    &activity_queue,
+                    &subscription_service,
+                    &config,
+                )
+                .await
+                .expect("process event");
+                event_source
+                    .update_position("orchestrator", event.cursor())
+                    .await
+                    .unwrap();
+            }
+        }
+    };
+
+    event_source
+        .publish(NewWorkflowEvent {
+            workflow_id,
+            event_type: WorkflowEventType::WorkflowCreated,
+            activity_key: None,
+            payload: json!({
+                "definition_name": definition.name,
+                "workflow_definition_id": definition_id,
+            }),
+            iteration: None,
+        })
+        .await
+        .unwrap();
+
+    // The check fails twice, then passes
+    let mut order: Vec<String> = Vec::new();
+    let mut checks = 0;
+    for _ in 0..50 {
+        process_all().await;
+        let mut tx = pool.begin().await.unwrap();
+        let state = load_materialized_state(&mut tx, workflow_id).await.unwrap();
+        tx.commit().await.unwrap();
+
+        let pending: Vec<(String, u32)> = state
+            .activities
+            .values()
+            .filter(|a| a.status == WorkflowActivityStatus::Pending)
+            .map(|a| (a.key.clone(), a.iteration))
+            .collect();
+        if pending.is_empty() {
+            break;
+        }
+        assert_eq!(
+            pending.len(),
+            1,
+            "only one step should be pending at a time, got {pending:?} (order so far {order:?})"
+        );
+        let (key, iteration) = pending.into_iter().next().unwrap();
+        let result = if key == "check" {
+            checks += 1;
+            if checks < 3 { "fail" } else { "pass" }
+        } else {
+            "ok"
+        };
+        order.push(key.clone());
+        event_source
+            .publish(NewWorkflowEvent {
+                workflow_id,
+                event_type: WorkflowEventType::ActivityCompleted,
+                activity_key: Some(key),
+                payload: json!({"outputs": {"result": result}}),
+                iteration: Some(iteration as i32),
+            })
+            .await
+            .unwrap();
+    }
+    process_all().await;
+
+    // Only the loop's own steps: whether `done` runs after the loop is not
+    // what this test is about
+    let loop_steps: Vec<&str> = order
+        .iter()
+        .map(String::as_str)
+        .filter(|key| *key != "done")
+        .collect();
+    assert_eq!(
+        loop_steps,
+        ["run", "check", "fix", "run", "check", "fix", "run", "check"],
+        "each round runs run, check, then fix while the check fails"
     );
 }

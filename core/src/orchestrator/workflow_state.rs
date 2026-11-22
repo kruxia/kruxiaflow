@@ -65,7 +65,7 @@ pub struct ActivityState {
 
     /// Workflow-wide sequence number of this activity's latest completion:
     /// one more than the highest sequence number in the workflow at the time.
-    /// 0 means never completed, or completed before sequence numbers existed.
+    /// 0 means never completed, or loaded from state saved without one.
     /// Lets loop members tell new input from input left over from an earlier
     /// round (see `dependency_evaluator::has_new_input`).
     #[serde(default)]
@@ -91,6 +91,14 @@ impl ActivityState {
     /// Add cost to accumulated total
     pub fn add_cost(&mut self, cost: Decimal) {
         self.accumulated_cost_usd += cost;
+    }
+
+    /// Whether a signal for loop round `round` ends this activity's wait: it
+    /// is waiting, and in that round. A signal with no round (outside a loop)
+    /// is checked on the status alone.
+    pub fn ends_wait(&self, round: Option<i32>) -> bool {
+        self.status == WorkflowActivityStatus::Waiting
+            && round.is_none_or(|r| i64::from(r) == i64::from(self.iteration))
     }
 
     /// Increment iteration counter (for ALL looping activities, regardless of iteration_scoped)
@@ -167,7 +175,8 @@ pub async fn load_workflow_definition(
         activities,
         settings,
     };
-    // Definitions stored before #18 was fixed lack some loop markings
+    // A stored definition may mark only each back-edge's two ends; mark
+    // every step on the cycle
     definition.mark_loop_members();
     Ok(definition)
 }
@@ -202,7 +211,8 @@ pub async fn load_workflow_definition_by_id(
         activities,
         settings,
     };
-    // Definitions stored before #18 was fixed lack some loop markings
+    // A stored definition may mark only each back-edge's two ends; mark
+    // every step on the cycle
     definition.mark_loop_members();
     Ok(definition)
 }
@@ -533,10 +543,10 @@ pub fn apply_event_to_state(state: &mut WorkflowState, event: &WorkflowEvent) ->
                 .ok_or(OrchestratorError::MissingActivityKey)?;
 
             if let Some(activity) = state.activities.get_mut(activity_key) {
-                // Only process if activity is still waiting — a duplicate event
-                // (e.g., from crash recovery) should not revert an activity that
-                // has already moved past the Waiting state.
-                if activity.status == WorkflowActivityStatus::Waiting {
+                // Only a signal for the open wait counts: a duplicate or replayed
+                // event (crash recovery) must not revert an activity that has
+                // moved past the wait, or end a later loop round's wait.
+                if activity.ends_wait(event.iteration) {
                     let on_timeout = event.payload.get("on_timeout").and_then(|v| v.as_str());
                     if on_timeout == Some("skip") {
                         activity.status = WorkflowActivityStatus::Skipped;
@@ -1479,7 +1489,7 @@ mod tests {
         assert_eq!(state.activities["tail"].completion_seq, 2);
     }
 
-    /// State saved before #18 has no `completion_seq`; it must still load
+    /// State without `completion_seq` loads, with 0
     #[test]
     fn test_activity_state_without_completion_seq_deserializes() {
         let json = json!({
