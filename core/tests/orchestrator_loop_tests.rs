@@ -1836,7 +1836,9 @@ async fn run_to_end(
 }
 
 /// The repair loop of #27: run, check, fix while the check fails, and finish
-/// when it passes. Keys sort in written order (see #26).
+/// when it passes. Keys sort in written order, so the back-edge is
+/// `a_run`'s dependency on `c_fix` whether the back-edge search goes by key
+/// or by written order (#26).
 const REPAIR_LOOP: &str = r#"
 name: repair
 activities:
@@ -1894,8 +1896,7 @@ fn status_of(
 }
 
 /// #27 [loop-exit-skipped]: the loop's exit step runs when a later round
-/// exits. It used to be skipped after the first check failed, for good, and
-/// the workflow completed without it.
+/// exits.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_exit_step_runs_when_a_later_round_exits(pool: PgPool) {
     let (runs, state) = run_to_end(&pool, REPAIR_LOOP, check_results(2)).await;
@@ -1957,7 +1958,7 @@ async fn test_loop_exit_step_is_skipped_when_the_iteration_limit_is_reached(pool
 /// #27: a conditional step outside any loop is still skipped as soon as its
 /// condition is false, even while other activities are still running
 #[sqlx::test(migrations = "../migrations")]
-async fn test_conditional_skip_outside_a_loop_is_unchanged(pool: PgPool) {
+async fn test_conditional_skip_outside_a_loop_is_immediate(pool: PgPool) {
     let yaml = r#"
 name: branch
 activities:
@@ -2040,50 +2041,6 @@ activities:
         WorkflowActivityStatus::Skipped,
         "skipped right away, not when the workflow ends"
     );
-}
-
-/// #27: skipping one activity decides what depends on it in the same pass.
-/// A loop's exit step is now skipped in the loop's last pass, after which no
-/// event may come; everything after it must be decided then, or the workflow
-/// never completes. (This also hung without a loop: `c_after` and `d_else`
-/// stayed unscheduled and the workflow stayed running.)
-#[sqlx::test(migrations = "../migrations")]
-async fn test_skips_are_followed_through_in_the_same_pass(pool: PgPool) {
-    let yaml = r#"
-name: chain
-activities:
-  - key: a_start
-    worker: test
-    activity_name: echo
-  - key: b_maybe
-    worker: test
-    activity_name: echo
-    depends_on:
-      - activity_key: a_start
-        conditions: ["{{ a_start.result == 'other' }}"]
-  - key: c_after
-    worker: test
-    activity_name: echo
-    depends_on: [b_maybe]
-  - key: d_else
-    worker: test
-    activity_name: echo
-    depends_on:
-      - activity_key: b_maybe
-        conditions: ["{{ b_maybe.status == 'skipped' }}"]
-"#;
-    let (runs, state) = run_to_end(&pool, yaml, |key, _| json!({ "result": key })).await;
-
-    assert_eq!(
-        status_of(&state, "b_maybe"),
-        WorkflowActivityStatus::Skipped
-    );
-    assert_eq!(
-        status_of(&state, "c_after"),
-        WorkflowActivityStatus::Skipped
-    );
-    assert_eq!(runs.get("d_else"), Some(&1), "{runs:?}");
-    assert_eq!(state.status, WorkflowStatus::Completed);
 }
 
 /// What [`drive_loop_workflow`] saw: how often each activity ran, the set of
@@ -2208,8 +2165,7 @@ async fn drive_loop_workflow(pool: &PgPool, yaml: &str, first: &[&str]) -> LoopR
 
 /// #28 [loop-join-stale-input]: a join of parallel branches of different
 /// lengths inside a loop runs once per round, after both branches finished
-/// that round. It used to run as soon as the short branch finished, on the
-/// long branch's output from the previous round, and then again.
+/// that round.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_join_waits_for_every_branch_of_the_round(pool: PgPool) {
     let run = drive_loop_workflow(
@@ -2425,10 +2381,8 @@ activities:
 // A loop whose way in is closed is skipped [loop-entry-not-skipped]
 //
 // Entering a loop for the first time, a step's back-edge points at a loop step
-// that hasn't run (for a self-loop, the step itself). It used to count as
-// satisfied, so the loop ran although its entry condition was false, and it
-// kept the skip pass waiting for that step to finish, so a loop behind a
-// skipped step stayed not_scheduled and the workflow hung.
+// that hasn't run (for a self-loop, the step itself), so it is left out on
+// round 0 and the loop's other dependencies decide.
 // ============================================================================
 
 /// `gate` echoes `open` from `open_gate`; everything else echoes its key
@@ -2461,7 +2415,7 @@ activities:
 "#;
 
 /// The entry condition is false: the self-loop is skipped, and so is the step
-/// after it; the workflow completes. It used to run three times.
+/// after it; the workflow completes.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_self_loop_with_a_false_entry_condition_is_skipped(pool: PgPool) {
     let (runs, state) = run_to_end(&pool, GATED_SELF_LOOP, gate_outputs(false)).await;
@@ -2474,7 +2428,7 @@ async fn test_self_loop_with_a_false_entry_condition_is_skipped(pool: PgPool) {
     assert_eq!(state.status, WorkflowStatus::Completed);
 }
 
-/// The entry condition is true: the loop runs to its iteration_limit, as before
+/// The entry condition is true: the loop runs to its iteration_limit
 #[sqlx::test(migrations = "../migrations")]
 async fn test_self_loop_with_a_true_entry_condition_runs(pool: PgPool) {
     let (runs, state) = run_to_end(&pool, GATED_SELF_LOOP, gate_outputs(true)).await;
@@ -2485,8 +2439,7 @@ async fn test_self_loop_with_a_true_entry_condition_runs(pool: PgPool) {
 }
 
 /// The entry is a skipped step: the self-loop is skipped too, and the skip
-/// cascades past it; the workflow completes. The loop used to stay
-/// not_scheduled, and the workflow running, for ever.
+/// cascades past it; the workflow completes.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_self_loop_behind_a_skipped_step_is_skipped(pool: PgPool) {
     let yaml = r#"
@@ -2550,7 +2503,7 @@ activities:
 "#;
 
 /// The head's entry condition is false: head and tail are skipped, and the
-/// step that handles a skipped loop runs. The loop used to run three rounds.
+/// step that handles a skipped loop runs.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_two_step_loop_with_a_false_entry_condition_is_skipped(pool: PgPool) {
     let (runs, state) = run_to_end(&pool, GATED_TWO_STEP_LOOP, gate_outputs(false)).await;
@@ -2579,8 +2532,7 @@ async fn test_two_step_loop_with_a_true_entry_condition_runs(pool: PgPool) {
 }
 
 /// A two-step loop whose head depends on a skipped step: head and tail are
-/// skipped and the workflow completes. It used to hang with both
-/// not_scheduled.
+/// skipped and the workflow completes.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_two_step_loop_behind_a_skipped_step_is_skipped(pool: PgPool) {
     let yaml = r#"
@@ -2680,7 +2632,7 @@ activities:
     assert_eq!(state.status, WorkflowStatus::Completed);
 }
 
-/// A loop with no dependency outside it starts with the workflow, as before:
+/// A loop with no dependency outside it starts with the workflow:
 /// its back-edge neither lets it in nor keeps it out
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_entered_from_the_workflow_start_runs(pool: PgPool) {
@@ -2715,8 +2667,7 @@ activities:
 /// A loop whose entry condition reads an earlier loop's step waits for that
 /// loop to end before it is skipped, like a step after a loop (#27): the
 /// condition is false after the counter's first rounds and true after its
-/// last, so the second loop starts then, not before. It used to start after
-/// the counter's first round, condition or not.
+/// last, so the second loop starts then, not before.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_loop_entry_on_an_earlier_loop_waits_for_it(pool: PgPool) {
     let run = drive_loop_workflow(

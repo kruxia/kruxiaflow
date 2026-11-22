@@ -4,8 +4,8 @@
 //
 // Skips are applied after scheduling. A skip can make another activity ready
 // (a `status == 'skipped'` branch, or a dependent whose other inputs are
-// done), but skipping publishes no event, so nothing evaluated readiness
-// again: the activity stayed not_scheduled and the workflow stayed running.
+// done), and skipping publishes no event, so the same event processing must
+// schedule it.
 // ============================================================================
 
 mod common;
@@ -40,8 +40,7 @@ async fn insert_workflow_definition(pool: &PgPool, definition: &WorkflowDefiniti
 }
 
 /// Runs a workflow through the real orchestrator, completing whatever is
-/// pending until nothing is. Every event must process without error: a
-/// template error is not an event-processing failure.
+/// pending until nothing is. Every event must process without error.
 async fn run_workflow(pool: &PgPool, yaml: &str) -> WorkflowState {
     run_workflow_with_id(pool, yaml).await.1
 }
@@ -215,7 +214,7 @@ activities:
     assert_eq!(state.status, WorkflowStatus::Completed);
 }
 
-/// Unchanged: a branch whose condition is false after the skip is skipped
+/// A branch whose condition is false after the skip is skipped
 /// too, and the workflow completes
 #[sqlx::test(migrations = "../migrations")]
 async fn test_branch_not_taken_after_a_skip_is_skipped(pool: PgPool) {

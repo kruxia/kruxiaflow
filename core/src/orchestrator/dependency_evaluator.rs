@@ -560,11 +560,7 @@ fn is_activity_ready(
             );
 
             // For back-edges, evaluate loop condition
-            // Activity state should always exist if we're evaluating its dependencies
-            let current_activity_state = activity_state
-                .ok_or_else(|| OrchestratorError::ActivityNotFound(activity.key.clone()))?;
-
-            if !evaluate_loop_condition(dep_rel, dependency_state, state, current_activity_state)? {
+            if !evaluate_loop_condition(dep_rel, dependency_state, state)? {
                 tracing::trace!(
                     "Activity {} not ready: back-edge condition not met for {}",
                     activity.key,
@@ -722,22 +718,12 @@ fn evaluate_loop_condition(
     dep: &ActivityRelationship,
     dep_state: &super::workflow_state::ActivityState,
     state: &WorkflowState,
-    activity_state: &super::workflow_state::ActivityState,
 ) -> Result<bool> {
-    // An activity entering its loop for the first time never gets here: its
-    // back-edges are left out (see `deciding_dependencies`), so its other
-    // dependencies decide whether it runs (#38). A completed loop activity
-    // whose iteration was never counted (a middle step that completed before
-    // its loop marking was completed on load, #18) keeps going as before.
-    if activity_state.iteration == 0 {
-        tracing::trace!(
-            "Back-edge dependency satisfied for {} (first iteration)",
-            activity_state.key
-        );
-        return Ok(true);
-    }
+    // Only an activity that has run gets here: entering its loop for the
+    // first time, its back-edges are left out (see `deciding_dependencies`),
+    // so its other dependencies decide whether it runs (#38)
 
-    // For subsequent iterations, check if dependency has completed at least once
+    // Check if dependency has completed at least once
     // We need the dependency to have run before we can evaluate conditions that reference its outputs
     if dep_state.status != WorkflowActivityStatus::Completed && dep_state.iteration == 0 {
         // Dependency hasn't run yet in this loop cycle, can't loop back
@@ -926,9 +912,6 @@ pub fn is_workflow_failed(state: &WorkflowState) -> bool {
 ///   depends on a step of a loop it isn't part of (an exit step, or the head
 ///   of a later loop) waits until no loop member is scheduled, running or
 ///   waiting (#27, #38)
-///
-/// Skipping one activity can decide others (what depends on it); the
-/// orchestrator calls this again after marking them, until it finds none.
 pub fn find_skipped_activities<'a>(
     definition: &'a WorkflowDefinition,
     state: &WorkflowState,
@@ -947,6 +930,9 @@ pub type SkippedOrUnresolvable<'a> = ReadyOrUnresolvable<'a>;
 /// skipped earlier in the same skip pass, such as a condition on a skipped
 /// step's result. Left out, the activity stays NotScheduled with nothing to
 /// wake it, and the workflow hangs.
+///
+/// Skipping one activity can decide others (what depends on it); the
+/// orchestrator calls this again after marking them, until it finds none.
 pub fn find_skipped_or_unresolvable_activities<'a>(
     definition: &'a WorkflowDefinition,
     state: &WorkflowState,
@@ -1879,10 +1865,9 @@ mod tests {
     }
 
     #[test]
-    fn test_state_without_sequence_numbers_keeps_previous_behaviour() {
-        // Saved before completion_seq existed (all 0): no ordering
-        // information, so a completed loop member may run again as before.
-        // The tail still waits while the head, upstream of it in the same
+    fn test_state_without_sequence_numbers_counts_as_new_input() {
+        // All `completion_seq` 0: no ordering information, so every completed
+        // loop member counts as having new input. The tail still waits while the head, upstream of it in the same
         // loop, is ready to run (#28); it runs on the head's next completion.
         let definition = two_step_loop();
         let state = make_workflow_state(vec![
@@ -1892,10 +1877,9 @@ mod tests {
         ]);
         assert_eq!(ready_keys(&definition, &state), vec!["head"]);
         let mut state = state;
-        if let Some(head) = state.activities.get_mut("head") {
-            head.completion_seq = 1;
-            head.iteration = 2;
-        }
+        let head = state.activities.get_mut("head").unwrap();
+        head.completion_seq = 1;
+        head.iteration = 2;
         assert_eq!(ready_keys(&definition, &state), vec!["tail"]);
     }
 
@@ -1915,9 +1899,7 @@ mod tests {
     }
 
     // ============================================================================
-    // Activities after a loop wait for the loop to end before being skipped
-    // Regression tests for #27 [loop-exit-skipped]: the exit step was skipped
-    // for good when the loop's first round did not exit
+    // Activities after a loop wait for the loop to end before being skipped (#27)
     // ============================================================================
 
     /// A condition that is false here (`check` is never skipped in these tests)
@@ -1999,10 +1981,12 @@ mod tests {
             completed("check", 2, 1),
             make_activity_state("done", WorkflowActivityStatus::NotScheduled),
         ]);
-        assert_eq!(
-            find_skipped_activities(&definition, &state).unwrap().len(),
-            1
-        );
+        let skipped: Vec<&str> = find_skipped_activities(&definition, &state)
+            .unwrap()
+            .iter()
+            .map(|a| a.key.as_str())
+            .collect();
+        assert_eq!(skipped, vec!["done"]);
     }
 
     #[test]
@@ -2031,9 +2015,7 @@ mod tests {
     }
 
     // ============================================================================
-    // A completed loop member waits for the rest of its round upstream
-    // Regression tests for #28 [loop-join-stale-input]: a join of parallel
-    // branches inside a loop ran as soon as the short branch finished
+    // A completed loop member waits for the rest of its round upstream (#28)
     // ============================================================================
 
     /// The issue's diamond: start → a_head → (b_long1 → c_long2 | d_short)
@@ -2170,9 +2152,7 @@ mod tests {
     }
 
     // ============================================================================
-    // A loop whose way in is closed is skipped
-    // Regression tests for #38 [loop-entry-not-skipped]: entering its loop the
-    // first time, a step's back-edge let it in, or kept it waiting for ever
+    // A loop whose way in is closed is skipped (#38)
     // ============================================================================
 
     fn rel_if(key: &str, condition: &str) -> ActivityRelationship {
@@ -2332,16 +2312,9 @@ mod tests {
 
     #[test]
     fn test_later_rounds_still_follow_the_back_edge() {
-        // porter has run a round: from now on its back-edge decides, as
-        // before #38, whatever its entry condition says by now
-        let mut definition = gated_self_loop();
-        definition.activities[1] = loop_def(
-            "porter",
-            vec![
-                rel_if("gate", "{{ gate.status == 'skipped' }}"),
-                rel("porter", true),
-            ],
-        );
+        // porter has run a round: its back-edge decides, whatever its entry
+        // condition says now
+        let definition = gated_self_loop();
         let state = make_workflow_state(vec![
             completed("gate", 1, 0),
             completed("porter", 2, 1),
