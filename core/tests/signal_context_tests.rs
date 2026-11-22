@@ -249,6 +249,7 @@ impl Run {
 /// it resumes, and a step that uses it still waits first
 #[sqlx::test(migrations = "../migrations")]
 async fn test_signal_data_in_parameters(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let mut run = Run::submit(pool, SIGNAL_PARAMETERS).await;
     // Its templates aren't resolved while it waits, so `SIGNAL` isn't needed yet
     assert_eq!(
@@ -283,6 +284,7 @@ async fn test_signal_data_in_parameters(pool: PgPool) {
 /// null, not undefined
 #[sqlx::test(migrations = "../migrations")]
 async fn test_signal_without_data_is_null(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     for payload in [
         json!({ "event_name": "approve", "signal_data": null }),
         json!({ "event_name": "approve" }),
@@ -307,6 +309,7 @@ async fn test_signal_without_data_is_null(pool: PgPool) {
 /// undefined, and using it fails that step's scheduling
 #[sqlx::test(migrations = "../migrations")]
 async fn test_signal_is_undefined_without_a_wait(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = Run::create(
         pool,
         r#"
@@ -342,6 +345,7 @@ activities:
 /// budget check resolves an LLM step's parameters again
 #[sqlx::test(migrations = "../migrations")]
 async fn test_signal_data_on_retry(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = Run::submit(
         pool,
         r#"
@@ -386,6 +390,7 @@ activities:
 /// `delay` can come from the signal's data
 #[sqlx::test(migrations = "../migrations")]
 async fn test_signal_data_in_delay(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = Run::submit(
         pool,
         r#"
@@ -422,6 +427,7 @@ activities:
 /// In a loop, each round's step sees its own round's signal data
 #[sqlx::test(migrations = "../migrations")]
 async fn test_signal_data_per_round(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = Run::submit(
         pool,
         r#"

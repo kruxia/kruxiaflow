@@ -262,6 +262,7 @@ impl Run {
 /// being scheduled: 0, 1 and 2 over three rounds
 #[sqlx::test(migrations = "../migrations")]
 async fn test_activity_iteration_in_loop_parameters(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let mut run = Run::submit(pool, LOOP_PARAMETERS).await;
     run.run_to_end(|_, _| None).await;
     assert_eq!(run.state().await.status.to_string(), "completed");
@@ -280,6 +281,7 @@ async fn test_activity_iteration_in_loop_parameters(pool: PgPool) {
 /// minus that, and null for an activity without a budget
 #[sqlx::test(migrations = "../migrations")]
 async fn test_activity_cost_and_budget_in_loop_parameters(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let mut run = Run::submit(pool, LOOP_PARAMETERS).await;
     run.run_to_end(|key, round| match (key, round) {
         ("step", 0) => Some("0.25"),
@@ -306,6 +308,7 @@ async fn test_activity_cost_and_budget_in_loop_parameters(pool: PgPool) {
 /// 1; on `after`'s dependency, `after` itself, which has budget left
 #[sqlx::test(migrations = "../migrations")]
 async fn test_activity_context_in_conditions(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let mut run = Run::submit(pool, LOOP_CONDITION).await;
     run.run_to_end(|_, _| None).await;
     let s = run.state().await;
@@ -318,6 +321,7 @@ async fn test_activity_context_in_conditions(pool: PgPool) {
 /// `ACTIVITY.*` resolves there too, so the retry goes ahead
 #[sqlx::test(migrations = "../migrations")]
 async fn test_activity_context_in_llm_retry(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = Run::submit(pool, LLM_RETRY).await;
     let queued: Value = sqlx::query_scalar(
         "SELECT parameters->'prompt' FROM activity_queue WHERE workflow_id = $1",

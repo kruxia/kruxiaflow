@@ -141,6 +141,7 @@ fn status(state: &WorkflowState, key: &str) -> WorkflowActivityStatus {
 /// The issue's reproduction: `fallback` runs because `maybe` was skipped
 #[sqlx::test(migrations = "../migrations")]
 async fn test_branch_on_a_skipped_step_runs(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let state = run_workflow(
         &pool,
         r#"
@@ -177,6 +178,7 @@ activities:
 /// A skip that cascades two levels before the branch becomes ready
 #[sqlx::test(migrations = "../migrations")]
 async fn test_branch_after_a_cascade_of_skips_runs(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let state = run_workflow(
         &pool,
         r#"
@@ -218,6 +220,7 @@ activities:
 /// too, and the workflow completes
 #[sqlx::test(migrations = "../migrations")]
 async fn test_branch_not_taken_after_a_skip_is_skipped(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let state = run_workflow(
         &pool,
         r#"

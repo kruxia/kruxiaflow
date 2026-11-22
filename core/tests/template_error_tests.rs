@@ -142,6 +142,7 @@ fn status(state: &WorkflowState, key: &str) -> WorkflowActivityStatus {
 /// not run) → later
 #[sqlx::test(migrations = "../migrations")]
 async fn test_bad_template_fails_its_own_activity_and_the_workflow(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let state = run_workflow(
         &pool,
         r#"
@@ -194,6 +195,7 @@ activities:
 /// Skips cascade down a chain in one pass
 #[sqlx::test(migrations = "../migrations")]
 async fn test_skips_cascade_down_a_chain(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let state = run_workflow(
         &pool,
         r#"
@@ -243,6 +245,7 @@ activities:
 /// branch can handle it
 #[sqlx::test(migrations = "../migrations")]
 async fn test_failed_branch_runs_after_a_template_error(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let state = run_workflow(
         &pool,
         r#"
@@ -292,6 +295,7 @@ activities:
 /// A bad `delay` template fails the activity the same way
 #[sqlx::test(migrations = "../migrations")]
 async fn test_bad_delay_template_fails_its_own_activity(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let state = run_workflow(
         &pool,
         r#"
@@ -352,6 +356,7 @@ async fn event_count(
 /// for it: only its ActivityFailed
 #[sqlx::test(migrations = "../migrations")]
 async fn test_no_activity_scheduled_event_for_a_template_failure(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let (workflow_id, state) = run_workflow_with_id(
         &pool,
         r#"
@@ -394,6 +399,7 @@ activities:
 /// the upstream activity's completion event
 #[sqlx::test(migrations = "../migrations")]
 async fn test_bad_condition_template_fails_its_own_activity(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let state = run_workflow(
         &pool,
         r#"
@@ -442,6 +448,7 @@ activities:
 /// leave it NotScheduled with nothing left to wake it.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_condition_unresolvable_after_a_skip_fails_its_activity(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let state = run_workflow(
         &pool,
         r#"
@@ -490,6 +497,7 @@ activities:
 /// instead of hanging.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_template_error_in_a_later_loop_round_fails_that_round(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let state = run_workflow(
         &pool,
         r#"
@@ -529,6 +537,7 @@ activities:
 /// before `b`, and `target` runs once `b` has.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_condition_on_a_later_sibling_dependency_waits_for_it(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let state = run_workflow(
         &pool,
         r#"
@@ -571,6 +580,7 @@ activities:
 /// itself processes cleanly.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_retry_whose_template_no_longer_resolves_fails_the_activity(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let definition = WorkflowDefinition::from_yaml(
         r#"
 name: retry_template_error
@@ -863,6 +873,7 @@ fn assert_template_error(state: &WorkflowState) {
 /// is ignored: the step stays failed with no outputs.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_claimed_retry_completing_after_its_template_error_is_ignored(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let harness = RetryHarness::start(pool).await;
 
     let first = harness.claim().await;
@@ -899,6 +910,7 @@ async fn test_claimed_retry_completing_after_its_template_error_is_ignored(pool:
 /// ignored.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_retry_completed_before_its_template_error_completes_the_step(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let harness = RetryHarness::start(pool).await;
 
     let first = harness.claim().await;
@@ -931,6 +943,7 @@ async fn test_retry_completed_before_its_template_error_completes_the_step(pool:
 /// swept the queue while the retry was still claimed.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_claimed_retry_failing_after_its_template_error_is_ignored(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let harness = RetryHarness::start(pool).await;
 
     let first = harness.claim().await;
@@ -964,6 +977,7 @@ async fn test_claimed_retry_failing_after_its_template_error_is_ignored(pool: Pg
 /// fails with `TEMPLATE_ERROR` and nothing is left to run.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_retry_failed_before_its_template_error_fails_the_step(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let harness = RetryHarness::start(pool).await;
 
     let first = harness.claim().await;

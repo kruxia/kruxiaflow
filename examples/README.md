@@ -38,8 +38,8 @@ to recreate the volumes.
 | `06b-rag-index-builder.yaml`           | Batch embedding generation, bulk pgvector storage, unnest insert                | Examples environment, Google API key                    |
 | `06c-rag-query.yaml`                   | Complete RAG pattern: embed → search → augment → generate, MiniJinja loops      | Examples environment, Google + Anthropic API keys       |
 | `07a-agentic-research-simple.yaml`     | Iterative workflows (loops), iteration-scoped storage, budget-aware loops       | Anthropic API key                                       |
-| `07b-agentic-research-complete.yaml`   | Complete iterative research: model fallback, file storage, dual paths           | Examples environment, Anthropic API key                 |
-| `08a-rate-limited-api-calls.yaml`      | Loop with `delay` (first round only), httpbin.org, configurable page count      | Examples environment                                    |
+| `07b-agentic-research-complete.yaml`   | Complete iterative research: model fallback, every round's results, dual paths  | Examples environment, Anthropic API key                 |
+| `08a-rate-limited-api-calls.yaml`      | Loop with `delay` on every round, httpbin.org, configurable page count          | None                                                    |
 | `08b-scheduled-daily-report.yaml`      | Activity scheduling with `scheduled_for`, absolute timestamps, ISO 8601         | Examples environment, Anthropic API key                 |
 | `08c-delayed-reminders.yaml`           | Cascading delays, escalating reminders (1m → 3m → 8m), email escalation         | Examples environment                                    |
 | `09a-streaming-llm.yaml`               | LLM token streaming over WebSocket, provider fallback, two-level opt-in         |  Any LLM provider API key                               |
@@ -403,12 +403,13 @@ curl -X POST http://localhost:8080/api/v1/workflows \
 
 **Expected behavior:**
 - First question: LLM call → cache miss → costs ~$0.001
-- Second identical question (within TTL): cache hit → costs $0.000
+- Second identical question (within TTL): cache hit → no LLM call, and the activity is
+  recorded at $0.000 (its `result`, `cost_usd` included, is the cached one)
 
 **Features demonstrated:**
-- Semantic caching for LLM responses (enabled, ttl_seconds, key)
-- Cache hit tracking in outputs (`{{answer_question.result.cache_hit}}`)
-- Cost tracking with cache awareness
+- Result caching for LLM responses (`cache: true`, `cache_ttl`); the key is a hash of the
+  activity name and its resolved parameters
+- Cost tracking with cache awareness (a cache hit is recorded at $0)
 
 ---
 
@@ -522,8 +523,8 @@ curl -X POST http://localhost:8080/api/v1/workflows \
 ### Example 7b: Complete Agentic Research (Production-Ready)
 
 Full agentic research workflow using Claude Haiku 4.5 for iterative research (with Gemini
-fallback), file storage with iteration scoping, structured field extraction, and dual
-success/failure paths.
+fallback), every round's results kept with iteration scoping, a round counter in conditions,
+and dual success/failure paths.
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/workflow_definitions \
@@ -540,26 +541,32 @@ curl -X POST http://localhost:8080/api/v1/workflows \
 ```
 
 **Features demonstrated (beyond 07a):**
-- Model fallback: Haiku 4.5 primary, Gemini 2.0 Flash Lite fallback for research
-- File storage with iteration scoping (`type: file`, `iteration_scoped: true`)
-- Structured field extraction (`{{evaluate.sufficient}}`)
-- Array access with bracket notation (`{{search_information[*].results}}`)
-- Dual success/failure paths (`publish_success` and `publish_failure`)
-- Complex boolean conditions (`AND`, `<`, `>`)
-- Budget checks in conditions
+- Model fallback: Haiku 4.5 primary, Gemini 2.5 Flash Lite fallback for research
+- Every round's results with `iteration_scoped: true`: `{{search_information.result}}` is the
+  array of all rounds' results, and `{{(search_information.result | last).content}}` is the latest
+- Round counter: `{{search_information.iteration}}`, the rounds completed so far
+- Dual success/failure paths: `compile_report` → `publish_success` when the evaluation says
+  SUFFICIENT, `publish_failure` when it still says CONTINUE after 5 rounds
+- Boolean conditions as single expressions
+  (`{{ ((evaluate_sufficiency.result | last).content | trim | upper) is startingwith('CONTINUE') and search_information.iteration >= 5 }}`),
+  reading only the start of the reply, in any case
+
+Templates and conditions can't read an activity's accumulated cost or remaining budget, so
+the loop can't exit early on a low budget; `settings.budget` fails the activity instead.
+`{{ACTIVITY.remaining_budget_usd}}` in `evaluate_sufficiency`'s prompt is not set yet (#32).
 
 **Differences from 07a:**
 
-| Feature                | 07a (Simple)               | 07b (Complete)                             |
-|------------------------|----------------------------|--------------------------------------------|
-| Research activity      | LLM simulates research     | Haiku 4.5 with Gemini fallback              |
-| Loop condition syntax  | String matching            | Structured field access                     |
-| Results storage        | Inline JSON                | Files with iteration scoping                |
-| Array access           | Implicit (Jinja filters)   | Explicit ([*] bracket notation)             |
-| Failure handling       | Implicit (timeout/error)   | Explicit publish_failure activity           |
-| Budget checks          | Activity-level only        | Condition-level remaining checks            |
-| External dependencies  | None (LLM-only)            | Anthropic API key (+ Google for fallback)   |
-| Production readiness   | Educational demo           | Production-ready pattern                    |
+| Feature               | 07a (Simple)             | 07b (Complete)                            |
+|-----------------------|--------------------------|-------------------------------------------|
+| Research activity     | LLM simulates research   | Haiku 4.5 with Gemini fallback            |
+| Loop condition syntax | String matching          | String matching plus the round counter    |
+| Results storage       | Inline JSON              | Every round's result (iteration_scoped)   |
+| Array access          | Implicit (Jinja filters) | Explicit (map, join and last filters)     |
+| Failure handling      | Implicit (timeout/error) | Explicit publish_failure activity         |
+| Budget checks         | Activity-level only      | Activity-level only                       |
+| External dependencies | None (LLM-only)          | Anthropic API key (+ Google for fallback) |
+| Production readiness  | Educational demo         | Production-ready pattern                  |
 
 ---
 
@@ -572,8 +579,8 @@ absolute timestamps (`scheduled_for`).
 
 Uses an iterative loop with `delay` to fetch multiple pages from httpbin.org. The page
 count is configurable via workflow input (default: 3, max: 5). `settings.delay` applies
-only to an activity's first round, so it holds back the first request; the later requests
-are not spaced out.
+to every round of the loop, so each request waits 5 seconds after the one before it
+completes. It needs no mail or database service: the last step is an `echo`.
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/workflow_definitions \
@@ -588,25 +595,25 @@ curl -X POST http://localhost:8080/api/v1/workflows \
 
 **Expected behavior:**
 1. `fetch_page` iteration 0 waits 5 seconds, then executes (page 0)
-2. `fetch_page` iteration 1 executes once iteration 0 completes (page 1)
-3. `fetch_page` iteration 2 executes once iteration 1 completes (page 2)
+2. `fetch_page` iteration 1 waits 5 seconds after iteration 0 completes (page 1)
+3. `fetch_page` iteration 2 waits 5 seconds after iteration 1 completes (page 2)
 4. Loop exits (iteration >= num_pages)
-5. `aggregate_results` sends all page results to Mailpit
+5. `aggregate_results` returns the page count and every page's response
 
 ```
 t=0s     (delay, 5s)
 t=5s     fetch_page[0] ━━━┓
-                            │ (loop back, no delay)
-t=5s+    fetch_page[1] ━━━┓
-                            │ (loop back, no delay)
-t=5s+    fetch_page[2] ━━━┓
+                            │ (loop back, delay 5s)
+t=10s+   fetch_page[1] ━━━┓
+                            │ (loop back, delay 5s)
+t=15s+   fetch_page[2] ━━━┓
                             │ (loop exits)
-t=5s+                      └─→ aggregate_results
+t=15s+                     └─→ aggregate_results
 ```
 
 **Features demonstrated:**
 - Iterative loop with fixed count (no evaluation activity needed)
-- `settings.delay`, which applies to the first round only
+- `settings.delay` on a loop step: every round waits before it runs
 - `iteration_scoped: true` for per-iteration output storage
 - Loop-back `depends_on` (activity depends on itself with condition)
 - All iterations' responses as one array (`{{fetch_page.response}}` on an iteration-scoped activity; `http_request`'s output is `response`)
@@ -770,7 +777,9 @@ gather_sources  ──┘
 - Selective streaming: only the final long-form output streams
 - Non-streaming preparation steps for efficiency
 - Multi-step workflow with streaming final output
-- Budget enforcement with warn action ($0.10)
+- Budget with the `continue` action ($0.10): the step isn't stopped before it runs, but the
+  LLM worker still skips any model whose estimated cost would exceed the limit, and the step
+  fails if none is left
 
 ---
 

@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A guide to signal waits** (`docs/signals.md`, #36). `wait_for_signal`
+  had no reference in `docs/`. The new page covers the setting
+  (`event_name`, `timeout_seconds`, `on_timeout`, `hold_early`), what a waiting step and
+  its workflow look like, the signal endpoint and its responses, using the
+  signal's data through `{{SIGNAL}}` (including templates that work when it
+  is `null`), timeouts, waits inside loops, and known limits. Every example on
+  the page was run against a local server. It is linked from the
+  README's approval-gate section, whose example now names a worker and an
+  activity (without them the step never ran after its signal), from the API
+  reference, and from the book's table of contents. The API reference now
+  lists the `waiting` and `skipped` activity statuses.
 - **The machine shop** (`machines/`, `api/tests/machine_shop.rs`): small
   workflows inspired by physical machines, run against a real engine one at a
   time and all at once, with a scoreboard. Starts with a domino run, a prism
@@ -40,19 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `machine-shop-results/2`. Every card has an edge reading, and the Shop
   Floor shows the edge readings, footprints, hosts and plug outcomes.
 
-### Changed
-
-- **The CI pipeline (`main-ci.yml`) overlaps its slow jobs.** The tests
-  (including the MCP server job) now start alongside clippy and rustfmt
-  instead of waiting for them, on pull requests as on every other run. Release
-  binaries and the per-platform Docker builds likewise start alongside the
-  Rust checks. The two publish steps, the Docker manifest-list merge (which
-  applies the image tags) and the crates.io publish, run alongside each other
-  once the checks and every build have passed. Nothing publishes on a failed
-  check or a failed build: until then the builds have produced only run
-  artifacts and untagged image digests.
-  The Docker workflow is split into `docker-build.yml` and `docker-merge.yml`
-  so the merge can be gated separately.
 ### Fixed
 
 - **`INPUT` in a condition is the workflow input.** Conditions read `INPUT`
@@ -72,10 +70,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the body uses `{{fetch_page.response}}`, the array of every round's
   response (`http_request`'s output is `response`, not `result`, which the
   example also declared). A new test runs the example through the
-  orchestrator. Its header and README described a 5-second delay between
-  requests; `settings.delay` applies only to an activity's first round, so
-  it holds back the first request and the later ones are not spaced out.
-  They now say so.
+  orchestrator. Its last step is now an `echo` that returns the page count
+  and every page's response, so the example needs no mail service.
+- **`delay` and `scheduled_for` apply to every round of a loop.** They
+  applied only to a loop step's first round: the scheduling code treated a
+  later round as a retry and skipped the setting, so a "rate-limited" loop
+  such as example 08a delayed its first request and ran the rest back to
+  back. Each round is now delayed. A retry is unchanged: the queue
+  reschedules it with the retry backoff.
 - **`{{ACTIVITY.*}}` resolves.** `ACTIVITY.iteration`,
   `ACTIVITY.accumulated_cost_usd` and `ACTIVITY.remaining_budget_usd` were
   documented but never set, so any template using them failed with
@@ -89,6 +91,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its wait ends, with `SIGNAL` set to the signal's `data`, or `null` when it
   carried none or the wait timed out with `on_timeout: continue`. A budget
   check for a waiting activity happens then too, not when the wait begins.
+- **Examples 06a and 09b can be submitted.** They failed to parse. 06a's
+  `cache:` was a map (`enabled`, `ttl_seconds`, `key`), but `cache` is a
+  boolean with the TTL in `cache_ttl`; it is now `cache: true` and
+  `cache_ttl: 86400`. The cache key can't be configured: it is a hash of the
+  activity name and all of its resolved parameters, which covers the model and
+  prompt the old `key` listed. Its header no longer says caching falls back
+  to in-memory: without `KRUXIAFLOW_CACHE_PROVIDER=redis`, caching is off.
+  Its log step no longer reads `result.cache_hit`, which `llm_prompt` doesn't
+  return (a cache hit shows only in the activity's metadata): it bound NULL
+  into the log table's `NOT NULL` `cache_hit` column, so the step failed on
+  every run. The `cache_hit` column is gone. 09b's budget `action: warn` is
+  now `continue`, which doesn't stop the step before it runs; the LLM worker
+  still skips models over the limit.
+- **Example 07b's conditions and templates are valid.** Its conditions were
+  two templates joined by an operator, or by `OR` outside a template, so they
+  rendered to a non-empty string and were always true. It also used `[*]`,
+  which is not template syntax, outputs `llm_prompt` doesn't produce
+  (`results`, `sufficient`, `reason`, `gaps`, file outputs), and per-step cost
+  fields templates can't read. The conditions are now single expressions on
+  the start of the evaluation's reply (any case) and
+  `{{search_information.iteration}}`, tested against sample replies; every
+  round's results are read from the iteration-scoped `result` array, and the
+  loop's budget-based exit is gone: `settings.budget` still fails an activity
+  over its budget. `{{ACTIVITY.remaining_budget_usd}}` in its prompt resolves
+  with #32's fix.
+- **Every example is parsed by the test suite.** A new test parses and
+  validates each file in `examples/`, so an example the engine can't accept
+  fails the build.
 - **The MCP activity catalog and authoring guide match the engine.** Both are
   hand-written, had drifted from the activities and the parser, and agents
   copy them verbatim. Because activity settings ignore unknown keys, several
@@ -191,6 +221,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The CI pipeline (`main-ci.yml`) overlaps its slow jobs.** The tests
+  (including the MCP server job) now start alongside clippy and rustfmt
+  instead of waiting for them, on pull requests as on every other run. Release
+  binaries and the per-platform Docker builds likewise start alongside the
+  Rust checks. The two publish steps, the Docker manifest-list merge (which
+  applies the image tags) and the crates.io publish, run alongside each other
+  once the checks and every build have passed. Nothing publishes on a failed
+  check or a failed build: until then the builds have produced only run
+  artifacts and untagged image digests.
+  The Docker workflow is split into `docker-build.yml` and `docker-merge.yml`
+  so the merge can be gated separately.
 - **`ACTIVITY` costs are numbers.** `accumulated_cost_usd` and
   `remaining_budget_usd` were strings such as `"7.50"`, which compare greater
   than every number, so `{{ACTIVITY.accumulated_cost_usd < 5}}` was always
