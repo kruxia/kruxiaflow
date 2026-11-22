@@ -99,7 +99,8 @@
 # Budget in conditions: an activity's accumulated cost and remaining budget are not
 # available to conditions or to other activities' templates, so the loop can't exit
 # early on a low remaining budget. Budget is enforced by settings.budget instead.
-# {{ACTIVITY.remaining_budget_usd}} (evaluate_sufficiency's prompt) depends on #32.
+# An activity's own templates can read its budget: evaluate_sufficiency's prompt
+# uses {{ACTIVITY.remaining_budget_usd}}.
 #
 # Differences from 07a (Simple Version):
 #
@@ -192,7 +193,6 @@ activities:
           - "{{ ((evaluate_sufficiency.result | last).content | trim | upper) is startingwith('CONTINUE') }}"
 
   # Step 2: Evaluate if gathered information is sufficient (after each search)
-  # {{ACTIVITY.remaining_budget_usd}} below depends on #32.
   - key: evaluate_sufficiency
     activity_name: llm_prompt
     iteration_scoped: true       # Keep every round's assessment for compile_report

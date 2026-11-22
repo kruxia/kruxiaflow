@@ -39,7 +39,7 @@ to recreate the volumes.
 | `06c-rag-query.yaml`                   | Complete RAG pattern: embed → search → augment → generate, MiniJinja loops      | Examples environment, Google + Anthropic API keys       |
 | `07a-agentic-research-simple.yaml`     | Iterative workflows (loops), iteration-scoped storage, budget-aware loops       | Anthropic API key                                       |
 | `07b-agentic-research-complete.yaml`   | Complete iterative research: model fallback, every round's results, dual paths  | Examples environment, Anthropic API key                 |
-| `08a-rate-limited-api-calls.yaml`      | Loop with `delay` (first round only), httpbin.org, configurable page count      | Examples environment                                    |
+| `08a-rate-limited-api-calls.yaml`      | Loop with `delay` on every round, httpbin.org, configurable page count          | None                                                    |
 | `08b-scheduled-daily-report.yaml`      | Activity scheduling with `scheduled_for`, absolute timestamps, ISO 8601         | Examples environment, Anthropic API key                 |
 | `08c-delayed-reminders.yaml`           | Cascading delays, escalating reminders (1m → 3m → 8m), email escalation         | Examples environment                                    |
 | `09a-streaming-llm.yaml`               | LLM token streaming over WebSocket, provider fallback, two-level opt-in         |  Any LLM provider API key                               |
@@ -579,8 +579,8 @@ absolute timestamps (`scheduled_for`).
 
 Uses an iterative loop with `delay` to fetch multiple pages from httpbin.org. The page
 count is configurable via workflow input (default: 3, max: 5). `settings.delay` applies
-only to an activity's first round, so it holds back the first request; the later requests
-are not spaced out.
+to every round of the loop, so each request waits 5 seconds after the one before it
+completes. It needs no mail or database service: the last step is an `echo`.
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/workflow_definitions \
@@ -595,25 +595,25 @@ curl -X POST http://localhost:8080/api/v1/workflows \
 
 **Expected behavior:**
 1. `fetch_page` iteration 0 waits 5 seconds, then executes (page 0)
-2. `fetch_page` iteration 1 executes once iteration 0 completes (page 1)
-3. `fetch_page` iteration 2 executes once iteration 1 completes (page 2)
+2. `fetch_page` iteration 1 waits 5 seconds after iteration 0 completes (page 1)
+3. `fetch_page` iteration 2 waits 5 seconds after iteration 1 completes (page 2)
 4. Loop exits (iteration >= num_pages)
-5. `aggregate_results` sends all page results to Mailpit
+5. `aggregate_results` returns the page count and every page's response
 
 ```
 t=0s     (delay, 5s)
 t=5s     fetch_page[0] ━━━┓
-                            │ (loop back, no delay)
-t=5s+    fetch_page[1] ━━━┓
-                            │ (loop back, no delay)
-t=5s+    fetch_page[2] ━━━┓
+                            │ (loop back, delay 5s)
+t=10s+   fetch_page[1] ━━━┓
+                            │ (loop back, delay 5s)
+t=15s+   fetch_page[2] ━━━┓
                             │ (loop exits)
-t=5s+                      └─→ aggregate_results
+t=15s+                     └─→ aggregate_results
 ```
 
 **Features demonstrated:**
 - Iterative loop with fixed count (no evaluation activity needed)
-- `settings.delay`, which applies to the first round only
+- `settings.delay` on a loop step: every round waits before it runs
 - `iteration_scoped: true` for per-iteration output storage
 - Loop-back `depends_on` (activity depends on itself with condition)
 - All iterations' responses as one array (`{{fetch_page.response}}` on an iteration-scoped activity; `http_request`'s output is `response`)

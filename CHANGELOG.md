@@ -26,10 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the body uses `{{fetch_page.response}}`, the array of every round's
   response (`http_request`'s output is `response`, not `result`, which the
   example also declared). A new test runs the example through the
-  orchestrator. Its header and README described a 5-second delay between
-  requests; `settings.delay` applies only to an activity's first round, so
-  it holds back the first request and the later ones are not spaced out.
-  They now say so.
+  orchestrator. Its last step is now an `echo` that returns the page count
+  and every page's response, so the example needs no mail service.
+- **`delay` and `scheduled_for` apply to every round of a loop.** They
+  applied only to a loop step's first round: the scheduling code treated a
+  later round as a retry and skipped the setting, so a "rate-limited" loop
+  such as example 08a delayed its first request and ran the rest back to
+  back. Each round is now delayed. A retry is unchanged: the queue
+  reschedules it with the retry backoff.
 - **`{{ACTIVITY.*}}` resolves.** `ACTIVITY.iteration`,
   `ACTIVITY.accumulated_cost_usd` and `ACTIVITY.remaining_budget_usd` were
   documented but never set, so any template using them failed with

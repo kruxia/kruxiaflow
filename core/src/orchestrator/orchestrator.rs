@@ -561,8 +561,10 @@ fn handlers_stopped() -> super::OrchestratorError {
 /// Handles both relative delays (e.g., "5s", "30m") and absolute timestamps (ISO 8601).
 /// Templates are resolved using the provided context.
 ///
-/// User-specified scheduling only applies to initial attempts (iteration 0).
-/// Retry attempts use the backoff logic instead.
+/// Applies every time the orchestrator schedules the activity: its first
+/// run, and each later round of a loop, so a `delay` spaces a loop's rounds
+/// out. A retry is not scheduled here: the queue reschedules it with the
+/// retry backoff.
 ///
 /// Returns:
 /// - Some(DateTime) if activity should be delayed
@@ -570,17 +572,7 @@ fn handlers_stopped() -> super::OrchestratorError {
 fn compute_scheduled_for(
     activity_def: &crate::workflow::ActivityDefinition,
     template_context: &TemplateContext,
-    iteration: Option<i32>,
 ) -> Result<Option<DateTime<Utc>>> {
-    // User-specified scheduling only applies to initial attempt (iteration = 0 or None)
-    // Retries (iteration > 0) use backoff logic, which is handled separately by the queue
-    let is_initial_attempt = iteration.unwrap_or(0) == 0;
-
-    if !is_initial_attempt {
-        // For retries, scheduled_for is handled by the retry backoff logic
-        return Ok(None);
-    }
-
     let settings = match &activity_def.settings {
         Some(s) => s,
         None => return Ok(None), // No settings = immediate execution
@@ -2098,8 +2090,7 @@ pub async fn process_workflow_event(
 
                     // Compute scheduled_for based on activity settings (a `delay`
                     // or `scheduled_for` template can fail like parameters, #19)
-                    let scheduled_for = match compute_scheduled_for(a, &template_context, iteration)
-                    {
+                    let scheduled_for = match compute_scheduled_for(a, &template_context) {
                         Ok(scheduled_for) => scheduled_for,
                         Err(super::OrchestratorError::TemplateFailed(error)) => {
                             fail_unresolvable_activity(&mut state, a, &error, event_source).await?;
@@ -3600,7 +3591,7 @@ mod tests {
         let activity_def = create_activity_def("test", None);
         let context = TemplateContext::new();
 
-        let result = compute_scheduled_for(&activity_def, &context, None).unwrap();
+        let result = compute_scheduled_for(&activity_def, &context).unwrap();
         assert!(
             result.is_none(),
             "No settings should result in immediate execution"
@@ -3624,7 +3615,7 @@ mod tests {
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
 
-        let result = compute_scheduled_for(&activity_def, &context, None).unwrap();
+        let result = compute_scheduled_for(&activity_def, &context).unwrap();
         assert!(
             result.is_none(),
             "Settings without delay/scheduled_for should result in immediate execution"
@@ -3649,7 +3640,7 @@ mod tests {
         let context = TemplateContext::new();
 
         let before = Utc::now();
-        let result = compute_scheduled_for(&activity_def, &context, None)
+        let result = compute_scheduled_for(&activity_def, &context)
             .unwrap()
             .unwrap();
         let after = Utc::now();
@@ -3684,7 +3675,7 @@ mod tests {
         let context = TemplateContext::new();
 
         let before = Utc::now();
-        let result = compute_scheduled_for(&activity_def, &context, None)
+        let result = compute_scheduled_for(&activity_def, &context)
             .unwrap()
             .unwrap();
 
@@ -3697,32 +3688,6 @@ mod tests {
             "Scheduled time {:?} should be ~5 minutes after {:?}",
             result,
             before
-        );
-    }
-
-    #[test]
-    fn test_compute_scheduled_for_retry_ignores_delay() {
-        // On retry (iteration > 0), delay should be ignored
-        let settings = ActivitySettings {
-            timeout_seconds: None,
-            retry: None,
-            budget: None,
-            cache: false,
-            cache_ttl: None,
-            iteration_limit: None,
-            delay: Some("1h".to_string()), // 1 hour delay
-            scheduled_for: None,
-            wait_for_signal: None,
-            ..Default::default()
-        };
-        let activity_def = create_activity_def("test", Some(settings));
-        let context = TemplateContext::new();
-
-        // Iteration 1 = retry, should ignore delay
-        let result = compute_scheduled_for(&activity_def, &context, Some(1)).unwrap();
-        assert!(
-            result.is_none(),
-            "Retry attempts should ignore delay and execute immediately"
         );
     }
 
@@ -3746,7 +3711,7 @@ mod tests {
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
 
-        let result = compute_scheduled_for(&activity_def, &context, None)
+        let result = compute_scheduled_for(&activity_def, &context)
             .unwrap()
             .unwrap();
 
@@ -3780,7 +3745,7 @@ mod tests {
         let context = TemplateContext::new().with_inputs(inputs);
 
         let before = Utc::now();
-        let result = compute_scheduled_for(&activity_def, &context, None)
+        let result = compute_scheduled_for(&activity_def, &context)
             .unwrap()
             .unwrap();
 
@@ -4647,7 +4612,7 @@ mod tests {
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
 
-        let result = compute_scheduled_for(&activity_def, &context, None);
+        let result = compute_scheduled_for(&activity_def, &context);
         assert!(result.is_err(), "Invalid delay format should return error");
     }
 
@@ -4668,7 +4633,7 @@ mod tests {
         let activity_def = create_activity_def("test", Some(settings));
         let context = TemplateContext::new();
 
-        let result = compute_scheduled_for(&activity_def, &context, None);
+        let result = compute_scheduled_for(&activity_def, &context);
         assert!(
             result.is_err(),
             "Invalid timestamp format should return error"
@@ -4694,7 +4659,7 @@ mod tests {
         let context = TemplateContext::new();
 
         // Past time is a warning, not an error — should return Ok with the past time
-        let result = compute_scheduled_for(&activity_def, &context, None).unwrap();
+        let result = compute_scheduled_for(&activity_def, &context).unwrap();
         assert!(result.is_some());
         let scheduled = result.unwrap();
         assert!(scheduled < Utc::now());
@@ -4720,7 +4685,7 @@ mod tests {
         let context = TemplateContext::new();
 
         let before = Utc::now();
-        let result = compute_scheduled_for(&activity_def, &context, None)
+        let result = compute_scheduled_for(&activity_def, &context)
             .unwrap()
             .unwrap();
 

@@ -35,6 +35,8 @@ struct Run {
     loop_keys: Vec<String>,
     /// Resolved `url` parameter of each scheduled activity, in order
     urls: Vec<(String, Value)>,
+    /// How far ahead each scheduled activity was queued, in seconds, in order
+    leads: Vec<(String, f64)>,
 }
 
 impl Run {
@@ -63,6 +65,7 @@ impl Run {
             pool,
             loop_keys,
             urls: Vec::new(),
+            leads: Vec::new(),
         };
         run.process_all().await;
         run
@@ -109,8 +112,11 @@ impl Run {
             };
             let key = a.key.clone();
             let iteration = self.loop_keys.contains(&key).then_some(a.iteration as i32);
-            let url: Value = sqlx::query_scalar(
-                "SELECT parameters->'url' FROM activity_queue \
+            // (the last step, an echo, has no `url`)
+            let (url, lead): (Option<Value>, f64) = sqlx::query_as(
+                "SELECT parameters->'url', \
+                        EXTRACT(EPOCH FROM (scheduled_for - now()))::float8 \
+                 FROM activity_queue \
                  WHERE workflow_id = $1 AND activity_key = $2 \
                  ORDER BY id DESC LIMIT 1",
             )
@@ -119,7 +125,8 @@ impl Run {
             .fetch_one(&self.pool)
             .await
             .expect("queued activity row");
-            self.urls.push((key.clone(), url));
+            self.urls.push((key.clone(), url.unwrap_or(Value::Null)));
+            self.leads.push((key.clone(), lead));
             *runs.entry(key.clone()).or_default() += 1;
             self.es
                 .publish(NewWorkflowEvent {
@@ -162,9 +169,23 @@ async fn assert_pages(pool: PgPool, input: Value, pages: u32) {
         .collect();
     assert_eq!(fetched, expected);
 
-    // The email lists every page's response
-    let text: Option<String> = sqlx::query_scalar(
-        "SELECT parameters->'body'->>'Text' FROM activity_queue \
+    // `delay: 5s` holds back every round, not only the first: each fetch is
+    // queued about 5 seconds ahead, and the step after the loop is not
+    for (key, lead) in &run.leads {
+        if key == "fetch_page" {
+            assert!(
+                (3.5..=5.0).contains(lead),
+                "every fetch_page round waits 5s: {:?}",
+                run.leads
+            );
+        } else {
+            assert!(*lead < 0.5, "{key} is not delayed: {:?}", run.leads);
+        }
+    }
+
+    // The last step returns the page count and every page's response
+    let (count, responses): (Value, Value) = sqlx::query_as(
+        "SELECT parameters->'pages', parameters->'responses' FROM activity_queue \
          WHERE workflow_id = $1 AND activity_key = 'aggregate_results' \
          ORDER BY id DESC LIMIT 1",
     )
@@ -172,11 +193,11 @@ async fn assert_pages(pool: PgPool, input: Value, pages: u32) {
     .fetch_one(&run.pool)
     .await
     .expect("queued aggregate_results row");
-    let text = text.unwrap_or_default();
+    assert_eq!(count, json!(pages), "aggregate_results pages");
     assert_eq!(
-        text.matches("status_code").count(),
-        pages as usize,
-        "aggregate_results text: {text}"
+        responses.as_array().map(Vec::len),
+        Some(pages as usize),
+        "aggregate_results responses: {responses}"
     );
 }
 

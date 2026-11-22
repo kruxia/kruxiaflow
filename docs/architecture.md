@@ -3702,6 +3702,7 @@ activities:
 - `budget`: Cost limits for LLM activities (`limit`, `action: abort`)
 - `delay`: Delayed execution for rate limiting (e.g., `"5s"`)
 - `scheduled_for`: Absolute scheduling timestamp
+- `delay` and `scheduled_for` apply each time the orchestrator schedules the activity: its first run and every later round of a loop. A retry is rescheduled by the queue with the retry backoff instead
 
 **Workflow Settings** (top-level `settings:` in the definition):
 - `timeout`: Maximum workflow run time in seconds, measured from creation.
