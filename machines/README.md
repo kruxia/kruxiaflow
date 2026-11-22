@@ -95,7 +95,7 @@ There are two views of the same results, each for its own audience: the Shop Flo
 
 #### The Stack's sheets for engineers
 
-Each machine card has five sheets, picked with the buttons at its top; the arrow keys keep the sheet while they flip machines, and the URL names it (`stack.html#thermostat/ladder`). A legend card, after the compare card, explains every symbol.
+Each machine card has five sheets, picked with the buttons at its top; the arrow keys keep the sheet while they flip machines, and the URL names it (`stack.html#thermostat/ladder`). On the code sheet the URL can name a step too (`stack.html#thermostat/code/heater`), which opens the sheet with that activity lit; clicking an activity puts it there. A legend card, after the compare card, explains every symbol.
 
 | Sheet     | What it shows                                                                                                                                                                                                                                                                                                                                                                                              |
 |-----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

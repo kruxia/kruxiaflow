@@ -226,7 +226,7 @@
   pre.code { position: relative; margin: 0; padding: 10px 12px; max-height: 75vh; overflow: auto; border: 1px solid var(--ink); background: var(--paper); font: 12px/1.5 var(--mono); tab-size: 2; }
   pre.code code { display: inline-block; min-width: 100%; }
   pre.code .ln { display: block; padding: 0 6px; margin: 0 -6px; }
-  pre.code .act { display: block; }
+  pre.code .act { display: block; cursor: pointer; }
   pre.code .act:hover .ln { box-shadow: inset 3px 0 var(--ink); }
   pre.code .act.hl .ln { background: var(--ink); color: var(--paper); }
   .twin-trace { margin: 10px 0 0 12px; padding-left: 10px; border-left: 3px double var(--ink); }
@@ -766,7 +766,7 @@ function codeSheet(m) {
     }
   }
   return `<div class="field"><h2>machines/${esc(m.dir)}/workflow.yaml</h2>
-      <p class="caption">The workflow as the runner deploys it. Each step's activity starts at its <code>- key:</code> line; pointing at one marks its block. Clicking a coil on the ladder, or a step's name on a timing diagram, opens the same file at that activity, with a button to come back here.</p></div>
+      <p class="caption">The workflow as the runner deploys it. Each step's activity starts at its <code>- key:</code> line; pointing at one marks its block, and clicking it lights it and puts it in the page's address, for a link that opens here with it lit. Clicking a coil on the ladder, or a step's name on a timing diagram, opens the same file at that activity, with a button to come back here.</p></div>
     <div class="field"><pre class="code"><code>${html}</code></pre></div>`;
 }
 
@@ -1240,7 +1240,8 @@ function show(i, focus, still) {
   cardEl.innerHTML = `<div class="inner">${id === "home" ? homeCard() : id === "compare" ? compareCard() : id === "legend" ? legendCard() : machineCard(m)}</div>`;
   if (!still) { void cardEl.offsetWidth; cardEl.classList.add("flip"); }
   document.getElementById("where").textContent = `Card ${current + 1} of ${CARDS.length}`;
-  const hash = m && sheet !== "card" ? `${id}/${sheet}` : id;
+  const step = m && sheet === "code" && codeFocus && codeFocus.dir === id ? codeFocus.step : null;
+  const hash = m && sheet !== "card" ? `${id}/${sheet}${step ? `/${step}` : ""}` : id;
   if (location.hash.slice(1) !== hash) history.replaceState(null, "", "#" + hash);
   if (focus) cardEl.focus({ preventScroll: true });
   const hl = m && sheet === "code" && cardEl.querySelector("pre.code .act.hl");
@@ -1253,12 +1254,23 @@ function show(i, focus, still) {
   if (sr && m) sr.onchange = () => { chosenRun[m.dir] = sr.value; show(current, false, true); };
 }
 
-/** `#thermostat/ladder` as the card's index, choosing the sheet */
+/** `#thermostat/ladder` as the card's index, choosing the sheet; `#thermostat/code/heater`
+ *  also lights that step's activity on the code sheet */
 function fromHash() {
-  const [id, sh] = decodeURIComponent(location.hash.slice(1)).split("/");
+  let h = "";
+  try { h = decodeURIComponent(location.hash.slice(1)); } catch (_) { h = ""; }
+  const [id, sh, step] = h.split("/");
   if (SHEETS.some(x => x.id === sh)) sheet = sh;
   else if (id) sheet = "card";
+  const m = MACHINES.find(x => x.dir === id);
+  if (sheet === "code" && m && step && m.workflow.steps.some(x => x.key === step)) codeFocus = { dir: id, step };
   return CARDS.indexOf(id);
+}
+/** Light one activity on the code sheet in place, and name it in the URL */
+function focusAct(m, step) {
+  codeFocus = { dir: m.dir, step };
+  cardEl.querySelectorAll("pre.code .act").forEach(a => a.classList.toggle("hl", a.dataset.act === step));
+  history.replaceState(null, "", `#${m.dir}/code/${step}`);
 }
 
 document.getElementById("title").innerHTML = pixelText("Machine shop", 2);
@@ -1269,6 +1281,8 @@ document.getElementById("prev").onclick = () => show(current - 1, true);
 document.getElementById("next").onclick = () => show(current + 1, true);
 document.getElementById("home").onclick = () => show(0, true);
 cardEl.addEventListener("click", e => {
+  const act = e.target.closest("pre.code .act");
+  if (act) { const m = MACHINES.find(x => x.dir === CARDS[current]); if (m) focusAct(m, act.dataset.act); return; }
   const link = e.target.closest("[data-step]");
   if (link) { const m = MACHINES.find(x => x.dir === CARDS[current]); if (m) showSource(m, link.dataset.step); return; }
   const go = e.target.closest("[data-go]");
@@ -1292,9 +1306,9 @@ document.addEventListener("keydown", e => {
   else if (e.key === "Home") show(0);
 });
 window.addEventListener("hashchange", () => {
-  const before = sheet;
+  const before = sheet, beforeStep = codeFocus && codeFocus.step;
   const i = fromHash();
-  if (i >= 0 && (i !== current || sheet !== before)) show(i);
+  if (i >= 0 && (i !== current || sheet !== before || (codeFocus && codeFocus.step) !== beforeStep)) show(i);
 });
 
 // Find: the next card, after this one, whose words include the text
