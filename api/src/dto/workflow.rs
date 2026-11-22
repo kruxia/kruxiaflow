@@ -370,6 +370,12 @@ pub struct WaitForSignalSettings {
     /// Action to take when timeout occurs (default: fail)
     #[serde(default)]
     pub on_timeout: OnTimeout,
+
+    /// Hold a signal that arrives while this activity is not waiting, and
+    /// deliver it (oldest first) when the activity next waits, instead of
+    /// refusing it (default: false)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hold_early: bool,
 }
 
 /// Action to take when a signal wait times out
@@ -391,6 +397,7 @@ impl From<kruxiaflow_core::workflow::WaitForSignalSettings> for WaitForSignalSet
             event_name: settings.event_name,
             timeout_seconds: settings.timeout_seconds,
             on_timeout: settings.on_timeout.into(),
+            hold_early: settings.hold_early,
         }
     }
 }
@@ -401,6 +408,7 @@ impl From<WaitForSignalSettings> for kruxiaflow_core::workflow::WaitForSignalSet
             event_name: settings.event_name,
             timeout_seconds: settings.timeout_seconds,
             on_timeout: settings.on_timeout.into(),
+            hold_early: settings.hold_early,
         }
     }
 }
@@ -1010,6 +1018,7 @@ mod tests {
             event_name: "approval".to_string(),
             timeout_seconds: 3600,
             on_timeout: OnTimeout::Skip,
+            hold_early: false,
         };
         let core: kruxiaflow_core::workflow::WaitForSignalSettings = api.into();
         let back: WaitForSignalSettings = core.into();
@@ -1057,6 +1066,7 @@ mod tests {
                 event_name: "done".to_string(),
                 timeout_seconds: 120,
                 on_timeout: OnTimeout::Continue,
+                hold_early: false,
             }),
             ..Default::default()
         };

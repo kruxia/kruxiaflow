@@ -53,7 +53,7 @@ pub use storage::{
 
 pub use subscription::{
     ActivitySubscription, ExpiredSubscription, NewSubscription, PostgresSubscriptionService,
-    SignalRequest, SubscriptionService,
+    SignalDeliveryError, SignalRequest, SubscriptionService, deliver_signal,
 };
 
 pub use workflow::{

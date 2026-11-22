@@ -58,6 +58,217 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Every example is parsed by the test suite.** A new test parses and
   validates each file in `examples/`, so an example the engine can't accept
   fails the build.
+- **The MCP activity catalog and authoring guide match the engine.** Both are
+  hand-written, had drifted from the activities and the parser, and agents
+  copy them verbatim. Because activity settings ignore unknown keys, several
+  of the mistakes produced settings that silently did nothing:
+  - **Settings:** `timeout` (the key is `timeout_seconds`), retry
+    `backoff_base_secs` / `backoff_max_secs` (`base_seconds` / `max_seconds`),
+    and `delay_secs` (`delay: 60s`). Budget `action: skip` is now
+    `abort` / `continue`.
+  - **Examples that didn't parse:** `wait_for_signal` used `signal_name` and
+    `timeout`; the parser requires `event_name` and `timeout_seconds`.
+  - **Conditions:** examples without `{{ }}`, which are always true.
+  - **Template variables:** `{{WORKFLOW.name}}` and `{{WORKFLOW.submitted_at}}`
+    (only `id` and `status` exist), and output paths such as
+    `{{fetch.response}}` for `{{fetch.response.body}}`, and `rows` for
+    `result.rows`.
+  - **Activity parameters and outputs:** 17 parameter and output names across
+    `http_request`, `llm_prompt`, `embedding`, `postgres_query`,
+    `postgres_transaction`, `email_send` and `echo` (for example `system` for
+    `system_prompt`, `database_url` for `db_url`, `body` / `html` for
+    `text_body` / `html_body`). Entries now carry each activity's
+    `output_shape`.
+  - **`script`:** documented with parameters `code`, `globals` and
+    `timeout` and outputs `stdout` / `stderr`, on worker `python`. The Python
+    worker's activity takes `script` and `inputs`, returns `result` (the
+    script's `OUTPUT`), and runs on `py-std`. The catalog listed worker
+    pools `py-data`, `py-ml` and `py-nlp`, which the SDK doesn't build; it
+    now lists `py-std` and `py-sys`.
+  - **Silently ineffective fields:** `streaming` under settings (the
+    orchestrator overwrites it with the activity-level `streaming`), and the
+    activity field `output_definitions` (the YAML key is `outputs`).
+  - **The approval example** never processed low-value requests: they
+    skipped the approval step, and the skip cascaded to processing. It now
+    has a direct path for low-value requests.
+  - **Output and parameter descriptions:** `postgres_query` returns `rows` or
+    `rows_affected`, never both (`rows` also for `WITH` and `… RETURNING`); embeddings on a server are always in
+    `embeddings_file`; `download_to_file` is kept as a workflow file only when
+    declared in `outputs`; http `headers` and `query` take string values;
+    `iteration_limit` stops a loop rather than failing it.
+  - **Signals:** the guide's `wait_for_signal` section now covers
+    `hold_early`, the `on_timeout` default, and waiting again in each round
+    of a loop. `send_workflow_signal` and `docs/mcp-server.md` said the
+    signal's data is `{{SIGNAL.*}}`; no template can read it
+    ([#37](https://github.com/kruxia/kruxiaflow/issues/37)), and the worker
+    receives it as `signal_data`.
+  - **README:** the approval-gate example had no `activity_name`, so it did
+    not parse.
+  - **CI now lints and tests the MCP server.** Its code is behind the
+    optional `mcp-server` feature, which no CI job compiled, so none of its
+    tests ran in CI. A new `MCP server` job runs clippy and its tests with
+    the feature, against a PostgreSQL service for its database tests.
+  - **Guard against further drift:** new tests validate every guide example
+    with the workflow parser (including that no settings key is dropped, and
+    that conditions are templates), check the `WORKFLOW` variables, and pin
+    the catalog's parameter and output names to the activities', in both
+    directions. Guide examples may use only real activity fields and each
+    activity's real parameters, must give its required parameters, and the
+    approval example is run through the
+    orchestrator's readiness evaluation for both kinds of request.
+
+## [0.12.4] - 2026-11-21
+
+### Added
+
+- **A wait can hold a signal that arrives early
+  ([#42](https://github.com/kruxia/kruxiaflow/issues/42)).** A signal sent
+  while its activity was not waiting was refused and dropped, so a sender a
+  moment early, or one signaling a loop that was busy with the previous
+  round, lost its signal. `wait_for_signal: {hold_early: true}` keeps such a
+  signal and delivers it, oldest first, when the activity next waits: the
+  activity then runs with that signal's data without waiting, and its
+  `ActivitySignaled` event carries `"held": true`. The signal endpoint
+  answers `"held": true`. An activity holds up to 100 signals per
+  event name, and signals still held when the workflow ends are discarded.
+  Migration `20261121000001` adds the `held_signals` table.
+- **A refused signal says why.** The signal endpoint's answer has `held` and,
+  when the signal was neither delivered nor held, a `reason`: `not_waiting`
+  (the same signal can succeed later), `unknown_workflow`, `unknown_activity`,
+  `workflow_ended` or `hold_limit`. The MCP `send_workflow_signal` result
+  has `held`, `held_activities` and, on refusal, `reasons`.
+
+### Fixed
+
+- **The MCP `send_workflow_signal` tool delivers signals the way the REST
+  endpoint does** ([#39](https://github.com/kruxia/kruxiaflow/issues/39)). It
+  published the caller's `data` as the whole `ActivitySignaled` payload, so
+  the data never reached the step (`{{SIGNAL.*}}` was null) and keys in it
+  were read as event fields: `{"on_timeout": "skip"}` skipped the step. A
+  failed publish was reported as success, although nothing else delivers the
+  signal. The REST endpoint and the tool now share one function,
+  `deliver_signal`, which validates the request, marks the subscription and
+  publishes `{"event_name", "signal_data"}`. When the publish fails it
+  reopens the wait and returns an error, so the signal can be retried and
+  the timeout still applies. The tool's result now has `"signaled": true/false`, drops the
+  per-activity `event_published` flag, and its description no longer claims
+  REST has a workflow-level signal.
+- **A signal wait takes one signal, with or without `data`.** A wait
+  recorded "signaled" by storing the signal's `data`, so a signal sent
+  without `data` left it looking unsignaled until the orchestrator took it.
+  Meanwhile a second signal was answered `"signaled": true` while its data
+  was dropped, and the expiry checker could still time the wait out: with
+  `on_timeout: fail`, a step whose signal arrived before the deadline
+  failed with `SIGNAL_TIMEOUT`. A signal was also accepted after its wait
+  had timed out. Migration `20261119000002` adds
+  `activity_event_subscriptions.signaled_at` (backfilled for rows signaled
+  with data); a signal now needs a wait that is neither signaled nor
+  expired, and the expiry checker skips signaled waits. If the signal's
+  event fails to publish, the API reopens the wait before answering 500, so
+  a retry is accepted and the timeout still applies. The MCP tools
+  `send_workflow_signal` and `list_waiting_workflows` use the same test.
+
+## [0.12.3] - 2026-11-21
+
+### Fixed
+
+- **A template error fails the activity whose template is bad (#19).**
+  - **Before:** when an activity's parameters (or `delay` / `scheduled_for`)
+    referenced an undefined value, the error surfaced while processing the
+    upstream activity's completion. That event was retried five times and
+    dropped as poison, the upstream activity was marked failed although it had
+    succeeded, the activity with the bad template never ran or failed, and the
+    workflow stayed `running` indefinitely.
+  - **Now:** that activity fails with
+    `TEMPLATE_ERROR: Failed to resolve templates in activity <key>: …` (for
+    `delay` / `scheduled_for`, `TEMPLATE_ERROR: Failed to resolve delay
+    template for activity <key>: …` and similar), through a terminal
+    `ActivityFailed` like any other failure. Its `status == 'failed'`
+    branches run, its other dependents are skipped, and the workflow fails.
+  - **Conditions too:** a `conditions:` template on a dependency that can't
+    be evaluated fails the activity that carries it in the same way, instead
+    of poisoning the upstream completion. That includes a condition that only
+    becomes evaluable when its dependency is skipped, such as a condition on
+    a skipped step's result. A condition is evaluated only once every
+    dependency of its activity is terminal, so a condition that reads a
+    sibling dependency doesn't fail when that sibling completes last.
+  - **Retries too:** an LLM activity's retry resolves its parameters again
+    for the budget check. If they no longer resolve (a secret removed, for
+    example), the queued retry is cancelled and the activity fails with
+    `TEMPLATE_ERROR`, instead of poisoning the failure event.
+  - **No misleading event:** no `ActivityScheduled` is recorded for an
+    activity that failed this way, since it was never queued.
+- **Skipped activities cascade (#19).** Skipping was a single pass over the
+  state, so in a chain after a failed or skipped activity only the first
+  dependent was skipped and the rest stayed `not_scheduled`, which kept the
+  workflow from ever completing. Skipping now repeats until nothing changes.
+- **Loop steps run once per round, on new input (#18).** In a two-step loop
+  (the shape of examples 07a and 07b), the step after the loop head re-ran
+  after every one of its own completions, on the head's previous output,
+  until the default cap of 100 iterations. The head also re-ran on the other
+  step's previous result. Paid LLM steps were called far more often than
+  intended. A completed loop activity is now scheduled again only when a
+  dependency has completed since it last did (a self-loop counts its own
+  completion).
+  - **Sequence numbers:** workflow state records a per-workflow completion
+    sequence number for this (`completion_seq`, default 0). Activities
+    completed before the upgrade keep the old behaviour, so workflows in
+    flight are not stalled.
+- **Loops of three or more steps run every step each round (#18).** Only the
+  two ends of a back-edge were marked as loop activities, so a middle step
+  ran once and never again. Every activity on the cycle is now a loop
+  activity.
+  - **No redeploy needed:** the orchestrator completes the loop marking of
+    every definition it loads, from the stored back-edges, so definitions
+    deployed before the fix and runs already in flight are fixed too.
+  - **Known limitation:** a join of parallel branches inside a loop still
+    runs when any of its inputs is new, so it can run on a branch's output
+    from the previous round. See the loops guide.
+  - **Behaviour change:** middle steps of such loops now count iterations
+    (`{{ACTIVITY.iteration}}`), and with `iteration_scoped: true` they store
+    per-round outputs.
+- **A re-delivered completion from an earlier loop round is ignored (#18).**
+  Event delivery is at-least-once. A loop activity already re-scheduled for
+  its next round passed the status-based duplicate guard, so a re-delivered
+  completion of its previous round was applied as new, advancing its
+  iteration and giving its dependents spurious input. Completions whose
+  iteration doesn't match the activity's current iteration are now ignored.
+- **A loop's back-edge follows the order activities are written, not their
+  keys (#26).** The search for the back-edge started from the alphabetically
+  first key, so renaming steps could change how a loop ran. In the repair loop
+  `run → check → fix → run`, `check` started before `run`. A loop with two
+  branches could fail validation. The search now starts from the first written
+  activity, so a loop starts at its first written step.
+  - **Loops written with `dependency_of`** now get their back-edge marked when
+    parsed, and conditions written there count as the loop's exit condition.
+  - **Markings in the input are recomputed.** `is_back_edge` and
+    `is_loop_activity` in a submitted definition (for example an exported one)
+    are ignored, not kept alongside the computed ones.
+  - **Deployed definitions are unchanged.** They and runs in flight keep the
+    back-edge they were stored with. Redeploying an affected definition stores
+    a new version. Examples 07a, 07b and 08a keep the same back-edge.
+
+## [0.12.2] - 2026-11-21
+
+### Fixed
+
+- **A signaled activity runs.** After `POST /api/v1/workflows/{id}/signal`
+  the orchestrator evaluated the activity again, found `wait_for_signal`,
+  and tried to create its subscription a second time. The first row was
+  still there, so every `wait_for_signal` activity failed with "Subscription
+  already exists" as soon as it was signaled, inside a loop or not. A
+  timeout with `on_timeout: continue` made the activity wait again instead
+  of running. The orchestrator now queues the activity whose wait the event
+  ended, and deletes its subscription.
+- **A signal wait inside a loop takes a signal every round.** The signal API
+  and the expiry checker published `ActivitySignaled` (and the timeout
+  `ActivityFailed`) without an iteration, so the event dedup index dropped
+  each round's after the first as a duplicate, while the API still answered
+  `"signaled": true`; the workflow then waited for good. Subscriptions now
+  record the loop round (migration `20261119000001` adds
+  `activity_event_subscriptions.iteration`); the events the signal endpoint
+  and the expiry checker publish carry it, and the orchestrator acts only on
+  a signal for the round that is waiting.
 
 ## [0.12.1] - 2026-11-17
 
