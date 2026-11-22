@@ -43,6 +43,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its wait ends, with `SIGNAL` set to the signal's `data`, or `null` when it
   carried none or the wait timed out with `on_timeout: continue`. A budget
   check for a waiting activity happens then too, not when the wait begins.
+- **Examples 06a and 09b can be submitted.** They failed to parse. 06a's
+  `cache:` was a map (`enabled`, `ttl_seconds`, `key`), but `cache` is a
+  boolean with the TTL in `cache_ttl`; it is now `cache: true` and
+  `cache_ttl: 86400`. The cache key can't be configured: it is a hash of the
+  activity name and all of its resolved parameters, which covers the model and
+  prompt the old `key` listed. Its header no longer says caching falls back
+  to in-memory: without `KRUXIAFLOW_CACHE_PROVIDER=redis`, caching is off.
+  Its log step no longer reads `result.cache_hit`, which `llm_prompt` doesn't
+  return (a cache hit shows only in the activity's metadata): it bound NULL
+  into the log table's `NOT NULL` `cache_hit` column, so the step failed on
+  every run. The `cache_hit` column is gone. 09b's budget `action: warn` is
+  now `continue`, which doesn't stop the step before it runs; the LLM worker
+  still skips models over the limit.
+- **Example 07b's conditions and templates are valid.** Its conditions were
+  two templates joined by an operator, or by `OR` outside a template, so they
+  rendered to a non-empty string and were always true. It also used `[*]`,
+  which is not template syntax, outputs `llm_prompt` doesn't produce
+  (`results`, `sufficient`, `reason`, `gaps`, file outputs), and per-step cost
+  fields templates can't read. The conditions are now single expressions on
+  the start of the evaluation's reply (any case) and
+  `{{search_information.iteration}}`, tested against sample replies; every
+  round's results are read from the iteration-scoped `result` array, and the
+  loop's budget-based exit is gone: `settings.budget` still fails an activity
+  over its budget. `{{ACTIVITY.remaining_budget_usd}}` in its prompt resolves
+  with #32's fix.
+- **Every example is parsed by the test suite.** A new test parses and
+  validates each file in `examples/`, so an example the engine can't accept
+  fails the build.
 - **The MCP activity catalog and authoring guide match the engine.** Both are
   hand-written, had drifted from the activities and the parser, and agents
   copy them verbatim. Because activity settings ignore unknown keys, several
