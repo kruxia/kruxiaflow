@@ -148,6 +148,30 @@ Each run ends as one of four results:
 
 **A workflow the engine won't deploy** is a result too, not a crash. When `POST /api/v1/workflow_definitions` rejects a machine's `workflow.yaml`, each of its runs ends with the workflow `not_deployed`, every step `absent`, and the validator's message as the problem: known broken for a trap, broken otherwise. The other machines still run. A bug can show this way: the ferris wheel's valid loop fails validation on an engine that picks the back-edge by key order (#26).
 
+## Two ways to use it
+
+### One issue, one branch
+
+When you're working on one fix, the shop tells you when the fix works and whether it holds up.
+
+1. Find the issue's trap, or build one: a machine whose card says what should happen, with `trap:` naming the issue. On `main`, its runs come out known broken.
+2. While you work, run only that machine, with `MACHINE_SHOP_ONLY`. When the fix works, its runs come out fixed. Take the trap label off the card in the same branch.
+3. Before the pull request, run every machine in both modes.
+   - Bench mode shows that nothing else broke.
+   - Shop mode shows that the fix holds when everything runs at once, which is where timing bugs show. #28's mill passed in bench mode by luck.
+   - If the fix changes what the engine writes, or when, pull the plug too.
+4. To see the change, run `main` and your branch into the same `MACHINE_SHOP_OUT`, with `MACHINE_SHOP_TREE` set to each. The pages show both and mark the steps that changed.
+
+### Many branches, one integration tree
+
+When several fixes are merged into one tree to test together, the shop shows how they behave as a whole.
+
+1. Run every machine in bench and shop mode, plain and with the plug pulled, labelled with the tree's name.
+2. Every trap whose fix is merged should come out fixed, and every other run should come out as before. A run that breaks only in the merged tree points to where two fixes meet in the engine.
+3. Run a combined pull request the same way. When its results match the integration tree's, the pull request carries every fix the tree does.
+
+The shop doesn't replace unit or integration tests. It runs alongside them, and shows in one picture what the merged engine does with workflows a person can read.
+
 ## A machine
 
 Each machine is a directory with two files:
