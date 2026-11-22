@@ -180,6 +180,25 @@
   .tools form { margin-left: auto; display: flex; gap: 6px; align-items: center; min-width: 0; }
   .tools input { width: 160px; }
   .message { font-size: 12px; min-height: 1.4em; padding: 0 12px 8px; }
+  .tools button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+
+  /* terms: marked when "Explain terms" (?) is on; each opens a card, and the legend card lists them all */
+  .term { text-decoration: underline dotted var(--ink); text-underline-offset: 3px; cursor: help; }
+  .term:hover, .term:focus-visible { background: var(--ink); color: var(--paper); text-decoration: none; outline: none; }
+  .term:hover code, .term:focus-visible code { color: var(--paper); }
+  .tip { position: absolute; z-index: 30; box-sizing: border-box; padding: 8px 10px; font: 12px/1.45 var(--body);
+    background: var(--paper); color: var(--ink); border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink); }
+  .tip p { margin: 4px 0 0; }
+  .tip p.head { margin: 0; font-family: var(--mono); }
+  .tip .k, .glossary h3 { font: bold 10px var(--mono); text-transform: uppercase; letter-spacing: 0.08em; }
+  .tip .k { margin-left: 8px; }
+  .tip .an, .glossary .an { font-style: italic; }
+  .tip a, .glossary a { color: var(--ink); }
+  .glossary h3 { margin: 12px 0 4px; }
+  .glossary dl { margin: 0; display: grid; grid-template-columns: minmax(0, 10rem) minmax(0, 1fr); gap: 4px 12px; font-size: 12px; }
+  .glossary dt { font-weight: bold; }
+  .glossary dd { margin: 0; }
+  @media (max-width: 560px) { .glossary dl { grid-template-columns: minmax(0, 1fr); } .glossary dd { margin-bottom: 6px; } }
 
   /* sheets: each machine card has five, picked with buttons like the tool bar's */
   .sheets { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; }
@@ -268,6 +287,7 @@
     <button type="button" id="prev" aria-label="Previous card"></button>
     <button type="button" id="home" aria-label="Home card"></button>
     <button type="button" id="next" aria-label="Next card"></button>
+    <button type="button" id="terms" aria-pressed="false" aria-label="Explain terms" title="Explain terms"></button>
     <span class="where" id="where"></span>
     <form id="find" role="search">
       <input type="search" id="find-text" placeholder="Find" aria-label="Find in the stack">
@@ -277,6 +297,7 @@
 </div>
 
 <script id="shop-data" type="application/json">__MACHINE_SHOP_DATA__</script>
+<script id="shop-glossary" type="application/json">__MACHINE_SHOP_GLOSSARY__</script>
 <script>
 "use strict";
 
@@ -1114,8 +1135,155 @@ function legendCard() {
       <p class="caption">Each step is a rung between two rails, ending in its coil. Power flows left to right through closed contacts. The rungs follow the engine's dependency rules in <code>docs/conditional-branching.md</code> and <code>docs/loops-guide.md</code>: the drawing is what the workflow should do, and the timing diagrams show what it did.</p>
       <div class="scroll"><table><tbody>${rows}</tbody></table></div></div>
     <div class="field"><h2>Timing diagrams</h2><div class="scroll"><table><tbody>${traceRows}</tbody></table></div></div>
-    <div class="field"><h2>Title block</h2><p class="story">Every machine sheet carries one. The drawing number stays with the machine. The revision is the tree and commit of the result set shown, which is the checker; drawn by is the Stack, from the machine's <code>workflow.yaml</code>.</p></div>`;
+    <div class="field"><h2>Title block</h2><p class="story">Every machine sheet carries one. The drawing number stays with the machine. The revision is the tree and commit of the result set shown, which is the checker; drawn by is the Stack, from the machine's <code>workflow.yaml</code>.</p></div>
+    ${TERMS.length ? `<div class="field glossary"><h2>Glossary</h2><p class="caption">What the Stack's words mean in Kruxia Flow, and where its docs explain them. The <b>?</b> button in the tool bar marks them on every card.</p>${glossaryList()}</div>` : ""}`;
 }
+
+const PAGE = "stack";
+
+// ---------------------------------------------------------------------------
+// Terms: what this page's words mean in Kruxia Flow, and where its docs explain
+// them. "Explain terms" marks them, and each opens a card; the glossary lists all.
+// ---------------------------------------------------------------------------
+
+let GLOSSARY = { terms: [] };
+try { GLOSSARY = JSON.parse(document.getElementById("shop-glossary").textContent); } catch (_) { /* the template, not yet rendered */ }
+const TERMS = (GLOSSARY.terms || []).filter(t => (t.pages || []).includes(PAGE));
+const TERM_BY_ID = Object.fromEntries(TERMS.map(t => [t.id, t]));
+const TERM_PHRASES = TERMS.flatMap(t => t.match.map(p => ({ p, id: t.id }))).sort((a, b) => b.p.length - a.p.length);
+const TERM_RE = TERM_PHRASES.length
+  ? new RegExp(`(?<![\\w/.-])(${TERM_PHRASES.map(x => x.p.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")).join("|")})(?![\\w-])`, "gi")
+  : null;
+const TERMS_KEY = "machine-shop-terms";
+let termsOn = false;
+try { termsOn = localStorage.getItem(TERMS_KEY) === "on"; } catch (_) { termsOn = false; }
+function setTermsOn(on) {
+  termsOn = on;
+  try { localStorage.setItem(TERMS_KEY, on ? "on" : "off"); } catch (_) { /* storage blocked: the choice lasts this visit */ }
+}
+
+/** The term a phrase names; an all-capitals phrase such as TON matches only as written */
+function termFor(text) {
+  const exact = TERM_PHRASES.find(x => x.p === text);
+  if (exact) return exact.id;
+  const loose = TERM_PHRASES.find(x => x.p !== x.p.toUpperCase() && x.p.toLowerCase() === text.toLowerCase());
+  return loose ? loose.id : null;
+}
+function docUrl(path) {
+  return path.startsWith("shop:") ? (GLOSSARY.shop_base || "") + path.slice(5) : (GLOSSARY.docs_base || "") + path;
+}
+function docLinks(t) {
+  return (t.docs || []).map(([label, path]) => `<a href="${esc(docUrl(path))}" target="_blank" rel="noopener">${esc(label)}</a>`).join(" · ");
+}
+
+/** Mark the first use of each term in each scope, when "Explain terms" is on */
+function markTerms(root, scopeSel) {
+  if (!termsOn || !TERM_RE || !root) return;
+  const skip = "pre, svg, button, select, option, a, summary, script, style, textarea, label, .term, .tip, .glossary";
+  for (const scope of root.querySelectorAll(scopeSel)) {
+    const seen = new Set();
+    for (const code of scope.querySelectorAll("code")) {
+      if (code.closest(skip)) continue;
+      const id = termFor(code.textContent.trim());
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const span = document.createElement("span");
+      span.className = "term"; span.tabIndex = 0; span.dataset.term = id;
+      code.replaceWith(span); span.appendChild(code);
+    }
+    const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, {
+      acceptNode: n => (n.parentElement && !n.parentElement.closest(skip + ", code") && n.nodeValue.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      const text = node.nodeValue;
+      let last = 0, out = null, m;
+      TERM_RE.lastIndex = 0;
+      while ((m = TERM_RE.exec(text))) {
+        const id = termFor(m[1]);
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        out = out || document.createDocumentFragment();
+        out.append(text.slice(last, m.index));
+        const span = document.createElement("span");
+        span.className = "term"; span.tabIndex = 0; span.dataset.term = id; span.textContent = m[1];
+        out.append(span);
+        last = m.index + m[1].length;
+      }
+      if (out) { out.append(text.slice(last)); node.replaceWith(out); }
+    }
+  }
+}
+
+/** Every term on this page, Kruxia Flow's own first, then the analogies */
+function glossaryList() {
+  const group = (kind, title) => {
+    const ts = TERMS.filter(t => t.kind === kind);
+    if (!ts.length) return "";
+    return `<h3>${esc(title)}</h3><dl>${ts.map(t => `<dt>${esc(t.name)}</dt><dd>${t.analog ? `<span class="an">${esc(t.analog)}</span> Here: ` : ""}${esc(t.means)}${t.docs ? ` <span class="docs">${docLinks(t)}</span>` : ""}</dd>`).join("")}</dl>`;
+  };
+  return group("kruxia", "Kruxia Flow") + group("analogy", "The analogies");
+}
+
+const tip = document.createElement("div");
+tip.className = "tip"; tip.id = "term-tip"; tip.setAttribute("role", "tooltip"); tip.hidden = true;
+document.body.appendChild(tip);
+let tipFor = null, tipTimer = 0;
+function showTip(el) {
+  clearTimeout(tipTimer);
+  const t = TERM_BY_ID[el.dataset.term];
+  if (!t) return;
+  if (tipFor && tipFor !== el) tipFor.removeAttribute("aria-describedby");
+  tipFor = el;
+  el.setAttribute("aria-describedby", "term-tip");
+  tip.innerHTML = `<p class="head"><b>${esc(t.name)}</b><span class="k">${t.kind === "analogy" ? "analogy" : "Kruxia Flow"}</span></p>` +
+    (t.analog ? `<p class="an">${esc(t.analog)}</p>` : "") +
+    `<p>${t.kind === "analogy" ? "Here: " : ""}${esc(t.means)}</p>` +
+    (t.docs ? `<p class="docs">Docs: ${docLinks(t)}</p>` : "");
+  tip.hidden = false;
+  const r = el.getBoundingClientRect();
+  const w = Math.min(340, window.innerWidth - 24);
+  tip.style.width = `${w}px`;
+  const x = Math.min(Math.max(12, r.left), window.innerWidth - w - 12);
+  let y = r.bottom + 6;
+  if (y + tip.offsetHeight > window.innerHeight && r.top - 6 - tip.offsetHeight > 0) y = r.top - 6 - tip.offsetHeight;
+  tip.style.left = `${x + window.scrollX}px`;
+  tip.style.top = `${y + window.scrollY}px`;
+}
+function hideTip(now) {
+  clearTimeout(tipTimer);
+  const go = () => { tip.hidden = true; if (tipFor) tipFor.removeAttribute("aria-describedby"); tipFor = null; };
+  if (now) go(); else tipTimer = setTimeout(go, 250);
+}
+const inTerm = el => el && el.closest ? el.closest(".term") : null;
+const inTip = el => !!(el && el.closest && el.closest("#term-tip"));
+document.addEventListener("pointerover", e => {
+  if (e.pointerType === "touch") return;
+  const el = inTerm(e.target);
+  if (el) showTip(el); else if (inTip(e.target)) clearTimeout(tipTimer);
+});
+document.addEventListener("pointerout", e => {
+  if (e.pointerType === "touch" || tip.hidden) return;
+  if (!(inTerm(e.target) || inTip(e.target))) return;
+  if (inTip(e.relatedTarget) || inTerm(e.relatedTarget) === tipFor) return;
+  hideTip();
+});
+document.addEventListener("focusin", e => { const el = inTerm(e.target); if (el) showTip(el); });
+document.addEventListener("focusout", e => { if (inTerm(e.target) && !inTip(e.relatedTarget)) hideTip(); });
+document.addEventListener("click", e => {
+  const el = inTerm(e.target);
+  if (el) {
+    e.preventDefault(); e.stopPropagation();
+    if (tipFor === el && !tip.hidden) hideTip(true); else showTip(el);
+    return;
+  }
+  if (!tip.hidden && !inTip(e.target)) hideTip(true);
+}, true);
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !tip.hidden) { hideTip(true); e.stopImmediatePropagation(); }
+}, true);
+window.addEventListener("resize", () => { if (tipFor && !tip.hidden) showTip(tipFor); });
 
 // ---------------------------------------------------------------------------
 // Cards
@@ -1151,7 +1319,7 @@ function homeCard() {
   return `
     <div class="hero">${pixelText("Machine shop", 3)}
       <p>Small workflows, each inspired by a physical machine, that test the Kruxia Flow engine. One card per machine. Flip through with the arrows, or pick one below.</p>
-      <p>Each machine has five sheets: its card, a datasheet, its ladder logic, a timing diagram per run, and its code, the <code>workflow.yaml</code> it runs. <a href="#legend">The legend card</a> explains the symbols.</p></div>
+      <p>Each machine has five sheets: its card, a datasheet, its ladder logic, a timing diagram per run, and its code, the <code>workflow.yaml</code> it runs. <a href="#legend">The legend card</a> explains the symbols and the words, and the <b>?</b> button marks the words on every card.</p></div>
     <section class="section"><h2>Machines</h2><div class="machines">${buttons}</div></section>
     <section class="section"><h2>Results sets</h2><div class="tiles">${tiles}</div></section>`;
 }
@@ -1243,6 +1411,7 @@ function show(i, focus, still) {
   const step = m && sheet === "code" && codeFocus && codeFocus.dir === id ? codeFocus.step : null;
   const hash = m && sheet !== "card" ? `${id}/${sheet}${step ? `/${step}` : ""}` : id;
   if (location.hash.slice(1) !== hash) history.replaceState(null, "", "#" + hash);
+  markTerms(cardEl, ".field, .hero, .titleblock");
   if (focus) cardEl.focus({ preventScroll: true });
   const hl = m && sheet === "code" && cardEl.querySelector("pre.code .act.hl");
   if (hl) { const pre = hl.closest("pre"); pre.scrollTop = Math.max(0, hl.offsetTop - 24); pre.scrollIntoView({ block: "nearest" }); }
@@ -1277,6 +1446,12 @@ document.getElementById("title").innerHTML = pixelText("Machine shop", 2);
 document.getElementById("prev").innerHTML = pixelText("<", 2);
 document.getElementById("home").innerHTML = pixelText("^", 2);
 document.getElementById("next").innerHTML = pixelText(">", 2);
+const termsBtn = document.getElementById("terms");
+if (TERMS.length) {
+  termsBtn.innerHTML = pixelText("?", 2);
+  termsBtn.setAttribute("aria-pressed", String(termsOn));
+  termsBtn.onclick = () => { setTermsOn(!termsOn); termsBtn.setAttribute("aria-pressed", String(termsOn)); hideTip(true); show(current, false, true); };
+} else termsBtn.hidden = true;
 document.getElementById("prev").onclick = () => show(current - 1, true);
 document.getElementById("next").onclick = () => show(current + 1, true);
 document.getElementById("home").onclick = () => show(0, true);

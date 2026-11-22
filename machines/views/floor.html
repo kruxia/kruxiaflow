@@ -244,11 +244,31 @@
   .bay.max { grid-column: 1 / -1; }
   .floor > .back { grid-column: 1 / -1; }
   .bay.max .bay-head h2 { font-size: 19px; }
-  .bay.max .schematic svg { width: min(100%, calc(var(--w) * 2px)); }
+  /* up to twice its size, but no taller than the window below the header, and never smaller than drawn */
+  .bay.max .schematic svg { width: min(100%, max(calc(var(--w) * 1px), min(calc(var(--w) * 2px), calc((100vh - var(--head, 160px) - 40px) * var(--w) / var(--h))))); }
   .bay.max .source { max-height: calc(100vh - 220px); }
   @media (min-width: 1100px) {
     .bay.max { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); column-gap: 20px; align-items: start; }
   }
+  /* terms: marked when "Explain terms" is on; each opens a card, and the glossary lists them all */
+  .term { text-decoration: underline dotted var(--ink-muted); text-underline-offset: 3px; cursor: help; border-radius: 2px; }
+  .term:hover, .term:focus-visible { text-decoration-color: var(--ink); background: color-mix(in srgb, var(--series) 12%, transparent); outline: none; }
+  .tip { position: absolute; z-index: 30; box-sizing: border-box; padding: 10px 12px; font-size: 12.5px; line-height: 1.45;
+    background: var(--surface); color: var(--ink); border: 1px solid var(--baseline); border-radius: 8px;
+    box-shadow: 0 6px 20px color-mix(in srgb, var(--ink) 18%, transparent); }
+  .tip p { margin: 4px 0 0; }
+  .tip p.head { margin: 0; }
+  .tip .k, .glossary h3 { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-muted); }
+  .tip .k { margin-left: 8px; }
+  .tip .an, .glossary .an { color: var(--ink-secondary); font-style: italic; }
+  .tip a, .glossary a { color: var(--series); }
+  .glossary { margin-top: 8px; max-width: 90ch; }
+  .glossary h3 { margin: 10px 0 4px; }
+  .glossary dl { margin: 0; display: grid; grid-template-columns: minmax(0, 11rem) minmax(0, 1fr); gap: 4px 14px; font-size: 12.5px; }
+  .glossary dt { font-weight: 600; }
+  .glossary dd { margin: 0; color: var(--ink-secondary); }
+  .glossary .docs { white-space: normal; }
+  @media (max-width: 560px) { .glossary dl { grid-template-columns: minmax(0, 1fr); } .glossary dd { margin-bottom: 6px; } }
   @media (max-width: 560px) {
     header { position: static; }
     .controls { margin-left: 0; }
@@ -286,6 +306,7 @@
 </main>
 
 <script id="shop-data" type="application/json">__MACHINE_SHOP_DATA__</script>
+<script id="shop-glossary" type="application/json">__MACHINE_SHOP_GLOSSARY__</script>
 <script>
 "use strict";
 
@@ -502,7 +523,7 @@ Click to see its source</title>
       <text class="state" x="${p.x + 9}" y="${p.y + 31}">${esc(stateText(got))}</text>
       ${badges}</g>`;
   }
-  return `<svg viewBox="-2 -9 ${width + 4} ${height + 11}" width="${width + 4}" style="--w:${width + 4}" role="img" aria-label="Schematic of ${esc(m.card.name)}">
+  return `<svg viewBox="-2 -9 ${width + 4} ${height + 11}" width="${width + 4}" style="--w:${width + 4};--h:${height + 11}" role="img" aria-label="Schematic of ${esc(m.card.name)}">
     <defs>
       <marker id="${id}-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="arrow" d="M0 0 L8 4 L0 8 Z"/></marker>
     </defs>${links}${parts}</svg>`;
@@ -518,7 +539,8 @@ function controls() {
     SETS.map(s => `<option value="${s.id}"${s.id === sel ? " selected" : ""}>${esc(setName(s))}</option>`).join("");
   return `<label for="pick-set">Results <select id="pick-set">${opts(state.set)}</select></label>
     <label for="pick-cmp">Compare with <select id="pick-cmp">${opts(state.compare, true)}</select></label>
-    <label class="check" for="only-changed"><input type="checkbox" id="only-changed"${state.onlyChanged ? " checked" : ""}${cmp() ? "" : " disabled"}> Only what changed</label>`;
+    <label class="check" for="only-changed"><input type="checkbox" id="only-changed"${state.onlyChanged ? " checked" : ""}${cmp() ? "" : " disabled"}> Only what changed</label>
+    ${TERMS.length ? `<label class="check" for="terms-on"><input type="checkbox" id="terms-on"${termsOn ? " checked" : ""}> Explain terms</label>` : ""}`;
 }
 
 function tally() {
@@ -741,6 +763,152 @@ document.addEventListener("keydown", e => {
   if (g) { e.preventDefault(); showStepSource(g.closest(".bay"), g.dataset.step); }
 });
 
+const PAGE = "floor";
+
+// ---------------------------------------------------------------------------
+// Terms: what this page's words mean in Kruxia Flow, and where its docs explain
+// them. "Explain terms" marks them, and each opens a card; the glossary lists all.
+// ---------------------------------------------------------------------------
+
+let GLOSSARY = { terms: [] };
+try { GLOSSARY = JSON.parse(document.getElementById("shop-glossary").textContent); } catch (_) { /* the template, not yet rendered */ }
+const TERMS = (GLOSSARY.terms || []).filter(t => (t.pages || []).includes(PAGE));
+const TERM_BY_ID = Object.fromEntries(TERMS.map(t => [t.id, t]));
+const TERM_PHRASES = TERMS.flatMap(t => t.match.map(p => ({ p, id: t.id }))).sort((a, b) => b.p.length - a.p.length);
+const TERM_RE = TERM_PHRASES.length
+  ? new RegExp(`(?<![\\w/.-])(${TERM_PHRASES.map(x => x.p.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")).join("|")})(?![\\w-])`, "gi")
+  : null;
+const TERMS_KEY = "machine-shop-terms";
+let termsOn = false;
+try { termsOn = localStorage.getItem(TERMS_KEY) === "on"; } catch (_) { termsOn = false; }
+function setTermsOn(on) {
+  termsOn = on;
+  try { localStorage.setItem(TERMS_KEY, on ? "on" : "off"); } catch (_) { /* storage blocked: the choice lasts this visit */ }
+}
+
+/** The term a phrase names; an all-capitals phrase such as TON matches only as written */
+function termFor(text) {
+  const exact = TERM_PHRASES.find(x => x.p === text);
+  if (exact) return exact.id;
+  const loose = TERM_PHRASES.find(x => x.p !== x.p.toUpperCase() && x.p.toLowerCase() === text.toLowerCase());
+  return loose ? loose.id : null;
+}
+function docUrl(path) {
+  return path.startsWith("shop:") ? (GLOSSARY.shop_base || "") + path.slice(5) : (GLOSSARY.docs_base || "") + path;
+}
+function docLinks(t) {
+  return (t.docs || []).map(([label, path]) => `<a href="${esc(docUrl(path))}" target="_blank" rel="noopener">${esc(label)}</a>`).join(" · ");
+}
+
+/** Mark the first use of each term in each scope, when "Explain terms" is on */
+function markTerms(root, scopeSel) {
+  if (!termsOn || !TERM_RE || !root) return;
+  const skip = "pre, svg, button, select, option, a, summary, script, style, textarea, label, .term, .tip, .glossary";
+  for (const scope of root.querySelectorAll(scopeSel)) {
+    const seen = new Set();
+    for (const code of scope.querySelectorAll("code")) {
+      if (code.closest(skip)) continue;
+      const id = termFor(code.textContent.trim());
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const span = document.createElement("span");
+      span.className = "term"; span.tabIndex = 0; span.dataset.term = id;
+      code.replaceWith(span); span.appendChild(code);
+    }
+    const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT, {
+      acceptNode: n => (n.parentElement && !n.parentElement.closest(skip + ", code") && n.nodeValue.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT),
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      const text = node.nodeValue;
+      let last = 0, out = null, m;
+      TERM_RE.lastIndex = 0;
+      while ((m = TERM_RE.exec(text))) {
+        const id = termFor(m[1]);
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        out = out || document.createDocumentFragment();
+        out.append(text.slice(last, m.index));
+        const span = document.createElement("span");
+        span.className = "term"; span.tabIndex = 0; span.dataset.term = id; span.textContent = m[1];
+        out.append(span);
+        last = m.index + m[1].length;
+      }
+      if (out) { out.append(text.slice(last)); node.replaceWith(out); }
+    }
+  }
+}
+
+/** Every term on this page, Kruxia Flow's own first, then the analogies */
+function glossaryList() {
+  const group = (kind, title) => {
+    const ts = TERMS.filter(t => t.kind === kind);
+    if (!ts.length) return "";
+    return `<h3>${esc(title)}</h3><dl>${ts.map(t => `<dt>${esc(t.name)}</dt><dd>${t.analog ? `<span class="an">${esc(t.analog)}</span> Here: ` : ""}${esc(t.means)}${t.docs ? ` <span class="docs">${docLinks(t)}</span>` : ""}</dd>`).join("")}</dl>`;
+  };
+  return group("kruxia", "Kruxia Flow") + group("analogy", "The analogies");
+}
+
+const tip = document.createElement("div");
+tip.className = "tip"; tip.id = "term-tip"; tip.setAttribute("role", "tooltip"); tip.hidden = true;
+document.body.appendChild(tip);
+let tipFor = null, tipTimer = 0;
+function showTip(el) {
+  clearTimeout(tipTimer);
+  const t = TERM_BY_ID[el.dataset.term];
+  if (!t) return;
+  if (tipFor && tipFor !== el) tipFor.removeAttribute("aria-describedby");
+  tipFor = el;
+  el.setAttribute("aria-describedby", "term-tip");
+  tip.innerHTML = `<p class="head"><b>${esc(t.name)}</b><span class="k">${t.kind === "analogy" ? "analogy" : "Kruxia Flow"}</span></p>` +
+    (t.analog ? `<p class="an">${esc(t.analog)}</p>` : "") +
+    `<p>${t.kind === "analogy" ? "Here: " : ""}${esc(t.means)}</p>` +
+    (t.docs ? `<p class="docs">Docs: ${docLinks(t)}</p>` : "");
+  tip.hidden = false;
+  const r = el.getBoundingClientRect();
+  const w = Math.min(340, window.innerWidth - 24);
+  tip.style.width = `${w}px`;
+  const x = Math.min(Math.max(12, r.left), window.innerWidth - w - 12);
+  let y = r.bottom + 6;
+  if (y + tip.offsetHeight > window.innerHeight && r.top - 6 - tip.offsetHeight > 0) y = r.top - 6 - tip.offsetHeight;
+  tip.style.left = `${x + window.scrollX}px`;
+  tip.style.top = `${y + window.scrollY}px`;
+}
+function hideTip(now) {
+  clearTimeout(tipTimer);
+  const go = () => { tip.hidden = true; if (tipFor) tipFor.removeAttribute("aria-describedby"); tipFor = null; };
+  if (now) go(); else tipTimer = setTimeout(go, 250);
+}
+const inTerm = el => el && el.closest ? el.closest(".term") : null;
+const inTip = el => !!(el && el.closest && el.closest("#term-tip"));
+document.addEventListener("pointerover", e => {
+  if (e.pointerType === "touch") return;
+  const el = inTerm(e.target);
+  if (el) showTip(el); else if (inTip(e.target)) clearTimeout(tipTimer);
+});
+document.addEventListener("pointerout", e => {
+  if (e.pointerType === "touch" || tip.hidden) return;
+  if (!(inTerm(e.target) || inTip(e.target))) return;
+  if (inTip(e.relatedTarget) || inTerm(e.relatedTarget) === tipFor) return;
+  hideTip();
+});
+document.addEventListener("focusin", e => { const el = inTerm(e.target); if (el) showTip(el); });
+document.addEventListener("focusout", e => { if (inTerm(e.target) && !inTip(e.relatedTarget)) hideTip(); });
+document.addEventListener("click", e => {
+  const el = inTerm(e.target);
+  if (el) {
+    e.preventDefault(); e.stopPropagation();
+    if (tipFor === el && !tip.hidden) hideTip(true); else showTip(el);
+    return;
+  }
+  if (!tip.hidden && !inTip(e.target)) hideTip(true);
+}, true);
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !tip.hidden) { hideTip(true); e.stopImmediatePropagation(); }
+}, true);
+window.addEventListener("resize", () => { if (tipFor && !tip.hidden) showTip(tipFor); });
+
 // ---------------------------------------------------------------------------
 // One machine maximized: `#max-<machine>` in the URL, so a link opens it
 // ---------------------------------------------------------------------------
@@ -770,11 +938,18 @@ function applyHash() {
   if (!was) floorScroll = window.scrollY;
   state.max = next;
   render();
-  if (next) { openMaxSource(); window.scrollTo(0, 0); return; }
+  if (next) { openMaxSource(); setHeadHeight(); window.scrollTo(0, 0); return; }
   const b = was && document.getElementById(was);
   if (floorScroll) window.scrollTo(0, floorScroll);
   else if (b) b.scrollIntoView({ block: "start" });
 }
+/** The sticky header's height, so a maximized schematic fits the window below it */
+function setHeadHeight() {
+  const h = document.querySelector("header");
+  if (h) document.documentElement.style.setProperty("--head", `${h.offsetHeight}px`);
+}
+window.addEventListener("resize", () => { if (state.max) setHeadHeight(); });
+document.addEventListener("fullscreenchange", () => { if (state.max) setHeadHeight(); });
 function toggleFullscreen() {
   try {
     const p = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
@@ -800,7 +975,9 @@ function render() {
   document.getElementById("meta").innerHTML = meta();
   document.getElementById("andon").innerHTML = andon();
   document.getElementById("legend").innerHTML = legend();
-  document.getElementById("notes").innerHTML = notes();
+  const glossaryOpen = !!document.querySelector("#glossary[open]");
+  document.getElementById("notes").innerHTML = notes() + (TERMS.length
+    ? `<details class="glossary" id="glossary"${glossaryOpen ? " open" : ""}><summary>Terms on this page, and where Kruxia Flow's docs explain them</summary>${glossaryList()}</details>` : "");
   uid = 0;
   const shown = state.max ? MACHINES.filter(m => m.dir === state.max) : MACHINES;
   document.getElementById("floor").innerHTML =
@@ -816,6 +993,9 @@ function render() {
   if (ps) ps.onchange = () => { state.set = Number(ps.value); render(); };
   if (pc) pc.onchange = () => { state.compare = pc.value === "" ? null : Number(pc.value); render(); };
   if (oc) oc.onchange = () => { state.onlyChanged = oc.checked; render(); };
+  const to = document.getElementById("terms-on");
+  if (to) to.onchange = () => { setTermsOn(to.checked); hideTip(true); render(); };
+  markTerms(document.querySelector("main"), ".bay, #notes > p, #legend");
 }
 
 document.getElementById("floor").addEventListener("click", e => {
@@ -831,6 +1011,7 @@ document.getElementById("floor").addEventListener("click", e => {
 state.max = maxFromHash();
 render();
 openMaxSource();
+if (state.max) setHeadHeight();
 </script>
 </body>
 </html>

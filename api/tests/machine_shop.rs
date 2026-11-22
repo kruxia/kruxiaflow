@@ -2567,6 +2567,7 @@ fn machine_view(dir: &str) -> Value {
 /// results file, and write it next to the results, ready to open from disk
 fn bundle_views(dir: &Path) -> Vec<PathBuf> {
     const MARKER: &str = "__MACHINE_SHOP_DATA__";
+    const GLOSSARY_MARKER: &str = "__MACHINE_SHOP_GLOSSARY__";
     let mut machine_dirs: Vec<String> = std::fs::read_dir(machines_dir())
         .expect("machines/")
         .filter_map(|e| e.ok().map(|e| e.path()))
@@ -2599,6 +2600,9 @@ fn bundle_views(dir: &Path) -> Vec<PathBuf> {
     let data = json!({ "machines": machines, "results": results });
     // Inside <script>, "</" would end the element; "\/" is the same JSON
     let data = serde_json::to_string(&data).unwrap().replace("</", "<\\/");
+    let glossary = serde_json::to_string(&glossary())
+        .unwrap()
+        .replace("</", "<\\/");
 
     let mut pages = Vec::new();
     let views = machines_dir().join("views");
@@ -2615,11 +2619,98 @@ fn bundle_views(dir: &Path) -> Vec<PathBuf> {
             continue;
         }
         let out = dir.join(path.file_name().unwrap());
-        write_atomic(&out, &template.replacen(MARKER, &data, 1));
+        let page = template
+            .replacen(MARKER, &data, 1)
+            .replacen(GLOSSARY_MARKER, &glossary, 1);
+        write_atomic(&out, &page);
         pages.push(out);
     }
     pages.sort();
     pages
+}
+
+/// The views' glossary (`machines/views/glossary.json`): what their words mean in
+/// Kruxia Flow, and the docs that explain them
+fn glossary() -> Value {
+    let path = machines_dir().join("views").join("glossary.json");
+    let text = std::fs::read_to_string(&path).expect("machines/views/glossary.json");
+    serde_json::from_str(&text).expect("machines/views/glossary.json is JSON")
+}
+
+/// A GitHub heading anchor: lower case, spaces to hyphens, other punctuation dropped
+fn heading_anchor(heading: &str) -> String {
+    heading
+        .trim()
+        .to_lowercase()
+        .chars()
+        .filter_map(|c| match c {
+            ' ' => Some('-'),
+            c if c.is_alphanumeric() || c == '-' || c == '_' => Some(c),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every glossary term is complete, and every docs link names a file and heading that exist
+#[test]
+fn glossary_is_valid() {
+    let g = glossary();
+    let root = machines_dir().join("..");
+    let terms = g["terms"].as_array().expect("terms");
+    assert!(!terms.is_empty(), "no terms");
+    let mut ids = std::collections::HashSet::new();
+    let mut phrases = std::collections::HashSet::new();
+    for t in terms {
+        let id = t["id"].as_str().expect("id");
+        assert!(ids.insert(id), "{id}: id used twice");
+        for field in ["name", "means"] {
+            assert!(
+                t[field].as_str().is_some_and(|s| !s.is_empty()),
+                "{id}: no {field}"
+            );
+        }
+        let kind = t["kind"].as_str().unwrap_or_default();
+        assert!(kind == "kruxia" || kind == "analogy", "{id}: kind {kind}");
+        if kind == "analogy" {
+            assert!(
+                t["analog"].as_str().is_some(),
+                "{id}: an analogy needs analog"
+            );
+        }
+        let pages = t["pages"].as_array().expect("pages");
+        assert!(
+            !pages.is_empty()
+                && pages
+                    .iter()
+                    .all(|p| matches!(p.as_str(), Some("floor" | "stack"))),
+            "{id}: pages"
+        );
+        let matches = t["match"].as_array().expect("match");
+        assert!(!matches.is_empty(), "{id}: nothing to match");
+        for m in matches {
+            let m = m.as_str().expect("match phrase");
+            for page in pages {
+                assert!(
+                    phrases.insert((page.as_str().unwrap().to_string(), m.to_lowercase())),
+                    "{id}: {m} already names another term on {page}"
+                );
+            }
+        }
+        for doc in t["docs"].as_array().into_iter().flatten() {
+            let path = doc[1].as_str().expect("docs path");
+            let path = path.strip_prefix("shop:").unwrap_or(path);
+            let (file, anchor) = path.split_once('#').unwrap_or((path, ""));
+            let text = std::fs::read_to_string(root.join(file))
+                .unwrap_or_else(|_| panic!("{id}: no file {file}"));
+            if !anchor.is_empty() {
+                let found = text
+                    .lines()
+                    .filter(|l| l.starts_with('#'))
+                    .any(|l| heading_anchor(l.trim_start_matches('#')) == anchor);
+                assert!(found, "{id}: no heading #{anchor} in {file}");
+            }
+        }
+    }
 }
 
 /// Every machine, one at a time
@@ -2732,6 +2823,10 @@ fn machine_shop_views() {
         assert!(
             page.contains("__MACHINE_SHOP_DATA__"),
             "{name}: no data marker"
+        );
+        assert!(
+            page.contains("__MACHINE_SHOP_GLOSSARY__"),
+            "{name}: no glossary marker"
         );
         // Links out (to an issue) are fine; loads are not
         for banned in [

@@ -821,3 +821,7 @@ validate_inventory → reserve_inventory → process_payment → record_order �
 - `http_request` to Mailpit REST API for HTML email
 - Sequential dependency chain modeling a real-world order flow
 - All resources are local (database + Mailpit) — no external APIs needed
+
+## More: the machine shop
+
+For small workflows that show how the engine behaves when steps contend, wait for signals, loop, or lose the engine mid-run, see the machine shop in [`machines/`](../machines/README.md). Each machine is a workflow with a card that says what it should do, and the runner checks it.
