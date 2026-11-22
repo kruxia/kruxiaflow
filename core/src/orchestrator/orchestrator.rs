@@ -1089,8 +1089,13 @@ async fn handle_activity_failed(
 /// 1. Find `NotScheduled` activities where:
 ///    - All dependencies are terminal (Completed/Failed/Skipped)
 ///    - No applicable dependencies (all conditions false)
+///    - Not after a loop that is still running: an activity that depends on a
+///      loop member without being one (a loop's exit step) waits until no loop
+///      member is scheduled, running or waiting (#27)
 /// 2. Mark as `Skipped` (terminal state)
 /// 3. Allows workflow completion when conditional branches not taken
+/// 4. If anything was skipped, go back to Phase 8: a skip can make another
+///    activity ready, and no later event may come to schedule it (#25)
 ///
 /// ### Phase 11: Workflow Completion Check
 /// **Purpose**: Detect when workflow has reached terminal state

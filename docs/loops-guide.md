@@ -86,6 +86,44 @@ Before this was fixed, the step after the head re-ran after each of its own comp
 
 **Known limitation: parallel branches inside a loop.** When a loop splits into branches of different lengths that join again (`head → a → b → join` alongside `head → c → join`), the join runs as soon as *any* of its inputs is new. It can therefore run once the short branch finishes, using the long branch's output from the previous round, and then again when the long branch finishes. Keep each loop a single chain of steps, or join the branches outside the loop. Requiring *every* input to be new would make the join wait forever whenever a branch's condition is false in a later round, so this needs a fuller design.
 
+### Steps After a Loop
+
+A step that depends on a loop step, without being part of the loop, is how a loop hands off its result. The usual shape is a repair loop: run, check, fix while the check fails, and finish when it passes.
+
+```yaml
+activities:
+  - key: a_run
+    activity_name: echo
+    iteration_limit: 5
+    depends_on:
+      - activity_key: c_fix
+        conditions: ["{{ c_fix.status == 'completed' }}"]
+  - key: b_check
+    activity_name: echo
+    depends_on: [a_run]
+  - key: c_fix
+    activity_name: echo
+    depends_on:
+      - activity_key: b_check
+        conditions: ["{{ b_check.result == 'fail' }}"]
+  - key: d_done            # runs once, after the check that passes
+    activity_name: echo
+    depends_on:
+      - activity_key: b_check
+        conditions: ["{{ b_check.result == 'pass' }}"]
+```
+
+- **While the loop runs**, `d_done` waits. A failed check doesn't skip it, because a later round runs `b_check` again and may pass.
+- **When the loop exits through its condition**, `d_done` runs if its own condition holds.
+- **When the loop ends without passing** (here, after 5 rounds), `d_done` is skipped, and so is everything that depends on it unconditionally. A step with a condition such as `{{ d_done.status == 'skipped' }}` runs then, which suits a "give up" step. The workflow completes.
+
+The loop counts as running while any loop step in the workflow is pending, running or waiting for a signal. Before this was fixed, `d_done` was skipped as soon as the first check failed, and the workflow completed without it (#27).
+
+**Known limitations:**
+
+- **A step after a loop that starts a loop of its own** is a loop step itself, so it is still skipped as soon as its condition is false. Put a plain step between the two loops.
+- **Another loop running elsewhere in the workflow** also holds the step back. It is decided when that loop ends too, which only delays it.
+
 ---
 
 ## Loop Patterns

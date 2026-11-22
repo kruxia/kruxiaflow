@@ -67,6 +67,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     activity's real parameters, must give its required parameters, and the
     approval example is run through the
     orchestrator's readiness evaluation for both kinds of request.
+- **A loop's exit step runs when a later round exits (#27).** A step after a
+  loop, conditional on a loop step (such as "finish when the check passes"),
+  was skipped for good when its condition was false in the first round, and
+  the workflow completed without it. It now waits while the loop runs, and is
+  skipped only once the loop has ended without satisfying it.
 - **A step that runs because another was skipped now runs (#25).** A branch
   such as `conditions: ["{{ maybe.status == 'skipped' }}"]` became ready only
   after `maybe` was skipped, but skips were applied after scheduling and
@@ -189,6 +194,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   completion of its previous round was applied as new, advancing its
   iteration and giving its dependents spurious input. Completions whose
   iteration doesn't match the activity's current iteration are now ignored.
+- **A template error fails the activity whose template is bad (#19).**
+  - **Before:** when an activity's parameters (or `delay` / `scheduled_for`)
+    referenced an undefined value, the error surfaced while processing the
+    upstream activity's completion. That event was retried five times and
+    dropped as poison, the upstream activity was marked failed although it had
+    succeeded, the activity with the bad template never ran or failed, and the
+    workflow stayed `running` indefinitely.
+  - **Now:** that activity fails with
+    `TEMPLATE_ERROR: Failed to resolve templates in activity <key>: …`, through
+    a terminal `ActivityFailed` like any other failure. Its `status == 'failed'`
+    branches run, its other dependents are skipped, and the workflow fails.
+  - **Conditions too:** a `conditions:` template on a dependency that can't
+    be evaluated fails the activity that carries it in the same way, instead
+    of poisoning the upstream completion. That includes a condition that only
+    becomes evaluable when its dependency is skipped, such as a condition on
+    a skipped step's result.
+  - **No misleading event:** no `ActivityScheduled` is recorded for an
+    activity that failed this way, since it was never queued.
+- **Skipped activities cascade (#19).** Skipping was a single pass over the
+  state, so in a chain after a failed or skipped activity only the first
+  dependent was skipped and the rest stayed `not_scheduled`, which kept the
+  workflow from ever completing. Skipping now repeats until nothing changes.
 - **A loop's back-edge follows the order activities are written, not their
   keys (#26).** The search for the back-edge started from the alphabetically
   first key, so renaming steps could change how a loop ran. In the repair loop
