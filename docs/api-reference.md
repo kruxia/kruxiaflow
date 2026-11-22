@@ -562,18 +562,56 @@ Sends a signal to a waiting activity within a workflow.
 - `event_name` - Required, not empty
 - `data` - Optional, any JSON object
 
+A wait takes one signal, with or without `data`. Once a signal has been
+accepted, another signal for the same wait gets `"signaled": false` (its
+`data` is not used), and so does a signal for a wait whose timeout has
+already expired. A 500 response means the signal was not taken (the wait is
+still open), so it can be retried.
+
 **Response** (200 OK):
 ```json
 {
   "signaled": true,
+  "held": false,
   "message": "Activity signaled successfully"
 }
 ```
 
 One signal ends one wait: the activity then runs (with `data` as its signal
 data). An activity inside a loop waits again in each round, and each round
-takes its own signal; `"signaled": false` means the activity is not waiting
-for `event_name` right now (not yet, or this round's signal already arrived).
+takes its own signal.
+
+When the activity is not waiting, the signal is not delivered
+(`"signaled": false`), and the answer says what became of it:
+
+| `held`  | `reason`           | Meaning                                                                            |
+|---------|--------------------|------------------------------------------------------------------------------------|
+| `true`  | absent             | Kept for the activity's next wait (its `wait_for_signal` sets `hold_early`)        |
+| `false` | `not_waiting`      | The activity waits for `event_name`, but not right now; a later signal can succeed |
+| `false` | `unknown_workflow` | No such workflow                                                                   |
+| `false` | `unknown_activity` | The workflow has no activity `activity_key` that waits for `event_name`            |
+| `false` | `workflow_ended`   | The workflow has completed or failed                                               |
+| `false` | `hold_limit`       | The activity already holds 100 signals for `event_name`                            |
+
+**Holding early signals.** A wait declared with `hold_early: true` keeps a
+signal that arrives while its activity is not waiting (before the activity
+is reached, or while a loop is busy with the previous round):
+
+```yaml
+settings:
+  wait_for_signal:
+    event_name: message
+    timeout_seconds: 3600
+    hold_early: true
+```
+
+Held signals are delivered oldest first. When the activity next waits and a
+signal is held for it, it takes that signal and runs at once, with the
+signal's `data`, without entering `waiting` (so its timeout never starts).
+The workflow's events then show `ActivitySignaled` for the activity, with
+`"held": true` in its payload, and no `ActivityWaiting`. With nothing held
+the activity waits as usual. Signals still held when the workflow ends are
+discarded.
 
 ---
 

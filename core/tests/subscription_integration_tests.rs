@@ -422,4 +422,18 @@ async fn test_subscription_iteration_round_trip(pool: PgPool) {
     assert_eq!(expired.len(), 1);
     assert_eq!(expired[0].activity_key, "expiring");
     assert_eq!(expired[0].iteration, Some(2));
+
+    // Past the recovery grace period, recovery returns it with its round too
+    sqlx::query(
+        "UPDATE activity_event_subscriptions SET expired_at = expired_at - INTERVAL '1 hour' \
+         WHERE workflow_id = $1",
+    )
+    .bind(workflow_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let recovered = service.recover_expired(100).await.unwrap();
+    assert_eq!(recovered.len(), 1);
+    assert_eq!(recovered[0].activity_key, "expiring");
+    assert_eq!(recovered[0].iteration, Some(2));
 }

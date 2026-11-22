@@ -129,7 +129,8 @@ impl Stack {
                 activity_queue,
                 subscriptions,
                 OrchestratorConfig::new(orch_pool)
-                    .with_poll_interval(Duration::from_millis(1), Duration::from_millis(10)),
+                    .with_poll_interval(Duration::from_millis(1), Duration::from_millis(10))
+                    .with_timeout_check_interval(Duration::from_millis(100)),
                 Some(orch_shutdown),
             )
             .await
@@ -380,14 +381,14 @@ activities:
 
 /// The loop head waits for a signal each round
 #[sqlx::test(migrations = "../migrations")]
-#[ignore = "needs #18 (fix/loop-tail-rerun): on main the step closing a two-step loop re-runs every pass"]
+#[ignore = "needs #18"]
 async fn test_signal_in_loop_head(pool: PgPool) {
     signal_in_loop(pool, "head").await;
 }
 
 /// The step that closes the loop waits for a signal each round
 #[sqlx::test(migrations = "../migrations")]
-#[ignore = "needs #18 (fix/loop-tail-rerun): on main the step closing a two-step loop re-runs every pass"]
+#[ignore = "needs #18"]
 async fn test_signal_in_loop_tail(pool: PgPool) {
     signal_in_loop(pool, "tail").await;
 }
@@ -424,5 +425,284 @@ activities:
     assert_eq!(status, "completed", "{activities:#}");
     assert_eq!(signals, 3, "{activities:#}");
     assert_eq!(activities["poll"]["iteration"], 3, "{activities:#}");
+    stack.stop().await;
+}
+
+/// A self-loop whose wait times out and continues each round: three rounds
+/// with no signal
+#[sqlx::test(migrations = "../migrations")]
+async fn test_timeout_continue_in_self_loop(pool: PgPool) {
+    let stack = Stack::start(pool).await;
+    let get = http_get(&stack.api_url);
+    let id = stack
+        .submit(&format!(
+            r#"
+name: signal_timeout_self_loop
+activities:
+  - key: start
+{get}
+  - key: poll
+{get}
+    settings:
+      wait_for_signal:
+        event_name: go
+        timeout_seconds: 1
+        on_timeout: continue
+    iteration_limit: 3
+    depends_on:
+      - start
+      - activity_key: poll
+        conditions: ["{{{{ poll.status == 'completed' }}}}"]
+"#
+        ))
+        .await;
+
+    let start = Instant::now();
+    let (status, activities) = loop {
+        let (status, activities) = stack.workflow(id).await;
+        if status == "completed" || status == "failed" || start.elapsed() > TIMEOUT {
+            break (status, activities);
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    assert_eq!(status, "completed", "{activities:#}");
+    assert_eq!(activities["poll"]["iteration"], 3, "{activities:#}");
+    stack.stop().await;
+}
+
+/// Wait until the workflow completes or fails (or `TIMEOUT` passes)
+async fn finished(stack: &Stack, id: Uuid) -> (String, Value) {
+    let start = Instant::now();
+    loop {
+        let (status, activities) = stack.workflow(id).await;
+        if status == "completed" || status == "failed" || start.elapsed() > TIMEOUT {
+            return (status, activities);
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// `(iteration, payload)` of each `ActivitySignaled` event for `key`, by round
+async fn signal_events(stack: &Stack, id: Uuid, key: &str) -> Vec<(Option<i32>, Value)> {
+    sqlx::query_as(
+        "SELECT iteration, payload FROM workflow_events \
+         WHERE workflow_id = $1 AND event_type::text = 'ActivitySignaled' AND activity_key = $2 \
+         ORDER BY iteration",
+    )
+    .bind(id)
+    .bind(key)
+    .fetch_all(&stack.pool)
+    .await
+    .unwrap()
+}
+
+async fn held_signals(stack: &Stack, id: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM held_signals WHERE workflow_id = $1")
+        .bind(id)
+        .fetch_one(&stack.pool)
+        .await
+        .unwrap()
+}
+
+/// `hold_early` (#42): signals sent before the loop is reached are held, the
+/// answer says so, and they drive the loop with no further signal: three
+/// rounds, oldest signal first. A refused signal says why.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_held_signals_drive_a_loop(pool: PgPool) {
+    let stack = Stack::start(pool).await;
+    let get = http_get(&stack.api_url);
+    let id = stack
+        .submit(&format!(
+            r#"
+name: signal_hold_early
+activities:
+  - key: start
+{get}
+    settings:
+      wait_for_signal:
+        event_name: go
+        timeout_seconds: 600
+  - key: receive
+{get}
+    iteration_limit: 3
+    settings:
+      wait_for_signal:
+        event_name: message
+        timeout_seconds: 600
+        hold_early: true
+    depends_on:
+      - start
+      - activity_key: answer
+  - key: answer
+{get}
+    depends_on:
+      - receive
+"#
+        ))
+        .await;
+
+    // The workflow is parked on `start`; `receive` is not waiting yet
+    let begin = Instant::now();
+    while stack.workflow(id).await.1["start"]["status"] != "waiting" {
+        assert!(begin.elapsed() < TIMEOUT, "start never waited");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+
+    for n in 1..=3 {
+        let r = stack
+            .signal(id, "receive", "message", json!({"n": n}))
+            .await;
+        assert_eq!(r["signaled"], false, "{r}");
+        assert_eq!(r["held"], true, "{r}");
+        assert!(r.get("reason").is_none(), "{r}");
+    }
+    assert_eq!(held_signals(&stack, id).await, 3);
+
+    // Neither delivered nor held: the answer says why
+    let r = stack.signal(id, "nosuch", "message", json!({})).await;
+    assert_eq!(
+        (&r["signaled"], &r["held"]),
+        (&json!(false), &json!(false)),
+        "{r}"
+    );
+    assert_eq!(r["reason"], "unknown_activity", "{r}");
+    let r = stack.signal(id, "answer", "message", json!({})).await;
+    assert_eq!(r["reason"], "unknown_activity", "{r}");
+
+    // Release the workflow: the held signals run the loop to its end
+    let r = stack.signal(id, "start", "go", json!({})).await;
+    assert_eq!(
+        (&r["signaled"], &r["held"]),
+        (&json!(true), &json!(false)),
+        "{r}"
+    );
+
+    let (status, activities) = finished(&stack, id).await;
+    assert_eq!(status, "completed", "{activities:#}");
+    assert_eq!(activities["receive"]["iteration"], 3, "{activities:#}");
+    assert_eq!(activities["answer"]["iteration"], 3, "{activities:#}");
+    assert_eq!(held_signals(&stack, id).await, 0);
+
+    let events = signal_events(&stack, id, "receive").await;
+    let expected: Vec<(Option<i32>, Value)> = (1..=3)
+        .map(|n| {
+            (
+                Some(n - 1),
+                json!({"event_name": "message", "signal_data": {"n": n}, "held": true}),
+            )
+        })
+        .collect();
+    assert_eq!(events, expected);
+    let waits: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workflow_events WHERE workflow_id = $1 \
+         AND event_type::text = 'ActivityWaiting' AND activity_key = 'receive'",
+    )
+    .bind(id)
+    .fetch_one(&stack.pool)
+    .await
+    .unwrap();
+    assert_eq!(waits, 0, "receive waited although signals were held for it");
+
+    let r = stack.signal(id, "receive", "message", json!({})).await;
+    assert_eq!(r["reason"], "workflow_ended", "{r}");
+    assert_eq!(held_signals(&stack, id).await, 0);
+    stack.stop().await;
+}
+
+/// Signals sent at arbitrary moments while a `hold_early` loop runs: each is
+/// either taken by the open wait or held, never refused and never lost. All
+/// of them reach the step, one per round, in the order they were sent.
+///
+/// The loop runs exactly as many rounds as signals are sent, so one lost
+/// signal (held just after its wait opened, say) leaves the last round
+/// waiting and the workflow unfinished.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_signals_racing_a_hold_early_loop_all_arrive_in_order(pool: PgPool) {
+    const SIGNALS: usize = 25;
+    let stack = Stack::start(pool).await;
+    let get = http_get(&stack.api_url);
+    let id = stack
+        .submit(&format!(
+            r#"
+name: signal_hold_early_race
+activities:
+  - key: start
+{get}
+  - key: receive
+{get}
+    iteration_limit: {SIGNALS}
+    settings:
+      wait_for_signal:
+        event_name: message
+        timeout_seconds: 600
+        hold_early: true
+    depends_on:
+      - start
+      - activity_key: answer
+  - key: answer
+{get}
+    depends_on:
+      - receive
+"#
+        ))
+        .await;
+
+    // One sender, so "the order sent" is well defined; pauses of 0-120 ms
+    // (a fixed pseudo-random sequence) land signals before, during and after
+    // the loop's rounds
+    let (client, token) = (stack.client.clone(), stack.token.clone());
+    let url = format!("{}/api/v1/workflows/{id}/signal", stack.api_url);
+    let sender = tokio::spawn(async move {
+        let mut answers = Vec::new();
+        let mut seed: u64 = 0x2545_F491_4F6C_DD1D;
+        for n in 0..SIGNALS {
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            tokio::time::sleep(Duration::from_millis((seed >> 33) % 121)).await;
+            let r: Value = client
+                .post(&url)
+                .bearer_auth(&token)
+                .json(
+                    &json!({"activity_key": "receive", "event_name": "message", "data": {"n": n}}),
+                )
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            answers.push(r);
+        }
+        answers
+    });
+
+    let (status, activities) = finished(&stack, id).await;
+    let answers = sender.await.unwrap();
+
+    for (n, r) in answers.iter().enumerate() {
+        assert!(
+            r["signaled"] == true || r["held"] == true,
+            "signal {n} was refused: {r}"
+        );
+    }
+    assert_eq!(answers.len(), SIGNALS);
+    assert_eq!(
+        status, "completed",
+        "a signal was lost: {activities:#}\nanswers: {answers:?}"
+    );
+    assert_eq!(
+        activities["receive"]["iteration"], SIGNALS,
+        "{activities:#}"
+    );
+    assert_eq!(held_signals(&stack, id).await, 0);
+
+    let delivered: Vec<Value> = signal_events(&stack, id, "receive")
+        .await
+        .into_iter()
+        .map(|(_, payload)| payload["signal_data"]["n"].clone())
+        .collect();
+    let sent: Vec<Value> = (0..SIGNALS).map(|n| json!(n)).collect();
+    assert_eq!(delivered, sent, "signals reached the step out of order");
     stack.stop().await;
 }

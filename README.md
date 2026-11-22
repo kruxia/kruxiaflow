@@ -199,6 +199,7 @@ decision — then resume when signaled, even days later, surviving restarts in b
 ```yaml
 activities:
   - key: await_approval
+    activity_name: echo
     settings:
       wait_for_signal:
         event_name: approval

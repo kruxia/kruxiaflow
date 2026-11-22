@@ -4,10 +4,10 @@ use crate::error::{ApiResult, AppError, ValidationErrors};
 use crate::middleware::auth::ValidatedClaims;
 use crate::state::AppState;
 use axum::{Extension, Json, extract::Path, extract::State};
-use kruxiaflow_core::events::{NewWorkflowEvent, WorkflowEventType};
-use kruxiaflow_core::subscription::SignalRequest;
+use kruxiaflow_core::subscription::{
+    SignalDeliveryError, SignalOutcome, SignalRequest, deliver_signal,
+};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -28,31 +28,52 @@ pub struct SignalActivityRequest {
 }
 
 impl SignalActivityRequest {
-    fn validate(&self) -> Result<(), ValidationErrors> {
-        let mut errors = ValidationErrors::new();
-
-        if self.activity_key.is_empty() {
-            errors.add("activity_key", "Activity key cannot be empty");
-        }
-
-        if self.event_name.is_empty() {
-            errors.add("event_name", "Event name cannot be empty");
-        }
-
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors)
+    fn to_signal_request(&self, workflow_id: Uuid) -> SignalRequest {
+        SignalRequest {
+            workflow_id,
+            activity_key: self.activity_key.clone(),
+            event_name: self.event_name.clone(),
+            data: self.data.clone(),
         }
     }
+
+    /// The same validation `deliver_signal` applies, as field errors
+    #[cfg(test)]
+    fn validate(&self) -> Result<(), ValidationErrors> {
+        self.to_signal_request(Uuid::nil())
+            .validate()
+            .map_err(field_errors)
+    }
+}
+
+fn field_errors(errors: Vec<kruxiaflow_core::subscription::SignalFieldError>) -> ValidationErrors {
+    let mut out = ValidationErrors::new();
+    for e in errors {
+        out.add(e.field, e.message);
+    }
+    out
 }
 
 /// Signal activity response
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SignalActivityResponse {
-    /// Whether the signal was delivered
+    /// Whether the waiting activity took the signal
     #[schema(example = true)]
     pub signaled: bool,
+
+    /// Whether the signal is held for the activity's next wait. Only an
+    /// activity whose `wait_for_signal` sets `hold_early: true` holds a signal
+    /// that arrives while it is not waiting.
+    #[schema(example = false)]
+    pub held: bool,
+
+    /// Why the signal was neither delivered nor held: `not_waiting` (the
+    /// activity waits for this event, but not right now; the same signal can
+    /// succeed later), `unknown_workflow`, `unknown_activity` (no activity
+    /// with this key waits for this event), `workflow_ended` or `hold_limit`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(example = "not_waiting")]
+    pub reason: Option<String>,
 
     /// Message describing the result
     #[schema(example = "Activity signaled successfully")]
@@ -66,6 +87,7 @@ mod tests {
     use crate::state::tests::*;
     use axum::extract::State;
     use kruxiaflow_oauth::Claims;
+    use serde_json::json;
     use sqlx::PgPool;
     use std::sync::Arc;
     use tokio_util::sync::CancellationToken;
@@ -147,6 +169,8 @@ mod tests {
     fn test_signal_response_serialize() {
         let response = SignalActivityResponse {
             signaled: true,
+            held: false,
+            reason: None,
             message: "Activity signaled successfully".to_string(),
         };
         let json = serde_json::to_value(&response).unwrap();
@@ -158,6 +182,8 @@ mod tests {
     fn test_signal_response_serialize_not_found() {
         let response = SignalActivityResponse {
             signaled: false,
+            held: false,
+            reason: Some("not_waiting".to_string()),
             message: "No waiting activity found".to_string(),
         };
         let json = serde_json::to_value(&response).unwrap();
@@ -213,7 +239,9 @@ mod tests {
         assert!(result.is_ok());
         let response = result.unwrap().0;
         assert!(!response.signaled);
-        assert!(response.message.contains("No waiting activity found"));
+        assert!(!response.held);
+        assert_eq!(response.reason.as_deref(), Some("not_waiting"));
+        assert!(response.message.contains("is not waiting for"));
     }
 
     #[sqlx::test(migrations = "../migrations")]
@@ -298,6 +326,20 @@ mod tests {
             &self,
             _workflow_id: Uuid,
             _activity_key: &str,
+        ) -> kruxiaflow_core::subscription::Result<()> {
+            Ok(())
+        }
+
+        async fn release_signal(
+            &self,
+            _subscription_id: Uuid,
+        ) -> kruxiaflow_core::subscription::Result<()> {
+            Ok(())
+        }
+
+        async fn delete_subscription_by_id(
+            &self,
+            _id: Uuid,
         ) -> kruxiaflow_core::subscription::Result<()> {
             Ok(())
         }
@@ -418,6 +460,20 @@ mod tests {
         ) -> kruxiaflow_core::subscription::Result<()> {
             Ok(())
         }
+
+        async fn release_signal(
+            &self,
+            _subscription_id: Uuid,
+        ) -> kruxiaflow_core::subscription::Result<()> {
+            Ok(())
+        }
+
+        async fn delete_subscription_by_id(
+            &self,
+            _id: Uuid,
+        ) -> kruxiaflow_core::subscription::Result<()> {
+            Ok(())
+        }
     }
 
     #[sqlx::test(migrations = "../migrations")]
@@ -484,9 +540,6 @@ pub async fn signal_activity(
     Path(workflow_id): Path<Uuid>,
     Json(request): Json<SignalActivityRequest>,
 ) -> ApiResult<Json<SignalActivityResponse>> {
-    // Validate request
-    request.validate().map_err(AppError::ValidationError)?;
-
     tracing::info!(
         workflow_id = %workflow_id,
         activity_key = %request.activity_key,
@@ -494,45 +547,26 @@ pub async fn signal_activity(
         "Signaling activity"
     );
 
-    // Create signal request
-    let signal_request = SignalRequest {
-        workflow_id,
-        activity_key: request.activity_key.clone(),
-        event_name: request.event_name.clone(),
-        data: request.data.clone(),
-    };
+    // Shared with the MCP send_workflow_signal tool: validates, marks the
+    // subscription and publishes the ActivitySignaled event, or holds the
+    // signal for the activity's next wait
+    let signal_request = request.to_signal_request(workflow_id);
+    let outcome = deliver_signal(
+        state.subscription_service.as_ref(),
+        state.event_source.as_ref(),
+        signal_request.clone(),
+    )
+    .await
+    .map_err(|e| match e {
+        SignalDeliveryError::Invalid(errors) => AppError::ValidationError(field_errors(errors)),
+        other => {
+            tracing::error!("Error signaling activity: {:?}", other);
+            AppError::InternalError(anyhow::anyhow!(other))
+        }
+    })?;
 
-    // Try to signal the subscription
-    let subscription = state
-        .subscription_service
-        .signal_activity(signal_request)
-        .await
-        .map_err(|e| {
-            tracing::error!("Error signaling activity: {:?}", e);
-            AppError::InternalError(anyhow::anyhow!(e))
-        })?;
-
-    match subscription {
-        Some(sub) => {
-            // Subscription found and signaled - publish ActivitySignaled event
-            let event = NewWorkflowEvent {
-                workflow_id,
-                event_type: WorkflowEventType::ActivitySignaled,
-                activity_key: Some(request.activity_key.clone()),
-                payload: json!({
-                    "event_name": request.event_name,
-                    "signal_data": request.data,
-                }),
-                // The round this wait belongs to: without it, the event dedup
-                // index drops every round's signal after the first
-                iteration: sub.iteration,
-            };
-
-            state.event_source.publish(event).await.map_err(|e| {
-                tracing::error!("Failed to publish ActivitySignaled event: {:?}", e);
-                AppError::InternalError(anyhow::anyhow!(e))
-            })?;
-
+    match outcome {
+        SignalOutcome::Signaled(sub) => {
             tracing::info!(
                 workflow_id = %workflow_id,
                 activity_key = %request.activity_key,
@@ -542,24 +576,43 @@ pub async fn signal_activity(
 
             Ok(Json(SignalActivityResponse {
                 signaled: true,
+                held: false,
+                reason: None,
                 message: "Activity signaled successfully".to_string(),
             }))
         }
-        None => {
-            // No matching subscription found
-            tracing::warn!(
+        SignalOutcome::Held => {
+            tracing::info!(
                 workflow_id = %workflow_id,
                 activity_key = %request.activity_key,
                 event_name = %request.event_name,
-                "No matching subscription found for signal"
+                "Signal held for the activity's next wait"
             );
 
             Ok(Json(SignalActivityResponse {
                 signaled: false,
+                held: true,
+                reason: None,
                 message: format!(
-                    "No waiting activity found for workflow {} with key '{}' and event '{}'",
-                    workflow_id, request.activity_key, request.event_name
+                    "Activity '{}' is not waiting; the signal is held and will be delivered when it next waits",
+                    request.activity_key
                 ),
+            }))
+        }
+        SignalOutcome::Refused(refusal) => {
+            tracing::warn!(
+                workflow_id = %workflow_id,
+                activity_key = %request.activity_key,
+                event_name = %request.event_name,
+                reason = refusal.code(),
+                "Signal refused"
+            );
+
+            Ok(Json(SignalActivityResponse {
+                signaled: false,
+                held: false,
+                reason: Some(refusal.code().to_string()),
+                message: refusal.describe(&signal_request),
             }))
         }
     }

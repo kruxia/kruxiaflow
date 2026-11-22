@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            UPDATE activity_event_subscriptions\n            SET signal_data = $4\n            WHERE workflow_id = $1\n              AND activity_key = $2\n              AND event_name = $3\n              AND signal_data IS NULL\n            RETURNING id, workflow_id, activity_key, event_name, on_timeout, timeout_at, signal_data, created_at, iteration\n            ",
+  "query": "\n        UPDATE activity_event_subscriptions\n        SET signal_data = $4, signaled_at = NOW()\n        WHERE workflow_id = $1\n          AND activity_key = $2\n          AND event_name = $3\n          AND signaled_at IS NULL\n          AND expired_at IS NULL\n        RETURNING id, workflow_id, activity_key, event_name, on_timeout, timeout_at, signal_data, created_at, iteration\n        ",
   "describe": {
     "columns": [
       {
@@ -69,5 +69,5 @@
       true
     ]
   },
-  "hash": "87749cf7569db72d7cbcf82e2decad0ed0c9482a4d837053b65586db54b12ea7"
+  "hash": "984712fd2604d1c879e14a7653b09fc3f48a058ac82f843cf5e07b00c2d1df7a"
 }
