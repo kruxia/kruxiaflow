@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            UPDATE activity_event_subscriptions\n            SET expired_at = $1\n            WHERE id IN (\n                SELECT id FROM activity_event_subscriptions\n                WHERE timeout_at <= $1\n                  AND signal_data IS NULL\n                  AND expired_at IS NULL\n                ORDER BY timeout_at\n                LIMIT $2\n            )\n            RETURNING id, workflow_id, activity_key, event_name, on_timeout, iteration\n            ",
+  "query": "\n            UPDATE activity_event_subscriptions\n            SET expired_at = $1\n            WHERE id IN (\n                SELECT id FROM activity_event_subscriptions\n                WHERE timeout_at <= $1\n                  AND signaled_at IS NULL\n                  AND expired_at IS NULL\n                ORDER BY timeout_at\n                LIMIT $2\n            )\n              AND signaled_at IS NULL\n              AND expired_at IS NULL\n            RETURNING id, workflow_id, activity_key, event_name, on_timeout, iteration\n            ",
   "describe": {
     "columns": [
       {
@@ -49,5 +49,5 @@
       true
     ]
   },
-  "hash": "df1d292f102b157afefafb11346f6ce73bf227e674319a55aa9d47d59a7af1de"
+  "hash": "ca34d1ea97a4ad23a3a69020f768f0bf8432779b3dab60ac2e648b659d854acc"
 }
