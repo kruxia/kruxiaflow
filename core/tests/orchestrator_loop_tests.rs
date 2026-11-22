@@ -2046,6 +2046,7 @@ activities:
 /// What [`drive_loop_workflow`] saw: how often each activity ran, the set of
 /// pending activities at every step, and the workflow's final status.
 struct LoopRun {
+    workflow_id: Uuid,
     runs: std::collections::BTreeMap<String, u32>,
     pending_history: Vec<Vec<String>>,
     status: kruxiaflow_core::events::models::WorkflowStatus,
@@ -2155,6 +2156,7 @@ async fn drive_loop_workflow(pool: &PgPool, yaml: &str, first: &[&str]) -> LoopR
     process_all().await;
     let status = load().await.status;
     LoopRun {
+        workflow_id,
         runs,
         pending_history,
         status,
@@ -2298,8 +2300,10 @@ activities:
 }
 
 /// #28: two loops in sequence (loop 2's head depends on loop 1's tail). Each
-/// loop's steps belong to that loop only: loop 1 still running must not hold
-/// back loop 2, and both complete.
+/// loop's steps belong to that loop only: loop 1's steps are upstream of
+/// loop 2's head but never hold its later rounds back (#28's hold), and both
+/// loops complete. Loop 2 starts once loop 1 has ended (#40): its head is a
+/// step after loop 1.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_two_sequential_loops_both_complete(pool: PgPool) {
     let run = drive_loop_workflow(
@@ -2349,18 +2353,20 @@ activities:
             run.pending_history
         );
     }
-    // Both of loop 2's rounds start while loop 1 is still running: loop 1's
-    // steps are upstream of loop 2's head, but not in its loop
+    // Loop 2 starts after loop 1's last round, not alongside its first ones
+    // (#40); its second round then follows its own first, with nothing of
+    // loop 1 left to hold it back
     let overlapping = run
         .pending_history
         .iter()
         .filter(|p| {
-            p.iter().any(|k| k == "c_head") && p.iter().any(|k| k == "a_head" || k == "b_tail")
+            p.iter().any(|k| k == "c_head" || k == "d_tail")
+                && p.iter().any(|k| k == "a_head" || k == "b_tail")
         })
         .count();
     assert_eq!(
-        overlapping, 2,
-        "loop 2 is not held back by loop 1: {:?}",
+        overlapping, 0,
+        "loop 2 starts once loop 1 has ended: {:?}",
         run.pending_history
     );
     assert_eq!(
@@ -2708,6 +2714,187 @@ activities:
         "{:?}",
         run.runs
     );
+}
+
+// ============================================================================
+// A step after a loop runs after the loop's last round [loop-dependent-runs-early]
+//
+// A step that depends on a loop step without being part of the loop is how
+// the loop hands off its result. It runs once, after the loop's last round,
+// on that round's output.
+// ============================================================================
+
+/// The parameters the orchestrator queued `key` with, in `workflow_id`
+async fn queued_parameters(pool: &PgPool, workflow_id: Uuid, key: &str) -> serde_json::Value {
+    sqlx::query_scalar::<_, serde_json::Value>(
+        "SELECT parameters FROM activity_queue WHERE workflow_id = $1 AND activity_key = $2",
+    )
+    .bind(workflow_id)
+    .bind(key)
+    .fetch_one(pool)
+    .await
+    .expect("queued activity")
+}
+
+/// Whether `key` was ever pending alongside one of `others`
+fn ran_alongside(run: &LoopRun, key: &str, others: &[&str]) -> bool {
+    run.pending_history
+        .iter()
+        .any(|p| p.iter().any(|k| k == key) && p.iter().any(|k| others.contains(&k.as_str())))
+}
+
+/// A two-step loop (lift ⇄ drop, three rounds) and `survey`, which depends on
+/// `drop` with no condition: it runs once, after the third drop, on its
+/// output.
+#[sqlx::test(migrations = "../migrations")]
+async fn test_step_after_a_two_step_loop_runs_after_its_last_round(pool: PgPool) {
+    let run = drive_loop_workflow(
+        &pool,
+        r#"
+name: step_after_two_step_loop
+activities:
+  - key: crane
+    worker: test
+    activity_name: echo
+  - key: lift
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on:
+      - crane
+      - activity_key: drop
+        conditions: ["{{ drop.status == 'completed' }}"]
+  - key: drop
+    worker: test
+    activity_name: echo
+    depends_on: [lift]
+  - key: survey
+    worker: test
+    activity_name: echo
+    parameters:
+      depth: "{{ drop.round }}"
+    depends_on: [drop]
+"#,
+        &[],
+    )
+    .await;
+
+    for (key, expected) in [("crane", 1), ("lift", 3), ("drop", 3), ("survey", 1)] {
+        assert_eq!(
+            run.runs.get(key),
+            Some(&expected),
+            "{key}: {:?} (history {:?})",
+            run.runs,
+            run.pending_history
+        );
+    }
+    assert!(
+        !ran_alongside(&run, "survey", &["lift", "drop"]),
+        "survey waits for the loop to end: {:?}",
+        run.pending_history
+    );
+    assert_eq!(
+        queued_parameters(&pool, run.workflow_id, "survey").await,
+        json!({ "depth": 2 }),
+        "survey takes the last round's output (round 2, 0-based)"
+    );
+    assert_eq!(run.status, WorkflowStatus::Completed, "{:?}", run.runs);
+}
+
+/// A self-loop (three rounds) and a step after it with no condition: the
+/// step runs once, after the last round, on its output
+#[sqlx::test(migrations = "../migrations")]
+async fn test_step_after_a_self_loop_runs_after_its_last_round(pool: PgPool) {
+    let run = drive_loop_workflow(
+        &pool,
+        r#"
+name: step_after_self_loop
+activities:
+  - key: tamper
+    worker: test
+    activity_name: echo
+    iteration_limit: 3
+    depends_on: [tamper]
+  - key: sign_off
+    worker: test
+    activity_name: echo
+    parameters:
+      tamps: "{{ tamper.round }}"
+    depends_on: [tamper]
+"#,
+        &[],
+    )
+    .await;
+
+    assert_eq!(run.runs.get("tamper"), Some(&3), "{:?}", run.runs);
+    assert_eq!(run.runs.get("sign_off"), Some(&1), "{:?}", run.runs);
+    assert!(
+        !ran_alongside(&run, "sign_off", &["tamper"]),
+        "sign_off waits for the loop to end: {:?}",
+        run.pending_history
+    );
+    assert_eq!(
+        queued_parameters(&pool, run.workflow_id, "sign_off").await,
+        json!({ "tamps": 2 })
+    );
+    assert_eq!(run.status, WorkflowStatus::Completed, "{:?}", run.runs);
+}
+
+/// A step after one loop doesn't wait for another loop that runs alongside
+/// it: `survey` runs once `lift ⇄ drop` has ended, while `poller` (a
+/// separate self-loop with more rounds) is still going
+#[sqlx::test(migrations = "../migrations")]
+async fn test_step_after_a_loop_does_not_wait_for_another_loop(pool: PgPool) {
+    let run = drive_loop_workflow(
+        &pool,
+        r#"
+name: step_after_loop_beside_another
+activities:
+  - key: lift
+    worker: test
+    activity_name: echo
+    iteration_limit: 2
+    depends_on:
+      - activity_key: drop
+        conditions: ["{{ drop.status == 'completed' }}"]
+  - key: drop
+    worker: test
+    activity_name: echo
+    depends_on: [lift]
+  - key: survey
+    worker: test
+    activity_name: echo
+    depends_on: [drop]
+  - key: poller
+    worker: test
+    activity_name: echo
+    iteration_limit: 8
+    depends_on: [poller]
+"#,
+        &[],
+    )
+    .await;
+
+    for (key, expected) in [("lift", 2), ("drop", 2), ("survey", 1), ("poller", 8)] {
+        assert_eq!(
+            run.runs.get(key),
+            Some(&expected),
+            "{key}: {:?} (history {:?})",
+            run.runs,
+            run.pending_history
+        );
+    }
+    assert!(
+        !ran_alongside(&run, "survey", &["lift", "drop"]),
+        "{:?}",
+        run.pending_history
+    );
+    assert!(
+        ran_alongside(&run, "survey", &["poller"]),
+        "survey runs while the other loop still goes: {:?}",
+        run.pending_history
+    );
+    assert_eq!(run.status, WorkflowStatus::Completed, "{:?}", run.runs);
 }
 
 /// #26 [loop-backedge-by-name]: the repair loop `run → check → fix → run`

@@ -110,7 +110,7 @@ Before this was fixed, the step after the head re-ran after each of its own comp
 - **No redeploy needed.** Definitions deployed before this fix marked only the two ends of a back-edge as loop activities. The orchestrator completes the marking each time it loads a definition, from the back-edges stored with it, so existing definitions and runs already in flight get every step of a longer loop running each round.
 - **Middle steps now count iterations.** They are loop activities now, so `{{ACTIVITY.iteration}}` and `{{step.iteration}}` count up for them, and `iteration_scoped: true` stores their per-round outputs. Before, they stayed at 0.
 
-**Parallel branches inside a loop.** When a loop splits into branches of different lengths that join again (`head → a → b → join` alongside `head → c → join`), the join runs once per round, after every branch has finished that round. A step waits while anything upstream of it in the same loop is still running, or is about to run on this round's input. A branch whose condition is false this round doesn't hold the join back: it won't run, so the join runs on that branch's output from the last round it ran. Steps of another loop never hold a step back, even when that loop is upstream (two loops in sequence). Before this was fixed, the join ran as soon as the short branch finished, on the long branch's output from the previous round, and then again (#28).
+**Parallel branches inside a loop.** When a loop splits into branches of different lengths that join again (`head → a → b → join` alongside `head → c → join`), the join runs once per round, after every branch has finished that round. A step waits while anything upstream of it in the same loop is still running, or is about to run on this round's input. A branch whose condition is false this round doesn't hold the join back: it won't run, so the join runs on that branch's output from the last round it ran. Inside a loop, a step waits only for steps of its own loop; the head of a later loop waits for an earlier loop to end (see [Steps After a Loop](#steps-after-a-loop)). Before this was fixed, the join ran as soon as the short branch finished, on the long branch's output from the previous round, and then again (#28).
 
 ### Steps After a Loop
 
@@ -143,12 +143,25 @@ activities:
 - **When the loop exits through its condition**, `d_done` runs if its own condition holds.
 - **When the loop ends without passing** (here, after 5 rounds), `d_done` is skipped, and so is everything that depends on it unconditionally. A step with a condition such as `{{ d_done.status == 'skipped' }}` runs then, which suits a "give up" step. The workflow completes.
 
-The loop counts as running while any loop step in the workflow is pending, running or waiting for a signal. Before this was fixed, `d_done` was skipped as soon as the first check failed, and the workflow completed without it (#27).
+**A step after a loop with no condition** runs once, after the loop's last round, on that round's output. In the repair loop above, a report on the checks:
 
-**Known limitations:**
+```yaml
+  - key: report            # runs once, after the last check, pass or not
+    activity_name: echo
+    parameters:
+      last_check: "{{ b_check.result }}"
+    depends_on: [b_check]
+```
 
-- **A loop that starts after another loop** waits for it in the same way: the head of the second loop, conditional on a step of the first, isn't skipped while the first loop runs (#38). If its condition becomes true after an earlier round of the first loop, it starts then, like an exit step.
-- **Another loop running elsewhere in the workflow** also holds the step back. It is decided when that loop ends too, which only delays it.
+`report` runs after the check that passes or, if none does, once the loop has ended after its fifth round. It never runs after an earlier check, so `{{ b_check.result }}` is always the last one. This is also how to follow a loop with fixed iterations (Pattern 1), which has no condition to wait on.
+
+**When a step after a loop is decided:**
+
+- **It runs** once no step of the loop it depends on is pending, running or waiting for a signal, or about to start another round. Its conditions are evaluated then, on the last round's output: a condition that held after an earlier round but not after the last doesn't run it. Only that loop counts; another loop running elsewhere in the workflow doesn't hold it back. Before this was fixed, a step after a loop ran as soon as its loop step first completed with its conditions true: with no condition, after the first round, on that round's output, and never again (#40).
+- **It's skipped** once no loop step in the workflow is pending, running or waiting for a signal. Before this was fixed, `d_done` was skipped as soon as the first check failed, and the workflow completed without it (#27).
+- **A loop that starts after another loop** is a step after that loop too: the head of the second loop, which depends on a step of the first, starts or is skipped once the first loop has ended, on its last round (#38, #40). The two loops run one after the other. Before #40, a second loop whose way in had no condition, or a condition true in an earlier round, started then, and ran alongside the first.
+
+**Known limitation:** another loop running elsewhere in the workflow holds back the *skip* of a step after a loop, not its run. It is skipped when that loop ends too, which only delays it.
 
 ---
 
@@ -797,6 +810,8 @@ Kruxia Flow uses precomputed metadata for loop detection:
 - Assign the completion's sequence number: O(V), a scan for the highest `completion_seq` among the workflow's activities (V is small, and this is in memory)
 - Check a completed loop activity for new input: O(D), its dependencies' `completion_seq`
 - Check a completed loop activity, otherwise ready, for unfinished work upstream in its loop: O(V + E), three walks of the definition's dependencies. Only done while such an activity is otherwise ready to run again, not on every evaluation
+- Check an activity after a loop, never scheduled and otherwise ready, for a step of that loop still running: O(V × (V + E)) at worst per loop dependency, a walk from the dependency plus one per loop member to test that it shares the loop. Only done while such an activity is otherwise ready
+- Decide whether a never-scheduled loop activity that depends on a loop step may be skipped yet: O(V + E) per such dependency, a walk to test whether the two share a loop. Only done for activities whose dependencies are all terminal and that would otherwise be skipped
 - **No graph traversal in orchestrator hot path** otherwise
 
 ### Storage Efficiency

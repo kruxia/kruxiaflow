@@ -67,6 +67,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     activity's real parameters, must give its required parameters, and the
     approval example is run through the
     orchestrator's readiness evaluation for both kinds of request.
+- **A step after a loop runs after the loop's last round (#40).** A step
+  that depends on a loop step without being part of the loop ran as soon as
+  that step first completed: with no condition, after the loop's first
+  round, on that round's output, and never again. Now it waits while a step
+  of that loop is still running or about to start another round, and runs
+  (or is skipped) once the loop has ended, on its last round. A loop running
+  elsewhere in the workflow doesn't hold it back.
+  - **Loops in sequence:** a loop whose way in is a step of an earlier loop
+    now starts once that loop has ended, condition or not. It used to start
+    after the earlier loop's first round and run alongside it.
+  - **Conditions on a step after a loop** are decided by the last round: a
+    condition that held after an earlier round but not after the last no
+    longer runs the step.
 - **A loop whose way in is closed is skipped (#38).** The first time a loop
   was reached, its back-edge (the head's dependency on itself, or on the
   loop's last step) counted although that step hadn't run. A loop behind a
@@ -79,16 +92,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dependency outside it still starts with the workflow.
   - **Loops in sequence:** a loop whose way in is a condition on an earlier
     loop's step now waits for that loop to end before it's skipped, like a
-    step after a loop (#27). It used to start after the earlier loop's first
-    round, whatever the condition said.
+    step after a loop (#27); it starts only once that loop has ended (#40).
 - **A join of parallel branches inside a loop waits for every branch of the
   round (#28).** With a loop split into branches of different lengths that
   join again, the join ran as soon as the short branch finished, on the long
   branch's output from the previous round, and then again. A completed loop
   activity now also waits while anything upstream of it in the same loop is
   still running or about to run. A branch whose condition is false that round
-  doesn't hold the join back, and an earlier, separate loop never holds a
-  step back.
+  doesn't hold the join back, and steps of another loop never hold back a
+  step inside this one (a loop after a loop waits for it to end, #40).
 - **A loop's exit step runs when a later round exits (#27).** A step after a
   loop, conditional on a loop step (such as "finish when the check passes"),
   was skipped for good when its condition was false in the first round, and

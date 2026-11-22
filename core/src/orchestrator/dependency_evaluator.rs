@@ -16,6 +16,8 @@ const DEFAULT_MAX_ITERATIONS: u32 = 100;
 /// - All conditions on `depends_on` relationships are satisfied
 /// - For a completed loop member: nothing upstream of it in the same loop is
 ///   still able to run this round (see [`is_upstream_of_round_unsettled`])
+/// - For an activity after a loop (it depends on a step of a loop it isn't
+///   part of): that loop has ended (see [`waits_for_a_running_loop`])
 pub fn find_ready_activities<'a>(
     definition: &'a WorkflowDefinition,
     state: &WorkflowState,
@@ -30,6 +32,7 @@ pub fn find_ready_activities<'a>(
     }
 
     hold_back_unsettled_loop_members(definition, state, &mut ready);
+    hold_back_steps_after_running_loops(definition, state, &mut ready);
     Ok(ready)
 }
 
@@ -52,6 +55,104 @@ fn hold_back_unsettled_loop_members<'a>(
         let ready_keys: HashSet<&str> = ready.iter().map(|a| a.key.as_str()).collect();
         ready.retain(|a| !is_upstream_of_round_unsettled(a, &graph, state, &ready_keys));
     }
+}
+
+/// An activity after a loop waits for the loop to end (#40): drop it from
+/// `ready` while the loop it depends on can still go another round (see
+/// [`waits_for_a_running_loop`]). The graph is only built while such an
+/// activity is otherwise ready. Used by both readiness functions, after
+/// [`hold_back_unsettled_loop_members`], so `ready` holds the loop steps that
+/// are actually scheduled in this pass.
+fn hold_back_steps_after_running_loops<'a>(
+    definition: &'a WorkflowDefinition,
+    state: &WorkflowState,
+    ready: &mut Vec<&'a ActivityDefinition>,
+) {
+    let depends_on_a_loop = |activity: &ActivityDefinition| {
+        is_never_scheduled(state, &activity.key)
+            && get_dependencies(activity)
+                .iter()
+                .any(|dep| !dep.is_back_edge && is_loop_member(definition, &dep.activity_key))
+    };
+    if ready.iter().any(|a| depends_on_a_loop(a)) {
+        let graph = DependencyGraph::new(definition);
+        let ready_keys: HashSet<&str> = ready.iter().map(|a| a.key.as_str()).collect();
+        ready.retain(|a| !waits_for_a_running_loop(a, definition, &graph, state, &ready_keys));
+    }
+}
+
+/// Whether an activity after a loop, otherwise ready, must wait because the
+/// loop it depends on is still running (#40).
+///
+/// An activity after a loop depends on a step of a loop it isn't part of: a
+/// loop's exit step, a step that takes the loop's result, or the head of a
+/// later loop. That loop step completes once per round, and every completion
+/// but the last is followed by another round. Run after an earlier round,
+/// the activity would take that round's output, and since it runs once (or,
+/// as the head of a later loop, starts its own loop once) it would never see
+/// the rounds after it. So it waits until the loop has ended, and then runs
+/// (or is skipped) on the loop's last round, conditions or not. The skip side
+/// already waited for this (#27, #38); this is the run side.
+///
+/// The loop is still running while any of its steps is in flight (`Pending`,
+/// `Running`, `Waiting`) or is being scheduled in this pass (`ready_keys`).
+/// Its steps are the dependency and every activity on a cycle with it.
+/// Activities of other loops, and steps of the same loop the activity is
+/// itself part of, never hold it back.
+///
+/// Only an activity that has never been scheduled waits, like on the skip
+/// side: it is decided once. A later loop's head that has started its own
+/// loop (it can only have done so once the earlier loop ended) follows its
+/// back-edge from then on.
+///
+/// Cannot hang a workflow: the activity is held back only by a loop step that
+/// is in flight (its completion or failure is a later event, which evaluates
+/// the activity again) or that is scheduled in this same pass.
+fn waits_for_a_running_loop(
+    activity: &ActivityDefinition,
+    definition: &WorkflowDefinition,
+    graph: &DependencyGraph<'_>,
+    state: &WorkflowState,
+    ready_keys: &HashSet<&str>,
+) -> bool {
+    if !is_never_scheduled(state, &activity.key) {
+        return false;
+    }
+    for dep in get_dependencies(activity) {
+        let dep_key = dep.activity_key.as_str();
+        if dep.is_back_edge
+            || !is_loop_member(definition, dep_key)
+            || (activity.is_loop_activity && in_same_loop(graph, &activity.key, dep_key))
+        {
+            continue;
+        }
+        let downstream_of_dep = reach_from(graph, dep_key);
+        let running = definition.activities.iter().find(|member| {
+            let key = member.key.as_str();
+            member.is_loop_activity
+                && (key == dep_key
+                    || (downstream_of_dep.contains(key) && in_same_loop(graph, key, dep_key)))
+                && (ready_keys.contains(key)
+                    || state.activities.get(key).is_some_and(|s| {
+                        matches!(
+                            s.status,
+                            WorkflowActivityStatus::Pending
+                                | WorkflowActivityStatus::Running
+                                | WorkflowActivityStatus::Waiting
+                        )
+                    }))
+        });
+        if let Some(running) = running {
+            tracing::trace!(
+                "Activity {} not ready: {} of the loop it depends on (through {}) can still run",
+                activity.key,
+                running.key,
+                dep_key
+            );
+            return true;
+        }
+    }
+    false
 }
 
 /// Activities ready to schedule, and activities whose conditions could not
@@ -81,7 +182,16 @@ pub fn find_ready_or_unresolvable_activities<'a>(
         }
     }
     hold_back_unsettled_loop_members(definition, state, &mut ready);
+    hold_back_steps_after_running_loops(definition, state, &mut ready);
     Ok((ready, unresolvable))
+}
+
+/// Whether `key` has never been scheduled (`NotScheduled`, or no state yet)
+fn is_never_scheduled(state: &WorkflowState, key: &str) -> bool {
+    state
+        .activities
+        .get(key)
+        .is_none_or(|s| s.status == WorkflowActivityStatus::NotScheduled)
 }
 
 fn is_completed(state: &WorkflowState, key: &str) -> bool {
@@ -2212,5 +2322,157 @@ mod tests {
         ]);
         let ready = ready_keys(&definition, &state);
         assert!(ready.contains(&"porter".to_string()), "{ready:?}");
+    }
+
+    // ============================================================================
+    // An activity after a loop waits for the loop to end (#40)
+    // ============================================================================
+
+    /// start → head ⇄ tail (head holds the back-edge, limit 3), and `after`,
+    /// which depends on the tail with no condition
+    fn loop_with_step_after() -> WorkflowDefinition {
+        let mut definition = two_step_loop();
+        definition.activities[1].iteration_limit = Some(3);
+        definition
+            .activities
+            .push(make_activity_def("after", Some(vec![rel("tail", false)])));
+        definition
+    }
+
+    #[test]
+    fn test_step_after_a_loop_waits_while_the_loop_goes_another_round() {
+        let definition = loop_with_step_after();
+        // Round 1 is done: the head is about to go again, so `after` waits
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("head", 2, 1),
+            completed("tail", 3, 1),
+            make_activity_state("after", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(ready_keys(&definition, &state), vec!["head"]);
+    }
+
+    #[test]
+    fn test_step_after_a_loop_waits_while_a_loop_step_is_in_flight() {
+        let definition = loop_with_step_after();
+        for status in [
+            WorkflowActivityStatus::Pending,
+            WorkflowActivityStatus::Running,
+            WorkflowActivityStatus::Waiting,
+        ] {
+            let state = make_workflow_state(vec![
+                completed("start", 1, 0),
+                with_status("head", 4, status),
+                completed("tail", 3, 1),
+                make_activity_state("after", WorkflowActivityStatus::NotScheduled),
+            ]);
+            assert!(
+                ready_keys(&definition, &state).is_empty(),
+                "head {status:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_step_after_a_loop_runs_once_the_loop_has_ended() {
+        let definition = loop_with_step_after();
+        // The head has used its iteration_limit: the loop is over
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("head", 6, 3),
+            completed("tail", 7, 3),
+            make_activity_state("after", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(ready_keys(&definition, &state), vec!["after"]);
+    }
+
+    #[test]
+    fn test_step_after_a_self_loop_waits_for_its_last_round() {
+        let definition = WorkflowDefinition {
+            name: "self_loop".to_string(),
+            settings: None,
+            activities: vec![
+                ActivityDefinition {
+                    iteration_limit: Some(2),
+                    ..loop_def("spinner", vec![rel("spinner", true)])
+                },
+                make_activity_def("after", Some(vec![rel("spinner", false)])),
+            ],
+        };
+        let going = make_workflow_state(vec![
+            completed("spinner", 1, 1),
+            make_activity_state("after", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(ready_keys(&definition, &going), vec!["spinner"]);
+
+        let ended = make_workflow_state(vec![
+            completed("spinner", 2, 2),
+            make_activity_state("after", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(ready_keys(&definition, &ended), vec!["after"]);
+    }
+
+    #[test]
+    fn test_another_loop_never_holds_a_step_after_a_loop_back() {
+        // `poller` is a separate self-loop, still running: `after` follows
+        // the head ⇄ tail loop only, which has ended
+        let mut definition = loop_with_step_after();
+        definition
+            .activities
+            .push(loop_def("poller", vec![rel("poller", true)]));
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("head", 6, 3),
+            completed("tail", 7, 3),
+            make_activity_state("after", WorkflowActivityStatus::NotScheduled),
+            with_status("poller", 8, WorkflowActivityStatus::Running),
+        ]);
+        assert_eq!(ready_keys(&definition, &state), vec!["after"]);
+    }
+
+    #[test]
+    fn test_loop_head_after_a_loop_waits_for_it_to_end() {
+        // A later loop's head that depends on this loop's tail with no
+        // condition starts once this loop has ended, not after its first round
+        let mut definition = loop_with_step_after();
+        definition.activities[3] =
+            loop_def("after", vec![rel("tail", false), rel("after_tail", true)]);
+        definition
+            .activities
+            .push(loop_def("after_tail", vec![rel("after", false)]));
+        let going = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("head", 2, 1),
+            completed("tail", 3, 1),
+            make_activity_state("after", WorkflowActivityStatus::NotScheduled),
+            make_activity_state("after_tail", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(ready_keys(&definition, &going), vec!["head"]);
+
+        let ended = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("head", 6, 3),
+            completed("tail", 7, 3),
+            make_activity_state("after", WorkflowActivityStatus::NotScheduled),
+            make_activity_state("after_tail", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert_eq!(ready_keys(&definition, &ended), vec!["after"]);
+    }
+
+    #[test]
+    fn test_held_step_after_a_loop_is_not_skipped() {
+        // Held back while the loop runs, `after` is ready, not skippable
+        let definition = loop_with_step_after();
+        let state = make_workflow_state(vec![
+            completed("start", 1, 0),
+            completed("head", 2, 1),
+            completed("tail", 3, 1),
+            make_activity_state("after", WorkflowActivityStatus::NotScheduled),
+        ]);
+        assert!(
+            find_skipped_activities(&definition, &state)
+                .unwrap()
+                .is_empty()
+        );
     }
 }
