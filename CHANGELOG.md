@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The CI pipeline (`main-ci.yml`) overlaps its slow jobs.** Release
+  binaries and the per-platform Docker builds now start alongside the Rust
+  checks instead of waiting for them. The two publish steps, the Docker
+  manifest-list merge (which applies the image tags) and the crates.io
+  publish, run alongside each other once the checks and every build have
+  passed. Nothing publishes on a failed check or a failed build: until then
+  the builds have produced only run artifacts and untagged image digests.
+  The Docker workflow is split into `docker-build.yml` and `docker-merge.yml`
+  so the merge can be gated separately.
+
 ### Fixed
 
 - **The MCP activity catalog and authoring guide match the engine.** Both are

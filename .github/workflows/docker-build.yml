@@ -1,11 +1,16 @@
 name: Docker Build
 
-# Reusable multi-arch image pipeline. Each platform builds NATIVELY on its own
-# runner (arm64 on ubuntu-24.04-arm — free for public repos) instead of under
-# QEMU emulation, which made the Rust release build take >1 hour. Each build
-# pushes by digest only; the merge job then stitches the digests into a single
+# Reusable multi-arch image BUILD stage. Each platform builds NATIVELY on its
+# own runner (arm64 on ubuntu-24.04-arm — free for public repos) instead of
+# under QEMU emulation, which made the Rust release build take >1 hour. Each
+# build pushes by digest only and records the digest as a run artifact
+# (digests-<platform>). Nothing here applies a tag, so this stage is safe to
+# run before the checks finish: an untagged digest is not pullable by name.
+#
+# docker-merge.yml is the publish stage: it stitches the digests into a single
 # multi-arch manifest list carrying the caller-supplied tags, so no tag ever
-# points at a partial image.
+# points at a partial image. The two are separate workflows so the caller can
+# gate the merge on jobs this stage does not wait for.
 #
 # GHA layer cache is scoped per platform so the two arches don't evict each
 # other. Tag runs can restore caches written on main (the default branch), so
@@ -13,18 +18,14 @@ name: Docker Build
 
 on:
   workflow_call:
-    inputs:
-      tags:
-        description: docker/metadata-action tags spec for the merged manifest
-        required: true
-        type: string
 
 env:
+  # Keep in sync with docker-merge.yml
   IMAGE: kruxia/kruxiaflow
 
 jobs:
   build:
-    name: Build ${{ matrix.platform }}
+    name: ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -81,42 +82,3 @@ jobs:
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
-
-  merge:
-    name: Merge manifest list
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: ${{ runner.temp }}/digests
-          pattern: digests-*
-          merge-multiple: true
-
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
-        with:
-          username: ${{ vars.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE }}
-          tags: ${{ inputs.tags }}
-
-      - name: Create and push manifest list
-        working-directory: ${{ runner.temp }}/digests
-        run: |
-          args=()
-          while IFS= read -r tag; do
-            args+=(-t "$tag")
-          done < <(jq -r '.tags[]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
-          for digest in *; do
-            args+=("${IMAGE}@sha256:${digest}")
-          done
-          docker buildx imagetools create "${args[@]}"
-
-      - name: Inspect
-        run: docker buildx imagetools inspect "${IMAGE}:${{ steps.meta.outputs.version }}"
