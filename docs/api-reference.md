@@ -394,7 +394,7 @@ Authorization: Bearer <token>
     {
       "activity_key": "validate_payment",
       "status": "completed",
-      "outputs": {"valid": true},
+      "outputs": [{"name": "result", "type": "value", "value": {"valid": true}}],
       "error": null,
       "started_at": "2025-11-06T10:00:00Z",
       "completed_at": "2025-11-06T10:00:01Z"
@@ -405,7 +405,7 @@ Authorization: Bearer <token>
 }
 ```
 
-**Activity Status Values**: `not_scheduled`, `pending`, `running`, `completed`, `failed`
+**Activity Status Values**: `not_scheduled`, `waiting` (for a signal, see [Signals](signals.md)), `pending`, `running`, `completed`, `failed`, `skipped`
 
 Each activity's `error` holds the message from its most recent failure; the
 workflow-level `error_message` surfaces a failed activity's error directly.
@@ -544,7 +544,9 @@ Authorization: Bearer <token>
 Content-Type: application/json
 ```
 
-Sends a signal to a waiting activity within a workflow.
+Sends a signal to a waiting activity within a workflow. For the
+`wait_for_signal` setting, timeouts, and how the activity reads the data
+(`{{SIGNAL}}`), see [Signals: Human-in-the-Loop Waits](signals.md).
 
 **Request Body**:
 ```json
@@ -560,7 +562,7 @@ Sends a signal to a waiting activity within a workflow.
 
 - `activity_key` - Required, not empty
 - `event_name` - Required, not empty
-- `data` - Optional, any JSON object
+- `data` - Optional, any JSON value; omitted or `null` means no data
 
 A wait takes one signal, with or without `data`. Once a signal has been
 accepted, another signal for the same wait gets `"signaled": false` (its
