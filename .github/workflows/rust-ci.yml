@@ -15,7 +15,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -36,7 +36,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -50,9 +50,9 @@ jobs:
   # jobs don't compile. Its #[sqlx::test] tests need a PostgreSQL server; each
   # creates and migrates its own database. nextest runs each test in its own
   # process, so no other test in the binary can remove DATABASE_URL.
+  # Runs alongside the lint jobs (no `needs`), like `test` below.
   mcp:
     name: MCP server
-    needs: [clippy, fmt]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -71,7 +71,7 @@ jobs:
         ports:
           - 5432:5432
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -99,9 +99,9 @@ jobs:
 
   test:
     name: Test with Coverage
-    # Don't spend the expensive test/coverage job on commits that fail the
-    # fast lint checks
-    needs: [clippy, fmt]
+    # Runs alongside the lint jobs (no `needs`), so a run takes as long as its
+    # slowest job instead of lint + tests. The cost is that a commit failing
+    # the lints still spends this job.
     runs-on: ubuntu-latest
     # id-token enables the Codecov OIDC upload (also requires the same grant
     # on the caller job — reusable workflows only get what the caller allows)
@@ -124,7 +124,7 @@ jobs:
           - 5432:5432
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
