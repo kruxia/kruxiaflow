@@ -34,7 +34,8 @@ use kruxiaflow_core::{
         waiting for signal_name and not yet signaled. If activity_key is omitted, \
         the signal is delivered to every activity in the workflow currently waiting \
         for signal_name (a convenience of this tool; REST signals one activity). \
-        The activity receives data as its signal data ({{SIGNAL.*}}). Each activity \
+        The data is given to the activity's worker as the activity's signal_data; \
+        templates cannot read it. Each activity \
         can be signaled once per wait: a second signal is refused, unless the \
         activity's wait_for_signal sets hold_early: true. Such an activity, named \
         by activity_key, holds a signal that arrives while it is not waiting and \
