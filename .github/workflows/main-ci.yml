@@ -4,13 +4,19 @@ name: Main CI
 #
 # - Pull requests / pushes to main: rust checks; main pushes also refresh the
 #   rolling Docker image (date-sha tag only — never :latest).
-# - Tag pushes (v*): the FULL release pipeline on one run — rust checks →
-#   binaries + versioned multi-arch Docker + crates.io (kruxiaflow-worker) →
-#   GitHub Release. Nothing publishes unless the checks pass.
+# - Tag pushes (v*): the FULL release pipeline on one run, in three stages:
+#     1. verify + build, in parallel: rust checks ∥ binaries ∥ per-platform
+#        Docker builds (pushed by digest, untagged)
+#     2. publish, in parallel: Docker manifest-list merge (applies the tags)
+#        ∥ crates.io (kruxiaflow-worker)
+#     3. GitHub Release
+#   Builds do not wait for the checks, so the slow jobs overlap instead of
+#   queueing. Nothing PUBLISHES unless the checks and every build pass: stage 1
+#   only produces run artifacts and untagged image digests.
 #
-# A single docker job serves main pushes (date-sha tag) and tag pushes
-# (semver + :latest) through the reusable docker-build.yml workflow: one
-# native runner per platform (no QEMU), then a manifest-list merge.
+# The docker jobs serve main pushes (date-sha tag) and tag pushes (semver +
+# :latest) through two reusable workflows: docker-build.yml (one native runner
+# per platform, no QEMU) and docker-merge.yml (manifest-list merge).
 # metadata-action emits only the tags that apply to the triggering event.
 # :latest moves ONLY on releases, so it always equals the newest release.
 # The rolling build is multi-arch too, so main keeps both platforms' GHA
@@ -56,7 +62,7 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check tag against Cargo.toml
         run: |
@@ -67,9 +73,11 @@ jobs:
             exit 1
           fi
 
+  # Runs alongside the rust checks (no `needs: rust`): the output is only a run
+  # artifact, which the release job attaches after everything has passed.
   binaries:
     name: Binary ${{ matrix.target }}
-    needs: [rust, preflight]
+    needs: [preflight]
     if: github.ref_type == 'tag'
     runs-on: ${{ matrix.os }}
     strategy:
@@ -90,7 +98,7 @@ jobs:
             os: macos-latest
             use-cross: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -125,7 +133,7 @@ jobs:
           tar -C "target/${{ matrix.target }}/release" -czf "$ARCHIVE" kruxiaflow
           shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: binaries-${{ matrix.target }}
           path: |
@@ -135,23 +143,46 @@ jobs:
 
   # ---- docker images: main pushes AND release tags --------------------------
 
-  # One job for both triggers (they never occur in the same run): main pushes
-  # publish only a date-sha tag, tag pushes publish semver + :latest.
+  # Build and merge are separate jobs so the per-platform builds can run
+  # alongside the rust checks while the merge — the step that applies tags —
+  # waits for them. Both serve both triggers (which never occur in the same
+  # run): main pushes publish only a date-sha tag, tag pushes publish semver +
+  # :latest.
+  docker-build:
+    name: Docker build
+    needs: [preflight]
+    # No `needs: rust`: builds push untagged digests only, so they are safe to
+    # start before the checks finish. `!cancelled()` lets the job run on main
+    # pushes even though preflight is skipped there; tag runs still
+    # hard-require preflight success. PRs match neither ref condition. The
+    # release-commit branch push is excluded here for the same reason `rust`
+    # skips it: the tag run (same SHA) builds the image.
+    if: >-
+      !cancelled() &&
+      ((github.ref == 'refs/heads/main' &&
+        !startsWith(github.event.head_commit.message, 'release:')) ||
+       (github.ref_type == 'tag' && needs.preflight.result == 'success'))
+    uses: ./.github/workflows/docker-build.yml
+    secrets: inherit
+
+  # ---- publish stage: runs only after the checks and every build pass --------
+
   # :latest is release-only so it always equals the most recent release —
   # rolling main builds must never move it (users' docker-compose.yml pulls
   # :latest, and an unreleased build there bypasses release verification).
   # metadata-action emits only the tag types that apply to the event.
-  docker:
-    name: Docker multi-arch
-    needs: [rust, preflight]
-    # `!cancelled()` lets the job run on main pushes even though preflight is
-    # skipped there; tag runs still hard-require preflight success. PRs match
-    # neither ref condition.
+  docker-merge:
+    name: Docker publish
+    needs: [rust, binaries, docker-build]
+    # Explicit results instead of the implicit success(): success() is false
+    # when ANY ancestor was skipped, and on main pushes preflight and binaries
+    # always are. Tag runs additionally require the binaries, so a release
+    # never moves :latest when one of its channels cannot ship.
     if: >-
       !cancelled() && needs.rust.result == 'success' &&
-      (github.ref == 'refs/heads/main' ||
-       (github.ref_type == 'tag' && needs.preflight.result == 'success'))
-    uses: ./.github/workflows/docker-build.yml
+      needs.docker-build.result == 'success' &&
+      (github.ref_type != 'tag' || needs.binaries.result == 'success')
+    uses: ./.github/workflows/docker-merge.yml
     secrets: inherit
     with:
       tags: |
@@ -170,9 +201,13 @@ jobs:
   # SDK can ever ship from here. The version comes from the workspace (tag ==
   # version is enforced by preflight); the skip guard makes tag-run re-runs
   # idempotent when the version is already up.
+  #
+  # Runs alongside docker-merge, behind the same gate (checks + every build):
+  # a crates.io publish cannot be undone, so it must not go out on a release
+  # whose binaries or images then fail to build.
   crates:
     name: crates.io publish
-    needs: [rust, preflight]
+    needs: [rust, preflight, binaries, docker-build]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     environment: crates-io
@@ -180,7 +215,7 @@ jobs:
       id-token: write
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -209,19 +244,19 @@ jobs:
 
   release:
     name: GitHub Release
-    needs: [binaries, docker, crates]
+    needs: [binaries, docker-merge, crates]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: binaries-*
           merge-multiple: true
           path: dist
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true

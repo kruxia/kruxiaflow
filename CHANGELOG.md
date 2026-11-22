@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The CI pipeline (`main-ci.yml`) overlaps its slow jobs.** The tests
+  (including the MCP server job) now start alongside clippy and rustfmt
+  instead of waiting for them, on pull requests as on every other run. Release
+  binaries and the per-platform Docker builds likewise start alongside the
+  Rust checks. The two publish steps, the Docker manifest-list merge (which
+  applies the image tags) and the crates.io publish, run alongside each other
+  once the checks and every build have passed. Nothing publishes on a failed
+  check or a failed build: until then the builds have produced only run
+  artifacts and untagged image digests.
+  The Docker workflow is split into `docker-build.yml` and `docker-merge.yml`
+  so the merge can be gated separately.
+
 ### Fixed
 
 - **The MCP activity catalog and authoring guide match the engine.** Both are
@@ -194,28 +208,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   completion of its previous round was applied as new, advancing its
   iteration and giving its dependents spurious input. Completions whose
   iteration doesn't match the activity's current iteration are now ignored.
-- **A template error fails the activity whose template is bad (#19).**
-  - **Before:** when an activity's parameters (or `delay` / `scheduled_for`)
-    referenced an undefined value, the error surfaced while processing the
-    upstream activity's completion. That event was retried five times and
-    dropped as poison, the upstream activity was marked failed although it had
-    succeeded, the activity with the bad template never ran or failed, and the
-    workflow stayed `running` indefinitely.
-  - **Now:** that activity fails with
-    `TEMPLATE_ERROR: Failed to resolve templates in activity <key>: …`, through
-    a terminal `ActivityFailed` like any other failure. Its `status == 'failed'`
-    branches run, its other dependents are skipped, and the workflow fails.
-  - **Conditions too:** a `conditions:` template on a dependency that can't
-    be evaluated fails the activity that carries it in the same way, instead
-    of poisoning the upstream completion. That includes a condition that only
-    becomes evaluable when its dependency is skipped, such as a condition on
-    a skipped step's result.
-  - **No misleading event:** no `ActivityScheduled` is recorded for an
-    activity that failed this way, since it was never queued.
-- **Skipped activities cascade (#19).** Skipping was a single pass over the
-  state, so in a chain after a failed or skipped activity only the first
-  dependent was skipped and the rest stayed `not_scheduled`, which kept the
-  workflow from ever completing. Skipping now repeats until nothing changes.
 - **A loop's back-edge follows the order activities are written, not their
   keys (#26).** The search for the back-edge started from the alphabetically
   first key, so renaming steps could change how a loop ran. In the repair loop
