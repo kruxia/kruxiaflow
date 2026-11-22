@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`INPUT` in a condition is the workflow input.** Conditions read `INPUT`
+  from `state_data`, which submission leaves empty, so every `INPUT.*` in a
+  `depends_on` condition was undefined: it failed the workflow, or with a
+  `default(...)` silently ignored the submitted value. Conditions now see
+  the submitted input, as parameter templates do.
+- **`{{activity_key.iteration}}` resolves.** The rounds an activity has
+  completed were tracked but not in the template context, so a parameter or
+  condition using them failed with "undefined value". An output named
+  `iteration` still takes precedence.
+- **Example 08a runs.** It failed scheduling its first activity. Besides the
+  two fixes above, its conditions were two templates joined by `<`/`>=`,
+  which render to a non-empty string and so were always true (the loop ran
+  to `iteration_limit`), and its email body used `{{fetch_page[*].result}}`,
+  which is not template syntax. The conditions are now single expressions,
+  and the body uses `{{fetch_page.response}}`, the array of every round's
+  response (`http_request`'s output is `response`, not `result`, which the
+  example also declared). A new test runs the example through the
+  orchestrator. Its header and README described a 5-second delay between
+  requests; `settings.delay` applies only to an activity's first round, so
+  it holds back the first request and the later ones are not spaced out.
+  They now say so.
 - **The MCP activity catalog and authoring guide match the engine.** Both are
   hand-written, had drifted from the activities and the parser, and agents
   copy them verbatim. Because activity settings ignore unknown keys, several

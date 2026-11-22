@@ -199,6 +199,11 @@ impl TemplateContext {
                     "status".to_string(),
                     Value::String(activity_info.status.clone()),
                 );
+                // Rounds completed so far ({{activity.iteration}}), unless an
+                // output of that name already claims the key
+                value_map
+                    .entry("iteration".to_string())
+                    .or_insert_with(|| Value::from(activity_info.iteration));
 
                 // Always add iteration-scoped activities to context, even if empty
                 // This ensures templates can reference them (e.g., {{activity.output | last}})
@@ -238,6 +243,9 @@ impl TemplateContext {
                     "status".to_string(),
                     Value::String(activity_info.status.clone()),
                 );
+                activity_obj
+                    .entry("iteration".to_string())
+                    .or_insert_with(|| Value::from(activity_info.iteration));
                 context_map.insert(
                     activity_key.clone(),
                     serde_json_to_minijinja(&Value::Object(activity_obj)),
@@ -1060,6 +1068,50 @@ mod tests {
         let value = Value::String("{{search.results | first}}".to_string());
         let result = resolve_template_value(&value, &context).unwrap();
         assert_eq!(result, serde_json::json!("result1"));
+    }
+
+    #[test]
+    fn test_activity_iteration_in_context() {
+        use crate::workflow::ActivityOutput;
+        let mut context = TemplateContext::new();
+        // Iteration-scoped, two rounds completed
+        context.add_activity_state(
+            "fetch_page".to_string(),
+            vec![],
+            Some(HashMap::new()),
+            2,
+            rust_decimal::Decimal::ZERO,
+            "completed".to_string(),
+        );
+        // Not iteration-scoped, with an output named `iteration`
+        context.add_activity_state(
+            "counter".to_string(),
+            vec![ActivityOutput::value(
+                "iteration".to_string(),
+                serde_json::json!("from output"),
+            )],
+            None,
+            1,
+            rust_decimal::Decimal::ZERO,
+            "completed".to_string(),
+        );
+
+        let value = Value::String("page={{fetch_page.iteration}}".to_string());
+        assert_eq!(
+            resolve_template_value(&value, &context).unwrap(),
+            serde_json::json!("page=2")
+        );
+        let value = Value::String("{{fetch_page.iteration}}".to_string());
+        assert_eq!(
+            resolve_template_value(&value, &context).unwrap(),
+            serde_json::json!(2)
+        );
+        // An output of the same name is not shadowed
+        let value = Value::String("{{counter.iteration}}".to_string());
+        assert_eq!(
+            resolve_template_value(&value, &context).unwrap(),
+            serde_json::json!("from output")
+        );
     }
 
     #[test]
