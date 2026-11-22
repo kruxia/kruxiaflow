@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A wait can hold a signal that arrives early
+  ([#42](https://github.com/kruxia/kruxiaflow/issues/42)).** A signal sent
+  while its activity was not waiting was refused and dropped, so a sender a
+  moment early, or one signaling a loop that was busy with the previous
+  round, lost its signal. `wait_for_signal: {hold_early: true}` keeps such a
+  signal and delivers it, oldest first, when the activity next waits: the
+  activity then runs with that signal's data without waiting, and its
+  `ActivitySignaled` event carries `"held": true`. The signal endpoint
+  answers `"held": true`. An activity holds up to 100 signals per
+  event name, and signals still held when the workflow ends are discarded.
+  Migration `20261121000001` adds the `held_signals` table.
+- **A refused signal says why.** The signal endpoint's answer has `held` and,
+  when the signal was neither delivered nor held, a `reason`: `not_waiting`
+  (the same signal can succeed later), `unknown_workflow`, `unknown_activity`,
+  `workflow_ended` or `hold_limit`. The MCP `send_workflow_signal` result
+  has `held`, `held_activities` and, on refusal, `reasons`.
+
 ### Fixed
 
 - **The MCP `send_workflow_signal` tool delivers signals the way the REST

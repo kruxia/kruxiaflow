@@ -4,7 +4,9 @@ use crate::error::{ApiResult, AppError, ValidationErrors};
 use crate::middleware::auth::ValidatedClaims;
 use crate::state::AppState;
 use axum::{Extension, Json, extract::Path, extract::State};
-use kruxiaflow_core::subscription::{SignalDeliveryError, SignalRequest, deliver_signal};
+use kruxiaflow_core::subscription::{
+    SignalDeliveryError, SignalOutcome, SignalRequest, deliver_signal,
+};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -55,9 +57,23 @@ fn field_errors(errors: Vec<kruxiaflow_core::subscription::SignalFieldError>) ->
 /// Signal activity response
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SignalActivityResponse {
-    /// Whether the signal was delivered
+    /// Whether the waiting activity took the signal
     #[schema(example = true)]
     pub signaled: bool,
+
+    /// Whether the signal is held for the activity's next wait. Only an
+    /// activity whose `wait_for_signal` sets `hold_early: true` holds a signal
+    /// that arrives while it is not waiting.
+    #[schema(example = false)]
+    pub held: bool,
+
+    /// Why the signal was neither delivered nor held: `not_waiting` (the
+    /// activity waits for this event, but not right now; the same signal can
+    /// succeed later), `unknown_workflow`, `unknown_activity` (no activity
+    /// with this key waits for this event), `workflow_ended` or `hold_limit`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(example = "not_waiting")]
+    pub reason: Option<String>,
 
     /// Message describing the result
     #[schema(example = "Activity signaled successfully")]
@@ -153,6 +169,8 @@ mod tests {
     fn test_signal_response_serialize() {
         let response = SignalActivityResponse {
             signaled: true,
+            held: false,
+            reason: None,
             message: "Activity signaled successfully".to_string(),
         };
         let json = serde_json::to_value(&response).unwrap();
@@ -164,6 +182,8 @@ mod tests {
     fn test_signal_response_serialize_not_found() {
         let response = SignalActivityResponse {
             signaled: false,
+            held: false,
+            reason: Some("not_waiting".to_string()),
             message: "No waiting activity found".to_string(),
         };
         let json = serde_json::to_value(&response).unwrap();
@@ -219,7 +239,9 @@ mod tests {
         assert!(result.is_ok());
         let response = result.unwrap().0;
         assert!(!response.signaled);
-        assert!(response.message.contains("No waiting activity found"));
+        assert!(!response.held);
+        assert_eq!(response.reason.as_deref(), Some("not_waiting"));
+        assert!(response.message.contains("is not waiting for"));
     }
 
     #[sqlx::test(migrations = "../migrations")]
@@ -526,11 +548,13 @@ pub async fn signal_activity(
     );
 
     // Shared with the MCP send_workflow_signal tool: validates, marks the
-    // subscription and publishes the ActivitySignaled event
-    let subscription = deliver_signal(
+    // subscription and publishes the ActivitySignaled event, or holds the
+    // signal for the activity's next wait
+    let signal_request = request.to_signal_request(workflow_id);
+    let outcome = deliver_signal(
         state.subscription_service.as_ref(),
         state.event_source.as_ref(),
-        request.to_signal_request(workflow_id),
+        signal_request.clone(),
     )
     .await
     .map_err(|e| match e {
@@ -541,8 +565,8 @@ pub async fn signal_activity(
         }
     })?;
 
-    match subscription {
-        Some(sub) => {
+    match outcome {
+        SignalOutcome::Signaled(sub) => {
             tracing::info!(
                 workflow_id = %workflow_id,
                 activity_key = %request.activity_key,
@@ -552,24 +576,43 @@ pub async fn signal_activity(
 
             Ok(Json(SignalActivityResponse {
                 signaled: true,
+                held: false,
+                reason: None,
                 message: "Activity signaled successfully".to_string(),
             }))
         }
-        None => {
-            // No matching subscription found
-            tracing::warn!(
+        SignalOutcome::Held => {
+            tracing::info!(
                 workflow_id = %workflow_id,
                 activity_key = %request.activity_key,
                 event_name = %request.event_name,
-                "No matching subscription found for signal"
+                "Signal held for the activity's next wait"
             );
 
             Ok(Json(SignalActivityResponse {
                 signaled: false,
+                held: true,
+                reason: None,
                 message: format!(
-                    "No waiting activity found for workflow {} with key '{}' and event '{}'",
-                    workflow_id, request.activity_key, request.event_name
+                    "Activity '{}' is not waiting; the signal is held and will be delivered when it next waits",
+                    request.activity_key
                 ),
+            }))
+        }
+        SignalOutcome::Refused(refusal) => {
+            tracing::warn!(
+                workflow_id = %workflow_id,
+                activity_key = %request.activity_key,
+                event_name = %request.event_name,
+                reason = refusal.code(),
+                "Signal refused"
+            );
+
+            Ok(Json(SignalActivityResponse {
+                signaled: false,
+                held: false,
+                reason: Some(refusal.code().to_string()),
+                message: refusal.describe(&signal_request),
             }))
         }
     }

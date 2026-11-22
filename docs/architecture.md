@@ -2932,6 +2932,41 @@ also accepted after its wait had expired. Migration `20261119000002` adds
 turns a data-less signal's NULL into JSON `null` so the old marker still sees
 it as signaled.
 
+**Held signals** (`wait_for_signal.hold_early`, #42): a signal that no open
+wait takes is refused, unless the activity's wait in the workflow's
+definition sets `hold_early`. Then `deliver_signal` stores it in
+`held_signals` (`SubscriptionService::hold_signal`) and publishes nothing yet.
+When the orchestrator is about to open that activity's wait, it first takes
+the oldest held signal for it (`take_held_signal`); if there is one, the
+activity is queued in that pass with the signal's data and never enters
+`Waiting`, so there is no subscription row and no timeout. The take runs on
+the pass's own transaction, so a held signal is consumed only if the state
+that queued the activity is saved; a failed pass leaves it held.
+
+Taking a held signal publishes its `ActivitySignaled` event, with the
+activity's loop round and `"held": true` in the payload beside `event_name`
+and `signal_data`, so the workflow's history shows the signal as it does for
+a waiting activity. The orchestrator has already acted on it: when it reads
+the event back the activity is not waiting, so the event is a no-op, and a
+retried pass's second copy is dropped by the dedup index.
+
+Both sides take a transaction advisory lock on `(workflow_id, activity_key)`:
+`hold_signal` before it re-checks for an open wait and inserts, the
+orchestrator before it looks for a held signal, keeping it until the pass
+commits. A signal therefore either reaches the wait the pass opened or is
+held where the next wait finds it. Without the lock, a signal could be held
+just after its wait opened and stay held while the activity waited.
+
+An activity holds at most 100 signals per event name (`MAX_HELD_SIGNALS`);
+`WorkflowCompleted` / `WorkflowFailed` discard what is still held, and the
+rows cascade with the workflow.
+
+**Why**: a loop that waits for input each round is not waiting while the
+round's other steps run, and a sender cannot see that window. Refusing its
+signal left the sender to poll and retry, racing the orchestrator. Holding is
+opt-in on the wait, not on the request, so only activities declared this way
+accumulate signals and senders need no change.
+
 **WebSocket replay** resolves `from_event_id` to that event's `(tx, position)`
 and reads with the same predicate, so a reconnecting client cannot miss an
 event that committed late. An unknown id yields an empty replay (logged at

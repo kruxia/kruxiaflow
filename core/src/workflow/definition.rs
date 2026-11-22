@@ -862,6 +862,12 @@ pub struct WaitForSignalSettings {
     /// Action to take when timeout occurs (default: fail)
     #[serde(default)]
     pub on_timeout: OnTimeout,
+
+    /// Hold a signal that arrives while this activity is not waiting, and
+    /// deliver it (oldest first) when the activity next waits, instead of
+    /// refusing it (default: false)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hold_early: bool,
 }
 
 /// Action to take when a signal wait times out

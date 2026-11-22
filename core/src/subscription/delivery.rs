@@ -5,7 +5,7 @@
 //! subscription marking and the `ActivitySignaled` event the orchestrator
 //! reads can't drift between them.
 
-use super::models::{ActivitySubscription, SignalRequest};
+use super::models::{ActivitySubscription, SignalOutcome, SignalRequest};
 use super::service::{SubscriptionError, SubscriptionService};
 use crate::events::{EventError, EventSource, NewWorkflowEvent, WorkflowEventType};
 use serde_json::json;
@@ -93,21 +93,33 @@ pub fn activity_signaled_event(
 /// Validates the request, marks the subscription signaled through
 /// [`SubscriptionService::signal_activity`], then publishes `ActivitySignaled`.
 ///
-/// Returns `Ok(Some(subscription))` when the activity was signaled, and
-/// `Ok(None)` when no subscription matched (no such activity, a different
-/// event name, already signaled, or not waiting). A publish failure is an
-/// error: nothing else delivers the signal to the orchestrator, so the
-/// subscription's mark is undone first ([`SubscriptionService::release_signal`])
-/// and the signal can be retried.
+/// Returns what became of the signal:
+/// - [`SignalOutcome::Signaled`]: the waiting activity took it.
+/// - [`SignalOutcome::Held`]: the activity is not waiting and its wait is
+///   configured with `hold_early`; the signal is kept for its next wait
+///   ([`SubscriptionService::hold_signal`]). No event is published: the
+///   orchestrator takes the held signal when the activity next waits.
+/// - [`SignalOutcome::Refused`]: neither, with the reason (no such activity,
+///   a different event name, not waiting, the workflow has ended, or the
+///   activity holds as many signals as it may).
+///
+/// A publish failure is an error: nothing else delivers the signal to the
+/// orchestrator, so the subscription's mark is undone first
+/// ([`SubscriptionService::release_signal`]) and the signal can be retried.
 pub async fn deliver_signal(
     subscriptions: &dyn SubscriptionService,
     events: &dyn EventSource,
     request: SignalRequest,
-) -> Result<Option<ActivitySubscription>, SignalDeliveryError> {
+) -> Result<SignalOutcome, SignalDeliveryError> {
     request.validate().map_err(SignalDeliveryError::Invalid)?;
 
-    let Some(subscription) = subscriptions.signal_activity(request.clone()).await? else {
-        return Ok(None);
+    let subscription = match subscriptions.signal_activity(request.clone()).await? {
+        Some(subscription) => subscription,
+        // No open wait took it: hold it for the next one, or say why not
+        None => match subscriptions.hold_signal(request.clone()).await? {
+            SignalOutcome::Signaled(subscription) => subscription,
+            other => return Ok(other),
+        },
     };
 
     if let Err(e) = events
@@ -124,7 +136,7 @@ pub async fn deliver_signal(
         return Err(SignalDeliveryError::Publish(e));
     }
 
-    Ok(Some(subscription))
+    Ok(SignalOutcome::Signaled(subscription))
 }
 
 #[cfg(test)]
@@ -315,9 +327,9 @@ mod tests {
         let req = request("approve", "go", Some(json!({"approved": true})));
 
         let first = deliver_signal(&subs, &events, req.clone()).await.unwrap();
-        assert!(first.is_some());
+        assert!(first.is_signaled());
         let second = deliver_signal(&subs, &events, req).await.unwrap();
-        assert!(second.is_none());
+        assert!(!second.is_signaled());
 
         let published = events.published.lock().unwrap();
         assert_eq!(published.len(), 1);
@@ -411,11 +423,11 @@ mod tests {
         let first = deliver_signal(&subs, &events, approve(workflow_id, Some(json!({"n": 1}))))
             .await
             .unwrap();
-        assert!(first.is_some());
+        assert!(first.is_signaled());
         let second = deliver_signal(&subs, &events, approve(workflow_id, Some(json!({"n": 2}))))
             .await
             .unwrap();
-        assert!(second.is_none());
+        assert!(!second.is_signaled());
         assert_eq!(events.published.lock().unwrap().len(), 1);
     }
 
@@ -448,7 +460,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            retry.is_some(),
+            retry.is_signaled(),
             "a retry after a failed publish was refused"
         );
         assert_eq!(events.published.lock().unwrap().len(), 1);
