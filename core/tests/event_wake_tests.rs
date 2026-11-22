@@ -37,6 +37,7 @@ async fn wake_source(pool: &PgPool) -> PostgresEventSource {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_publish_wakes_receiver(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = wake_source(&pool).await;
     let mut rx = source.wake().expect("wake attached");
 
@@ -50,6 +51,7 @@ async fn test_publish_wakes_receiver(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_wake_before_wait_is_not_lost(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = wake_source(&pool).await;
     let mut rx = source.wake().unwrap();
 
@@ -61,6 +63,7 @@ async fn test_wake_before_wait_is_not_lost(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_every_receiver_wakes(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = wake_source(&pool).await;
     let mut a = source.wake().unwrap();
     let mut b = source.wake().unwrap();
@@ -73,6 +76,7 @@ async fn test_every_receiver_wakes(pool: PgPool) {
 /// The trigger, not the client, is the source of the notification
 #[sqlx::test(migrations = "../migrations")]
 async fn test_plain_sql_insert_wakes(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = wake_source(&pool).await;
     let mut rx = source.wake().unwrap();
 
@@ -90,6 +94,7 @@ async fn test_plain_sql_insert_wakes(pool: PgPool) {
 /// Notifications are delivered at commit; a rolled-back insert never wakes
 #[sqlx::test(migrations = "../migrations")]
 async fn test_notification_waits_for_commit(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = wake_source(&pool).await;
     let mut rx = source.wake().unwrap();
 
@@ -123,6 +128,7 @@ async fn test_notification_waits_for_commit(pool: PgPool) {
 /// trigger: the consumer wakes, polls, and finds nothing new
 #[sqlx::test(migrations = "../migrations")]
 async fn test_conflicting_insert_wakes_and_poll_is_empty(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = wake_source(&pool).await;
     let mut rx = source.wake().unwrap();
     let workflow_id = Uuid::now_v7();
@@ -145,6 +151,7 @@ async fn test_conflicting_insert_wakes_and_poll_is_empty(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_poll_mode_has_no_wake(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = PostgresEventSource::connect(pool.clone(), EventWakeMode::Poll)
         .await
         .unwrap();

@@ -52,6 +52,7 @@ async fn insert_workflow(
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_delayed_activity_execution(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create workflow with a 2-second delay
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -145,6 +146,7 @@ async fn test_delayed_activity_execution(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_scheduled_activity_execution(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Schedule activity for 3 seconds in the future
     let future_time = Utc::now() + ChronoDuration::seconds(3);
     let scheduled_time_str = future_time.to_rfc3339();
@@ -255,6 +257,7 @@ async fn test_scheduled_activity_execution(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_immediate_activity_unaffected(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create workflow without scheduling fields
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -336,6 +339,7 @@ async fn test_immediate_activity_unaffected(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_worker_respects_scheduled_for(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create workflow with 5-second delay
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -441,6 +445,7 @@ async fn test_worker_respects_scheduled_for(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_multiple_delayed_activities(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create workflow with chain of delays (rate limiting pattern)
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -629,6 +634,7 @@ async fn test_multiple_delayed_activities(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_delay_with_all_duration_units(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Test milliseconds
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),

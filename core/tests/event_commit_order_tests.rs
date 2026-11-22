@@ -73,6 +73,7 @@ async fn poll_ids(source: &PostgresEventSource, consumer: &str) -> Vec<Uuid> {
 /// was read must still be delivered.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_late_commit_is_not_skipped(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = PostgresEventSource::new(pool.clone());
 
     // A inserts first (lower id, lower xid) and stays open
@@ -115,6 +116,7 @@ async fn test_late_commit_is_not_skipped(pool: PgPool) {
 /// delivers it.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_lower_xid_with_higher_position_is_not_skipped(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = PostgresEventSource::new(pool.clone());
 
     // T1 takes an xid first
@@ -163,6 +165,7 @@ async fn test_lower_xid_with_higher_position_is_not_skipped(pool: PgPool) {
 /// even if it never touches workflow_events.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_unrelated_open_transaction_delays_delivery(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = PostgresEventSource::new(pool.clone());
 
     let mut blocker = pool.begin().await.unwrap();
@@ -185,6 +188,7 @@ async fn test_unrelated_open_transaction_delays_delivery(pool: PgPool) {
 /// transaction, and until the consumer's cursor has passed it.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_pending_events_are_reported_while_held_back(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = PostgresEventSource::new(pool.clone());
     let consumer = "pending-held-back";
 
@@ -227,6 +231,7 @@ async fn test_pending_events_are_reported_while_held_back(pool: PgPool) {
 /// commit will send a wake, so the consumer has no reason to retry early.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_uncommitted_events_are_not_pending(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = PostgresEventSource::new(pool.clone());
     let consumer = "pending-uncommitted";
 
@@ -246,6 +251,7 @@ async fn test_uncommitted_events_are_not_pending(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_read_only_transaction_does_not_delay_delivery(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = PostgresEventSource::new(pool.clone());
 
     let mut reader = pool.begin().await.unwrap();
@@ -266,6 +272,7 @@ async fn test_read_only_transaction_does_not_delay_delivery(pool: PgPool) {
 /// held back for as long as the outer transaction is open
 #[sqlx::test(migrations = "../migrations")]
 async fn test_savepoint_insert_carries_top_level_xid(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = PostgresEventSource::new(pool.clone());
 
     let mut outer = pool.begin().await.unwrap();
@@ -303,6 +310,7 @@ async fn test_savepoint_insert_carries_top_level_xid(pool: PgPool) {
 /// WebSocket replay (`get_events_from_id`) has the same guarantee as poll
 #[sqlx::test(migrations = "../migrations")]
 async fn test_replay_from_id_includes_late_commit(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = PostgresEventSource::new(pool.clone());
 
     let e0_id = publish(&source, &pool, Uuid::now_v7()).await;
@@ -365,6 +373,7 @@ async fn test_replay_from_id_includes_late_commit(pool: PgPool) {
 /// consumes an identity value, so positions are not gap-free in general.)
 #[sqlx::test(migrations = "../migrations")]
 async fn test_positions_increase(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = PostgresEventSource::new(pool.clone());
     for _ in 0..3 {
         publish(&source, &pool, Uuid::now_v7()).await;
@@ -381,6 +390,7 @@ async fn test_positions_increase(pool: PgPool) {
 /// update_position never moves a cursor backwards
 #[sqlx::test(migrations = "../migrations")]
 async fn test_update_position_is_forward_only(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = PostgresEventSource::new(pool.clone());
     for _ in 0..2 {
         publish(&source, &pool, Uuid::now_v7()).await;
@@ -404,6 +414,7 @@ async fn test_update_position_is_forward_only(pool: PgPool) {
 /// across, and its down migration restores them.
 #[sqlx::test(migrations = false)]
 async fn test_commit_order_migration_round_trip(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     const BEFORE: i64 = 20261101000001;
     let migrator = sqlx::migrate!("../migrations");
     migrator.run(&pool).await.unwrap();

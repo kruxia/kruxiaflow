@@ -154,6 +154,7 @@ impl Run {
 /// round 1's wait open: its subscription stays, and the step keeps waiting
 #[sqlx::test(migrations = "../migrations")]
 async fn test_replayed_signal_of_earlier_round_changes_nothing(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = Run::submit(pool, SELF_LOOP).await;
     run.publish(WorkflowEventType::ActivityCompleted, "start", None)
         .await;

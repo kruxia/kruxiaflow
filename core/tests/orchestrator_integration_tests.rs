@@ -53,6 +53,7 @@ async fn insert_workflow(
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_sequential_workflow_integration(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create workflow definition
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -203,6 +204,7 @@ async fn test_sequential_workflow_integration(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_parallel_workflow_integration(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create workflow definition with fan-out/fan-in
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -437,6 +439,7 @@ async fn test_parallel_workflow_integration(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_conditional_workflow_integration(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create workflow with conditional branching
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -572,6 +575,7 @@ async fn test_conditional_workflow_integration(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_workflow_completion_success(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create simple workflow with just one activity
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -698,6 +702,7 @@ async fn test_workflow_completion_success(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_workflow_failure(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create workflow with one activity that will fail
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -828,6 +833,7 @@ async fn test_workflow_failure(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_workflow_completion_with_multiple_activities(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create workflow with 3 sequential activities
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -957,6 +963,7 @@ async fn test_workflow_completion_with_multiple_activities(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_activity_scheduled_events_published(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
         name: "event_tracking".to_string(),
@@ -1032,6 +1039,7 @@ async fn test_activity_scheduled_events_published(pool: PgPool) {
 /// a long backoff wait is processed at once rather than when the timer fires
 #[sqlx::test(migrations = "../migrations")]
 async fn test_run_orchestrator_wakes_on_notify(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
         name: "wake_test_workflow".to_string(),
@@ -1137,6 +1145,7 @@ async fn test_run_orchestrator_wakes_on_notify(pool: PgPool) {
 async fn test_run_orchestrator_delivers_a_held_back_event_soon_after_its_blocker_ends(
     pool: PgPool,
 ) {
+    let pool = common::unshared_pool(&pool).await;
     use kruxiaflow_core::events::{EventWake, PostgresEventSource};
 
     let definition = WorkflowDefinition {
@@ -1251,6 +1260,7 @@ async fn test_run_orchestrator_delivers_a_held_back_event_soon_after_its_blocker
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_run_orchestrator_loop(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create simple workflow
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -1373,6 +1383,7 @@ async fn test_run_orchestrator_loop(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_orchestrator_backoff_when_no_events(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
     let activity_queue: Arc<dyn ActivityQueue> =
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
@@ -1426,6 +1437,7 @@ async fn test_orchestrator_backoff_when_no_events(pool: PgPool) {
 /// Expected behavior after fix: workflow gracefully transitions to Failed status.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_workflow_failed_with_incomplete_template_dependencies(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create workflow with template conditions that reference activity outputs
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -1582,6 +1594,7 @@ async fn test_workflow_failed_with_incomplete_template_dependencies(pool: PgPool
 /// conditions that depend on incomplete activities.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_workflow_failed_with_multiple_incomplete_dependencies(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create workflow with multiple activities that have complex conditions
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -1736,6 +1749,7 @@ async fn test_workflow_failed_with_multiple_incomplete_dependencies(pool: PgPool
 /// completion where activities complete successfully.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_normal_workflow_with_conditions_still_completes(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Same structure as template timeout test, but we complete activities properly
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -1930,6 +1944,7 @@ async fn test_normal_workflow_with_conditions_still_completes(pool: PgPool) {
 /// the Failed status without attempting to schedule more activities.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_workflow_failed_event_persists_status_immediately(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create a workflow that will be timed out
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -2071,6 +2086,7 @@ async fn test_workflow_failed_event_persists_status_immediately(pool: PgPool) {
 /// no new activities are scheduled (the early exit works correctly).
 #[sqlx::test(migrations = "../migrations")]
 async fn test_failed_workflow_does_not_schedule_activities(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
         name: "no_schedule_after_fail".to_string(),
@@ -2200,6 +2216,7 @@ async fn test_failed_workflow_does_not_schedule_activities(pool: PgPool) {
 /// they are processed without error and the Failed status is preserved.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_events_on_already_failed_workflow_handled_gracefully(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
         name: "events_after_fail".to_string(),
@@ -2352,6 +2369,7 @@ async fn test_events_on_already_failed_workflow_handled_gracefully(pool: PgPool)
 /// preventing any scheduling logic from running on terminal states.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_completed_workflow_early_exit(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
         name: "completed_early_exit".to_string(),
@@ -2515,6 +2533,7 @@ async fn test_completed_workflow_early_exit(pool: PgPool) {
 /// and publishes WorkflowFailed events for them.
 #[sqlx::test(migrations = "../migrations")]
 async fn test_check_and_timeout_stuck_workflows(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Create a simple workflow definition
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
@@ -2587,6 +2606,7 @@ async fn test_check_and_timeout_stuck_workflows(pool: PgPool) {
 /// Test that check_and_timeout_stuck_workflows does nothing when no workflows are stuck
 #[sqlx::test(migrations = "../migrations")]
 async fn test_check_and_timeout_no_stuck_workflows(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let event_source: Arc<dyn EventSource> = Arc::new(common::settled_event_source(pool.clone()));
 
     let config = OrchestratorConfig::new(pool.clone());

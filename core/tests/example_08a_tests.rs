@@ -183,17 +183,20 @@ async fn assert_pages(pool: PgPool, input: Value, pages: u32) {
 /// The documented submission: `{"num_pages": 3}` fetches pages 0, 1, 2
 #[sqlx::test(migrations = "../migrations")]
 async fn test_example_08a_documented_input(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     assert_pages(pool, json!({"num_pages": 3}), 3).await;
 }
 
 /// `num_pages` is read from the workflow input, not only defaulted
 #[sqlx::test(migrations = "../migrations")]
 async fn test_example_08a_num_pages_from_input(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     assert_pages(pool, json!({"num_pages": 2}), 2).await;
 }
 
 /// No input: the YAML's `default(3)` applies
 #[sqlx::test(migrations = "../migrations")]
 async fn test_example_08a_default_num_pages(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     assert_pages(pool, json!({}), 3).await;
 }
