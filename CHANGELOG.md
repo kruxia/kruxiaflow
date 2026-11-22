@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   requests; `settings.delay` applies only to an activity's first round, so
   it holds back the first request and the later ones are not spaced out.
   They now say so.
+- **`{{ACTIVITY.*}}` resolves.** `ACTIVITY.iteration`,
+  `ACTIVITY.accumulated_cost_usd` and `ACTIVITY.remaining_budget_usd` were
+  documented but never set, so any template using them failed with
+  "undefined value" (#32). `ACTIVITY` is now the activity whose templates
+  are being resolved: its parameters, `delay` and `scheduled_for`, and the
+  conditions on its own `depends_on`.
 - **The MCP activity catalog and authoring guide match the engine.** Both are
   hand-written, had drifted from the activities and the parser, and agents
   copy them verbatim. Because activity settings ignore unknown keys, several
@@ -132,6 +138,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   after `maybe` was skipped, but skips were applied after scheduling and
   publish no event, so nothing scheduled it and the workflow stayed `running`
   forever. Scheduling and skipping now repeat until a pass skips nothing.
+
+### Changed
+
+- **`ACTIVITY` costs are numbers.** `accumulated_cost_usd` and
+  `remaining_budget_usd` were strings such as `"7.50"`, which compare greater
+  than every number, so `{{ACTIVITY.accumulated_cost_usd < 5}}` was always
+  false. With no `settings.budget` on the activity, `remaining_budget_usd`
+  is `null` rather than `"0.00"`, which read as an exhausted budget.
 
 ## [0.12.4] - 2026-11-21
 

@@ -365,20 +365,41 @@ Template access:
 
 ### Special Context Variables
 
+`ACTIVITY` is the activity whose templates are being resolved: in its
+`parameters`, `delay` and `scheduled_for`, and in the conditions on its own
+`depends_on`. In a condition it is the activity the condition gates, not the
+activity the condition names (use `{{<key>.iteration}}` for that one).
+
+| Variable                            | Type           | Value                                                                                            |
+|-------------------------------------|----------------|--------------------------------------------------------------------------------------------------|
+| `{{ACTIVITY.iteration}}`            | integer        | The round being scheduled: 0, 1, 2, ... (the same as `{{<its key>.iteration}}`)                  |
+| `{{ACTIVITY.accumulated_cost_usd}}` | number         | USD this activity has spent in earlier rounds and failed attempts                                |
+| `{{ACTIVITY.remaining_budget_usd}}` | number or null | Its own `settings.budget.limit` minus `accumulated_cost_usd`, never below 0; null with no budget |
+| `{{ACTIVITY.status}}`               | string         | Its status, as in `{{<key>.status}}`                                                             |
+
 **Current Iteration Number** (0-based):
 ```yaml
 "{{ACTIVITY.iteration}}"  # 0, 1, 2, ...
 ```
 
-**Accumulated Cost** (across all iterations):
+**Accumulated Cost** (earlier rounds and attempts of this activity):
 ```yaml
-"{{ACTIVITY.accumulated_cost_usd}}"  # "7.50"
+"{{ACTIVITY.accumulated_cost_usd}}"  # 7.5
 ```
 
-**Remaining Budget**:
+**Remaining Budget** (this activity's `settings.budget.limit` minus its cost so far):
 ```yaml
-"{{ACTIVITY.remaining_budget_usd}}"  # "2.50"
+"{{ACTIVITY.remaining_budget_usd}}"                    # 2.5, or null with no budget
+"{{ACTIVITY.remaining_budget_usd | coalesce('n/a')}}"  # "n/a" with no budget
 ```
+
+Costs are numbers, so they compare and add as numbers
+(`{{ACTIVITY.accumulated_cost_usd < 5}}`). Embedded in text they print as
+numbers do: `7.5`, and `0.0` before anything is spent. A null
+`remaining_budget_usd` compares below every number, so
+`{{ACTIVITY.remaining_budget_usd < 1}}` is true for an activity without a
+budget: give the activity a budget, or `coalesce` the value, before using it
+in a condition. The workflow-level budget is not included.
 
 ### Conditions in Loops
 
@@ -400,12 +421,13 @@ depends_on:
 
 **Multiple Conditions** (all must be true):
 ```yaml
-depends_on:
-  - activity_key: check
-    conditions:
-      - "{{check.ready | last == false}}"      # Not ready yet
-      - "{{ACTIVITY.iteration < 10}}"           # Less than 10 iterations
-      - "{{ACTIVITY.accumulated_cost_usd < 5}}" # Under $5 spent
+- key: poll                                     # ACTIVITY is poll here
+  depends_on:
+    - activity_key: check
+      conditions:
+        - "{{check.ready | last == false}}"      # Not ready yet
+        - "{{ACTIVITY.iteration < 10}}"           # poll has run fewer than 10 rounds
+        - "{{ACTIVITY.accumulated_cost_usd < 5}}" # poll has spent under $5
 ```
 
 ---
@@ -438,10 +460,11 @@ Budget limits apply to the **total accumulated cost across all iterations**, not
 - Loop terminates
 - Orchestrator marks workflow as failed
 
-**`action: warn`**:
-- Log warning but continue execution
-- Budget can be exceeded
-- Use for soft limits
+**`action: continue`**:
+- The activity is not stopped before it runs
+- An LLM activity's worker still skips any model whose estimated cost would
+  exceed the limit, and the activity fails if no model is left
+- Use when a condition, not the budget, should end the loop
 
 ### Budget-Aware Loop Design
 
@@ -462,12 +485,13 @@ Loop stops at whichever limit is reached first.
   settings:
     budget:
       limit: 10.00
-      action: warn             # Don't abort, just warn
+      action: continue         # Don't stop it before it runs
   depends_on:
     - activity_key: evaluate
       conditions:
-        # Exit if sufficient OR budget running low
-        - "{{evaluate.sufficient | last == true || ACTIVITY.remaining_budget_usd < 1}}"
+        # Loop again only while not sufficient AND at least $1 of
+        # research_loop's budget is left
+        - "{{ evaluate.sufficient | last == false and ACTIVITY.remaining_budget_usd >= 1 }}"
 ```
 
 ---
@@ -499,7 +523,7 @@ Loop stops at whichever limit is reached first.
 ```yaml
 parameters:
   issue_number: "{{ACTIVITY.iteration + 1}}"  # 1, 2, 3 (not 0, 1, 2)
-  status: "Processing iteration {{ACTIVITY.iteration + 1}} of {{settings.iteration_limit}}"
+  status: "Processing iteration {{ACTIVITY.iteration + 1}} of 10"  # iteration_limit: 10
 ```
 
 ### 3. Set Appropriate Iteration Limits
