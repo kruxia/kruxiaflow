@@ -1698,6 +1698,34 @@ mod tests {
     }
 
     #[test]
+    fn test_build_condition_context_ignores_input_that_is_not_an_object() {
+        // The API accepts any JSON as a workflow's input. Only an object's
+        // fields can be INPUT fields; anything else adds none, and state_data
+        // is still read
+        for input in [
+            serde_json::json!(null),
+            serde_json::json!([1, 2]),
+            serde_json::json!(5),
+            serde_json::json!("text"),
+        ] {
+            let mut state = make_workflow_state(vec![]);
+            state.state_data = serde_json::json!({"mode": "fast"});
+            state.input = input.clone();
+
+            let context = build_condition_context(&state);
+            assert_eq!(
+                context.inputs.keys().collect::<Vec<_>>(),
+                vec!["mode"],
+                "input {input}"
+            );
+            assert!(
+                evaluate_condition("{{ INPUT.mode == 'fast' }}", &context).unwrap(),
+                "input {input}"
+            );
+        }
+    }
+
+    #[test]
     fn test_build_condition_context_exposes_activity_iteration() {
         let (key, mut activity) = make_activity_state("fetch", WorkflowActivityStatus::Completed);
         activity.iteration = 2;
