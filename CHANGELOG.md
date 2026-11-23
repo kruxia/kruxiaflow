@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A step's wait survives a restart.** A step that begins to wait for a
+- **A step's wait survives a restart** (#54). A step that begins to wait for a
   signal opens its subscription, then publishes `ActivityWaiting`. If the
   engine stopped between the two, the event that made the step ready was
   processed again on restart, opening the subscription failed with "already
