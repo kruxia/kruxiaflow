@@ -1,4 +1,4 @@
-use crate::events::{NewWorkflowEvent, insert_event};
+use crate::events::{NewWorkflowEvent, WorkflowEventType, insert_event};
 use crate::queue::{
     Activity, ActivityQueue, ActivityResult, ActivitySettings, ActivityStatus, ActivitySummary,
     FailureEvent, QueueConfig, QueueError, QueuedActivity, Result, StaleActivityAction,
@@ -271,12 +271,49 @@ impl ActivityQueue for PostgresQueue {
         _result: ActivityResult,
         event: NewWorkflowEvent,
     ) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
-        complete_on(&mut tx, activity_id, worker_id).await?;
-        // Also for an activity already completed: its event is written if
-        // it was missing, and dropped by the event dedup if not
-        insert_event(&mut *tx, &event).await?;
-        tx.commit().await?;
+        // One statement, so the completion and its event commit together in
+        // a single round trip
+        let mut conn = self.pool.acquire().await?;
+        let completed = sqlx::query_scalar!(
+            r#"
+            WITH done AS (
+                UPDATE activity_queue
+                SET status = 'completed'::activity_status,
+                    completed_at = NOW()
+                WHERE id = $1 AND claimed_by = $2 AND status = 'running'::activity_status
+                RETURNING id
+            ),
+            event AS (
+                INSERT INTO workflow_events (workflow_id, event_type, activity_key, payload, iteration)
+                SELECT $3::uuid, $4::workflow_event_type, $5::text, $6::jsonb, $7::integer
+                FROM done
+                ON CONFLICT (workflow_id, event_type, activity_key, iteration, ((payload->>'attempt'))) DO NOTHING
+            )
+            SELECT EXISTS (SELECT 1 FROM done) AS "completed!"
+            "#,
+            activity_id,
+            worker_id,
+            event.workflow_id,
+            event.event_type as WorkflowEventType,
+            event.activity_key,
+            event.payload,
+            event.iteration
+        )
+        .fetch_one(&mut *conn)
+        .await?;
+
+        if completed {
+            debug!(
+                activity_id = %activity_id,
+                worker_id = %worker_id,
+                "Activity marked as completed"
+            );
+            return Ok(());
+        }
+        not_completed(&mut conn, activity_id, worker_id).await?;
+        // Already completed by this worker: its event is written if it was
+        // missing, and dropped by the event dedup if not
+        insert_event(&mut *conn, &event).await?;
         Ok(())
     }
 
@@ -608,56 +645,63 @@ async fn complete_on(conn: &mut PgConnection, activity_id: Uuid, worker_id: &str
         );
         Ok(())
     } else {
-        // Check if activity exists to provide better error
-        let exists = sqlx::query!(
-            r#"
-                SELECT id, claimed_by, status AS "status: ActivityStatus"
-                FROM activity_queue
-                WHERE id = $1
-                "#,
-            activity_id
-        )
-        .fetch_optional(&mut *conn)
-        .await?;
+        not_completed(conn, activity_id, worker_id).await
+    }
+}
 
-        match exists {
-            Some(activity) => {
-                if activity.claimed_by.as_deref() != Some(worker_id) {
-                    error!(
-                        activity_id = %activity_id,
-                        expected_worker = ?activity.claimed_by,
-                        actual_worker = %worker_id,
-                        "Activity claimed by different worker"
-                    );
-                    Err(QueueError::ActivityReclaimed)
-                } else if activity.status == ActivityStatus::Completed {
-                    // Activity already completed - this is idempotent, return success
-                    debug!(
-                        activity_id = %activity_id,
-                        "Activity already completed (idempotent)"
-                    );
-                    Ok(())
-                } else {
-                    // Activity exists but status is wrong
-                    warn!(
-                        activity_id = %activity_id,
-                        status = ?activity.status,
-                        "Activity not in running state"
-                    );
-                    Err(QueueError::InvalidStatus {
-                        expected: "running".to_string(),
-                        actual: format!("{:?}", activity.status),
-                    })
-                }
-            }
-            None => {
-                // Activity doesn't exist (shouldn't happen with soft-delete)
+/// Why an activity that wasn't running under `worker_id` didn't complete: a
+/// success if this worker already completed it (a retried report), otherwise
+/// the error.
+async fn not_completed(conn: &mut PgConnection, activity_id: Uuid, worker_id: &str) -> Result<()> {
+    // Check if activity exists to provide better error
+    let exists = sqlx::query!(
+        r#"
+            SELECT id, claimed_by, status AS "status: ActivityStatus"
+            FROM activity_queue
+            WHERE id = $1
+            "#,
+        activity_id
+    )
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    match exists {
+        Some(activity) => {
+            if activity.claimed_by.as_deref() != Some(worker_id) {
+                error!(
+                    activity_id = %activity_id,
+                    expected_worker = ?activity.claimed_by,
+                    actual_worker = %worker_id,
+                    "Activity claimed by different worker"
+                );
+                Err(QueueError::ActivityReclaimed)
+            } else if activity.status == ActivityStatus::Completed {
+                // Activity already completed - this is idempotent, return success
                 debug!(
                     activity_id = %activity_id,
-                    "Activity not found"
+                    "Activity already completed (idempotent)"
                 );
-                Err(QueueError::ActivityNotFound(activity_id))
+                Ok(())
+            } else {
+                // Activity exists but status is wrong
+                warn!(
+                    activity_id = %activity_id,
+                    status = ?activity.status,
+                    "Activity not in running state"
+                );
+                Err(QueueError::InvalidStatus {
+                    expected: "running".to_string(),
+                    actual: format!("{:?}", activity.status),
+                })
             }
+        }
+        None => {
+            // Activity doesn't exist (shouldn't happen with soft-delete)
+            debug!(
+                activity_id = %activity_id,
+                "Activity not found"
+            );
+            Err(QueueError::ActivityNotFound(activity_id))
         }
     }
 }

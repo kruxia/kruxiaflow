@@ -1,0 +1,45 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH done AS (\n                UPDATE activity_queue\n                SET status = 'completed'::activity_status,\n                    completed_at = NOW()\n                WHERE id = $1 AND claimed_by = $2 AND status = 'running'::activity_status\n                RETURNING id\n            ),\n            event AS (\n                INSERT INTO workflow_events (workflow_id, event_type, activity_key, payload, iteration)\n                SELECT $3::uuid, $4::workflow_event_type, $5::text, $6::jsonb, $7::integer\n                FROM done\n                ON CONFLICT (workflow_id, event_type, activity_key, iteration, ((payload->>'attempt'))) DO NOTHING\n            )\n            SELECT EXISTS (SELECT 1 FROM done) AS \"completed!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "completed!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        {
+          "Custom": {
+            "name": "workflow_event_type",
+            "kind": {
+              "Enum": [
+                "WorkflowCreated",
+                "WorkflowUpdated",
+                "ActivityScheduled",
+                "ActivityCompleted",
+                "ActivityFailed",
+                "WorkflowCompleted",
+                "WorkflowFailed",
+                "ActivityWaiting",
+                "ActivitySignaled"
+              ]
+            }
+          }
+        },
+        "Text",
+        "Jsonb",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d01969c49ccf37711bebe38c477beb1e3e8130549f30af8b834dfc226b0ce6c7"
+}

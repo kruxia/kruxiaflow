@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                SELECT id, claimed_by, status AS \"status: ActivityStatus\"\n                FROM activity_queue\n                WHERE id = $1\n                ",
+  "query": "\n            SELECT id, claimed_by, status AS \"status: ActivityStatus\"\n            FROM activity_queue\n            WHERE id = $1\n            ",
   "describe": {
     "columns": [
       {
@@ -43,5 +43,5 @@
       false
     ]
   },
-  "hash": "e692842f8e48d3317172f3d6cf1c3fadb8a392e8ca4f906d05afe97d5b7f6249"
+  "hash": "99e6f7884fc086e1a97b4a145b09114b4f1e344730e9331ca32f35bc93936b49"
 }
