@@ -59,7 +59,7 @@ The engine's connections are the ones whose `application_name` is `kruxiaflow-ma
 
 ### Pull the plug
 
-`MACHINE_SHOP_PLUG=on` gives every run a twin. After the uninterrupted runs, the runner starts a fresh engine on the same database and runs each twin, and partway through, it pulls the plug:
+**Pulling the plug tests durable execution:** a workflow should survive the engine stopping at any moment, and pick up where it left off once the engine is back. `MACHINE_SHOP_PLUG=on` gives every run a twin. After the uninterrupted runs, the runner starts a fresh engine on the same database and runs each twin, and partway through, it pulls the plug:
 
 1. **It stops the engine abruptly.** The API server, orchestrator and std worker run in a Tokio runtime of their own, with their own connection pool. The runner shuts that runtime down at once, which drops every task the engine spawned: the poller, the partition handlers, the timeout checker, and any activity a worker is running.
 2. **It waits until PostgreSQL has seen the engine's connections go,** then reads how many events the twin has.
@@ -81,7 +81,7 @@ Each twin ends as one of four outcomes:
 | hung      | The uninterrupted run finished, and the twin hadn't within its card's timeout plus the grace     |
 | missed    | The plug wasn't pulled mid-run: the twin had already finished                                    |
 
-A twin that hasn't finished but doesn't match yet is read again until it matches, ends, or its card's timeout plus the grace passes; this matters most for a twin of a run that never finished, which stops waiting for the workflow to end five seconds past the card's timeout. A different or hung twin doesn't fail the test: it's a candidate engine finding, printed as a `PLUG:` line and listed in the scoreboard, with the twin's activity queue rows added to its differences.
+A twin that hasn't finished but doesn't match yet is read again until it matches, ends, or its card's timeout plus the grace passes; this matters most for a twin of a run that never finished, which stops waiting for the workflow to end five seconds past the card's timeout. A different or hung twin doesn't fail the test: it's a candidate engine finding, a place where durable execution doesn't hold yet, printed as a `PLUG:` line and listed in the scoreboard, with the twin's activity queue rows added to its differences.
 
 **Recovery takes time, and the twin's footprint shows it.** A step whose worker was stopped mid-activity keeps its claim on the queue row until the activity's timeout runs out (the engine's default is 60 seconds), and only then runs again. So a twin can come out identical and still take a minute longer, and the grace is 75 seconds by default.
 
