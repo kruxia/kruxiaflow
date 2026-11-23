@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A step's wait survives a restart** (#54). A step that begins to wait for a
+  signal opens its subscription, then publishes `ActivityWaiting`. If the
+  engine stopped between the two, the event that made the step ready was
+  processed again on restart, opening the subscription failed with "already
+  exists", and the step was marked failed. Opening the same round's wait
+  again now finds the open one, and the step waits on it with its original
+  timeout.
+
 ## [0.12.5] - 2026-11-22
 
 ### Added
@@ -25,13 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A step's wait survives a restart** (#54). A step that begins to wait for a
-  signal opens its subscription, then publishes `ActivityWaiting`. If the
-  engine stopped between the two, the event that made the step ready was
-  processed again on restart, opening the subscription failed with "already
-  exists", and the step was marked failed. Opening the same round's wait
-  again now finds the open one, and the step waits on it with its original
-  timeout.
 - **`INPUT` in a condition is the workflow input.** Conditions read `INPUT`
   from `state_data`, which submission leaves empty, so every `INPUT.*` in a
   `depends_on` condition was undefined: it failed the workflow, or with a
