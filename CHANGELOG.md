@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The MCP server can advertise sandboxed `run_code` from an add-on.**
+  `--mcp-run-code-contract` (`KRUXIAFLOW_MCP_RUN_CODE_CONTRACT`) points the
+  server at the contract the kruxiaflow-monty add-on writes. With it,
+  `list_activities` lists `run_code` under the add-on's worker type, the
+  authoring guide gains a `sandboxed_code` section (rules, modules,
+  capabilities with their Python signatures, limit ceilings, error kinds and
+  a repair-loop example), and a new tool, `get_run_code_contract`, returns
+  the contract. Without it nothing changes, except that `script` is now
+  marked as not sandboxed in the catalog, and the guide recommends guarding
+  references to steps that may not have run with their status.
+
 ## [0.12.5] - 2026-11-22
 
 ### Added

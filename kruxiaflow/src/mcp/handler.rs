@@ -32,6 +32,9 @@ pub struct KruxiaFlowMcpHandler {
     pub config: Arc<McpConfig>,
     pub pool: PgPool,
     pub cache: Arc<dyn kruxiaflow_core::CacheService>,
+    /// The kruxiaflow-monty add-on's `run_code` contract, when this server is
+    /// configured with it; `None` hides `run_code` from the discovery tools
+    pub run_code_contract: Option<serde_json::Value>,
 }
 
 impl KruxiaFlowMcpHandler {
@@ -44,7 +47,14 @@ impl KruxiaFlowMcpHandler {
             config,
             pool,
             cache,
+            run_code_contract: None,
         }
+    }
+
+    /// Advertise `run_code` in the discovery tools, with its contract
+    pub fn with_run_code_contract(mut self, contract: Option<serde_json::Value>) -> Self {
+        self.run_code_contract = contract;
+        self
     }
 }
 
@@ -88,7 +98,8 @@ impl ServerHandler for KruxiaFlowMcpHandler {
             | "get_workflow_authoring_guide"
             | "search_llm_models"
             | "list_llm_providers"
-            | "check_system_health" => {
+            | "check_system_health"
+            | "get_run_code_contract" => {
                 let tool = DiscoveryTools::try_from(params).map_err(CallToolError::new)?;
                 match tool {
                     DiscoveryTools::ListWorkflowDefinitions(ref p) => {
@@ -97,9 +108,17 @@ impl ServerHandler for KruxiaFlowMcpHandler {
                     DiscoveryTools::GetWorkflowDefinition(ref p) => {
                         discovery::run_get_workflow_definition(&self.pool, p).await
                     }
-                    DiscoveryTools::ListActivities(ref p) => discovery::run_list_activities(p),
+                    DiscoveryTools::ListActivities(ref p) => {
+                        discovery::run_list_activities(p, self.run_code_contract.as_ref())
+                    }
                     DiscoveryTools::GetWorkflowAuthoringGuide(ref p) => {
-                        discovery::run_get_workflow_authoring_guide(p)
+                        discovery::run_get_workflow_authoring_guide(
+                            p,
+                            self.run_code_contract.as_ref(),
+                        )
+                    }
+                    DiscoveryTools::GetRunCodeContract(ref p) => {
+                        discovery::run_get_run_code_contract(p, self.run_code_contract.as_ref())
                     }
                     DiscoveryTools::SearchLlmModels(ref p) => {
                         discovery::run_search_llm_models(&self.pool, p).await
