@@ -10,9 +10,7 @@ use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum_test::TestServer;
 use bcrypt::hash;
 use kruxiaflow_api::{AppState, app_router};
-use kruxiaflow_core::events::{
-    EventCursor, EventError, EventSource, NewWorkflowEvent, PostgresEventSource, WorkflowEvent,
-};
+use kruxiaflow_core::events::{EventSource, PostgresEventSource};
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_core::subscription::NewSubscription;
 use kruxiaflow_core::workflow::OnTimeout;
@@ -21,7 +19,6 @@ use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -36,33 +33,20 @@ async fn start(pool: PgPool) -> Api {
     start_with(pool.clone(), Arc::new(PostgresEventSource::new(pool))).await
 }
 
-/// An event source whose first publish fails, as a database error would
-struct FailFirstPublish {
-    inner: PostgresEventSource,
-    failed: AtomicBool,
-}
-
-#[async_trait::async_trait]
-impl EventSource for FailFirstPublish {
-    async fn publish(&self, event: NewWorkflowEvent) -> kruxiaflow_core::events::Result<()> {
-        if !self.failed.swap(true, Ordering::SeqCst) {
-            return Err(EventError::Database(sqlx::Error::Protocol(
-                "connection lost".to_string(),
-            )));
-        }
-        self.inner.publish(event).await
-    }
-
-    async fn poll(&self, consumer_id: &str) -> kruxiaflow_core::events::Result<Vec<WorkflowEvent>> {
-        self.inner.poll(consumer_id).await
-    }
-
-    async fn update_position(
-        &self,
-        consumer_id: &str,
-        cursor: EventCursor,
-    ) -> kruxiaflow_core::events::Result<()> {
-        self.inner.update_position(consumer_id, cursor).await
+/// Make the next insert into `workflow_events` fail, once, as a database
+/// error would. The sequence isn't rolled back, so only the first fails.
+async fn fail_next_event(pool: &PgPool) {
+    for statement in [
+        "CREATE SEQUENCE fail_next_event",
+        "CREATE FUNCTION fail_next_event() RETURNS trigger LANGUAGE plpgsql AS $$ \
+         BEGIN \
+           IF nextval('fail_next_event') = 1 THEN RAISE EXCEPTION 'connection lost'; END IF; \
+           RETURN NEW; \
+         END $$",
+        "CREATE TRIGGER fail_next_event BEFORE INSERT ON workflow_events \
+         FOR EACH ROW EXECUTE FUNCTION fail_next_event()",
+    ] {
+        sqlx::query(statement).execute(pool).await.unwrap();
     }
 }
 
@@ -308,18 +292,12 @@ async fn test_signal_after_expiry_with_data(pool: PgPool) {
     signal_after_expiry(pool, Some(json!({"n": 1}))).await;
 }
 
-/// A signal whose event fails to publish gets an error and leaves the wait
-/// open: a retry is accepted and publishes the event
+/// A signal whose event can't be written gets an error and records nothing:
+/// the wait is open, and a retry is accepted and writes the event
 async fn failed_publish_then_retry(pool: PgPool, data: Option<Value>) {
-    let api = start_with(
-        pool.clone(),
-        Arc::new(FailFirstPublish {
-            inner: PostgresEventSource::new(pool),
-            failed: AtomicBool::new(false),
-        }),
-    )
-    .await;
+    let api = start(pool.clone()).await;
     let id = api.waiting_workflow(600).await;
+    fail_next_event(&pool).await;
 
     let (status, body) = api.signal_status(id, data.clone()).await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
@@ -341,18 +319,12 @@ async fn test_failed_publish_then_retry_with_data(pool: PgPool) {
     failed_publish_then_retry(pool, Some(json!({"n": 1}))).await;
 }
 
-/// A wait whose signal failed to publish still times out
+/// A wait whose signal's event couldn't be written still times out
 #[sqlx::test(migrations = "../migrations")]
 async fn test_failed_publish_wait_still_expires(pool: PgPool) {
-    let api = start_with(
-        pool.clone(),
-        Arc::new(FailFirstPublish {
-            inner: PostgresEventSource::new(pool),
-            failed: AtomicBool::new(false),
-        }),
-    )
-    .await;
+    let api = start(pool.clone()).await;
     let id = api.waiting_workflow(0).await;
+    fail_next_event(&pool).await;
 
     let (status, body) = api.signal_status(id, Some(json!({"n": 1}))).await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "{body}");
