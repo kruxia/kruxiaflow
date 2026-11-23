@@ -18,6 +18,35 @@ const CLUSTER_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 /// A writing transaction open longer than this is reported as a possible stall
 const STALL_TRANSACTION_AGE_SECS: f64 = 30.0;
 
+/// Write `event` to the PostgreSQL event store on `executor`, which may be a
+/// caller's transaction: the event is then written if, and only if, the
+/// transaction commits, together with the change it records.
+///
+/// What [`PostgresEventSource::publish`] does; idempotent the same way.
+pub async fn insert_event<'e, E>(
+    executor: E,
+    event: &NewWorkflowEvent,
+) -> std::result::Result<(), sqlx::Error>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    sqlx::query!(
+        r#"
+        INSERT INTO workflow_events (workflow_id, event_type, activity_key, payload, iteration)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (workflow_id, event_type, activity_key, iteration, ((payload->>'attempt'))) DO NOTHING
+        "#,
+        event.workflow_id,
+        event.event_type as WorkflowEventType,
+        event.activity_key,
+        event.payload,
+        event.iteration
+    )
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
 /// PostgreSQL-based event source implementation
 ///
 /// # Delivery
@@ -201,21 +230,7 @@ impl EventSource for PostgresEventSource {
     /// - Database assigns id (UUIDv7), timestamp, position and tx
     #[tracing::instrument(skip(self), level = "debug")]
     async fn publish(&self, event: NewWorkflowEvent) -> Result<()> {
-        sqlx::query!(
-            r#"
-            INSERT INTO workflow_events (workflow_id, event_type, activity_key, payload, iteration)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (workflow_id, event_type, activity_key, iteration, ((payload->>'attempt'))) DO NOTHING
-            "#,
-            event.workflow_id,
-            event.event_type as WorkflowEventType,
-            event.activity_key,
-            event.payload,
-            event.iteration
-        )
-        .execute(&self.pool)
-        .await?;
-
+        insert_event(&self.pool, &event).await?;
         Ok(())
     }
 

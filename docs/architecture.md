@@ -2961,9 +2961,20 @@ so a wait ends once: by its signal or by its timeout. Each is a single
 `UPDATE` of the row, so concurrent signals and the checker serialize on its
 row lock. The checker repeats its conditions outside its `id IN (subquery)`,
 because PostgreSQL re-checks only those on a row changed under it. The mark
-and the `ActivitySignaled` publish are two statements: if the publish fails,
-the API clears the mark again (`release_signal`) and answers 500, so the
-client can retry and the timeout still applies.
+and its `ActivitySignaled` event are written in one transaction
+(`PostgresSubscriptionService::signal_activity`, and `hold_signal` when the
+wait opened meanwhile, both through `events::insert_event`): if the event
+can't be written, neither is recorded, the API answers 500, and the client
+can retry while the timeout still applies. An engine that stops partway
+leaves the wait open the same way. As two writes, with the mark cleared again
+only when the publish returned an error, a stop between them left the wait
+signaled with no event, and the step waiting for good (#56).
+
+**Why** one transaction: the MVP keeps subscriptions and the event store in
+one PostgreSQL database, so it is exact and adds no moving parts. It ties the
+subscription service to the PostgreSQL event store: an event store outside
+PostgreSQL (post-MVP Kafka) would write the event to an outbox table in the
+same transaction and relay it from there.
 
 **Why**: the "signaled" marker used to be `signal_data IS NULL`. A signal
 without `data` left the row looking unsignaled until the orchestrator deleted

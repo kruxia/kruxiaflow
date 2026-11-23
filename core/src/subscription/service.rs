@@ -37,6 +37,11 @@ pub trait SubscriptionService: Send + Sync {
     /// Returns the subscription if found, event_name matches and the wait is
     /// still open (not already signaled, not expired), None otherwise.
     /// A wait takes one signal, with or without data.
+    ///
+    /// The wait is marked signaled and its `ActivitySignaled` event written
+    /// ([`super::activity_signaled_event`]) in one transaction: both are
+    /// recorded or neither is, so an engine that stops partway leaves the
+    /// wait open for the signal to be sent again (#56).
     async fn signal_activity(&self, request: SignalRequest)
     -> Result<Option<ActivitySubscription>>;
 
@@ -45,16 +50,12 @@ pub trait SubscriptionService: Send + Sync {
     /// with `hold_early`, and otherwise say why it is refused (#42).
     ///
     /// Returns [`SignalOutcome::Signaled`] if the wait opened in the meantime
-    /// and took the signal; the caller then publishes its event as usual.
+    /// and took the signal, with its `ActivitySignaled` event written as by
+    /// [`Self::signal_activity`].
     /// The default refuses every such signal as not waiting.
     async fn hold_signal(&self, _request: SignalRequest) -> Result<SignalOutcome> {
         Ok(SignalOutcome::Refused(SignalRefusal::NotWaiting))
     }
-
-    /// Undo a signal whose ActivitySignaled event could not be published, so
-    /// the wait is open again: a retried signal is accepted, and the expiry
-    /// checker can time the wait out
-    async fn release_signal(&self, subscription_id: Uuid) -> Result<()>;
 
     /// Get signal data for an activity (if it was signaled)
     async fn get_signal_data(&self, workflow_id: Uuid, activity_key: &str)
