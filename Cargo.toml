@@ -9,6 +9,9 @@ members = [
     "worker-sdk",
     "profiling",
 ]
+# Add-ons with toolchains or dependencies of their own (contrib/*/), each its
+# own Cargo workspace
+exclude = ["contrib"]
 resolver = "2"
 
 # Release flow: `cargo release <version> --execute` bumps this version,
