@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A signal is never taken without its event** (#56). Signaling a
+  waiting step marked its wait signaled, then published `ActivitySignaled`
+  as a separate write. If the engine stopped between the two, the wait
+  stayed signaled with no event: the step waited for good, and every later
+  signal was refused with "No waiting activity found". Both now commit in
+  one transaction, so a stop leaves the wait open for the signal to be sent
+  again. `deliver_signal` no longer takes an event source, and
+  `SubscriptionService::release_signal`, which undid a mark after a failed
+  publish, is gone.
+
 ## [0.12.5] - 2026-11-22
 
 ### Added
@@ -25,15 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A signal is never taken without its event** (#56). Signaling a
-  waiting step marked its wait signaled, then published `ActivitySignaled`
-  as a separate write. If the engine stopped between the two, the wait
-  stayed signaled with no event: the step waited for good, and every later
-  signal was refused with "No waiting activity found". Both now commit in
-  one transaction, so a stop leaves the wait open for the signal to be sent
-  again. `deliver_signal` no longer takes an event source, and
-  `SubscriptionService::release_signal`, which undid a mark after a failed
-  publish, is gone.
 - **`INPUT` in a condition is the workflow input.** Conditions read `INPUT`
   from `state_data`, which submission leaves empty, so every `INPUT.*` in a
   `depends_on` condition was undefined: it failed the workflow, or with a
