@@ -6,8 +6,8 @@ another system. The signal can carry data, which the step reads as
 `{{SIGNAL}}`. If no signal arrives in time, the step fails, is skipped, or
 runs anyway, as you choose.
 
-> **Which version this describes.** This page describes the release after
-> v0.12.4. In v0.12.4 and earlier:
+> **Which version this describes.** This page describes v0.12.5. In v0.12.4
+> and earlier:
 >
 > - `SIGNAL` is never set, and a step that uses `{{SIGNAL.*}}` fails before
 >   it can wait ([#37](https://github.com/kruxia/kruxiaflow/issues/37)).
