@@ -30,7 +30,11 @@ pub type Result<T> = std::result::Result<T, SubscriptionError>;
 /// Service for managing activity event subscriptions
 #[async_trait]
 pub trait SubscriptionService: Send + Sync {
-    /// Create a new subscription for an activity waiting for a signal
+    /// Create a new subscription for an activity waiting for a signal.
+    ///
+    /// An activity has one wait per loop round: creating the wait of a round
+    /// that already has one returns that subscription's id, unchanged.
+    /// `AlreadyExists` means the activity has a wait from another round.
     async fn create_subscription(&self, subscription: NewSubscription) -> Result<Uuid>;
 
     /// Signal an activity, transitioning it from waiting to pending

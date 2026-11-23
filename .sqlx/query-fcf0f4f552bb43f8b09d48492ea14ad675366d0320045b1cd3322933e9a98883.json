@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id\n            FROM activity_event_subscriptions\n            WHERE workflow_id = $1\n              AND activity_key = $2\n              AND iteration IS NOT DISTINCT FROM $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "fcf0f4f552bb43f8b09d48492ea14ad675366d0320045b1cd3322933e9a98883"
+}

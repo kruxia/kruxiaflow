@@ -34,11 +34,16 @@ impl SubscriptionService for PostgresSubscriptionService {
             OnTimeout::Fail => "fail",
         };
 
-        let row = sqlx::query!(
+        // One wait per activity and loop round. The same round's wait, created
+        // again, is the one already open: a pass that opened it can stop before
+        // the workflow's state is saved, and the event that made the activity
+        // ready is then processed again. The open wait keeps its timeout.
+        let inserted = sqlx::query_scalar!(
             r#"
             INSERT INTO activity_event_subscriptions
                 (workflow_id, activity_key, event_name, on_timeout, timeout_at, iteration)
             VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (workflow_id, activity_key) DO NOTHING
             RETURNING id
             "#,
             subscription.workflow_id,
@@ -48,21 +53,31 @@ impl SubscriptionService for PostgresSubscriptionService {
             timeout_at,
             subscription.iteration
         )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| {
-            if let sqlx::Error::Database(ref db_err) = e
-                && db_err.is_unique_violation()
-            {
-                return SubscriptionError::AlreadyExists(
-                    subscription.workflow_id,
-                    subscription.activity_key.clone(),
-                );
-            }
-            SubscriptionError::Database(e)
-        })?;
+        .fetch_optional(&self.pool)
+        .await?;
+        if let Some(id) = inserted {
+            return Ok(id);
+        }
 
-        Ok(row.id)
+        let same_round = sqlx::query_scalar!(
+            r#"
+            SELECT id
+            FROM activity_event_subscriptions
+            WHERE workflow_id = $1
+              AND activity_key = $2
+              AND iteration IS NOT DISTINCT FROM $3
+            "#,
+            subscription.workflow_id,
+            subscription.activity_key,
+            subscription.iteration
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        same_round.ok_or(SubscriptionError::AlreadyExists(
+            subscription.workflow_id,
+            subscription.activity_key,
+        ))
     }
 
     async fn signal_activity(
