@@ -2557,6 +2557,9 @@ pub trait ActivityQueue: Send + Sync {
     async fn schedule(&self, workflow_id: Uuid, activities: Vec<Activity>) -> Result<()>;
     async fn claim_next(&self, worker: &str, name: &str) -> Result<Option<QueuedActivity>>;
     async fn complete(&self, activity_id: Uuid, result: ActivityResult) -> Result<()>;
+    // A worker's report: the queue change and its event in one transaction
+    async fn complete_with_event(&self, activity_id: Uuid, result: ActivityResult, event: NewWorkflowEvent) -> Result<()>;
+    async fn fail_with_event(&self, activity_id: Uuid, retryable: bool, result: ActivityResult, event: FailureEvent) -> Result<bool>;
     async fn heartbeat(&self, activity_id: Uuid) -> Result<()>;
 }
 
@@ -2708,6 +2711,12 @@ KRUXIAFLOW_QUEUE_PROVIDER=sqs
 KRUXIAFLOW_QUEUE_SQS_URL=https://sqs.us-east-1.amazonaws.com/123456/kruxiaflow-activities
 KRUXIAFLOW_QUEUE_SQS_REGION=us-east-1
 ```
+
+**A worker's report and its event commit together**
+
+A worker's completion or failure changes the activity's queue row and writes the event the orchestrator acts on (`ActivityCompleted` or `ActivityFailed`). `PostgresQueue::complete_with_event` and `fail_with_event` do both in one transaction, writing the event with `events::insert_event`, the same insert `PostgresEventSource::publish` makes. If the engine stops partway, neither is recorded: the row is still the worker's running claim, so the claim timeout runs the activity again, and a retried report succeeds. A row already completed by the same worker is a success, and its event is written again, which the event dedup drops if it exists. As two separate writes, a stop between them left the row completed with no event, so the activity never ran again and its workflow never moved on (#55).
+
+**Why:** the MVP keeps the queue and the event store in one PostgreSQL database, so one transaction is exact and costs no new moving parts. It ties `PostgresQueue` to the PostgreSQL event store: a queue or an event store outside PostgreSQL (post-MVP SQS or Kafka) would write the event to an outbox table in the queue's transaction and relay it from there, instead of calling `insert_event`.
 
 **Worker wake: claiming without a short poll timer**
 

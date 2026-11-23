@@ -826,7 +826,7 @@ mod tests {
     }
 
     fn test_service() -> ActivityWorkerService {
-        ActivityWorkerService::new(Arc::new(MockActivityQueue), Arc::new(MockEventSource))
+        ActivityWorkerService::new(Arc::new(MockActivityQueue))
     }
 
     fn test_state(pool: sqlx::PgPool) -> AppState {

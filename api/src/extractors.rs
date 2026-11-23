@@ -101,9 +101,6 @@ impl FromRequestParts<AppState> for ActivityWorkerService {
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
         // Use the configured queue and event source from AppState (swappable via configuration)
-        Ok(ActivityWorkerService::new(
-            state.activity_queue.clone(),
-            state.event_source.clone(),
-        ))
+        Ok(ActivityWorkerService::new(state.activity_queue.clone()))
     }
 }

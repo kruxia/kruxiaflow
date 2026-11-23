@@ -3979,6 +3979,8 @@ mod tests {
             async fn get_activity_summary(&self, activity_id: Uuid) -> std::result::Result<ActivitySummary, crate::queue::QueueError>;
             async fn complete(&self, activity_id: Uuid, worker_id: &str, result: QueueActivityResult) -> std::result::Result<(), crate::queue::QueueError>;
             async fn fail(&self, activity_id: Uuid, worker_id: &str, retryable: bool, result: QueueActivityResult) -> std::result::Result<bool, crate::queue::QueueError>;
+            async fn complete_with_event(&self, activity_id: Uuid, worker_id: &str, result: QueueActivityResult, event: NewWorkflowEvent) -> std::result::Result<(), crate::queue::QueueError>;
+            async fn fail_with_event(&self, activity_id: Uuid, worker_id: &str, retryable: bool, result: QueueActivityResult, event: crate::queue::FailureEvent) -> std::result::Result<bool, crate::queue::QueueError>;
             async fn heartbeat(&self, activity_id: Uuid, worker_id: &str) -> std::result::Result<(), crate::queue::QueueError>;
             async fn cancel_pending(&self, workflow_id: Uuid, activity_key: &str, iteration: Option<i32>) -> std::result::Result<bool, crate::queue::QueueError>;
             async fn cancel_workflow_pending(&self, workflow_id: Uuid) -> std::result::Result<u64, crate::queue::QueueError>;

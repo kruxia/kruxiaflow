@@ -729,7 +729,7 @@ activities:
             .insert("token".to_string(), "t0ken".to_string());
         let harness = Self {
             workflow_id: Uuid::now_v7(),
-            worker: ActivityWorkerService::new(activity_queue.clone(), event_source.clone()),
+            worker: ActivityWorkerService::new(activity_queue.clone()),
             subscription_service: Arc::new(PostgresSubscriptionService::new(pool.clone())),
             without_secret: OrchestratorConfig::new(pool.clone()),
             event_source,
