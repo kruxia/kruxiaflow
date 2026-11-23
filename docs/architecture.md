@@ -752,6 +752,48 @@ HTML/text email via SMTP.
 - SMTP URL configuration (supports authentication)
 - Template variable substitution in body
 
+### 5. Add-on Activities: run_code
+
+`run_code` runs untrusted, typically LLM-written, Python in a [Pydantic Monty](https://github.com/pydantic/monty) sandbox. It is not a built-in activity: it runs in the **kruxiaflow-monty add-on** (`contrib/kruxiaflow-monty`), a separate worker on the worker SDK, and its steps name `worker: monty`. Full guide: [Sandboxed Code (`run_code`)](run-code.md).
+
+```yaml
+- key: run_rule
+  worker: monty
+  activity_name: run_code
+  parameters:
+    code: "{{write_rule.result.content}}"
+    inputs:
+      orders: "{{INPUT.orders}}"
+    capabilities: [log, now]
+    limits:
+      max_feed_duration_secs: 2
+```
+
+**How it fits**:
+
+```mermaid
+flowchart LR
+    API[Engine API] -->|poll, complete| Addon[kruxiaflow-monty<br/>worker SDK]
+    Addon -->|checkout| Pool[Monty pool<br/>monty-pool crate]
+    Pool -->|stdio protocol| W1[monty worker process]
+    Pool -->|stdio protocol| W2[monty worker process]
+    W1 -.->|host call: log, now, ...| Addon
+    Addon -.->|answer, or NameError if not granted| W1
+    Addon -->|kruxiaflow-monty contract| Contract[contract JSON]
+    Contract -->|--mcp-run-code-contract| MCP[Engine MCP server]
+```
+
+- **A separate worker.** The add-on claims `run_code` steps by worker type, like any external worker, and reports their results through the API. It holds the API URL and a worker's client credentials, not database credentials.
+- **Process isolation.** Code runs in `monty` worker subprocesses managed by one pool in the add-on. A crash kills one subprocess, and the pool replaces it. The binary's path and version are checked at start-up.
+- **Capabilities.** The only route to the host is a capability compiled into the add-on (`json_path`, `now`, `log`, `fail`). Each call is checked against the step's granted list when it arrives.
+- **Outcomes complete the step.** Type errors, exceptions, tripped limits and host-side kills caused by the code complete the activity with `result.ok: false` and a model-facing `error`, so a loop can feed the error back to the model. Invalid parameters fail it without retries; infrastructure failures fail it and retry.
+- **Run record.** `result.run` carries the effective limits, measured execution time and host calls, the capabilities granted and called, the Monty version and a hash of the code. It lives in the output because the completion API carries no result metadata.
+- **Discovery.** The engine's MCP server lists `run_code` only when it is given the add-on's contract (`--mcp-run-code-contract`), a JSON file `kruxiaflow-monty contract` writes from the add-on's own capability registry and settings.
+
+**Why** a subprocess pool (2026-11-18): Monty runs through `monty-pool`'s subprocesses, not the in-process `monty` crate and not a Python worker. The in-process crate cannot contain an interpreter abort, which would take the whole worker down. A Python worker could not yet report LLM usage, which a metered `llm()` capability needs.
+
+**Why** an add-on (2026-11-22): Monty needs Rust 1.98 or newer and pins its crates exactly, and its binary nearly doubles the engine's Docker image. As an add-on in its own Cargo workspace, none of that reaches the engine: no feature flag, no toolchain or shared-dependency change, the same image and release binaries. The cost is one more process beside `serve`, and an MCP contract file to keep in step with the add-on's settings.
+
 ---
 
 ## Data Architecture

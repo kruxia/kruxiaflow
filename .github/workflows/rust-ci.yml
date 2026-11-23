@@ -169,3 +169,90 @@ jobs:
           # Flip to true once the first upload succeeds, so upload regressions
           # are visible instead of silently green.
           fail_ci_if_error: false
+
+  # The kruxiaflow-monty add-on (contrib/kruxiaflow-monty: run_code,
+  # sandboxed Python on Pydantic Monty) is its own Cargo workspace, which the
+  # jobs above don't build. This job lints it and runs its tests against the
+  # real `monty` worker binary, pinned to exactly the version of its
+  # monty-pool pin (the worker refuses a mismatch at start-up). Keep
+  # MONTY_VERSION here, the add-on's Dockerfile ARG and MONTY_VERSION in
+  # contrib/kruxiaflow-monty/src/run_code/config.rs in step.
+  monty-addon:
+    name: Monty add-on (run_code)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: contrib/kruxiaflow-monty
+    env:
+      MONTY_VERSION: "1.6.0"
+      # The end-to-end test compiles the engine crates; their query data is
+      # the engine's
+      SQLX_OFFLINE_DIR: ${{ github.workspace }}/.sqlx
+    # For the Example 16a end-to-end test (the engine's API and orchestrator
+    # in-process, and this worker). #[sqlx::test] creates its own per-test
+    # databases on this server.
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_USER: kruxiaflow
+          POSTGRES_PASSWORD: kruxiaflow_test
+          POSTGRES_DB: kruxiaflow
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contrib/kruxiaflow-monty
+          cache-on-failure: true
+
+      # monty-runtime publishes no prebuilt binaries, so the worker is built
+      # from source once per version and cached
+      - name: Cache the monty worker binary
+        id: monty-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/monty-bin
+          key: monty-runtime-${{ env.MONTY_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install the monty worker binary
+        if: steps.monty-cache.outputs.cache-hit != 'true'
+        run: |
+          CARGO_PROFILE_RELEASE_STRIP=symbols cargo install monty-runtime \
+            --version "$MONTY_VERSION" --locked --root ~/monty-bin
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      # Unit tests, the sandbox integration tests against real Monty workers,
+      # and the Example 16a end-to-end test (needs the database)
+      - name: Test
+        env:
+          DATABASE_URL: postgres://kruxiaflow:kruxiaflow_test@localhost:5432/kruxiaflow
+        run: |
+          export KRUXIAFLOW_MONTY_BINARY="$HOME/monty-bin/bin/monty"
+          "$KRUXIAFLOW_MONTY_BINARY" --version
+          cargo nextest run

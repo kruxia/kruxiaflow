@@ -135,6 +135,10 @@ cargo test test_name
 cargo test -p kruxiaflow-core
 ```
 
+### The `run_code` add-on (`contrib/kruxiaflow-monty`)
+
+The add-on is its own Cargo workspace (Rust 1.98 or newer), so `./scripts/test.sh` and the engine's CI jobs don't build it. When you change it, or the worker SDK or engine code it uses, run its checks from its directory, as the `Monty add-on (run_code)` CI job does: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and `cargo nextest run`. See [docs/testing.md](docs/testing.md#sandboxed-code-run_code-add-on-tests).
+
 ### Writing Tests
 
 - Write unit tests for new functionality

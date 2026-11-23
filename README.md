@@ -221,6 +221,27 @@ Inside a loop, the activity waits again in each round, for that round's signal.
 See [Signals: Human-in-the-Loop Waits](docs/signals.md) for timeouts, the
 signal's data, finding waiting workflows, and known limits.
 
+
+### Sandboxed Code for Model-Written Steps (add-on)
+
+"Governed code mode": an LLM writes a step as Python, and the `run_code` activity runs it in a
+[Pydantic Monty](https://github.com/pydantic/monty) sandbox, with no filesystem, network or
+environment, and only the host functions the step grants. Hard limits apply to memory, time,
+recursion and host calls, and every run records what it was allowed and what it used. Errors
+complete the step with a message for the model, so a budgeted loop can let the model repair its
+own code. It runs in the **kruxiaflow-monty add-on** ([`contrib/kruxiaflow-monty`](contrib/kruxiaflow-monty/)),
+a worker beside the engine, so the engine's binary and image don't change. See [Sandboxed Code](docs/run-code.md).
+
+```yaml
+- key: run_rule
+  worker: monty
+  activity_name: run_code
+  parameters:
+    code: "{{write_rule.result.content}}"   # Python an LLM just wrote
+    inputs: { orders: "{{INPUT.orders}}" }
+    capabilities: [log]
+    limits: { max_feed_duration_secs: 2, max_memory: 16000000 }
+```
 ### Result Caching
 
 Save on LLM costs by caching repeated queries:
@@ -281,6 +302,7 @@ Kruxia Flow includes 15+ production-ready example workflows in YAML and Python:
 | 13 | [Customer Churn Prediction][ex13] | Python SDK, parallel ML training, LLM explanations |
 | 14 | [Document Intelligence][ex14]     | Python SDK, AI-powered document analysis           |
 | 15 | [Content Moderation System][ex15] | Python SDK, multi-stage moderation pipeline        |
+| 16 | [Sandboxed Code][ex16]            | `run_code` add-on: model-written Python, repairs   |
 
 [ex1]: examples/README.md#example-1-weather-report-pipeline
 [ex2]: examples/README.md#example-2-user-validation-with-conditional-branching
@@ -297,6 +319,7 @@ Kruxia Flow includes 15+ production-ready example workflows in YAML and Python:
 [ex13]: https://github.com/kruxia/kruxiaflow-python/blob/main/examples/13_customer_churn_prediction.py
 [ex14]: https://github.com/kruxia/kruxiaflow-python/blob/main/examples/14_document_intelligence.py
 [ex15]: https://github.com/kruxia/kruxiaflow-python/blob/main/examples/15_content_moderation_system.py
+[ex16]: contrib/kruxiaflow-monty/README.md#examples
 
 ## Architecture
 
@@ -358,6 +381,7 @@ See [`benchmarks/README.md`](benchmarks/README.md#results) for the methodology, 
 - **[Architecture](docs/architecture.md)** - System design and component overview
 - **[MVP Requirements](docs/mvp-requirements.md)** - Product requirements and roadmap
 - **[Implementation Plans](docs/implementation/)** - Detailed technical implementation specifications
+- **[Sandboxed Code](docs/run-code.md)** - Running model-written Python with the `run_code` add-on
 - **[Post-MVP Roadmap](docs/post-mvp.md), [Features](docs/features/)** - Future features and integrations
 
 ## Development

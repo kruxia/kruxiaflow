@@ -12,6 +12,7 @@
 - [Workflow Loops](loops-guide.md)
 - [Conditional Branching](conditional-branching.md)
 - [Signals (Human-in-the-Loop)](signals.md)
+- [Sandboxed Code (`run_code` add-on)](run-code.md)
 
 # Python SDK
 

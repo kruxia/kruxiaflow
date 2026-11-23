@@ -1,5 +1,6 @@
-# Build artifacts
+# Build artifacts (the engine's, and each contrib add-on's own workspace)
 target/
+contrib/*/target/
 
 # Environment and secrets
 .env
