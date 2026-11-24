@@ -14,8 +14,10 @@ The shop is an R&D exploration. Its opportunity and value are still being discov
 
 ## Running
 
+The shop is a developer tool, separate from the engine: its own crate, `kruxiaflow-machine-shop` (`machines/Cargo.toml`), a member of the workspace that's never published. Its runner is the integration test `machines/tests/machine_shop.rs`, which starts an engine in-process from the workspace's crates. Nothing in it is part of the `kruxiaflow` binary or its Docker image, so it runs from a clone of the repository.
+
 ```bash
-DATABASE_URL=postgres://... cargo test -p kruxiaflow-api --test machine_shop -- --nocapture
+DATABASE_URL=postgres://... cargo test -p kruxiaflow-machine-shop --test machine_shop -- --nocapture
 ```
 
 There are two modes, one test each:

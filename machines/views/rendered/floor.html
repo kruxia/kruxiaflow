@@ -966,7 +966,7 @@ document.addEventListener("keydown", e => {
 function render() {
   if (!DATA) {
     document.getElementById("floor").innerHTML = `<div class="empty"><p>This is the page template, with no results in it yet. Run the machine shop and open the page it writes:</p>
-      <p><code>cargo test -p kruxiaflow-api --test machine_shop</code></p><p>The page is written to <code>target/tmp/machine-shop/floor.html</code>.</p></div>`;
+      <p><code>cargo test -p kruxiaflow-machine-shop --test machine_shop</code></p><p>The page is written to <code>target/tmp/machine-shop/floor.html</code>.</p></div>`;
     return;
   }
   const open = new Set([...document.querySelectorAll(".bay details[open]")].map(d => `${d.closest(".bay").id}|${d.dataset.part || "card"}`));

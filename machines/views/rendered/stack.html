@@ -1296,7 +1296,7 @@ function homeCard() {
   if (!DATA) {
     return `<div class="hero">${pixelText("Machine shop", 3)}</div>
       <div class="field empty"><p>This is the page template, with no results in it yet. Run the machine shop and open the page it writes:</p>
-      <p><code>cargo test -p kruxiaflow-api --test machine_shop</code></p>
+      <p><code>cargo test -p kruxiaflow-machine-shop --test machine_shop</code></p>
       <p>The page is written to <code>target/tmp/machine-shop/stack.html</code>.</p></div>`;
   }
   const tiles = SETS.length

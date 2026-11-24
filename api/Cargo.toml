@@ -42,5 +42,4 @@ serial_test.workspace = true
 axum-test = "15.0"
 futures = "0.3"
 reqwest = { workspace = true }
-serde_yaml.workspace = true
 tokio-tungstenite = "0.24"

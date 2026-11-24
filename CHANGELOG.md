@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **The machine shop** (`machines/`, `api/tests/machine_shop.rs`): small
+- **The machine shop** (`machines/`, the `kruxiaflow-machine-shop` crate): small
   workflows inspired by physical machines, run against a real engine one at a
   time and all at once, with a scoreboard. Starts with a domino run, a prism
   and funnel, a railway switch, a level crossing that traps #25, and a

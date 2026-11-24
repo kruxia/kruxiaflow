@@ -8,6 +8,7 @@ members = [
     "worker",
     "worker-sdk",
     "profiling",
+    "machines",
 ]
 resolver = "2"
 

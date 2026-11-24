@@ -1892,7 +1892,6 @@ dependencies = [
  "rust_decimal",
  "serde",
  "serde_json",
- "serde_yaml",
  "serial_test",
  "sqlx",
  "thiserror 2.0.17",
@@ -1945,6 +1944,29 @@ name = "kruxiaflow-dashboard"
 version = "0.12.6"
 dependencies = [
  "axum 0.7.9",
+]
+
+[[package]]
+name = "kruxiaflow-machine-shop"
+version = "0.12.6"
+dependencies = [
+ "axum 0.7.9",
+ "bcrypt",
+ "chrono",
+ "futures",
+ "kruxiaflow-api",
+ "kruxiaflow-core",
+ "kruxiaflow-oauth",
+ "kruxiaflow-std-worker",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sqlx",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

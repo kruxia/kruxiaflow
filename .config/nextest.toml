@@ -17,5 +17,5 @@ test-group = 'mailpit'
 # timeout from its card. Alongside the rest of the suite they starve and
 # time out, so each takes every test slot and runs alone.
 [[profile.default.overrides]]
-filter = 'binary(machine_shop) & test(/^machine_shop_(bench|shop)$/)'
+filter = 'package(kruxiaflow-machine-shop) & binary(machine_shop) & test(/^machine_shop_(bench|shop)$/)'
 threads-required = 'num-test-threads'

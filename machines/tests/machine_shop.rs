@@ -199,7 +199,7 @@ struct Machine {
 }
 
 fn machines_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../machines")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
 /// Load every machine, check each card against its workflow, and apply

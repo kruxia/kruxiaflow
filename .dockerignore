@@ -49,3 +49,9 @@ Thumbs.db
 .cargo/.global-cache
 .cargo/.package-cache
 .cargo/.package-cache-mutate
+
+# The machine shop is a developer tool: the image build needs only its
+# manifest, so the workspace still resolves
+machines/
+!machines/Cargo.toml
+!machines/src/
