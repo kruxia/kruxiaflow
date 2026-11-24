@@ -25,8 +25,8 @@ pub use cost::{
 };
 
 pub use events::{
-    ActivityDefinition as EventActivityDefinition, ActivityWake, DependencyEdge, EventCursor,
-    EventSource, EventWake, EventWakeMode, NewWorkflowEvent, PostgresEventSource,
+    ActivityDefinition as EventActivityDefinition, ActivityWake, Announcer, DependencyEdge,
+    EventCursor, EventSource, EventWake, EventWakeMode, NewWorkflowEvent, PostgresEventSource,
     WorkflowDefinition as EventWorkflowDefinition, WorkflowEvent, WorkflowEventType,
     WorkflowStatus,
 };
