@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use super::{AnyJson, error_response, parse_uuid, text_response};
 
 use kruxiaflow_core::{
-    PostgresEventSource, PostgresSubscriptionService, SignalRequest, deliver_signal,
+    PostgresSubscriptionService, SignalRequest, deliver_signal,
     subscription::{SignalDeliveryError, SignalOutcome},
 };
 
@@ -214,8 +214,7 @@ pub async fn run_send_workflow_signal(
         }));
     }
 
-    let sub_svc = PostgresSubscriptionService::new(pool.clone());
-    let event_source = PostgresEventSource::new(pool.clone()).with_announcer(announcer.clone());
+    let sub_svc = PostgresSubscriptionService::new(pool.clone()).with_announcer(announcer.clone());
     let mut signaled: Vec<serde_json::Value> = Vec::new();
     let mut held: Vec<String> = Vec::new();
     let mut not_signaled: Vec<String> = Vec::new();
@@ -229,7 +228,7 @@ pub async fn run_send_workflow_signal(
             data: params.data.as_ref().map(|v| v.0.clone()),
         };
 
-        match deliver_signal(&sub_svc, &event_source, request).await {
+        match deliver_signal(&sub_svc, request).await {
             Ok(SignalOutcome::Signaled(subscription)) => signaled.push(serde_json::json!({
                 "activity_key": activity_key,
                 "subscription_id": subscription.id.to_string(),

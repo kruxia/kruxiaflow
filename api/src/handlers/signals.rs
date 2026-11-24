@@ -330,13 +330,6 @@ mod tests {
             Ok(())
         }
 
-        async fn release_signal(
-            &self,
-            _subscription_id: Uuid,
-        ) -> kruxiaflow_core::subscription::Result<()> {
-            Ok(())
-        }
-
         async fn delete_subscription_by_id(
             &self,
             _id: Uuid,
@@ -461,13 +454,6 @@ mod tests {
             Ok(())
         }
 
-        async fn release_signal(
-            &self,
-            _subscription_id: Uuid,
-        ) -> kruxiaflow_core::subscription::Result<()> {
-            Ok(())
-        }
-
         async fn delete_subscription_by_id(
             &self,
             _id: Uuid,
@@ -547,23 +533,19 @@ pub async fn signal_activity(
         "Signaling activity"
     );
 
-    // Shared with the MCP send_workflow_signal tool: validates, marks the
-    // subscription and publishes the ActivitySignaled event, or holds the
-    // signal for the activity's next wait
+    // Shared with the MCP send_workflow_signal tool: validates, then marks
+    // the subscription and writes the ActivitySignaled event together, or
+    // holds the signal for the activity's next wait
     let signal_request = request.to_signal_request(workflow_id);
-    let outcome = deliver_signal(
-        state.subscription_service.as_ref(),
-        state.event_source.as_ref(),
-        signal_request.clone(),
-    )
-    .await
-    .map_err(|e| match e {
-        SignalDeliveryError::Invalid(errors) => AppError::ValidationError(field_errors(errors)),
-        other => {
-            tracing::error!("Error signaling activity: {:?}", other);
-            AppError::InternalError(anyhow::anyhow!(other))
-        }
-    })?;
+    let outcome = deliver_signal(state.subscription_service.as_ref(), signal_request.clone())
+        .await
+        .map_err(|e| match e {
+            SignalDeliveryError::Invalid(errors) => AppError::ValidationError(field_errors(errors)),
+            other => {
+                tracing::error!("Error signaling activity: {:?}", other);
+                AppError::InternalError(anyhow::anyhow!(other))
+            }
+        })?;
 
     match outcome {
         SignalOutcome::Signaled(sub) => {

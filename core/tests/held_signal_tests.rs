@@ -155,13 +155,9 @@ impl Run {
 
     /// Send a signal the way the API does, without processing its event
     async fn send(&self, key: &str, event: &str, data: Option<Value>) -> SignalOutcome {
-        deliver_signal(
-            self.subs.as_ref(),
-            self.es.as_ref(),
-            self.request(key, event, data),
-        )
-        .await
-        .expect("deliver signal")
+        deliver_signal(self.subs.as_ref(), self.request(key, event, data))
+            .await
+            .expect("deliver signal")
     }
 
     /// Send a `message` signal to `receive` carrying `{"text": text}`, then
@@ -444,9 +440,7 @@ async fn test_refused_signals_say_why(pool: PgPool) {
     // No such workflow
     let mut request = run.request("receive", "message", None);
     request.workflow_id = Uuid::now_v7();
-    let outcome = deliver_signal(run.subs.as_ref(), run.es.as_ref(), request)
-        .await
-        .unwrap();
+    let outcome = deliver_signal(run.subs.as_ref(), request).await.unwrap();
     assert_eq!(refusal(outcome), SignalRefusal::UnknownWorkflow);
 
     assert_eq!(run.held().await, 0);

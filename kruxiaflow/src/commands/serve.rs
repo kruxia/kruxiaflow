@@ -709,7 +709,7 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
 
     // Create subscription service for activities waiting for signals
     let subscription_service: Arc<dyn SubscriptionService> =
-        Arc::new(PostgresSubscriptionService::new(pool.clone()));
+        Arc::new(PostgresSubscriptionService::new(pool.clone()).with_announcer(announcer.clone()));
 
     // Create API state with shutdown token
     let state = AppState::new(

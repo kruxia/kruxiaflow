@@ -168,9 +168,11 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
         Arc::new(RedisCache::new(&redis_url, None).context("Failed to connect to Redis")?);
     tracing::info!("Cache service initialized (Redis)");
 
-    // Initialize subscription service (PostgreSQL for MVP)
-    let subscription_service: Arc<dyn SubscriptionService> =
-        Arc::new(PostgresSubscriptionService::new(db_pool.clone()));
+    // Initialize subscription service (PostgreSQL for MVP); it announces the
+    // signal events it writes through the event source's wake
+    let subscription_service: Arc<dyn SubscriptionService> = Arc::new(
+        PostgresSubscriptionService::new(db_pool.clone()).with_announcer(event_source.announcer()),
+    );
     tracing::info!("Subscription service initialized (PostgreSQL)");
 
     // Create application state with configured infrastructure services

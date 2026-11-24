@@ -213,7 +213,7 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
 
     // Create subscription service
     let subscription_service: Arc<dyn SubscriptionService> =
-        Arc::new(PostgresSubscriptionService::new(pool.clone()));
+        Arc::new(PostgresSubscriptionService::new(pool.clone()).with_announcer(announcer.clone()));
 
     // Create orchestrator config from CLI parameters
     let config = OrchestratorConfig::new(pool.clone())

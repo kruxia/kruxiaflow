@@ -1,13 +1,14 @@
 //! Signal delivery: the one code path for signaling a waiting activity.
 //!
 //! Every entry point that signals an activity (the REST signal endpoint and
-//! the MCP `send_workflow_signal` tool) calls [`deliver_signal`], so the
-//! subscription marking and the `ActivitySignaled` event the orchestrator
-//! reads can't drift between them.
+//! the MCP `send_workflow_signal` tool) calls [`deliver_signal`], so
+//! validation and the outcomes can't drift between them. The subscription
+//! service marks the wait and writes the `ActivitySignaled` event the
+//! orchestrator reads, in one transaction.
 
 use super::models::{ActivitySubscription, SignalOutcome, SignalRequest};
 use super::service::{SubscriptionError, SubscriptionService};
-use crate::events::{EventError, EventSource, NewWorkflowEvent, WorkflowEventType};
+use crate::events::{NewWorkflowEvent, WorkflowEventType};
 use serde_json::json;
 use thiserror::Error;
 
@@ -25,12 +26,9 @@ pub enum SignalDeliveryError {
     #[error("Invalid signal request: {}", format_field_errors(.0))]
     Invalid(Vec<SignalFieldError>),
 
+    /// Nothing was recorded: neither the signal nor its event
     #[error("Error signaling activity: {0}")]
     Subscription(#[from] SubscriptionError),
-
-    /// The subscription was marked signaled but the event was not published
-    #[error("Failed to publish ActivitySignaled event: {0}")]
-    Publish(#[from] EventError),
 }
 
 fn format_field_errors(errors: &[SignalFieldError]) -> String {
@@ -88,188 +86,43 @@ pub fn activity_signaled_event(
     }
 }
 
-/// Signal a waiting activity and publish the event the orchestrator acts on.
+/// Signal a waiting activity.
 ///
-/// Validates the request, marks the subscription signaled through
-/// [`SubscriptionService::signal_activity`], then publishes `ActivitySignaled`.
+/// Validates the request, then signals the activity's open wait through
+/// [`SubscriptionService::signal_activity`], which writes the
+/// `ActivitySignaled` event in the same transaction.
 ///
 /// Returns what became of the signal:
 /// - [`SignalOutcome::Signaled`]: the waiting activity took it.
 /// - [`SignalOutcome::Held`]: the activity is not waiting and its wait is
 ///   configured with `hold_early`; the signal is kept for its next wait
-///   ([`SubscriptionService::hold_signal`]). No event is published: the
+///   ([`SubscriptionService::hold_signal`]). No event is written: the
 ///   orchestrator takes the held signal when the activity next waits.
 /// - [`SignalOutcome::Refused`]: neither, with the reason (no such activity,
 ///   a different event name, not waiting, the workflow has ended, or the
 ///   activity holds as many signals as it may).
 ///
-/// A publish failure is an error: nothing else delivers the signal to the
-/// orchestrator, so the subscription's mark is undone first
-/// ([`SubscriptionService::release_signal`]) and the signal can be retried.
+/// An error records nothing, so the signal can be sent again.
 pub async fn deliver_signal(
     subscriptions: &dyn SubscriptionService,
-    events: &dyn EventSource,
     request: SignalRequest,
 ) -> Result<SignalOutcome, SignalDeliveryError> {
     request.validate().map_err(SignalDeliveryError::Invalid)?;
 
-    let subscription = match subscriptions.signal_activity(request.clone()).await? {
-        Some(subscription) => subscription,
+    match subscriptions.signal_activity(request.clone()).await? {
+        Some(subscription) => Ok(SignalOutcome::Signaled(subscription)),
         // No open wait took it: hold it for the next one, or say why not
-        None => match subscriptions.hold_signal(request.clone()).await? {
-            SignalOutcome::Signaled(subscription) => subscription,
-            other => return Ok(other),
-        },
-    };
-
-    if let Err(e) = events
-        .publish(activity_signaled_event(&subscription, &request))
-        .await
-    {
-        if let Err(release) = subscriptions.release_signal(subscription.id).await {
-            tracing::error!(
-                subscription_id = %subscription.id,
-                "Failed to reopen the wait after a failed publish: {:?}",
-                release
-            );
-        }
-        return Err(SignalDeliveryError::Publish(e));
+        None => Ok(subscriptions.hold_signal(request).await?),
     }
-
-    Ok(SignalOutcome::Signaled(subscription))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::{EventCursor, WorkflowEvent};
-    use crate::subscription::{ExpiredSubscription, NewSubscription};
+    use crate::subscription::{NewSubscription, PostgresSubscriptionService};
     use crate::workflow::OnTimeout;
-    use async_trait::async_trait;
     use serde_json::Value;
-    use std::sync::Mutex;
     use uuid::Uuid;
-
-    /// Subscription service that matches once per activity key
-    struct OnceSubscriptions {
-        signaled: Mutex<Vec<String>>,
-    }
-
-    impl OnceSubscriptions {
-        fn new() -> Self {
-            Self {
-                signaled: Mutex::new(Vec::new()),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl SubscriptionService for OnceSubscriptions {
-        async fn create_subscription(
-            &self,
-            _subscription: NewSubscription,
-        ) -> crate::subscription::Result<Uuid> {
-            Ok(Uuid::now_v7())
-        }
-
-        async fn signal_activity(
-            &self,
-            request: SignalRequest,
-        ) -> crate::subscription::Result<Option<ActivitySubscription>> {
-            let mut signaled = self.signaled.lock().unwrap();
-            if signaled.contains(&request.activity_key) {
-                return Ok(None);
-            }
-            signaled.push(request.activity_key.clone());
-            Ok(Some(ActivitySubscription {
-                id: Uuid::now_v7(),
-                workflow_id: request.workflow_id,
-                activity_key: request.activity_key,
-                event_name: request.event_name,
-                on_timeout: OnTimeout::Fail,
-                timeout_at: chrono::Utc::now(),
-                signal_data: request.data,
-                created_at: chrono::Utc::now(),
-                iteration: None,
-            }))
-        }
-
-        async fn get_signal_data(
-            &self,
-            _workflow_id: Uuid,
-            _activity_key: &str,
-        ) -> crate::subscription::Result<Option<Value>> {
-            Ok(None)
-        }
-
-        async fn expire_subscriptions(
-            &self,
-            _limit: i64,
-        ) -> crate::subscription::Result<Vec<ExpiredSubscription>> {
-            Ok(vec![])
-        }
-
-        async fn recover_expired(
-            &self,
-            _limit: i64,
-        ) -> crate::subscription::Result<Vec<ExpiredSubscription>> {
-            Ok(vec![])
-        }
-
-        async fn delete_subscription(
-            &self,
-            _workflow_id: Uuid,
-            _activity_key: &str,
-        ) -> crate::subscription::Result<()> {
-            Ok(())
-        }
-
-        async fn release_signal(&self, _subscription_id: Uuid) -> crate::subscription::Result<()> {
-            Ok(())
-        }
-
-        async fn delete_subscription_by_id(&self, _id: Uuid) -> crate::subscription::Result<()> {
-            Ok(())
-        }
-    }
-
-    /// Event source that records published events, or fails every publish
-    struct RecordingEvents {
-        published: Mutex<Vec<NewWorkflowEvent>>,
-        fail: bool,
-    }
-
-    impl RecordingEvents {
-        fn new(fail: bool) -> Self {
-            Self {
-                published: Mutex::new(Vec::new()),
-                fail,
-            }
-        }
-    }
-
-    #[async_trait]
-    impl EventSource for RecordingEvents {
-        async fn publish(&self, event: NewWorkflowEvent) -> crate::events::Result<()> {
-            if self.fail {
-                return Err(EventError::Invalid("publish failed".to_string()));
-            }
-            self.published.lock().unwrap().push(event);
-            Ok(())
-        }
-
-        async fn poll(&self, _consumer_id: &str) -> crate::events::Result<Vec<WorkflowEvent>> {
-            Ok(vec![])
-        }
-
-        async fn update_position(
-            &self,
-            _consumer_id: &str,
-            _cursor: EventCursor,
-        ) -> crate::events::Result<()> {
-            Ok(())
-        }
-    }
 
     fn request(activity_key: &str, event_name: &str, data: Option<Value>) -> SignalRequest {
         SignalRequest {
@@ -320,57 +173,6 @@ mod tests {
         assert_eq!(event.iteration, Some(2));
     }
 
-    #[tokio::test]
-    async fn test_deliver_signal_publishes_only_when_signaled() {
-        let subs = OnceSubscriptions::new();
-        let events = RecordingEvents::new(false);
-        let req = request("approve", "go", Some(json!({"approved": true})));
-
-        let first = deliver_signal(&subs, &events, req.clone()).await.unwrap();
-        assert!(first.is_signaled());
-        let second = deliver_signal(&subs, &events, req).await.unwrap();
-        assert!(!second.is_signaled());
-
-        let published = events.published.lock().unwrap();
-        assert_eq!(published.len(), 1);
-        assert_eq!(
-            published[0].payload,
-            json!({"event_name": "go", "signal_data": {"approved": true}})
-        );
-    }
-
-    #[tokio::test]
-    async fn test_deliver_signal_without_data() {
-        let subs = OnceSubscriptions::new();
-        let events = RecordingEvents::new(false);
-        deliver_signal(&subs, &events, request("approve", "go", None))
-            .await
-            .unwrap();
-        let published = events.published.lock().unwrap();
-        assert_eq!(
-            published[0].payload,
-            json!({"event_name": "go", "signal_data": null})
-        );
-    }
-
-    #[tokio::test]
-    async fn test_deliver_signal_invalid_request() {
-        let subs = OnceSubscriptions::new();
-        let events = RecordingEvents::new(false);
-        let result = deliver_signal(&subs, &events, request("approve", "", None)).await;
-        assert!(matches!(result, Err(SignalDeliveryError::Invalid(_))));
-        assert!(subs.signaled.lock().unwrap().is_empty());
-        assert!(events.published.lock().unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_deliver_signal_publish_failure_is_an_error() {
-        let subs = OnceSubscriptions::new();
-        let events = RecordingEvents::new(true);
-        let result = deliver_signal(&subs, &events, request("approve", "go", None)).await;
-        assert!(matches!(result, Err(SignalDeliveryError::Publish(_))));
-    }
-
     /// A running workflow whose `approve` step waits for `go`
     async fn waiting_workflow(pool: &sqlx::PgPool) -> Uuid {
         let def_id: Uuid = sqlx::query_scalar(
@@ -389,7 +191,7 @@ mod tests {
         .execute(pool)
         .await
         .unwrap();
-        crate::subscription::PostgresSubscriptionService::new(pool.clone())
+        PostgresSubscriptionService::new(pool.clone())
             .create_subscription(NewSubscription {
                 workflow_id,
                 activity_key: "approve".to_string(),
@@ -412,57 +214,99 @@ mod tests {
         }
     }
 
-    /// Against PostgreSQL: the second signal for a wait matches nothing and
-    /// publishes nothing
-    #[sqlx::test(migrations = "../migrations")]
-    async fn test_deliver_signal_once_against_postgres(pool: sqlx::PgPool) {
-        let workflow_id = waiting_workflow(&pool).await;
-        let subs = crate::subscription::PostgresSubscriptionService::new(pool.clone());
-        let events = RecordingEvents::new(false);
+    /// The payloads of the workflow's `ActivitySignaled` events
+    async fn signaled_events(pool: &sqlx::PgPool, workflow_id: Uuid) -> Vec<Value> {
+        sqlx::query_scalar(
+            "SELECT payload FROM workflow_events \
+             WHERE workflow_id = $1 AND event_type = 'ActivitySignaled'",
+        )
+        .bind(workflow_id)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+    }
 
-        let first = deliver_signal(&subs, &events, approve(workflow_id, Some(json!({"n": 1}))))
+    /// The first signal for a wait is taken and its event written with its
+    /// data; the second matches nothing and writes nothing
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_deliver_signal_once(pool: sqlx::PgPool) {
+        let workflow_id = waiting_workflow(&pool).await;
+        let subs = PostgresSubscriptionService::new(pool.clone());
+
+        let first = deliver_signal(&subs, approve(workflow_id, Some(json!({"n": 1}))))
             .await
             .unwrap();
         assert!(first.is_signaled());
-        let second = deliver_signal(&subs, &events, approve(workflow_id, Some(json!({"n": 2}))))
+        let second = deliver_signal(&subs, approve(workflow_id, Some(json!({"n": 2}))))
             .await
             .unwrap();
         assert!(!second.is_signaled());
-        assert_eq!(events.published.lock().unwrap().len(), 1);
+        assert_eq!(
+            signaled_events(&pool, workflow_id).await,
+            vec![json!({"event_name": "go", "signal_data": {"n": 1}})]
+        );
     }
 
-    /// A signal whose event fails to publish leaves the wait open: a retry is
-    /// accepted and publishes the event
     #[sqlx::test(migrations = "../migrations")]
-    async fn test_deliver_signal_publish_failure_reopens_the_wait(pool: sqlx::PgPool) {
+    async fn test_deliver_signal_without_data(pool: sqlx::PgPool) {
         let workflow_id = waiting_workflow(&pool).await;
-        let subs = crate::subscription::PostgresSubscriptionService::new(pool.clone());
+        let subs = PostgresSubscriptionService::new(pool.clone());
+        deliver_signal(&subs, approve(workflow_id, None))
+            .await
+            .unwrap();
+        assert_eq!(
+            signaled_events(&pool, workflow_id).await,
+            vec![json!({"event_name": "go", "signal_data": null})]
+        );
+    }
+
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_deliver_signal_invalid_request(pool: sqlx::PgPool) {
+        let workflow_id = waiting_workflow(&pool).await;
+        let subs = PostgresSubscriptionService::new(pool.clone());
+        let mut invalid = approve(workflow_id, None);
+        invalid.event_name = String::new();
+        let result = deliver_signal(&subs, invalid).await;
+        assert!(matches!(result, Err(SignalDeliveryError::Invalid(_))));
+        assert!(signaled_events(&pool, workflow_id).await.is_empty());
+    }
+
+    /// A signal whose event can't be written records nothing: it is an
+    /// error, the wait is still open, and the signal sent again is taken
+    #[sqlx::test(migrations = "../migrations")]
+    async fn test_deliver_signal_event_failure_leaves_the_wait_open(pool: sqlx::PgPool) {
+        let workflow_id = waiting_workflow(&pool).await;
+        let subs = PostgresSubscriptionService::new(pool.clone());
+        // The next event insert fails, once (a sequence isn't rolled back)
+        for statement in [
+            "CREATE SEQUENCE fail_event_once",
+            "CREATE FUNCTION fail_event_once() RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN \
+               IF nextval('fail_event_once') = 1 THEN RAISE EXCEPTION 'insert failed'; END IF; \
+               RETURN NEW; \
+             END $$",
+            "CREATE TRIGGER fail_event_once BEFORE INSERT ON workflow_events \
+             FOR EACH ROW EXECUTE FUNCTION fail_event_once()",
+        ] {
+            sqlx::query(statement).execute(&pool).await.unwrap();
+        }
         let data = Some(json!({"approved": true}));
 
-        let failed = deliver_signal(
-            &subs,
-            &RecordingEvents::new(true),
-            approve(workflow_id, data.clone()),
-        )
-        .await;
-        assert!(matches!(failed, Err(SignalDeliveryError::Publish(_))));
-        let stored: Option<Value> = sqlx::query_scalar(
-            "SELECT signal_data FROM activity_event_subscriptions WHERE workflow_id = $1",
+        let failed = deliver_signal(&subs, approve(workflow_id, data.clone())).await;
+        assert!(matches!(failed, Err(SignalDeliveryError::Subscription(_))));
+        let signaled_at: Option<chrono::DateTime<chrono::Utc>> = sqlx::query_scalar(
+            "SELECT signaled_at FROM activity_event_subscriptions WHERE workflow_id = $1",
         )
         .bind(workflow_id)
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(stored, None, "the wait is still marked signaled");
+        assert_eq!(signaled_at, None, "the wait is still marked signaled");
 
-        let events = RecordingEvents::new(false);
-        let retry = deliver_signal(&subs, &events, approve(workflow_id, data))
+        let retry = deliver_signal(&subs, approve(workflow_id, data))
             .await
             .unwrap();
-        assert!(
-            retry.is_signaled(),
-            "a retry after a failed publish was refused"
-        );
-        assert_eq!(events.published.lock().unwrap().len(), 1);
+        assert!(retry.is_signaled(), "the signal sent again was refused");
+        assert_eq!(signaled_events(&pool, workflow_id).await.len(), 1);
     }
 }
