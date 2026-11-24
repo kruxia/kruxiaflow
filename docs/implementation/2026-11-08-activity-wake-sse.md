@@ -1,5 +1,7 @@
 # Activity wake for workers over SSE
 
+> **Superseded in part (2026-11-23).** The NOTIFY trigger this plan adds was dropped by migration `20261123000001_app_side_notify`: the application now announces its own committed writes, and each process sends one coalesced NOTIFY per batch (`Announcer` in `core/src/events/wake.rs`; `docs/architecture.md`, "NOTIFY as a wake, never as data"). Notifications under load had queued on PostgreSQL's database-wide notify lock. Channels and payloads are unchanged, and the rest of this plan stands.
+
 **Date:** 2026-11-08 · **Status:** implemented, tested and benchmarked (§6); Python SDK not started · **Target release:** 0.10.0
 **Scope:** one migration, `kruxiaflow-core` (wake listener, activity queue), `kruxiaflow-api` (one new endpoint, one new response field), `kruxiaflow-worker` (the Rust worker SDK, which the built-in `std` worker uses), docs, benchmark.
 

@@ -549,9 +549,13 @@ impl SchedulerConfig {
 ///
 /// Safe to run in multiple processes concurrently: due schedules are claimed
 /// with FOR UPDATE SKIP LOCKED and submissions are idempotent via unique_key.
+///
+/// `announcer` announces each submitted workflow (see
+/// [`Announcer`](crate::events::Announcer)).
 pub async fn run_scheduler(
     pool: PgPool,
     config: SchedulerConfig,
+    announcer: crate::events::Announcer,
     shutdown_token: Option<CancellationToken>,
 ) {
     if !config.enabled {
@@ -559,7 +563,7 @@ pub async fn run_scheduler(
         return;
     }
 
-    let workflow_service = WorkflowService::new(pool.clone());
+    let workflow_service = WorkflowService::new(pool.clone()).with_announcer(announcer);
     let mut interval = tokio::time::interval(config.tick_interval);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 

@@ -51,7 +51,8 @@ impl FromRequestParts<AppState> for WorkflowService {
         _parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        Ok(WorkflowService::new(state.db_pool.clone()))
+        Ok(WorkflowService::new(state.db_pool.clone())
+            .with_announcer(state.event_source.announcer()))
     }
 }
 

@@ -1,3 +1,4 @@
+use crate::events::Announcer;
 use crate::queue::{
     Activity, ActivityQueue, ActivityResult, ActivitySettings, ActivityStatus, ActivitySummary,
     QueueConfig, QueueError, QueuedActivity, Result, StaleActivityAction, StaleActivityInfo,
@@ -10,11 +11,27 @@ use uuid::Uuid;
 pub struct PostgresQueue {
     pool: PgPool,
     config: QueueConfig,
+    /// Announces each activity written as pending, once committed
+    announcer: Announcer,
 }
 
 impl PostgresQueue {
+    /// A queue that announces nothing: workers find its activities on their
+    /// poll timer. Production callers attach the process's announcer with
+    /// [`with_announcer`](Self::with_announcer).
     pub fn new(pool: PgPool, config: QueueConfig) -> Self {
-        Self { pool, config }
+        Self {
+            pool,
+            config,
+            announcer: Announcer::none(),
+        }
+    }
+
+    /// Wake the workers of an activity's type when it is written as pending
+    /// (scheduled, requeued for a retry, or reclaimed from a stale worker)
+    pub fn with_announcer(mut self, announcer: Announcer) -> Self {
+        self.announcer = announcer;
+        self
     }
 
     fn extract_timeout(&self, settings: &Option<ActivitySettings>) -> u64 {
@@ -101,6 +118,7 @@ impl ActivityQueue for PostgresQueue {
             .await?;
 
             if result.rows_affected() > 0 {
+                self.announcer.activity(&activity.worker);
                 trace!(
                     workflow_id = %workflow_id,
                     activity_key = %activity.key,
@@ -431,7 +449,7 @@ impl ActivityQueue for PostgresQueue {
         // FOR UPDATE lock is held until transaction commits
         let activity = sqlx::query!(
             r#"
-            SELECT id, workflow_id, activity_key, status AS "status: ActivityStatus",
+            SELECT id, workflow_id, activity_key, worker, status AS "status: ActivityStatus",
                    claimed_by, retry_count, max_retries, settings
             FROM activity_queue
             WHERE id = $1
@@ -533,6 +551,9 @@ impl ActivityQueue for PostgresQueue {
 
         // Commit transaction - releases FOR UPDATE lock
         tx.commit().await?;
+        if will_retry {
+            self.announcer.activity(&activity.worker);
+        }
 
         Ok(will_retry)
     }
@@ -630,7 +651,7 @@ impl ActivityQueue for PostgresQueue {
         // 2. Activities with no retries remaining -> mark as failed
         let stale_activities = sqlx::query!(
             r#"
-            SELECT id, workflow_id, activity_key, iteration, retry_count, max_retries
+            SELECT id, workflow_id, activity_key, worker, iteration, retry_count, max_retries
             FROM activity_queue
             WHERE status = 'running'::activity_status
               AND claimed_at IS NOT NULL
@@ -649,11 +670,14 @@ impl ActivityQueue for PostgresQueue {
         }
 
         let mut results = Vec::with_capacity(stale_activities.len());
+        // Worker types with an activity reset to pending, announced after commit
+        let mut requeued_workers = std::collections::BTreeSet::new();
 
         for activity in stale_activities {
             let has_retries = activity.retry_count < activity.max_retries;
 
             if has_retries {
+                requeued_workers.insert(activity.worker.clone());
                 // Reset to pending for retry
                 sqlx::query!(
                     r#"
@@ -722,6 +746,9 @@ impl ActivityQueue for PostgresQueue {
         }
 
         tx.commit().await?;
+        for worker in &requeued_workers {
+            self.announcer.activity(worker);
+        }
 
         Ok(results)
     }
