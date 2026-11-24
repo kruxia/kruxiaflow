@@ -144,7 +144,7 @@ benchmarks/
 ├── shared/
 │   ├── report.py               # HTML report generator
 │   └── resource_monitor.py     # Per-platform container CPU/memory sampling
-└── results/                     # Output directory (gitignored)
+└── results/                     # Output directory (gitignored; .dockerignore keeps it out of the runner image)
 ```
 
 Note for Apple Silicon: `kruxia/kruxiaflow-py-std` on Docker Hub is

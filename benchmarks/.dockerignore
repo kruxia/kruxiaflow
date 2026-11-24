@@ -1,0 +1,11 @@
+# The runner image needs only the code. Results grow with every run, and
+# copying them would make each build a new image.
+results/
+
+# Python and editor leftovers
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.DS_Store
