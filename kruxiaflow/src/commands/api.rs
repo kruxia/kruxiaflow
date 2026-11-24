@@ -264,6 +264,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_execute_fails_without_database_url() {
+        let _database_url = crate::test_env::EnvVarGuard::new("DATABASE_URL");
         // Test that execute fails when no database URL is provided
         let cmd = ApiCommand {
             port: Some(8080),
@@ -518,6 +519,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_api_config_port_from_env() {
+        let _database_url = crate::test_env::EnvVarGuard::new("DATABASE_URL");
         unsafe {
             std::env::set_var("DATABASE_URL", "postgres://localhost/test");
             std::env::set_var("KRUXIAFLOW_API_PORT", "9090");
@@ -537,6 +539,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_api_config_bind_from_env() {
+        let _database_url = crate::test_env::EnvVarGuard::new("DATABASE_URL");
         unsafe {
             std::env::set_var("DATABASE_URL", "postgres://localhost/test");
             std::env::set_var("KRUXIAFLOW_API_BIND", "127.0.0.1");

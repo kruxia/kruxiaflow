@@ -11,6 +11,8 @@ mod credentials;
 mod llm_catalog;
 mod logging;
 mod signals;
+#[cfg(test)]
+mod test_env;
 
 // MCP server module (optional - only compiled with mcp-server feature)
 #[cfg(feature = "mcp-server")]

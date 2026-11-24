@@ -708,6 +708,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_defaults() {
+        let _database_url = crate::test_env::EnvVarGuard::new("DATABASE_URL");
         // Set database URL via environment for test
         unsafe {
             std::env::set_var("DATABASE_URL", "postgres://localhost/test");
@@ -727,6 +728,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_cli_overrides_env() {
+        let _database_url = crate::test_env::EnvVarGuard::new("DATABASE_URL");
         unsafe {
             std::env::set_var("DATABASE_URL", "postgres://localhost/env_db");
             std::env::set_var("KRUXIAFLOW_API_PORT", "9090");
@@ -757,6 +759,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_env_overrides_defaults() {
+        let _database_url = crate::test_env::EnvVarGuard::new("DATABASE_URL");
         unsafe {
             std::env::set_var("DATABASE_URL", "postgres://localhost/test");
             std::env::set_var("KRUXIAFLOW_API_PORT", "9000");
@@ -779,6 +782,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_invalid_port() {
+        let _database_url = crate::test_env::EnvVarGuard::new("DATABASE_URL");
         unsafe {
             std::env::set_var("DATABASE_URL", "postgres://localhost/test");
         }
@@ -795,6 +799,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_database_url_required() {
+        let _database_url = crate::test_env::EnvVarGuard::new("DATABASE_URL");
         unsafe {
             std::env::remove_var("DATABASE_URL");
         }
@@ -844,6 +849,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_invalid_port_from_environment() {
+        let _database_url = crate::test_env::EnvVarGuard::new("DATABASE_URL");
         unsafe {
             std::env::set_var("DATABASE_URL", "postgres://localhost/test");
             std::env::set_var("KRUXIAFLOW_API_PORT", "invalid_port");

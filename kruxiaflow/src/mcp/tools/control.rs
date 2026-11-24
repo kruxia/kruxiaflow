@@ -461,10 +461,11 @@ mod tests {
     use kruxiaflow_core::workflow::OnTimeout;
     use kruxiaflow_core::{NewSubscription, PostgresSubscriptionService, SubscriptionService};
     use serde_json::json;
+    use serial_test::serial;
 
-    // These tests need DATABASE_URL. Other tests in this binary remove it from
-    // the process environment, so run them with cargo nextest (a process per
-    // test) or filtered: cargo test --features mcp-server mcp::
+    // Serial: other tests in this binary change DATABASE_URL, which
+    // #[sqlx::test] reads as each test starts. #[serial] goes below
+    // #[sqlx::test], so it also covers that read.
 
     fn extract_json(result: &CallToolResult) -> serde_json::Value {
         let text_content = result.content[0].as_text_content().unwrap();
@@ -540,6 +541,7 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "../migrations")]
+    #[serial]
     async fn test_send_signal_publishes_rest_event_shape(pool: PgPool) {
         let workflow_id = waiting_workflow(&pool, &["approve"]).await;
         // Keys that are also event fields must stay inside signal_data
@@ -577,6 +579,7 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "../migrations")]
+    #[serial]
     async fn test_send_signal_twice_is_refused(pool: PgPool) {
         let workflow_id = waiting_workflow(&pool, &["approve"]).await;
         let params = signal(
@@ -600,6 +603,7 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "../migrations")]
+    #[serial]
     async fn test_send_signal_without_data(pool: PgPool) {
         let workflow_id = waiting_workflow(&pool, &["approve"]).await;
 
@@ -620,6 +624,7 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "../migrations")]
+    #[serial]
     async fn test_send_signal_wrong_event_name_is_refused(pool: PgPool) {
         let workflow_id = waiting_workflow(&pool, &["approve"]).await;
         let mut params = signal(workflow_id, Some("approve"), None);
@@ -634,6 +639,7 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "../migrations")]
+    #[serial]
     async fn test_send_signal_empty_activity_key_is_invalid(pool: PgPool) {
         let workflow_id = waiting_workflow(&pool, &["approve"]).await;
 
@@ -653,6 +659,7 @@ mod tests {
     /// With activity_key omitted, an empty signal_name is a field error, not
     /// "nothing is waiting"
     #[sqlx::test(migrations = "../migrations")]
+    #[serial]
     async fn test_send_signal_empty_signal_name_is_invalid(pool: PgPool) {
         let workflow_id = waiting_workflow(&pool, &["approve"]).await;
         let mut params = signal(workflow_id, None, None);
@@ -668,6 +675,7 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "../migrations")]
+    #[serial]
     async fn test_send_signal_without_activity_key_signals_each_waiting(pool: PgPool) {
         let workflow_id = waiting_workflow(&pool, &["approve_a", "approve_b"]).await;
         let data = json!({"approved": true});

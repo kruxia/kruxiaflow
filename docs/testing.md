@@ -330,6 +330,31 @@ async fn test_database_operation() {
 }
 ```
 
+### Tests That Change Environment Variables
+
+The tests in one binary share one process environment. A plain `cargo test` runs them in parallel inside that process; nextest gives each test a process of its own. So a test that changes a variable another test reads:
+
+1. puts it back with `EnvVarGuard` (`kruxiaflow/src/test_env.rs`), which restores the variable when the test ends, even if it fails;
+2. is `#[serial]`, and so is every test that reads that variable.
+
+`#[sqlx::test]` reads `DATABASE_URL` as each test starts, so `#[serial]` goes below it, where it also covers that read:
+
+```rust
+#[sqlx::test(migrations = "../migrations")]
+#[serial]
+async fn test_with_database(pool: PgPool) {
+    // ...
+}
+
+#[test]
+#[serial]
+fn test_database_url_from_env() {
+    let _database_url = crate::test_env::EnvVarGuard::new("DATABASE_URL");
+    unsafe { std::env::set_var("DATABASE_URL", "postgres://localhost/test") };
+    // ...
+}
+```
+
 ### Async Tests
 
 ```rust
