@@ -2715,11 +2715,11 @@ Workers claim activities only through `claim_next` (`POST /api/v1/workers/poll`)
 
 | An activity becomes claimable when...                        | The worker learns of it by...                                                        |
 |--------------------------------------------------------------|--------------------------------------------------------------------------------------|
-| A transaction that wrote it as pending, due now, commits     | A wake: trigger → `NOTIFY activity_queue` → API listener → SSE stream → worker polls |
-| The clock reaches its `scheduled_for` (delay, retry backoff) | The `next_due_ms` in the answer to its last empty poll                               |
-| A running activity passes its timeout                        | Its idle timer (5 s), or the orchestrator's 30 s stale sweep (which then wakes it)   |
+| A transaction that wrote it as pending, due now, commits     | A wake: announcer → `NOTIFY activity_queue` → API listener → SSE stream → worker polls |
+| The clock reaches its `scheduled_for` (delay, retry backoff) | The `next_due_ms` in the answer to its last empty poll                                 |
+| A running activity passes its timeout                        | Its idle timer (5 s), or the orchestrator's 30 s stale sweep (which then wakes it)     |
 
-- **Trigger.** A row-level trigger on `activity_queue` fires after an insert, or an update of `status` or `scheduled_for`, when the new row is `pending`, and notifies the channel `activity_queue` with the worker type as payload. Claims, heartbeats and completions do not match and cost nothing. The payload is a routing hint only.
+- **Announcer.** `PostgresQueue` announces each activity it writes as `pending`, after the write commits: a new row (`schedule`), a retry (`fail`), or a reclaimed stale row (`reclaim_stale_activities`). Claims, heartbeats and completions announce nothing. The announcement wakes the process's own subscribers of that worker type in memory, and reaches other processes as a notification on the channel `activity_queue` with the worker type as payload (see **NOTIFY as a wake, never as data**, below). The payload is a routing hint only.
 - **Fan-out.** The API process's one `LISTEN` connection carries this channel alongside `workflow_events`, with one wake counter per worker type. A reconnect or listener error wakes every subscriber. There is no transaction-id gate here: a row is claimable by any statement that starts after its commit.
 - **Stream.** `GET /api/v1/workers/wake?worker=<type>` sends a `wake` event on connection and on each notification, with a keepalive comment every 15 s. Events carry no data. The endpoint answers 503 when the process has no listener (`KRUXIAFLOW_EVENT_WAKE=poll`, or `LISTEN` failed).
 - **Worker loop.** After an empty poll the worker waits for a wake, for `next_due_ms`, or for its timer, whichever is first. The timer is `wake_poll_interval` (5 s) only while the stream is connected; otherwise it is the ordinary `poll_interval` (100 ms), so a worker that cannot get a stream behaves as it always did. A wake that arrives while a poll is in flight ends the next wait at once.
@@ -2823,13 +2823,31 @@ new events sort behind every restored cursor. Both would be silent, so:
 it (pre-migration history, rebased history) are always deliverable and always
 sort first.
 
-**NOTIFY as a wake, never as data.** An `AFTER INSERT ... FOR EACH STATEMENT`
-trigger on `workflow_events` runs `pg_notify('workflow_events', '')`. Postgres
-delivers it when the inserting transaction commits; a rolled-back insert never
-notifies. Each process holds one `PgListener` and fans notifications out to its
+**NOTIFY as a wake, never as data.** The application announces its own
+writes; no trigger notifies. A writer that has committed an event (`publish`,
+a submission's first event, or a signal's `ActivitySignaled`) or a claimable
+activity tells its process's
+`Announcer` (`core/src/events/wake.rs`). The announcer wakes the process's own
+consumers in memory at once, and queues a notification for the others. One
+sender task per process sends everything queued as a single `pg_notify`
+statement, on its own connection, with `synchronous_commit = off`; whatever is
+announced while a send is in flight goes in the next one.
+
+The reason is a PostgreSQL lock. Commits of transactions that sent a NOTIFY
+take turns on one database-wide lock, held through the commit's WAL flush.
+When every writing transaction notified, as the triggers of migrations
+`20261108000002` and `20261108000004` made them do, those commits queued
+behind one another under load. Now each process has at most one notifying
+transaction at a time, and it writes nothing else.
+
+Each process holds one `PgListener` and fans notifications out to its
 consumers (orchestrator, WebSocket broadcast poller) through a
 `tokio::sync::watch` counter, which keeps a notification that arrives between
-a consumer's poll and its wait. Three rules keep the data path honest:
+a consumer's poll and its wait. It ignores the notifications its own sender
+sent (recognized by the sending backend's process id), whose wake was already
+delivered in memory. A row written by anything but the application (SQL by
+hand) wakes nobody and is found on the consumers' timers. Three rules keep the
+data path honest:
 
 1. The payload is empty and never read: a wake means "poll from your cursor
    until empty".
@@ -2845,13 +2863,17 @@ process logs a warning and runs on the timer alone.
 ```mermaid
 sequenceDiagram
     participant W as Writer (API / worker / orchestrator)
+    participant A as Announcer (one per process)
     participant PG as PostgreSQL
     participant L as PgListener (one per process)
     participant C as Consumer loop
 
     W->>PG: INSERT INTO workflow_events (in a transaction)
     W->>PG: COMMIT
-    PG-->>L: NOTIFY workflow_events (at commit)
+    W->>A: announce (after the commit)
+    A-->>C: watch counter bump, same process (wake)
+    A->>PG: one pg_notify for every announcement since the last send
+    PG-->>L: NOTIFY workflow_events, in each other process
     L-->>C: watch counter bump (wake)
     C->>PG: poll: (tx, position) > cursor AND tx < xmin
     PG-->>C: events (committed, final)
@@ -2966,7 +2988,8 @@ and its `ActivitySignaled` event are written in one transaction
 wait opened meanwhile, both through `events::insert_event`): if the event
 can't be written, neither is recorded, the API answers 500, and the client
 can retry while the timeout still applies. An engine that stops partway
-leaves the wait open the same way. As two writes, with the mark cleared again
+leaves the wait open the same way. `insert_event` announces nothing; the
+subscription service announces the event once the transaction commits. As two writes, with the mark cleared again
 only when the publish returned an error, a stop between them left the wait
 signaled with no event, and the step waiting for good (#56).
 

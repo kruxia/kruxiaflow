@@ -1,10 +1,12 @@
 //! A signal claims its step's wait and writes `ActivitySignaled`. Both commit
 //! together, or neither does: if the engine stops partway through, the wait
-//! is still open and the signal can be sent again (#56).
+//! is still open and the signal can be sent again (#56). Once they commit,
+//! the event is announced, so the orchestrator is woken for it.
 //!
 //! The engine is stopped by dropping `deliver_signal` while the event insert
 //! is in progress (a trigger holds the first one), so no code after that
 //! point runs, as in an abrupt stop.
+use kruxiaflow_core::events::{EventWake, Wake};
 use kruxiaflow_core::subscription::{
     NewSubscription, PostgresSubscriptionService, SignalRequest, SubscriptionService,
     deliver_signal,
@@ -102,4 +104,19 @@ async fn test_signal_stopped_before_its_event_leaves_the_wait_open(pool: PgPool)
     .await
     .unwrap();
     assert_eq!(signaled, 1);
+}
+
+/// The signal's event, written inside the signal's transaction, wakes the
+/// orchestrator once it commits
+#[sqlx::test(migrations = "../migrations")]
+async fn test_signal_wakes_the_orchestrator(pool: PgPool) {
+    let workflow_id = waiting_workflow(&pool).await;
+    let wake = EventWake::connect(&pool).await.expect("LISTEN");
+    let mut rx = wake.subscribe();
+    let subs = PostgresSubscriptionService::new(pool.clone()).with_announcer(wake.announcer());
+    assert_eq!(rx.wait(Duration::from_millis(200)).await, Wake::TimedOut);
+
+    let outcome = deliver_signal(&subs, approve(workflow_id)).await.unwrap();
+    assert!(outcome.is_signaled());
+    assert_eq!(rx.wait(Duration::from_millis(500)).await, Wake::Woken);
 }

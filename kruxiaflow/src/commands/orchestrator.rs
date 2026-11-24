@@ -199,18 +199,21 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
 
     tracing::info!("Database connection established");
 
-    // Create activity queue
-    let queue_config = QueueConfig::from_env();
-    let activity_queue: Arc<dyn ActivityQueue> =
-        Arc::new(PostgresQueue::new(pool.clone(), queue_config));
-
     // Create event source
     let event_source: Arc<dyn EventSource> =
         Arc::new(cmd.event_wake.event_source(pool.clone()).await?);
+    // Writes outside `publish` (queue rows, scheduled submissions) are
+    // announced through the event source's wake
+    let announcer = event_source.announcer();
+
+    // Create activity queue
+    let queue_config = QueueConfig::from_env();
+    let activity_queue: Arc<dyn ActivityQueue> =
+        Arc::new(PostgresQueue::new(pool.clone(), queue_config).with_announcer(announcer.clone()));
 
     // Create subscription service
     let subscription_service: Arc<dyn SubscriptionService> =
-        Arc::new(PostgresSubscriptionService::new(pool.clone()));
+        Arc::new(PostgresSubscriptionService::new(pool.clone()).with_announcer(announcer.clone()));
 
     // Create orchestrator config from CLI parameters
     let config = OrchestratorConfig::new(pool.clone())
@@ -254,6 +257,7 @@ pub async fn execute(cmd: OrchestratorCommand, database_url: String) -> Result<(
             kruxiaflow_core::run_scheduler(
                 pool,
                 kruxiaflow_core::SchedulerConfig::from_env(),
+                announcer,
                 Some(token),
             )
             .await;

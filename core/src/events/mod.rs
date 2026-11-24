@@ -10,7 +10,7 @@ pub use postgres_event_source::{PostgresEventSource, insert_event};
 pub use rebase::{
     ForeignXids, RebaseReport, find_foreign_xids, rebase_event_xids, verify_event_xids,
 };
-pub use wake::{ActivityWake, EventWake, EventWakeMode, Wake, WakeReceiver};
+pub use wake::{ActivityWake, Announcer, EventWake, EventWakeMode, Wake, WakeReceiver};
 
 use async_trait::async_trait;
 use uuid::Uuid;
@@ -117,5 +117,13 @@ pub trait EventSource: Send + Sync {
     /// correct without it.
     fn wake(&self) -> Option<WakeReceiver> {
         None
+    }
+
+    /// The announcer for writes this process commits outside `publish` (a
+    /// workflow's first event, activities written to the queue).
+    ///
+    /// [`Announcer::none`] (the default) announces nothing.
+    fn announcer(&self) -> Announcer {
+        Announcer::none()
     }
 }

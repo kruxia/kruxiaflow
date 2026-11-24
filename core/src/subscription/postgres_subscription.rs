@@ -6,7 +6,7 @@ use super::models::{
     SignalRefusal, SignalRequest,
 };
 use super::service::{Result, SubscriptionError, SubscriptionService};
-use crate::events::insert_event;
+use crate::events::{Announcer, insert_event};
 use crate::workflow::{OnTimeout, WaitForSignalSettings};
 use async_trait::async_trait;
 use chrono::{Duration, Utc};
@@ -17,12 +17,27 @@ use uuid::Uuid;
 /// PostgreSQL-based subscription service
 pub struct PostgresSubscriptionService {
     pool: PgPool,
+    /// Announces each signal event once its transaction commits
+    announcer: Announcer,
 }
 
 impl PostgresSubscriptionService {
     /// Create a new PostgresSubscriptionService
+    ///
+    /// It announces nothing: the orchestrator finds its signal events on its
+    /// poll timer. Production callers attach the process's announcer with
+    /// [`with_announcer`](Self::with_announcer).
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            announcer: Announcer::none(),
+        }
+    }
+
+    /// Wake the orchestrator when a signal's event commits
+    pub fn with_announcer(mut self, announcer: Announcer) -> Self {
+        self.announcer = announcer;
+        self
     }
 }
 
@@ -73,10 +88,15 @@ impl SubscriptionService for PostgresSubscriptionService {
     ) -> Result<Option<ActivitySubscription>> {
         let mut tx = self.pool.begin().await?;
         let subscription = mark_signaled(&mut *tx, &request).await?;
+        let mut inserted = false;
         if let Some(subscription) = &subscription {
-            insert_event(&mut *tx, &activity_signaled_event(subscription, &request)).await?;
+            inserted =
+                insert_event(&mut *tx, &activity_signaled_event(subscription, &request)).await?;
         }
         tx.commit().await?;
+        if inserted {
+            self.announcer.events();
+        }
         Ok(subscription)
     }
 
@@ -86,8 +106,12 @@ impl SubscriptionService for PostgresSubscriptionService {
 
         // The wait may have opened since the caller's signal_activity
         if let Some(subscription) = mark_signaled(&mut *tx, &request).await? {
-            insert_event(&mut *tx, &activity_signaled_event(&subscription, &request)).await?;
+            let inserted =
+                insert_event(&mut *tx, &activity_signaled_event(&subscription, &request)).await?;
             tx.commit().await?;
+            if inserted {
+                self.announcer.events();
+            }
             return Ok(SignalOutcome::Signaled(subscription));
         }
 

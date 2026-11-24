@@ -39,7 +39,7 @@ Kruxia Flow is **cost-governed orchestration**: a durable execution engine — t
 - **Ask a human.** Workflows suspend on `wait_for_signal` — for budget approvals, review gates, or any human-in-the-loop step — and resume days later, surviving restarts while they wait.
 - **Costs in your database.** Token-level splits (input / output / cache) per activity, per attempt, queryable via the cost API. Your spend data lives in your Postgres, not a vendor dashboard.
 - **Durable by construction.** Event-sourced execution over PostgreSQL: crashes resume where they left off, with exactly-once semantics.
-- **Fast.** 2-5x the throughput of Temporal on the same hardware, with a single workflow completing in about 20 ms. See [Performance](#performance).
+- **Fast.** 3-5x the throughput of Temporal on the same hardware, with a single workflow completing in about 25 ms. See [Performance](#performance).
 
 Built for teams that run LLM pipelines on their own infrastructure — including fully local with [Ollama](https://ollama.com/) — and want the spend governed as carefully as the data.
 
@@ -325,17 +325,17 @@ Run it on a cloud VM, on-premise, or entirely air-gapped alongside local models.
 
 ## Performance
 
-**2-5x the throughput of Temporal on the same hardware, at lower latency at every percentile, and 80x or more the throughput of Airflow.** Kruxia Flow 0.11.0 against Temporal 1.32.2 and Airflow 3.4.0 (November 2026), each alone on the same machine, identical echo workflows, every workflow completed on all three:
+**3-5x the throughput of Temporal on the same hardware, at lower latency at every percentile, and 80x or more the throughput of Airflow.** Kruxia Flow 0.12.6 against Temporal 1.32.2 and Airflow 3.4.0 (November 2026), each alone on the same machine, identical echo workflows, every workflow completed on all three:
 
 | Scenario                                     | Metric              | Kruxia Flow | Temporal | Airflow  | vs Temporal |
 |----------------------------------------------|---------------------|-------------|----------|----------|-------------|
-| 5 activities in sequence, 10 concurrent      | Throughput (wf/sec) | **163**     | 35       | 1.7      | 4.7x        |
-| 10 activities in parallel, 10 concurrent     | Throughput (wf/sec) | **81**      | 34       | 1.0      | 2.4x        |
-| 3 activities, 100 concurrent                 | Throughput (wf/sec) | **267**     | 118      | 3.2      | 2.3x        |
-| 3 activities, 100 concurrent                 | P50 latency         | **324 ms**  | 544 ms   | 27 s     | 1.7x lower  |
-| 3 activities, 100 concurrent                 | P99 latency         | **593 ms**  | 2,242 ms | 44 s     | 3.8x lower  |
-| One workflow on an idle system, 1 activity   | Mean latency        | **20 ms**   | 34 ms    | —        | 1.7x lower  |
-| One workflow on an idle system, 5 activities | Mean latency        | **35 ms**   | 65 ms    | —        | 1.9x lower  |
+| 5 activities in sequence, 10 concurrent      | Throughput (wf/sec) | **167**     | 35       | 1.7      | 4.8x        |
+| 10 activities in parallel, 10 concurrent     | Throughput (wf/sec) | **97**      | 34       | 1.0      | 2.9x        |
+| 3 activities, 100 concurrent                 | Throughput (wf/sec) | **350**     | 109      | 3.2      | 3.2x        |
+| 3 activities, 100 concurrent                 | P50 latency         | **236 ms**  | 619 ms   | 27 s     | 2.6x lower  |
+| 3 activities, 100 concurrent                 | P99 latency         | **507 ms**  | 2,459 ms | 44 s     | 4.9x lower  |
+| One workflow on an idle system, 1 activity   | Mean latency        | **26 ms**   | 41 ms    | —        | 1.6x lower  |
+| One workflow on an idle system, 5 activities | Mean latency        | **41 ms**   | 79 ms    | —        | 1.9x lower  |
 
 Footprint, measured from the published releases and images:
 
@@ -349,7 +349,7 @@ Footprint, measured from the published releases and images:
 | Peak memory under the suite, all services | **0.24 GB**   | 0.52 GB       | 4.1-5.0 GB   |
 | Runs on Raspberry Pi Zero                 | **[Awesome](docs/raspberry-pi-deployment.md)** | Maybe | No way |
 
-This is each platform out of the box in Docker Compose on one machine, not any of them tuned to its best. Temporal's worker is its Python SDK, Kruxia Flow's is built into the server, and Temporal records a fuller replayable history per step; Airflow is a batch scheduler running on Celery, not built for this kind of load. Kruxia Flow and Temporal figures are medians of twelve passes from one session, Airflow's of six from another. Throughput and latency were measured on 0.11.0 and the memory rows on 0.11.1, which stopped the server holding about 1.5 MB per client connection; under the suite the 0.11.1 server itself stays under 30 MB and the rest is PostgreSQL.
+This is each platform out of the box in Docker Compose on one machine, not any of them tuned to its best. Temporal's worker is its Python SDK, Kruxia Flow's is built into the server, and Temporal records a fuller replayable history per step; Airflow is a batch scheduler running on Celery, not built for this kind of load. Kruxia Flow and Temporal figures are medians of twelve passes from one session, Airflow's of six from another (against Kruxia Flow 0.11.0). Throughput and latency were measured on 0.12.6, which in the same session had 9-42% more throughput than 0.11.0 and the same idle latency, and the memory rows on 0.11.1, which stopped the server holding about 1.5 MB per client connection; under the suite the 0.11.1 server itself stays under 30 MB and the rest is PostgreSQL.
 
 See [`benchmarks/README.md`](benchmarks/README.md#results) for the methodology, the full tables, the caveats, and the dated history of every result set, and [`benchmarks/`](benchmarks/) to reproduce them.
 

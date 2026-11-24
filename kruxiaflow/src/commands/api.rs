@@ -2,6 +2,7 @@ use crate::config::{ApiConfig, DbPoolArgs, EventWakeArgs, StorageArgs};
 use crate::signals;
 use anyhow::{Context, Result};
 use clap::Args;
+use kruxiaflow_core::EventSource;
 use kruxiaflow_core::cache::{CacheService, RedisCache};
 use kruxiaflow_core::queue::{PostgresQueue, QueueConfig};
 use kruxiaflow_core::subscription::{PostgresSubscriptionService, SubscriptionService};
@@ -141,10 +142,6 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
 
     tracing::info!("Authentication service initialized");
 
-    // Initialize activity queue (PostgreSQL implementation for MVP)
-    let activity_queue = Arc::new(PostgresQueue::new(db_pool.clone(), QueueConfig::default()));
-    tracing::info!("Activity queue initialized (PostgreSQL)");
-
     // Initialize event source (PostgreSQL; polling from a durable cursor,
     // woken by commit notifications unless --event-wake poll)
     let event_source = cmd.event_wake.event_source(db_pool.clone()).await?;
@@ -152,6 +149,14 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
     let activity_wake = event_source.activity_wake();
     let event_source = Arc::new(event_source);
     tracing::info!("Event source initialized (PostgreSQL)");
+
+    // Initialize activity queue (PostgreSQL implementation for MVP); it
+    // announces retries through the event source's wake
+    let activity_queue = Arc::new(
+        PostgresQueue::new(db_pool.clone(), QueueConfig::default())
+            .with_announcer(event_source.announcer()),
+    );
+    tracing::info!("Activity queue initialized (PostgreSQL)");
 
     // Initialize workflow storage (provider from --storage-provider)
     let workflow_storage = cmd.storage.create_storage(db_pool.clone())?;
@@ -163,9 +168,11 @@ pub async fn execute(cmd: ApiCommand, database_url_global: Option<String>) -> Re
         Arc::new(RedisCache::new(&redis_url, None).context("Failed to connect to Redis")?);
     tracing::info!("Cache service initialized (Redis)");
 
-    // Initialize subscription service (PostgreSQL for MVP)
-    let subscription_service: Arc<dyn SubscriptionService> =
-        Arc::new(PostgresSubscriptionService::new(db_pool.clone()));
+    // Initialize subscription service (PostgreSQL for MVP); it announces the
+    // signal events it writes through the event source's wake
+    let subscription_service: Arc<dyn SubscriptionService> = Arc::new(
+        PostgresSubscriptionService::new(db_pool.clone()).with_announcer(event_source.announcer()),
+    );
     tracing::info!("Subscription service initialized (PostgreSQL)");
 
     // Create application state with configured infrastructure services

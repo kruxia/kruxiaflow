@@ -1,3 +1,4 @@
+use crate::events::Announcer;
 use crate::events::models::{WorkflowEventType, WorkflowStatus};
 use crate::workflow::repository::{RepositoryError, WorkflowDefinitionRepository};
 use chrono::{DateTime, Utc};
@@ -54,11 +55,24 @@ pub struct CreatedWorkflow {
 #[derive(Clone)]
 pub struct WorkflowService {
     pool: PgPool,
+    announcer: Announcer,
 }
 
 impl WorkflowService {
+    /// A service whose submissions announce nothing: the orchestrator picks
+    /// them up on its poll timer. Production callers attach the process's
+    /// announcer with [`with_announcer`](Self::with_announcer).
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            announcer: Announcer::none(),
+        }
+    }
+
+    /// Announce each submitted workflow's first event once it has committed
+    pub fn with_announcer(mut self, announcer: Announcer) -> Self {
+        self.announcer = announcer;
+        self
     }
 
     /// Submit a new workflow
@@ -222,6 +236,7 @@ impl WorkflowService {
 
         // Commit transaction
         tx.commit().await?;
+        self.announcer.events();
 
         tracing::debug!(
             workflow_id = %workflow_id,
