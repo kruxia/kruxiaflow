@@ -9,7 +9,7 @@
 use bcrypt::hash;
 use kruxiaflow_api::{AppState, AppStateBuild, app_router};
 use kruxiaflow_core::PostgresSubscriptionService;
-use kruxiaflow_core::events::{EventWakeMode, PostgresEventSource};
+use kruxiaflow_core::events::{EventSource, EventWake, EventWakeMode, PostgresEventSource};
 use kruxiaflow_core::queue::{Activity, ActivityQueue, PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use serde_json::json;
@@ -69,11 +69,14 @@ async fn setup_state(pool: PgPool, shutdown_token: CancellationToken, with_wake:
         .expect("event source");
     let activity_wake = event_source.activity_wake();
     assert_eq!(activity_wake.is_some(), with_wake);
+    // The API's own queue writes (retries) announce through its wake
+    let queue = PostgresQueue::new(pool.clone(), QueueConfig::default())
+        .with_announcer(event_source.announcer());
 
     AppState::with_metadata(
         pool.clone(),
         Arc::new(auth_service),
-        Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default())),
+        Arc::new(queue),
         Arc::new(event_source),
         Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone())),
         Arc::new(kruxiaflow_core::cache::NoOpCache::new()),
@@ -235,8 +238,13 @@ async fn db_time_in(pool: &PgPool, seconds: i32) -> chrono::DateTime<chrono::Utc
         .unwrap()
 }
 
+/// Schedule as the orchestrator would, from another process: its queue
+/// announces through a wake of its own, so the API hears of the activity by
+/// notification
 async fn schedule(pool: &PgPool, activity: Activity) {
+    let other_process = EventWake::connect(pool).await.expect("LISTEN");
     PostgresQueue::new(pool.clone(), QueueConfig::default())
+        .with_announcer(other_process.announcer())
         .schedule(Uuid::now_v7(), vec![activity])
         .await
         .expect("schedule");

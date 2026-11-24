@@ -9,7 +9,7 @@
 
 use kruxiaflow_api::{routes::app_router, state::AppState};
 use kruxiaflow_core::PostgresSubscriptionService;
-use kruxiaflow_core::events::{EventWakeMode, PostgresEventSource};
+use kruxiaflow_core::events::{EventSource, EventWake, EventWakeMode, PostgresEventSource};
 use kruxiaflow_core::queue::{Activity, ActivityQueue as _, PostgresQueue, QueueConfig};
 use kruxiaflow_oauth::{AuthConfig, PostgresAuthService};
 use kruxiaflow_std_worker::{ActivityRegistry, EchoActivity, WorkerConfig, WorkerManager};
@@ -61,10 +61,13 @@ async fn start_server_with_wake(pool: PgPool) -> (String, tokio::task::JoinHandl
     let activity_wake = event_source.activity_wake();
     assert!(activity_wake.is_some(), "LISTEN should succeed in tests");
 
+    // The API's own queue writes (retries) announce through its wake
+    let queue = PostgresQueue::new(pool.clone(), QueueConfig::default())
+        .with_announcer(event_source.announcer());
     let state = AppState::new(
         pool.clone(),
         Arc::new(auth_service),
-        Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default())),
+        Arc::new(queue),
         Arc::new(event_source),
         Arc::new(kruxiaflow_core::storage::PostgresStorage::new(pool.clone())),
         Arc::new(kruxiaflow_core::cache::NoOpCache::new()),
@@ -129,7 +132,11 @@ async fn time_to_completion(
 #[sqlx::test(migrations = "../migrations")]
 async fn test_worker_is_woken_for_new_work_and_returns_on_time_for_delayed_work(pool: PgPool) {
     let (server_url, server_handle) = start_server_with_wake(pool.clone()).await;
-    let queue = PostgresQueue::new(pool.clone(), QueueConfig::default());
+    // The orchestrator's queue, in another process: it announces through a
+    // wake of its own, so the API hears of new work by notification
+    let orchestrator_wake = EventWake::connect(&pool).await.expect("LISTEN");
+    let queue = PostgresQueue::new(pool.clone(), QueueConfig::default())
+        .with_announcer(orchestrator_wake.announcer());
 
     let config = WorkerConfig {
         api_url: server_url,

@@ -151,6 +151,7 @@ tool_box!(
 /// REST signal endpoint.
 pub async fn run_send_workflow_signal(
     pool: &PgPool,
+    announcer: &kruxiaflow_core::Announcer,
     params: &SendWorkflowSignal,
 ) -> Result<CallToolResult, CallToolError> {
     let workflow_id = parse_uuid(&params.workflow_id)?;
@@ -214,7 +215,7 @@ pub async fn run_send_workflow_signal(
     }
 
     let sub_svc = PostgresSubscriptionService::new(pool.clone());
-    let event_source = PostgresEventSource::new(pool.clone());
+    let event_source = PostgresEventSource::new(pool.clone()).with_announcer(announcer.clone());
     let mut signaled: Vec<serde_json::Value> = Vec::new();
     let mut held: Vec<String> = Vec::new();
     let mut not_signaled: Vec<String> = Vec::new();
@@ -456,6 +457,7 @@ pub async fn run_invalidate_cache(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kruxiaflow_core::Announcer;
     use kruxiaflow_core::workflow::OnTimeout;
     use kruxiaflow_core::{NewSubscription, PostgresSubscriptionService, SubscriptionService};
     use serde_json::json;
@@ -545,6 +547,7 @@ mod tests {
 
         let result = run_send_workflow_signal(
             &pool,
+            &Announcer::none(),
             &signal(workflow_id, Some("approve"), Some(data.clone())),
         )
         .await
@@ -582,10 +585,14 @@ mod tests {
             Some(json!({"approved": true})),
         );
 
-        let first = run_send_workflow_signal(&pool, &params).await.unwrap();
+        let first = run_send_workflow_signal(&pool, &Announcer::none(), &params)
+            .await
+            .unwrap();
         assert_eq!(extract_json(&first)["signaled"], true);
 
-        let second = run_send_workflow_signal(&pool, &params).await.unwrap();
+        let second = run_send_workflow_signal(&pool, &Announcer::none(), &params)
+            .await
+            .unwrap();
         assert_eq!(second.is_error, Some(true));
         assert_eq!(extract_json(&second)["signaled"], false);
 
@@ -596,9 +603,13 @@ mod tests {
     async fn test_send_signal_without_data(pool: PgPool) {
         let workflow_id = waiting_workflow(&pool, &["approve"]).await;
 
-        let result = run_send_workflow_signal(&pool, &signal(workflow_id, Some("approve"), None))
-            .await
-            .unwrap();
+        let result = run_send_workflow_signal(
+            &pool,
+            &Announcer::none(),
+            &signal(workflow_id, Some("approve"), None),
+        )
+        .await
+        .unwrap();
         assert_eq!(extract_json(&result)["signaled"], true);
 
         let events = signaled_events(&pool, workflow_id).await;
@@ -614,7 +625,9 @@ mod tests {
         let mut params = signal(workflow_id, Some("approve"), None);
         params.signal_name = "other".to_string();
 
-        let result = run_send_workflow_signal(&pool, &params).await.unwrap();
+        let result = run_send_workflow_signal(&pool, &Announcer::none(), &params)
+            .await
+            .unwrap();
         assert_eq!(result.is_error, Some(true));
         assert_eq!(extract_json(&result)["signaled"], false);
         assert!(signaled_events(&pool, workflow_id).await.is_empty());
@@ -624,9 +637,13 @@ mod tests {
     async fn test_send_signal_empty_activity_key_is_invalid(pool: PgPool) {
         let workflow_id = waiting_workflow(&pool, &["approve"]).await;
 
-        let result = run_send_workflow_signal(&pool, &signal(workflow_id, Some(""), None))
-            .await
-            .unwrap();
+        let result = run_send_workflow_signal(
+            &pool,
+            &Announcer::none(),
+            &signal(workflow_id, Some(""), None),
+        )
+        .await
+        .unwrap();
         assert_eq!(result.is_error, Some(true));
         let body = extract_json(&result);
         assert!(body["error"].as_str().unwrap().contains("activity_key"));
@@ -641,7 +658,9 @@ mod tests {
         let mut params = signal(workflow_id, None, None);
         params.signal_name = String::new();
 
-        let result = run_send_workflow_signal(&pool, &params).await.unwrap();
+        let result = run_send_workflow_signal(&pool, &Announcer::none(), &params)
+            .await
+            .unwrap();
         assert_eq!(result.is_error, Some(true));
         let error = extract_json(&result)["error"].as_str().unwrap().to_string();
         assert!(error.contains("event_name"), "{error}");
@@ -653,10 +672,13 @@ mod tests {
         let workflow_id = waiting_workflow(&pool, &["approve_a", "approve_b"]).await;
         let data = json!({"approved": true});
 
-        let result =
-            run_send_workflow_signal(&pool, &signal(workflow_id, None, Some(data.clone())))
-                .await
-                .unwrap();
+        let result = run_send_workflow_signal(
+            &pool,
+            &Announcer::none(),
+            &signal(workflow_id, None, Some(data.clone())),
+        )
+        .await
+        .unwrap();
         let body = extract_json(&result);
         assert_eq!(body["signaled"], true);
         assert_eq!(body["signaled_activities"].as_array().unwrap().len(), 2);

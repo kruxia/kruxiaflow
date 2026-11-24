@@ -1,5 +1,7 @@
 # Commit-order event cursor and LISTEN/NOTIFY wake
 
+> **Superseded in part (2026-11-23).** The NOTIFY trigger this plan adds was dropped by migration `20261123000001_app_side_notify`: the application now announces its own committed writes, and each process sends one coalesced NOTIFY per batch (`Announcer` in `core/src/events/wake.rs`; `docs/architecture.md`, "NOTIFY as a wake, never as data"). Notifications under load had queued on PostgreSQL's database-wide notify lock. Channels and payloads are unchanged, and the rest of this plan stands.
+
 **Date:** 2026-11-08 · **Status:** implemented with changes (§0, §7), tested and benchmarked (§7.15); release pending · **Target release:** 0.10.0
 **Scope:** `kruxiaflow-core` (events, orchestrator), `kruxiaflow-api` (event broadcast poller, WebSocket replay, health), one migration, docs.
 
