@@ -18,6 +18,38 @@ const CLUSTER_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 /// A writing transaction open longer than this is reported as a possible stall
 const STALL_TRANSACTION_AGE_SECS: f64 = 30.0;
 
+/// Write `event` to the PostgreSQL event store on `executor`, which may be a
+/// caller's transaction: the event is then written if, and only if, the
+/// transaction commits, together with the change it records.
+///
+/// What [`PostgresEventSource::publish`] does; idempotent the same way.
+/// Returns whether a row was inserted (a duplicate inserts none). Nothing is
+/// announced: the caller announces an inserted event once its transaction
+/// commits.
+pub async fn insert_event<'e, E>(
+    executor: E,
+    event: &NewWorkflowEvent,
+) -> std::result::Result<bool, sqlx::Error>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let inserted = sqlx::query!(
+        r#"
+        INSERT INTO workflow_events (workflow_id, event_type, activity_key, payload, iteration)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (workflow_id, event_type, activity_key, iteration, ((payload->>'attempt'))) DO NOTHING
+        "#,
+        event.workflow_id,
+        event.event_type as WorkflowEventType,
+        event.activity_key,
+        event.payload,
+        event.iteration
+    )
+    .execute(executor)
+    .await?;
+    Ok(inserted.rows_affected() > 0)
+}
+
 /// PostgreSQL-based event source implementation
 ///
 /// # Delivery
@@ -214,23 +246,8 @@ impl EventSource for PostgresEventSource {
     /// - An inserted event is announced once its insert has committed
     #[tracing::instrument(skip(self), level = "debug")]
     async fn publish(&self, event: NewWorkflowEvent) -> Result<()> {
-        let inserted = sqlx::query!(
-            r#"
-            INSERT INTO workflow_events (workflow_id, event_type, activity_key, payload, iteration)
-            VALUES ($1, $2, $3, $4, $5)
-            ON CONFLICT (workflow_id, event_type, activity_key, iteration, ((payload->>'attempt'))) DO NOTHING
-            "#,
-            event.workflow_id,
-            event.event_type as WorkflowEventType,
-            event.activity_key,
-            event.payload,
-            event.iteration
-        )
-        .execute(&self.pool)
-        .await?;
-
         // A duplicate inserts nothing, and there is nothing to announce
-        if inserted.rows_affected() > 0 {
+        if insert_event(&self.pool, &event).await? {
             self.announcer.events();
         }
         Ok(())

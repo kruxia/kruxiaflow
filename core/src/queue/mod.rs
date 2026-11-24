@@ -10,8 +10,13 @@ pub use models::*;
 pub use monitor::QueueMonitor;
 pub use postgres_queue::PostgresQueue;
 
+use crate::events::NewWorkflowEvent;
 use async_trait::async_trait;
 use uuid::Uuid;
+
+/// Builds an activity failure's event from whether the activity will be
+/// retried, which the queue decides inside the transaction
+pub type FailureEvent = Box<dyn FnOnce(bool) -> NewWorkflowEvent + Send>;
 
 /// Activity details for event publishing
 #[derive(Debug, Clone, Default)]
@@ -61,6 +66,30 @@ pub trait ActivityQueue: Send + Sync {
         worker_id: &str,
         retryable: bool,
         result: ActivityResult,
+    ) -> Result<bool>;
+
+    /// Complete an activity and write its `ActivityCompleted` event in the
+    /// same transaction: both are recorded or neither is. An engine that stops
+    /// partway leaves the activity running under the worker's claim, so the
+    /// claim timeout runs it again and a retried report succeeds.
+    async fn complete_with_event(
+        &self,
+        activity_id: Uuid,
+        worker_id: &str,
+        result: ActivityResult,
+        event: NewWorkflowEvent,
+    ) -> Result<()>;
+
+    /// Fail an activity, as [`ActivityQueue::fail`], and write the event that
+    /// `event` builds from whether it will be retried, in the same
+    /// transaction: both are recorded or neither is.
+    async fn fail_with_event(
+        &self,
+        activity_id: Uuid,
+        worker_id: &str,
+        retryable: bool,
+        result: ActivityResult,
+        event: FailureEvent,
     ) -> Result<bool>;
 
     /// Send heartbeat for long-running activity (extends timeout deadline)

@@ -295,6 +295,27 @@ pub mod tests {
             Ok(())
         }
 
+        async fn complete_with_event(
+            &self,
+            _activity_id: Uuid,
+            _worker_id: &str,
+            _result: ActivityResult,
+            _event: kruxiaflow_core::events::NewWorkflowEvent,
+        ) -> kruxiaflow_core::queue::Result<()> {
+            Ok(())
+        }
+
+        async fn fail_with_event(
+            &self,
+            _activity_id: Uuid,
+            _worker_id: &str,
+            _retryable: bool,
+            _result: ActivityResult,
+            _event: kruxiaflow_core::queue::FailureEvent,
+        ) -> kruxiaflow_core::queue::Result<bool> {
+            Ok(false)
+        }
+
         async fn fail(
             &self,
             _activity_id: Uuid,

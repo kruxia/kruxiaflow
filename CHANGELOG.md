@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A worker's report is never recorded without its event** (#55). A
+  completion or failure marked the activity's queue row, then published
+  `ActivityCompleted` or `ActivityFailed` as a separate write. If the
+  engine stopped between the two, the row was completed (or failed) with no
+  event behind it: the claim timeout never ran the step again, and its
+  workflow stayed `running` for good. Both now commit in one transaction,
+  so a stop leaves the step running under its claim, to run again after the
+  claim timeout. `ActivityWorkerService::new` no longer takes an event
+  source.
+
 ## [0.12.6] - 2026-11-23
 
 ### Changed

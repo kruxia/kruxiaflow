@@ -2557,6 +2557,9 @@ pub trait ActivityQueue: Send + Sync {
     async fn schedule(&self, workflow_id: Uuid, activities: Vec<Activity>) -> Result<()>;
     async fn claim_next(&self, worker: &str, name: &str) -> Result<Option<QueuedActivity>>;
     async fn complete(&self, activity_id: Uuid, result: ActivityResult) -> Result<()>;
+    // A worker's report: the queue change and its event in one transaction
+    async fn complete_with_event(&self, activity_id: Uuid, result: ActivityResult, event: NewWorkflowEvent) -> Result<()>;
+    async fn fail_with_event(&self, activity_id: Uuid, retryable: bool, result: ActivityResult, event: FailureEvent) -> Result<bool>;
     async fn heartbeat(&self, activity_id: Uuid) -> Result<()>;
 }
 
@@ -2709,6 +2712,12 @@ KRUXIAFLOW_QUEUE_SQS_URL=https://sqs.us-east-1.amazonaws.com/123456/kruxiaflow-a
 KRUXIAFLOW_QUEUE_SQS_REGION=us-east-1
 ```
 
+**A worker's report and its event commit together**
+
+A worker's completion or failure changes the activity's queue row and writes the event the orchestrator acts on (`ActivityCompleted` or `ActivityFailed`). `PostgresQueue::complete_with_event` does both in one statement: the update, then the event insert from the row it returned, in a single round trip. `fail_with_event` does both in one transaction, since it first reads the row `FOR UPDATE` to decide on a retry, and writes the event with `events::insert_event`, the same insert `PostgresEventSource::publish` makes. If the engine stops partway, neither is recorded: the row is still the worker's running claim, so the claim timeout runs the activity again, and a retried report succeeds. A row already completed by the same worker is a success, and its event is written again, which the event dedup drops if it exists. Once the statement or transaction commits, the queue announces the event (and a retry's requeued row), as `publish` would: `insert_event` itself announces nothing. As two separate writes, a stop between them left the row completed with no event, so the activity never ran again and its workflow never moved on (#55).
+
+**Why:** the MVP keeps the queue and the event store in one PostgreSQL database, so one transaction is exact and costs no new moving parts. It ties `PostgresQueue` to the PostgreSQL event store: a queue or an event store outside PostgreSQL (post-MVP SQS or Kafka) would write the event to an outbox table in the queue's transaction and relay it from there, instead of calling `insert_event`.
+
 **Worker wake: claiming without a short poll timer**
 
 Workers claim activities only through `claim_next` (`POST /api/v1/workers/poll`). What changes with the wake is when they ask. An activity becomes claimable in one of two ways, and each is handled differently:
@@ -2719,7 +2728,7 @@ Workers claim activities only through `claim_next` (`POST /api/v1/workers/poll`)
 | The clock reaches its `scheduled_for` (delay, retry backoff) | The `next_due_ms` in the answer to its last empty poll                                 |
 | A running activity passes its timeout                        | Its idle timer (5 s), or the orchestrator's 30 s stale sweep (which then wakes it)     |
 
-- **Announcer.** `PostgresQueue` announces each activity it writes as `pending`, after the write commits: a new row (`schedule`), a retry (`fail`), or a reclaimed stale row (`reclaim_stale_activities`). Claims, heartbeats and completions announce nothing. The announcement wakes the process's own subscribers of that worker type in memory, and reaches other processes as a notification on the channel `activity_queue` with the worker type as payload (see **NOTIFY as a wake, never as data**, below). The payload is a routing hint only.
+- **Announcer.** `PostgresQueue` announces each activity it writes as `pending`, after the write commits: a new row (`schedule`), a retry (`fail`, `fail_with_event`), or a reclaimed stale row (`reclaim_stale_activities`). Claims and heartbeats announce nothing, and completions only their events. The announcement wakes the process's own subscribers of that worker type in memory, and reaches other processes as a notification on the channel `activity_queue` with the worker type as payload (see **NOTIFY as a wake, never as data**, below). The payload is a routing hint only.
 - **Fan-out.** The API process's one `LISTEN` connection carries this channel alongside `workflow_events`, with one wake counter per worker type. A reconnect or listener error wakes every subscriber. There is no transaction-id gate here: a row is claimable by any statement that starts after its commit.
 - **Stream.** `GET /api/v1/workers/wake?worker=<type>` sends a `wake` event on connection and on each notification, with a keepalive comment every 15 s. Events carry no data. The endpoint answers 503 when the process has no listener (`KRUXIAFLOW_EVENT_WAKE=poll`, or `LISTEN` failed).
 - **Worker loop.** After an empty poll the worker waits for a wake, for `next_due_ms`, or for its timer, whichever is first. The timer is `wake_poll_interval` (5 s) only while the stream is connected; otherwise it is the ordinary `poll_interval` (100 ms), so a worker that cannot get a stream behaves as it always did. A wake that arrives while a poll is in flight ends the next wait at once.
@@ -2825,7 +2834,8 @@ sort first.
 
 **NOTIFY as a wake, never as data.** The application announces its own
 writes; no trigger notifies. A writer that has committed an event (`publish`,
-or a submission's first event) or a claimable activity tells its process's
+a submission's first event, or a worker's report through `complete_with_event`
+or `fail_with_event`) or a claimable activity tells its process's
 `Announcer` (`core/src/events/wake.rs`). The announcer wakes the process's own
 consumers in memory at once, and queues a notification for the others. One
 sender task per process sends everything queued as a single `pg_notify`

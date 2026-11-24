@@ -6,7 +6,7 @@ pub mod wake;
 
 pub use error::{EventError, Result, is_connection_error};
 pub use models::*;
-pub use postgres_event_source::PostgresEventSource;
+pub use postgres_event_source::{PostgresEventSource, insert_event};
 pub use rebase::{
     ForeignXids, RebaseReport, find_foreign_xids, rebase_event_xids, verify_event_xids,
 };

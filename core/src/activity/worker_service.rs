@@ -1,5 +1,5 @@
 use crate::cost::UsageEntry;
-use crate::events::{EventSource, NewWorkflowEvent, WorkflowEventType};
+use crate::events::{NewWorkflowEvent, WorkflowEventType};
 use crate::queue::{ActivityQueue, ActivityResult, QueueError, QueuedActivity};
 use rust_decimal::Decimal;
 use serde_json::Value;
@@ -66,24 +66,22 @@ impl From<QueuedActivity> for PendingActivityRecord {
 
 /// Activity worker service
 ///
-/// Coordinates between ActivityQueue (for queue operations) and EventSource
-/// (for orchestrator notifications). This service delegates queue operations to
-/// the ActivityQueue trait and event publishing to the EventSource trait.
+/// The worker-facing operations on the ActivityQueue. A completion or failure
+/// is recorded together with the event the orchestrator acts on, in one
+/// transaction ([`ActivityQueue::complete_with_event`],
+/// [`ActivityQueue::fail_with_event`]), so a report is never recorded without
+/// its event.
 ///
 /// This follows the service interface pattern - all infrastructure dependencies
 /// are abstracted behind interfaces.
 #[derive(Clone)]
 pub struct ActivityWorkerService {
     queue: Arc<dyn ActivityQueue>,
-    event_source: Arc<dyn EventSource>,
 }
 
 impl ActivityWorkerService {
-    pub fn new(queue: Arc<dyn ActivityQueue>, event_source: Arc<dyn EventSource>) -> Self {
-        Self {
-            queue,
-            event_source,
-        }
+    pub fn new(queue: Arc<dyn ActivityQueue>) -> Self {
+        Self { queue }
     }
 
     /// Poll for pending activities
@@ -149,7 +147,8 @@ impl ActivityWorkerService {
 
     /// Complete an activity successfully
     ///
-    /// Delegates to ActivityQueue::complete and publishes ActivityCompleted event via EventSource.
+    /// Records the completion and its ActivityCompleted event in one transaction
+    /// ([`ActivityQueue::complete_with_event`]).
     pub async fn complete_activity(
         &self,
         activity_id: Uuid,
@@ -169,22 +168,8 @@ impl ActivityWorkerService {
                 other => ActivityWorkerError::QueueError(other),
             })?;
 
-        // Delegate to ActivityQueue to complete the activity
-        // This handles worker verification and queue removal atomically
-        let mut result = ActivityResult::success(outputs.clone());
-        result.cost_usd = cost_usd;
-
-        self.queue
-            .complete(activity_id, &worker_id, result)
-            .await
-            .map_err(|e| match e {
-                QueueError::ActivityNotFound(id) => ActivityWorkerError::ActivityNotFound(id),
-                QueueError::ActivityReclaimed => ActivityWorkerError::WrongWorker,
-                QueueError::InvalidStatus { .. } => ActivityWorkerError::ActivityAlreadyCompleted,
-                other => ActivityWorkerError::QueueError(other),
-            })?;
-
-        // Service-layer responsibility: Publish ActivityCompleted event via EventSource
+        // The completion and its ActivityCompleted event commit together, so
+        // an engine that stops partway leaves the activity claimed and running
         // IMPORTANT: outputs must be an object mapping names to values (e.g., {"response": {...}})
         // The orchestrator will convert this to Vec<ActivityOutput> using output_definitions
         let mut event_payload = serde_json::json!({
@@ -197,16 +182,26 @@ impl ActivityWorkerService {
         {
             event_payload["usage"] = serde_json::to_value(usage)?;
         }
+        let event = NewWorkflowEvent {
+            workflow_id: activity.workflow_id,
+            event_type: WorkflowEventType::ActivityCompleted,
+            activity_key: Some(activity.activity_key.clone()),
+            payload: event_payload,
+            iteration: activity.iteration,
+        };
 
-        self.event_source
-            .publish(NewWorkflowEvent {
-                workflow_id: activity.workflow_id,
-                event_type: WorkflowEventType::ActivityCompleted,
-                activity_key: Some(activity.activity_key.clone()),
-                payload: event_payload,
-                iteration: activity.iteration,
-            })
-            .await?;
+        let mut result = ActivityResult::success(outputs);
+        result.cost_usd = cost_usd;
+
+        self.queue
+            .complete_with_event(activity_id, &worker_id, result, event)
+            .await
+            .map_err(|e| match e {
+                QueueError::ActivityNotFound(id) => ActivityWorkerError::ActivityNotFound(id),
+                QueueError::ActivityReclaimed => ActivityWorkerError::WrongWorker,
+                QueueError::InvalidStatus { .. } => ActivityWorkerError::ActivityAlreadyCompleted,
+                other => ActivityWorkerError::QueueError(other),
+            })?;
 
         tracing::debug!(
             activity_id = %activity_id,
@@ -221,7 +216,8 @@ impl ActivityWorkerService {
 
     /// Fail an activity
     ///
-    /// Delegates to ActivityQueue::fail and publishes ActivityFailed event via EventSource.
+    /// Records the failure and its ActivityFailed event in one transaction
+    /// ([`ActivityQueue::fail_with_event`]).
     #[allow(clippy::too_many_arguments)]
     pub async fn fail_activity(
         &self,
@@ -244,8 +240,6 @@ impl ActivityWorkerService {
                 other => ActivityWorkerError::QueueError(other),
             })?;
 
-        // Delegate to ActivityQueue to fail the activity
-        // This handles worker verification, retry logic, and queue management atomically
         let result = ActivityResult {
             success: false,
             outputs: None,
@@ -254,9 +248,49 @@ impl ActivityWorkerService {
             token_usage: None,
         };
 
+        // A failed activity may still have spent money before erroring; carry the
+        // reported cost/usage so the orchestrator records it under this attempt.
+        // `attempt` (the 1-indexed attempt that just failed, read before
+        // the queue incremented retry_count) makes each attempt's failure
+        // event distinct under the per-attempt event dedup — without it, the
+        // terminal failure would be deduped against the first retryable one
+        // and the workflow would hang. The queue decides `will_retry` and
+        // writes the event in the same transaction as the failure.
+        let usage = match &usage {
+            Some(usage) if !usage.is_empty() => Some(serde_json::to_value(usage)?),
+            _ => None,
+        };
+        let workflow_id = activity.workflow_id;
+        let iteration = activity.iteration;
+        let payload_key = activity.activity_key.clone();
+        let event_key = activity.activity_key.clone();
+        let attempt = activity.attempt;
+        let (code, message) = (error_code.clone(), error_message.clone());
+        let event = Box::new(move |will_retry: bool| {
+            let mut payload = serde_json::json!({
+                "activity_key": payload_key,
+                "error_code": code,
+                "error_message": message,
+                "retryable": retryable,
+                "will_retry": will_retry,
+                "attempt": attempt,
+                "cost_usd": cost_usd
+            });
+            if let Some(usage) = usage {
+                payload["usage"] = usage;
+            }
+            NewWorkflowEvent {
+                workflow_id,
+                event_type: WorkflowEventType::ActivityFailed,
+                activity_key: Some(event_key),
+                payload,
+                iteration,
+            }
+        });
+
         let will_retry = self
             .queue
-            .fail(activity_id, &worker_id, retryable, result)
+            .fail_with_event(activity_id, &worker_id, retryable, result, event)
             .await
             .map_err(|e| match e {
                 QueueError::ActivityNotFound(id) => ActivityWorkerError::ActivityNotFound(id),
@@ -264,39 +298,6 @@ impl ActivityWorkerService {
                 QueueError::InvalidStatus { .. } => ActivityWorkerError::ActivityAlreadyCompleted,
                 other => ActivityWorkerError::QueueError(other),
             })?;
-
-        // Service-layer responsibility: Publish ActivityFailed event via EventSource
-        // A failed activity may still have spent money before erroring; carry the
-        // reported cost/usage so the orchestrator records it under this attempt.
-        // `attempt` (the 1-indexed attempt that just failed, read before
-        // queue.fail incremented retry_count) makes each attempt's failure
-        // event distinct under the per-attempt event dedup — without it, the
-        // terminal failure would be deduped against the first retryable one
-        // and the workflow would hang.
-        let mut event_payload = serde_json::json!({
-            "activity_key": activity.activity_key,
-            "error_code": error_code,
-            "error_message": error_message,
-            "retryable": retryable,
-            "will_retry": will_retry,
-            "attempt": activity.attempt,
-            "cost_usd": cost_usd
-        });
-        if let Some(usage) = &usage
-            && !usage.is_empty()
-        {
-            event_payload["usage"] = serde_json::to_value(usage)?;
-        }
-
-        self.event_source
-            .publish(NewWorkflowEvent {
-                workflow_id: activity.workflow_id,
-                event_type: WorkflowEventType::ActivityFailed,
-                activity_key: Some(activity.activity_key.clone()),
-                payload: event_payload,
-                iteration: activity.iteration,
-            })
-            .await?;
 
         tracing::debug!(
             activity_id = %activity_id,
