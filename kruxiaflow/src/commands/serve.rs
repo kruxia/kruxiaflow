@@ -684,16 +684,19 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
 
     let auth_service = Arc::new(PostgresAuthService::new(pool.clone(), auth_config)?);
 
-    // Create activity queue with environment variable configuration
-    let queue_config = QueueConfig::from_env();
-    let activity_queue: Arc<dyn ActivityQueue> =
-        Arc::new(PostgresQueue::new(pool.clone(), queue_config));
-
     // Create event source
     let event_source = cmd.event_wake.event_source(pool.clone()).await?;
     // The same LISTEN connection wakes workers (GET /api/v1/workers/wake)
     let activity_wake = event_source.activity_wake();
     let event_source: Arc<dyn EventSource> = Arc::new(event_source);
+    // Writes outside `publish` (queue rows, submissions from the scheduler
+    // and MCP) are announced through the event source's wake
+    let announcer = event_source.announcer();
+
+    // Create activity queue with environment variable configuration
+    let queue_config = QueueConfig::from_env();
+    let activity_queue: Arc<dyn ActivityQueue> =
+        Arc::new(PostgresQueue::new(pool.clone(), queue_config).with_announcer(announcer.clone()));
 
     // Create workflow storage
     let workflow_storage = cmd.storage.create_storage(pool.clone())?;
@@ -749,10 +752,12 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     let scheduler_handle = {
         let pool = pool.clone();
         let token = shutdown_token.clone();
+        let announcer = announcer.clone();
         tokio::spawn(async move {
             kruxiaflow_core::run_scheduler(
                 pool,
                 kruxiaflow_core::SchedulerConfig::from_env(),
+                announcer,
                 Some(token),
             )
             .await;
@@ -826,6 +831,7 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
             Some(crate::mcp::spawn_mcp_server(
                 Arc::new(mcp_config),
                 pool.clone(),
+                announcer.clone(),
                 cache_service.clone(),
                 mcp_auth,
             ))

@@ -1,5 +1,7 @@
 //! LISTEN/NOTIFY wake-up for event consumers
-//! (docs/implementation/2026-11-08-commit-order-cursor-and-notify-wake.md §2.2).
+//! (docs/implementation/2026-11-08-commit-order-cursor-and-notify-wake.md §2.2;
+//! since migration 20261123000001 the application announces each publish,
+//! not a trigger).
 //!
 //! Notifications are scoped to a database, so each `sqlx::test` database
 //! sees only its own.
@@ -73,9 +75,10 @@ async fn test_every_receiver_wakes(pool: PgPool) {
     assert_eq!(b.wait(WAKE_WITHIN).await, Wake::Woken);
 }
 
-/// The trigger, not the client, is the source of the notification
+/// The application announces its events; the database does not. An event
+/// written by SQL alone wakes nobody, and consumers find it on their timer.
 #[sqlx::test(migrations = "../migrations")]
-async fn test_plain_sql_insert_wakes(pool: PgPool) {
+async fn test_plain_sql_insert_does_not_wake(pool: PgPool) {
     let pool = common::unshared_pool(&pool).await;
     let source = wake_source(&pool).await;
     let mut rx = source.wake().unwrap();
@@ -88,46 +91,26 @@ async fn test_plain_sql_insert_wakes(pool: PgPool) {
     .execute(&pool)
     .await
     .unwrap();
-    assert_eq!(rx.wait(WAKE_WITHIN).await, Wake::Woken);
+    assert_eq!(rx.wait(QUIET).await, Wake::TimedOut);
 }
 
-/// Notifications are delivered at commit; a rolled-back insert never wakes
+/// An event published by another process (here, an event source with a wake
+/// of its own) reaches this one as a notification
 #[sqlx::test(migrations = "../migrations")]
-async fn test_notification_waits_for_commit(pool: PgPool) {
+async fn test_publish_in_another_process_wakes(pool: PgPool) {
     let pool = common::unshared_pool(&pool).await;
-    let source = wake_source(&pool).await;
-    let mut rx = source.wake().unwrap();
+    let listener = wake_source(&pool).await;
+    let mut rx = listener.wake().unwrap();
+    let other_process = wake_source(&pool).await;
 
-    // (A rolled-back first uuidv7() call on a connection is also the case
-    // migration 20261108000003 fixes for PostgreSQL < 18.)
-    let insert = "INSERT INTO workflow_events (workflow_id, event_type, payload) \
-                  VALUES ($1, 'WorkflowCreated', '{}')";
-
-    let mut tx = pool.begin().await.unwrap();
-    sqlx::query(insert)
-        .bind(Uuid::now_v7())
-        .execute(&mut *tx)
-        .await
-        .unwrap();
     assert_eq!(rx.wait(QUIET).await, Wake::TimedOut);
-    tx.rollback().await.unwrap();
-    assert_eq!(rx.wait(QUIET).await, Wake::TimedOut);
-
-    let mut tx = pool.begin().await.unwrap();
-    sqlx::query(insert)
-        .bind(Uuid::now_v7())
-        .execute(&mut *tx)
-        .await
-        .unwrap();
-    assert_eq!(rx.wait(QUIET).await, Wake::TimedOut);
-    tx.commit().await.unwrap();
+    other_process.publish(event(Uuid::now_v7())).await.unwrap();
     assert_eq!(rx.wait(WAKE_WITHIN).await, Wake::Woken);
 }
 
-/// A duplicate publish inserts nothing but still fires the statement
-/// trigger: the consumer wakes, polls, and finds nothing new
+/// A duplicate publish inserts nothing, so it announces nothing
 #[sqlx::test(migrations = "../migrations")]
-async fn test_conflicting_insert_wakes_and_poll_is_empty(pool: PgPool) {
+async fn test_conflicting_insert_does_not_wake(pool: PgPool) {
     let pool = common::unshared_pool(&pool).await;
     let source = wake_source(&pool).await;
     let mut rx = source.wake().unwrap();
@@ -144,7 +127,7 @@ async fn test_conflicting_insert_wakes_and_poll_is_empty(pool: PgPool) {
         .unwrap();
 
     source.publish(event(workflow_id)).await.unwrap();
-    assert_eq!(rx.wait(WAKE_WITHIN).await, Wake::Woken);
+    assert_eq!(rx.wait(QUIET).await, Wake::TimedOut);
     common::settle_events(&pool).await;
     assert!(source.poll("c").await.unwrap().is_empty());
 }

@@ -1,6 +1,6 @@
 use super::{
-    ActivityWake, EventCursor, EventSource, EventWake, EventWakeMode, NewWorkflowEvent, Result,
-    WakeReceiver, WorkflowEvent, WorkflowEventType, find_foreign_xids, verify_event_xids,
+    ActivityWake, Announcer, EventCursor, EventSource, EventWake, EventWakeMode, NewWorkflowEvent,
+    Result, WakeReceiver, WorkflowEvent, WorkflowEventType, find_foreign_xids, verify_event_xids,
 };
 use async_trait::async_trait;
 use sqlx::PgPool;
@@ -23,14 +23,17 @@ const STALL_TRANSACTION_AGE_SECS: f64 = 30.0;
 /// transaction commits, together with the change it records.
 ///
 /// What [`PostgresEventSource::publish`] does; idempotent the same way.
+/// Returns whether a row was inserted (a duplicate inserts none). Nothing is
+/// announced: the caller announces an inserted event once its transaction
+/// commits.
 pub async fn insert_event<'e, E>(
     executor: E,
     event: &NewWorkflowEvent,
-) -> std::result::Result<(), sqlx::Error>
+) -> std::result::Result<bool, sqlx::Error>
 where
     E: sqlx::PgExecutor<'e>,
 {
-    sqlx::query!(
+    let inserted = sqlx::query!(
         r#"
         INSERT INTO workflow_events (workflow_id, event_type, activity_key, payload, iteration)
         VALUES ($1, $2, $3, $4, $5)
@@ -44,7 +47,7 @@ where
     )
     .execute(executor)
     .await?;
-    Ok(())
+    Ok(inserted.rows_affected() > 0)
 }
 
 /// PostgreSQL-based event source implementation
@@ -71,6 +74,9 @@ where
 pub struct PostgresEventSource {
     pool: PgPool,
     wake: Option<EventWake>,
+    /// Announces each published event (from the wake, or attached with
+    /// [`with_announcer`](Self::with_announcer))
+    announcer: Announcer,
     last_stall_check: Mutex<Option<Instant>>,
     last_cluster_check: Mutex<Option<Instant>>,
 }
@@ -93,6 +99,7 @@ impl PostgresEventSource {
         Self {
             pool,
             wake: None,
+            announcer: Announcer::none(),
             last_stall_check: Mutex::new(None),
             last_cluster_check: Mutex::new(None),
         }
@@ -101,9 +108,17 @@ impl PostgresEventSource {
     /// An event source whose consumers also wake on commit notifications
     pub fn with_wake(pool: PgPool, wake: EventWake) -> Self {
         Self {
+            announcer: wake.announcer(),
             wake: Some(wake),
             ..Self::new(pool)
         }
+    }
+
+    /// An event source that only publishes, announcing each event it
+    /// publishes through `announcer` (another component's wake)
+    pub fn with_announcer(mut self, announcer: Announcer) -> Self {
+        self.announcer = announcer;
+        self
     }
 
     /// Build an event source for a process that consumes events, in the
@@ -228,9 +243,13 @@ impl EventSource for PostgresEventSource {
     ///   distinct; every other event type carries no attempt and keeps
     ///   one-slot idempotency (NULLS NOT DISTINCT)
     /// - Database assigns id (UUIDv7), timestamp, position and tx
+    /// - An inserted event is announced once its insert has committed
     #[tracing::instrument(skip(self), level = "debug")]
     async fn publish(&self, event: NewWorkflowEvent) -> Result<()> {
-        insert_event(&self.pool, &event).await?;
+        // A duplicate inserts nothing, and there is nothing to announce
+        if insert_event(&self.pool, &event).await? {
+            self.announcer.events();
+        }
         Ok(())
     }
 
@@ -476,5 +495,9 @@ impl EventSource for PostgresEventSource {
 
     fn wake(&self) -> Option<WakeReceiver> {
         self.wake.as_ref().map(EventWake::subscribe)
+    }
+
+    fn announcer(&self) -> Announcer {
+        self.announcer.clone()
     }
 }

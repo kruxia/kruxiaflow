@@ -2,15 +2,18 @@
 //! the event the orchestrator acts on. Both commit together, or neither does:
 //! if the engine stops before the event is written, the row is still the
 //! worker's running claim, so the claim timeout runs the step again, and a
-//! retried report still records the result and writes its event (#55).
+//! retried report still records the result and writes its event (#55). Once
+//! they commit, the event is announced, so the orchestrator is woken for it.
 //!
 //! The engine is stopped by a trigger that makes the next event insert fail
 //! once, as a stop just before the event is written would.
 use kruxiaflow_core::activity::ActivityWorkerService;
+use kruxiaflow_core::events::{Announcer, EventWake, Wake};
 use kruxiaflow_core::queue::{Activity, ActivityQueue, PostgresQueue, QueueConfig};
 use serde_json::json;
 use sqlx::PgPool;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 /// Make the next insert into `workflow_events` fail, once. The sequence
@@ -35,8 +38,14 @@ async fn stop_before_next_event(pool: &PgPool) {
 
 /// A worker service, and the id of an activity `worker_01` has claimed
 async fn claimed(pool: &PgPool) -> (ActivityWorkerService, Uuid, Uuid) {
-    let queue = Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()))
-        as Arc<dyn ActivityQueue>;
+    claimed_with(pool, Announcer::none()).await
+}
+
+/// [`claimed`], with a queue that announces through `announcer`
+async fn claimed_with(pool: &PgPool, announcer: Announcer) -> (ActivityWorkerService, Uuid, Uuid) {
+    let queue = Arc::new(
+        PostgresQueue::new(pool.clone(), QueueConfig::default()).with_announcer(announcer),
+    ) as Arc<dyn ActivityQueue>;
     let workflow_id = Uuid::now_v7();
     queue
         .schedule(
@@ -187,4 +196,50 @@ async fn test_retryable_failure_writes_its_event_with_the_requeue(pool: PgPool) 
     .await
     .unwrap();
     assert_eq!(will_retry, vec![json!(true)]);
+}
+
+/// A completion's event, written in the completion's statement, wakes the
+/// orchestrator once it commits
+#[sqlx::test(migrations = "../migrations")]
+async fn test_completion_wakes_the_orchestrator(pool: PgPool) {
+    let wake = EventWake::connect(&pool).await.expect("LISTEN");
+    let (service, _, id) = claimed_with(&pool, wake.announcer()).await;
+    let mut rx = wake.subscribe();
+    assert_eq!(rx.wait(Duration::from_millis(200)).await, Wake::TimedOut);
+
+    service
+        .complete_activity(
+            id,
+            "worker_01".to_string(),
+            json!({"strokes": 3}),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(rx.wait(Duration::from_millis(500)).await, Wake::Woken);
+}
+
+/// A failure's event, written in the failure's transaction, wakes the
+/// orchestrator once it commits
+#[sqlx::test(migrations = "../migrations")]
+async fn test_failure_wakes_the_orchestrator(pool: PgPool) {
+    let wake = EventWake::connect(&pool).await.expect("LISTEN");
+    let (service, _, id) = claimed_with(&pool, wake.announcer()).await;
+    let mut rx = wake.subscribe();
+    assert_eq!(rx.wait(Duration::from_millis(200)).await, Wake::TimedOut);
+
+    service
+        .fail_activity(
+            id,
+            "worker_01".to_string(),
+            "jammed".to_string(),
+            "the piston jammed".to_string(),
+            false,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    assert_eq!(rx.wait(Duration::from_millis(500)).await, Wake::Woken);
 }

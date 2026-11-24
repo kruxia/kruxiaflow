@@ -518,7 +518,10 @@ async fn heartbeat_loop(
     interval: Duration,
     reassigned: CancellationToken,
 ) {
-    let mut ticker = tokio::time::interval(interval);
+    // The first heartbeat is due one interval after the claim, which already
+    // set the deadline. (`interval` alone ticks at once: a request per
+    // activity, most arriving after a short activity has finished.)
+    let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {

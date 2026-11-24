@@ -1,4 +1,4 @@
-use crate::events::{NewWorkflowEvent, WorkflowEventType, insert_event};
+use crate::events::{Announcer, NewWorkflowEvent, WorkflowEventType, insert_event};
 use crate::queue::{
     Activity, ActivityQueue, ActivityResult, ActivitySettings, ActivityStatus, ActivitySummary,
     FailureEvent, QueueConfig, QueueError, QueuedActivity, Result, StaleActivityAction,
@@ -12,11 +12,27 @@ use uuid::Uuid;
 pub struct PostgresQueue {
     pool: PgPool,
     config: QueueConfig,
+    /// Announces each activity written as pending, once committed
+    announcer: Announcer,
 }
 
 impl PostgresQueue {
+    /// A queue that announces nothing: workers find its activities on their
+    /// poll timer. Production callers attach the process's announcer with
+    /// [`with_announcer`](Self::with_announcer).
     pub fn new(pool: PgPool, config: QueueConfig) -> Self {
-        Self { pool, config }
+        Self {
+            pool,
+            config,
+            announcer: Announcer::none(),
+        }
+    }
+
+    /// Wake the workers of an activity's type when it is written as pending
+    /// (scheduled, requeued for a retry, or reclaimed from a stale worker)
+    pub fn with_announcer(mut self, announcer: Announcer) -> Self {
+        self.announcer = announcer;
+        self
     }
 
     fn extract_timeout(&self, settings: &Option<ActivitySettings>) -> u64 {
@@ -103,6 +119,7 @@ impl ActivityQueue for PostgresQueue {
             .await?;
 
             if result.rows_affected() > 0 {
+                self.announcer.activity(&activity.worker);
                 trace!(
                     workflow_id = %workflow_id,
                     activity_key = %activity.key,
@@ -303,6 +320,8 @@ impl ActivityQueue for PostgresQueue {
         .await?;
 
         if completed {
+            // A completion commits once, so its event is new: announce it
+            self.announcer.events();
             debug!(
                 activity_id = %activity_id,
                 worker_id = %worker_id,
@@ -313,7 +332,9 @@ impl ActivityQueue for PostgresQueue {
         not_completed(&mut conn, activity_id, worker_id).await?;
         // Already completed by this worker: its event is written if it was
         // missing, and dropped by the event dedup if not
-        insert_event(&mut *conn, &event).await?;
+        if insert_event(&mut *conn, &event).await? {
+            self.announcer.events();
+        }
         Ok(())
     }
 
@@ -408,9 +429,12 @@ impl ActivityQueue for PostgresQueue {
         // One transaction holds the row's FOR UPDATE lock from the read that
         // decides on a retry to the write
         let mut tx = self.pool.begin().await?;
-        let will_retry = fail_on(&mut tx, activity_id, worker_id, retryable, &result).await?;
+        let failed = fail_on(&mut tx, activity_id, worker_id, retryable, &result).await?;
         tx.commit().await?;
-        Ok(will_retry)
+        if failed.will_retry {
+            self.announcer.activity(&failed.worker);
+        }
+        Ok(failed.will_retry)
     }
 
     async fn fail_with_event(
@@ -422,10 +446,16 @@ impl ActivityQueue for PostgresQueue {
         event: FailureEvent,
     ) -> Result<bool> {
         let mut tx = self.pool.begin().await?;
-        let will_retry = fail_on(&mut tx, activity_id, worker_id, retryable, &result).await?;
-        insert_event(&mut *tx, &event(will_retry)).await?;
+        let failed = fail_on(&mut tx, activity_id, worker_id, retryable, &result).await?;
+        let inserted = insert_event(&mut *tx, &event(failed.will_retry)).await?;
         tx.commit().await?;
-        Ok(will_retry)
+        if failed.will_retry {
+            self.announcer.activity(&failed.worker);
+        }
+        if inserted {
+            self.announcer.events();
+        }
+        Ok(failed.will_retry)
     }
 
     async fn cancel_pending(
@@ -521,7 +551,7 @@ impl ActivityQueue for PostgresQueue {
         // 2. Activities with no retries remaining -> mark as failed
         let stale_activities = sqlx::query!(
             r#"
-            SELECT id, workflow_id, activity_key, iteration, retry_count, max_retries
+            SELECT id, workflow_id, activity_key, worker, iteration, retry_count, max_retries
             FROM activity_queue
             WHERE status = 'running'::activity_status
               AND claimed_at IS NOT NULL
@@ -540,11 +570,14 @@ impl ActivityQueue for PostgresQueue {
         }
 
         let mut results = Vec::with_capacity(stale_activities.len());
+        // Worker types with an activity reset to pending, announced after commit
+        let mut requeued_workers = std::collections::BTreeSet::new();
 
         for activity in stale_activities {
             let has_retries = activity.retry_count < activity.max_retries;
 
             if has_retries {
+                requeued_workers.insert(activity.worker.clone());
                 // Reset to pending for retry
                 sqlx::query!(
                     r#"
@@ -613,6 +646,9 @@ impl ActivityQueue for PostgresQueue {
         }
 
         tx.commit().await?;
+        for worker in &requeued_workers {
+            self.announcer.activity(worker);
+        }
 
         Ok(results)
     }
@@ -709,18 +745,26 @@ async fn not_completed(conn: &mut PgConnection, activity_id: Uuid, worker_id: &s
 /// Fail a running activity claimed by `worker_id`: requeue it with backoff if
 /// it may be retried, or mark it failed. Returns whether it will be retried.
 /// Locks the row (`FOR UPDATE`) until `conn`'s transaction ends.
+/// What [`fail_on`] did to a failed activity
+struct Failed {
+    /// Requeued as pending for another attempt
+    will_retry: bool,
+    /// The activity's worker type, whose workers a retry wakes
+    worker: String,
+}
+
 async fn fail_on(
     conn: &mut PgConnection,
     activity_id: Uuid,
     worker_id: &str,
     retryable: bool,
     result: &ActivityResult,
-) -> Result<bool> {
+) -> Result<Failed> {
     // Get activity details to determine if we should retry
     // FOR UPDATE lock is held until transaction commits
     let activity = sqlx::query!(
         r#"
-            SELECT id, workflow_id, activity_key, status AS "status: ActivityStatus",
+            SELECT id, workflow_id, activity_key, worker, status AS "status: ActivityStatus",
                    claimed_by, retry_count, max_retries, settings
             FROM activity_queue
             WHERE id = $1
@@ -820,5 +864,8 @@ async fn fail_on(
         );
     }
 
-    Ok(will_retry)
+    Ok(Failed {
+        will_retry,
+        worker: activity.worker,
+    })
 }
