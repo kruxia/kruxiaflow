@@ -258,6 +258,7 @@ pub async fn run_deploy_workflow(
 /// Submit a workflow via WorkflowService.
 pub async fn run_submit_workflow(
     pool: &PgPool,
+    announcer: &kruxiaflow_core::Announcer,
     params: &SubmitWorkflow,
 ) -> Result<CallToolResult, CallToolError> {
     // Basic input validation before hitting the service. as_object also
@@ -286,7 +287,8 @@ pub async fn run_submit_workflow(
         None => None,
     };
 
-    let service = kruxiaflow_core::workflow::WorkflowService::new(pool.clone());
+    let service = kruxiaflow_core::workflow::WorkflowService::new(pool.clone())
+        .with_announcer(announcer.clone());
 
     let result = service
         .submit_workflow(
