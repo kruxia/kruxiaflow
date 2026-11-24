@@ -72,7 +72,12 @@ impl Run {
     /// Store the definition, submit a workflow and process `WorkflowCreated`:
     /// `open` is queued, nothing waits yet
     async fn submit(pool: PgPool) -> Run {
-        let def = WorkflowDefinition::from_yaml(LOOP).expect("definition parses");
+        Run::submit_yaml(pool, LOOP).await
+    }
+
+    /// As `submit`, for another definition
+    async fn submit_yaml(pool: PgPool, yaml: &str) -> Run {
+        let def = WorkflowDefinition::from_yaml(yaml).expect("definition parses");
         WorkflowDefinitionRepository::new(pool.clone())
             .store(def.clone())
             .await
@@ -192,6 +197,20 @@ impl Run {
         .unwrap()
     }
 
+    /// The parameter `name` that `key` was queued with, per loop round, in order
+    async fn queued_param(&self, key: &str, name: &str) -> Vec<Value> {
+        sqlx::query_scalar(
+            "SELECT parameters -> $3 FROM activity_queue \
+             WHERE workflow_id = $1 AND activity_key = $2 ORDER BY iteration",
+        )
+        .bind(self.wf)
+        .bind(key)
+        .bind(name)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap()
+    }
+
     /// How many signals are held for the workflow
     async fn held(&self) -> i64 {
         sqlx::query_scalar("SELECT COUNT(*) FROM held_signals WHERE workflow_id = $1")
@@ -238,6 +257,7 @@ fn text(text: &str) -> Option<Value> {
 /// is what the step runs with when it is reached: no wait, no subscription
 #[sqlx::test(migrations = "../migrations")]
 async fn test_early_signal_is_held_then_runs_the_step_without_waiting(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = Run::submit(pool).await;
 
     assert!(run.message("m1").await.is_held());
@@ -267,6 +287,7 @@ async fn test_early_signal_is_held_then_runs_the_step_without_waiting(pool: PgPo
 /// loop round and `held: true`; reading that event back changes nothing
 #[sqlx::test(migrations = "../migrations")]
 async fn test_taking_a_held_signal_publishes_its_event(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = Run::submit(pool).await;
     run.message("m1").await;
     run.complete("open", None).await;
@@ -288,6 +309,7 @@ async fn test_taking_a_held_signal_publishes_its_event(pool: PgPool) {
 /// step waits, and the next signal is delivered to that wait directly
 #[sqlx::test(migrations = "../migrations")]
 async fn test_held_signals_are_delivered_oldest_first_then_the_step_waits(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = Run::submit(pool).await;
     assert!(run.message("m1").await.is_held());
     assert!(run.message("m2").await.is_held());
@@ -331,6 +353,7 @@ async fn test_held_signals_are_delivered_oldest_first_then_the_step_waits(pool: 
 /// that the orchestrator has not processed yet
 #[sqlx::test(migrations = "../migrations")]
 async fn test_signal_while_the_round_is_busy_is_held_for_the_next(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = Run::submit(pool).await;
     run.complete("open", None).await;
     assert_eq!(run.status("receive").await, WorkflowActivityStatus::Waiting);
@@ -365,6 +388,7 @@ async fn test_signal_while_the_round_is_busy_is_held_for_the_next(pool: PgPool) 
 /// data, as a signal without data does on an open wait
 #[sqlx::test(migrations = "../migrations")]
 async fn test_held_signal_without_data_runs_the_step_with_none(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = Run::submit(pool).await;
     assert!(run.send("receive", "message", None).await.is_held());
 
@@ -393,6 +417,7 @@ async fn test_held_signal_without_data_runs_the_step_with_none(pool: PgPool) {
 /// A signal that is neither delivered nor held says why
 #[sqlx::test(migrations = "../migrations")]
 async fn test_refused_signals_say_why(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = Run::submit(pool).await;
     let refusal = |outcome: SignalOutcome| match outcome {
         SignalOutcome::Refused(refusal) => refusal,
@@ -436,6 +461,7 @@ async fn test_refused_signals_say_why(pool: PgPool) {
 /// sent afterwards is refused
 #[sqlx::test(migrations = "../migrations")]
 async fn test_held_signals_are_discarded_when_the_workflow_ends(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = Run::submit(pool).await;
     assert!(run.message("m1").await.is_held());
     assert!(run.message("m2").await.is_held());
@@ -456,6 +482,7 @@ async fn test_held_signals_are_discarded_when_the_workflow_ends(pool: PgPool) {
 /// next one is refused, and taking one makes room again
 #[sqlx::test(migrations = "../migrations")]
 async fn test_hold_limit(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = Run::submit(pool).await;
     for n in 0..MAX_HELD_SIGNALS {
         let outcome = run
@@ -480,6 +507,7 @@ async fn test_hold_limit(pool: PgPool) {
 /// a pass that fails after taking it leaves it held
 #[sqlx::test(migrations = "../migrations")]
 async fn test_a_held_signal_survives_a_rolled_back_take(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = Run::submit(pool).await;
     assert!(run.message("m1").await.is_held());
 
@@ -520,6 +548,7 @@ async fn test_a_held_signal_survives_a_rolled_back_take(pool: PgPool) {
 /// wait opened in between, it takes the signal instead of holding it
 #[sqlx::test(migrations = "../migrations")]
 async fn test_hold_signal_signals_a_wait_that_opened_meanwhile(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = Run::submit(pool).await;
     run.complete("open", None).await;
     assert_eq!(run.status("receive").await, WorkflowActivityStatus::Waiting);
@@ -546,6 +575,7 @@ async fn test_hold_signal_signals_a_wait_that_opened_meanwhile(pool: PgPool) {
 /// waits for it, and then finds the wait the pass opened
 #[sqlx::test(migrations = "../migrations")]
 async fn test_a_signal_waits_for_the_pass_that_is_opening_the_wait(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let run = Run::submit(pool).await;
 
     // The pass: nothing held, so it will open the wait before it commits
@@ -606,4 +636,41 @@ fn test_hold_early_defaults_to_false() {
     assert!(stored.get("hold_early").is_none(), "{stored}");
     let stored = serde_json::to_value(wait("receive")).unwrap();
     assert_eq!(stored["hold_early"], json!(true));
+}
+
+/// `open`, then `receive`, which holds early signals and reads the signal's
+/// data in its parameters
+const HELD_SIGNAL_PARAMETERS: &str = r#"
+name: held_signal_parameters
+activities:
+  - key: open
+    activity_name: http_request
+  - key: receive
+    activity_name: http_request
+    parameters:
+      text: "{{SIGNAL.text}}"
+    settings:
+      wait_for_signal:
+        event_name: message
+        timeout_seconds: 3600
+        hold_early: true
+    depends_on:
+      - open
+"#;
+
+/// A step that takes a held signal instead of waiting resolves `{{SIGNAL}}`
+/// with that signal's data, as it would after a wait
+#[sqlx::test(migrations = "../migrations")]
+async fn test_held_signal_data_is_signal_in_parameters(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
+    let run = Run::submit_yaml(pool, HELD_SIGNAL_PARAMETERS).await;
+
+    assert!(run.message("early").await.is_held());
+    run.complete("open", None).await;
+
+    assert_eq!(run.status("receive").await, WorkflowActivityStatus::Pending);
+    assert_eq!(
+        run.queued_param("receive", "text").await,
+        vec![json!("early")]
+    );
 }

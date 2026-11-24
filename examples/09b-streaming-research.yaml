@@ -100,4 +100,6 @@ activities:
       timeout_seconds: 180
       budget:
         limit: 0.10
-        action: warn
+        # continue: not stopped before it runs (abort would be); the LLM worker
+        # still skips any model over the limit and fails if none is left
+        action: continue

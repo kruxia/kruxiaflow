@@ -68,6 +68,7 @@ async fn simulate_restore_into_new_cluster(pool: &PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_healthy_database_passes_the_guard(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     // Empty
     assert_eq!(find_foreign_xids(&pool).await.unwrap(), None);
 
@@ -100,6 +101,7 @@ async fn test_healthy_database_passes_the_guard(pool: PgPool) {
 
 #[sqlx::test(migrations = "../migrations")]
 async fn test_foreign_cluster_is_detected_and_rebased(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = PostgresEventSource::new(pool.clone());
 
     // Four events; "orch" has processed the first two, "idle" none
@@ -198,6 +200,7 @@ async fn test_foreign_cluster_is_detected_and_rebased(pool: PgPool) {
 /// first, ahead of restored events with real transaction ids
 #[sqlx::test(migrations = "../migrations")]
 async fn test_rebase_keeps_tx_zero_history_first(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
     let source = PostgresEventSource::new(pool.clone());
     let mut ids = Vec::new();
     for _ in 0..3 {

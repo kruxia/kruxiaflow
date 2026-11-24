@@ -1,11 +1,13 @@
 # Example 8a: Rate-Limited API Calls (Iterative with Delay)
 #
-# Demonstrates iterative HTTP requests with rate limiting using `delay` between
-# iterations. Fetches multiple pages from httpbin.org with a configurable page
-# count and a 5-second delay between each request.
+# Demonstrates iterative HTTP requests with `settings.delay`. Fetches multiple
+# pages from httpbin.org with a configurable page count. The delay applies to
+# every round of the loop: each request is scheduled 5 seconds after the one
+# before it completes (the first, 5 seconds after the workflow starts), so the
+# requests are spaced out.
 #
 # Workflow Pattern:
-# fetch_page (iterates with delay) → aggregate_results (sends email)
+# fetch_page (iterates with delay) → aggregate_results (collects every response)
 #     ↑__________________________|
 #
 # Input Parameters:
@@ -14,36 +16,40 @@
 # Expected Execution Flow:
 #
 # 1. fetch_page (iteration 0): GET httpbin.org/get?page=0
-#    - No delay on first iteration (no dependencies met yet)
+#    - Scheduled 5s after the workflow starts
 #
 # 2. fetch_page (iteration 1): GET httpbin.org/get?page=1
-#    - 5s delay after loop-back condition met
+#    - Scheduled 5s after iteration 0 completes
 #
 # 3. fetch_page (iteration 2): GET httpbin.org/get?page=2
-#    - 5s delay after loop-back condition met
+#    - Scheduled 5s after iteration 1 completes
 #    - Loop exits: iteration >= num_pages
 #
-# 4. aggregate_results: Sends all page results via Mailpit
+# 4. aggregate_results: Returns the page count and every page's response
 #
 # ```
-# t=0s     fetch_page[0] ━━━┓
-#                             │ (loop back, 5s delay)
-# t=5s     fetch_page[1] ━━━┓
-#                             │ (loop back, 5s delay)
-# t=10s    fetch_page[2] ━━━┓
+# t=0s     (delay, 5s)
+# t=5s     fetch_page[0] ━━━┓
+#                             │ (loop back, delay 5s)
+# t=10s+   fetch_page[1] ━━━┓
+#                             │ (loop back, delay 5s)
+# t=15s+   fetch_page[2] ━━━┓
 #                             │ (loop exits)
-# t=10s+                     └─→ aggregate_results
+# t=15s+                     └─→ aggregate_results
 # ```
 #
 # Prerequisites:
-# - Examples environment (for Mailpit)
+# - None beyond the server and its built-in worker (the requests go to
+#   httpbin.org)
 #
 # Features Demonstrated:
 # - Iterative loop with fixed count (no evaluation activity needed)
-# - `settings.delay` for rate limiting between iterations
+# - `settings.delay` on a loop step: every round waits before it runs
 # - `iteration_scoped: true` for per-iteration output storage
 # - Loop-back `depends_on` (activity depends on itself with condition)
-# - Array access pattern (`{{fetch_page[*].result}}`) for all iteration results
+# - All iterations' responses as one array (`{{fetch_page.response}}`, iteration-scoped;
+#   `http_request`'s output is `response`)
+# - `{{fetch_page.iteration}}`: rounds completed so far (0 in the first round)
 # - `iteration_limit` as safety bound
 # - Configurable iteration count via workflow input with default
 
@@ -59,36 +65,22 @@ activities:
       method: GET
       url: "https://httpbin.org/get?page={{fetch_page.iteration}}"
     outputs:
-      - result
+      - response
     settings:
-      delay: "5s"               # Rate limit: 5 seconds between iterations
+      delay: "5s"               # Every round waits 5 seconds before it runs
     depends_on:
       # Loop: fetch_page depends on itself to iterate
       - activity_key: fetch_page
         conditions:
-          - "{{fetch_page.iteration}} < {{INPUT.num_pages | default(3)}}"
+          - "{{ fetch_page.iteration < (INPUT.num_pages | default(3)) }}"
 
-  # Aggregate all page results and send via email
+  # Collect every page's response into one result
   - key: aggregate_results
-    activity_name: http_request
+    activity_name: echo
     parameters:
-      method: POST
-      url: "http://mailpit:8025/api/v1/send"
-      headers:
-        Content-Type: "application/json"
-      body:
-        From:
-          Name: "Kruxia Flow"
-          Email: "workflow@kruxiaflow.local"
-        To:
-          - Name: "API Consumer"
-            Email: "consumer@example.com"
-        Subject: "Rate-Limited API Results"
-        Text: |
-          Fetched {{INPUT.num_pages | default(3)}} pages from httpbin.org:
-
-          {{fetch_page[*].result}}
+      pages: "{{fetch_page.iteration}}"
+      responses: "{{fetch_page.response}}"
     depends_on:
       - activity_key: fetch_page
         conditions:
-          - "{{fetch_page.iteration}} >= {{INPUT.num_pages | default(3)}}"
+          - "{{ fetch_page.iteration >= (INPUT.num_pages | default(3)) }}"

@@ -6,15 +6,18 @@
 # For a SIMPLER, SELF-CONTAINED introduction to loops (LLM-only, no external dependencies),
 # see 07a-agentic-research-simple.yaml first.
 #
+# Input:
+#   {"research_topic": "Recent advances in solid-state batteries"}
+#
 # What This Example Adds Beyond 07a (Advanced US-3.4 Features):
 # ✓ Multiple LLM activities: Haiku for research + evaluation, Sonnet for reporting
-# ✓ Structured field extraction from LLM outputs ({{evaluate.sufficient}} not string matching)
-# ✓ File storage with iteration scoping (large search results stored as files)
+# ✓ Multi-provider fallback: Haiku primary, Gemini fallback for research
+# ✓ Every round's results kept: iteration_scoped: true makes {{search_information.result}}
+#   the array of all rounds' results
 # ✓ Dual success/failure paths (explicit publish_success and publish_failure activities)
-# ✓ Array access patterns ({{search_information[*].results}} - all iterations)
-# ✓ Complex boolean conditions (AND, <, > operators)
-# ✓ Remaining budget checks in conditions ({{evaluate.remaining_budget_usd}})
-# ✓ Comprehensive iteration metadata tracking
+# ✓ Round counter in templates and conditions: {{search_information.iteration}}
+# ✓ Boolean conditions written as single expressions ({{ a and b }}, `in`, `<`, `>=`)
+# ✓ Budget enforcement per activity across all rounds (settings.budget)
 #
 # Prerequisites:
 # - ANTHROPIC_API_KEY for Claude models (Haiku 4.5 for research + evaluate, Sonnet 4.5 for compile)
@@ -22,124 +25,126 @@
 # - Examples environment (for Mailpit notifications)
 #
 # Workflow Pattern:
-# search_information → evaluate_sufficiency → [loop back if not sufficient] → compile_report → publish_success
-#            ↑_____________________________|                                                          ↓
-#                                                                                              publish_failure
+# search_information → evaluate_sufficiency → [loop back if CONTINUE] → compile_report → publish_success
+#            ↑_____________________________|
+#                                          └─→ [CONTINUE after 5 rounds] → publish_failure
 #
 # Budget-Aware Loop Behavior:
 # - Each iteration of search_information costs ~$0.002 (Haiku 4.5)
-# - Each iteration of evaluate_sufficiency costs ~$0.001 (Haiku 4)
-# - With $0.50 budget and 5 iteration limit:
+# - Each iteration of evaluate_sufficiency costs ~$0.001 (Haiku 4.5)
+# - With $0.50 budget per activity and a 5 iteration limit:
 #   - Max theoretical iterations: 5 (well within budget)
 #   - Max enforced iterations: 5 (iteration_limit)
 #   - Loop will stop at whichever limit is reached first
 # - Budget accumulates across ALL iterations (not per-iteration)
-# - If budget exceeded, activity fails and publish_failure runs
+# - If an activity's budget is exceeded, that activity fails (action: abort), and so
+#   does the workflow
 #
 # Expected Execution Flow (Success Scenario):
 #
-# 1. search_information (iteration 0): Haiku researches the topic
+# 1. search_information (round 1, iteration 0): Haiku researches the topic
 #    - Cost: ~$0.002, Total: $0.002
-#    - Claude Haiku 4.5 generates structured research findings
-#    - Outputs: {{search_information.results}} = [results_file_0] (stored as file)
+#    - Outputs: {{search_information.result}} = [result_1]
 #
-# 2. evaluate_sufficiency (iteration 0): Not sufficient yet → sufficient=false
+# 2. evaluate_sufficiency (round 1): Not sufficient yet → replies CONTINUE
 #    - Cost: ~$0.001, Total: $0.003
 #    - Loop back condition met → schedule search_information again
 #
-# 3. search_information (iteration 1): Haiku researches again with refined focus
+# 3. search_information (round 2, iteration 1): Haiku researches again with refined focus
 #    - Cost: ~$0.002, Total: $0.005
 #    - Prompt includes previous findings, so Haiku focuses on gaps
-#    - Outputs: {{search_information.results}} = [results_file_0, results_file_1]
+#    - Outputs: {{search_information.result}} = [result_1, result_2]
 #
-# 4. evaluate_sufficiency (iteration 1): Still not sufficient → sufficient=false
+# 4. evaluate_sufficiency (round 2): Still not sufficient → CONTINUE
 #    - Cost: ~$0.001, Total: $0.006
 #    - Loop back condition met → schedule search_information again
 #
-# 5. search_information (iteration 2): Third search, comprehensive coverage
+# 5. search_information (round 3, iteration 2): Third search, comprehensive coverage
 #    - Cost: ~$0.002, Total: $0.008
-#    - Outputs: {{search_information.results}} = [results_file_0, results_file_1, results_file_2]
+#    - Outputs: {{search_information.result}} = [result_1, result_2, result_3]
 #
-# 6. evaluate_sufficiency (iteration 2): Now sufficient → sufficient=true
+# 6. evaluate_sufficiency (round 3): Now sufficient → SUFFICIENT
 #    - Cost: ~$0.001, Total: $0.009
-#    - Loop back condition NOT met (sufficient == true)
-#    - compile_report condition IS met (sufficient == true)
+#    - Loop back condition NOT met (the reply starts with SUFFICIENT)
+#    - compile_report condition IS met
 #
-# 7. compile_report: Synthesize all findings from 3 iterations
+# 7. compile_report: Synthesize all findings from 3 rounds
 #    - Cost: ~$0.020 (Sonnet 4.5), Total: $0.029
-#    - Accesses all iteration files: {{search_information[*].results}}
+#    - Reads every round's findings from {{search_information.result}}
 #
 # 8. publish_success: Send report via email
-#    - Cost: ~$0.00, Total: $0.029
-#    - Includes metadata: topic, iterations=3, total_cost=$0.029
+#    - Includes: topic, iterations=3
 #
 # Total iterations: 3 (stopped by evaluate decision)
-# Total cost: ~$0.029 (well under $1.50 total budget)
+# Total cost: ~$0.029 (well under the activity budgets)
 #
-# Expected Execution Flow (Failure Scenario - Budget Exhausted):
+# Expected Execution Flow (Failure Scenario - Iteration Limit Reached):
 #
-# 1-4. [Same as above through iteration 1]
+# 1-4. [Same as above, but evaluate_sufficiency replies CONTINUE every round]
 #
-# 5. evaluate_sufficiency (iteration 4): Still insufficient, but budget low
-#    - Cost: ~$0.001, Total: $0.493
-#    - remaining_budget_usd = $0.007 (< avg iteration cost threshold)
-#    - Loop back condition NOT met (insufficient budget)
+# 5. evaluate_sufficiency (round 5): Still insufficient after 5 rounds
+#    - Loop back condition NOT met (search_information.iteration is 5)
 #    - publish_failure condition IS met
 #
 # 6. publish_failure: Send failure report via email
-#    - Includes: reason="Insufficient information after 4 iterations"
-#    - Includes: gaps from last evaluation, total_cost=$0.493
+#    - Includes: reason="Insufficient information after 5 iterations"
+#    - Includes: the last evaluation, with its remaining gaps
 #
 # Loop Exit Scenarios:
-# 1. Normal exit: evaluate returns sufficient=true (condition-based)
-# 2. Iteration limit: reaches 5 iterations (iteration_limit-based)
-# 3. Budget exhausted: remaining_budget_usd < avg iteration cost (budget-based)
+# 1. Normal exit: evaluate replies SUFFICIENT (condition-based)
+# 2. Iteration limit: 5 rounds without SUFFICIENT (iteration-based) → publish_failure
+# 3. Budget exhausted: an activity exceeds its budget and fails (settings.budget)
 # 4. Activity failure: any activity fails (error-based)
+#
+# Budget in conditions: an activity's accumulated cost and remaining budget are not
+# available to conditions or to other activities' templates, so the loop can't exit
+# early on a low remaining budget. Budget is enforced by settings.budget instead.
+# An activity's own templates can read its budget: evaluate_sufficiency's prompt
+# uses {{ACTIVITY.remaining_budget_usd}}.
 #
 # Differences from 07a (Simple Version):
 #
-# | Feature                      | 07a (Simple)                    | 07b (Complete)                                |
-# |------------------------------|---------------------------------|-----------------------------------------------|
-# | Research activity            | LLM simulates research          | Haiku 4.5 with Gemini fallback                 |
-# | Loop condition syntax        | String matching (.contains())   | Structured field access (.sufficient)          |
-# | Results storage              | Inline JSON                     | Files with iteration scoping                   |
-# | Array access                 | Implicit (Jinja filters)        | Explicit ([*] bracket notation)                |
-# | Failure handling             | Implicit (timeout/error)        | Explicit publish_failure activity              |
-# | Budget checks                | Activity-level only             | Condition-level remaining budget checks        |
-# | External dependencies        | None (LLM-only)                 | Anthropic API key (+ Google for fallback)      |
-# | Production readiness         | Educational demo                | Production-ready pattern                       |
+# | Feature               | 07a (Simple)             | 07b (Complete)                            |
+# |-----------------------|--------------------------|-------------------------------------------|
+# | Research activity     | LLM simulates research   | Haiku 4.5 with Gemini fallback            |
+# | Loop condition syntax | String matching          | String matching plus the round counter    |
+# | Results storage       | Inline JSON              | Every round's result (iteration_scoped)   |
+# | Array access          | Implicit (Jinja filters) | Explicit (map, join and last filters)     |
+# | Failure handling      | Implicit (timeout/error) | Explicit publish_failure activity         |
+# | Budget checks         | Activity-level only      | Activity-level only                       |
+# | External dependencies | None (LLM-only)          | Anthropic API key (+ Google for fallback) |
+# | Production readiness  | Educational demo         | Production-ready pattern                  |
 #
 # Key YAML Features Demonstrated (from mvp-workflows-implementation-plan.md lines 1376-1386):
-# ✅ Loop edges (activity depends on itself with condition)
+# ✅ Loop back-edge (search_information depends on evaluate_sufficiency, with conditions)
 # ✅ Iteration-scoped outputs: iteration_scoped: true
-# ✅ Access all iteration results: {{activity_key[*].output_name}} (array of all iterations)
-# ✅ Access current iteration: {{activity_key.output_name}} (latest iteration)
-# ✅ Activity context variables: {{activity_key.iteration}} - iteration count
-# ✅ Budget tracking per activity: {{activity_key.remaining_budget_usd}}
+# ✅ Access all iteration results: {{activity_key.output_name}} (array of all rounds)
+# ✅ Access the latest iteration: {{(activity_key.output_name | last)}}
+# ✅ Round counter: {{activity_key.iteration}} - rounds completed so far (0 in the first round)
 # ✅ Maximum iteration limits (prevent infinite loops)
-# ✅ Complex boolean expressions with AND, <
-# ✅ File outputs with iteration scoping (large data handling)
+# ✅ Boolean expressions with `and`, `in`, `<`, `>=`
 # ✅ Multi-provider fallback: Haiku primary, Gemini fallback for research
 #
 # Implementation Notes:
-# - Uses Claude Haiku 4.5 for research (falls back to Gemini 2.0 Flash Lite if unavailable)
+# - Uses Claude Haiku 4.5 for research (falls back to Gemini 2.5 Flash Lite if unavailable)
 # - Claude Haiku 4.5 for evaluation, Claude Sonnet 4.5 for report compilation
-# - Multi-provider fallback demonstrates resilient model selection
-# - Output field extraction ({{evaluate.sufficient}}) requires US-3.4+ features
+# - llm_prompt has a single output, `result`, with the reply text in `result.content`.
+#   It doesn't split the reply's JSON into separate outputs, so the decision is read
+#   from the text: evaluate_sufficiency starts its reply with SUFFICIENT or CONTINUE.
 # - Future: When MCP tool support is added, search_information can use google_search
 #   tool for real-time web-grounded research
 
 name: agentic_research_complete
-description: Complete iterative research workflow with model fallback, file storage, and dual success/failure paths
+description: Complete iterative research workflow with model fallback, every round's results kept, and dual success/failure paths
 
 activities:
   # Step 1: Iterative research via Haiku 4.5 (loops until sufficient)
-  # Falls back to Gemini 2.0 Flash Lite if Haiku is unavailable.
+  # Falls back to Gemini 2.5 Flash Lite if Haiku is unavailable.
   # Future: When MCP tool support is added, this activity can use google_search
   # for real-time web-grounded research.
   - key: search_information
     activity_name: llm_prompt
-    iteration_scoped: true       # Store each iteration's results as separate file
+    iteration_scoped: true       # Keep every round's result: search_information.result is an array
     iteration_limit: 5           # Safety bound: max 5 iterations
     parameters:
       model:
@@ -151,11 +156,10 @@ activities:
         Research topic: {{INPUT.research_topic}}
 
         Current iteration: {{search_information.iteration}}
-        Previous results count: {{search_information[*].results | length}}
 
         {% if search_information.iteration > 0 %}
-        Previous findings from earlier iterations:
-        {{search_information[*].results}}
+        Previous findings from {{search_information.result | length}} earlier iterations:
+        {{search_information.result | map(attribute='content') | join('\n\n---\n\n')}}
 
         Focus on filling gaps and finding NEW information not covered above.
         {% else %}
@@ -173,57 +177,49 @@ activities:
         }
       max_tokens: 2000
     outputs:
-      - name: results
-        type: file  # Store large search results as file, not inline JSON
-        # File path format: {workflow_id}/search_information/iteration-{N}/results
+      - result
     settings:
       budget:
         limit: 0.50
         action: abort
     depends_on:
-      # Loop: search depends on evaluate with conditions
+      # Loop: search depends on evaluate with conditions (all must hold)
       - activity_key: evaluate_sufficiency
         conditions:
           # Loop back if:
-          # 1. Current iteration < 5 (redundant with iteration_limit, but explicit)
-          # 2. evaluate said insufficient (sufficient == false)
-          # 3. Remaining budget > avg cost per iteration (default $0.01 on first iteration)
-          - "{{search_information.iteration}} < 5"
-          - "{{evaluate_sufficiency.sufficient}} == false"
-          - "{{evaluate_sufficiency.remaining_budget_usd}} > {{search_information.accumulated_cost_usd / search_information.iteration | default(0.01)}}"
+          # 1. Fewer than 5 rounds so far (redundant with iteration_limit, but explicit)
+          # 2. evaluate said insufficient (its latest reply starts with CONTINUE)
+          - "{{ search_information.iteration < 5 }}"
+          - "{{ ((evaluate_sufficiency.result | last).content | trim | upper) is startingwith('CONTINUE') }}"
 
   # Step 2: Evaluate if gathered information is sufficient (after each search)
   - key: evaluate_sufficiency
     activity_name: llm_prompt
+    iteration_scoped: true       # Keep every round's assessment for compile_report
     parameters:
       model: anthropic/claude-haiku-4-5-20251001
       prompt: |
         You are a research assistant. Determine if the gathered information
-        is sufficient to answer the research question. Respond with ONLY valid JSON (no markdown):
+        is sufficient to answer the research question.
 
-        {
-          "sufficient": true or false,
-          "reason": "explanation of why sufficient or insufficient",
-          "gaps": ["list", "of", "information", "gaps"]
-        }
+        Start your reply with exactly one word on its own line:
+        - SUFFICIENT (if ready to compile the report)
+        - CONTINUE (if more research is needed)
+        Then explain why, and list the remaining information gaps.
 
         Research question: {{INPUT.research_topic}}
         Current iteration: {{search_information.iteration}}
 
-        All information gathered across {{search_information[*].results | length}} iterations:
-        {{search_information[*].results}}
+        All information gathered across {{search_information.result | length}} iterations:
+        {{search_information.result | map(attribute='content') | join('\n\n---\n\n')}}
 
         Current iteration's findings:
-        {{search_information.results}}
+        {{(search_information.result | last).content}}
 
         Remaining budget: ${{ACTIVITY.remaining_budget_usd}}
       max_tokens: 200
     outputs:
-      # Structured field extraction (US-3.4+ feature)
-      # Framework extracts JSON fields as separate named outputs
-      - sufficient    # Boolean: true if sufficient, false otherwise
-      - reason        # String: explanation
-      - gaps          # Array: list of information gaps
+      - result
     settings:
       budget:
         limit: 0.50
@@ -231,7 +227,7 @@ activities:
     depends_on:
       - search_information
 
-  # Step 3: Compile comprehensive report (runs once, after loop exits via sufficient=true)
+  # Step 3: Compile comprehensive report (runs once, after loop exits via SUFFICIENT)
   - key: compile_report
     activity_name: llm_prompt
     parameters:
@@ -242,11 +238,11 @@ activities:
         Topic: {{INPUT.research_topic}}
         Total iterations: {{search_information.iteration}}
 
-        All research findings from {{search_information[*].results | length}} iterations:
-        {{search_information[*].results}}
+        All research findings from {{search_information.result | length}} iterations:
+        {{search_information.result | map(attribute='content') | join('\n\n---\n\n')}}
 
         Evaluation assessments from each iteration:
-        {{evaluate_sufficiency[*].reason}}
+        {{evaluate_sufficiency.result | map(attribute='content') | join('\n\n---\n\n')}}
 
         Create a well-structured report that:
         1. Answers the research question comprehensively
@@ -255,8 +251,7 @@ activities:
         4. Provides actionable insights
       max_tokens: 4000
     outputs:
-      - name: report
-        type: file  # Store report as file (could be large)
+      - result
     settings:
       budget:
         limit: 1.00
@@ -264,8 +259,9 @@ activities:
     depends_on:
       - activity_key: evaluate_sufficiency
         conditions:
-          # Only compile report when evaluate said sufficient
-          - "{{evaluate_sufficiency.sufficient}} == true"
+          # Only compile report when evaluate said sufficient (its latest reply
+          # doesn't start with CONTINUE)
+          - "{{ ((evaluate_sufficiency.result | last).content | trim | upper) is not startingwith('CONTINUE') }}"
 
   # Step 4a: Publish success result (after successful research completion)
   - key: publish_success
@@ -287,16 +283,15 @@ activities:
           Status: success
           Topic: {{INPUT.research_topic}}
           Iterations: {{search_information.iteration}}
-          Total Cost (USD): {{search_information.total_cost_usd}}
           Workflow ID: {{WORKFLOW.id}}
 
           --- Report ---
 
-          {{compile_report.report}}
+          {{compile_report.result.content}}
     depends_on:
       - compile_report
 
-  # Step 4b: Publish failure result (when loop exits without sufficient information)
+  # Step 4b: Publish failure result (when the loop ends without sufficient information)
   - key: publish_failure
     activity_name: http_request
     parameters:
@@ -317,15 +312,14 @@ activities:
           Topic: {{INPUT.research_topic}}
           Reason: Insufficient information after {{search_information.iteration}} iterations
           Iterations: {{search_information.iteration}}
-          Total Cost (USD): {{search_information.total_cost_usd}}
-          Last Assessment: {{evaluate_sufficiency.reason}}
-          Gaps: {{evaluate_sufficiency.gaps}}
           Workflow ID: {{WORKFLOW.id}}
+
+          --- Last Assessment ---
+
+          {{(evaluate_sufficiency.result | last).content}}
     depends_on:
       - activity_key: evaluate_sufficiency
         conditions:
-          # Publish failure if:
-          # 1. evaluate said insufficient (sufficient == false) AND
-          # 2. either budget exhausted OR iteration limit reached
-          - "{{evaluate_sufficiency.sufficient}} == false"
-          - "{{evaluate_sufficiency.remaining_budget_usd}} < {{search_information.accumulated_cost_usd / search_information.iteration | default(0.01)}} OR {{search_information.iteration}} >= 5"
+          # Publish failure if evaluate still said insufficient (CONTINUE)
+          # when the iteration limit was reached
+          - "{{ ((evaluate_sufficiency.result | last).content | trim | upper) is startingwith('CONTINUE') and search_information.iteration >= 5 }}"

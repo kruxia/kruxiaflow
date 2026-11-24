@@ -67,8 +67,150 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Shared dependency updates from adding Monty:** hyper 1.8.1 → 1.12.0, h2
   0.4.12 → 0.4.20, libc, want and cfg_aliases. They are in the lockfile, so
   they apply to every build, with or without the `monty` feature.
+
+## [0.12.6] - 2026-11-23
+
+### Changed
+
+- **Commit notifications come from the application, not from triggers.**
+  Two triggers sent a `NOTIFY` from inside every transaction that wrote an
+  event or a claimable activity. PostgreSQL makes the commits of notifying
+  transactions take turns on one database-wide lock, held through each
+  commit's WAL flush, so under load those commits queued behind one another.
+  In a 3,000-workflow run of the High-Concurrency workload, about 6 commits
+  were waiting for that lock at any moment (up to 38), and an event waited
+  17–25 ms on average before the orchestrator began to handle it.
+  Migration `20261123000001` drops both triggers. Each process now announces
+  its own writes once they commit (`Announcer`, `core/src/events/wake.rs`):
+  its own consumers are woken in memory, and one sender task per process
+  sends the other processes a single `pg_notify` for everything announced
+  since its last send, on its own connection with `synchronous_commit = off`.
+  The wake is still only a hint, and every consumer still polls on its timer.
+  - **Measured against 0.12.5** (one host, `serve` or separate `api`,
+    `orchestrator` and `worker` processes alike): no commit waits for the
+    NOTIFY lock any more. The orchestrator's reaction under the
+    High-Concurrency load fell from about 30 ms to 3 ms. Throughput rose by
+    about 20% on Parallel-10 (81 to 97 workflows/s), 15% on
+    High-Concurrency-3 (about 295 to 345) and 5–15% with several clients
+    at once. Sequential-5 and the latency of a lone workflow are unchanged.
+  - **Writes by anything but the application wake nobody.** A row inserted
+    by hand is picked up on the consumers' poll timers (up to 5 s idle).
+  - **A duplicate publish no longer wakes**: it inserts nothing.
+  - **API:** `EventSource::announcer()` (default `Announcer::none()`);
+    `PostgresQueue`, `PostgresEventSource` and `WorkflowService` take one
+    with `with_announcer`, and `run_scheduler` takes one. Without it they
+    announce nothing.
+
 ### Fixed
 
+- **The worker no longer sends a heartbeat the moment an activity starts.**
+  Its heartbeat timer fired at once, before the first interval, so every
+  activity with a timeout over 60 s cost an extra heartbeat request and
+  queue update, most of them arriving after a short activity had already
+  finished. The first heartbeat is now due one interval after the claim,
+  which already set the deadline. The Python SDK already waited.
+
+### Upgrading
+
+- **During a rolling upgrade, older processes wake nobody.** Once the
+  migration has run, a process of an earlier version writes without
+  notifying, and its rows are found on the poll timers (up to 5 s idle)
+  until it is replaced. The notifications keep their channels and payloads,
+  so older processes are still woken by the new ones.
+- **`serve`, `api` and `orchestrator` open one more connection, the
+  announcer's**, outside their pools (`application_name =
+  kruxiaflow-announcer`), next to their LISTEN connection (both only with
+  `KRUXIAFLOW_EVENT_WAKE=notify`, the default). Size the pools so that their
+  sum plus two per such process stays below PostgreSQL's `max_connections`
+  (minus its reserved connections): `serve`'s default pool of 100 already
+  exceeded the default `max_connections` of 100, and under load the last
+  connections are refused (`sorry, too many clients already`) and requests
+  fail with a pool timeout.
+
+## [0.12.5] - 2026-11-22
+
+### Added
+
+- **A guide to signal waits** (`docs/signals.md`, #36). `wait_for_signal`
+  had no reference in `docs/`. The new page covers the setting
+  (`event_name`, `timeout_seconds`, `on_timeout`, `hold_early`), what a waiting step and
+  its workflow look like, the signal endpoint and its responses, using the
+  signal's data through `{{SIGNAL}}` (including templates that work when it
+  is `null`), timeouts, waits inside loops, and known limits. Every example on
+  the page was run against a local server. It is linked from the
+  README's approval-gate section, whose example now names a worker and an
+  activity (without them the step never ran after its signal), from the API
+  reference, and from the book's table of contents. The API reference now
+  lists the `waiting` and `skipped` activity statuses.
+
+### Fixed
+
+- **`INPUT` in a condition is the workflow input.** Conditions read `INPUT`
+  from `state_data`, which submission leaves empty, so every `INPUT.*` in a
+  `depends_on` condition was undefined: it failed the workflow, or with a
+  `default(...)` silently ignored the submitted value. Conditions now see
+  the submitted input, as parameter templates do.
+- **`{{activity_key.iteration}}` resolves.** The rounds an activity has
+  completed were tracked but not in the template context, so a parameter or
+  condition using them failed with "undefined value". An output named
+  `iteration` still takes precedence.
+- **Example 08a runs.** It failed scheduling its first activity. Besides the
+  two fixes above, its conditions were two templates joined by `<`/`>=`,
+  which render to a non-empty string and so were always true (the loop ran
+  to `iteration_limit`), and its email body used `{{fetch_page[*].result}}`,
+  which is not template syntax. The conditions are now single expressions,
+  and the body uses `{{fetch_page.response}}`, the array of every round's
+  response (`http_request`'s output is `response`, not `result`, which the
+  example also declared). A new test runs the example through the
+  orchestrator. Its last step is now an `echo` that returns the page count
+  and every page's response, so the example needs no mail service.
+- **`delay` and `scheduled_for` apply to every round of a loop.** They
+  applied only to a loop step's first round: the scheduling code treated a
+  later round as a retry and skipped the setting, so a "rate-limited" loop
+  such as example 08a delayed its first request and ran the rest back to
+  back. Each round is now delayed. A retry is unchanged: the queue
+  reschedules it with the retry backoff.
+- **`{{ACTIVITY.*}}` resolves.** `ACTIVITY.iteration`,
+  `ACTIVITY.accumulated_cost_usd` and `ACTIVITY.remaining_budget_usd` were
+  documented but never set, so any template using them failed with
+  "undefined value" (#32). `ACTIVITY` is now the activity whose templates
+  are being resolved: its parameters, `delay` and `scheduled_for`, and the
+  conditions on its own `depends_on`.
+- **`{{SIGNAL.*}}` resolves** (#37). The data a signal carries was never put
+  in the template context, and parameters were resolved before the activity
+  started waiting, so an activity using `{{SIGNAL.*}}` failed with
+  "undefined value" before it could wait. Its templates are now resolved when
+  its wait ends, with `SIGNAL` set to the signal's `data`, or `null` when it
+  carried none or the wait timed out with `on_timeout: continue`. A budget
+  check for a waiting activity happens then too, not when the wait begins.
+- **Examples 06a and 09b can be submitted.** They failed to parse. 06a's
+  `cache:` was a map (`enabled`, `ttl_seconds`, `key`), but `cache` is a
+  boolean with the TTL in `cache_ttl`; it is now `cache: true` and
+  `cache_ttl: 86400`. The cache key can't be configured: it is a hash of the
+  activity name and all of its resolved parameters, which covers the model and
+  prompt the old `key` listed. Its header no longer says caching falls back
+  to in-memory: without `KRUXIAFLOW_CACHE_PROVIDER=redis`, caching is off.
+  Its log step no longer reads `result.cache_hit`, which `llm_prompt` doesn't
+  return (a cache hit shows only in the activity's metadata): it bound NULL
+  into the log table's `NOT NULL` `cache_hit` column, so the step failed on
+  every run. The `cache_hit` column is gone. 09b's budget `action: warn` is
+  now `continue`, which doesn't stop the step before it runs; the LLM worker
+  still skips models over the limit.
+- **Example 07b's conditions and templates are valid.** Its conditions were
+  two templates joined by an operator, or by `OR` outside a template, so they
+  rendered to a non-empty string and were always true. It also used `[*]`,
+  which is not template syntax, outputs `llm_prompt` doesn't produce
+  (`results`, `sufficient`, `reason`, `gaps`, file outputs), and per-step cost
+  fields templates can't read. The conditions are now single expressions on
+  the start of the evaluation's reply (any case) and
+  `{{search_information.iteration}}`, tested against sample replies; every
+  round's results are read from the iteration-scoped `result` array, and the
+  loop's budget-based exit is gone: `settings.budget` still fails an activity
+  over its budget. `{{ACTIVITY.remaining_budget_usd}}` in its prompt resolves
+  with #32's fix.
+- **Every example is parsed by the test suite.** A new test parses and
+  validates each file in `examples/`, so an example the engine can't accept
+  fails the build.
 - **The MCP activity catalog and authoring guide match the engine.** Both are
   hand-written, had drifted from the activities and the parser, and agents
   copy them verbatim. Because activity settings ignore unknown keys, several
@@ -109,10 +251,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `iteration_limit` stops a loop rather than failing it.
   - **Signals:** the guide's `wait_for_signal` section now covers
     `hold_early`, the `on_timeout` default, and waiting again in each round
-    of a loop. `send_workflow_signal` and `docs/mcp-server.md` said the
-    signal's data is `{{SIGNAL.*}}`; no template can read it
-    ([#37](https://github.com/kruxia/kruxiaflow/issues/37)), and the worker
-    receives it as `signal_data`.
+    of a loop. The guide lists `SIGNAL` among the template sources.
   - **README:** the approval-gate example had no `activity_name`, so it did
     not parse.
   - **CI now lints and tests the MCP server.** Its code is behind the
@@ -127,6 +266,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     activity's real parameters, must give its required parameters, and the
     approval example is run through the
     orchestrator's readiness evaluation for both kinds of request.
+- **A step after a loop runs after the loop's last round (#40).** A step
+  that depends on a loop step without being part of the loop ran as soon as
+  that step first completed: with no condition, after the loop's first
+  round, on that round's output, and never again. Now it waits while a step
+  of that loop is still running or about to start another round, and runs
+  (or is skipped) once the loop has ended, on its last round. A loop running
+  elsewhere in the workflow doesn't hold it back.
+  - **Loops in sequence:** a loop whose way in is a step of an earlier loop
+    now starts once that loop has ended, condition or not. It used to start
+    after the earlier loop's first round and run alongside it.
+  - **Conditions on a step after a loop** are decided by the last round: a
+    condition that held after an earlier round but not after the last no
+    longer runs the step.
+- **A loop whose way in is closed is skipped (#38).** The first time a loop
+  was reached, its back-edge (the head's dependency on itself, or on the
+  loop's last step) counted although that step hadn't run. A loop behind a
+  false condition ran anyway, to its `iteration_limit`, and a loop behind a
+  skipped step stayed `not_scheduled`, so the workflow stayed `running`
+  forever. Now the loop's dependencies from outside it decide its first
+  round, like any other step's: a false condition, or an unconditional
+  dependency on a skipped step, skips the loop, and the skip cascades to what
+  follows. Later rounds follow the back-edge as before, and a loop with no
+  dependency outside it still starts with the workflow.
+  - **Loops in sequence:** a loop whose way in is a condition on an earlier
+    loop's step now waits for that loop to end before it's skipped, like a
+    step after a loop (#27); it starts only once that loop has ended (#40).
+- **A join of parallel branches inside a loop waits for every branch of the
+  round (#28).** With a loop split into branches of different lengths that
+  join again, the join ran as soon as the short branch finished, on the long
+  branch's output from the previous round, and then again. A completed loop
+  activity now also waits while anything upstream of it in the same loop is
+  still running or about to run. A branch whose condition is false that round
+  doesn't hold the join back, and steps of another loop never hold back a
+  step inside this one (a loop after a loop waits for it to end, #40).
+- **A loop's exit step runs when a later round exits (#27).** A step after a
+  loop, conditional on a loop step (such as "finish when the check passes"),
+  was skipped for good when its condition was false in the first round, and
+  the workflow completed without it. It now waits while the loop runs, and is
+  skipped only once the loop has ended without satisfying it.
+- **A step that runs because another was skipped now runs (#25).** A branch
+  such as `conditions: ["{{ maybe.status == 'skipped' }}"]` became ready only
+  after `maybe` was skipped, but skips were applied after scheduling and
+  publish no event, so nothing scheduled it and the workflow stayed `running`
+  forever. Scheduling and skipping now repeat until a pass skips nothing.
+
+### Changed
+
+- **The CI pipeline (`main-ci.yml`) overlaps its slow jobs.** The tests
+  (including the MCP server job) now start alongside clippy and rustfmt
+  instead of waiting for them, on pull requests as on every other run. Release
+  binaries and the per-platform Docker builds likewise start alongside the
+  Rust checks. The two publish steps, the Docker manifest-list merge (which
+  applies the image tags) and the crates.io publish, run alongside each other
+  once the checks and every build have passed. Nothing publishes on a failed
+  check or a failed build: until then the builds have produced only run
+  artifacts and untagged image digests.
+  The Docker workflow is split into `docker-build.yml` and `docker-merge.yml`
+  so the merge can be gated separately.
+- **`ACTIVITY` costs are numbers.** `accumulated_cost_usd` and
+  `remaining_budget_usd` were strings such as `"7.50"`, which compare greater
+  than every number, so `{{ACTIVITY.accumulated_cost_usd < 5}}` was always
+  false. With no `settings.budget` on the activity, `remaining_budget_usd`
+  is `null` rather than `"0.00"`, which read as an exhausted budget.
 
 ## [0.12.4] - 2026-11-21
 
@@ -232,9 +434,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **No redeploy needed:** the orchestrator completes the loop marking of
     every definition it loads, from the stored back-edges, so definitions
     deployed before the fix and runs already in flight are fixed too.
-  - **Known limitation:** a join of parallel branches inside a loop still
-    runs when any of its inputs is new, so it can run on a branch's output
-    from the previous round. See the loops guide.
   - **Behaviour change:** middle steps of such loops now count iterations
     (`{{ACTIVITY.iteration}}`), and with `iteration_scoped: true` they store
     per-round outputs.
@@ -277,9 +476,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each round's after the first as a duplicate, while the API still answered
   `"signaled": true`; the workflow then waited for good. Subscriptions now
   record the loop round (migration `20261119000001` adds
-  `activity_event_subscriptions.iteration`); the events the signal endpoint
-  and the expiry checker publish carry it, and the orchestrator acts only on
-  a signal for the round that is waiting.
+  `activity_event_subscriptions.iteration`) and their events carry it.
 
 ## [0.12.1] - 2026-11-17
 

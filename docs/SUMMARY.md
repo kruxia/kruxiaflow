@@ -11,6 +11,7 @@
 - [Architecture](architecture.md)
 - [Workflow Loops](loops-guide.md)
 - [Conditional Branching](conditional-branching.md)
+- [Signals (Human-in-the-Loop)](signals.md)
 - [Sandboxed Code (`run_code`)](run-code.md)
 
 # Python SDK
@@ -35,6 +36,7 @@
 - [Commit-order event cursor and NOTIFY wake](implementation/2026-11-08-commit-order-cursor-and-notify-wake.md) (IMPLEMENTED with changes; release pending)
 - [Activity wake for workers over SSE](implementation/2026-11-08-activity-wake-sse.md) (IMPLEMENTED; Python SDK pending)
 - [Parallel event processing in the orchestrator](implementation/2026-11-09-parallel-orchestrator.md) (IMPLEMENTED; tests pending)
+- [Commit notifications from the application, and the first heartbeat](implementation/2026-11-23-app-side-notify.md) (IMPLEMENTED and benchmarked)
 - [Post-MVP](post-mvp.md)
 
 ---

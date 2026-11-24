@@ -1888,6 +1888,21 @@ When an activity is skipped or fails, downstream activities with unconditional d
 
 This "fail-fast" behavior prevents workflows from hanging with activities stuck waiting for dependencies that can never be satisfied.
 
+**A skip can also make an activity ready.** A branch on `{{ step.status == 'skipped' }}`, for example, becomes ready only once `step` is skipped:
+
+```yaml
+- key: maybe
+  depends_on:
+    - activity_key: first
+      conditions: ["{{ first.result.value == 2 }}"]
+- key: fallback
+  depends_on:
+    - activity_key: maybe
+      conditions: ["{{ maybe.status == 'skipped' }}"]
+```
+
+When processing an event, the orchestrator therefore repeats *find ready activities → schedule them → mark skips* until a pass skips nothing. **Why** (#25): skips are applied after scheduling, and marking an activity skipped publishes no event. With a single pass, `fallback` stayed `not_scheduled` with nothing left to evaluate it, and the workflow stayed `running`. Each repeat follows at least one new skip, so the loop always ends.
+
 ### Long-Running Activities
 
 Activities post heartbeats to prevent timeout:
@@ -1944,15 +1959,27 @@ activities:
 - **Iteration-scoped storage**: Activities with `iteration_scoped: true` store results as arrays, with each iteration appending to the array
 - **Iteration limits**: `iteration_limit` prevents infinite loops by enforcing a maximum number of iterations
 - **Conditional exit**: Loop exits when the back-edge condition evaluates to false
-- **Loop membership**: every activity on the cycle is a loop activity (`is_loop_activity`), not only the two ends of the back-edge, so every step of a longer loop runs each round. Membership is computed at validation and stored with the definition, and completed again from the stored back-edges whenever the orchestrator loads a definition (`WorkflowDefinition::mark_loop_members`), so definitions stored before #18 was fixed need no redeploy. **Limitation:** a join of parallel branches inside a loop runs when any input is new, not all (see the loops guide)
+- **Loop membership**: every activity on the cycle is a loop activity (`is_loop_activity`), not only the two ends of the back-edge, so every step of a longer loop runs each round. Membership is computed at validation and stored with the definition, and completed again from the stored back-edges whenever the orchestrator loads a definition (`WorkflowDefinition::mark_loop_members`), so definitions stored before #18 was fixed need no redeploy
 - **New input only**: a completed loop activity is scheduled again only when one of its dependencies completed after it last did (a self back-edge counts as new input; a dependency that completes only once, such as a step before the loop, never triggers a round). Each completion gets a per-workflow sequence number, `completion_seq`, in the activity's materialized state for this comparison. **Why** (#18): without it, a dependency still `Completed` from an earlier round re-triggered the activity, so a loop's tail re-ran on stale input until the iteration cap
+- **Steps after a loop**: an activity that depends on a loop member without being one (a loop's exit step) is not skipped while any loop member is `Pending`, `Running` or `Waiting`; once none is, the loop has ended and it is skipped as usual. The orchestrator schedules a loop's next step in the same pass that handles the previous completion, before it looks for activities to skip, so a running loop always has a member in one of those states. Each pass then repeats scheduling and skipping until nothing more is skipped, so what depends on a skipped activity (skip it too, or run it on a `status == 'skipped'` condition) is decided in the same pass. **Why** (#27): `Skipped` is terminal, so an exit step whose condition was false in the first round was skipped for good, and the workflow completed without it. Deferring the skip moves it to the loop's last pass, after which no event may come, which is why that pass must follow skips through
+- **Running steps after a loop**: an activity that has never been scheduled and depends on a loop member it doesn't share a loop with (a step after a loop, or the head of a later loop) is not scheduled while any activity on a cycle with that dependency is `Pending`, `Running` or `Waiting`, or is being scheduled in the same pass (`hold_back_steps_after_running_loops`, applied by both readiness functions after the whole-rounds hold below). Once none is, the loop has ended, and the activity runs or is skipped on the loop's last round, whatever its conditions said after earlier rounds. Other loops never hold it back. It cannot hang: every blocker is in flight or being scheduled in this pass, so another event follows. **Why** (#40): a loop member is `Completed` after every round, so a step after it with no condition (or a condition already true) was ready after the first round and, since it runs once, never saw the rest of the loop; a later loop's head started its loop alongside the earlier one. The skip side already waited for the loop (#27); the run side now waits too, but only for the loop the activity depends on, because holding a run back for an unrelated loop would delay real work for as long as that loop runs
+- **Whole rounds upstream**: a completed loop activity with new input still waits while any activity upstream of it in the same loop is in flight (`Pending`, `Running`, `Waiting`) or is itself ready to be scheduled. Upstream means reachable backwards through forward (non-back-edge) dependencies and not also downstream through them; same loop means on a cycle with the activity, so this hold never waits on an earlier, separate loop (a later loop's head waits for an earlier loop under **Running steps after a loop**). The dependency graph is walked (O(V + E)) only while a completed loop activity is otherwise ready to run again, not on every evaluation. **Why** (#28): with new input from *any* dependency, a join of parallel branches of different lengths ran as soon as the short branch finished, on the long branch's output from the previous round, and then again. Requiring *every* input to be new would hang the join whenever a branch's condition is false in a later round, because that branch stays `Completed` from an earlier round. Waiting only on what can still run this round tells the two apart, and cannot hang: every blocker is in flight or being scheduled, or held back by one further upstream, and upstream is a strict order
+- **Entering a loop**: an activity that has never been scheduled leaves its back-edges out, both when deciding whether it is ready and when deciding whether to skip it (`deciding_dependencies`). Its other dependencies (for a loop's head, those from outside the loop) decide round 0 with the usual rules: a false condition, or an unconditional dependency on a skipped or failed activity, keeps it from running, and once those dependencies are terminal it is skipped, which cascades. An activity with nothing but back-edges has no dependency left, so its loop starts with the workflow. From round 1 on, the back-edges decide as before (`evaluate_loop_condition`). A loop activity whose way in depends on a step of another loop waits for that loop to end before it is skipped, like a step after a loop; a dependency on a step of its own loop (a tail on its head) is skipped at once. **Why** (#38): a back-edge points at a step of the loop that hasn't run yet, for a self-loop the activity itself. Counted as satisfied on round 0, it was an applicable dependency, so a loop behind a false condition ran anyway; counted as unfinished, it kept the skip pass waiting for that step, which never runs before the loop does, so a loop behind a skipped step stayed `not_scheduled` and the workflow hung. Neither outcome means anything on round 0, so the back-edge is left out until there is a round to loop back from
 - **Stale completions**: a completion whose `iteration` does not match the activity's current iteration (a re-delivery from an earlier round) is ignored, since a re-scheduled loop activity is `Pending` again and passes the status-based duplicate guard
 
 **Iteration Context Variables**:
 
-- `{{ACTIVITY.iteration}}` - Current iteration number (0-indexed)
-- `{{ACTIVITY.accumulated_cost_usd}}` - Total cost accumulated across all iterations (for LLM activities)
-- `{{ACTIVITY.remaining_budget_usd}}` - Remaining budget after current iteration
+- `{{ACTIVITY.iteration}}` - The round of this activity being scheduled (0-indexed); the same value as `{{<its key>.iteration}}`
+- `{{ACTIVITY.accumulated_cost_usd}}` - Number: USD this activity has spent in earlier rounds and failed attempts (the reported and computed costs recorded for it)
+- `{{ACTIVITY.remaining_budget_usd}}` - Number: the activity's own `settings.budget.limit` minus `accumulated_cost_usd`, never below 0; `null` when the activity has no budget. The workflow-level budget is not included.
+- `ACTIVITY` is the activity whose templates are being resolved: its `parameters`, `delay` and `scheduled_for` when it is scheduled (and its parameters again when an LLM retry is budget-checked), and the conditions on its own `depends_on`. In a condition it is the activity the condition gates, not the one the condition names.
+- `{{activity_key.iteration}}` - Rounds of `activity_key` completed so far (0 before its first completion), in parameters and conditions alike. An output named `iteration` takes precedence.
+
+**Conditions** are one expression: `"{{ fetch.iteration < (INPUT.n | default(3)) }}"`. In a condition, `INPUT` is the workflow's submitted input, the same as in parameters.
+
+**Why**: Conditions read `INPUT` from `state_data`, which submission leaves empty, so every `INPUT.*` in a condition was undefined, and `{{activity_key.iteration}}` was missing from the template context although the iteration is tracked. Example 08a used both, and failed on its first activity.
+
+**Why `ACTIVITY` is set per activity**: one template context is built per event and reused for every activity scheduled from it; `TemplateContext::set_current_activity` points `ACTIVITY` at each activity in turn, before its templates are resolved. Nothing set it before (#32), so every template using `ACTIVITY.*` failed with `undefined value`. In conditions, `ACTIVITY` is the gated activity because that is the activity a condition decides to schedule, so a loop's back-edge condition reads the loop's own round and budget, as its parameters do. The costs are numbers, not strings, because a string such as `"7.50"` compares greater than every number in MiniJinja, which made `ACTIVITY.accumulated_cost_usd < 5` silently false. With no budget, `remaining_budget_usd` is `null`, not `0`, so it cannot be mistaken for an exhausted budget.
 
 **Array Filters for Iteration Results**:
 
@@ -2739,11 +2766,11 @@ Workers claim activities only through `claim_next` (`POST /api/v1/workers/poll`)
 
 | An activity becomes claimable when...                        | The worker learns of it by...                                                        |
 |--------------------------------------------------------------|--------------------------------------------------------------------------------------|
-| A transaction that wrote it as pending, due now, commits     | A wake: trigger → `NOTIFY activity_queue` → API listener → SSE stream → worker polls |
-| The clock reaches its `scheduled_for` (delay, retry backoff) | The `next_due_ms` in the answer to its last empty poll                               |
-| A running activity passes its timeout                        | Its idle timer (5 s), or the orchestrator's 30 s stale sweep (which then wakes it)   |
+| A transaction that wrote it as pending, due now, commits     | A wake: announcer → `NOTIFY activity_queue` → API listener → SSE stream → worker polls |
+| The clock reaches its `scheduled_for` (delay, retry backoff) | The `next_due_ms` in the answer to its last empty poll                                 |
+| A running activity passes its timeout                        | Its idle timer (5 s), or the orchestrator's 30 s stale sweep (which then wakes it)     |
 
-- **Trigger.** A row-level trigger on `activity_queue` fires after an insert, or an update of `status` or `scheduled_for`, when the new row is `pending`, and notifies the channel `activity_queue` with the worker type as payload. Claims, heartbeats and completions do not match and cost nothing. The payload is a routing hint only.
+- **Announcer.** `PostgresQueue` announces each activity it writes as `pending`, after the write commits: a new row (`schedule`), a retry (`fail`), or a reclaimed stale row (`reclaim_stale_activities`). Claims, heartbeats and completions announce nothing. The announcement wakes the process's own subscribers of that worker type in memory, and reaches other processes as a notification on the channel `activity_queue` with the worker type as payload (see **NOTIFY as a wake, never as data**, below). The payload is a routing hint only.
 - **Fan-out.** The API process's one `LISTEN` connection carries this channel alongside `workflow_events`, with one wake counter per worker type. A reconnect or listener error wakes every subscriber. There is no transaction-id gate here: a row is claimable by any statement that starts after its commit.
 - **Stream.** `GET /api/v1/workers/wake?worker=<type>` sends a `wake` event on connection and on each notification, with a keepalive comment every 15 s. Events carry no data. The endpoint answers 503 when the process has no listener (`KRUXIAFLOW_EVENT_WAKE=poll`, or `LISTEN` failed).
 - **Worker loop.** After an empty poll the worker waits for a wake, for `next_due_ms`, or for its timer, whichever is first. The timer is `wake_poll_interval` (5 s) only while the stream is connected; otherwise it is the ordinary `poll_interval` (100 ms), so a worker that cannot get a stream behaves as it always did. A wake that arrives while a poll is in flight ends the next wait at once.
@@ -2847,13 +2874,30 @@ new events sort behind every restored cursor. Both would be silent, so:
 it (pre-migration history, rebased history) are always deliverable and always
 sort first.
 
-**NOTIFY as a wake, never as data.** An `AFTER INSERT ... FOR EACH STATEMENT`
-trigger on `workflow_events` runs `pg_notify('workflow_events', '')`. Postgres
-delivers it when the inserting transaction commits; a rolled-back insert never
-notifies. Each process holds one `PgListener` and fans notifications out to its
+**NOTIFY as a wake, never as data.** The application announces its own
+writes; no trigger notifies. A writer that has committed an event (`publish`,
+or a submission's first event) or a claimable activity tells its process's
+`Announcer` (`core/src/events/wake.rs`). The announcer wakes the process's own
+consumers in memory at once, and queues a notification for the others. One
+sender task per process sends everything queued as a single `pg_notify`
+statement, on its own connection, with `synchronous_commit = off`; whatever is
+announced while a send is in flight goes in the next one.
+
+The reason is a PostgreSQL lock. Commits of transactions that sent a NOTIFY
+take turns on one database-wide lock, held through the commit's WAL flush.
+When every writing transaction notified, as the triggers of migrations
+`20261108000002` and `20261108000004` made them do, those commits queued
+behind one another under load. Now each process has at most one notifying
+transaction at a time, and it writes nothing else.
+
+Each process holds one `PgListener` and fans notifications out to its
 consumers (orchestrator, WebSocket broadcast poller) through a
 `tokio::sync::watch` counter, which keeps a notification that arrives between
-a consumer's poll and its wait. Three rules keep the data path honest:
+a consumer's poll and its wait. It ignores the notifications its own sender
+sent (recognized by the sending backend's process id), whose wake was already
+delivered in memory. A row written by anything but the application (SQL by
+hand) wakes nobody and is found on the consumers' timers. Three rules keep the
+data path honest:
 
 1. The payload is empty and never read: a wake means "poll from your cursor
    until empty".
@@ -2869,13 +2913,17 @@ process logs a warning and runs on the timer alone.
 ```mermaid
 sequenceDiagram
     participant W as Writer (API / worker / orchestrator)
+    participant A as Announcer (one per process)
     participant PG as PostgreSQL
     participant L as PgListener (one per process)
     participant C as Consumer loop
 
     W->>PG: INSERT INTO workflow_events (in a transaction)
     W->>PG: COMMIT
-    PG-->>L: NOTIFY workflow_events (at commit)
+    W->>A: announce (after the commit)
+    A-->>C: watch counter bump, same process (wake)
+    A->>PG: one pg_notify for every announcement since the last send
+    PG-->>L: NOTIFY workflow_events, in each other process
     L-->>C: watch counter bump (wake)
     C->>PG: poll: (tx, position) > cursor AND tx < xmin
     PG-->>C: events (committed, final)
@@ -2959,6 +3007,22 @@ exists", in or out of a loop. Deleting the row lets a loop round wait again,
 and the round's `iteration` on the event keeps the dedup index
 `(workflow_id, event_type, activity_key, iteration, attempt)` from dropping
 every signal after the first as a duplicate.
+
+**Signal data** is `{{SIGNAL}}` in the templates of the activity it resumed:
+its `parameters`, `delay` and `scheduled_for`, and its parameters again on a
+retry. It is the signal's `data` (or a held signal's, when a `hold_early` wait
+takes one instead of waiting), or `null` when the signal carried none or
+the wait timed out with `on_timeout: continue`. On an activity without
+`wait_for_signal`, `SIGNAL` is undefined. Whether an activity waits is decided
+from its settings before any of its templates are resolved; they are resolved
+only when the wait ends, so a budget check also happens then. Later steps read
+the data through the resumed activity's outputs.
+
+**Why**: `TemplateContext::signal` existed but nothing outside a unit test set
+it (#37), and parameters were resolved before the wait was decided and then
+thrown away. So `{{SIGNAL.*}}` was undefined in every run, and an activity
+using it failed with "undefined value" as soon as it became ready, before it
+could wait.
 
 **One signal per wait**: the row's `signaled_at` marks that the wait took
 its signal and `expired_at` that it timed out; `signal_data` is only the
@@ -3710,6 +3774,7 @@ activities:
 - `budget`: Cost limits for LLM activities (`limit`, `action: abort`)
 - `delay`: Delayed execution for rate limiting (e.g., `"5s"`)
 - `scheduled_for`: Absolute scheduling timestamp
+- `delay` and `scheduled_for` apply each time the orchestrator schedules the activity: its first run and every later round of a loop. A retry is rescheduled by the queue with the retry backoff instead
 
 **Workflow Settings** (top-level `settings:` in the definition):
 - `timeout`: Maximum workflow run time in seconds, measured from creation.

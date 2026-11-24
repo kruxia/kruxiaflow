@@ -1,5 +1,7 @@
 # Commit-order event cursor and LISTEN/NOTIFY wake
 
+> **Superseded in part (2026-11-23).** The NOTIFY trigger this plan adds was dropped by migration `20261123000001_app_side_notify`: the application now announces its own committed writes, and each process sends one coalesced NOTIFY per batch (`Announcer` in `core/src/events/wake.rs`; `docs/architecture.md`, "NOTIFY as a wake, never as data"). Notifications under load had queued on PostgreSQL's database-wide notify lock. Channels and payloads are unchanged, and the rest of this plan stands.
+
 **Date:** 2026-11-08 · **Status:** implemented with changes (§0, §7), tested and benchmarked (§7.15); release pending · **Target release:** 0.10.0
 **Scope:** `kruxiaflow-core` (events, orchestrator), `kruxiaflow-api` (event broadcast poller, WebSocket replay, health), one migration, docs.
 
@@ -372,6 +374,8 @@ The plan removes the post-batch sleep in favour of drain-then-wait. With no slee
 `sqlx::test` runs many tests at once against one PostgreSQL instance, each in its own database and each applying migrations in transactions. Because xmin is instance-wide, a test that publishes and immediately polls can find its event held back by another test's open transaction: 33 existing tests failed this way on the first run. It is the §2.1 head-of-line trade-off appearing in the test harness, and worth knowing about for any future test that reads events.
 
 Integration tests that read events go through `core/tests/common::SettledEventSource`, which waits before each read until every committed event in the test's database is below xmin. Tests of the delivery predicate use `PostgresEventSource` directly and settle explicitly, asserting "nothing delivered" only where one of the test's own open transactions is what blocks delivery. `test_run_orchestrator_loop` had fixed 500 ms sleeps; it now waits on the condition.
+
+Settling can deadlock inside one test binary (found 2026-11-19, when the loop tests failed in most full runs). Every `sqlx::test` pool (5 connections) draws its connections from one parent pool of 20 per binary, and keeps each slot it has drawn until the test ends. An orchestrator handler holds its transaction, with an xid once it has written, while it takes a second connection to publish. With enough tests running at once, handlers sat idle in transaction waiting for a slot, while the tests holding every slot were settling, waiting for those xids, until their 10 s timeout. Narrowing the settle to the test's own database cannot help, because the real poll that follows uses the instance-wide horizon. Instead, every test that uses `core/tests/common` first replaces its pool with `common::unshared_pool`, a pool of the same size with no parent, so a test's connections wait only on that test. Tests of this kind need up to 6 server connections each while they run.
 
 ### 7.13 Documentation found stale
 

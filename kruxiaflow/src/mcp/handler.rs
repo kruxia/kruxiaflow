@@ -31,6 +31,8 @@ pub struct KruxiaFlowMcpHandler {
     #[allow(dead_code)]
     pub config: Arc<McpConfig>,
     pub pool: PgPool,
+    /// Announces workflows and signals submitted through MCP
+    pub announcer: kruxiaflow_core::Announcer,
     pub cache: Arc<dyn kruxiaflow_core::CacheService>,
     /// `run_code` contract when the sandbox is enabled on this server's
     /// built-in worker; `None` hides `run_code` from the discovery tools
@@ -41,11 +43,13 @@ impl KruxiaFlowMcpHandler {
     pub fn new(
         config: Arc<McpConfig>,
         pool: PgPool,
+        announcer: kruxiaflow_core::Announcer,
         cache: Arc<dyn kruxiaflow_core::CacheService>,
     ) -> Self {
         Self {
             config,
             pool,
+            announcer,
             cache,
             run_code_contract: None,
         }
@@ -141,7 +145,7 @@ impl ServerHandler for KruxiaFlowMcpHandler {
                         execution::run_deploy_workflow(&self.pool, p).await
                     }
                     ExecutionTools::SubmitWorkflow(ref p) => {
-                        execution::run_submit_workflow(&self.pool, p).await
+                        execution::run_submit_workflow(&self.pool, &self.announcer, p).await
                     }
                 }
             }
@@ -202,7 +206,7 @@ impl ServerHandler for KruxiaFlowMcpHandler {
                 let tool = ControlTools::try_from(params).map_err(CallToolError::new)?;
                 match tool {
                     ControlTools::SendWorkflowSignal(ref p) => {
-                        control::run_send_workflow_signal(&self.pool, p).await
+                        control::run_send_workflow_signal(&self.pool, &self.announcer, p).await
                     }
                     ControlTools::ListWaitingWorkflows(ref p) => {
                         control::run_list_waiting_workflows(&self.pool, p).await

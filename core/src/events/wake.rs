@@ -1,11 +1,32 @@
 //! `LISTEN`/`NOTIFY` wake-ups: for event consumers, and for workers waiting
 //! on the activity queue.
 //!
-//! An `AFTER INSERT ... FOR EACH STATEMENT` trigger on `workflow_events` runs
-//! `pg_notify('workflow_events', '')`. Postgres delivers the notification when
-//! the inserting transaction commits, to every connection listening at that
-//! moment. [`EventWake`] holds one `PgListener` per process and fans each
+//! # Announcing
+//!
+//! A writer that has committed an event, or an activity a worker can claim,
+//! tells the process's [`Announcer`]. The announcer wakes the process's own
+//! consumers in memory at once, and queues a notification for every other
+//! process. One sender task per process sends what is queued as a single
+//! `pg_notify` statement, on its own connection; announcements made while a
+//! send is in flight are sent together when it returns. So there is at most
+//! one notifying transaction per process at a time, however many writers
+//! there are: PostgreSQL serializes the commits of notifying transactions on
+//! one database-wide lock, and a notification sent from inside every writing
+//! transaction made those commits queue behind one another under load. The
+//! sender's connection commits with `synchronous_commit = off`: its only
+//! write is the notification, which is a hint.
+//!
+//! The application is the only writer of `workflow_events` and of the
+//! activity queue, so every write is announced this way. A row written by
+//! anything else (SQL by hand, a process that has no announcer) wakes nobody
+//! and is picked up on the consumers' poll timer.
+//!
+//! # Listening
+//!
+//! [`EventWake`] holds one `PgListener` per process and fans each
 //! notification out to its consumers through a `tokio::sync::watch` counter.
+//! Notifications this process's own sender sent are ignored (recognized by
+//! the sending backend's process id): their wake was delivered in memory.
 //!
 //! A wake is only ever a hint to poll. It carries no data, and every consumer
 //! is correct with it disabled:
@@ -18,20 +39,20 @@
 //!    the connection was down are gone.
 //!
 //! The same listener connection also carries the activity queue's channel
-//! (trigger `activity_queue_notify`, payload = worker type). [`ActivityWake`]
-//! hands out one receiver per worker type; the API passes each wake on to the
-//! workers of that type (`GET /api/v1/workers/wake`), which then poll for
-//! work. The same three rules apply, with the payload used only to decide
-//! whom to wake.
+//! (payload = worker type). [`ActivityWake`] hands out one receiver per
+//! worker type; the API passes each wake on to the workers of that type
+//! (`GET /api/v1/workers/wake`), which then poll for work. The same three
+//! rules apply, with the payload used only to decide whom to wake.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use sqlx::PgPool;
-use sqlx::postgres::PgListener;
-use tokio::sync::watch;
+use sqlx::postgres::{PgConnectOptions, PgConnection, PgListener};
+use sqlx::{Connection, PgPool};
+use tokio::sync::{Notify, watch};
 use tokio::task::AbortHandle;
 
 use super::Result;
@@ -104,8 +125,13 @@ pub enum Wake {
 /// One notification from the listener connection
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ListenerEvent {
-    /// A notification on one of the channels
-    Notification { channel: String, payload: String },
+    /// A notification on one of the channels, sent by the database backend
+    /// `process_id`
+    Notification {
+        channel: String,
+        payload: String,
+        process_id: u32,
+    },
     /// The connection was lost and re-established; notifications sent in
     /// between are gone
     Reconnected,
@@ -127,17 +153,148 @@ impl NotificationSource for PgListener {
             Some(notification) => Ok(ListenerEvent::Notification {
                 channel: notification.channel().to_string(),
                 payload: notification.payload().to_string(),
+                process_id: notification.process_id(),
             }),
             None => Ok(ListenerEvent::Reconnected),
         }
     }
 }
 
-/// The wake counters the listener task writes and receivers read
+/// Where the announcer's notifications go: a dedicated connection in
+/// production, a stub in tests
+#[async_trait]
+pub trait NotificationSink: Send + 'static {
+    /// Send every `(channel, payload)` pair, in one transaction.
+    ///
+    /// Before sending from a new database backend, store its process id in
+    /// `own_pid`, so that the listener can recognize this process's own
+    /// notifications when they come back.
+    async fn send(&mut self, notifications: &[(String, String)], own_pid: &AtomicU32)
+    -> Result<()>;
+}
+
+/// The announcer's own connection, opened on first use and again after an
+/// error
+pub struct PgNotifySink {
+    options: PgConnectOptions,
+    connection: Option<PgConnection>,
+}
+
+impl PgNotifySink {
+    /// A sink on `pool`'s connect options. The connection commits with
+    /// `synchronous_commit = off`: a notification is a hint, so losing one in
+    /// a crash costs nothing, and not waiting for a WAL flush keeps the
+    /// database-wide notify lock held for as short a time as possible.
+    pub fn new(pool: &PgPool) -> Self {
+        let options = (*pool.connect_options())
+            .clone()
+            .application_name("kruxiaflow-announcer")
+            .options([("synchronous_commit", "off")]);
+        Self {
+            options,
+            connection: None,
+        }
+    }
+}
+
+#[async_trait]
+impl NotificationSink for PgNotifySink {
+    async fn send(
+        &mut self,
+        notifications: &[(String, String)],
+        own_pid: &AtomicU32,
+    ) -> Result<()> {
+        if self.connection.is_none() {
+            let mut connection = PgConnection::connect_with(&self.options).await?;
+            let pid = sqlx::query_scalar!(r#"SELECT pg_backend_pid() AS "pid!""#)
+                .fetch_one(&mut connection)
+                .await?;
+            own_pid.store(pid as u32, Ordering::Relaxed);
+            self.connection = Some(connection);
+        }
+        let Some(connection) = self.connection.as_mut() else {
+            return Ok(());
+        };
+
+        let (channels, payloads): (Vec<String>, Vec<String>) =
+            notifications.iter().cloned().unzip();
+        // pg_notify returns void; counting its rows keeps every call in the
+        // plan and gives the statement a result the macro can type
+        let sent = sqlx::query_scalar!(
+            r#"
+            SELECT count(*) AS "sent!"
+            FROM (
+                SELECT pg_notify(t.channel, t.payload)
+                FROM unnest($1::text[], $2::text[]) AS t(channel, payload)
+            ) AS notified
+            "#,
+            &channels,
+            &payloads
+        )
+        .fetch_one(&mut *connection)
+        .await;
+
+        if let Err(e) = sent {
+            // Start over on a fresh connection next time
+            self.connection = None;
+            return Err(e.into());
+        }
+        Ok(())
+    }
+}
+
+/// Notifications waiting for the sender: whether events were committed, and
+/// which worker types have new claimable work
+#[derive(Default)]
+struct Outbox {
+    events: bool,
+    workers: BTreeSet<String>,
+}
+
+impl Outbox {
+    /// Everything queued, as `(channel, payload)` pairs, leaving it empty
+    fn take(&mut self) -> Vec<(String, String)> {
+        let mut notifications = Vec::with_capacity(self.workers.len() + 1);
+        if std::mem::take(&mut self.events) {
+            notifications.push((EVENT_NOTIFY_CHANNEL.to_string(), String::new()));
+        }
+        notifications.extend(
+            std::mem::take(&mut self.workers)
+                .into_iter()
+                .map(|worker| (ACTIVITY_NOTIFY_CHANNEL.to_string(), worker)),
+        );
+        notifications
+    }
+
+    /// Queue a batch again after a failed send
+    fn restore(&mut self, notifications: Vec<(String, String)>) {
+        for (channel, payload) in notifications {
+            if channel == EVENT_NOTIFY_CHANNEL {
+                self.events = true;
+            } else {
+                self.workers.insert(payload);
+            }
+        }
+    }
+}
+
+/// The wake counters the listener task writes and receivers read, and the
+/// announcer's outbox
 struct Shared {
     events: watch::Sender<u64>,
     /// One counter per worker type, created on first subscription
     activities: Mutex<HashMap<String, watch::Sender<u64>>>,
+    outbox: Mutex<Outbox>,
+    /// Tells the sender that the outbox has something in it. A `Notify`
+    /// keeps one permit while the sender is busy, so an announcement made
+    /// during a send is sent right after it.
+    outbox_ready: Notify,
+    /// Process id of the database backend the sender sends from (0 before
+    /// its first send, or without a sender)
+    own_pid: AtomicU32,
+    /// Set when the last handle is dropped: the sender sends what is queued,
+    /// then stops
+    closed: AtomicBool,
 }
 
 impl Shared {
@@ -145,6 +302,45 @@ impl Shared {
         Self {
             events: watch::channel(0u64).0,
             activities: Mutex::new(HashMap::new()),
+            outbox: Mutex::new(Outbox::default()),
+            outbox_ready: Notify::new(),
+            own_pid: AtomicU32::new(0),
+            closed: AtomicBool::new(false),
+        }
+    }
+
+    /// Whether a notification came from this process's own sender
+    fn is_own(&self, process_id: u32) -> bool {
+        let own = self.own_pid.load(Ordering::Relaxed);
+        own != 0 && own == process_id
+    }
+
+    fn queue_events(&self) {
+        if let Ok(mut outbox) = self.outbox.lock() {
+            outbox.events = true;
+        }
+        self.outbox_ready.notify_one();
+    }
+
+    fn queue_activity(&self, worker: &str) {
+        if let Ok(mut outbox) = self.outbox.lock()
+            && !outbox.workers.contains(worker)
+        {
+            outbox.workers.insert(worker.to_string());
+        }
+        self.outbox_ready.notify_one();
+    }
+
+    fn take_outbox(&self) -> Vec<(String, String)> {
+        self.outbox
+            .lock()
+            .map(|mut outbox| outbox.take())
+            .unwrap_or_default()
+    }
+
+    fn restore_outbox(&self, notifications: Vec<(String, String)>) {
+        if let Ok(mut outbox) = self.outbox.lock() {
+            outbox.restore(notifications);
         }
     }
 
@@ -184,19 +380,25 @@ impl Shared {
 
 struct Inner {
     shared: Arc<Shared>,
-    task: AbortHandle,
+    /// The listener task. The sender task is not aborted: it sends what is
+    /// still queued when the last handle goes, then stops.
+    listener: AbortHandle,
 }
 
 impl Drop for Inner {
     fn drop(&mut self) {
-        self.task.abort();
+        self.listener.abort();
+        self.shared.closed.store(true, Ordering::Release);
+        self.shared.outbox_ready.notify_one();
     }
 }
 
-/// A process-wide wake-up signal for event consumers.
+/// A process-wide wake-up signal for event consumers, and the
+/// [`Announcer`] that sends this process's wakes to the others.
 ///
-/// Cheap to clone. The listener task runs until the last `EventWake` and the
-/// last [`WakeReceiver`] are dropped.
+/// Cheap to clone. The listener and sender tasks run until the last
+/// `EventWake`, [`Announcer`] and [`WakeReceiver`] are dropped; the sender
+/// first sends whatever is still queued.
 #[derive(Clone)]
 pub struct EventWake {
     inner: Arc<Inner>,
@@ -204,7 +406,8 @@ pub struct EventWake {
 
 impl EventWake {
     /// Open a dedicated listener connection on `pool`'s connect options and
-    /// `LISTEN` on [`EVENT_NOTIFY_CHANNEL`] and [`ACTIVITY_NOTIFY_CHANNEL`].
+    /// `LISTEN` on [`EVENT_NOTIFY_CHANNEL`] and [`ACTIVITY_NOTIFY_CHANNEL`];
+    /// announcements go out on a second connection, opened on first use.
     ///
     /// Fails if the connection or the `LISTEN` fails (no permission, a
     /// transaction-mode connection pooler); callers fall back to the timer.
@@ -213,18 +416,35 @@ impl EventWake {
         listener
             .listen_all([EVENT_NOTIFY_CHANNEL, ACTIVITY_NOTIFY_CHANNEL])
             .await?;
-        Ok(Self::from_source(listener))
+        Ok(Self::from_parts(listener, Some(PgNotifySink::new(pool))))
     }
 
-    /// Run the listener loop over any notification source
+    /// Run the listener loop over any notification source. Announcements
+    /// wake this process's receivers only.
     pub fn from_source<S: NotificationSource>(source: S) -> Self {
+        Self::from_parts::<S, PgNotifySink>(source, None)
+    }
+
+    /// Run the listener loop over `source`, and send announcements to other
+    /// processes through `sink` (with `None`, they wake this process only)
+    pub fn from_parts<S: NotificationSource, K: NotificationSink>(
+        source: S,
+        sink: Option<K>,
+    ) -> Self {
         let shared = Arc::new(Shared::new());
-        let task = tokio::spawn(run_listener(source, shared.clone()));
+        let listener = tokio::spawn(run_listener(source, shared.clone())).abort_handle();
+        if let Some(sink) = sink {
+            tokio::spawn(run_sender(sink, shared.clone()));
+        }
         Self {
-            inner: Arc::new(Inner {
-                shared,
-                task: task.abort_handle(),
-            }),
+            inner: Arc::new(Inner { shared, listener }),
+        }
+    }
+
+    /// The announcer for writes made by this process
+    pub fn announcer(&self) -> Announcer {
+        Announcer {
+            inner: Some(self.inner.clone()),
         }
     }
 
@@ -264,6 +484,50 @@ impl ActivityWake {
     }
 }
 
+/// Announces committed writes: events, and activities a worker can claim.
+///
+/// Call it after the write has committed, and only when a row was written.
+/// It wakes this process's own receivers at once and queues one notification
+/// for the other processes (see the module docs); it never blocks or fails.
+///
+/// Cheap to clone. [`Announcer::none`] (the default) announces nothing, for
+/// a process without a wake (poll mode, or `LISTEN` failed) and for tests.
+#[derive(Clone, Default)]
+pub struct Announcer {
+    inner: Option<Arc<Inner>>,
+}
+
+impl Announcer {
+    /// An announcer that does nothing
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// Workflow events were committed
+    pub fn events(&self) {
+        if let Some(inner) = &self.inner {
+            inner.shared.wake_events();
+            inner.shared.queue_events();
+        }
+    }
+
+    /// An activity for `worker` was committed as pending (due now or later)
+    pub fn activity(&self, worker: &str) {
+        if let Some(inner) = &self.inner {
+            inner.shared.wake_activity(worker);
+            inner.shared.queue_activity(worker);
+        }
+    }
+}
+
+impl std::fmt::Debug for Announcer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Announcer")
+            .field("active", &self.inner.is_some())
+            .finish()
+    }
+}
+
 impl std::fmt::Debug for ActivityWake {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ActivityWake").finish_non_exhaustive()
@@ -283,8 +547,17 @@ async fn run_listener<S: NotificationSource>(mut source: S, shared: Arc<Shared>)
 
     loop {
         match source.recv().await {
-            Ok(ListenerEvent::Notification { channel, payload }) => {
+            Ok(ListenerEvent::Notification {
+                channel,
+                payload,
+                process_id,
+            }) => {
                 retry = RETRY_MIN;
+                if shared.is_own(process_id) {
+                    // Sent by this process's announcer, which already woke
+                    // this process's receivers
+                    continue;
+                }
                 if channel == ACTIVITY_NOTIFY_CHANNEL {
                     shared.wake_activity(&payload);
                 } else {
@@ -309,6 +582,47 @@ async fn run_listener<S: NotificationSource>(mut source: S, shared: Arc<Shared>)
                 shared.wake_all();
                 tokio::time::sleep(retry).await;
                 retry = (retry * 2).min(RETRY_MAX);
+            }
+        }
+    }
+}
+
+/// Send what the announcer queued, one batch at a time, until the last
+/// handle is dropped; then send what is still queued, and stop.
+///
+/// A failed send is queued again and retried on a backoff: the processes
+/// it was for poll on their timers meanwhile, and this process's own
+/// receivers were woken when the announcement was made.
+async fn run_sender<K: NotificationSink>(mut sink: K, shared: Arc<Shared>) {
+    const RETRY_MIN: Duration = Duration::from_millis(100);
+    const RETRY_MAX: Duration = Duration::from_secs(5);
+    let mut retry = RETRY_MIN;
+
+    loop {
+        shared.outbox_ready.notified().await;
+        let closed = shared.closed.load(Ordering::Acquire);
+        let batch = shared.take_outbox();
+        if batch.is_empty() {
+            if closed {
+                return;
+            }
+            continue;
+        }
+        match sink.send(&batch, &shared.own_pid).await {
+            Ok(()) if closed => return,
+            Ok(()) => retry = RETRY_MIN,
+            // Nobody is left to retry for
+            Err(_) if closed => return,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    retry_in_ms = retry.as_millis() as u64,
+                    "Could not send wake notifications; other processes poll on their timers"
+                );
+                shared.restore_outbox(batch);
+                tokio::time::sleep(retry).await;
+                retry = (retry * 2).min(RETRY_MAX);
+                shared.outbox_ready.notify_one();
             }
         }
     }
@@ -390,8 +704,13 @@ mod tests {
         ListenerEvent::Notification {
             channel: EVENT_NOTIFY_CHANNEL.to_string(),
             payload: String::new(),
+
+            process_id: OTHER_PROCESS,
         }
     }
+
+    /// A backend pid that is not this process's sender
+    const OTHER_PROCESS: u32 = 4242;
 
     const SHORT: Duration = Duration::from_millis(50);
     const LONG: Duration = Duration::from_secs(2);
@@ -466,6 +785,8 @@ mod tests {
         ListenerEvent::Notification {
             channel: ACTIVITY_NOTIFY_CHANNEL.to_string(),
             payload: worker.to_string(),
+
+            process_id: OTHER_PROCESS,
         }
     }
 
