@@ -55,7 +55,29 @@ async fn test_create_subscription(pool: PgPool) {
 }
 
 #[sqlx::test(migrations = "../migrations")]
-async fn test_create_duplicate_subscription_fails(pool: PgPool) {
+async fn test_create_same_wait_again_returns_it(pool: PgPool) {
+    let workflow_id = insert_test_workflow(&pool).await;
+
+    let service = PostgresSubscriptionService::new(pool.clone());
+
+    for iteration in [None, Some(2)] {
+        let sub = NewSubscription {
+            workflow_id,
+            activity_key: format!("wait_step_{iteration:?}"),
+            event_name: "approval".to_string(),
+            on_timeout: OnTimeout::Fail,
+            timeout_seconds: 300,
+            iteration,
+        };
+
+        let first = service.create_subscription(sub.clone()).await.unwrap();
+        let again = service.create_subscription(sub).await.unwrap();
+        assert_eq!(again, first, "round {iteration:?}");
+    }
+}
+
+#[sqlx::test(migrations = "../migrations")]
+async fn test_create_wait_while_another_round_waits_fails(pool: PgPool) {
     let workflow_id = insert_test_workflow(&pool).await;
 
     let service = PostgresSubscriptionService::new(pool.clone());
@@ -66,15 +88,16 @@ async fn test_create_duplicate_subscription_fails(pool: PgPool) {
         event_name: "approval".to_string(),
         on_timeout: OnTimeout::Fail,
         timeout_seconds: 300,
-        iteration: None,
+        iteration: Some(0),
     };
-
-    // First create should succeed
     service.create_subscription(sub.clone()).await.unwrap();
 
-    // Second create should fail with AlreadyExists
-    let result = service.create_subscription(sub).await;
-    assert!(result.is_err());
+    let result = service
+        .create_subscription(NewSubscription {
+            iteration: Some(1),
+            ..sub
+        })
+        .await;
     match result.unwrap_err() {
         SubscriptionError::AlreadyExists(wf_id, key) => {
             assert_eq!(wf_id, workflow_id);

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A step's wait survives a restart** (#54). A step that begins to wait for a
+  signal opens its subscription, then publishes `ActivityWaiting`. If the
+  engine stopped between the two, the event that made the step ready was
+  processed again on restart, opening the subscription failed with "already
+  exists", and the step was marked failed. Opening the same round's wait
+  again now finds the open one, and the step waits on it with its original
+  timeout.
+
 ## [0.12.6] - 2026-11-23
 
 ### Changed

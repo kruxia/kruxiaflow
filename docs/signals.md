@@ -213,8 +213,9 @@ Mistakes in the setting are refused when the workflow is deployed, with a
   `started_at` is when the wait began.
 - Nothing is queued: no worker is busy, and nothing is spent. A budget check
   for the step happens when the wait ends, not when it begins.
-- The wait is a row in PostgreSQL, so it survives restarts. Stop and start
-  `kruxiaflow serve`, send the signal, and the workflow carries on. A timeout
+- The wait is a row in PostgreSQL, so it survives restarts, including a stop
+  at the moment the wait begins. Stop and start `kruxiaflow serve`, send the
+  signal, and the workflow carries on. A timeout
   that passes while the server is down takes effect once it is back.
 - A workflow-level `settings.timeout`, if the definition sets one, still
   applies while a step waits.
