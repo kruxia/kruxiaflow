@@ -33,6 +33,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   marked as not sandboxed in the catalog, and the guide recommends guarding
   references to steps that may not have run with their status.
 
+## [0.12.6] - 2026-11-23
+
+### Changed
+
+- **Commit notifications come from the application, not from triggers.**
+  Two triggers sent a `NOTIFY` from inside every transaction that wrote an
+  event or a claimable activity. PostgreSQL makes the commits of notifying
+  transactions take turns on one database-wide lock, held through each
+  commit's WAL flush, so under load those commits queued behind one another.
+  In a 3,000-workflow run of the High-Concurrency workload, about 6 commits
+  were waiting for that lock at any moment (up to 38), and an event waited
+  17–25 ms on average before the orchestrator began to handle it.
+  Migration `20261123000001` drops both triggers. Each process now announces
+  its own writes once they commit (`Announcer`, `core/src/events/wake.rs`):
+  its own consumers are woken in memory, and one sender task per process
+  sends the other processes a single `pg_notify` for everything announced
+  since its last send, on its own connection with `synchronous_commit = off`.
+  The wake is still only a hint, and every consumer still polls on its timer.
+  - **Measured against 0.12.5** (one host, `serve` or separate `api`,
+    `orchestrator` and `worker` processes alike): no commit waits for the
+    NOTIFY lock any more. The orchestrator's reaction under the
+    High-Concurrency load fell from about 30 ms to 3 ms. Throughput rose by
+    about 20% on Parallel-10 (81 to 97 workflows/s), 15% on
+    High-Concurrency-3 (about 295 to 345) and 5–15% with several clients
+    at once. Sequential-5 and the latency of a lone workflow are unchanged.
+  - **Writes by anything but the application wake nobody.** A row inserted
+    by hand is picked up on the consumers' poll timers (up to 5 s idle).
+  - **A duplicate publish no longer wakes**: it inserts nothing.
+  - **API:** `EventSource::announcer()` (default `Announcer::none()`);
+    `PostgresQueue`, `PostgresEventSource` and `WorkflowService` take one
+    with `with_announcer`, and `run_scheduler` takes one. Without it they
+    announce nothing.
+
+### Fixed
+
+- **The worker no longer sends a heartbeat the moment an activity starts.**
+  Its heartbeat timer fired at once, before the first interval, so every
+  activity with a timeout over 60 s cost an extra heartbeat request and
+  queue update, most of them arriving after a short activity had already
+  finished. The first heartbeat is now due one interval after the claim,
+  which already set the deadline. The Python SDK already waited.
+
+### Upgrading
+
+- **During a rolling upgrade, older processes wake nobody.** Once the
+  migration has run, a process of an earlier version writes without
+  notifying, and its rows are found on the poll timers (up to 5 s idle)
+  until it is replaced. The notifications keep their channels and payloads,
+  so older processes are still woken by the new ones.
+- **`serve`, `api` and `orchestrator` open one more connection, the
+  announcer's**, outside their pools (`application_name =
+  kruxiaflow-announcer`), next to their LISTEN connection (both only with
+  `KRUXIAFLOW_EVENT_WAKE=notify`, the default). Size the pools so that their
+  sum plus two per such process stays below PostgreSQL's `max_connections`
+  (minus its reserved connections): `serve`'s default pool of 100 already
+  exceeded the default `max_connections` of 100, and under load the last
+  connections are refused (`sorry, too many clients already`) and requests
+  fail with a pool timeout.
+
 ## [0.12.5] - 2026-11-22
 
 ### Added

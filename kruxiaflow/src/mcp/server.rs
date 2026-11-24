@@ -45,6 +45,8 @@ use super::config::McpConfig;
 pub struct McpServer {
     config: Arc<McpConfig>,
     pool: PgPool,
+    /// Announces workflows and signals submitted through MCP
+    announcer: kruxiaflow_core::Announcer,
     cache_service: Arc<dyn kruxiaflow_core::CacheService>,
     auth_service: Option<Arc<dyn kruxiaflow_oauth::AuthenticationService>>,
     /// The kruxiaflow-monty add-on's `run_code` contract, when configured
@@ -57,12 +59,14 @@ impl McpServer {
     pub fn new(
         config: Arc<McpConfig>,
         pool: PgPool,
+        announcer: kruxiaflow_core::Announcer,
         cache_service: Arc<dyn kruxiaflow_core::CacheService>,
         auth_service: Option<Arc<dyn kruxiaflow_oauth::AuthenticationService>>,
     ) -> Self {
         Self {
             config,
             pool,
+            announcer,
             cache_service,
             auth_service,
             run_code_contract: None,
@@ -115,6 +119,7 @@ impl McpServer {
         let handler = super::handler::KruxiaFlowMcpHandler::new(
             self.config.clone(),
             self.pool.clone(),
+            self.announcer.clone(),
             self.cache_service.clone(),
         )
         .with_run_code_contract(self.run_code_contract.clone())
@@ -152,10 +157,11 @@ impl McpServer {
 pub fn create_mcp_server(
     config: Arc<McpConfig>,
     pool: PgPool,
+    announcer: kruxiaflow_core::Announcer,
     cache_service: Arc<dyn kruxiaflow_core::CacheService>,
     auth_service: Option<Arc<dyn kruxiaflow_oauth::AuthenticationService>>,
 ) -> McpServer {
-    McpServer::new(config, pool, cache_service, auth_service)
+    McpServer::new(config, pool, announcer, cache_service, auth_service)
 }
 
 /// Spawn MCP server in a background task
@@ -167,11 +173,12 @@ pub fn create_mcp_server(
 pub fn spawn_mcp_server(
     config: Arc<McpConfig>,
     pool: PgPool,
+    announcer: kruxiaflow_core::Announcer,
     cache_service: Arc<dyn kruxiaflow_core::CacheService>,
     auth_service: Option<Arc<dyn kruxiaflow_oauth::AuthenticationService>>,
     run_code_contract: Option<serde_json::Value>,
 ) -> JoinHandle<Result<()>> {
-    let server = create_mcp_server(config, pool, cache_service, auth_service)
+    let server = create_mcp_server(config, pool, announcer, cache_service, auth_service)
         .with_run_code_contract(run_code_contract);
     tokio::spawn(async move { server.start().await })
 }

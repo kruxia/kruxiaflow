@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT count(*) AS \"sent!\"\n            FROM (\n                SELECT pg_notify(t.channel, t.payload)\n                FROM unnest($1::text[], $2::text[]) AS t(channel, payload)\n            ) AS notified\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sent!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "75f946aff7fc6dd825d10d90f2a60156ad03d414ff990794950e581eebcfbeb0"
+}

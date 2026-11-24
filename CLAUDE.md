@@ -100,7 +100,7 @@ All external infrastructure dependencies are wrapped in service interfaces:
 
 **MVP Implementation**: All interfaces use PostgreSQL
 - **EventSource delivers by polling** a durable `(tx, position)` cursor with `tx < pg_snapshot_xmin(...)`, so no event can commit behind a cursor; adaptive backoff (50ms-1s timer only, 5s idle wait with the wake, 50ms-1s retries while committed events are held back)
-  - **LISTEN/NOTIFY is a wake-up only**: a statement trigger notifies on commit, consumers poll from their cursor on every wake *and* on the timer
+  - **LISTEN/NOTIFY is a wake-up only**: each process announces its own committed writes (in memory for its own consumers, one coalesced NOTIFY per batch for the others; no triggers), consumers poll from their cursor on every wake *and* on the timer
   - **Critical**: LISTEN/NOTIFY cannot guarantee event delivery (lost on connection drop, no backlog) - the poll is the only data path
   - Workflow orchestration requires guaranteed delivery (missed events = hung workflows)
   - Only polling and logical replication provide delivery guarantees
