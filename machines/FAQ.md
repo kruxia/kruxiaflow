@@ -107,7 +107,7 @@ It's a style: a homage to HyperCard, and any browser renders it.
 
 ## Does it use Python?
 
-No. Every step of every machine runs on the Rust std worker: 106 steps are `echo` and 7 are `postgres_query`. There's no Python file or Python project in `machines/`. A machine that ran steps on the Python worker would bring Python in; none does today.
+No. Every step of every machine runs on the Rust std worker: 106 steps are `echo` and 7 are `postgres_query`. There's no Python file or Python project in `machines/`. A machine that ran steps on the Python worker would bring Python in; none does today, though machines that run code are one of the directions in [What's next?](#whats-next).
 
 ## What does it show on 0.12.6?
 
@@ -124,15 +124,14 @@ Every run does what its card says. With the plug pulled, the open crash fixes cl
 
 ## What's next?
 
-The shop is an R&D exploration, and these questions are open in its pull request:
+The shop is an R&D exploration, so where it goes is open. Some directions it could take:
 
-1. **Where it lives:** `machines/` at the repo root, `examples/`, or a repo of its own.
-2. **Its name:** "machine shop" was the first one; "makerspace" may fit the Rube Goldberg inspiration better.
-3. **CI:** bench and shop mode run with every push today, in about 70 seconds. Keep that, or move them to nightly or on demand? Plug mode is too slow for every pull request.
-4. **The rendered pages:** refreshed by hand today. CI could build them as a run artifact instead.
-5. **Trap labels** for fixes now on `main`: take them off, or keep them while the fixes are new.
-
-Beyond those, two things haven't been tried yet: plug mode on Linux, and anything on Windows or on small edge hardware, such as a Raspberry Pi.
+- **Machines that run code.** Every step today is a built-in activity on the Rust std worker. Machines whose steps run code, such as Python on the Python worker or model-written code in a sandbox, would show how the engine treats code it didn't write: a step that fails, hangs or runs out of time partway through, its retries, and what happens to it when the plug is pulled mid-run.
+- **Machines that call models,** where budgets and costs come into play: a step that would go over its budget, or falls back to a cheaper model.
+- **Harder ways to pull the plug.** Today the plug stops the engine's tasks inside one process, and PostgreSQL keeps running. Killing the process, cutting the engine off from the database, or restarting the database would each test durable execution further.
+- **More places to run it:** small edge hardware such as a Raspberry Pi, Windows, and plug mode on Linux, with each host's results side by side in the same views.
+- **Views that follow the engine over time,** built for every run instead of by hand, so a change in behaviour shows up the day it lands.
+- **Its home and its name.** It lives in `machines/` today, and "machine shop" was the first name; "makerspace" may fit the Rube Goldberg inspiration better.
 
 ## How can I help?
 
@@ -140,4 +139,4 @@ Beyond those, two things haven't been tried yet: plug mode on Linux, and anythin
 - **Add a machine,** especially a compound one that combines functions no machine combines yet. Interactions are where the most interesting behaviour shows up.
 - **Turn a bug into a trap** when you file an issue, so its fix shows up as "fixed".
 - **Read the views and say what's unclear:** a term the glossary doesn't explain, or a picture that doesn't match what the machine does.
-- **Weigh in on the open questions above** in the pull request.
+- **Suggest a direction,** or a machine for one of the directions above.
