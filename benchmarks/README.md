@@ -154,6 +154,76 @@ or the py-std services fail to start.
 
 ## Results
 
+### 2026-11-23 (0.12.6 against Temporal 1.32.2, with 0.11.0 as control)
+
+The release that takes commit notifications out of the writing transactions
+(`docs/implementation/2026-11-23-app-side-notify.md`) against current
+Temporal, with 0.11.0 rerun beside them to tie this session to the
+2026-11-09 one. The published `kruxia/kruxiaflow:0.12.6` and
+`kruxia/kruxiaflow:0.11.0` images with default settings, Temporal server
+1.32.2 with the stack of the 2026-11-09 session (Python SDK 1.35.0,
+PostgreSQL 18 for all). The same scripts as that session: each platform
+alone, four alternating rounds (Temporal, 0.12.6, 0.11.0), a fresh stack per
+round with a discarded warm-up and three measured passes, so twelve passes
+per figure. Another project's three containers were up but idle (load
+average 2.4-6 at the start of each round); no round was discarded.
+
+**Every workflow completed on all three** (3,600 workflows per platform in
+the measured passes alone). Neither Kruxia Flow server logged a warning;
+Temporal's logged its usual handful of transient errors (2-12 per round).
+
+Standard suite: median of twelve passes, with the range of throughput (wf/s)
+and latency in ms:
+
+| Scenario           | Metric     | Kruxia Flow 0.12.6  | Kruxia Flow 0.11.0  | Temporal 1.32.2    | 0.12.6 vs Temporal |
+|--------------------|------------|---------------------|---------------------|--------------------|--------------------|
+| Sequential-5       | Throughput | 167.1 (151.9-170.3) | 152.8 (111.1-166.2) | 34.9 (32.6-35.5)   | 4.8x               |
+| Sequential-5       | P50        | 56                  | 57                  | 297                | 5.3x lower         |
+| Sequential-5       | P95        | 72                  | 110                 | 316                | 4.4x lower         |
+| Parallel-10        | Throughput | 97.4 (89.1-99.2)    | 78.0 (53.6-82.8)    | 33.6 (21.3-36.0)   | 2.9x               |
+| Parallel-10        | P50        | 110                 | 111                 | 288                | 2.6x lower         |
+| Parallel-10        | P95        | 124                 | 174                 | 355                | 2.9x lower         |
+| High-Concurrency-3 | Throughput | 350.0 (289.8-378.4) | 247.3 (105.9-321.8) | 108.5 (86.6-120.2) | 3.2x               |
+| High-Concurrency-3 | P50        | 236                 | 350                 | 619                | 2.6x lower         |
+| High-Concurrency-3 | P95        | 414                 | 639                 | 2246               | 5.4x lower         |
+| High-Concurrency-3 | P99        | 507                 | 828                 | 2459               | 4.9x lower         |
+
+One workflow at a time on an otherwise idle system, after a random 4-8 s idle
+gap (30 one-activity and 10 five-activity workflows per round; mean
+end-to-end latency in ms as the client sees it, one figure per round):
+
+| Workflow     | Kruxia Flow 0.12.6     | Kruxia Flow 0.11.0     | Temporal 1.32.2        |
+|--------------|------------------------|------------------------|------------------------|
+| 1 activity   | 25.5, 24.7, 26.8, 25.5 | 27.9, 25.6, 22.9, 25.5 | 40.4, 38.3, 39.3, 44.3 |
+| 5 activities | 39.3, 38.6, 39.7, 45.9 | 42.1, 43.0, 38.9, 42.2 | 85.1, 76.1, 68.0, 86.0 |
+
+Reading these:
+
+- **Against 0.11.0 in the same session, 0.12.6 has 9%, 25% and 42% more
+  throughput** on the three scenarios, and at 100 concurrent workflows a
+  third lower median latency (236 against 350 ms) and a 39% lower P99. Its
+  passes also vary much less: 0.11.0's High-Concurrency-3 passes ranged from
+  106 to 322 wf/s, 0.12.6's from 290 to 378.
+- **The orchestrator's mean reaction time at 100 concurrent workflows was
+  3.1-4.0 ms per round** on 0.12.6, against 12-39 ms on 0.11.0 (15-22 ms in
+  the 2026-11-09 session); at 10 concurrent, 2.3-2.5 against 4.0-6.4 ms.
+- **Against Temporal, 4.8x, 2.9x and 3.2x the throughput** (2026-11-09:
+  4.7x, 2.4x and 2.3x against 0.11.0), and lower latency at every
+  percentile: the tail at 100 concurrent is a fifth of Temporal's.
+- **Idle latency did not change between releases, but this host was slower
+  for idle latency than on 2026-11-09, for both platforms.** 0.11.0 measured
+  25.5 ms for one activity on average this time against about 20.5 then,
+  and Temporal 40.6 against 33.9, while 0.11.0 and 0.12.6 match each other
+  within a millisecond. The figures to compare are those from one session:
+  1.6x lower than Temporal for one activity and 1.9x for five (1.7x and 1.9x
+  on 2026-11-09).
+- Temporal's High-Concurrency-3 throughput is a little lower than on
+  2026-11-09 (108.5 against 118.0 wf/s), within the run-to-run range of both
+  sessions. The caveats of the 0.10.0 comparison still apply.
+
+Raw results are in `results/2026-11-23-v0.12.6-temporal-1.32/` (not in
+version control).
+
 ### 2026-11-10 (Airflow 3.4.0, footprint and memory)
 
 Airflow brought up to date and rerun, and the size and memory figures
