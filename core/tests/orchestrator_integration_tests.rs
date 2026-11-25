@@ -1035,11 +1035,31 @@ async fn test_activity_scheduled_events_published(pool: PgPool) {
     }
 }
 
-/// With a NOTIFY wake attached, an event that arrives while the loop sits in
-/// a long backoff wait is processed at once rather than when the timer fires
-#[sqlx::test(migrations = "../migrations")]
-async fn test_run_orchestrator_wakes_on_notify(pool: PgPool) {
-    let pool = common::unshared_pool(&pool).await;
+/// The orchestrator's idle wait in the wake tests below. With a wake
+/// attached, an empty poll is followed by the full idle wait, so an event
+/// nobody announces is picked up only when it runs out.
+const WAKE_TEST_IDLE_WAIT: Duration = Duration::from_secs(30);
+
+/// How soon an announced event must be scheduled. Generous, because a busy
+/// database slows processing, and an open writing transaction anywhere on the
+/// PostgreSQL instance (another test's, in a parallel run) holds the event
+/// back until it ends; yet far enough below [`WAKE_TEST_IDLE_WAIT`] that only
+/// a wake can meet it.
+const WAKE_BOUND: Duration = Duration::from_secs(10);
+
+/// How the test's event reaches the orchestrator
+enum Arrival {
+    /// Published through the event source, which announces it
+    Published,
+    /// Inserted with plain SQL, which announces nothing
+    PlainSql,
+}
+
+/// Start an orchestrator with a wake attached, let it settle into its idle
+/// wait, deliver one `WorkflowCreated` event as `arrival` says, and return
+/// how long after the delivery began its activity was scheduled, if within
+/// `deadline`
+async fn time_to_schedule(pool: &PgPool, arrival: Arrival, deadline: Duration) -> Option<Duration> {
     let definition = WorkflowDefinition {
         id: Uuid::now_v7(),
         name: "wake_test_workflow".to_string(),
@@ -1055,9 +1075,9 @@ async fn test_run_orchestrator_wakes_on_notify(pool: PgPool) {
             output_definitions: None,
         }],
     };
-    let definition_id = insert_workflow_definition(&pool, &definition).await;
+    let definition_id = insert_workflow_definition(pool, &definition).await;
     let workflow_id = Uuid::now_v7();
-    insert_workflow(&pool, workflow_id, &definition.name, definition_id).await;
+    insert_workflow(pool, workflow_id, &definition.name, definition_id).await;
 
     let event_source: Arc<dyn EventSource> =
         Arc::new(common::settled_event_source_with_wake(pool.clone()).await);
@@ -1065,10 +1085,8 @@ async fn test_run_orchestrator_wakes_on_notify(pool: PgPool) {
         Arc::new(PostgresQueue::new(pool.clone(), QueueConfig::default()));
     let subscription_service: Arc<dyn SubscriptionService> =
         Arc::new(PostgresSubscriptionService::new(pool.clone()));
-    // Waits of 50ms, 200ms, 800ms, then 3.2s from t≈1.05s to t≈4.25s
     let config = OrchestratorConfig::new(pool.clone())
-        .with_poll_interval(Duration::from_millis(50), Duration::from_secs(30))
-        .with_backoff_multiplier(4.0);
+        .with_poll_interval(Duration::from_millis(50), WAKE_TEST_IDLE_WAIT);
 
     // Stopped through the token at the end, so the loop and its background
     // task let go of the event source and its LISTEN connection; otherwise
@@ -1093,39 +1111,70 @@ async fn test_run_orchestrator_wakes_on_notify(pool: PgPool) {
         })
     };
 
-    // Let the loop back off into its 3.2s wait
+    // Let the loop find nothing and settle into its idle wait
     tokio::time::sleep(Duration::from_millis(1500)).await;
 
-    let published = std::time::Instant::now();
-    event_source
-        .publish(NewWorkflowEvent {
-            workflow_id,
-            event_type: WorkflowEventType::WorkflowCreated,
-            activity_key: None,
-            payload: json!({}),
-            iteration: None,
-        })
-        .await
-        .unwrap();
+    let started = std::time::Instant::now();
+    match arrival {
+        Arrival::Published => {
+            event_source
+                .publish(NewWorkflowEvent {
+                    workflow_id,
+                    event_type: WorkflowEventType::WorkflowCreated,
+                    activity_key: None,
+                    payload: json!({}),
+                    iteration: None,
+                })
+                .await
+                .unwrap();
+        }
+        Arrival::PlainSql => {
+            sqlx::query(
+                "INSERT INTO workflow_events (workflow_id, event_type, payload) \
+                 VALUES ($1, 'WorkflowCreated', '{}')",
+            )
+            .bind(workflow_id)
+            .execute(pool)
+            .await
+            .unwrap();
+        }
+    }
 
-    let scheduled = common::wait_until(Duration::from_secs(5), || async {
+    let scheduled = common::wait_until(deadline, || async {
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM activity_queue WHERE workflow_id = $1")
             .bind(workflow_id)
-            .fetch_one(&pool)
+            .fetch_one(pool)
             .await
             .unwrap_or(0)
             > 0
     })
     .await;
-    let latency = published.elapsed();
+    let latency = started.elapsed();
     shutdown.cancel();
     let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+    scheduled.then_some(latency)
+}
 
-    assert!(scheduled, "activity was never scheduled");
-    // On the timer alone this would take ~2.75s
+/// With a NOTIFY wake attached, an event that arrives while the loop sits in
+/// its idle wait is processed at once rather than when the wait runs out
+#[sqlx::test(migrations = "../migrations")]
+async fn test_run_orchestrator_wakes_on_notify(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
+    let latency = time_to_schedule(&pool, Arrival::Published, WAKE_BOUND)
+        .await
+        .expect("activity was not scheduled within the bound; the wake did not shorten the wait");
+    assert!(latency < WAKE_BOUND, "event took {latency:?} to process");
+}
+
+/// The control for the test above: an event that nobody announces waits for
+/// the idle wait, so meeting [`WAKE_BOUND`] there takes a wake
+#[sqlx::test(migrations = "../migrations")]
+async fn test_unannounced_event_waits_past_the_wake_bound(pool: PgPool) {
+    let pool = common::unshared_pool(&pool).await;
+    let latency = time_to_schedule(&pool, Arrival::PlainSql, WAKE_BOUND).await;
     assert!(
-        latency < Duration::from_secs(1),
-        "event took {latency:?} to process; the wake did not shorten the wait"
+        latency.is_none(),
+        "an unannounced event was processed after {latency:?}; the idle wait no longer separates a wake from the timer"
     );
 }
 
