@@ -17,8 +17,11 @@ use sqlx::PgPool;
 use std::time::Duration;
 use uuid::Uuid;
 
-/// Generous bound on notification latency (it is normally ~1ms)
-const WAKE_WITHIN: Duration = Duration::from_millis(500);
+/// How long to wait for a wake (it normally takes about 1 ms). A receiver
+/// has no timer of its own, so only a wake (or a listener reconnect) ends the
+/// wait with [`Wake::Woken`]: the bound can be generous for a busy machine and
+/// costs nothing when the wake comes.
+const WAKE_WITHIN: Duration = Duration::from_secs(5);
 /// How long to wait to be sure nothing arrives
 const QUIET: Duration = Duration::from_millis(200);
 
@@ -45,10 +48,8 @@ async fn test_publish_wakes_receiver(pool: PgPool) {
 
     assert_eq!(rx.wait(QUIET).await, Wake::TimedOut);
 
-    let started = std::time::Instant::now();
     source.publish(event(Uuid::now_v7())).await.unwrap();
     assert_eq!(rx.wait(WAKE_WITHIN).await, Wake::Woken);
-    assert!(started.elapsed() < WAKE_WITHIN);
 }
 
 #[sqlx::test(migrations = "../migrations")]

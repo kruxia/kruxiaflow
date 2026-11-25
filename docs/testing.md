@@ -309,6 +309,13 @@ jobs:
 3. **Descriptive names**: `test_workflow_submission_with_invalid_json_returns_422`
 4. **Test error paths**: Not just happy paths
 5. **Avoid flaky tests**: Use `serial_test` for shared resources
+6. **Timing bounds that hold under load**: A full parallel run is slow, and
+   event delivery waits for every open writing transaction on the PostgreSQL
+   instance, other tests' included. So start the clock where the behaviour
+   under test starts (after a publish returns, not before), and set the bound
+   far from what the alternative would take: a test that a wake shortens a
+   30 s idle wait can allow 10 s, not 1 s. A control test can check that the
+   alternative misses the bound (`test_unannounced_event_waits_past_the_wake_bound`).
 
 ### Database Tests
 
