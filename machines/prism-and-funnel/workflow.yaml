@@ -1,0 +1,58 @@
+# Prism and funnel: a beam of white light splits into red, green and blue,
+# which run in parallel, and a funnel gathers all three back into one.
+name: machine_prism_and_funnel
+
+activities:
+  - key: beam
+    worker: std
+    activity_name: echo
+    parameters:
+      light: white
+    outputs:
+      - echo
+
+  - key: red
+    worker: std
+    activity_name: echo
+    parameters:
+      colour: red
+      from: "{{ beam.echo.light }}"
+    outputs:
+      - echo
+    depends_on:
+      - beam
+
+  - key: green
+    worker: std
+    activity_name: echo
+    parameters:
+      colour: green
+      from: "{{ beam.echo.light }}"
+    outputs:
+      - echo
+    depends_on:
+      - beam
+
+  - key: blue
+    worker: std
+    activity_name: echo
+    parameters:
+      colour: blue
+      from: "{{ beam.echo.light }}"
+    outputs:
+      - echo
+    depends_on:
+      - beam
+
+  - key: funnel
+    worker: std
+    activity_name: echo
+    parameters:
+      mixed: "{{ red.echo.colour }}+{{ green.echo.colour }}+{{ blue.echo.colour }}"
+      source: "{{ red.echo.from }}"
+    outputs:
+      - echo
+    depends_on:
+      - red
+      - green
+      - blue

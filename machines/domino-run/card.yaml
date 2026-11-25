@@ -1,0 +1,40 @@
+name: Domino run
+kind: simple
+picture: >
+  A line of dominoes. Tip the first one and each knocks over the next,
+  until the last one falls.
+edge: >
+  A gateway passes a sensor reading through a chain of steps, each working
+  on the output of the one before, strictly in order.
+functions:
+  - a chain of depends_on, run in order
+  - one step's output used in the next step's parameters
+  - workflow input used in parameters
+  - a whole-value template keeps its number type; text templates join strings
+runs:
+  - name: from zero
+    input: { start: 0 }
+    expect:
+      status: completed
+      steps:
+        domino_1: { status: completed, runs: 1 }
+        domino_2: { status: completed, runs: 1 }
+        domino_3: { status: completed, runs: 1 }
+        domino_4: { status: completed, runs: 1 }
+      outputs:
+        - step: domino_4
+          output: echo
+          equals: { fallen: 4, trail: "tip tip tip tip" }
+  - name: from ten
+    input: { start: 10 }
+    expect:
+      status: completed
+      steps:
+        domino_1: { status: completed, runs: 1 }
+        domino_2: { status: completed, runs: 1 }
+        domino_3: { status: completed, runs: 1 }
+        domino_4: { status: completed, runs: 1 }
+      outputs:
+        - step: domino_4
+          output: echo
+          equals: { fallen: 14, trail: "tip tip tip tip" }

@@ -1,0 +1,58 @@
+name: Thermostat
+kind: simple
+picture: >
+  A thermostat's dial says how warm the room is and how warm it should be.
+  The heater warms the room a degree at a time and switches off when the
+  room reaches the setpoint: three rounds on a cold morning, one on a mild
+  one, and on a warm morning it never switches on.
+edge: >
+  A cold room's controller warms the room a degree per round until it
+  reaches the setpoint, and never switches the heater on when the room is
+  already warm enough.
+functions:
+  - "a condition on a self-loop's back-edge, reading the workflow's INPUT and {{<step>.iteration}}"
+  - "{{<step>.iteration}} in a loop step's own parameters"
+  - a condition on the loop's way in, so a loop that isn't needed is skipped
+trap:
+  issues: [30, 38]
+  broken_looks_like: >
+    The heater's {{heater.iteration}} isn't in the template context, and its
+    condition reads INPUT from state_data, which is empty (#30). On main the
+    heater's templates fail while the dial's completion is processed: the
+    dial is marked failed although it ran, the heater never runs, and the
+    workflow stays running (#19). On a warm morning the heater's back-edge
+    also lets it in although the dial's condition is false (#38), so it
+    switches on when it shouldn't.
+runs:
+  - name: cold morning, 17 to 20 degrees
+    input: { room: 17, setpoint: 20 }
+    timeout_seconds: 10
+    expect:
+      status: completed
+      steps:
+        dial: { status: completed, runs: 1 }
+        heater: { status: completed, runs: 3 }
+      outputs:
+        - step: heater
+          output: echo
+          equals: { round: 3, room: 20 }
+  - name: mild morning, one degree short
+    input: { room: 19, setpoint: 20 }
+    timeout_seconds: 10
+    expect:
+      status: completed
+      steps:
+        dial: { status: completed, runs: 1 }
+        heater: { status: completed, runs: 1 }
+      outputs:
+        - step: heater
+          output: echo
+          equals: { round: 1, room: 20 }
+  - name: warm morning, heating off
+    input: { room: 21, setpoint: 20 }
+    timeout_seconds: 10
+    expect:
+      status: completed
+      steps:
+        dial: { status: completed, runs: 1 }
+        heater: { status: skipped, runs: 0 }

@@ -1,0 +1,36 @@
+name: Water pump
+kind: compound
+picture: >
+  A hand pump at a well. Each stroke, the piston lifts water and the valve
+  lets it out. Three strokes, three lots of water: the valve opens once per
+  stroke, never on its own.
+edge: >
+  An irrigation controller runs a two-step pump cycle, piston then valve,
+  three times, the valve working on each stroke's latest output.
+functions:
+  - a two-step loop, the piston (head) and the valve (tail)
+  - iteration_limit ends the loop
+  - a loop step's parameters read the other step's latest output
+trap:
+  issue: 18
+  broken_looks_like: >
+    The valve runs again after each of its own runs, without a new stroke,
+    until the default cap of 100 rounds, and the piston strokes on the
+    valve's stale output. The workflow completes, with the valve run 100
+    times and the last stroke numbered 2.
+runs:
+  - name: three strokes
+    timeout_seconds: 10
+    expect:
+      status: completed
+      steps:
+        intake: { status: completed, runs: 1 }
+        piston: { status: completed, runs: 3 }
+        valve: { status: completed, runs: 3 }
+      outputs:
+        - step: piston
+          output: echo
+          equals: { stroke: 3 }
+        - step: valve
+          output: echo
+          equals: { stroke: 3 }

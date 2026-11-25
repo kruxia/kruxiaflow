@@ -1,0 +1,58 @@
+name: Revolving door
+kind: compound
+picture: >
+  At the lodge, the keeper unlocks the gate, and behind it a revolving door
+  turns three times to let visitors into the lobby. Inside, when the front
+  desk is staffed, the clerk rings the call bell twice for a porter. When the
+  gate stays locked the door doesn't turn and the lobby stays empty; when
+  the desk isn't staffed nobody rings the bell. Either way the day ends.
+edge: >
+  A depot gate controller cycles three vehicles through when the gate is
+  unlocked, and skips the cycle, and the step after it, when the gate stays
+  locked. A loop behind a skipped step is skipped too, and the day still
+  closes.
+functions:
+  - a self-loop whose way in is a condition on the previous step's output, skipped when it's false
+  - a self-loop behind a skipped step, skipped with it
+  - a self-loop ended by iteration_limit, its parameters reading its own last output
+trap:
+  issue: 38
+  broken_looks_like: >
+    A loop step's back-edge, its dependency on itself, counts before the
+    step has ever run. Behind the locked gate the door turns three times
+    anyway and the lobby fills. Behind the unstaffed desk, which is skipped,
+    the bell waits for itself to finish, stays not_scheduled, and the
+    workflow stays running until the run times out.
+runs:
+  - name: gate locked, desk staffed
+    input: { unlock: false, desk_staffed: true }
+    timeout_seconds: 10
+    expect:
+      status: completed
+      steps:
+        keeper: { status: completed, runs: 1 }
+        gate: { status: completed, runs: 1 }
+        door: { status: skipped, runs: 0 }
+        lobby: { status: skipped, runs: 0 }
+        desk: { status: completed, runs: 1 }
+        bell: { status: completed, runs: 2 }
+      outputs:
+        - step: bell
+          output: echo
+          equals: { ring: 2 }
+  - name: gate unlocked, desk unstaffed
+    input: { unlock: true, desk_staffed: false }
+    timeout_seconds: 10
+    expect:
+      status: completed
+      steps:
+        keeper: { status: completed, runs: 1 }
+        gate: { status: completed, runs: 1 }
+        door: { status: completed, runs: 3 }
+        lobby: { status: completed, runs: 1 }
+        desk: { status: skipped, runs: 0 }
+        bell: { status: skipped, runs: 0 }
+      outputs:
+        - step: door
+          output: echo
+          equals: { turn: 3 }

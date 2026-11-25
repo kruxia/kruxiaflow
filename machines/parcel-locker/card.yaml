@@ -1,0 +1,88 @@
+name: Parcel locker
+kind: compound
+picture: >
+  A courier leaves a parcel in a locker, and the customer has a few seconds
+  to collect it with a code. Collected, the locker prints a receipt. When
+  nobody comes, the locker gives up, no receipt is printed, and the van
+  takes the parcel back to the depot. A code typed after the locker has
+  given up is refused. Either way the locker is closed out once.
+edge: >
+  A clinic's medicine locker waits for a patient's pickup code; with no code
+  in time it skips the handover and books a return, and it refuses a code
+  typed too late. Either way it closes out once.
+functions:
+  - "on_timeout: skip, when nobody signals: the step is skipped without running, and the workflow carries on"
+  - a step that depends on the skipped step with no condition is skipped too
+  - "a step whose condition picks the skip ({{<step>.status == 'skipped'}}) runs"
+  - a join of two exclusive paths, with a status condition on each, runs once after whichever ran
+  - a signal that arrives after the wait has timed out is refused
+trap:
+  issues: [29, 37]
+  broken_looks_like: >
+    Before #37's fix, the locker's {{SIGNAL.code}} is undefined when the
+    locker becomes ready, so it never waits. On main that template error
+    lands on deliver, which is marked failed although it ran (#19); the
+    locker is skipped without waiting, the rest stay not_scheduled, and the
+    workflow stays running. Before #29's fix, a collected parcel fails the
+    locker as soon as it's signaled.
+runs:
+  - name: the customer collects it
+    input: { parcel: boots }
+    timeout_seconds: 10
+    signals:
+      - step: locker
+        event: collect
+        data: { code: 4417 }
+    expect:
+      status: completed
+      steps:
+        deliver: { status: completed, runs: 1 }
+        locker: { status: completed, runs: 1 }
+        receipt: { status: completed, runs: 1 }
+        return_to_depot: { status: skipped, runs: 0 }
+        close_out: { status: completed, runs: 1 }
+      outputs:
+        - step: receipt
+          output: echo
+          equals: { collected: boots, code: 4417 }
+        - step: close_out
+          output: echo
+          equals: { parcel: boots, outcome: collected }
+  - name: nobody comes
+    input: { parcel: kettle }
+    timeout_seconds: 12
+    expect:
+      status: completed
+      steps:
+        deliver: { status: completed, runs: 1 }
+        locker: { status: skipped, runs: 0 }
+        receipt: { status: skipped, runs: 0 }
+        return_to_depot: { status: completed, runs: 1 }
+        close_out: { status: completed, runs: 1 }
+      outputs:
+        - step: return_to_depot
+          output: echo
+          equals: { returned: kettle }
+        - step: close_out
+          output: echo
+          equals: { parcel: kettle, outcome: returned }
+  - name: the code comes too late
+    input: { parcel: lamp }
+    timeout_seconds: 12
+    signals:
+      - step: locker
+        event: collect
+        data: { code: 4417 }
+        late: true
+    expect:
+      status: completed
+      steps:
+        deliver: { status: completed, runs: 1 }
+        locker: { status: skipped, runs: 0 }
+        receipt: { status: skipped, runs: 0 }
+        return_to_depot: { status: completed, runs: 1 }
+        close_out: { status: completed, runs: 1 }
+      outputs:
+        - step: close_out
+          output: echo
+          equals: { parcel: lamp, outcome: returned }

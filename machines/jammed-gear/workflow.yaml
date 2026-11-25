@@ -1,0 +1,38 @@
+# Jammed gear: a motor turns a gear, which drives a belt. The gear is wired
+# wrong: it reads the belt's speed, but the belt comes after it and hasn't
+# run, so the gear's template can't be resolved.
+#
+# The broken template is the gear's own, so the gear fails, the belt behind
+# it never runs, and the workflow fails. The motor did its job and stays
+# completed.
+name: machine_jammed_gear
+
+activities:
+  - key: motor
+    worker: std
+    activity_name: echo
+    parameters:
+      rpm: 1200
+    outputs:
+      - echo
+
+  - key: gear
+    worker: std
+    activity_name: echo
+    parameters:
+      rpm: "{{ motor.echo.rpm }}"
+      belt_speed: "{{ belt.echo.speed }}"
+    outputs:
+      - echo
+    depends_on:
+      - motor
+
+  - key: belt
+    worker: std
+    activity_name: echo
+    parameters:
+      speed: "{{ gear.echo.rpm }}"
+    outputs:
+      - echo
+    depends_on:
+      - gear

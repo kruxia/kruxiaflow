@@ -1,0 +1,36 @@
+name: Taxi meter
+kind: simple
+picture: >
+  A taxi meter ticks once a mile. Each tick it shows the mile, the fare so
+  far and how much of the passenger's $20 budget is left, and after the third
+  mile it stops: the ride is over.
+edge: >
+  A delivery van's meter ticks once a mile, each tick reading its own mile
+  count, the cost so far and the budget left, and it stops itself after the
+  third mile.
+functions:
+  - "{{ACTIVITY.iteration}}, {{ACTIVITY.accumulated_cost_usd}} and {{ACTIVITY.remaining_budget_usd}} in a step's own parameters"
+  - "{{ACTIVITY.iteration}} in the condition on a step's own back-edge"
+  - a self-loop with an activity budget
+trap:
+  issue: 32
+  broken_looks_like: >
+    ACTIVITY is never put in the template context, so the meter's parameters
+    fail to resolve ("undefined value") before the first mile. On main that
+    template error has no step to fail (#19): the meter never runs and the
+    workflow never gets past created.
+runs:
+  - name: a three-mile ride
+    timeout_seconds: 10
+    expect:
+      status: completed
+      steps:
+        meter: { status: completed, runs: 3 }
+      outputs:
+        - step: meter
+          output: echo
+          equals:
+            mile: 3
+            spent: 0
+            left: 20
+            display: "mile 3: $0.0 spent, $20.0 left"

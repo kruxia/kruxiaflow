@@ -1,0 +1,78 @@
+name: Dead man's switch
+kind: compound
+picture: >
+  A train departs, and the driver has a few seconds to press the vigilance
+  pedal. Pressed, the train runs on to the next station. If the driver
+  doesn't press it in time, the switch trips: the brakes go on and the run
+  ends as failed. A press that comes after the switch has tripped is too
+  late, and changes nothing.
+edge: >
+  An operator-presence check on a remote pump: the operator must confirm
+  within seconds, or the run fails and a safe-stop step runs instead. A
+  confirmation that comes after the timeout is refused.
+functions:
+  - "on_timeout: fail, when nobody signals: the step fails, and so does the workflow"
+  - a step that depends on the failed step with no condition is skipped
+  - "a step whose condition picks the failure ({{<step>.status == 'failed'}}) runs"
+  - a signal that arrives after the wait has timed out is refused
+trap:
+  issues: [29, 37]
+  broken_looks_like: >
+    Before #37's fix, vigilance's {{SIGNAL.*}} template is undefined when
+    the step becomes ready, so it never waits. On main that template error
+    lands on depart, which is marked failed although it ran (#19);
+    vigilance is skipped, nothing is signaled or times out, brakes and
+    next_station stay not_scheduled, and the workflow stays running. Before
+    #29's fix, a pressed pedal fails vigilance as soon as it's signaled.
+runs:
+  - name: the driver presses the pedal
+    input: { train: Night mail }
+    timeout_seconds: 10
+    signals:
+      - step: vigilance
+        event: press
+        data: { driver: Agnes }
+    expect:
+      status: completed
+      steps:
+        depart: { status: completed, runs: 1 }
+        vigilance: { status: completed, runs: 1 }
+        next_station: { status: completed, runs: 1 }
+        brakes: { status: skipped, runs: 0 }
+      outputs:
+        - step: next_station
+          output: echo
+          equals: { arrived: Night mail, driver: Agnes }
+  - name: the driver is asleep
+    input: { train: Milk train }
+    timeout_seconds: 10
+    expect:
+      status: failed
+      steps:
+        depart: { status: completed, runs: 1 }
+        vigilance: { status: failed, runs: 0 }
+        next_station: { status: skipped, runs: 0 }
+        brakes: { status: completed, runs: 1 }
+      outputs:
+        - step: brakes
+          output: echo
+          equals: { stopped: Milk train }
+  - name: the driver wakes too late
+    input: { train: Sleeper }
+    timeout_seconds: 10
+    signals:
+      - step: vigilance
+        event: press
+        data: { driver: Agnes }
+        late: true
+    expect:
+      status: failed
+      steps:
+        depart: { status: completed, runs: 1 }
+        vigilance: { status: failed, runs: 0 }
+        next_station: { status: skipped, runs: 0 }
+        brakes: { status: completed, runs: 1 }
+      outputs:
+        - step: brakes
+          output: echo
+          equals: { stopped: Sleeper }

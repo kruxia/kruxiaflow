@@ -1,0 +1,46 @@
+# Drawbridge: a boat arrives at a closed bridge. The bridge waits for the
+# keeper's "raise" signal, which says how high to raise it, then lifts and
+# the boat passes. With no height, or no keeper at all (the wait times out
+# and continues), the bridge lifts its standard 3 metres.
+#
+# The bridge's parameters read {{SIGNAL}}, the data the signal carried. It is
+# null when the signal carried none, or when the wait timed out, so the
+# height falls back through `coalesce`.
+name: machine_drawbridge
+
+activities:
+  - key: boat_arrives
+    worker: std
+    activity_name: echo
+    parameters:
+      boat: "{{ INPUT.boat }}"
+    outputs:
+      - echo
+
+  - key: bridge
+    worker: std
+    activity_name: echo
+    parameters:
+      boat: "{{ boat_arrives.echo.boat }}"
+      raised_by: "{{ SIGNAL.height | coalesce(3) }}"
+      keeper_said: "{{ SIGNAL }}"
+    settings:
+      wait_for_signal:
+        event_name: raise
+        timeout_seconds: 4
+        on_timeout: continue
+    outputs:
+      - echo
+    depends_on:
+      - boat_arrives
+
+  - key: boat_passes
+    worker: std
+    activity_name: echo
+    parameters:
+      passed: "{{ bridge.echo.boat }}"
+      clearance: "{{ bridge.echo.raised_by }}"
+    outputs:
+      - echo
+    depends_on:
+      - bridge

@@ -1,0 +1,82 @@
+name: Drawbridge
+kind: compound
+picture: >
+  A boat arrives at a closed drawbridge. The bridge keeper signals "raise",
+  saying how high to raise it; the bridge lifts by that much and the boat
+  passes underneath. If the keeper gives no height, or never answers, the
+  bridge lifts its standard 3 metres after a short wait.
+edge: >
+  A store's price override waits for a manager to send the new price. If the
+  manager sends none, or never answers, the register goes ahead with the
+  standard price after a short wait.
+functions:
+  - "wait_for_signal: a step waits until it is signaled through the API"
+  - "{{SIGNAL}} in the resumed step's parameters: the signal's data, or null"
+  - "on_timeout: continue, when nobody signals"
+  - the coalesce filter, so a template renders when SIGNAL is null
+  - a later step reads the resumed step's output
+trap:
+  issues: [29, 37]
+  broken_looks_like: >
+    Before #37's fix the bridge never waits: its {{SIGNAL.*}} template is
+    undefined when the step becomes ready, so no signal can reach it. On main
+    that template error lands on boat_arrives, which is marked failed (#19);
+    the bridge is skipped and the workflow stays running. Before #29's fix, a
+    bridge that does wait fails as soon as the keeper signals ("Subscription
+    already exists"). Either way the boat never passes.
+runs:
+  - name: keeper raises it 6 metres
+    input: { boat: Marigold }
+    timeout_seconds: 10
+    signals:
+      - step: bridge
+        event: raise
+        data: { height: 6 }
+    expect:
+      status: completed
+      steps:
+        boat_arrives: { status: completed, runs: 1 }
+        bridge: { status: completed, runs: 1 }
+        boat_passes: { status: completed, runs: 1 }
+      outputs:
+        - step: bridge
+          output: echo
+          equals: { boat: Marigold, raised_by: 6, keeper_said: { height: 6 } }
+        - step: boat_passes
+          output: echo
+          equals: { passed: Marigold, clearance: 6 }
+  - name: keeper gives no height
+    input: { boat: Heron }
+    timeout_seconds: 10
+    signals:
+      - step: bridge
+        event: raise
+    expect:
+      status: completed
+      steps:
+        boat_arrives: { status: completed, runs: 1 }
+        bridge: { status: completed, runs: 1 }
+        boat_passes: { status: completed, runs: 1 }
+      outputs:
+        - step: bridge
+          output: echo
+          equals: { boat: Heron, raised_by: 3, keeper_said: null }
+        - step: boat_passes
+          output: echo
+          equals: { passed: Heron, clearance: 3 }
+  - name: no keeper, the wait times out
+    input: { boat: Night ferry }
+    timeout_seconds: 12
+    expect:
+      status: completed
+      steps:
+        boat_arrives: { status: completed, runs: 1 }
+        bridge: { status: completed, runs: 1 }
+        boat_passes: { status: completed, runs: 1 }
+      outputs:
+        - step: bridge
+          output: echo
+          equals: { boat: Night ferry, raised_by: 3, keeper_said: null }
+        - step: boat_passes
+          output: echo
+          equals: { passed: Night ferry, clearance: 3 }

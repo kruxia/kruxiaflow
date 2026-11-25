@@ -1,0 +1,59 @@
+# Vending machine: it warms up for two seconds when switched on, then waits
+# for a coin. A coin pushed in while it's still warming up is refused (the
+# wait hasn't begun) and must be inserted again. The coin mechanism jams on
+# the first try and runs again (retry.max_attempts: 3); the retry still has
+# the coin ({{SIGNAL}} is the same on every attempt), and doesn't wait for
+# another one. Then the machine dispenses.
+#
+# power_on creates this run's sequence and has a delay, so the coin slot
+# isn't waiting yet when the early coin arrives. coin_slot is a
+# postgres_query on the test's own database that counts its tries in the
+# sequence and fails (division by zero) on the first one.
+name: machine_vending_machine
+
+activities:
+  - key: power_on
+    worker: std
+    activity_name: postgres_query
+    parameters:
+      db_url: "{{ SECRET.shop_db_url }}"
+      query: CREATE SEQUENCE "shop_vend_{{ WORKFLOW.id }}"
+    settings:
+      delay: 2s
+    outputs:
+      - result
+
+  - key: coin_slot
+    worker: std
+    activity_name: postgres_query
+    parameters:
+      db_url: "{{ SECRET.shop_db_url }}"
+      query: >-
+        WITH mechanism AS (SELECT nextval('"shop_vend_{{ WORKFLOW.id }}"') AS try)
+        SELECT try, {{ SIGNAL.coin }} AS coin,
+          1 / (CASE WHEN try >= 2 THEN 1 ELSE 0 END) AS freed
+        FROM mechanism
+    settings:
+      wait_for_signal:
+        event_name: coin
+        timeout_seconds: 6
+        on_timeout: fail
+      retry:
+        max_attempts: 3
+        strategy: fixed
+        base_seconds: 1
+    outputs:
+      - result
+    depends_on:
+      - power_on
+
+  - key: dispense
+    worker: std
+    activity_name: echo
+    parameters:
+      paid: "{{ coin_slot.result.rows[0].coin }}"
+      tries: "{{ coin_slot.result.rows[0].try }}"
+    outputs:
+      - echo
+    depends_on:
+      - coin_slot

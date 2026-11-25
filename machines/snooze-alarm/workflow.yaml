@@ -1,0 +1,58 @@
+# Snooze alarm: the alarm rings, and waits for someone to switch it off.
+# Nobody does, so it snoozes (the wait times out and continues) and rings
+# again, three rings at most. Someone who reaches it can snooze it (off:
+# false) or switch it off (off: true). Then the bedroom is quiet.
+#
+# alarm is a self-loop whose every round waits for a signal: a round ends
+# with the signal, or with the timeout, with {{SIGNAL}} null. Its back-edge
+# goes round again while it isn't switched off and has rung fewer than
+# three times. quiet is the loop's exit, with the opposite condition.
+#
+# The ring number comes from {{ACTIVITY.iteration}}, the round being run,
+# as the signals guide's loop example counts rounds. A round's templates are
+# resolved when its wait ends, and then the step's own status is waiting,
+# not its last round's completed, so a count that tests
+# {{alarm.status == 'completed'}} would start again at 1 in every round.
+name: machine_snooze_alarm
+
+activities:
+  - key: bedtime
+    worker: std
+    activity_name: echo
+    parameters:
+      room: bedroom
+    outputs:
+      - echo
+
+  - key: alarm
+    worker: std
+    activity_name: echo
+    iteration_limit: 5
+    parameters:
+      ring: "{{ ACTIVITY.iteration + 1 }}"
+      off: "{{ SIGNAL.off | coalesce(false) }}"
+    settings:
+      wait_for_signal:
+        event_name: switch
+        timeout_seconds: 1
+        on_timeout: continue
+    outputs:
+      - echo
+    depends_on:
+      - bedtime
+      - activity_key: alarm
+        conditions:
+          - "{{ not alarm.echo.off and alarm.echo.ring < 3 }}"
+
+  - key: quiet
+    worker: std
+    activity_name: echo
+    parameters:
+      rings: "{{ alarm.echo.ring }}"
+      switched_off: "{{ alarm.echo.off }}"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: alarm
+        conditions:
+          - "{{ alarm.echo.off or alarm.echo.ring >= 3 }}"

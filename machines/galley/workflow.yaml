@@ -1,0 +1,160 @@
+# Galley: the drummer beats the stroke, and twelve oarsmen pull at once,
+# each on their own oar. The coxswain counts the stroke only when every oar
+# has pulled: oar 1 pulls with a weight of 1, oar 12 with 12, so a full
+# stroke weighs 78.
+#
+# The drum fans out to the oars with dependency_of; the coxswain fans in
+# with depends_on, no conditions, so it waits for all twelve.
+name: machine_galley
+
+activities:
+  - key: drum
+    worker: std
+    activity_name: echo
+    parameters:
+      beat: "{{ INPUT.beat }}"
+    outputs:
+      - echo
+    dependency_of:
+      - oar_1
+      - oar_2
+      - oar_3
+      - oar_4
+      - oar_5
+      - oar_6
+      - oar_7
+      - oar_8
+      - oar_9
+      - oar_10
+      - oar_11
+      - oar_12
+
+  - key: oar_1
+    worker: std
+    activity_name: echo
+    parameters:
+      weight: 1
+      beat: "{{ drum.echo.beat }}"
+    outputs:
+      - echo
+
+  - key: oar_2
+    worker: std
+    activity_name: echo
+    parameters:
+      weight: 2
+      beat: "{{ drum.echo.beat }}"
+    outputs:
+      - echo
+
+  - key: oar_3
+    worker: std
+    activity_name: echo
+    parameters:
+      weight: 3
+      beat: "{{ drum.echo.beat }}"
+    outputs:
+      - echo
+
+  - key: oar_4
+    worker: std
+    activity_name: echo
+    parameters:
+      weight: 4
+      beat: "{{ drum.echo.beat }}"
+    outputs:
+      - echo
+
+  - key: oar_5
+    worker: std
+    activity_name: echo
+    parameters:
+      weight: 5
+      beat: "{{ drum.echo.beat }}"
+    outputs:
+      - echo
+
+  - key: oar_6
+    worker: std
+    activity_name: echo
+    parameters:
+      weight: 6
+      beat: "{{ drum.echo.beat }}"
+    outputs:
+      - echo
+
+  - key: oar_7
+    worker: std
+    activity_name: echo
+    parameters:
+      weight: 7
+      beat: "{{ drum.echo.beat }}"
+    outputs:
+      - echo
+
+  - key: oar_8
+    worker: std
+    activity_name: echo
+    parameters:
+      weight: 8
+      beat: "{{ drum.echo.beat }}"
+    outputs:
+      - echo
+
+  - key: oar_9
+    worker: std
+    activity_name: echo
+    parameters:
+      weight: 9
+      beat: "{{ drum.echo.beat }}"
+    outputs:
+      - echo
+
+  - key: oar_10
+    worker: std
+    activity_name: echo
+    parameters:
+      weight: 10
+      beat: "{{ drum.echo.beat }}"
+    outputs:
+      - echo
+
+  - key: oar_11
+    worker: std
+    activity_name: echo
+    parameters:
+      weight: 11
+      beat: "{{ drum.echo.beat }}"
+    outputs:
+      - echo
+
+  - key: oar_12
+    worker: std
+    activity_name: echo
+    parameters:
+      weight: 12
+      beat: "{{ drum.echo.beat }}"
+    outputs:
+      - echo
+
+  - key: cox
+    worker: std
+    activity_name: echo
+    parameters:
+      beat: "{{ oar_12.echo.beat }}"
+      stroke: "{{ oar_1.echo.weight + oar_2.echo.weight + oar_3.echo.weight + oar_4.echo.weight + oar_5.echo.weight + oar_6.echo.weight + oar_7.echo.weight + oar_8.echo.weight + oar_9.echo.weight + oar_10.echo.weight + oar_11.echo.weight + oar_12.echo.weight }}"
+    outputs:
+      - echo
+    depends_on:
+      - oar_1
+      - oar_2
+      - oar_3
+      - oar_4
+      - oar_5
+      - oar_6
+      - oar_7
+      - oar_8
+      - oar_9
+      - oar_10
+      - oar_11
+      - oar_12

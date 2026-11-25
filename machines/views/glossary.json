@@ -1,0 +1,209 @@
+{
+  "docs_base": "https://github.com/kruxia/kruxiaflow/blob/main/",
+  "shop_base": "https://github.com/kruxia/kruxiaflow/blob/machine-shop/",
+  "terms": [
+    {
+      "id": "workflow", "name": "Workflow", "kind": "kruxia", "pages": ["floor", "stack"],
+      "match": ["workflow", "workflows"],
+      "means": "A directed graph of steps, written as YAML and deployed to the engine. Each submission is one run of it. Every machine here is one workflow, in its workflow.yaml.",
+      "docs": [["Workflow lifecycle", "docs/architecture.md#workflow-lifecycle"], ["Quickstart", "docs/quickstart.md"]]
+    },
+    {
+      "id": "step", "name": "Step (activity)", "kind": "kruxia", "pages": ["floor", "stack"],
+      "match": ["step", "steps", "activity", "activities"],
+      "means": "One node of a workflow: a \"- key:\" entry under \"activities:\" in workflow.yaml, naming the worker that runs it, the activity it calls, its parameters and its outputs. These pages say step; the YAML and the engine's events say activity.",
+      "docs": [["Directed graph structure", "docs/architecture.md#directed-graph-structure"], ["Activity status values", "docs/architecture.md#activity-status-values"]]
+    },
+    {
+      "id": "depends_on", "name": "depends_on", "kind": "kruxia", "pages": ["floor", "stack"],
+      "match": ["depends_on"],
+      "means": "A step's list of the steps it waits for. An entry with no conditions is required. An entry with conditions applies only when they hold; when they don't, the entry is not applicable rather than failed.",
+      "docs": [["Conditional branching", "docs/conditional-branching.md"], ["Conditional dependencies", "docs/architecture.md#conditional-dependencies"]]
+    },
+    {
+      "id": "condition", "name": "Condition", "kind": "kruxia", "pages": ["floor", "stack"],
+      "match": ["condition", "conditions"],
+      "means": "A template expression on a depends_on entry, such as {{ dial.echo.room < dial.echo.setpoint }}. Several on one entry must all hold; the engine runs the step when any entry applies.",
+      "docs": [["The model", "docs/conditional-branching.md#the-model"], ["AND vs OR semantics", "docs/architecture.md#and-vs-or-semantics"]]
+    },
+    {
+      "id": "skipped", "name": "Skipped", "kind": "kruxia", "pages": ["floor", "stack"],
+      "match": ["skipped"],
+      "means": "A step none of whose dependencies apply is skipped, not failed. A skip carries on to the steps that need it, unless their own conditions say otherwise.",
+      "docs": [["Cascade behavior", "docs/architecture.md#cascade-behavior"], ["Common pitfalls", "docs/conditional-branching.md#common-pitfalls"]]
+    },
+    {
+      "id": "loop", "name": "Loop and rounds", "kind": "kruxia", "pages": ["floor", "stack"],
+      "match": ["loop", "loops", "round", "rounds", "iteration_limit"],
+      "means": "A step that depends on itself, or on a step after it, runs again while its conditions hold, up to iteration_limit (100 by default). Each run of it is a round.",
+      "docs": [["Loops guide", "docs/loops-guide.md"], ["Iterative workflows", "docs/architecture.md#iterative-workflows-loops"]]
+    },
+    {
+      "id": "signal", "name": "Signal", "kind": "kruxia", "pages": ["floor", "stack"],
+      "match": ["signal", "signals", "wait_for_signal"],
+      "means": "A step with wait_for_signal pauses until something outside the engine signals it through the API, or until timeout_seconds runs out; on_timeout then says whether it runs anyway, is skipped or fails.",
+      "docs": [["Signal an activity", "docs/api-reference.md#signal-an-activity"], ["Signals in the machine shop", "shop:machines/README.md#signals"]]
+    },
+    {
+      "id": "delay", "name": "Delay", "kind": "kruxia", "pages": ["stack"],
+      "match": ["settings.delay"],
+      "means": "A step's settings.delay holds it back for that long once its dependencies are met, before it's scheduled.",
+      "docs": [["Scheduled and delayed activities", "docs/architecture.md#scheduled-and-delayed-activities"]]
+    },
+    {
+      "id": "retry", "name": "Retry", "kind": "kruxia", "pages": ["floor", "stack"],
+      "match": ["retry", "retries", "retrying"],
+      "means": "A failed attempt can be tried again, as the step's retry settings allow. The engine alone decides whether it does.",
+      "docs": [["Activity retry", "docs/architecture.md#activity-retry-single-authority"]]
+    },
+    {
+      "id": "worker", "name": "Worker", "kind": "kruxia", "pages": ["floor", "stack"],
+      "match": ["worker", "workers", "std worker"],
+      "means": "A process that asks the engine for activities and runs them. std is the built-in worker; other workers use the worker API.",
+      "docs": [["Activity worker", "docs/architecture.md#3-activity-worker-built-in"], ["Worker endpoints", "docs/api-reference.md#worker-endpoints"]]
+    },
+    {
+      "id": "orchestrator", "name": "Orchestrator", "kind": "kruxia", "pages": ["floor", "stack"],
+      "match": ["orchestrator"],
+      "means": "The part of the engine that reads each workflow's events and decides what runs next.",
+      "docs": [["Workflow orchestrator", "docs/architecture.md#2-workflow-orchestrator-event-driven"]]
+    },
+    {
+      "id": "event", "name": "Event", "kind": "kruxia", "pages": ["floor", "stack"],
+      "match": ["event", "events"],
+      "means": "Every change in a run, such as ActivityScheduled or ActivityCompleted, is an event in the workflow's log in PostgreSQL. The orchestrator works from that log, and the timing diagrams are drawn from it.",
+      "docs": [["Event sourcing pattern", "docs/architecture.md#event-sourcing-pattern"]]
+    },
+    {
+      "id": "queue_row", "name": "Queue row", "kind": "kruxia", "pages": ["floor"],
+      "match": ["queue row", "queue rows"],
+      "means": "An activity waiting for a worker, or claimed by one, is a row in the activity queue table.",
+      "docs": [["Activity scheduling", "docs/architecture.md#activity-scheduling-idempotent"]]
+    },
+    {
+      "id": "claim_timeout", "name": "Claim timeout", "kind": "kruxia", "pages": ["floor", "stack"],
+      "match": ["claim timeout"],
+      "means": "How long a worker's claim on an activity lasts without a heartbeat. After it, the activity goes back to the queue for another worker.",
+      "docs": [["Heartbeat", "docs/api-reference.md#heartbeat"]]
+    },
+
+    {
+      "id": "schematic", "name": "Schematic", "kind": "analogy", "pages": ["floor"],
+      "match": ["schematic"],
+      "analog": "A circuit drawn as parts and wires.",
+      "means": "The workflow drawn the same way: each step a part, lit by what it did; each depends_on entry a wire; a diamond where the entry has conditions.",
+      "docs": [["Directed graph structure", "docs/architecture.md#directed-graph-structure"]]
+    },
+    {
+      "id": "andon", "name": "Andon", "kind": "analogy", "pages": ["floor"],
+      "match": ["andon"],
+      "analog": "On a factory floor, a board of lights showing each station's state.",
+      "means": "The row of machine names under the header: one lamp per machine, coloured by its worst run in the chosen results set."
+    },
+    {
+      "id": "edge", "name": "At the edge", "kind": "analogy", "pages": ["floor"],
+      "match": ["At the edge", "edge reading"],
+      "analog": "Edge computing: devices in the field, where the network, the power or the operator can't be trusted.",
+      "means": "What this machine would be on such a device. It's the card's edge field.",
+      "docs": [["Raspberry Pi deployment", "docs/raspberry-pi-deployment.md"]]
+    },
+    {
+      "id": "plug", "name": "Pull the plug, twin", "kind": "analogy", "pages": ["floor", "stack"],
+      "match": ["Pull the plug", "plug", "twin", "twins"],
+      "analog": "Pulling a machine's power cord mid-run, then plugging it back in.",
+      "means": "In plug mode each run gets a twin. Partway through the twin, the engine's tasks are stopped in-process and restarted on the same database, and the twin's outcome is compared with the run's: identical, different, hung, or missed.",
+      "docs": [["Pull the plug", "shop:machines/README.md#pull-the-plug"]]
+    },
+    {
+      "id": "footprint", "name": "Footprint", "kind": "analogy", "pages": ["floor"],
+      "match": ["footprint", "footprints"],
+      "analog": "The space a part takes on a circuit board.",
+      "means": "What a run took from the engine: its events and their stored size, queue rows, and the engine's peak connections.",
+      "docs": [["Footprint", "shop:machines/README.md#footprint"]]
+    },
+    {
+      "id": "trap", "name": "Trap", "kind": "analogy", "pages": ["floor", "stack"],
+      "match": ["trap", "traps", "known broken"],
+      "analog": "A trap set for one thing.",
+      "means": "A machine that reproduces a filed bug. Its runs report known broken until the fix lands, then fixed.",
+      "docs": [["A machine", "shop:machines/README.md#a-machine"]]
+    },
+    {
+      "id": "datasheet", "name": "Datasheet", "kind": "analogy", "pages": ["stack"],
+      "match": ["datasheet"],
+      "analog": "A component's datasheet: its features, pinout, limits and measured characteristics.",
+      "means": "The machine's interface and behaviour, read from its workflow.yaml and from every run in every results set."
+    },
+    {
+      "id": "pinout", "name": "Pinout", "kind": "analogy", "pages": ["stack"],
+      "match": ["pinout"],
+      "analog": "Which pin of a chip does what.",
+      "means": "Inputs are the INPUT fields and secrets the workflow reads, and each signal it waits for, as an interrupt pin. Outputs are the outputs of the steps nothing depends on."
+    },
+    {
+      "id": "ratings", "name": "Absolute maximum ratings", "kind": "analogy", "pages": ["stack"],
+      "match": ["Absolute maximum ratings"],
+      "analog": "The limits a part must not be driven past.",
+      "means": "The limits the workflow sets: iteration_limit, timeout_seconds, retries and budget. Past one, the engine ends the loop, ends the wait, stops retrying or stops on the budget.",
+      "docs": [["Budget configuration", "docs/budget-configuration.md"]]
+    },
+    {
+      "id": "characteristics", "name": "Characteristics", "kind": "analogy", "pages": ["stack"],
+      "match": ["Characteristics"],
+      "analog": "A datasheet's min, typical and max measurements.",
+      "means": "Each run's time and each step's rounds, as min, typical and max over every run in every results set."
+    },
+    {
+      "id": "ladder", "name": "Ladder logic", "kind": "analogy", "pages": ["stack"],
+      "match": ["ladder logic", "ladder", "rung", "rungs"],
+      "analog": "A PLC program drawn as rungs between two power rails: power reaches a rung's coil when its contacts close.",
+      "means": "One rung per step, drawn from workflow.yaml by the engine's dependency rules. Its depends_on entries are the contacts; the coil is the step.",
+      "docs": [["Conditional branching", "docs/conditional-branching.md"], ["Loops guide", "docs/loops-guide.md"]]
+    },
+    {
+      "id": "contact", "name": "Contact", "kind": "analogy", "pages": ["stack"],
+      "match": ["contact", "contacts"],
+      "analog": "A switch on a rung.",
+      "means": "One depends_on entry, closed once its step has completed (or, with conditions, finished). Contacts in series must all close: a fan-in is an AND."
+    },
+    {
+      "id": "coil", "name": "Coil", "kind": "analogy", "pages": ["stack"],
+      "match": ["coil", "coils"],
+      "analog": "The relay or output a rung drives.",
+      "means": "The step itself. Energized, it's scheduled to run. Click one to see its activity in workflow.yaml."
+    },
+    {
+      "id": "seal_in", "name": "Seal-in", "kind": "analogy", "pages": ["stack"],
+      "match": ["seal-in"],
+      "analog": "A contact that keeps a rung energized once it has run.",
+      "means": "A loop's back-edge: the depends_on entry that closes the loop, so the step runs again while its conditions hold.",
+      "docs": [["Loop detection", "docs/loops-guide.md#loop-detection"]]
+    },
+    {
+      "id": "timer", "name": "Timer (TON) and counter (CTU)", "kind": "analogy", "pages": ["stack"],
+      "match": ["TON", "CTU", "on-delay", "counter"],
+      "analog": "A PLC's on-delay timer and up-counter.",
+      "means": "TON is settings.delay, or a signal wait's timeout_seconds. CTU counts a loop step's rounds and opens at iteration_limit."
+    },
+    {
+      "id": "interrupt", "name": "Interrupt", "kind": "analogy", "pages": ["stack"],
+      "match": ["interrupt", "/INT"],
+      "analog": "A line that tells a processor something outside needs it now.",
+      "means": "A signal: the interrupt contact closes when the step's signal arrives, and the timing diagrams' /INT line dips for each one taken.",
+      "docs": [["Signal an activity", "docs/api-reference.md#signal-an-activity"]]
+    },
+    {
+      "id": "timing", "name": "Timing diagram", "kind": "analogy", "pages": ["stack"],
+      "match": ["timing diagram", "timing diagrams", "logic-analyzer", "logic analyzer"],
+      "analog": "A logic analyzer's capture: one channel per signal over time.",
+      "means": "One channel per step, drawn from the run's events: high while scheduled or running, dashed at mid-level while waiting for a signal, low when idle.",
+      "docs": [["Event sourcing pattern", "docs/architecture.md#event-sourcing-pattern"]]
+    },
+    {
+      "id": "title_block", "name": "Title block", "kind": "analogy", "pages": ["stack"],
+      "match": ["title block"],
+      "analog": "The box on an engineering drawing that names it, its revision, and who drew and checked it.",
+      "means": "The drawing number stays with the machine. Rev is the tree and commit of the results set shown, and that results set is the checker."
+    }
+  ]
+}

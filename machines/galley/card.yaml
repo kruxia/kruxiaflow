@@ -1,0 +1,62 @@
+name: Galley
+kind: simple
+picture: >
+  The drummer beats the stroke, and twelve oarsmen pull at once, each on
+  their own oar. The coxswain counts the stroke once, when every oar has
+  pulled: a full stroke of all twelve.
+edge: >
+  A cell-site controller polls twelve radios at once, and writes one status
+  report, once, only after all twelve have answered.
+functions:
+  - "wide fan-out with dependency_of: one step starts twelve in parallel"
+  - "wide fan-in with depends_on, no conditions: a step waits for all twelve and runs exactly once"
+  - one template reads all twelve outputs
+runs:
+  - name: stroke 1
+    input: { beat: 1 }
+    timeout_seconds: 15
+    expect:
+      status: completed
+      steps:
+        drum: { status: completed, runs: 1 }
+        oar_1: { status: completed, runs: 1 }
+        oar_2: { status: completed, runs: 1 }
+        oar_3: { status: completed, runs: 1 }
+        oar_4: { status: completed, runs: 1 }
+        oar_5: { status: completed, runs: 1 }
+        oar_6: { status: completed, runs: 1 }
+        oar_7: { status: completed, runs: 1 }
+        oar_8: { status: completed, runs: 1 }
+        oar_9: { status: completed, runs: 1 }
+        oar_10: { status: completed, runs: 1 }
+        oar_11: { status: completed, runs: 1 }
+        oar_12: { status: completed, runs: 1 }
+        cox: { status: completed, runs: 1 }
+      outputs:
+        - step: cox
+          output: echo
+          equals: { beat: 1, stroke: 78 }
+  - name: stroke 2
+    input: { beat: 2 }
+    timeout_seconds: 15
+    expect:
+      status: completed
+      steps:
+        drum: { status: completed, runs: 1 }
+        oar_1: { status: completed, runs: 1 }
+        oar_2: { status: completed, runs: 1 }
+        oar_3: { status: completed, runs: 1 }
+        oar_4: { status: completed, runs: 1 }
+        oar_5: { status: completed, runs: 1 }
+        oar_6: { status: completed, runs: 1 }
+        oar_7: { status: completed, runs: 1 }
+        oar_8: { status: completed, runs: 1 }
+        oar_9: { status: completed, runs: 1 }
+        oar_10: { status: completed, runs: 1 }
+        oar_11: { status: completed, runs: 1 }
+        oar_12: { status: completed, runs: 1 }
+        cox: { status: completed, runs: 1 }
+      outputs:
+        - step: cox
+          output: echo
+          equals: { beat: 2, stroke: 78 }

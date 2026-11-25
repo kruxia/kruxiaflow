@@ -1,0 +1,119 @@
+name: Pipe organ
+kind: compound
+picture: >
+  An organist plays a chord, and each of the twelve pipes of the octave
+  sounds only if its key is held down. The wind chest gathers every pipe
+  that sounded into one chord, once. With no key held, no pipe sounds and
+  there's no chord.
+edge: >
+  A factory line controller acts, in parallel, only on the stations an order
+  flags, and writes one combined report once every station has acted or been
+  skipped. With no station flagged there's no report.
+functions:
+  - "wide fan-out: one step starts twelve, each behind its own condition"
+  - "wide fan-in: a join of twelve, each dependency with a status condition, waits for every branch to run or be skipped, then runs once"
+  - the join reads every branch's output, and sees a skipped branch as skipped
+  - when every branch is skipped, the join has no applicable dependency and is skipped
+trap:
+  issue: 19
+  runs: [no key held]
+  broken_looks_like: >
+    With no key held, all twelve pipes are skipped in one pass that has
+    already looked at the chord, and skipping is a single pass, so the
+    chord is never skipped after them: it stays not_scheduled and the
+    workflow stays running. #19's fix makes skipping repeat until nothing
+    changes (its "skipped activities cascade" change; the issue itself is
+    about template errors).
+runs:
+  - name: a C major chord
+    input: { keys: ["C", "E", "G"] }
+    timeout_seconds: 15
+    expect:
+      status: completed
+      steps:
+        keyboard: { status: completed, runs: 1 }
+        c: { status: completed, runs: 1 }
+        c_sharp: { status: skipped, runs: 0 }
+        d: { status: skipped, runs: 0 }
+        d_sharp: { status: skipped, runs: 0 }
+        e: { status: completed, runs: 1 }
+        f: { status: skipped, runs: 0 }
+        f_sharp: { status: skipped, runs: 0 }
+        g: { status: completed, runs: 1 }
+        g_sharp: { status: skipped, runs: 0 }
+        a: { status: skipped, runs: 0 }
+        a_sharp: { status: skipped, runs: 0 }
+        b: { status: skipped, runs: 0 }
+        chord: { status: completed, runs: 1 }
+      outputs:
+        - step: chord
+          output: echo
+          equals:
+            c: "C"
+            c_sharp: null
+            d: null
+            d_sharp: null
+            e: "E"
+            f: null
+            f_sharp: null
+            g: "G"
+            g_sharp: null
+            a: null
+            a_sharp: null
+            b: null
+  - name: every key at once
+    input: { keys: ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] }
+    timeout_seconds: 15
+    expect:
+      status: completed
+      steps:
+        keyboard: { status: completed, runs: 1 }
+        c: { status: completed, runs: 1 }
+        c_sharp: { status: completed, runs: 1 }
+        d: { status: completed, runs: 1 }
+        d_sharp: { status: completed, runs: 1 }
+        e: { status: completed, runs: 1 }
+        f: { status: completed, runs: 1 }
+        f_sharp: { status: completed, runs: 1 }
+        g: { status: completed, runs: 1 }
+        g_sharp: { status: completed, runs: 1 }
+        a: { status: completed, runs: 1 }
+        a_sharp: { status: completed, runs: 1 }
+        b: { status: completed, runs: 1 }
+        chord: { status: completed, runs: 1 }
+      outputs:
+        - step: chord
+          output: echo
+          equals:
+            c: "C"
+            c_sharp: "C#"
+            d: "D"
+            d_sharp: "D#"
+            e: "E"
+            f: "F"
+            f_sharp: "F#"
+            g: "G"
+            g_sharp: "G#"
+            a: "A"
+            a_sharp: "A#"
+            b: "B"
+  - name: no key held
+    input: { keys: [] }
+    timeout_seconds: 15
+    expect:
+      status: completed
+      steps:
+        keyboard: { status: completed, runs: 1 }
+        c: { status: skipped, runs: 0 }
+        c_sharp: { status: skipped, runs: 0 }
+        d: { status: skipped, runs: 0 }
+        d_sharp: { status: skipped, runs: 0 }
+        e: { status: skipped, runs: 0 }
+        f: { status: skipped, runs: 0 }
+        f_sharp: { status: skipped, runs: 0 }
+        g: { status: skipped, runs: 0 }
+        g_sharp: { status: skipped, runs: 0 }
+        a: { status: skipped, runs: 0 }
+        a_sharp: { status: skipped, runs: 0 }
+        b: { status: skipped, runs: 0 }
+        chord: { status: skipped, runs: 0 }

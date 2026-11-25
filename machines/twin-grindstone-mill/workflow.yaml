@@ -1,0 +1,80 @@
+# Twin grindstone mill: each batch of grain from the hopper goes two ways.
+# The flour goes through two grindstones, coarse then fine; a sample goes
+# through the sieve, which is quicker. The sack takes the flour and the
+# sieve's sample of the same batch, and then the hopper lets in the next
+# batch: three batches in all.
+#
+# The sack joins a long branch (two steps) and a short one (one step) inside
+# the loop. It must wait for both branches of this batch, not run when the
+# sieve finishes, on the grindstones' flour from the batch before.
+#
+# The keys sort with grain first, so even the alphabetical back-edge search
+# (#26) finds sack -> hopper. Keep it that way, so this machine traps #28
+# alone.
+name: machine_twin_grindstone_mill
+
+activities:
+  - key: grain
+    worker: std
+    activity_name: echo
+    parameters:
+      grain: wheat
+    outputs:
+      - echo
+
+  - key: hopper
+    worker: std
+    activity_name: echo
+    iteration_limit: 3
+    parameters:
+      batch: "{{ (sack.echo.batch + 1) if sack.status == 'completed' else 1 }}"
+    outputs:
+      - echo
+    depends_on:
+      - grain
+      - activity_key: sack
+        conditions:
+          - "{{ sack.status == 'completed' }}"
+
+  - key: stone_coarse
+    worker: std
+    activity_name: echo
+    parameters:
+      batch: "{{ hopper.echo.batch }}"
+    outputs:
+      - echo
+    depends_on:
+      - hopper
+
+  - key: stone_fine
+    worker: std
+    activity_name: echo
+    parameters:
+      batch: "{{ stone_coarse.echo.batch }}"
+    outputs:
+      - echo
+    depends_on:
+      - stone_coarse
+
+  - key: sieve
+    worker: std
+    activity_name: echo
+    parameters:
+      batch: "{{ hopper.echo.batch }}"
+    outputs:
+      - echo
+    depends_on:
+      - hopper
+
+  - key: sack
+    worker: std
+    activity_name: echo
+    parameters:
+      batch: "{{ hopper.echo.batch }}"
+      flour: "{{ stone_fine.echo.batch }}"
+      sample: "{{ sieve.echo.batch }}"
+    outputs:
+      - echo
+    depends_on:
+      - stone_fine
+      - sieve

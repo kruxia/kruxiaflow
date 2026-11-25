@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The machine shop** (`machines/`, the `kruxiaflow-machine-shop` crate): small
+  workflows inspired by physical machines, run against a real engine one at a
+  time and all at once, with a scoreboard. Starts with a domino run, a prism
+  and funnel, a railway switch, a level crossing that traps #25, and a
+  drawbridge that traps #29 and #37. Nine more traps: a water pump (#18), a
+  jammed gear (#19), a ferris wheel (#26), a kiln (#27), a twin grindstone
+  mill (#28), a thermostat (#30 and #38), a taxi meter (#32), a revolving
+  door (#38) and a pile driver (#40). Ten more for signal timeouts, retries,
+  wide fan-in and parallel waits: a dead man's switch, a parcel locker, a
+  toaster, a bank vault and a vending machine (#29, #37), a snooze alarm
+  (#27, #29, #32, #37), a pipe organ (#19), a pull-start mower, a printing
+  press and a galley. A run can send signals: the runner waits for the step
+  to be waiting, then signals it through the public API; an early or late
+  signal must be refused, and a later signal to the same step waits for its
+  next round. Machines can keep state across retries in the test's own
+  database, through `{{SECRET.shop_db_url}}`. A trap can name several issues.
+  A definition the engine rejects is reported as each of its runs' result,
+  not a crash. Each run writes a results file, and two prototype views of the
+  results (the Stack and the Shop Floor) are written next to it, to open from
+  disk.
+- **The machine shop pulls the plug.** `MACHINE_SHOP_PLUG=on` gives every run
+  a twin: partway through, the engine's in-process tasks are aborted (which
+  drops their connections and rolls back their open transactions), the
+  engine restarts on the same database, and the twin's outcome is compared
+  with the uninterrupted run's: identical, different or hung. Each run also
+  records a footprint (wall time, workflow events, event payload bytes,
+  activity queue rows, and the engine's connections in bench mode) and a
+  host label (`MACHINE_SHOP_HOST`, or `<os>/<arch>`), in results format
+  `machine-shop-results/2`. Every card has an edge reading, and the Shop
+  Floor shows the edge readings, footprints, hosts and plug outcomes.
+
 ## [0.12.6] - 2026-11-23
 
 ### Changed
@@ -81,7 +114,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   activity (without them the step never ran after its signal), from the API
   reference, and from the book's table of contents. The API reference now
   lists the `waiting` and `skipped` activity statuses.
-
 ### Fixed
 
 - **`INPUT` in a condition is the workflow input.** Conditions read `INPUT`

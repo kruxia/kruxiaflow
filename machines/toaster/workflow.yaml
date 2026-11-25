@@ -1,0 +1,49 @@
+# Toaster: bread goes in, and the toast waits for someone to pop it. Popped
+# by hand, it comes out at the shade they chose. Left alone, the timer pops
+# it (the wait times out and continues), golden, with {{SIGNAL}} null. Then
+# it's buttered. A pop after the timer has popped it is refused, and the
+# toast is made once.
+#
+# The butter takes two seconds to soften (butter's delay), so a late pop
+# reaches a running workflow.
+name: machine_toaster
+
+activities:
+  - key: load
+    worker: std
+    activity_name: echo
+    parameters:
+      bread: "{{ INPUT.bread }}"
+    outputs:
+      - echo
+
+  - key: toast
+    worker: std
+    activity_name: echo
+    parameters:
+      bread: "{{ load.echo.bread }}"
+      shade: "{{ SIGNAL.shade | coalesce('golden') }}"
+      popped_by: "{{ SIGNAL.by | coalesce('timer') }}"
+    settings:
+      wait_for_signal:
+        event_name: pop
+        timeout_seconds: 2
+        on_timeout: continue
+    outputs:
+      - echo
+    depends_on:
+      - load
+
+  - key: butter
+    worker: std
+    activity_name: echo
+    parameters:
+      buttered: "{{ toast.echo.bread }}"
+      shade: "{{ toast.echo.shade }}"
+      popped_by: "{{ toast.echo.popped_by }}"
+    settings:
+      delay: 2s
+    outputs:
+      - echo
+    depends_on:
+      - toast

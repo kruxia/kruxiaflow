@@ -1,0 +1,81 @@
+# Parcel locker: a courier leaves a parcel in a locker, and the customer has
+# a few seconds to collect it with the code from their text message. When
+# they collect it, a receipt is printed. When nobody comes, the locker gives
+# up (the wait times out and skips), the receipt is skipped with it, and the
+# parcel goes back to the depot. Either way the locker is closed out.
+#
+# locker waits with on_timeout: skip. receipt depends on it with no
+# condition, so it is skipped with the locker; return_to_depot depends on it
+# with a condition that picks the skip. close_out joins the two paths with a
+# status condition on each, so it runs after whichever one ran.
+#
+# The van takes two seconds to come back for the parcel (return_to_depot's
+# delay), so a code typed after the locker gave up reaches a running
+# workflow.
+name: machine_parcel_locker
+
+activities:
+  - key: deliver
+    worker: std
+    activity_name: echo
+    parameters:
+      parcel: "{{ INPUT.parcel }}"
+    outputs:
+      - echo
+
+  - key: locker
+    worker: std
+    activity_name: echo
+    parameters:
+      parcel: "{{ deliver.echo.parcel }}"
+      code: "{{ SIGNAL.code }}"
+    settings:
+      wait_for_signal:
+        event_name: collect
+        timeout_seconds: 2
+        on_timeout: skip
+    outputs:
+      - echo
+    depends_on:
+      - deliver
+
+  - key: receipt
+    worker: std
+    activity_name: echo
+    parameters:
+      collected: "{{ locker.echo.parcel }}"
+      code: "{{ locker.echo.code }}"
+    outputs:
+      - echo
+    depends_on:
+      - locker
+
+  - key: return_to_depot
+    worker: std
+    activity_name: echo
+    parameters:
+      returned: "{{ deliver.echo.parcel }}"
+    settings:
+      delay: 2s
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: locker
+        conditions:
+          - "{{ locker.status == 'skipped' }}"
+
+  - key: close_out
+    worker: std
+    activity_name: echo
+    parameters:
+      parcel: "{{ deliver.echo.parcel }}"
+      outcome: "{{ 'collected' if receipt.status == 'completed' else 'returned' }}"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: receipt
+        conditions:
+          - "{{ receipt.status == 'completed' }}"
+      - activity_key: return_to_depot
+        conditions:
+          - "{{ return_to_depot.status == 'completed' }}"

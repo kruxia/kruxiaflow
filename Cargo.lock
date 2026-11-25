@@ -1947,6 +1947,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "kruxiaflow-machine-shop"
+version = "0.12.6"
+dependencies = [
+ "axum 0.7.9",
+ "bcrypt",
+ "chrono",
+ "futures",
+ "kruxiaflow-api",
+ "kruxiaflow-core",
+ "kruxiaflow-oauth",
+ "kruxiaflow-std-worker",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sqlx",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "kruxiaflow-oauth"
 version = "0.12.6"
 dependencies = [

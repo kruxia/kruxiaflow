@@ -1,0 +1,33 @@
+name: Ferris wheel
+kind: simple
+picture: >
+  Riders step into a gondola, the wheel goes round, and they alight at the
+  bottom; then the next riders step in. The wheel turns three times, and
+  nobody alights before they've stepped in.
+edge: >
+  A line controller cycles load, process and unload a fixed number of times,
+  and each cycle runs its steps in that order, never unloading before
+  loading.
+functions:
+  - a three-step loop whose back-edge is chosen by the order the steps are written, not by their keys
+trap:
+  issue: 26
+  broken_looks_like: >
+    The back-edge search starts from the alphabetically first key, alight,
+    so alight's dependency on go_round is taken as the back-edge. On main
+    the validator then rejects the wheel: it finds a cycle from go_round to
+    alight with no exit mechanism, although step_in has an iteration_limit
+    and a condition, so the definition never deploys.
+runs:
+  - name: three turns
+    timeout_seconds: 10
+    expect:
+      status: completed
+      steps:
+        step_in: { status: completed, runs: 3 }
+        go_round: { status: completed, runs: 3 }
+        alight: { status: completed, runs: 3 }
+      outputs:
+        - step: alight
+          output: echo
+          equals: { turn: 3 }

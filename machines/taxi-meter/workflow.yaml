@@ -1,0 +1,28 @@
+# Taxi meter: the meter ticks once a mile for a three-mile ride. Each tick
+# reads the meter's own state through {{ACTIVITY.*}}: which mile this is,
+# what the ride has cost so far, and how much of the passenger's budget is
+# left. The meter itself decides when the ride is over, from its own round.
+#
+# echo costs nothing, so the fare stays at 0 and the whole budget is left.
+name: machine_taxi_meter
+
+activities:
+  - key: meter
+    worker: std
+    activity_name: echo
+    iteration_limit: 5
+    parameters:
+      mile: "{{ ACTIVITY.iteration + 1 }}"
+      spent: "{{ ACTIVITY.accumulated_cost_usd }}"
+      left: "{{ ACTIVITY.remaining_budget_usd }}"
+      display: "mile {{ ACTIVITY.iteration + 1 }}: ${{ ACTIVITY.accumulated_cost_usd }} spent, ${{ ACTIVITY.remaining_budget_usd }} left"
+    settings:
+      budget:
+        limit: 20.00
+        action: abort
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: meter
+        conditions:
+          - "{{ ACTIVITY.iteration < 3 }}"

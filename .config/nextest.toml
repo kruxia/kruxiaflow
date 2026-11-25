@@ -11,3 +11,11 @@ mailpit = { max-threads = 1 }
 [[profile.default.overrides]]
 filter = 'binary(email_activity_integration_test) | binary(example_10_e2e_test)'
 test-group = 'mailpit'
+
+# The machine shop's engine runs start a whole engine (API server,
+# orchestrator, std worker) on a small connection pool, and each run has a
+# timeout from its card. Alongside the rest of the suite they starve and
+# time out, so each takes every test slot and runs alone.
+[[profile.default.overrides]]
+filter = 'package(kruxiaflow-machine-shop) & binary(machine_shop) & test(/^machine_shop_(bench|shop)$/)'
+threads-required = 'num-test-threads'

@@ -1,0 +1,57 @@
+# Dead man's switch: a train departs, and the driver must press the
+# vigilance pedal within a few seconds to show they're awake. Pressed, the
+# train runs on to the next station. Not pressed, the switch trips: the
+# vigilance step fails, the brakes go on, and the run ends failed.
+#
+# vigilance waits with on_timeout: fail. next_station depends on it with no
+# condition, so a failed vigilance step skips it; brakes depends on it with
+# a condition on its status, so it runs only when vigilance failed.
+name: machine_dead_mans_switch
+
+activities:
+  - key: depart
+    worker: std
+    activity_name: echo
+    parameters:
+      train: "{{ INPUT.train }}"
+    outputs:
+      - echo
+
+  - key: vigilance
+    worker: std
+    activity_name: echo
+    parameters:
+      train: "{{ depart.echo.train }}"
+      pressed_by: "{{ SIGNAL.driver | coalesce('nobody') }}"
+    settings:
+      wait_for_signal:
+        event_name: press
+        timeout_seconds: 2
+        on_timeout: fail
+    outputs:
+      - echo
+    depends_on:
+      - depart
+
+  - key: next_station
+    worker: std
+    activity_name: echo
+    parameters:
+      arrived: "{{ vigilance.echo.train }}"
+      driver: "{{ vigilance.echo.pressed_by }}"
+    outputs:
+      - echo
+    depends_on:
+      - vigilance
+
+  - key: brakes
+    worker: std
+    activity_name: echo
+    parameters:
+      stopped: "{{ depart.echo.train }}"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: vigilance
+        conditions:
+          - "{{ vigilance.status == 'failed' }}"

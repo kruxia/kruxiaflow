@@ -1,0 +1,81 @@
+# Pile driver: the crane lifts the hammer and drops it on the pile, three
+# blows in all. Then the surveyor measures how deep the pile went, and the
+# tamper packs the backfill around it twice before the foreman signs off.
+#
+# Two loops, each with a step after it that depends on it with no condition:
+# - lift and drop are a two-step loop (lift's dependency on drop is the
+#   back-edge); survey depends on drop.
+# - tamper is a self-loop; sign_off depends on tamper.
+# A step after a loop is how the loop hands off its result: it must run once,
+# after the loop's last round, on its final output. It must not run after
+# the first round and miss the rest.
+#
+# The keys sort with crane first, so even the alphabetical back-edge search
+# (#26) finds drop -> lift. Keep it that way, so this machine traps one bug.
+name: machine_pile_driver
+
+activities:
+  - key: crane
+    worker: std
+    activity_name: echo
+    parameters:
+      pile: oak
+    outputs:
+      - echo
+
+  - key: lift
+    worker: std
+    activity_name: echo
+    iteration_limit: 3
+    parameters:
+      blow: "{{ (drop.echo.blow + 1) if drop.status == 'completed' else 1 }}"
+    outputs:
+      - echo
+    depends_on:
+      - crane
+      - activity_key: drop
+        conditions:
+          - "{{ drop.status == 'completed' }}"
+
+  - key: drop
+    worker: std
+    activity_name: echo
+    parameters:
+      blow: "{{ lift.echo.blow }}"
+    outputs:
+      - echo
+    depends_on:
+      - lift
+
+  - key: survey
+    worker: std
+    activity_name: echo
+    parameters:
+      depth: "{{ drop.echo.blow }}"
+    outputs:
+      - echo
+    depends_on:
+      - drop
+
+  - key: tamper
+    worker: std
+    activity_name: echo
+    iteration_limit: 2
+    parameters:
+      tamp: "{{ (tamper.echo.tamp + 1) if tamper.status == 'completed' else 1 }}"
+    outputs:
+      - echo
+    depends_on:
+      - survey
+      - tamper
+
+  - key: sign_off
+    worker: std
+    activity_name: echo
+    parameters:
+      depth: "{{ survey.echo.depth }}"
+      tamps: "{{ tamper.echo.tamp }}"
+    outputs:
+      - echo
+    depends_on:
+      - tamper

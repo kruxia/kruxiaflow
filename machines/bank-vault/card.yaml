@@ -1,0 +1,88 @@
+name: Bank vault
+kind: compound
+picture: >
+  Dual control: the manager and the teller each hold a key, and the vault
+  door opens only when both have turned theirs, in either order, while the
+  guard logs the opening. If the teller never comes, the teller's key is
+  never turned, the door stays shut, and the opening fails.
+edge: >
+  Two-person sign-off on a pharmacy's controlled-drugs cabinet: two staff
+  approve, in either order, and it opens once both have. If one never
+  approves, the opening fails instead of going ahead on one key.
+functions:
+  - "two wait_for_signal steps in parallel branches, waiting at once for the same event_name"
+  - a signal ends only the wait of the step it names, whichever is signaled first
+  - a join of two waiting branches and a plain one waits for all three and runs once
+  - "on_timeout: fail in one branch, while the other was signaled: the join is skipped and the workflow fails"
+trap:
+  issues: [29, 37]
+  broken_looks_like: >
+    Before #37's fix, the keys' {{SIGNAL.name}} is undefined when they
+    become ready, so neither waits. On main that template error lands on
+    arrive, which is marked failed although it ran (#19); both keys and the
+    log are skipped, the door stays not_scheduled, and the workflow stays
+    running. Before #29's fix, each key fails as soon as it's turned.
+runs:
+  - name: manager first, then teller
+    input: { vault: Vault A }
+    timeout_seconds: 10
+    signals:
+      - step: manager_key
+        event: turn
+        data: { name: Mrs Okafor }
+      - step: teller_key
+        event: turn
+        data: { name: Mr Lind }
+    expect:
+      status: completed
+      steps:
+        arrive: { status: completed, runs: 1 }
+        manager_key: { status: completed, runs: 1 }
+        teller_key: { status: completed, runs: 1 }
+        log_entry: { status: completed, runs: 1 }
+        vault_door: { status: completed, runs: 1 }
+      outputs:
+        - step: vault_door
+          output: echo
+          equals: { opened: Vault A, manager: Mrs Okafor, teller: Mr Lind, log: opening Vault A }
+  - name: teller first, then manager
+    input: { vault: Vault B }
+    timeout_seconds: 10
+    signals:
+      - step: teller_key
+        event: turn
+        data: { name: Mr Lind }
+      - step: manager_key
+        event: turn
+        data: { name: Mrs Okafor }
+    expect:
+      status: completed
+      steps:
+        arrive: { status: completed, runs: 1 }
+        manager_key: { status: completed, runs: 1 }
+        teller_key: { status: completed, runs: 1 }
+        log_entry: { status: completed, runs: 1 }
+        vault_door: { status: completed, runs: 1 }
+      outputs:
+        - step: vault_door
+          output: echo
+          equals: { opened: Vault B, manager: Mrs Okafor, teller: Mr Lind, log: opening Vault B }
+  - name: the teller never comes
+    input: { vault: Vault C }
+    timeout_seconds: 10
+    signals:
+      - step: manager_key
+        event: turn
+        data: { name: Mrs Okafor }
+    expect:
+      status: failed
+      steps:
+        arrive: { status: completed, runs: 1 }
+        manager_key: { status: completed, runs: 1 }
+        teller_key: { status: failed, runs: 0 }
+        log_entry: { status: completed, runs: 1 }
+        vault_door: { status: skipped, runs: 0 }
+      outputs:
+        - step: manager_key
+          output: echo
+          equals: { turned_by: Mrs Okafor }

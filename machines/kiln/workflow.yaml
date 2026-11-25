@@ -1,0 +1,57 @@
+# Kiln: the kiln heats, the pyrometer reads the temperature, and while the
+# pots aren't fired yet the stoker adds fuel and the kiln heats again. When
+# the pyrometer reads 1200 degrees, the kiln is unloaded.
+#
+# The first heat reaches 600 degrees and each round adds 300, so the kiln is
+# ready on the third round. unload depends on the loop without being part of
+# it: it must wait for the loop, not be skipped by the first reading.
+name: machine_kiln
+
+activities:
+  - key: heat
+    worker: std
+    activity_name: echo
+    iteration_limit: 5
+    parameters:
+      temp: "{{ (stoke.echo.temp + 300) if stoke.status == 'completed' else 600 }}"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: stoke
+        conditions:
+          - "{{ stoke.status == 'completed' }}"
+
+  - key: pyrometer
+    worker: std
+    activity_name: echo
+    parameters:
+      temp: "{{ heat.echo.temp }}"
+      ready: "{{ heat.echo.temp >= 1200 }}"
+    outputs:
+      - echo
+    depends_on:
+      - heat
+
+  - key: stoke
+    worker: std
+    activity_name: echo
+    parameters:
+      temp: "{{ pyrometer.echo.temp }}"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: pyrometer
+        conditions:
+          - "{{ not pyrometer.echo.ready }}"
+
+  - key: unload
+    worker: std
+    activity_name: echo
+    parameters:
+      fired_at: "{{ pyrometer.echo.temp }}"
+    outputs:
+      - echo
+    depends_on:
+      - activity_key: pyrometer
+        conditions:
+          - "{{ pyrometer.echo.ready }}"

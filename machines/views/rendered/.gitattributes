@@ -1,0 +1,2 @@
+# Rendered snapshots: keep them out of diffs and language stats
+*.html -diff linguist-generated

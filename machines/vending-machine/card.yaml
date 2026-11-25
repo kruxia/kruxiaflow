@@ -1,0 +1,48 @@
+name: Vending machine
+kind: compound
+picture: >
+  The machine warms up when it's switched on, then waits for a coin. A coin
+  pushed in while it's warming up drops straight out, and has to go in
+  again. The coin mechanism jams on the first try and frees itself on the
+  second, still holding the same coin, and the machine dispenses.
+edge: >
+  A parking meter refuses a payment tapped while it's still booting, so it
+  has to be tapped again. When the card reader glitches on the first try,
+  the step retries with the same payment, without asking for it again.
+functions:
+  - a signal sent before the step waits is refused, and isn't kept for later
+  - a signaled step with settings.retry that fails is run again, without waiting for another signal
+  - "a retry of a signaled step sees the same {{SIGNAL}}"
+trap:
+  issues: [29, 37]
+  broken_looks_like: >
+    Before #37's fix, the coin slot's {{SIGNAL.coin}} is undefined when it
+    becomes ready, so it never waits. On main that template error lands on
+    power_on, which is marked failed although it ran (#19); the coin slot
+    is skipped, dispense stays not_scheduled, and the workflow stays
+    running. Before #29's fix, the coin slot fails as soon as the coin goes
+    in.
+runs:
+  - name: a coin too soon, then a coin that jams
+    timeout_seconds: 15
+    signals:
+      - step: coin_slot
+        event: coin
+        data: { coin: 2 }
+        early: true
+      - step: coin_slot
+        event: coin
+        data: { coin: 2 }
+    expect:
+      status: completed
+      steps:
+        power_on: { status: completed, runs: 1 }
+        coin_slot: { status: completed, runs: 1 }
+        dispense: { status: completed, runs: 1 }
+      outputs:
+        - step: coin_slot
+          output: result
+          equals: { rows: [{ try: 2, coin: 2, freed: 1 }] }
+        - step: dispense
+          output: echo
+          equals: { paid: 2, tries: 2 }
