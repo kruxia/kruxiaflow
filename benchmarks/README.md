@@ -10,6 +10,25 @@ Reproducible benchmarks comparing Kruxia Flow against Temporal and Airflow workf
 - **Environment**: Docker Compose (controlled, reproducible)
 - **Client approach**: All platforms benchmarked via external clients (HTTP/SDK)
 
+### Reading Kruxia Flow's latency figures
+
+The Kruxia Flow client learns that a workflow finished by checking its status
+every 50 ms (`benchmarks/kruxiaflow/benchmark.py`), so the latencies it reports
+move in steps of about 50 ms, not smoothly:
+
+- **A workflow is counted at the first check after it finishes.** Most
+  Sequential-5 workflows finish just before the second check (P50 about 56 ms);
+  one that takes a few milliseconds longer is counted at the third, about 110 ms.
+- **Percentiles jump between steps.** A small engine change can move P95 or P99
+  from about 70 ms to about 110 ms, if it pushes a few percent of workflows past
+  a check. The engine's own time changed by a few milliseconds, not 40.
+- **Throughput follows.** Each client slot stays busy until its next check, so
+  the same small shift costs a few percent of throughput in short workflows.
+
+When comparing two builds, check whether a latency difference is a move across a
+check before reading it as the engine's. Timing inside the engine, such as from
+the event and queue timestamps in the database, shows the change itself.
+
 ## Quick Start
 
 ```bash
