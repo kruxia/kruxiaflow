@@ -22,7 +22,7 @@ docker run -e KRUXIAFLOW_API_URL=http://kruxiaflow:8080 \
 **From source**:
 
 ```bash
-cargo install monty-runtime --version 1.6.0 --locked    # the sandbox: ~/.cargo/bin/monty
+cargo install monty-runtime --version 1.7.0 --locked    # the sandbox: ~/.cargo/bin/monty
 cargo install --path contrib/kruxiaflow-monty --locked   # this worker
 
 KRUXIAFLOW_API_URL=http://localhost:8080 \

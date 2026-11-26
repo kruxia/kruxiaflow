@@ -9,7 +9,7 @@ use std::time::Duration;
 /// report the same version; the wire protocol between the pool and its
 /// workers is not guaranteed across versions. Keep in step with the
 /// `=x.y.z` pins in `worker/Cargo.toml`.
-pub const MONTY_VERSION: &str = "1.6.0";
+pub const MONTY_VERSION: &str = "1.7.0";
 
 /// Ceiling on host calls per run (Monty's own default).
 pub const MAX_SUSPENSIONS_CEILING: usize = 1000;

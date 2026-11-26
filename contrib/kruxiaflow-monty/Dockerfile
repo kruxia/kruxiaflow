@@ -19,7 +19,7 @@ WORKDIR /opt
 # add-on's monty-pool/monty-types pins: the add-on checks `monty --version`
 # at start-up and refuses a mismatch. Stripped at install. Its own layer, so
 # it stays cached across source changes.
-ARG MONTY_VERSION=1.6.0
+ARG MONTY_VERSION=1.7.0
 RUN CARGO_PROFILE_RELEASE_STRIP=symbols cargo install monty-runtime@${MONTY_VERSION} --locked
 
 COPY ./ ./

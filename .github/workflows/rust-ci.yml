@@ -186,7 +186,7 @@ jobs:
       run:
         working-directory: contrib/kruxiaflow-monty
     env:
-      MONTY_VERSION: "1.6.0"
+      MONTY_VERSION: "1.7.0"
       # The end-to-end test compiles the engine crates; their query data is
       # the engine's
       SQLX_OFFLINE_DIR: ${{ github.workspace }}/.sqlx

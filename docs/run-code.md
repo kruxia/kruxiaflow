@@ -32,7 +32,7 @@ docker run -e KRUXIAFLOW_API_URL=http://kruxiaflow:8080 \
 **From source** (Rust 1.98 or newer; the engine itself doesn't need it):
 
 ```bash
-cargo install monty-runtime --version 1.6.0 --locked    # installs ~/.cargo/bin/monty
+cargo install monty-runtime --version 1.7.0 --locked    # installs ~/.cargo/bin/monty
 cargo install --path contrib/kruxiaflow-monty --locked   # installs kruxiaflow-monty
 
 KRUXIAFLOW_API_URL=http://localhost:8080 \
@@ -40,7 +40,7 @@ KRUXIAFLOW_MONTY_BINARY=$HOME/.cargo/bin/monty \
   kruxiaflow-monty
 ```
 
-The `monty` binary must be the version the add-on is built against (currently 1.6.0): at start-up the add-on checks `monty --version` and refuses to start with a message saying what to fix. Code runs in pooled `monty` subprocesses, never inside `kruxiaflow-monty`: a crash in the interpreter kills one subprocess, and the pool replaces it.
+The `monty` binary must be the version the add-on is built against (currently 1.7.0): at start-up the add-on checks `monty --version` and refuses to start with a message saying what to fix. Code runs in pooled `monty` subprocesses, never inside `kruxiaflow-monty`: a crash in the interpreter kills one subprocess, and the pool replaces it.
 
 **Steps name the add-on's worker type.** Workers claim queued steps by worker type, so a `run_code` step says `worker: monty`:
 
@@ -126,7 +126,7 @@ The step's `result` output always has this shape. The step **completes** for eve
     "worker_crashes": 0,
     "stdout_truncated": false,
     "logs_truncated": false,
-    "monty_version": "monty-runtime 1.6.0",
+    "monty_version": "monty-runtime 1.7.0",
     "code_sha256": "193c32ff…"
   }
 }
@@ -174,9 +174,9 @@ These are side-effect free. Capabilities that call models (metered against the w
 
 Monty implements a subset of Python 3.14: functions, closures, lambdas, comprehensions, `try`/`except`, `match`, f-strings, simple classes and `@dataclass`, and `async`/`await`. Generators (`yield`), `del`, `@property`, user-defined exception classes and third-party packages are not available.
 
-Standard-library modules available in Monty 1.6 (each verified): `json`, `re`, `datetime`, `decimal`, `csv`, `math`, `collections`, `itertools`, `functools`, `hashlib`, `base64`, `random`, `tomllib`, `typing`, `dataclasses`.
+Standard-library modules available in Monty 1.7 (an integration test imports each one): `json`, `re`, `datetime`, `decimal`, `csv`, `math`, `statistics`, `collections`, `itertools`, `functools`, `hashlib`, `base64`, `random`, `tomllib`, `typing`, `dataclasses`.
 
-Not available: `statistics`, `enum`, `contextlib`, `io`, `logging`, `uuid`, `urllib`, and everything else. Importing one raises `ModuleNotFoundError` with the list above, so a model can adapt.
+Not available: `enum`, `contextlib`, `io`, `logging`, `uuid`, `urllib`, and everything else. Importing one raises `ModuleNotFoundError` with the list above, so a model can adapt.
 
 When an LLM writes the code, tell it in the prompt which modules it may use and that the last line must be an expression with the result.
 

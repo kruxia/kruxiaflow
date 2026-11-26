@@ -50,8 +50,8 @@ const MAX_ERROR_CHARS: usize = 4000;
 /// Largest JSON result returned, in bytes
 const MAX_VALUE_BYTES: usize = 1024 * 1024;
 
-/// Standard-library modules built into Monty 1.6 that `run_code` documents
-/// as available (each verified to import on 1.6.0). Imports of anything else
+/// Standard-library modules built into Monty 1.7 that `run_code` documents
+/// as available (an integration test imports each one). Imports of anything else
 /// suspend to the host and are refused with `ModuleNotFoundError`.
 pub const AVAILABLE_MODULES: &[&str] = &[
     "json",
@@ -60,6 +60,7 @@ pub const AVAILABLE_MODULES: &[&str] = &[
     "decimal",
     "csv",
     "math",
+    "statistics",
     "collections",
     "itertools",
     "functools",
@@ -1002,7 +1003,7 @@ mod tests {
             type_check: true,
             worker_crashes: 0,
             code_sha256: "abc",
-            monty_version: "monty-runtime 1.6.0",
+            monty_version: "monty-runtime 1.7.0",
         }
     }
 
@@ -1375,7 +1376,7 @@ mod tests {
             assert!(run.get(key).is_some(), "run record missing {key}");
         }
         assert_eq!(run["consumed"]["execution_ms"], json!(12.0));
-        assert_eq!(run["monty_version"], json!("monty-runtime 1.6.0"));
+        assert_eq!(run["monty_version"], json!("monty-runtime 1.7.0"));
     }
 
     #[test]

@@ -20,8 +20,8 @@ categories = ["asynchronous", "development-tools"]
 kruxiaflow-worker = { path = "../../worker-sdk", version = "0.12" }
 # Exact pins: Monty's crates pin each other exactly, and the host must match
 # the `monty` worker binary's version (checked at start-up)
-monty-pool = "=1.6.0"
-monty-types = "=1.6.0"
+monty-pool = "=1.7.0"
+monty-types = "=1.7.0"
 anyhow = "1.0"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }

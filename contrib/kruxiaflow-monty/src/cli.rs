@@ -51,7 +51,7 @@ pub struct MontyArgs {
 same version as this build). It runs untrusted Python in pooled Monty sandbox\n\
 subprocesses. The path is never looked up on PATH, and the binary's version is\n\
 checked at start-up.\n\n\
-Install: cargo install monty-runtime --version 1.6.0 --locked\n\
+Install: cargo install monty-runtime --version 1.7.0 --locked\n\
 Example: --monty-binary /usr/local/bin/monty"
     )]
     pub monty_binary: Option<PathBuf>,

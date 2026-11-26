@@ -8,14 +8,14 @@
 //
 // Requires the `monty` worker binary (from contrib/kruxiaflow-monty):
 //
-//   cargo install monty-runtime --version 1.6.0 --locked
+//   cargo install monty-runtime --version 1.7.0 --locked
 //   KRUXIAFLOW_MONTY_BINARY=$HOME/.cargo/bin/monty \
 //     cargo nextest run --test run_code_integration_tests
 //
 // Without KRUXIAFLOW_MONTY_BINARY each test prints a notice and returns.
 // ============================================================================
 
-use kruxiaflow_monty::{MontyConfig, RunCodeActivity, WORKER};
+use kruxiaflow_monty::{AVAILABLE_MODULES, MontyConfig, RunCodeActivity, WORKER};
 use kruxiaflow_worker::{ActivityContext, ActivityImpl};
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -260,11 +260,24 @@ async fn test_unavailable_module() {
     let activity = activity_or_skip!();
     let result = run(
         &activity,
-        json!({"code": "import statistics\nstatistics.mean([1, 2])", "type_check": false}),
+        json!({"code": "import enum\nenum.Enum", "type_check": false}),
     )
     .await;
-    assert_error(&result, "runtime", "No module named 'statistics'");
+    assert_error(&result, "runtime", "No module named 'enum'");
     assert_error(&result, "runtime", "json, re, datetime");
+}
+
+#[tokio::test]
+async fn test_every_listed_module_imports() {
+    let activity = activity_or_skip!();
+    for module in AVAILABLE_MODULES {
+        let result = run(
+            &activity,
+            json!({"code": format!("import {module}\n'{module}'"), "type_check": false}),
+        )
+        .await;
+        assert_eq!(result["ok"], json!(true), "import {module}: {result:#}");
+    }
 }
 
 #[tokio::test]
