@@ -41,6 +41,12 @@ pub struct McpConfig {
 
     /// HTTP bind address
     pub http_bind: Option<String>,
+
+    /// The `run_code` contract of the kruxiaflow-monty add-on worker, read
+    /// from the JSON file `kruxiaflow-monty contract` writes. When set, the
+    /// discovery tools list `run_code` with it; when not, `run_code` is
+    /// hidden. See [`McpConfig::with_run_code_contract`].
+    pub run_code_contract: Option<serde_json::Value>,
 }
 
 impl McpConfig {
@@ -98,6 +104,7 @@ impl McpConfig {
             enabled,
             http_port,
             http_bind,
+            run_code_contract: None,
         };
 
         config.validate()?;
@@ -110,7 +117,42 @@ impl McpConfig {
             enabled: false,
             http_port: Some(8081),
             http_bind: Some("0.0.0.0".to_string()),
+            run_code_contract: None,
         }
+    }
+
+    /// Read the kruxiaflow-monty add-on's `run_code` contract from `path`
+    /// (`--mcp-run-code-contract` / `KRUXIAFLOW_MCP_RUN_CODE_CONTRACT`), so
+    /// the discovery tools advertise `run_code`. `None` leaves it hidden.
+    ///
+    /// The file must be a JSON object naming the add-on's `worker` and its
+    /// `capabilities`; anything else is a configuration error, reported at
+    /// start-up rather than as a confusing catalog later.
+    pub fn with_run_code_contract(mut self, path: Option<&std::path::Path>) -> Result<Self> {
+        let Some(path) = path else {
+            return Ok(self);
+        };
+        let text = std::fs::read_to_string(path).map_err(|e| {
+            McpError::ConfigError(format!(
+                "Cannot read the run_code contract {}: {e}",
+                path.display()
+            ))
+        })?;
+        let contract: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+            McpError::ConfigError(format!(
+                "The run_code contract {} is not JSON: {e}",
+                path.display()
+            ))
+        })?;
+        if !contract["worker"].is_string() || !contract["capabilities"].is_array() {
+            return Err(McpError::ConfigError(format!(
+                "The run_code contract {} has no `worker` or `capabilities`: write it with \
+                 `kruxiaflow-monty contract`",
+                path.display()
+            )));
+        }
+        self.run_code_contract = Some(contract);
+        Ok(self)
     }
 
     /// Validate configuration
@@ -144,6 +186,13 @@ impl McpConfig {
         }
         if let Some(ref bind) = self.http_bind {
             tracing::info!("  HTTP Bind: {}", bind);
+        }
+        match &self.run_code_contract {
+            Some(contract) => tracing::info!(
+                "  run_code: advertised for worker {}",
+                contract["worker"].as_str().unwrap_or_default()
+            ),
+            None => tracing::info!("  run_code: not advertised (no add-on contract configured)"),
         }
         // Auth is handled by the AuthenticationService passed to spawn_mcp_server.
         // When an auth service is provided, MCP uses the same RS256 tokens as the REST API.
@@ -256,5 +305,65 @@ mod tests {
         assert!(config.enabled);
         assert_eq!(config.http_port, Some(9090));
         assert_eq!(config.http_bind, Some("127.0.0.1".to_string()));
+    }
+
+    /// A contract file with `text`, removed when dropped
+    struct ContractFile(std::path::PathBuf);
+
+    impl ContractFile {
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl Drop for ContractFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    fn write_contract(text: &str) -> ContractFile {
+        let path =
+            std::env::temp_dir().join(format!("run-code-contract-{}.json", uuid::Uuid::now_v7()));
+        std::fs::write(&path, text).unwrap();
+        ContractFile(path)
+    }
+
+    #[test]
+    fn test_run_code_contract_absent_hides_run_code() {
+        let config = McpConfig::disabled().with_run_code_contract(None).unwrap();
+        assert!(config.run_code_contract.is_none());
+    }
+
+    #[test]
+    fn test_run_code_contract_read_from_file() {
+        let file = write_contract(r#"{"worker": "monty", "capabilities": [{"name": "log"}]}"#);
+        let config = McpConfig::disabled()
+            .with_run_code_contract(Some(file.path()))
+            .unwrap();
+        assert_eq!(config.run_code_contract.unwrap()["worker"], "monty");
+    }
+
+    #[test]
+    fn test_run_code_contract_errors_name_the_file() {
+        let missing = std::path::Path::new("/nonexistent/run-code-contract.json");
+        let err = McpConfig::disabled()
+            .with_run_code_contract(Some(missing))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("/nonexistent/run-code-contract.json"), "{err}");
+
+        for text in [
+            "not json",
+            r#"{"capabilities": []}"#,
+            r#"{"worker": "monty"}"#,
+        ] {
+            let file = write_contract(text);
+            let err = McpConfig::disabled()
+                .with_run_code_contract(Some(file.path()))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("run_code contract"), "{text}: {err}");
+        }
     }
 }

@@ -290,6 +290,19 @@ Example: --mcp-http-port 9091"
     )]
     pub mcp_http_port: Option<u16>,
 
+    /// The kruxiaflow-monty add-on's run_code contract
+    #[cfg(feature = "mcp-server")]
+    #[arg(
+        long,
+        env = "KRUXIAFLOW_MCP_RUN_CODE_CONTRACT",
+        help = "run_code contract file from the kruxiaflow-monty add-on",
+        long_help = "JSON file written by `kruxiaflow-monty contract`. When set, the MCP\n\
+discovery tools list the add-on's sandboxed run_code activity with its\n\
+contract (capabilities, modules, limit ceilings). Unset: run_code is not listed.\n\n\
+Example: --mcp-run-code-contract /etc/kruxiaflow/run-code-contract.json"
+    )]
+    pub mcp_run_code_contract: Option<std::path::PathBuf>,
+
     /// MCP HTTP bind address
     #[cfg(feature = "mcp-server")]
     #[arg(
@@ -794,6 +807,9 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
     let mcp_handle = {
         let mcp_config =
             crate::mcp::McpConfig::new(cmd.mcp_enabled, cmd.mcp_http_port, cmd.mcp_http_bind)
+                .and_then(|config| {
+                    config.with_run_code_contract(cmd.mcp_run_code_contract.as_deref())
+                })
                 .map_err(|e| anyhow::anyhow!("{e}"))?;
 
         if mcp_config.enabled {
@@ -828,12 +844,14 @@ pub async fn execute(mut cmd: ServeCommand, database_url: String) -> Result<()> 
                 } else {
                     Some(auth_service.clone())
                 };
+            let run_code_contract = mcp_config.run_code_contract.clone();
             Some(crate::mcp::spawn_mcp_server(
                 Arc::new(mcp_config),
                 pool.clone(),
                 announcer.clone(),
                 cache_service.clone(),
                 mcp_auth,
+                run_code_contract,
             ))
         } else {
             None
@@ -1041,6 +1059,8 @@ mod tests {
             mcp_http_port: None,
             #[cfg(feature = "mcp-server")]
             mcp_http_bind: None,
+            #[cfg(feature = "mcp-server")]
+            mcp_run_code_contract: None,
         }
     }
 
@@ -1251,6 +1271,8 @@ mod tests {
             mcp_http_port: Some(8081),
             #[cfg(feature = "mcp-server")]
             mcp_http_bind: Some("127.0.0.1".to_string()),
+            #[cfg(feature = "mcp-server")]
+            mcp_run_code_contract: None,
         };
 
         assert!(cmd.validate().is_ok());

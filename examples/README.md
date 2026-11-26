@@ -46,6 +46,8 @@ to recreate the volumes.
 | `09b-streaming-research.yaml`          | Selective streaming, multi-step with streaming final output, cost tracking      | Anthropic API key                                       |
 | `10-order-processing.yaml`             | E-commerce order flow, postgres_query, postgres_transaction, Mailpit email      | Examples environment                                    |
 
+Example 16, sandboxed Python with `run_code`, lives with the add-on that runs it: [`contrib/kruxiaflow-monty/examples/`](../contrib/kruxiaflow-monty/examples/) (see its [README](../contrib/kruxiaflow-monty/README.md#examples)).
+
 ## Running Examples
 
 Every example follows the same two-step pattern: **deploy** the workflow definition,

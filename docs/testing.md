@@ -43,6 +43,18 @@ Kruxia Flow uses a unified test script at `scripts/test.sh` for all testing need
 ./scripts/test.sh --doc
 ```
 
+### Sandboxed Code (`run_code` add-on) Tests
+
+`scripts/test.sh` runs the engine's workspace. The `run_code` add-on in `contrib/kruxiaflow-monty` is its own Cargo workspace, with its own tests, run from its directory. The integration tests start real Monty workers when `KRUXIAFLOW_MONTY_BINARY` points at the pinned `monty` binary, and skip with a notice otherwise. They need no database, except `example_16_run_code_e2e_test`, which runs example 16a with the engine's API and orchestrator in-process and uses `DATABASE_URL` like every `#[sqlx::test]`:
+
+```bash
+cargo install monty-runtime --version 1.7.0 --locked   # once
+cd contrib/kruxiaflow-monty
+KRUXIAFLOW_MONTY_BINARY=$HOME/.cargo/bin/monty cargo nextest run
+```
+
+CI runs it in the `Monty add-on (run_code)` job. See [Sandboxed Code](run-code.md#testing).
+
 ### Debugging Tests
 
 ```bash

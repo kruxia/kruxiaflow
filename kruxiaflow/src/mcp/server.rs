@@ -49,6 +49,9 @@ pub struct McpServer {
     announcer: kruxiaflow_core::Announcer,
     cache_service: Arc<dyn kruxiaflow_core::CacheService>,
     auth_service: Option<Arc<dyn kruxiaflow_oauth::AuthenticationService>>,
+    /// The kruxiaflow-monty add-on's `run_code` contract, when configured
+    /// (`KRUXIAFLOW_MCP_RUN_CODE_CONTRACT`)
+    run_code_contract: Option<serde_json::Value>,
 }
 
 impl McpServer {
@@ -66,7 +69,14 @@ impl McpServer {
             announcer,
             cache_service,
             auth_service,
+            run_code_contract: None,
         }
+    }
+
+    /// Advertise `run_code` to agents (discovery tools), with its contract
+    pub fn with_run_code_contract(mut self, contract: Option<serde_json::Value>) -> Self {
+        self.run_code_contract = contract;
+        self
     }
 
     /// Start the MCP server (HTTP transport only)
@@ -112,6 +122,7 @@ impl McpServer {
             self.announcer.clone(),
             self.cache_service.clone(),
         )
+        .with_run_code_contract(self.run_code_contract.clone())
         .to_mcp_server_handler();
 
         let auth: Option<Arc<dyn AuthProvider>> = self
@@ -165,8 +176,10 @@ pub fn spawn_mcp_server(
     announcer: kruxiaflow_core::Announcer,
     cache_service: Arc<dyn kruxiaflow_core::CacheService>,
     auth_service: Option<Arc<dyn kruxiaflow_oauth::AuthenticationService>>,
+    run_code_contract: Option<serde_json::Value>,
 ) -> JoinHandle<Result<()>> {
-    let server = create_mcp_server(config, pool, announcer, cache_service, auth_service);
+    let server = create_mcp_server(config, pool, announcer, cache_service, auth_service)
+        .with_run_code_contract(run_code_contract);
     tokio::spawn(async move { server.start().await })
 }
 

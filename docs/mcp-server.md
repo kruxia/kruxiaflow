@@ -32,11 +32,12 @@ At runtime it is off unless enabled:
 kruxiaflow serve --mcp-enabled            # or KRUXIAFLOW_MCP_ENABLED=true
 ```
 
-| Setting                    | Flag / Env                                          | Default   |
-|----------------------------|-----------------------------------------------------|-----------|
-| Enable                     | `--mcp-enabled` / `KRUXIAFLOW_MCP_ENABLED`          | `false`   |
-| HTTP port                  | `--mcp-http-port` / `KRUXIAFLOW_MCP_HTTP_PORT`      | `8081`    |
-| Bind address               | `--mcp-http-bind` / `KRUXIAFLOW_MCP_HTTP_BIND`      | `0.0.0.0` |
+| Setting                    | Flag / Env                                                          | Default   |
+|----------------------------|---------------------------------------------------------------------|-----------|
+| Enable                     | `--mcp-enabled` / `KRUXIAFLOW_MCP_ENABLED`                          | `false`   |
+| HTTP port                  | `--mcp-http-port` / `KRUXIAFLOW_MCP_HTTP_PORT`                      | `8081`    |
+| Bind address               | `--mcp-http-bind` / `KRUXIAFLOW_MCP_HTTP_BIND`                      | `0.0.0.0` |
+| `run_code` contract        | `--mcp-run-code-contract` / `KRUXIAFLOW_MCP_RUN_CODE_CONTRACT`      | unset     |
 
 The MCP endpoint is `http://<host>:8081/mcp` (Streamable HTTP).
 
@@ -111,7 +112,7 @@ The same loopback guard applies: a non-loopback MCP bind requires the explicit
 `--insecure-dev-allow-nonloopback` opt-in (the compose file sets it and
 publishes the port on `127.0.0.1` only).
 
-## Tools (23)
+## Tools (24)
 
 **Discovery**
 
@@ -124,6 +125,7 @@ publishes the port on `127.0.0.1` only).
 | `search_llm_models`            | Model catalog with live pricing (the engine's own numbers) |
 | `list_llm_providers`           | Configured providers and capabilities                      |
 | `check_system_health`          | Readiness of database, event source, queue                 |
+| `get_run_code_contract`        | What sandboxed `run_code` steps may use (with the add-on)  |
 
 **Execution**
 
@@ -179,6 +181,16 @@ of reporting success, so the signal can be sent again. An empty
 
 `cancel_workflow` is intentionally absent until the engine gains a cancel
 endpoint.
+
+## Sandboxed code (`run_code`)
+
+`run_code` runs in the **kruxiaflow-monty add-on**, a separate worker, not in the engine. The engine's MCP server learns about it from the add-on's contract: write it with `kruxiaflow-monty contract > run-code-contract.json` (using the same settings the add-on runs with), and start the server with `--mcp-run-code-contract` (or `KRUXIAFLOW_MCP_RUN_CODE_CONTRACT`) pointing at that file. A file that can't be read, isn't JSON, or has no `worker` or `capabilities` stops the server at start-up. With the contract, the discovery tools tell agents about `run_code`:
+
+- `list_activities` includes `run_code` under the add-on's worker type, with its capabilities. The `script` entry is marked as **not sandboxed**, so agents don't send model-written code to it.
+- `get_workflow_authoring_guide` gains a `sandboxed_code` section: the rules the code must follow (the last line's value is the result, inputs become globals), the importable modules, the capabilities with their Python signatures, the add-on's limit ceilings, the error kinds, and a validated repair-loop example.
+- `get_run_code_contract` returns the contract on its own.
+
+Without a contract, `run_code` is absent from the catalog and the guide, and `get_run_code_contract` returns an error saying how to set it up. The contract is a snapshot: after changing the add-on's limits, write it again, or agents see the old ceilings (the add-on still enforces its own).
 
 ## Keeping the catalog honest
 

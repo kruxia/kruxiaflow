@@ -1,0 +1,52 @@
+# Example 16a: Run a business rule as sandboxed Python (run_code)
+#
+# The run_code activity runs Python in a Pydantic Monty sandbox: no
+# filesystem, network or environment, only the capabilities the step names
+# (here log and now), with hard limits on memory and time. This example runs
+# a fixed rule; 16b has an LLM write the rule and repair it.
+#
+# Needs the kruxiaflow-monty add-on worker running beside the engine (its
+# Docker image, or `cargo install` from contrib/kruxiaflow-monty with
+# KRUXIAFLOW_MONTY_BINARY set; see its README). Its steps name `worker: monty`.
+#
+# Rule (a typical "write it once, approve it, run it on every order" case):
+# flag orders over $500 from first-time customers placed on a weekend.
+#
+# Input:
+#   {"orders": [{"id": "A1", "total": 612.50, "first_order": true, "weekday": "Sat"},
+#               {"id": "A2", "total": 80.00, "first_order": true, "weekday": "Sun"},
+#               {"id": "A3", "total": 900.00, "first_order": false, "weekday": "Sat"}]}
+#
+# Output (check_orders.result):
+#   ok: true
+#   value: {"flagged": ["A1"], "checked": 3, "checked_at": "<step start time>"}
+#   logs: ["flagged A1: 612.5"]
+#   run: the limits it ran under and what it used
+
+name: run_code_order_rules
+description: Flag risky orders with a business rule run as sandboxed Python
+activities:
+  - key: check_orders
+    worker: monty
+    activity_name: run_code
+    parameters:
+      code: |
+        from decimal import Decimal
+
+        flagged = []
+        for order in orders:
+            total = Decimal(str(order["total"]))
+            weekend = order["weekday"] in ("Sat", "Sun")
+            if total > Decimal("500") and order["first_order"] and weekend:
+                flagged.append(order["id"])
+                log(f"flagged {order['id']}: {total}")
+
+        {"flagged": flagged, "checked": len(orders), "checked_at": now()}
+      inputs:
+        orders: "{{INPUT.orders}}"
+      capabilities: [log, now]
+      limits:
+        max_memory: 16000000
+        max_feed_duration_secs: 2
+    outputs:
+      - result

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Sandboxed Python for model-written steps, as an add-on**
+  (`contrib/kruxiaflow-monty`). The `run_code` activity runs Python in a
+  [Pydantic Monty](https://github.com/pydantic/monty) sandbox: no
+  filesystem, network or environment, only the capabilities a step grants
+  (`json_path`, `now`, `log`, `fail`), under hard limits on memory, time,
+  recursion and host calls, with a record of what each run was allowed and
+  used. Code errors complete the step with `result.ok == false` and a
+  message for the model, so a loop can let it repair its code; invalid
+  parameters fail it without retries. It runs in `kruxiaflow-monty`, a
+  worker beside the engine on the worker SDK, with its own Cargo workspace,
+  Dockerfile and CI job, so the engine's binary, image and toolchain are
+  unchanged. Steps name `worker: monty`. Examples 16a and 16b and the guide
+  ([docs/run-code.md](docs/run-code.md)) show it.
+- **The MCP server can advertise sandboxed `run_code` from an add-on.**
+  `--mcp-run-code-contract` (`KRUXIAFLOW_MCP_RUN_CODE_CONTRACT`) points the
+  server at the contract the kruxiaflow-monty add-on writes. With it,
+  `list_activities` lists `run_code` under the add-on's worker type, the
+  authoring guide gains a `sandboxed_code` section (rules, modules,
+  capabilities with their Python signatures, limit ceilings, error kinds and
+  a repair-loop example), and a new tool, `get_run_code_contract`, returns
+  the contract. Without it nothing changes, except that `script` is now
+  marked as not sandboxed in the catalog, and the guide recommends guarding
+  references to steps that may not have run with their status.
+
 ## [0.12.6] - 2026-11-23
 
 ### Changed
